@@ -65,6 +65,8 @@
 // or import the class symbol non-type-only — that bundles a second copy
 // into your bee and silently breaks the singleton.
 
+import { BEHAVIOR_PHEROMONES_KEY } from '../preferences/mobile-pheromones.js'
+
 export type VisualBeeDescriptor = {
   /**
    * Unique identity. e.g. `'website'`, `'audio'`, `'story'`. Used as the
@@ -249,6 +251,19 @@ export type VisualBeeDescriptor = {
    * hijack the primary navigation gesture.
    */
   readonly opensOnTileClick?: boolean
+
+  /**
+   * Capability pheromones this behaviour SHIPS — how a module self-declares
+   * what it is good for, so no one has to chase modules down to tag them.
+   * e.g. `['mobile:friendly']` marks a view the mobile shell may activate.
+   *
+   * DECLARED, NEVER SEEDED: this array is re-asserted on every module load
+   * and is never written to storage, so a module update that changes it can
+   * never clobber a user's choice and there is no stale default to migrate.
+   * The EFFECTIVE set folds in participant-local overrides — see
+   * `effectivePheromones` / `withPheromone` and mobile-experience-plan.md §4.4.
+   */
+  readonly pheromones?: readonly string[]
 }
 
 /**
@@ -320,6 +335,39 @@ export class VisualBeeRegistry extends EventTarget {
       if (bee.decorationKind === kind) return bee
     }
     return undefined
+  }
+
+  /**
+   * The EFFECTIVE pheromone set for a view: (declared ∪ add) − remove, where
+   * `add` / `remove` come from participant-local overrides in localStorage
+   * (`hc:behavior-pheromones`, keyed by the stable `view` name). The declared
+   * defaults are recomputed every call — never persisted — so a module update
+   * that changes its declaration can never clobber a user's choice and there
+   * is no stale seed to migrate. See mobile-experience-plan.md §4.4.
+   */
+  effectivePheromones(view: string): Set<string> {
+    const bee = this.#bees.get(view)
+    const set = new Set<string>(bee?.pheromones ?? [])
+    const ov = this.#pheromoneOverrides()[view]
+    ov?.add?.forEach(p => set.add(p))
+    ov?.remove?.forEach(p => set.delete(p))
+    return set
+  }
+
+  /** All registered bees whose EFFECTIVE pheromone set contains `name`. */
+  withPheromone(name: string): VisualBeeDescriptor[] {
+    return this.all().filter(b => this.effectivePheromones(b.view).has(name))
+  }
+
+  /** Participant-local behavior-pheromone overrides. Read fresh each call —
+   *  cheap, and keeps updates honest (no cached seed to go stale). */
+  #pheromoneOverrides(): Record<string, { add?: string[]; remove?: string[] }> {
+    try {
+      const raw = localStorage.getItem(BEHAVIOR_PHEROMONES_KEY)
+      return raw ? JSON.parse(raw) : {}
+    } catch {
+      return {}
+    }
   }
 }
 

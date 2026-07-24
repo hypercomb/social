@@ -35,10 +35,10 @@
 // Mirrors DashboardBee's shape: registry-owned, lineage-driven, emits over
 // EffectBus (`view-toggles:changed`), handles clicks via `view:toggle`.
 
-import { Worker, EffectBus } from '@hypercomb/core'
+import { Worker, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
 import { WEBSITE_SLOT } from './website-slot.js'
-import { isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
+import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
@@ -198,7 +198,7 @@ export class ViewBee extends Worker {
         toggles.push({
           view: v.view,
           icon: v.toggleIcon || FALLBACK_TOGGLE_ICON,
-          label: v.view,
+          label: this.#label(v),
           active: !!controller.isActive?.(),
         })
         continue
@@ -258,25 +258,43 @@ export class ViewBee extends Worker {
             payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
           }
         }
-
-        // Hidden-pool gate (branch semantics): a hide record at this node or
-        // any ancestor turns the site off for this subtree — never offer a
-        // toggle for a view SiteViewDrone refuses to mount.
-        if (present && v.decorationKind) {
-          const hidden = await isFeatureHiddenWithin(segments, v.decorationKind).catch(() => false)
-          if (hidden) present = false
-        }
       }
       if (!present) continue
+
+      // HIDDEN-POOL GATE — the participant's "set to show" switch, applied to
+      // EVERY view, not just websites: never offer an entrance to a view its
+      // drone will then refuse to mount. Reach matches each drone's own gate —
+      // a scope feature (a website) hides by BRANCH, so a record at the site
+      // root silences the whole site and a mid-branch record just that branch;
+      // a node-local view (home, slides, tutor) hides exactly where the record
+      // sits.
+      if (v.decorationKind) {
+        const branchScoped = v.view === 'website' || !!v.cascades
+        const hidden = await (branchScoped
+          ? isFeatureHiddenWithin(segments, v.decorationKind)
+          : isFeatureHidden(segments, v.decorationKind)).catch(() => false)
+        if (hidden) continue
+      }
 
       toggles.push({
         view: v.view,
         icon: payloadIcon || v.toggleIcon || FALLBACK_TOGGLE_ICON,
-        label: payloadLabel || v.view,
+        label: payloadLabel || this.#label(v),
         active: vm.is(v.view),
       })
     }
     this.#emit(toggles)
+  }
+
+  /** The toggle's human label — its tooltip and aria-label. The view's
+   *  `labelKey` through i18n ("Website", "Slides", "Study"), falling back to
+   *  the raw view id when a catalog is missing the key (t() echoes the key
+   *  back, so guard on that). A cell's own decoration payload label still
+   *  wins over this — every website names itself. */
+  #label(v: VisualBeeDescriptor): string {
+    if (!v.labelKey) return v.view
+    const translated = get<I18nProvider>(I18N_IOC_KEY)?.t(v.labelKey)
+    return translated && translated !== v.labelKey ? translated : v.view
   }
 
   /** The node the user is currently sitting on. Signs the current path and

@@ -212,6 +212,10 @@ window.ioc.register('@diamondcoreprocessor.com/PresentQueenBee', _present)
       // Clicking a deck plays it instead of entering its hexagon layer; the
       // viewer takes the screen in place and closing returns you where you were.
       opensOnTileClick: true,
+      // Ships mobile-friendly: slides playback is a first-class mobile surface
+      // (and the gallery view reuses its engine).
+      // Keep equal to MOBILE_FRIENDLY in preferences/mobile-pheromones.
+      pheromones: ['mobile:friendly'],
     })
   },
 )

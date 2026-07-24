@@ -12,6 +12,9 @@ $steel: #7eb6d6;
 // The one warm accent in a cold panel — used only by the armed-removal
 // surface, and matched to the strikethrough the staged tiles carry on canvas.
 $amber: #d99a4e;
+// The additive counterpart: the apply brush PUTS a keyword on tiles, so it
+// reads green (add) against removal's amber (take off).
+$mint: #6fbf94;
 
 :host {
   position: fixed;
@@ -38,6 +41,60 @@ $amber: #d99a4e;
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #eaf0f4;
   outline: none;
+}
+
+// ── phone: bottom sheet ───────────────────────────────────
+// Pheromones are a FIRST-CLASS mobile feature (marking what shows on mobile is
+// the core authoring act), but a 320px right-docked column is unreachable on a
+// phone. Here the panel becomes a bottom sheet: full width, capped height, so
+// the hive stays visible above it and every control is in thumb reach. Matches
+// the app's phone detection (small in EITHER dimension) so landscape phones —
+// wide but short — get the sheet too, where a side dock would eat the screen.
+@media (max-width: 599px), (max-height: 449px) {
+  .tags-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    // Inline width from the resize directive must not win on a phone.
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+    max-height: min(62vh, 30rem);
+    border-left: none;
+    border-top: 1px solid rgba($steel, 0.5);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($steel, 0.06) inset;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  // Bigger touch targets for the sheet's own controls.
+  .tags-panel .tag-scope-opt,
+  .tags-panel .tag-row-btn,
+  .tags-panel button {
+    min-height: 2.5em;
+  }
+
+  // ── no PAINTER on a phone ───────────────────────────────
+  // Mobile pheromones are SEE + MANAGE: read the list, filter by one, recolour,
+  // take one off tiles. Putting them ON tiles is a pointer-era gesture (pick a
+  // brush, then drag across the hive) that has no good touch form yet, so it is
+  // withheld rather than shipped badly. Everything hidden here is painting; the
+  // list, the reach control, the active-filter line, the removal review, the
+  // swatch and the × stay. (Drag-to-paint is also disabled in the component —
+  // on touch a drag IS the scroll gesture. See #isPhone in the .ts.)
+  .tags-painter-open,          // "Paint pheromones" entry button
+  .tags-painter-section,       // the painter itself (picked chips, staged tiles)
+  .tag-apply,                  // per-row ＋ : pick this one for the brush
+  .tag-drag-ghost {            // the drag-to-tile ghost
+    display: none !important;
+  }
+
+  // The footer hint is written for the painter ("＋ to pick a pheromone for the
+  // painter · drag onto a tile …"), so it would describe controls that aren't
+  // here. The intro line above already says what pheromones are and that
+  // filtering is the way in.
+  .tags-foot { display: none; }
 }
 
 .tags-header {
@@ -128,6 +185,8 @@ $amber: #d99a4e;
 .tags-intro,
 .tags-section-title,
 .tags-removal-section,
+.tags-painter-open,
+.tags-painter-section,
 .tags-active-section { flex: 0 0 auto; }
 
 .tags-intro {
@@ -318,6 +377,228 @@ $amber: #d99a4e;
   &:hover { color: #e06b6b; }
 }
 
+// ── the painter ───────────────────────────────────────────
+//
+// The additive twin of the removal surface: it too is about to change the
+// hive, so it too carries colour — green, to read as "add" against removal's
+// amber "take off". Two states share the block: picking (calm outline) and
+// painting (lit, because tile clicks are being taken over).
+
+// The way in. Cold chrome at rest — it is an entry point, not a live state —
+// and full-width so it reads as the panel's primary verb rather than a glyph
+// tucked in a row.
+.tags-painter-open {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  width: calc(100% - 2em);
+  margin: 0 1em 0.5em;
+  padding: 0.4em 0.7em;
+  background: none;
+  border: 1px solid rgba($mint, 0.4);
+  border-radius: 4px;
+  color: #cdead9;
+  font: inherit;
+  font-size: 0.76em;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+
+  &:hover { background: rgba($mint, 0.16); border-color: rgba($mint, 0.7); color: #fff; }
+
+  .mat-sym { font-size: 1.1em; }
+}
+
+.tags-painter-section {
+  border-top: 1px solid rgba($mint, 0.22);
+  border-bottom: 1px solid rgba($mint, 0.22);
+  background: rgba($mint, 0.04);
+  padding-bottom: 0.7em;
+
+  // Armed: the brush is loaded and tile clicks belong to it, so the surface
+  // goes as loud as the removal one.
+  &.armed {
+    border-top-color: rgba($mint, 0.35);
+    border-bottom-color: rgba($mint, 0.35);
+    background: rgba($mint, 0.07);
+  }
+}
+
+.painter-empty {
+  margin: 0;
+  padding: 0 1em 0.5em;
+  font-size: 0.72em;
+  color: rgba($mint, 0.75);
+}
+
+// The loaded brush, one chip per pheromone. Each drops out with its own ×, so
+// changing your mind about one never costs the whole selection.
+.painter-picked {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em;
+  margin: 0 0 0.6em;
+  padding: 0 1em;
+}
+
+// Square left, label right — same pairing as the list row, the drag ghost and
+// the on-tile card. The mint belongs to the chip's OUTLINE (it says "loaded in
+// the brush"); the pheromone's own colour stays on the swatch.
+.painter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.18em 0.22em 0.18em 0.32em;
+  border-radius: 4px;
+  background: rgba($mint, 0.1);
+  border: 1px solid rgba($mint, 0.38);
+  font-size: 0.74em;
+  color: #dff2e8;
+}
+
+.painter-chip-swatch {
+  flex: 0 0 auto;
+  width: 0.95em;
+  height: 0.95em;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+}
+
+.painter-chip-drop {
+  background: none;
+  border: none;
+  padding: 0 0.2em;
+  color: rgba($mint, 0.8);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { color: #fff; }
+}
+
+// What has landed so far — the mirror of the removal list, ticks instead of
+// strikethrough.
+.painter-painted {
+  list-style: none;
+  margin: 0 0 0.6em;
+  padding: 0 1em;
+  max-height: 9em;
+  overflow-y: auto;
+}
+
+.painted-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.12em 0;
+  font-size: 0.76em;
+  color: #cdead9;
+}
+
+.painted-cell-icon {
+  flex: 0 0 auto;
+  font-size: 0.9em;
+  color: rgba($mint, 0.9);
+}
+
+.painted-cell-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ── selection response — stage the whole canvas selection in one press ──
+.painter-stage-selection {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  width: 100%;
+  margin-top: 0.5em;
+  padding: 0.4em 0.6em;
+  border: 1px dashed rgba($mint, 0.45);
+  border-radius: 7px;
+  background: rgba($mint, 0.06);
+  color: rgba(214, 238, 226, 0.85);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8em;
+  text-align: left;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  .mat-sym { font-size: 1.1em; color: $mint; }
+  &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: #eefaf4; }
+  &:focus-visible { outline: 1px solid rgba($mint, 0.7); outline-offset: 1px; }
+}
+
+.painter-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  flex-wrap: wrap;
+  padding: 0 1em;
+}
+
+.painter-tally {
+  font-size: 0.72em;
+  color: rgba($mint, 0.8);
+}
+
+.painter-paint,
+.painter-close {
+  background: none;
+  border: 1px solid rgba($steel, 0.35);
+  border-radius: 3px;
+  color: #c6d5e0;
+  font: inherit;
+  font-size: 0.72em;
+  padding: 0.2em 0.65em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+  &:hover { background: rgba($steel, 0.16); color: #fff; }
+}
+
+// The commit of this surface — same weight the removal's Remove carries.
+.painter-paint {
+  border-color: rgba($mint, 0.6);
+  color: #cdead9;
+
+  &:hover:not(:disabled) { background: rgba($mint, 0.22); color: #fff; }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+    border-color: rgba($steel, 0.2);
+    color: #8ea2b0;
+  }
+}
+
+.apply-title { color: rgba($mint, 0.95); }
+
+.apply-hint {
+  margin: 0;
+  padding: 0 1em 0.5em;
+  font-size: 0.72em;
+  line-height: 1.45;
+  color: #8fbfa4;
+}
+
+.apply-done {
+  margin: 0 1em;
+  background: none;
+  border: 1px solid rgba($mint, 0.6);
+  border-radius: 3px;
+  color: #cdead9;
+  font: inherit;
+  font-size: 0.72em;
+  padding: 0.2em 0.65em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+  &:hover { background: rgba($mint, 0.22); color: #fff; }
+}
+
 .tags-list {
   list-style: none;
   margin: 0;
@@ -337,6 +618,10 @@ $amber: #d99a4e;
   &.filtered { background: rgba($steel, 0.14); }
   // the row whose removal is armed carries the same amber as its section
   &.staging { background: rgba($amber, 0.16); }
+  // picked for the brush but not yet painting — the quiet half of mint
+  &.picked { background: rgba($mint, 0.08); }
+  // loaded in an ARMED brush: every tile click is landing this one
+  &.painting { background: rgba($mint, 0.16); }
 }
 
 .tag-swatch {
@@ -359,6 +644,47 @@ $amber: #d99a4e;
   }
 }
 
+// The dragged pheromone, riding the cursor to its tile: the same swatch+name
+// pairing as the list row, so what you picked up is literally what you see.
+// Sits above every panel and ignores the pointer so the drop can hit-test the
+// hive underneath.
+//
+// The COLOUR belongs to the swatch, never the whole chip — a pheromone can be
+// any colour the participant picks, and tinting the chip made dark choices
+// unreadable and light ones glaring. Cold chrome carries the label instead, so
+// contrast is fixed whatever the colour is.
+.tag-drag-ghost {
+  position: fixed;
+  z-index: 100010;
+  pointer-events: none;
+  // Anchor on the SWATCH: the square sits under the cursor and the name trails
+  // to its right, so the thing you grabbed stays where you're pointing.
+  transform: translate(-0.5em, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.3em 0.6em 0.3em 0.35em;
+  border-radius: 5px;
+  background: rgba(14, 17, 24, 0.96);
+  border: 1px solid rgba($steel, 0.5);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  font-family: var(--hc-mono, system-ui);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  color: #e8eef5;
+  white-space: nowrap;
+}
+
+.tag-drag-swatch {
+  flex: 0 0 auto;
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 3px;
+  // Same inset hairline the list swatch carries, so a pale colour still reads
+  // as a distinct square rather than bleeding into the chip.
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+}
+
 .tag-name {
   flex: 1 1 auto;
   text-align: left;
@@ -366,12 +692,25 @@ $amber: #d99a4e;
   border: none;
   color: inherit;
   font: inherit;
-  cursor: pointer;
+  // Grab affordance: the name is the handle you drag onto a tile.
+  cursor: grab;
+  touch-action: none;
+  // A pointer-driven drag whose handle contains TEXT must opt out of the
+  // browser's own two gestures, or a real mouse never completes the drop:
+  // press-and-move selects the label, and the selection can start a NATIVE
+  // drag, which suppresses pointer events wholesale — `pointerup` never
+  // arrives, `#onDragUp` never runs, and the pheromone lands nowhere. This
+  // fails ONLY under real input; synthetic PointerEvents never enter native
+  // DnD, so it is invisible to instrumentation.
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
   padding: 0.1em 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 
+  &:active { cursor: grabbing; }
   &:hover { color: #fff; }
   &[aria-pressed="true"] { color: $steel; font-weight: 600; }
 }
@@ -406,6 +745,42 @@ $amber: #d99a4e;
     color: $amber;
 
     &:hover { color: #f0d9b6; }
+  }
+}
+
+.tag-apply {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: #6e8290;
+  font-size: 1em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2em;
+  // Painting is the panel's PRIMARY verb — it must be visible without
+  // hunting. Dimmed at rest (the row stays calm), full on row hover. The ×
+  // stays hover-only: taking a pheromone off is the rarer, heavier action.
+  opacity: 0.55;
+  transition: opacity 0.12s ease, color 0.12s ease;
+
+  .tags-row:hover & { opacity: 1; }
+  &:hover { color: $mint; }
+
+  // picked: the tick stays visible without a hover — it is the readout of
+  // what the brush is carrying, so it must never be hidden.
+  &.picked {
+    opacity: 1;
+    color: rgba($mint, 0.8);
+
+    &:hover { color: #cdead9; }
+  }
+
+  // armed: picked AND painting — full mint, the loudest the row gets.
+  &.armed {
+    opacity: 1;
+    color: $mint;
+
+    &:hover { color: #cdead9; }
   }
 }
 

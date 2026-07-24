@@ -105,13 +105,14 @@ $steel: rgb(126, 182, 214);
   &:disabled { opacity: 0.55; cursor: default; }
 }
 
-// ── phone: keep the cluster, shift to clear the smaller FAB inset ──
-@include phone-only {
-  .edit-actions { right: calc(0.3rem + var(--hc-inset-right, 0px)); bottom: 0.15rem; }
-  .ea-btn {
-    width: 1.85rem;
-    height: 1.85rem;
-    .mat-sym { font-size: 1.15rem; }
-  }
-  .ea-save { height: 1.85rem; padding: 0 0.7rem; font-size: 0.72rem; }
+// ── phone: no document-action cluster ──
+// The mobile control bar now owns the entire bottom band (full-width, five
+// slots), and this cluster's old tucked-in phone position landed exactly on
+// the bar's right end — a stray interactive undo button colliding with the
+// solo/swarm control. The phone shell is a VIEWER: undo/redo are desktop
+// editing chrome, and Save only appears while rewound, which a viewer never
+// is. Hidden under the same small-in-EITHER-dimension query the rest of the
+// mobile chrome keys on (phone-only is width-only and misses landscape).
+@media (max-width: 599px), (max-height: 449px) {
+  .edit-actions { display: none; }
 }

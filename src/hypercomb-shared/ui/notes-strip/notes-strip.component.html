@@ -33,10 +33,86 @@
       </button>
     </div>
 
+    <!-- Editor column. `cv2-main` is `display: contents` in the docked strip
+         (so the rows below stay direct flex children, exactly as before) and
+         becomes the RIGHT column in desktop fullscreen, where the tile
+         navigator moves to a vertical list on the left. -->
+    <div class="cv2-main">
+
     <!-- Active-tile editor — only present when a tile is active (selected on
-         the canvas or picked from the list below). Without one, the list alone
+         the canvas or picked from the list). Without one, the list alone
          shows so the user can find and pick a tile. -->
     @if (cell()) {
+      <!-- ── Mark rail ────────────────────────────────────────────
+           The participant's own icons, each carrying the meaning THEY gave
+           it. Clicking one marks the note being written; the meaning's
+           ROLE (heading / list) decides how every row carrying that icon
+           renders, so re-roling an icon restyles the whole tree. "+" opens
+           the shared Material chooser; "tune" flips to the palette editor
+           where each mark gets a name, a role and a remove. -->
+      <div class="cv2-rail" [class.is-editing]="paletteEditing()">
+        @if (!paletteEditing()) {
+          <div class="cv2-rail-marks" role="group" [attr.aria-label]="'notes.markRail' | t">
+            @for (m of marks(); track m.icon) {
+              <button type="button" class="cv2-rail-mark"
+                      [class.is-active]="draftMark() === m.icon"
+                      [class.is-heading]="m.role === 'heading'"
+                      (click)="pickMark(m.icon)"
+                      [attr.aria-pressed]="draftMark() === m.icon"
+                      [title]="markLabel(m.icon)">
+                <span class="mat-sym">{{ m.icon }}</span>
+              </button>
+            }
+            <button type="button" class="cv2-rail-btn" (click)="addMarkIcon()"
+                    [attr.aria-label]="'notes.addMark' | t" [title]="'notes.addMark' | t">
+              <span class="mat-sym">add</span>
+            </button>
+          </div>
+          <span class="cv2-rail-spacer"></span>
+          <button type="button" class="cv2-rail-btn" (click)="togglePaletteEdit()"
+                  [attr.aria-label]="'notes.editMarks' | t" [title]="'notes.editMarks' | t">
+            <span class="mat-sym">tune</span>
+          </button>
+        } @else {
+          <div class="cv2-rail-editor">
+            <div class="cv2-rail-editor-head">
+              <span>{{ 'notes.markPalette' | t }}</span>
+              <span class="cv2-rail-spacer"></span>
+              <button type="button" class="cv2-rail-btn" (click)="togglePaletteEdit()"
+                      [title]="'notes.markDone' | t">
+                <span class="mat-sym">check</span>
+              </button>
+            </div>
+            @for (m of marks(); track m.icon) {
+              <div class="cv2-mark-row">
+                <span class="mat-sym cv2-mark-row-icon" aria-hidden="true">{{ m.icon }}</span>
+                <input type="text" class="cv2-mark-name"
+                       [value]="m.name"
+                       (input)="renameMark(m.icon, $event)"
+                       [attr.placeholder]="'notes.markMeaning' | t"
+                       [attr.aria-label]="'notes.markMeaning' | t" />
+                <div class="cv2-mark-roles" role="group">
+                  <button type="button" [class.is-on]="m.role === 'heading'"
+                          (click)="setMarkRole(m.icon, 'heading')">{{ 'notes.markHeading' | t }}</button>
+                  <button type="button" [class.is-on]="m.role === 'list'"
+                          (click)="setMarkRole(m.icon, 'list')">{{ 'notes.markList' | t }}</button>
+                </div>
+                <button type="button" class="cv2-mark-remove" (click)="removeMark(m.icon)"
+                        [attr.aria-label]="'notes.markRemove' | t" [title]="'notes.markRemove' | t">
+                  <span class="mat-sym" style="font-size:14px">close</span>
+                </button>
+              </div>
+            } @empty {
+              <div class="cv2-rail-empty">{{ 'notes.noMarks' | t }}</div>
+            }
+            <button type="button" class="cv2-mark-add" (click)="addMarkIcon()">
+              <span class="mat-sym" style="font-size:14px">add</span>
+              <span>{{ 'notes.addMark' | t }}</span>
+            </button>
+          </div>
+        }
+      </div>
+
       <!-- Embedded note form — the single authoring surface. Add mode by
            default; clicking a note row loads it here for editing. The
            leading kind pill flips the entry between note and question;
@@ -115,7 +191,8 @@
       <ng-template #rowTpl let-note="note" let-depth="depth">
         <article class="cv2-note"
                  [attr.data-note-id]="note.id"
-                 [style.paddingLeft.px]="depth * 18"
+                 [style.--depth]="depth"
+                 [class.is-heading]="roleOf(note) === 'heading'"
                  [class.cv2-note-q]="noteKind(note) === 'q'"
                  [class.cv2-note-a]="noteKind(note) === 'a'"
                  [class.is-editing]="editingNoteId() === note.id"
@@ -142,10 +219,9 @@
           } @else {
             <span class="cv2-note-chevron-spacer" aria-hidden="true"></span>
           }
+          <!-- Grip is a CSS-drawn rail (see .cv2-note-grip) — no glyph. -->
           <div class="cv2-note-grip" [title]="'notes.dragToReorder' | t"
-               (pointerdown)="onNoteGripPointerDown(cell()!, note.id, $event)">
-            <span class="mat-sym" style="font-size:14px">drag_indicator</span>
-          </div>
+               (pointerdown)="onNoteGripPointerDown(cell()!, note.id, $event)"></div>
           <div class="cv2-note-body" (click)="onRowBodyClick(cell()!, note.id, $event)">
             @if (noteKind(note) === 'q') {
               <div class="cv2-note-kind">
@@ -156,12 +232,19 @@
                 <span class="mat-sym filled" style="font-size:12px">chat</span> {{ 'notes.noteKindAnswer' | t }}
               </div>
             }
-            <!-- Shape glyph (CSS-painted via the parent's .hc-shape-X
-                 class) + plain text body. Angular's `{{ }}`
-                 interpolation escapes the content — no HTML output
-                 from the user's text. `white-space: pre-wrap` in the
-                 SCSS preserves the user's line breaks. -->
-            <span class="hc-shape-glyph cv2-note-shape" aria-hidden="true"></span>
+            <!-- The row's glyph. A MARK (an icon from the participant's
+                 palette) when the note carries one; otherwise the legacy
+                 CSS-painted shape glyph, so notes written before marks
+                 existed still paint. The icon name is validated against
+                 /^[a-z0-9_]+$/ before it can reach a note layer, so it is
+                 safe as a ligature. Body text below: Angular's `{{ }}`
+                 interpolation escapes it — no HTML output from the user's
+                 text — and `white-space: pre-wrap` keeps their line breaks. -->
+            @if (markOf(note); as icon) {
+              <span class="mat-sym cv2-note-mark" [title]="markLabel(icon)">{{ icon }}</span>
+            } @else {
+              <span class="hc-shape-glyph cv2-note-shape" aria-hidden="true"></span>
+            }
             <p class="cv2-note-text">{{ noteDisplayText(note) }}</p>
           </div>
           <!-- Kebab opens a small popover with Nest / Promote / Delete. -->
@@ -204,6 +287,9 @@
                   <button type="button" class="cv2-nest-picker-item"
                           [style.paddingLeft.px]="8 + cand.depth * 12"
                           (click)="nestUnder(note.id, cand.id)">
+                    @if (cand.mark) {
+                      <span class="mat-sym cv2-nest-picker-mark" aria-hidden="true">{{ cand.mark }}</span>
+                    }
                     <span class="hc-shape-glyph cv2-nest-picker-shape"
                           [class.hc-shape-circle]="cand.shape === 'circle'"
                           [class.hc-shape-square]="cand.shape === 'square'"
@@ -261,15 +347,19 @@
         <span>{{ 'notes.footerCount' | t: { count: notes().length } }} <code>{{ cell() }}</code></span>
       </footer>
     } @else {
-      <!-- No active tile — prompt the user to find one in the list below. -->
+      <!-- No active tile — prompt the user to find one in the tile list. -->
       <div class="cv2-empty-hint">{{ 'notes.pickTile' | t }}</div>
     }
 
+    </div><!-- /cv2-main -->
+
     <!-- Tile navigator — always on. A one-of list of every tile in this
          layer, filterable by name OR note text. Click a row to make that
-         tile active above (single selection); the active tile (also set by
+         tile active (single selection); the active tile (also set by
          clicking the tile on the canvas) is highlighted. Hidden tiles can't
-         be clicked on the canvas but are still listed here. -->
+         be clicked on the canvas but are still listed here.
+         Docked: a wrapping tag cloud under the editor. Desktop fullscreen:
+         a vertical list in the left column (SCSS reflows it). -->
     <div class="cv2-tilelist">
       <div class="cv2-tilelist-filter">
         <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>

@@ -148,34 +148,61 @@
     @case ('browsing') {
 
       @if (isMobile()) {
-        <!-- ═══ MOBILE: 5 floating icons (no chrome) — Material Symbols ═══ -->
-        <!-- back · talk · center · fullscreen · solo/swarm -->
+        <!-- ═══ MOBILE: balanced bar — two buttons each side, fixed center ═══
+             back · talk │ CENTER (fit) │ fullscreen · solo/swarm.
+             The centre button is the anchor: it stays put while each side
+             scrolls independently if more controls ever appear. With five it
+             never needs to scroll. -->
         <div class="controls-section mobile-nav">
-          <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
-                  (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
-                  [attr.aria-label]="'controls.go-back' | t">
-            <span class="mat-sym">arrow_back</span>
-          </button>
-          @if (voiceSupported) {
-            <button class="ctl-btn mic-btn" [class.recording]="voiceActive()"
-              (pointerdown)="mobileMicDown($event)" (pointerup)="mobileMicUp()" (pointercancel)="mobileMicUp()" (pointerleave)="mobileMicUp()"
-              [attr.aria-label]="'controls.voice-hold' | t">
-              <span class="mat-sym" [class.filled]="voiceActive()">mic</span>
+          <div class="mobile-side left" data-consumes-wheel>
+            <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
+                    (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
+                    [attr.aria-label]="'controls.go-back' | t">
+              <span class="mat-sym">arrow_back</span>
+            </button>
+            @if (voiceSupported) {
+              <button class="ctl-btn mic-btn" [class.recording]="voiceActive()"
+                (pointerdown)="mobileMicDown($event)" (pointerup)="mobileMicUp()" (pointercancel)="mobileMicUp()" (pointerleave)="mobileMicUp()"
+                [attr.aria-label]="'controls.voice-hold' | t">
+                <span class="mat-sym" [class.filled]="voiceActive()">mic</span>
+              </button>
+            }
+          </div>
+
+          <!-- The centre is the viewport control — it goes away on a pinned
+               layer, same as the desktop rail's fit/zoom set. An inert spacer
+               holds the anchor so the two sides keep their balance. -->
+          @if (pinnedHere()) {
+            <div class="ctl-btn mobile-center pinned-spacer" aria-hidden="true"></div>
+          } @else {
+            <button class="ctl-btn fit-btn mobile-center"
+                    [class.fit-global]="fitButtonState() === 'global'"
+                    [class.fit-page]="fitButtonState() === 'page'"
+                    (click)="fitOrCenter($event)" (dblclick)="lockFit()"
+                    [attr.aria-label]="'controls.fit-content' | t">
+              <span class="mat-sym">center_focus_strong</span>
             </button>
           }
-          <button class="ctl-btn fit-btn"
-                  [class.fit-global]="fitButtonState() === 'global'"
-                  [class.fit-page]="fitButtonState() === 'page'"
-                  (click)="fitOrCenter($event)" (dblclick)="lockFit()"
-                  [attr.aria-label]="'controls.fit-content' | t">
-            <span class="mat-sym">center_focus_strong</span>
-          </button>
-          <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
-            <span class="mat-sym">fullscreen</span>
-          </button>
-          <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
-            <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
-          </button>
+
+          <div class="mobile-side right" data-consumes-wheel>
+            <!-- PHEROMONES — first-class on mobile: marking what shows on a
+                 phone is the core authoring act, so the opener sits on the bar
+                 itself rather than only in the tag strip / desktop header rail.
+                 The panel renders as a bottom sheet at phone sizes. The glyph
+                 reads out the current reach (page → children → global). -->
+            <button class="ctl-btn pheromone-mobile-btn"
+                    (click)="openPheromones()"
+                    [attr.aria-label]="'tags.panel.open' | t">
+              <!-- A FIXED identity glyph, not the reach readout: `scopeIcon()`
+                   returns `center_focus_strong` at page reach — the same glyph
+                   the centre fit button uses — so the two read as one repeated
+                   icon. Reach is named and changed inside the sheet. -->
+              <span class="mat-sym">label</span>
+            </button>
+            <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
+              <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
+            </button>
+          </div>
         </div>
       } @else {
         <!-- ═══ DESKTOP: single-row controls with edit-mode toggle ═══ -->

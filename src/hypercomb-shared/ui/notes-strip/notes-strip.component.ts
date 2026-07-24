@@ -11,6 +11,14 @@ import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { registerShellSurface } from '../../core/shell-surface-registry'
+import { fromRuntime } from '../../core/from-runtime'
+import { NOTE_MARKS_IOC_KEY, isMarkIcon, type MarkRole, type NoteMarksStore } from '../../core/note-marks.store'
+import { requestIconPick } from '../../core/icon-pick'
+
+// Correlation token for this window's requests to the shared icon chooser
+// (see core/icon-pick.ts). The chooser also serves the tile-icon override
+// flow, whose ids are real element ids, so every requester names itself.
+const MARK_PICK_ID = 'notes:mark-palette'
 
 
 
@@ -43,6 +51,9 @@ type Note = {
   id: string
   text: string
   shape: ShapeId | null
+  /** Material icon name from the participant's mark palette. Supersedes
+   *  `shape`; notes written before marks existed carry only a shape. */
+  mark: string | null
   children: Note[]
 }
 
@@ -208,6 +219,84 @@ export class NotesStripComponent implements OnDestroy {
     this.draftKind.update(k => (k === 'q' ? 'note' : 'q'))
   }
 
+  // ── Mark palette (the icon rail) ──────────────────────────
+  // The rail sits at the top of the editor column: the participant's own
+  // icons, each carrying a meaning THEY gave it and a role that decides how
+  // rows using it render (heading vs list item). The palette is hive
+  // content (sign('notes:marks') pool) — see core/note-marks.store.ts.
+
+  readonly #markStore = window.ioc?.get?.<NoteMarksStore>(NOTE_MARKS_IOC_KEY)
+
+  /** Live palette. Empty when the store is absent (marks simply don't
+   *  render) or before the pool read settles. */
+  readonly marks = fromRuntime(this.#markStore, () => this.#markStore?.marks ?? [])
+
+  /** The rail's current pick — the mark the next commit writes onto the
+   *  note. Null = no mark. Staged to the drone via `notes:active-mark` as
+   *  well as sent on the commit payload, so either path works. */
+  readonly draftMark = signal<string | null>(null)
+
+  /** Palette edit mode — flips the compact icon rail into a list where each
+   *  mark shows its name, its role and a remove button. */
+  readonly paletteEditing = signal(false)
+
+  togglePaletteEdit(): void { this.paletteEditing.update(v => !v) }
+
+  /** Click a rail icon: pick it for the draft, or clear it by picking the
+   *  one already active. */
+  pickMark(icon: string): void {
+    const next = this.draftMark() === icon ? null : icon
+    this.draftMark.set(next)
+    EffectBus.emit('notes:active-mark', { mark: next })
+  }
+
+  /** "+" on the rail — borrow the shared Material icon chooser. `store: false`
+   *  means nothing is written as an icon override: the name comes back here
+   *  and becomes palette content instead. Null = the user cancelled. */
+  async addMarkIcon(): Promise<void> {
+    const i18n = window.ioc?.get?.<I18nProvider>('@hypercomb.social/I18n')
+    const name = await requestIconPick({
+      id: MARK_PICK_ID,
+      store: false,
+      title: i18n?.t('notes.addMark'),
+    })
+    if (!isMarkIcon(name)) return
+    this.#markStore?.add(name)
+    this.draftMark.set(name)
+    EffectBus.emit('notes:active-mark', { mark: name })
+  }
+
+  renameMark(icon: string, event: Event): void {
+    this.#markStore?.rename(icon, (event.target as HTMLInputElement)?.value ?? '')
+  }
+
+  setMarkRole(icon: string, role: MarkRole): void {
+    this.#markStore?.setRole(icon, role)
+  }
+
+  removeMark(icon: string): void {
+    this.#markStore?.remove(icon)
+    if (this.draftMark() === icon) this.pickMark(icon)   // clears the draft pick
+  }
+
+  /** The icon a note row paints — its mark. Notes written before marks
+   *  existed carry a legacy `shape` instead, which the row still renders
+   *  through the CSS shape glyph. */
+  markOf(note: Note): string | null { return note.mark ?? null }
+
+  /** Role the row renders with. Lives on the PALETTE, not the note, so
+   *  re-roling an icon restyles every note that carries it. */
+  roleOf(note: Note): MarkRole {
+    return note.mark ? (this.#markStore?.roleOf(note.mark) ?? 'list') : 'list'
+  }
+
+  /** Human meaning of a mark, for tooltips. Falls back to the icon name so
+   *  an unnamed mark still says something. */
+  markLabel(icon: string): string {
+    const mark = this.#markStore?.byIcon(icon)
+    return mark?.name?.trim() || icon.replace(/_/g, ' ')
+  }
+
   /** Set of note ids whose subtree is currently collapsed. State is
    *  in-memory only — resets on reload. Keys are note ids, not paths,
    *  so two distinct notes with the same id (impossible since ids are
@@ -306,7 +395,7 @@ export class NotesStripComponent implements OnDestroy {
    *
    *  Returns a flat list of { id, text, shape, depth } so the picker
    *  can render a single scrollable list with visual depth hints. */
-  nestCandidates(sourceId: string): readonly { id: string; text: string; shape: ShapeId | null; depth: number }[] {
+  nestCandidates(sourceId: string): readonly { id: string; text: string; shape: ShapeId | null; mark: string | null; depth: number }[] {
     const cell = this.cell()
     if (!cell) return []
     const tree = this.#notesByCell().get(cell) ?? []
@@ -329,11 +418,11 @@ export class NotesStripComponent implements OnDestroy {
     }
     collectDescendants(tree)
     // Walk the whole tree and emit all non-forbidden notes.
-    const out: { id: string; text: string; shape: ShapeId | null; depth: number }[] = []
+    const out: { id: string; text: string; shape: ShapeId | null; mark: string | null; depth: number }[] = []
     const walk = (nodes: readonly Note[], depth: number): void => {
       for (const n of nodes) {
         if (!forbidden.has(n.id)) {
-          out.push({ id: n.id, text: this.noteDisplayText(n), shape: n.shape, depth })
+          out.push({ id: n.id, text: this.noteDisplayText(n), shape: n.shape, mark: n.mark, depth })
         }
         walk(n.children, depth + 1)
       }
@@ -944,6 +1033,7 @@ export class NotesStripComponent implements OnDestroy {
       id: 'qa:' + q.qId,
       text: '[Q] ' + q.question,
       shape: null,
+      mark: null,
       children: [],
     }))
     const filtered = notes.filter(n => {
@@ -1571,7 +1661,7 @@ export class NotesStripComponent implements OnDestroy {
       EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
       return
     }
-    this.#openForm(cell, { editId: noteId, prefill: note.text })
+    this.#openForm(cell, { editId: noteId, prefill: note.text, mark: note.mark })
   }
 
   /** Walk a cell's note tree (top-level or nested) to resolve a note id. */
@@ -1594,13 +1684,18 @@ export class NotesStripComponent implements OnDestroy {
   // event the drone already handles — no new write path.
 
   /** Open / focus the form for `cell`. `editId` set ⇒ edit mode. */
-  #openForm(cell: string, opts?: { editId?: string | null; prefill?: string }): void {
+  #openForm(cell: string, opts?: { editId?: string | null; prefill?: string; mark?: string | null }): void {
     if (!cell) return
     this.#capturingFor.set(cell)
     this.#open.set(true)                       // authoring turns the strip on
     this.editingNoteId.set(opts?.editId ?? null)
     this.draftText.set(opts?.prefill ?? '')
     this.draftKind.set('note')
+    // Add mode starts unmarked; edit mode inherits the note's own mark so
+    // saving round-trips it instead of silently stripping it.
+    const mark = opts?.mark ?? null
+    this.draftMark.set(mark)
+    EffectBus.emit('notes:active-mark', { mark })
     this.#focusForm()
   }
 
@@ -1648,11 +1743,12 @@ export class NotesStripComponent implements OnDestroy {
     const finalText = this.draftKind() === 'q' && !/^\[Q\]\s/i.test(text)
       ? `[Q] ${text}`
       : text
-    EffectBus.emit('note:commit', { cellLabel: cell, text: finalText, editId: editId ?? undefined })
+    const mark = this.draftMark()
+    EffectBus.emit('note:commit', { cellLabel: cell, text: finalText, mark, editId: editId ?? undefined })
     // Paint immediately — don't make the user wait for the resource write +
     // leaf→root layer cascade + the notes:changed re-read. The authoritative
     // reconcile lands moments later and replaces this with the persisted note.
-    this.#paintOptimistic(cell, finalText, editId ?? null)
+    this.#paintOptimistic(cell, finalText, editId ?? null, mark)
     this.draftText.set('')
     this.editingNoteId.set(null)           // editing is one-shot → back to add
     this.#focusForm()
@@ -1666,14 +1762,14 @@ export class NotesStripComponent implements OnDestroy {
    *  persisted note a moment later — same text + position, so the swap is
    *  seamless. On edit we mutate text in place (keeping id/children) so the
    *  row doesn't flicker. */
-  #paintOptimistic(cell: string, text: string, editId: string | null): void {
+  #paintOptimistic(cell: string, text: string, editId: string | null, mark: string | null = null): void {
     this.#notesByCell.update(prev => {
       const next = new Map(prev)
       const current = next.get(cell) ?? []
       if (editId) {
-        next.set(cell, current.map(n => (n.id === editId ? { ...n, text } : n)))
+        next.set(cell, current.map(n => (n.id === editId ? { ...n, text, mark } : n)))
       } else {
-        const pending: Note = { id: `pending-${++this.#pendingSeq}`, text, shape: null, children: [] }
+        const pending: Note = { id: `pending-${++this.#pendingSeq}`, text, shape: null, mark, children: [] }
         next.set(cell, [...current, pending])
       }
       return next
@@ -1689,6 +1785,8 @@ export class NotesStripComponent implements OnDestroy {
     this.editingNoteId.set(null)
     this.draftText.set('')
     this.draftKind.set('note')
+    this.draftMark.set(null)
+    EffectBus.emit('notes:active-mark', { mark: null })
     this.#focusForm()
   }
 

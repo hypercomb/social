@@ -23,6 +23,18 @@
   display: flex;
   align-items: stretch;
   height: 2.5rem;
+
+  // ── the icon rail's metrics ────────────────────────────
+  // One box, one glyph size, one gap for EVERY icon on the right of the
+  // header — the command-shell's behaviour toggles and standing tools
+  // (command-shell.component.scss `.rail-btn`) and the pinned-entrance
+  // quick links that follow them, which live in a separate component and
+  // would otherwise drift. Anything new that lands on this rail reads
+  // these; it never picks its own numbers.
+  --hc-rail-btn: 1.85rem;
+  --hc-rail-glyph: 1.2rem;
+  --hc-rail-gap: 0.3rem;
+
   // Switchable size: `--hc-header-zoom` (1.0 / 1.15 / 1.45, see
   // `styles/_header-size.scss`) scales the box AND every child
   // proportionally — height, padding, the command-line/mesh-header fonts
@@ -264,6 +276,25 @@
 
   .secured-label,
   .mode-crumb {
+    display: none;
+  }
+}
+
+// Landscape phones are WIDE but SHORT, so the width-based `phone-only` misses
+// them. Hide the docked command line here too — the mobile control sidebar on
+// the right edge is the input surface in landscape, same as the bottom bar is
+// in portrait. Long-pressing the canvas still reveals it (`.input-open`).
+@media (max-height: 449px) and (orientation: landscape) {
+  .header-bar { display: none; }
+
+  .header-bar.input-open {
+    display: flex;
+    height: clamp(3rem, 24vh, 4.5rem);
+  }
+
+  .header-bar.input-open .mesh-header,
+  .header-bar.input-open hc-mesh-header,
+  .header-bar.input-open hc-sync-indicator {
     display: none;
   }
 }

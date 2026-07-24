@@ -22,7 +22,12 @@ import {
   listDecorations,
   type DecorationRecord,
 } from './decoration-manifest.js'
-import { TAG_DECORATION_KIND, tagSigFor } from './decoration-kind-index.js'
+import { TAG_DECORATION_KIND, tagSigFor, TITLE_DECORATION_KIND } from './decoration-kind-index.js'
+import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+
+/** The locale a title is written in when the caller doesn't name one. */
+const activeLocale = (): string =>
+  (window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale ?? 'en'
 
 export class DecorationService {
 
@@ -53,6 +58,78 @@ export class DecorationService {
     return listDecorations<TPayload>(opts)
   }
 
+  /** This cell's title for `locale` (default: the active locale), or '' when it
+   *  carries none — the caller then shows the raw name. */
+  async titleOf(segments: readonly string[], locale?: string): Promise<string> {
+    const target = locale ?? activeLocale()
+    const records = await listDecorations<{ text?: Record<string, string> }>({
+      kind: TITLE_DECORATION_KIND,
+      segments,
+    })
+    for (const entry of records) {
+      const byLocale = entry.record.payload?.text
+      const value = byLocale && typeof byLocale === 'object' ? byLocale[target] : undefined
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+    return ''
+  }
+
+  /** Set this cell's title FOR ONE LOCALE (empty `text` clears that locale).
+   *
+   *  The tile's NAME is untouched — it is the address, and moving it would
+   *  strand the lineage bag and everything keyed by the path. This writes an
+   *  interpretation of that address in one language.
+   *
+   *  Merges with the locales already present, so retitling in English never
+   *  drops the Japanese reading; the record disappears once no locale is left.
+   *  Replace, not append: a cell carries at most ONE title record. The old
+   *  records are content-addressed and may be shared with identically-titled
+   *  cells elsewhere, so they stay in the resource store.
+   *
+   *  Both `/title` and the tile editor funnel through here — the editor lives
+   *  in shared and reaches it via IoC, never by import. */
+  async setTitle(
+    segments: readonly string[],
+    text: string,
+    locale?: string,
+  ): Promise<'set' | 'cleared' | 'noop'> {
+    const target = locale ?? activeLocale()
+    const next = text.trim()
+    const existing = await listDecorations<{ text?: Record<string, string> }>({
+      kind: TITLE_DECORATION_KIND,
+      segments,
+    })
+
+    const merged: Record<string, string> = {}
+    for (const entry of existing) {
+      const byLocale = entry.record.payload?.text
+      if (byLocale && typeof byLocale === 'object') {
+        for (const [loc, value] of Object.entries(byLocale)) {
+          if (typeof value === 'string' && value.trim()) merged[loc] = value.trim()
+        }
+      }
+    }
+
+    const had = merged[target] ?? ''
+    if (had === next) return 'noop'          // nothing changed — no commit, no repaint
+    if (next) merged[target] = next
+    else delete merged[target]
+
+    for (const entry of existing) removeDecoration({ sig: entry.sig, segments })
+
+    if (Object.keys(merged).length === 0) return 'cleared'
+
+    // appliesTo:[] so identically-titled cells dedup to ONE record — the
+    // location comes from the slot the sig lands in, not from the record.
+    await writeDecoration({
+      kind: TITLE_DECORATION_KIND,
+      appliesTo: [],
+      payload: { text: merged },
+      segments,
+    })
+    return next ? 'set' : 'cleared'
+  }
+
   /** Apply a tag to the cell at `segments`. Idempotent: same name → same
    *  record sig → append-or-noop on the slot. */
   addTag(segments: readonly string[], name: string): Promise<string> {
@@ -69,7 +146,11 @@ export class DecorationService {
    *  index is cold (e.g. first action after a fresh load). No-op if absent. */
   async removeTag(segments: readonly string[], name: string): Promise<void> {
     const label = segments[segments.length - 1]
-    let sig = label ? tagSigFor(label, name) : undefined
+    // Resolve by PATH, not by name: the index keys cells by location, and this
+    // call can arrive for a cell that isn't the one on screen (the pheromone
+    // card carries its own segments). A name-only lookup would answer with a
+    // same-named cell elsewhere and splice the tag off the wrong tile.
+    let sig = label ? tagSigFor(label, name, segments) : undefined
     if (!sig) {
       const records = await listDecorations<{ name?: string }>({
         kind: TAG_DECORATION_KIND,

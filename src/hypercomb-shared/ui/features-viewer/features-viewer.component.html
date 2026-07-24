@@ -36,6 +36,16 @@
       <div class="features-tile" [title]="g.cell">{{ g.cell }}</div>
     }
 
+    <!-- Canvas-selection response: the selected tiles carry features — one
+         press re-targets this window at them (show-features.drone answers). -->
+    @if (showCanvasSelectionAffordance()) {
+      <button class="features-selection" type="button" (click)="openSelectionFeatures()"
+              [attr.aria-label]="'features.selection' | t: { count: canvasSelectionCount() }">
+        <span class="mat-sym" aria-hidden="true">extension</span>
+        <span class="features-selection-label">{{ 'features.selection' | t: { count: canvasSelectionCount() } }}</span>
+      </button>
+    }
+
     <!-- ── Bulk bar: acts on the selected rows ── -->
     @if (selectedCount() > 0) {
       <div class="bulk-bar">

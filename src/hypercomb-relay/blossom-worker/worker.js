@@ -46,7 +46,7 @@ const HIVE_MAX_BYTES = 65_536 // a hive index is a small map, never a byte store
 // origin (hypercomb.io, operator domains, other Blossom clients).
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, HEAD, PUT, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range, X-SHA-256, X-Content-Length',
   'Access-Control-Expose-Headers': 'ETag, Accept-Ranges, Content-Range, Content-Length, X-Reason',
   'Access-Control-Max-Age': '86400',
@@ -441,6 +441,160 @@ async function getHive(request, env, pubkey) {
   })
 }
 
+// ── host AI (the immediate-answer tier) ──────────────────────────────────────
+//
+// POST /ai/ask — the host FIELDS conversational requests so a participant can
+// talk to their hive from anywhere and get an answer NOW, without their home
+// server being awake. The worker relays to the Anthropic API (Haiku by
+// default) and streams the reply straight through as SSE — first tokens in
+// well under a second. This is the shallow immediate tier; the home Claude
+// Code bridge (ws:2401, full agent) remains the deep one.
+//
+// Trust model mirrors the byte side — a schnorr-signed NIP-98 event proves
+// WHO without secrets:
+//   AI_WRITERS set   → allowlist (comma-separated pubkeys): only the
+//                      operator's own keys may spend their API money.
+//   AI_WRITERS unset → any valid signer, throttled by a per-pubkey per-day
+//                      token meter in GRANTS KV (`ai:<pubkey>:<day>`). An
+//                      anti-abuse ceiling, not billing — same doctrine as
+//                      the byte quota.
+//
+// Context rides as CONTENT SIGS (signature doctrine — reference, never
+// inline): the client names sigs already on this CDN; the worker resolves
+// them from R2, inlines capped text, and the model sees the participant's
+// actual content. Bytes never ride the request twice.
+//
+// The API key is a Wrangler secret, never a var:
+//   wrangler secret put ANTHROPIC_API_KEY
+
+const AI_Q_MAX = 4_000            // question chars
+const AI_CTX_SIGS_MAX = 8         // context sigs per ask
+const AI_CTX_EACH_MAX = 16_384    // bytes considered per context sig
+const AI_CTX_TOTAL_MAX = 49_152   // total context chars inlined
+
+function aiPolicy(env) {
+  return {
+    model: String(env.AI_MODEL || 'claude-haiku-4-5'),
+    maxTokens: Number(env.AI_MAX_TOKENS || 1024),
+    dailyTokens: Number(env.AI_DAILY_TOKENS || 100_000),
+    writers: String(env.AI_WRITERS || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean),
+    system: String(env.AI_SYSTEM ||
+      'You are the assistant of a Hypercomb hive host. Answer briefly and concretely. ' +
+      'When tile content is provided as context, ground your answer in it.'),
+  }
+}
+
+// Per-day token meter (estimate: chars/4 in + max_tokens reserved out).
+// KV row auto-expires two days on so the ledger cleans itself.
+async function aiAdmit(env, pubkey, estimate) {
+  const p = aiPolicy(env)
+  if (p.writers.length) {
+    return p.writers.includes(pubkey)
+      ? { ok: true, meter: null }
+      : { ok: false, reason: 'this key is not on the AI writers list — ask the operator' }
+  }
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const key = `ai:${pubkey}:${day}`
+  let used = 0
+  try { used = Number(JSON.parse((await env.GRANTS.get(key)) ?? '0')) || 0 } catch { used = 0 }
+  if (used + estimate > p.dailyTokens) {
+    return { ok: false, reason: 'daily AI allowance used up for this key — try again tomorrow' }
+  }
+  return { ok: true, meter: { key, used, estimate } }
+}
+
+async function aiConsume(env, meter) {
+  if (!meter) return
+  try {
+    await env.GRANTS.put(meter.key, JSON.stringify(meter.used + meter.estimate), { expirationTtl: 172_800 })
+  } catch { /* meter write raced — ceiling holds on next read */ }
+}
+
+// Resolve context sigs from the R2 heap into capped text blocks. Non-text or
+// missing sigs are skipped silently — context is best-effort, the question
+// always goes through.
+async function aiContext(env, sigs) {
+  const parts = []
+  let total = 0
+  for (const sig of sigs.slice(0, AI_CTX_SIGS_MAX)) {
+    if (!SIG_RE.test(String(sig || ''))) continue
+    let obj = null
+    try { obj = await env.CONTENT.get(sig, { range: { offset: 0, length: AI_CTX_EACH_MAX } }) } catch { obj = null }
+    if (!obj) continue
+    let text = ''
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(await obj.arrayBuffer()) } catch { continue }
+    if (!text.trim()) continue
+    const room = AI_CTX_TOTAL_MAX - total
+    if (room <= 0) break
+    const clipped = text.slice(0, room)
+    total += clipped.length
+    parts.push(`--- context ${sig.slice(0, 12)}… ---\n${clipped}`)
+  }
+  return parts.length ? parts.join('\n\n') + '\n\n' : ''
+}
+
+async function aiAsk(request, env) {
+  if (!env.ANTHROPIC_API_KEY) return text(503, 'AI is not configured on this host (missing ANTHROPIC_API_KEY secret)')
+
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  if (!auth.ok) return text(401, auth.reason)
+
+  let body
+  try { body = await request.json() } catch { return text(400, 'body is not JSON') }
+  const question = String(body?.question || '').trim()
+  if (!question) return text(400, 'missing question')
+  if (question.length > AI_Q_MAX) return text(413, `question too long (max ${AI_Q_MAX} chars)`)
+  const sigs = Array.isArray(body?.context) ? body.context : []
+  const wantStream = body?.stream !== false
+
+  const p = aiPolicy(env)
+  const context = await aiContext(env, sigs)
+  const estimate = Math.ceil((question.length + context.length) / 4) + p.maxTokens
+  const adm = await aiAdmit(env, auth.pubkey, estimate)
+  if (!adm.ok) return text(429, adm.reason)
+
+  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: p.model,
+      max_tokens: p.maxTokens,
+      system: p.system,
+      messages: [{ role: 'user', content: context + question }],
+      stream: wantStream,
+    }),
+  })
+
+  if (!upstream.ok) {
+    // Never leak the upstream body verbatim (it may include request echoes);
+    // status + a terse reason is enough for the client to display.
+    return text(upstream.status === 429 ? 429 : 502, `AI upstream error (${upstream.status})`)
+  }
+
+  await aiConsume(env, adm.meter)
+
+  if (wantStream) {
+    // SSE passthrough — the client parses Anthropic's event shapes directly.
+    return new Response(upstream.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-AI-Model': p.model,
+        ...CORS,
+      },
+    })
+  }
+  return new Response(upstream.body, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-AI-Model': p.model, ...CORS },
+  })
+}
+
 // ── router ───────────────────────────────────────────────────────────────────
 
 export default {
@@ -474,6 +628,12 @@ export default {
 
     if (pathname === '/grant') {
       if (method === 'GET') return getGrant(request, env)
+      return text(405, 'method not allowed')
+    }
+
+    // Host AI — the immediate conversational tier (see aiAsk above).
+    if (pathname === '/ai/ask') {
+      if (method === 'POST') return aiAsk(request, env)
       return text(405, 'method not allowed')
     }
 

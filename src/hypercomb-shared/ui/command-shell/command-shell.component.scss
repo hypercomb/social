@@ -389,11 +389,14 @@ $bp-phone-max: 599px;
   100% { opacity: 0;    transform: scale(0.9); }
 }
 
+// Dismissible status pills — a different affordance from the icon rail
+// (they carry an ×), so they keep their own pill shape, but they share the
+// rail's gap and hand off to it with one gap's worth of breathing room.
 .indicators {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding-right: 0.5rem;
+  gap: var(--hc-rail-gap, 0.3rem);
+  padding-right: var(--hc-rail-gap, 0.3rem);
   flex-shrink: 0;
 }
 
@@ -447,26 +450,62 @@ $bp-phone-max: 599px;
   transition: opacity 150ms ease;
 }
 
-// ── view-behavior toggles (right side, before the subscribe antenna) ──
+// ═══════════════════════════════════════════════════════════
+// THE ICON RAIL (right of the input)
+// ═══════════════════════════════════════════════════════════
 //
-// One stateful icon per view available at the current node (website, …).
-// Off = subdued; on = full glow, signalling "this view is active." Same
-// affordance shape as the open-for-subscribers antenna; the glyph is a
-// Material Symbols ligature (.mat-sym) declared by the view's registry entry.
-.view-toggles {
+// Every icon on the right — the view-behaviour toggles, the swarm antenna,
+// notes, pheromones, feedback — is ONE affordance repeated: same box, same
+// glyph size, same gap, same on/off treatment. Only COLOUR distinguishes a
+// member (notes stays post-it yellow). Sizing comes from `--hc-rail-*`,
+// declared on .header-bar, so the pinned-entrance strip that follows this
+// component sits on the identical rhythm.
+//
+// Rule: never give a rail button its own width, glyph size, or margin.
+// A special-cased icon mid-row is what made this look ragged before.
+.shell-actions {
   display: flex;
   align-items: center;
-  gap: 0.2rem;
+  flex-shrink: 0;
+  gap: var(--hc-rail-gap, 0.3rem);
+  margin-left: var(--hc-rail-gap, 0.3rem);
+  // No trailing padding: the shell's own 0.25rem is the air before whatever
+  // follows (the pinned-entrance strip's hairline, then the header's own
+  // divider). Adding more here made that seam wider than the rail's.
+}
+
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: var(--hc-rail-gap, 0.3rem);
+}
+
+// Hairline group separator — the same steel the header frame and the
+// mesh toggle's border use, shortened to a centred tick so it divides
+// without drawing attention.
+.rail-divider {
+  width: 1px;
+  height: 1.15em;
+  // Half a gap of extra air on EACH side — symmetric, so the rhythm holds
+  // while the seam still reads as deliberate rather than a squeezed icon.
+  margin: 0 calc(var(--hc-rail-gap, 0.3rem) * 0.5);
+  border-radius: 1px;
+  background: rgba(var(--glow-color-rgb), 0.35);
   flex-shrink: 0;
 }
 
-.view-toggle-btn {
+// ── the shared button ──
+//
+// Off = subdued outline that doesn't compete with the typed command.
+// On  = full glow + soft halo: "this behaviour is live" (a view rendering,
+// a panel open, the antenna broadcasting).
+.rail-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 1.8em;
-  height: 1.8em;
+  width: var(--hc-rail-btn, 1.85rem);
+  height: var(--hc-rail-btn, 1.85rem);
   padding: 0;
   background: transparent;
   border: none;
@@ -477,8 +516,6 @@ $bp-phone-max: 599px;
               background var(--md-dur-short) var(--md-easing-standard),
               box-shadow var(--md-dur-short) var(--md-easing-standard);
   user-select: none;
-
-  .mat-sym { font-size: 1.05em; line-height: 1; }
 
   &:hover {
     color: rgba(var(--glow-color-rgb), 0.85);
@@ -493,6 +530,13 @@ $bp-phone-max: 599px;
 
   &.on:hover {
     background: rgba(var(--glow-color-rgb), 0.28);
+  }
+
+  svg { display: block; }
+
+  .mat-sym {
+    font-size: var(--hc-rail-glyph, 1.2rem);
+    line-height: 1;
   }
 }
 
@@ -500,68 +544,13 @@ $bp-phone-max: 599px;
 // retired here — games now aggregate under the "games" launch group, reached
 // at /games or from `/sets`. See games-group.ts.
 
-// ── open-for-subscribers toggle (floats inside command-line, right) ──
-//
-// Small antenna icon that flips swarm.setOpenForSubscribers. Off state:
-// subdued outline that doesn't compete with input text. On state: full
-// glow color + soft halo, signalling "I'm broadcasting acceptance to
-// subscriber requests." Click toggles; persisted via swarm drone (no
-// session-local state in the shell).
-.open-for-subscribers-btn,
-.feedback-toggle-btn,
-.pheromone-toggle-btn,
+// Notes is the one member with its own colour — post-it yellow, filled
+// glyph — so it still reads as a sticky note among the steel. Box, glyph
+// size and gap stay on the rail; identity comes from colour alone.
 .notes-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 1.8em;
-  height: 1.8em;
-  margin-right: 0.45rem;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 50%;
-  color: rgba(var(--glow-color-rgb), 0.42);
-  cursor: pointer;
-  transition: color var(--md-dur-short) var(--md-easing-standard),
-              background var(--md-dur-short) var(--md-easing-standard),
-              box-shadow var(--md-dur-short) var(--md-easing-standard);
-  user-select: none;
-
-  &:hover {
-    color: rgba(var(--glow-color-rgb), 0.85);
-    background: rgba(var(--glow-color-rgb), 0.1);
-  }
-
-  &.on {
-    color: var(--glow-color);
-    background: rgba(var(--glow-color-rgb), 0.18);
-    box-shadow: 0 0 6px rgba(var(--glow-color-rgb), 0.55);
-  }
-
-  &.on:hover {
-    background: rgba(var(--glow-color-rgb), 0.28);
-  }
-
-  svg {
-    display: block;
-  }
-
-  .mat-sym { font-size: 1.05em; line-height: 1; }
-}
-
-// Notes is THE always-there page switch — bigger than its neighbours and
-// post-it yellow (filled glyph) so it reads as a sticky note, not chrome.
-.notes-toggle-btn {
-  width: 2.2em;
-  height: 2.2em;
   color: rgba(255, 213, 79, 0.55);
 
-  .mat-sym {
-    font-size: 1.4em;
-    font-variation-settings: 'FILL' 1;
-  }
+  .mat-sym { font-variation-settings: 'FILL' 1; }
 
   &:hover {
     color: rgba(255, 213, 79, 0.9);

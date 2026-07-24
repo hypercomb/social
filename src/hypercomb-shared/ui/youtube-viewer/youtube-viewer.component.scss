@@ -49,7 +49,10 @@
   // Slide left of any right-docked toolwindow so the panel can't cover the one
   // guaranteed way out. --hc-inset-right is 0 when no panel is open.
   right: calc(1.4rem + var(--hc-inset-right, 0px));
-  bottom: 1.4rem;
+  // Safe-area term: with viewport-fit=cover the FAB would otherwise sit on the
+  // home indicator on notched phones — the one guaranteed exit must stay fully
+  // tappable there.
+  bottom: calc(1.4rem + env(safe-area-inset-bottom, 0px));
   z-index: 10001;
   display: flex;
   align-items: center;

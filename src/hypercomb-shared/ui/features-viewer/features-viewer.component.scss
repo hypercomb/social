@@ -90,6 +90,37 @@ $accent: #c8b8ff;
   white-space: nowrap;
 }
 
+// ── canvas-selection response ─────────────────────────────────────
+// One-press re-target at the canvas selection; shown only while the selected
+// tiles actually carry features. Quiet accent band, mirror of files-selection.
+.features-selection {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  width: 100%;
+  padding: 0.45em 0.75em;
+  border: 0;
+  border-bottom: 1px solid rgba($accent, 0.18);
+  background: rgba($accent, 0.07);
+  color: rgba(230, 224, 255, 0.85);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8em;
+  text-align: left;
+  transition: background 140ms ease, color 140ms ease;
+
+  .mat-sym { font-size: 1.1em; color: $accent; }
+  &:hover { background: rgba($accent, 0.14); color: #f6f3ff; }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
+}
+
+.features-selection-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .features-clear {
   background: transparent;
   border: none;

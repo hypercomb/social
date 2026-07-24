@@ -122,6 +122,9 @@ window.ioc.register('@diamondcoreprocessor.com/HomeQueenBee', _home)
       descriptionKey: 'view.home.description',
       queenKey: '@diamondcoreprocessor.com/HomeQueenBee',
       adoptable: true,
+      // Ships mobile-friendly: the home view is a first-class mobile surface.
+      // Keep this string equal to MOBILE_FRIENDLY in preferences/mobile-pheromones.
+      pheromones: ['mobile:friendly'],
     })
   },
 )

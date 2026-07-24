@@ -36,6 +36,16 @@
       <button class="files-close" type="button" (click)="close()" [attr.aria-label]="'files.close' | t">×</button>
     </header>
 
+    <!-- Selection response: the selected tiles carry documents — one press
+         re-gathers this window around THEM (file-drop.drone answers). -->
+    @if (showSelectionAffordance()) {
+      <button class="files-selection" type="button" (click)="openSelectionDocuments()"
+              [attr.aria-label]="'files.selection' | t: { count: selectionCount() }">
+        <span class="mat-sym" aria-hidden="true">description</span>
+        <span class="files-selection-label">{{ 'files.selection' | t: { count: selectionCount() } }}</span>
+      </button>
+    }
+
     @if (types().length > 1) {
       <div class="files-filters" role="toolbar">
         <button

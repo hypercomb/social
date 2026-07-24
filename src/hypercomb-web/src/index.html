@@ -20,8 +20,26 @@
       })();
     </script>
 
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <!-- interactive-widget=resizes-content: when the on-screen keyboard opens
+         (Android Chrome/Edge), the layout viewport shrinks instead of the
+         keyboard overlaying it — so bottom-anchored chrome (mobile bar, sheets)
+         rides above the keyboard rather than hiding underneath. iOS ignores it
+         harmlessly. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
+
+    <!-- PWA: installable to a phone home screen, launches standalone. The
+         service worker (hypercomb.worker.js) is an OPFS module server, not an
+         app-shell cache, so install-ability rides on this manifest alone. -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#05060a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Hypercomb" />
+    <!-- iOS ignores SVG here (needs a PNG apple-touch-icon for a crisp home
+         icon); harmless until raster icons are added. -->
+    <link rel="apple-touch-icon" href="icon.svg" />
 
     <!-- Google Fonts: Inter (UI) + Material Symbols Outlined (icons) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />

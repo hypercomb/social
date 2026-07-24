@@ -5,6 +5,7 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
+  signal,
   ElementRef,
   ViewChild,
   type AfterViewInit,
@@ -114,6 +115,16 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // bound form values (updated on open, pushed on change)
   public linkValue = ''
+
+  /** The tile's reading in the CURRENT locale — empty means it has none and
+   *  draws under its raw address. Editing this never moves the tile.
+   *
+   *  A signal, not a plain field like `linkValue`: the app is ZONELESS, and
+   *  this one is filled from an async read that lands after the open pass has
+   *  already rendered. A bare field mutated in a promise callback schedules no
+   *  change detection, so the input stays visibly empty; a signal write does. */
+  public readonly titleValue = signal('')
+  #titleLoadedFor = ''
   public linkDenied = false
   public linkWarned = false
   public linkSafetyReason = ''
@@ -154,11 +165,14 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       // yet (first selection after page load), the list will be empty
       // and fill in after the next notes:changed.
       this.#refreshQaItems()
+      this.#loadTitle()
     }
     if (!isOpen && this.#wasOpen) {
       document.removeEventListener('keydown', this.#onKeyDown)
       if (this.cameraActive) this.closeCamera()
       this.linkValue = ''
+      this.titleValue.set('')
+      this.#titleLoadedFor = ''
       this.borderColorValue = ''
       this.backgroundColorValue = ''
       this.qaItems = []
@@ -173,6 +187,44 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
    *  `[Q ...]`-prefixed note with the matching `[A:<qId>] ...`
    *  answer note (when present). Called on editor open and after
    *  every successful answer submission. */
+  /** Segments of the cell being edited: where we are, plus its name. */
+  #cellSegments(): string[] {
+    const lineage = get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+    const cell = this.editorService?.cell ?? ''
+    if (!cell) return []
+    const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    return [...here, cell]
+  }
+
+  /** Read the current locale's title when the panel opens. Async, so a slow
+   *  read can land after the user has started typing or after they've moved to
+   *  another tile — `#titleLoadedFor` makes sure a stale answer never
+   *  overwrites either. */
+  #loadTitle(): void {
+    const decorations = get('@diamondcoreprocessor.com/DecorationService') as
+      { titleOf?: (segments: readonly string[], locale?: string) => Promise<string> } | undefined
+    const segments = this.#cellSegments()
+    const token = segments.join('/')
+    this.titleValue.set('')
+    this.#titleLoadedFor = ''
+    if (!decorations?.titleOf || segments.length === 0) return
+    void decorations.titleOf(segments).then(title => {
+      if (this.#titleLoadedFor !== '' || this.#cellSegments().join('/') !== token) return
+      this.titleValue.set(title)
+      this.#titleLoadedFor = token
+    }).catch(() => { /* no title is a normal state, not an error */ })
+  }
+
+  /** Commit the typed reading for the active locale. Empty clears it. */
+  onTitleBlur(): void {
+    const decorations = get('@diamondcoreprocessor.com/DecorationService') as
+      { setTitle?: (segments: readonly string[], text: string, locale?: string) => Promise<string> } | undefined
+    const segments = this.#cellSegments()
+    if (!decorations?.setTitle || segments.length === 0) return
+    void decorations.setTitle(segments, this.titleValue().trim())
+      .catch((err: unknown) => console.warn('[tile-editor] title failed', err))
+  }
+
   #refreshQaItems(): void {
     const notesService = get('@diamondcoreprocessor.com/NotesService') as NotesService | undefined
     const cell = this.editorService?.cell ?? ''

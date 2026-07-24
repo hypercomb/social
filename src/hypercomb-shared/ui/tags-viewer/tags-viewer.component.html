@@ -74,6 +74,76 @@
       </section>
     }
 
+    <!-- The way in to painting. One button, so "how do I put a pheromone on a
+         tile" has a visible answer before anything is picked. -->
+    @if (!painterOpen()) {
+      <button class="tags-painter-open" type="button" (click)="openPainter()" [attr.title]="'tags.painter.open.hint' | t">
+        <span class="mat-sym">brush</span>{{ 'tags.painter.open' | t }}
+      </button>
+    }
+
+    <!-- The painter. Pick pheromones (below), then hold-and-drag across tiles
+         to paint them. Painting only STAGES — the tiles mark on the hive and
+         list here as you go; Done persists them in one transaction. -->
+    @if (painterOpen()) {
+      <section class="tags-painter-section" [class.armed]="selectedCount() > 0">
+        <h3 class="tags-section-title apply-title">{{ 'tags.painter.title' | t }}</h3>
+        <p class="apply-hint">{{ (selectedCount() === 0 ? 'tags.painter.pick' : 'tags.painter.paint.hint') | t }}</p>
+
+        @if (selectedCount() === 0) {
+          <p class="painter-empty">{{ 'tags.painter.none' | t }}</p>
+        } @else {
+          <ul class="painter-picked">
+            @for (pick of selectedChips(); track pick.name) {
+              <li class="painter-chip">
+                <span class="painter-chip-swatch" [style.background]="pick.color" aria-hidden="true"></span>
+                <span class="painter-chip-name">{{ pick.name }}</span>
+                <button
+                  class="painter-chip-drop"
+                  type="button"
+                  (click)="togglePheromone(pick.name)"
+                  [attr.aria-label]="'tags.painter.deselect' | t: { tag: pick.name }"
+                >×</button>
+              </li>
+            }
+          </ul>
+        }
+
+        <!-- The tiles staged so far — the panel's half of "a visual cue to show
+             you painted that one"; the hive marks the same tiles. -->
+        @if (paintedCount() > 0) {
+          <ul class="painter-painted">
+            @for (cell of paintedCells(); track cell) {
+              <li class="painted-cell">
+                <span class="mat-sym painted-cell-icon">check</span>
+                <span class="painted-cell-name">{{ cell }}</span>
+              </li>
+            }
+          </ul>
+        }
+
+        <!-- Selection response: with the brush armed and tiles selected on the
+             canvas, one press stages the whole selection instead of clicking
+             each tile. Staging only — Done still commits. -->
+        @if (painting() && canvasSelectionCount() > 0) {
+          <button class="painter-stage-selection" type="button" (click)="stageSelection()">
+            <span class="mat-sym" aria-hidden="true">select_all</span>
+            <span>{{ 'tags.painter.stage-selection' | t: { count: canvasSelectionCount() } }}</span>
+          </button>
+        }
+
+        <div class="painter-actions">
+          <button
+            class="painter-paint"
+            type="button"
+            [disabled]="paintedCount() === 0"
+            (click)="donePaint()"
+          >{{ 'tags.painter.done' | t: { count: paintedCount() } }}</button>
+          <button class="painter-close" type="button" (click)="closePainter()">{{ 'tags.painter.cancel' | t }}</button>
+        </div>
+      </section>
+    }
+
     <!-- What is filtered right now, and the way out of it. -->
     <section class="tags-active-section">
       @if (hasFilter()) {
@@ -95,18 +165,39 @@
       <h3 class="tags-section-title">{{ 'tags.list.title' | t }}</h3>
       <ul class="tags-list">
         @for (row of rows(); track row.name) {
-          <li class="tags-row" [class.filtered]="isFiltered(row.name)" [class.staging]="isStaging(row.name)">
+          <li
+            class="tags-row"
+            [class.filtered]="isFiltered(row.name)"
+            [class.staging]="isStaging(row.name)"
+            [class.picked]="isSelected(row.name)"
+            [class.painting]="isApplying(row.name)"
+          >
             <label class="tag-swatch" [style.background]="row.color" [attr.title]="'tags.recolor' | t">
               <input type="color" [value]="row.color" (change)="recolor(row.name, $event)" />
             </label>
             <button
               class="tag-name"
               type="button"
-              (click)="toggleFilter(row.name)"
-              [attr.aria-pressed]="isFiltered(row.name)"
-              [attr.title]="'tags.filter.hint' | t"
+              draggable="false"
+              (dragstart)="$event.preventDefault()"
+              (pointerdown)="onRowPointerDown($event, row)"
+              (click)="onRowClick(row.name)"
+              [attr.aria-pressed]="painterOpen() ? isSelected(row.name) : isFiltered(row.name)"
+              [attr.title]="(painterOpen() ? 'tags.pick.hint' : 'tags.drag.hint') | t"
             >{{ row.name }}</button>
             <span class="tag-count" [attr.title]="'tags.count.hint' | t">{{ row.count }}</span>
+            <!-- Picks this keyword for the painter (opening it if shut). A tick
+                 means it is in the brush; clicking again takes it out. -->
+            <button
+              class="tag-apply"
+              type="button"
+              [class.armed]="isApplying(row.name)"
+              [class.picked]="isSelected(row.name)"
+              (click)="togglePheromone(row.name)"
+              [attr.aria-pressed]="isSelected(row.name)"
+              [attr.aria-label]="'tags.apply' | t: { tag: row.name }"
+              [attr.title]="(isSelected(row.name) ? 'tags.painter.deselect.hint' : 'tags.apply.hint.short') | t"
+            >{{ isSelected(row.name) ? '✓' : '＋' }}</button>
             <!-- Arms the staged removal; clicking it again commits whatever is
                  staged, which is why it turns into a tick. -->
             <button
@@ -123,4 +214,18 @@
       <footer class="tags-foot">{{ 'tags.foot.hint' | t }}</footer>
     }
   </aside>
+
+  <!-- The dragged pheromone, following the cursor from the list to the tile.
+       pointer-events:none so the drop can hit-test what's underneath. -->
+  @if (dragging(); as drag) {
+    <div
+      class="tag-drag-ghost"
+      [style.left.px]="dragPos().x"
+      [style.top.px]="dragPos().y"
+      aria-hidden="true"
+    >
+      <span class="tag-drag-swatch" [style.background]="drag.color"></span>
+      <span class="tag-drag-name">{{ drag.name }}</span>
+    </div>
+  }
 }

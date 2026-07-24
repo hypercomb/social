@@ -60,6 +60,19 @@ $accent: #ffe14a;
   }
 }
 
+// A note's MARK — the icon from the participant's palette. Takes the
+// glyph slot the legacy shape used, so a marked note reads the same here
+// as it does in the strip's tree.
+.viewer-row-mark {
+  font-size: 16px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--md-on-surface) 65%, transparent);
+}
+.viewer-row-root .viewer-row-mark {
+  font-size: 19px;
+  color: var(--md-secondary);
+}
 .viewer-row-shape {
   width: 14px;
   height: 14px;

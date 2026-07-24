@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/commands/history.queen.ts
 
-import { QueenBee } from '@hypercomb/core'
+import { EffectBus, QueenBee } from '@hypercomb/core'
 
 /**
  * /history — toggle the history panel.
@@ -10,16 +10,12 @@ import { QueenBee } from '@hypercomb/core'
  * Undo / redo keystrokes still operate on history regardless of
  * panel visibility — they just don't open the surface any more.
  *
- * The pack lives in `hypercomb-shared` and registers itself in IoC
- * under `@hypercomb.social/HistoryMenuPack` at install time, exposing
- * a `{ toggle, visible }` handle. Resolving by key keeps the
- * essentials → shared dependency direction unviolated.
+ * The viewer (hypercomb-shared history-viewer) owns its own visibility
+ * and listens on the bus — the old HistoryMenuPack IoC handle is gone
+ * with the vertical selection menu (see
+ * documentation/selection-tool-windows.md). The string contract keeps
+ * the essentials → shared dependency direction unviolated.
  */
-type HistoryMenuPackHandle = {
-  visible: { (): boolean }
-  toggle: () => void
-}
-
 export class HistoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'history'
@@ -29,12 +25,7 @@ export class HistoryQueenBee extends QueenBee {
   override examples = [{ input: '/history', result: 'History panel opens; repeat to hide it' }]
 
   protected execute(_args: string): void {
-    const pack = get('@hypercomb.social/HistoryMenuPack') as HistoryMenuPackHandle | undefined
-    if (!pack) {
-      console.warn('[/history] HistoryMenuPack not registered')
-      return
-    }
-    pack.toggle()
+    EffectBus.emit('history:view-toggle', {})
   }
 }
 

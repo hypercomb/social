@@ -1,0 +1,168 @@
+@if (open() && source(); as src) {
+  <aside
+    class="ai-panel"
+    hcDockInset="left"
+    [hcDockedPanel]="'aggregate-' + src.id"
+    dockSide="left"
+    [minWidth]="220"
+    [maxWidth]="480"
+    [defaultWidth]="280"
+    data-consumes-wheel
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="src.titleKey | t"
+  >
+    <header class="ai-header">
+      <div class="ai-heading">
+        <span class="mat-sym ai-icon" aria-hidden="true">{{ src.icon }}</span>
+        <span class="ai-title">{{ src.titleKey | t }}</span>
+        @if (items().length > 0) {
+          <span class="ai-total">{{ visible().length }}</span>
+        }
+      </div>
+      <button class="ai-close mat-sym" type="button" (click)="close()"
+              [attr.aria-label]="'aggregate.close' | t" [title]="'aggregate.close' | t">close</button>
+    </header>
+
+    <!-- Opening a row walks the hive into that collection to manage it. This is
+         the way back to the page the panel was opened from, so references can
+         go on being dragged onto it. Only shown once we have actually moved. -->
+    @if (awayFromOrigin()) {
+      <button class="ai-return" type="button" (click)="returnToOrigin()"
+              [attr.aria-label]="'aggregate.return' | t: { page: originLabel() }"
+              [title]="'aggregate.return' | t: { page: originLabel() }">
+        <span class="mat-sym" aria-hidden="true">arrow_back</span>
+        <span class="ai-return-label">{{ 'aggregate.return' | t: { page: originLabel() } }}</span>
+      </button>
+    }
+
+    @if (items().length > 0) {
+      <div class="ai-filter">
+        <div class="ai-filter-field">
+          <span class="mat-sym ai-filter-icon" aria-hidden="true">search</span>
+          <input class="ai-filter-input" type="text" autocomplete="off"
+                 [value]="query()"
+                 (input)="onQuery($any($event.target).value)"
+                 [placeholder]="'aggregate.filter' | t"
+                 [attr.aria-label]="'aggregate.filter' | t" />
+          @if (hasFilter()) {
+            <button class="ai-filter-clear mat-sym" type="button" (click)="clearFilter()"
+                    [attr.aria-label]="'aggregate.filter-clear' | t"
+                    [title]="'aggregate.filter-clear' | t">close</button>
+          }
+        </div>
+        @if (allTags().length > 0) {
+          <div class="ai-tags" role="group" [attr.aria-label]="'aggregate.filter-tags' | t">
+            @for (tag of allTags(); track tag) {
+              <button class="ai-tag" type="button"
+                      [class.is-active]="isTagActive(tag)"
+                      [attr.aria-pressed]="isTagActive(tag)"
+                      (click)="toggleTag(tag)">{{ tag }}</button>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    <div class="ai-scroll">
+      @if (canCreate()) {
+        <div class="ai-create">
+          @if (creating()) {
+            <form class="ai-create-row" (submit)="$event.preventDefault(); create(nameField)">
+              <input #nameField class="ai-create-input" type="text" autocomplete="off"
+                     [placeholder]="'aggregate.create-placeholder' | t"
+                     [attr.aria-label]="'aggregate.create-placeholder' | t" />
+              <button class="ai-create-submit" type="submit">{{ 'aggregate.create' | t }}</button>
+            </form>
+          } @else {
+            <button class="ai-create-open" type="button" (click)="toggleCreate()">
+              <span class="mat-sym">add</span>
+              <span>{{ (src.createKey ?? 'aggregate.new') | t }}</span>
+            </button>
+          }
+        </div>
+      }
+
+      @if (items().length === 0) {
+        <div class="ai-welcome">
+          @if (src.ledeKey) { <p class="ai-lede">{{ src.ledeKey | t }}</p> }
+          <p class="ai-empty">{{ 'aggregate.empty' | t }}</p>
+        </div>
+      } @else if (visible().length === 0) {
+        <p class="ai-no-match">{{ 'aggregate.no-match' | t }}</p>
+      } @else {
+        <!-- One line per item. The whole row is the drag handle — press and move
+             to carry it onto the hive; a plain click opens it. -->
+        <ul class="ai-list" role="list">
+          @for (item of visible(); track item.key) {
+            <li class="ai-row" [class.is-renaming]="renaming() === item.key"
+                [class.is-selected]="isSelected(item)"
+                [style.--accent]="accent(item.label)">
+              <button class="ai-row-open" type="button"
+                      (pointerdown)="onRowPointerDown($event, item)"
+                      (click)="openItem(item)"
+                      [attr.aria-label]="item.label">
+                <span class="ai-hex">
+                  @if (item.image) {
+                    <img class="ai-hex-img" [src]="item.image" alt="" decoding="async" />
+                  } @else {
+                    <span class="ai-hex-fallback">
+                      <span class="ai-monogram" aria-hidden="true">{{ monogram(item.label) }}</span>
+                    </span>
+                  }
+                </span>
+                @if (renaming() !== item.key) {
+                  <span class="ai-label">{{ item.label }}</span>
+                }
+              </button>
+
+              @if (renaming() === item.key) {
+                <form class="ai-rename" (submit)="$event.preventDefault(); commitRename(item, renameField)">
+                  <input #renameField class="ai-rename-input" type="text" [value]="item.label"
+                         autocomplete="off"
+                         [attr.aria-label]="'aggregate.rename' | t"
+                         (keydown.escape)="cancelRename()" (blur)="cancelRename()" />
+                </form>
+              } @else {
+                <div class="ai-actions">
+                  @if (canRename(item)) {
+                    <button class="ai-action" type="button" (click)="startRename(item, $event)"
+                            [attr.aria-label]="'aggregate.rename' | t" [title]="'aggregate.rename' | t">
+                      <span class="mat-sym">edit</span>
+                    </button>
+                  }
+                  @if (canRemove(item)) {
+                    <button class="ai-action ai-action-danger" type="button" (click)="remove(item, $event)"
+                            [attr.aria-label]="'aggregate.remove' | t" [title]="'aggregate.remove' | t">
+                      <span class="mat-sym">delete</span>
+                    </button>
+                  }
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  </aside>
+
+  <!-- Drag ghost — follows the cursor across the whole screen, so it must live
+       outside the panel and ignore pointer events. -->
+  @if (dragging(); as drag) {
+    <div class="ai-ghost" aria-hidden="true"
+         [style.--accent]="accent(drag.label)"
+         [style.left.px]="dragPos().x"
+         [style.top.px]="dragPos().y">
+      <span class="ai-ghost-hex">
+        @if (drag.image) {
+          <img class="ai-hex-img" [src]="drag.image" alt="" />
+        } @else {
+          <span class="ai-hex-fallback">
+            <span class="ai-monogram">{{ monogram(drag.label) }}</span>
+          </span>
+        }
+      </span>
+      <span class="ai-ghost-label">{{ drag.label }}</span>
+    </div>
+  }
+}

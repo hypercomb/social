@@ -160,6 +160,50 @@ $steel: rgb(126, 182, 214);
   color: rgba(255, 255, 255, 0.4);
 }
 
+// ── selection response strip ─────────────────────────────────────────
+// Offered while tiles are selected on the canvas: capture THEM from inside
+// the window the result lands in. Cold steel, no glow — a quiet standing
+// affordance, not a call to action.
+.clipboard-selection {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.45em 0.75em;
+  border-bottom: 1px solid rgba($steel, 0.16);
+  background: rgba($steel, 0.06);
+}
+
+.clipboard-selection-count {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78em;
+  color: rgba(207, 226, 238, 0.75);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipboard-selection-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7em;
+  height: 1.7em;
+  padding: 0;
+  border: 1px solid rgba($steel, 0.35);
+  border-radius: 6px;
+  background: none;
+  color: #cfe2ee;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  .mat-sym { font-size: 0.95em; }
+  &:hover { background: rgba($steel, 0.16); border-color: rgba($steel, 0.7); color: #f4fafd; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+}
+
 .clipboard-scroll {
   flex: 1;
   overflow-y: auto;

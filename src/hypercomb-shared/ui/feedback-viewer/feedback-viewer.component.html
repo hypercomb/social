@@ -13,13 +13,20 @@
     tabindex="0"
     (keydown)="onKey($event)"
   >
+    <!-- Title band — one line, icon-then-title-then-close, the same shape every
+         other tool window's header carries. Everything that used to crowd it
+         (subtitle, reach trio) moved down to the reach row. -->
     <header class="fv-header">
-      <div class="fv-heading">
-        <span class="fv-title">{{ 'feedback.viewer.title' | t }}</span>
-        <span class="fv-subtitle">{{ 'feedback.viewer.subtitle' | t }}</span>
-      </div>
-      <!-- Reach scope — the same three reaches the pheromone filter uses:
-           this page / this page and below / the whole hive. -->
+      <span class="fv-header-icon mat-sym" aria-hidden="true">forum</span>
+      <span class="fv-title">{{ 'feedback.viewer.title' | t }}</span>
+      <button class="fv-close" type="button" (click)="close()" [attr.aria-label]="'feedback.viewer.close' | t">×</button>
+    </header>
+
+    <!-- Reach row — sits under the header, just before the items it narrows.
+         The same three reaches the pheromone filter uses: this page / this page
+         and below / the whole hive. -->
+    <div class="fv-reach">
+      <span class="fv-subtitle">{{ 'feedback.viewer.subtitle' | t }}</span>
       <div class="fv-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
         @for (opt of scopeOptions; track opt.id) {
           <button
@@ -32,8 +39,7 @@
           ><span class="mat-sym">{{ opt.icon }}</span></button>
         }
       </div>
-      <button class="fv-close" type="button" (click)="close()" [attr.aria-label]="'feedback.viewer.close' | t">×</button>
-    </header>
+    </div>
 
     @if (scoped().length === 0) {
       <p class="fv-empty">{{ (items().length === 0 ? 'feedback.viewer.empty' : 'feedback.viewer.empty-scope') | t }}</p>

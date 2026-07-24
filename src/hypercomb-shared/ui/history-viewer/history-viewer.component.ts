@@ -12,7 +12,6 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { AfterViewInit, Component, ElementRef, computed, effect, inject, signal, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus, IconRef, type IconRef as IconRefType } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { HistoryMenuPack } from '../selection-context-menu/history-menu-pack'
 import { IconComponent } from '../icon/icon.component'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 
@@ -240,7 +239,12 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   #locationSig = signal('')
   #groupStepEnabled = signal(false)
 
-  readonly visible = HistoryMenuPack.visible
+  // The viewer owns its OWN visibility — the vertical-menu HistoryMenuPack
+  // that used to drive it is retired (documentation/selection-tool-windows.md).
+  // `/history` (and anything else) drives it over the bus:
+  // history:view-open / history:view-close / history:view-toggle.
+  readonly #visible = signal(false)
+  readonly visible = this.#visible.asReadonly()
   readonly total = this.#total.asReadonly()
   readonly position = this.#position.asReadonly()
   readonly groupStepEnabled = this.#groupStepEnabled.asReadonly()
@@ -379,6 +383,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   })
 
   #unsub: (() => void) | null = null
+  #viewUnsubs: (() => void)[] = []
   #loadSeq = 0
   readonly #el: ElementRef<HTMLElement> = inject(ElementRef)
 
@@ -403,6 +408,12 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   })
 
   constructor() {
+    this.#viewUnsubs.push(
+      EffectBus.on('history:view-open', () => this.#visible.set(true)),
+      EffectBus.on('history:view-close', () => this.#visible.set(false)),
+      EffectBus.on('history:view-toggle', () => this.#visible.set(!this.#visible())),
+    )
+
     // When the panel becomes visible, refresh entries + contents. Done
     // as an effect rather than a simple ngOnInit call so the panel
     // re-hydrates on re-activation (user hides then re-enters history).
@@ -485,6 +496,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
 
   ngOnDestroy(): void {
     this.#unsub?.()
+    for (const off of this.#viewUnsubs) off()
     // Best-effort: if the host was portaled, remove it from body so we
     // don't leave a dangling node behind after the component tears down.
     const host = this.#el.nativeElement
@@ -806,7 +818,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   readonly hide = (): void => {
-    HistoryMenuPack.onHide()
+    this.#visible.set(false)
   }
 
   /**

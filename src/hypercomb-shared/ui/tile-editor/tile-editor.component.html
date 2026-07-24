@@ -28,7 +28,7 @@
           }
           <div class="hex-frame"></div>
           @if (!hideText()) {
-            <div class="editor-label">{{ cell() }}</div>
+            <div class="editor-label">{{ titleValue() || cell() }}</div>
           }
         </div>
 
@@ -51,6 +51,23 @@
 
       <!-- property fields -->
       <div class="fields">
+        <!-- Name: the tile's reading in the CURRENT language. Editing this
+             never moves the tile — the address stays put and only the
+             interpretation changes, so links, history and peers are unaffected.
+             Empty restores the raw address. -->
+        <label class="field-row">
+          <span class="field-label"><span class="mat-sym">label</span> {{ 'editor.name' | t }}</span>
+          <input
+            class="field-input name-input"
+            type="text"
+            name="tile-name"
+            [placeholder]="cell()"
+            [ngModel]="titleValue()"
+            (ngModelChange)="titleValue.set($event)"
+            (blur)="onTitleBlur()"
+            [title]="'editor.name-hint' | t"
+          />
+        </label>
         <label class="field-row">
           <span class="field-label"><span class="mat-sym">link</span> {{ 'editor.link' | t }}</span>
           <input

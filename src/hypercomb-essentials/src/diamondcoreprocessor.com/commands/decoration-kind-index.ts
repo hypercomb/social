@@ -35,26 +35,88 @@
 import { EffectBus } from '@hypercomb/core'
 import { hiddenKeysSync, hiddenKey } from '../sharing/feature-hidden.js'
 
-/** Map<cellLabel, Set<decorationKind>>. Mutates in place — exported
- *  read function captures by reference. */
-const kindsByLabel = new Map<string, Set<string>>()
+// ── Location keys ─────────────────────────────────────────────────────
+//
+// EVERY sub-index below is keyed by LOCATION (`segments.join('\0')`), never by
+// bare cell label. A label is not an identity: the same name exists at many
+// places in a hive, and a REFERENCE tile is named after its target, so a
+// reference and its target ALWAYS share a name — as do two references to the
+// same place. Label-keyed buckets UNIONED all of them: painting a pheromone on
+// one reference showed it on every same-named tile, and a filter then acted on
+// that union. (The `checkedLabels` memo below was already made location-aware
+// for the same reason; the index itself had been left behind, which made the
+// smear total — every location walks, every walk folds into one bucket.)
+//
+// Reads take a bare label because that is all a `visibleWhen` / geometry pass
+// has. They resolve it against the location being rendered and DO NOT GUESS
+// past a miss: answering with some other cell's decorations is the defect.
 
-/** Map<cellLabel, segments> — the full lineage path each label was indexed at.
+/** NUL — the one character a tile name can never carry, so a joined key is
+ *  unambiguous. Same convention as `checkedLabels`' path key below. */
+const SEP = '\u0000'
+
+const locationKey = (segments: readonly string[]): string => segments.join(SEP)
+
+/** Map<locationKey, Set<decorationKind>>. Mutates in place — exported
+ *  read function captures by reference. */
+const kindsByKey = new Map<string, Set<string>>()
+
+/** Map<locationKey, segments> — the full lineage path behind each key.
  *  The hidden pool keys by (decorationKind, segments), so the index needs the
- *  location to ask "is this kind hidden HERE?". Captured wherever a label is
+ *  location to ask "is this kind hidden HERE?". Captured wherever a cell is
  *  indexed (the live `decorations:changed` event and the navigation walk both
  *  carry segments). This is what lets the ONE filter live here: the index is
  *  the read-model every draw-from-tiles consumer funnels through, so subtracting
  *  hidden once at its read functions filters overlay icons, the features-panel
  *  feed, and capability checks alike. */
-const segmentsByLabel = new Map<string, readonly string[]>()
+const segmentsByKey = new Map<string, readonly string[]>()
 
-/** Is `kind` HIDDEN at this label's location? Reads the synchronous hidden-key
+/** Absolute location key per label for the page currently FLATTENED by a tag
+ *  filter. A flattened match lives anywhere, so `here + label` is a phantom
+ *  path for it — show-cell hands us the real ones in `render:cell-count`'s
+ *  `flatPaths` (the same map tile-overlay uses to route a click). Empty on
+ *  every ordinary page: cleared on each emit, so a filter's paths can never
+ *  leak into the next render. */
+const flatKeyByLabel = new Map<string, string>()
+
+/** Location key of the page being rendered, memoized on the segments array's
+ *  IDENTITY — Lineage replaces `explorerPath` wholesale on navigation, so a
+ *  changed reference is exactly "we moved" and the join runs once per nav
+ *  rather than once per cell per frame. Reading live (rather than caching the
+ *  page from `render:cell-count`) keeps resolution correct for consumers that
+ *  read DURING geometry build, before the count is emitted. */
+let memoSegments: readonly string[] | null = null
+let memoParentKey = ''
+
+function currentParentKey(): string {
+  const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
+  const segs = lineage?.explorerSegments?.()
+  if (!segs) return ''
+  if (segs !== memoSegments) {
+    memoSegments = segs
+    memoParentKey = locationKey(segs)
+  }
+  return memoParentKey
+}
+
+/** Resolve a bare label to the location key it denotes ON THE PAGE BEING READ.
+ *  Flattened matches resolve to their absolute path; everything else is the
+ *  current location plus the label. Deliberately total (never null) so a miss
+ *  reads as "this cell carries nothing", which is the safe answer — the unsafe
+ *  one is another cell's decorations. */
+function keyForLabel(label: string): string {
+  const flat = flatKeyByLabel.get(label)
+  if (flat !== undefined) return flat
+  const parent = currentParentKey()
+  return parent ? parent + SEP + label : label
+}
+
+/** Is `kind` HIDDEN at this location? Reads the synchronous hidden-key
  *  snapshot (the participant-local pool the site-view gate also reads), so the
  *  filter is derived from one source however it's consumed. Unknown location →
  *  not hidden (fail-open: never suppress a feature we can't place). */
-function isKindHidden(label: string, kind: string): boolean {
-  const segs = segmentsByLabel.get(label)
+function isKindHidden(key: string, kind: string): boolean {
+  const segs = segmentsByKey.get(key)
   if (!segs) return false
   return hiddenKeysSync().has(hiddenKey(kind, segs))
 }
@@ -75,12 +137,12 @@ const kindBySig = new Map<string, string>()
 /** Decoration kind that marks a tag application. */
 export const TAG_DECORATION_KIND = 'tag'
 
-/** Map<cellLabel, Set<tagName>> — every tag name applied to a cell. */
-const tagsByLabel = new Map<string, Set<string>>()
+/** Map<locationKey, Set<tagName>> — every tag name applied to a cell. */
+const tagsByKey = new Map<string, Set<string>>()
 
-/** Map<cellLabel, Map<tagName, decorationSig>> — lets the remove path find
+/** Map<locationKey, Map<tagName, decorationSig>> — lets the remove path find
  *  the exact decoration sig to splice from a cell's slot by tag name. */
-const sigByLabelTag = new Map<string, Map<string, string>>()
+const sigByKeyTag = new Map<string, Map<string, string>>()
 
 /** Reverse cache: decoration sig → tag name. A tag's sig is content-addressed,
  *  so the SAME sig is shared by every cell carrying that tag name — the name is
@@ -95,30 +157,42 @@ const nameBySig = new Map<string, string>()
  *
  *  Designed for `visibleWhen` — must remain synchronous and O(1). */
 export function hasDecorationKind(label: string, kind: string): boolean {
-  return (kindsByLabel.get(label)?.has(kind) ?? false) && !isKindHidden(label, kind)
+  const key = keyForLabel(label)
+  return (kindsByKey.get(key)?.has(kind) ?? false) && !isKindHidden(key, kind)
 }
 
 /** Iterate every decoration kind known for a cell. Useful for
  *  introspection / debug; not part of the visibleWhen hot path. */
 export function kindsForLabel(label: string): readonly string[] {
-  const set = kindsByLabel.get(label)
+  const key = keyForLabel(label)
+  const set = kindsByKey.get(key)
   if (!set) return []
-  return [...set].filter(kind => !isKindHidden(label, kind))
+  return [...set].filter(kind => !isKindHidden(key, kind))
 }
 
 /** Every tag name applied to a cell, from the in-memory index. Synchronous
  *  and O(1) — the badge renderer and show-cell's tag aggregation read this
  *  per visible cell. Returns [] for an unknown / untagged cell. */
 export function tagsForLabel(label: string): readonly string[] {
-  const set = tagsByLabel.get(label)
+  const set = tagsByKey.get(keyForLabel(label))
   return set ? [...set] : []
 }
 
 /** The decoration sig of a specific tag on a cell, or undefined if the index
  *  hasn't seen it. The remove path uses this to splice one tag from the cell's
- *  slot; callers fall back to `listDecorations` when the index is cold. */
-export function tagSigFor(label: string, name: string): string | undefined {
-  return sigByLabelTag.get(label)?.get(name)
+ *  slot; callers fall back to `listDecorations` when the index is cold.
+ *
+ *  Pass `segments` whenever the caller has them: a tag's resource is
+ *  content-addressed and therefore SHARED by every cell carrying that name, so
+ *  the sig alone can't say which cell it came from — resolving the wrong
+ *  location here would splice the tag off a same-named cell somewhere else. */
+export function tagSigFor(
+  label: string,
+  name: string,
+  segments?: readonly string[],
+): string | undefined {
+  const key = segments ? locationKey(segments) : keyForLabel(label)
+  return sigByKeyTag.get(key)?.get(name)
 }
 
 // ── Launcher-shape sub-index ──────────────────────────────────────────
@@ -138,59 +212,102 @@ export const LAUNCH_DECORATION_KIND = 'launch:target'
  *  portals to that location. See reference.drone.ts / reference.queen.ts. */
 export const REFERENCE_DECORATION_KIND = 'reference'
 
-/** Map<cellLabel, targetSegments> — the location a reference tile points at.
- *  A present entry (even `[]`, meaning the hive root) marks the label as a
+/** Map<locationKey, targetSegments> — the location a reference tile points at.
+ *  A present entry (even `[]`, meaning the hive root) marks the cell as a
  *  reference; absent means "not a reference". */
-const referenceTargetByLabel = new Map<string, readonly string[]>()
+const referenceTargetByKey = new Map<string, readonly string[]>()
 
-/** The location a reference tile points at, or `null` if the label is not a
+/** The location a reference tile points at, or `null` if the cell is not a
  *  reference. `[]` is a valid target (the hive root) and is DISTINCT from
  *  `null`. Synchronous + O(1) — tile-overlay reads it per click to decide
  *  whether a body press should portal instead of entering a child. */
 export function referenceTargetForLabel(label: string): readonly string[] | null {
-  return referenceTargetByLabel.get(label) ?? null
+  return referenceTargetByKey.get(keyForLabel(label)) ?? null
 }
 
-/** Map<cellLabel, shapeId> — the owning group's silhouette for a launcher tile. */
-const launchShapeByLabel = new Map<string, string>()
+// ── Title sub-index (the display name) ────────────────────────────────
+//
+// A tile's layer `name` is its ADDRESS, not its caption. The lineage bag is
+// `sha256(lineageKey(segments))` and the committer matches children by name in
+// half a dozen places, so changing a name re-addresses the tile and strands
+// every path-keyed record behind it: the history bag, viewport, substrate,
+// tile properties, usage weight, the swarm channel sig, the published host
+// manifest entry, static followers, hidden-feature keys, and every inbound
+// reference.
+//
+// So the name never moves. A `title` decoration carries the display text while
+// the address stays put, which makes a rename one ordinary layer commit on the
+// tile — undoable, shareable and per-location like any other decoration. The
+// label atlas already had the slug→display seam (`setLabelResolver`, built for
+// i18n); this feeds it.
+//
+// The trade is deliberate: the path and URL keep the name the tile was born
+// with. Re-addressing a tile for real is a separate, heavier operation.
 
-/** Map<cellLabel, memberKey> — the member's STABLE id from the `launch:target`
+/** Decoration kind carrying a cell's display title, keyed BY LOCALE:
+ *  payload `{ text: { en: 'Jazz Standards', ja: 'ジャズ' } }`.
+ *
+ *  A title is not a second name — it is the tile's name INTERPRETED in one
+ *  language. The address stays language-neutral and every locale is an equal
+ *  reading of it, which is why no locale is privileged as a fallback below. */
+export const TITLE_DECORATION_KIND = 'title'
+
+/** Map<locationKey, Record<locale, title>>. */
+const titleByKey = new Map<string, Record<string, string>>()
+
+/** The title for a cell in `locale`, or '' when it carries none for that
+ *  locale — the caller then falls back to i18n and finally the raw name.
+ *
+ *  Deliberately does NOT fall back across locales: titling in English must not
+ *  put English text in front of a Japanese reader. An untranslated tile shows
+ *  its address, which is honest, and `/translate-sweep` can fill the gap.
+ *
+ *  Synchronous and O(1) — the atlas label resolver calls this per cell per
+ *  bake, so it must never touch OPFS. */
+export function titleForLabel(label: string, locale: string): string {
+  return titleByKey.get(keyForLabel(label))?.[locale] ?? ''
+}
+
+/** Map<locationKey, shapeId> — the owning group's silhouette for a launcher tile. */
+const launchShapeByKey = new Map<string, string>()
+
+/** Map<locationKey, memberKey> — the member's STABLE id from the `launch:target`
  *  payload (help → the keymap cmd, games → gameId). Lets hover features
  *  resolve a launcher tile back to the thing it launches without matching on
  *  display labels. */
-const launchKeyByLabel = new Map<string, string>()
+const launchKeyByKey = new Map<string, string>()
 
 /** The launcher silhouette id for a cell ('' if none / not a launcher tile).
  *  Synchronous and O(1) — show-cell reads it per visible cell at geometry build. */
 export function launchShapeForLabel(label: string): string {
-  return launchShapeByLabel.get(label) ?? ''
+  return launchShapeByKey.get(keyForLabel(label)) ?? ''
 }
 
 /** The launcher member key for a cell ('' if none). Synchronous and O(1) —
  *  the action-card drone resolves a hovered keycap to its keymap cmd here. */
 export function launchKeyForLabel(label: string): string {
-  return launchKeyByLabel.get(label) ?? ''
+  return launchKeyByKey.get(keyForLabel(label)) ?? ''
 }
 
-/** Map<cellLabel, role> — the launcher tile's layout role ('header' for a
+/** Map<locationKey, role> — the launcher tile's layout role ('header' for a
  *  category-title tile). Absent = a normal action tile. */
-const launchRoleByLabel = new Map<string, string>()
+const launchRoleByKey = new Map<string, string>()
 
 /** The launcher layout role for a cell ('' if none / a normal action tile).
  *  Synchronous and O(1) — show-cell reads it per visible cell to group the
  *  clustered-island layout on the help page. */
 export function launchRoleForLabel(label: string): string {
-  return launchRoleByLabel.get(label) ?? ''
+  return launchRoleByKey.get(keyForLabel(label)) ?? ''
 }
 
-/** Map<cellLabel, group> — the clustered-help island id a launcher tile belongs
- *  to. Every tile of one island shares it. Absent = ungrouped. */
-const launchGroupByLabel = new Map<string, string>()
+/** Map<locationKey, group> — the clustered-help island id a launcher tile
+ *  belongs to. Every tile of one island shares it. Absent = ungrouped. */
+const launchGroupByKey = new Map<string, string>()
 
 /** The clustered-help island id for a cell ('' if none). Synchronous and O(1) —
  *  show-cell gathers each island by this id, independent of render order. */
 export function launchGroupForLabel(label: string): string {
-  return launchGroupByLabel.get(label) ?? ''
+  return launchGroupByKey.get(keyForLabel(label)) ?? ''
 }
 
 // ── Dashboard-island sub-index ────────────────────────────────────────
@@ -206,21 +323,21 @@ export function launchGroupForLabel(label: string): string {
 /** Decoration kind that groups a dashboard question tile into an island. */
 export const DASHBOARD_ISLAND_KIND = 'dashboard-island'
 
-/** Map<cellLabel, islandId> — the dashboard island a tile belongs to. Every
+/** Map<locationKey, islandId> — the dashboard island a tile belongs to. Every
  *  tile of one island shares it. Absent = ungrouped. */
-const islandGroupByLabel = new Map<string, string>()
-/** Map<cellLabel, role> — 'header' for a category-title tile, else a question. */
-const islandRoleByLabel = new Map<string, string>()
+const islandGroupByKey = new Map<string, string>()
+/** Map<locationKey, role> — 'header' for a category-title tile, else a question. */
+const islandRoleByKey = new Map<string, string>()
 
 /** The dashboard island id for a cell ('' if none). Synchronous and O(1) —
  *  show-cell gathers each island by this id, independent of render order. */
 export function dashboardIslandGroupForLabel(label: string): string {
-  return islandGroupByLabel.get(label) ?? ''
+  return islandGroupByKey.get(keyForLabel(label)) ?? ''
 }
 
 /** The dashboard island role for a cell ('' / 'header'). Synchronous, O(1). */
 export function dashboardIslandRoleForLabel(label: string): string {
-  return islandRoleByLabel.get(label) ?? ''
+  return islandRoleByKey.get(keyForLabel(label)) ?? ''
 }
 
 // ── Overlap metric (the one popularity signal) ────────────────────────
@@ -231,13 +348,16 @@ export function dashboardIslandRoleForLabel(label: string): string {
 // this session), which is the live, available signal. Exposed via IoC so the
 // shell command-line (which can't import essentials) can rank suggestions by
 // it. Scope: counts cells that carry the kind/tag, honouring the hidden pool.
+// Counts CELLS, not names: two same-named tiles at different locations are two
+// carriers, which is what "how many share it" means (and was undercounted for
+// as long as the index collapsed them into one bucket).
 
 /** How many indexed cells carry a (non-hidden) decoration of `kind`. */
 export function countLabelsWithKind(kind: string): number {
   if (!kind) return 0
   let n = 0
-  for (const [label, set] of kindsByLabel) {
-    if (set.has(kind) && !isKindHidden(label, kind)) n++
+  for (const [key, set] of kindsByKey) {
+    if (set.has(kind) && !isKindHidden(key, kind)) n++
   }
   return n
 }
@@ -246,7 +366,7 @@ export function countLabelsWithKind(kind: string): number {
 export function countLabelsWithTag(name: string): number {
   if (!name) return 0
   let n = 0
-  for (const set of tagsByLabel.values()) if (set.has(name)) n++
+  for (const set of tagsByKey.values()) if (set.has(name)) n++
   return n
 }
 
@@ -335,76 +455,105 @@ function targetSegmentsOf(record: DecorationShape): readonly string[] | null {
   return raw.map(s => String(s)).filter(s => s.length > 0)
 }
 
-function addTag(label: string, name: string, sig: string): void {
-  let set = tagsByLabel.get(label)
-  if (!set) { set = new Set<string>(); tagsByLabel.set(label, set) }
+/** Pull the per-locale titles out of a `title` payload's `{ text }` map.
+ *  Blank or whitespace-only entries are dropped rather than stored, so a
+ *  cleared title falls back to the raw label — a tile must never draw as an
+ *  empty hexagon because someone emptied the field. Returns null when no
+ *  locale survives, which un-indexes the cell entirely. */
+function textOf(record: DecorationShape): Record<string, string> | null {
+  const payload = record.payload
+  const text = payload && typeof payload === 'object'
+    ? (payload as { text?: unknown }).text
+    : undefined
+  if (!text || typeof text !== 'object') return null
+  const byLocale: Record<string, string> = {}
+  for (const [locale, value] of Object.entries(text as Record<string, unknown>)) {
+    if (typeof value === 'string' && value.trim().length > 0) byLocale[locale] = value.trim()
+  }
+  return Object.keys(byLocale).length > 0 ? byLocale : null
+}
+
+function addTag(key: string, name: string, sig: string): void {
+  let set = tagsByKey.get(key)
+  if (!set) { set = new Set<string>(); tagsByKey.set(key, set) }
   set.add(name)
-  let bySig = sigByLabelTag.get(label)
-  if (!bySig) { bySig = new Map<string, string>(); sigByLabelTag.set(label, bySig) }
+  let bySig = sigByKeyTag.get(key)
+  if (!bySig) { bySig = new Map<string, string>(); sigByKeyTag.set(key, bySig) }
   bySig.set(name, sig)
   nameBySig.set(sig, name)
 }
 
-function removeTag(label: string, name: string): void {
-  const set = tagsByLabel.get(label)
-  if (set) { set.delete(name); if (set.size === 0) tagsByLabel.delete(label) }
-  const bySig = sigByLabelTag.get(label)
-  if (bySig) { bySig.delete(name); if (bySig.size === 0) sigByLabelTag.delete(label) }
+function removeTag(key: string, name: string): void {
+  const set = tagsByKey.get(key)
+  if (set) { set.delete(name); if (set.size === 0) tagsByKey.delete(key) }
+  const bySig = sigByKeyTag.get(key)
+  if (bySig) { bySig.delete(name); if (bySig.size === 0) sigByKeyTag.delete(key) }
 }
 
 /** Fold a freshly-fetched decoration record into the indices: always the
  *  kind index, plus the tag sub-index when it's a `tag`. Shared by the live
- *  `decorations:changed` path and the navigation hydration walk. */
-function indexRecord(label: string, sig: string, record: DecorationShape): void {
+ *  `decorations:changed` path and the navigation hydration walk.
+ *
+ *  Takes SEGMENTS, not a label — the location is the identity here. Both
+ *  callers already hold the full path; passing the leaf alone is what let one
+ *  cell's decorations answer for a same-named cell somewhere else. */
+function indexRecord(segments: readonly string[], sig: string, record: DecorationShape): void {
   const kind = typeof record.kind === 'string' ? record.kind : null
   if (!kind) return
-  addKind(label, kind)
+  const key = locationKey(segments)
+  segmentsByKey.set(key, segments)
+  addKind(key, kind)
   kindBySig.set(sig, kind)
   if (kind === TAG_DECORATION_KIND) {
     const name = tagNameOf(record)
-    if (name) addTag(label, name, sig)
+    if (name) addTag(key, name, sig)
   }
   if (kind === LAUNCH_DECORATION_KIND) {
     const shape = shapeOf(record)
-    if (shape) launchShapeByLabel.set(label, shape)
-    const key = keyOf(record)
-    if (key) launchKeyByLabel.set(label, key)
+    if (shape) launchShapeByKey.set(key, shape)
+    const memberKey = keyOf(record)
+    if (memberKey) launchKeyByKey.set(key, memberKey)
     const role = roleOf(record)
-    if (role) launchRoleByLabel.set(label, role)
-    else launchRoleByLabel.delete(label)
+    if (role) launchRoleByKey.set(key, role)
+    else launchRoleByKey.delete(key)
     const group = groupOf(record)
-    if (group) launchGroupByLabel.set(label, group)
-    else launchGroupByLabel.delete(label)
+    if (group) launchGroupByKey.set(key, group)
+    else launchGroupByKey.delete(key)
   }
   if (kind === DASHBOARD_ISLAND_KIND) {
     const group = groupOf(record)
-    if (group) islandGroupByLabel.set(label, group)
-    else islandGroupByLabel.delete(label)
+    if (group) islandGroupByKey.set(key, group)
+    else islandGroupByKey.delete(key)
     const role = roleOf(record)
-    if (role) islandRoleByLabel.set(label, role)
-    else islandRoleByLabel.delete(label)
+    if (role) islandRoleByKey.set(key, role)
+    else islandRoleByKey.delete(key)
   }
   if (kind === REFERENCE_DECORATION_KIND) {
     const target = targetSegmentsOf(record)
-    if (target) referenceTargetByLabel.set(label, target)
-    else referenceTargetByLabel.delete(label)
+    if (target) referenceTargetByKey.set(key, target)
+    else referenceTargetByKey.delete(key)
+  }
+  if (kind === TITLE_DECORATION_KIND) {
+    const text = textOf(record)
+    if (text) titleByKey.set(key, text)
+    else titleByKey.delete(key)
   }
 }
 
-function addKind(label: string, kind: string): void {
-  let set = kindsByLabel.get(label)
+function addKind(key: string, kind: string): void {
+  let set = kindsByKey.get(key)
   if (!set) {
     set = new Set<string>()
-    kindsByLabel.set(label, set)
+    kindsByKey.set(key, set)
   }
   set.add(kind)
 }
 
-function removeKind(label: string, kind: string): void {
-  const set = kindsByLabel.get(label)
+function removeKind(key: string, kind: string): void {
+  const set = kindsByKey.get(key)
   if (!set) return
   set.delete(kind)
-  if (set.size === 0) kindsByLabel.delete(label)
+  if (set.size === 0) kindsByKey.delete(key)
 }
 
 /** Decoration-trigger payload contract. Mirrors the LayerSlotRegistry
@@ -421,19 +570,25 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
   const sig = payload.sig
   const label = segments[segments.length - 1]
   if (!label) return
-  // Remember where this label lives so the hidden filter can ask the pool
+  // The event carries the FULL path, so the write lands at the exact cell that
+  // changed — never at whatever else happens to share its name.
+  const key = locationKey(segments)
+  // Remember where this cell lives so the hidden filter can ask the pool
   // "is this kind hidden HERE?" (the pool keys by kind + location).
-  segmentsByLabel.set(label, segments)
+  segmentsByKey.set(key, segments)
 
   if (payload.op === 'append') {
-    const priorShape = launchShapeByLabel.get(label)
-    const priorRole = launchRoleByLabel.get(label)
-    const priorGroup = launchGroupByLabel.get(label)
-    const priorIslandGroup = islandGroupByLabel.get(label)
-    const priorIslandRole = islandRoleByLabel.get(label)
+    const priorShape = launchShapeByKey.get(key)
+    const priorRole = launchRoleByKey.get(key)
+    const priorGroup = launchGroupByKey.get(key)
+    const priorIslandGroup = islandGroupByKey.get(key)
+    const priorIslandRole = islandRoleByKey.get(key)
+    // Stringified: the map is rebuilt on every index, so a reference compare
+    // would report a change on every pass and repaint the hive needlessly.
+    const priorTitle = JSON.stringify(titleByKey.get(key) ?? null)
     const record = await fetchDecorationRecord(sig)
     if (!record) return
-    indexRecord(label, sig, record)
+    indexRecord(segments, sig, record)
     // This append landed ASYNCHRONOUSLY (the record fetch above), AFTER the
     // synchronous `tags:changed` → show-cell `render:tags` re-aggregation that
     // a tag write triggers. Without a nudge, the last cell of a multi-cell tag
@@ -448,9 +603,9 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     // (ensureDecorationsIndexed) usually indexed it already, and re-nudging
     // would queue a redundant full geometry rebuild right after entry.
     if (record.kind === LAUNCH_DECORATION_KIND
-        && (launchShapeByLabel.get(label) !== priorShape
-          || launchRoleByLabel.get(label) !== priorRole
-          || launchGroupByLabel.get(label) !== priorGroup)) {
+        && (launchShapeByKey.get(key) !== priorShape
+          || launchRoleByKey.get(key) !== priorRole
+          || launchGroupByKey.get(key) !== priorGroup)) {
       EffectBus.emit('launch:indexed', { label })
     }
     // Same first-paint race for dashboard-island tiles: the island id lands
@@ -458,34 +613,48 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     // nudge — show-cell rebuilds geometry on it regardless of kind — so the
     // clustered islands appear without waiting for an unrelated render.
     if (record.kind === DASHBOARD_ISLAND_KIND
-        && (islandGroupByLabel.get(label) !== priorIslandGroup
-          || islandRoleByLabel.get(label) !== priorIslandRole)) {
+        && (islandGroupByKey.get(key) !== priorIslandGroup
+          || islandRoleByKey.get(key) !== priorIslandRole)) {
       EffectBus.emit('launch:indexed', { label })
+    }
+    // A retitle must repaint the tile it renamed. The atlas caches baked glyphs
+    // under the RAW label, so the stale entry has to be flushed as well as the
+    // geometry rebuilt — show-cell does both on this event.
+    if (record.kind === TITLE_DECORATION_KIND
+        && JSON.stringify(titleByKey.get(key) ?? null) !== priorTitle) {
+      EffectBus.emit('title:indexed', { label })
     }
   } else if (payload.op === 'removeSig') {
     const kind = kindBySig.get(sig)
     if (kind) {
-      removeKind(label, kind)
-      kindBySig.delete(sig)
+      removeKind(key, kind)
+      // `kindBySig` is a sig→kind cache, and a decoration resource is
+      // content-addressed: the SAME sig can sit in many cells' slots. Dropping
+      // the cache entry here would blind the next cell's removal, which then
+      // subtracts nothing. The mapping is constant for the sig — keep it.
     }
     if (kind === LAUNCH_DECORATION_KIND) {
-      launchShapeByLabel.delete(label)
-      launchKeyByLabel.delete(label)
-      launchRoleByLabel.delete(label)
-      launchGroupByLabel.delete(label)
+      launchShapeByKey.delete(key)
+      launchKeyByKey.delete(key)
+      launchRoleByKey.delete(key)
+      launchGroupByKey.delete(key)
     }
     if (kind === DASHBOARD_ISLAND_KIND) {
-      islandGroupByLabel.delete(label)
-      islandRoleByLabel.delete(label)
+      islandGroupByKey.delete(key)
+      islandRoleByKey.delete(key)
     }
     if (kind === REFERENCE_DECORATION_KIND) {
-      referenceTargetByLabel.delete(label)
+      referenceTargetByKey.delete(key)
+    }
+    if (kind === TITLE_DECORATION_KIND) {
+      titleByKey.delete(key)
+      EffectBus.emit('title:indexed', { label })
     }
     // A tag's resource is content-addressed and shared across cells, so subtract
-    // it from the cell named in THIS event (`label`), using the sig's constant
-    // tag name. Never delete `nameBySig[sig]` — other cells still share it.
+    // it from the cell named in THIS event, using the sig's constant tag name.
+    // Never delete `nameBySig[sig]` — other cells still share it.
     const name = nameBySig.get(sig)
-    if (name) removeTag(label, name)
+    if (name) removeTag(key, name)
   }
 })
 
@@ -530,16 +699,21 @@ async function hydrateLabel(
   parentSegments: readonly string[],
   history: HistoryServiceLike,
   nudge = true,
+  absoluteSegments?: readonly string[],
 ): Promise<boolean> {
-  const segments = [...parentSegments, label]
-  const pathKey = segments.join('\u0000')
+  // `absoluteSegments` is the flattened-match override: under a tag filter the
+  // page shows cells from all over the hive, so `here + label` names a layer
+  // that does not exist. Walking that phantom path fetched nothing, so a
+  // match's own decorations never got indexed while the filter was on.
+  const segments = absoluteSegments ?? [...parentSegments, label]
+  const pathKey = locationKey(segments)
   let seenPaths = checkedLabels.get(label)
   if (seenPaths?.has(pathKey)) return false
   if (!seenPaths) { seenPaths = new Set<string>(); checkedLabels.set(label, seenPaths) }
   seenPaths.add(pathKey)
 
   try {
-    segmentsByLabel.set(label, segments)
+    segmentsByKey.set(pathKey, segments)
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
     if (!layer) return false
@@ -549,7 +723,7 @@ async function hydrateLabel(
       if (typeof decorationSig !== 'string' || !/^[0-9a-f]{64}$/.test(decorationSig)) continue
       const record = await fetchDecorationRecord(decorationSig)
       if (!record) continue
-      indexRecord(label, decorationSig, record)
+      indexRecord(segments, decorationSig, record)
     }
     // A launcher tile discovered on this walk: nudge show-cell to rebuild its
     // geometry so the tile's silhouette — or its clustered ISLAND (help
@@ -560,8 +734,11 @@ async function hydrateLabel(
     // pre-paint hydration path (ensureDecorationsIndexed) passes nudge=false —
     // nothing is painted yet, so a rebuild request would only queue a
     // redundant second render.
-    if (nudge && (launchShapeByLabel.has(label) || launchGroupByLabel.has(label) || islandGroupByLabel.has(label))) EffectBus.emit('launch:indexed', { label })
-    return tagsByLabel.has(label)
+    if (nudge && (launchShapeByKey.has(pathKey) || launchGroupByKey.has(pathKey) || islandGroupByKey.has(pathKey))) EffectBus.emit('launch:indexed', { label })
+    // Same post-paint race for a title found on this walk: the tile has already
+    // painted under its raw label, so flush and repaint it under the title.
+    if (nudge && titleByKey.has(pathKey)) EffectBus.emit('title:indexed', { label })
+    return tagsByKey.has(pathKey)
   } catch {
     // Layer unavailable or fetch error — skip this location; another render
     // pass will retry (the path key is set BEFORE the await, so a failed
@@ -589,9 +766,24 @@ export async function ensureDecorationsIndexed(
 
 type RenderCellCountPayload = {
   readonly labels?: readonly string[]
+  /** Absolute path per label — populated ONLY while a tag filter flattens the
+   *  page, where a visible cell can live anywhere in the hive. */
+  readonly flatPaths?: Record<string, readonly string[]>
 }
 
 EffectBus.on('render:cell-count', (payload: RenderCellCountPayload | undefined) => {
+  // Adopt this render's flatten paths FIRST, and unconditionally — an ordinary
+  // page emits `{}`, which is what clears the previous filter's paths. Doing it
+  // before the empty-labels bail matters: an empty mesh is exactly how a filter
+  // that matched nothing reports itself, and its stale paths must not survive.
+  const flat = payload?.flatPaths
+  flatKeyByLabel.clear()
+  if (flat) {
+    for (const [label, segs] of Object.entries(flat)) {
+      if (Array.isArray(segs) && segs.length) flatKeyByLabel.set(label, locationKey(segs))
+    }
+  }
+
   const labels = payload?.labels
   if (!Array.isArray(labels) || labels.length === 0) return
   const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
@@ -602,7 +794,11 @@ EffectBus.on('render:cell-count', (payload: RenderCellCountPayload | undefined) 
   // walk discovers tags on a cell, signal `tags:indexed` so the tag renderers
   // (controls-bar aggregation, on-tile badge) repaint without waiting for the
   // next user action — the index hydrates AFTER render:cell-count fires.
-  void Promise.all(labels.map(label => hydrateLabel(label, parentSegments, history)))
+  // A flattened match is walked at its REAL location, not `here + label`.
+  void Promise.all(labels.map(label => hydrateLabel(
+    label, parentSegments, history, true,
+    flat?.[label]?.length ? flat[label] : undefined,
+  )))
     .then(results => {
       const tagged = labels.filter((_, i) => results[i])
       if (tagged.length) EffectBus.emit('tags:indexed', { labels: tagged })

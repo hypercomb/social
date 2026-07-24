@@ -46,3 +46,11 @@ id = "REPLACE_WITH_HIVES_NAMESPACE_ID"
 AUTO_GRANT = "1"                    # '1' mints a grant on first valid upload; '0' closes the door
 DEFAULT_QUOTA_BYTES = "104857600"   # 100 MB per auto-granted pubkey
 GRANT_TTL_DAYS = "90"               # grants lapse; under AUTO_GRANT they re-mint fresh
+
+# ── host AI (POST /ai/ask) ──
+# The API key is a SECRET, never a var:  wrangler secret put ANTHROPIC_API_KEY
+# Until that secret exists the route answers 503 and costs nothing.
+AI_MODEL = "claude-haiku-4-5"       # the immediate tier — fast + cheap
+AI_MAX_TOKENS = "1024"              # reply ceiling per ask
+AI_DAILY_TOKENS = "100000"          # per-pubkey daily estimate ceiling (open mode)
+AI_WRITERS = ""                     # comma-separated pubkeys; set to lock /ai/ask to your own keys

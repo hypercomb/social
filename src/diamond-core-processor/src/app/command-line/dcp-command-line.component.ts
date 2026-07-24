@@ -191,12 +191,48 @@ export class DcpCommandLineComponent implements AfterViewInit {
   }
 
   onKeyDown = (e: KeyboardEvent): void => {
+    // Tab is handled first and unconditionally — see handleTab.
+    if (e.key === 'Tab') { this.handleTab(e); return }
+
     if (this.handleCompletionKeys(e)) return
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       this.onCommit()
     }
+  }
+
+  /**
+   * Tab — a TOTAL function: it always consumes the key, so it can never reach
+   * the browser's default focus-traversal. Falling through (empty list, or a
+   * suppressed dropdown — which is what accepting a completion leaves behind)
+   * walked focus off the command line and lost the caret mid-command.
+   */
+  private handleTab(e: KeyboardEvent): void {
+    const list = this.suggestions()
+
+    if (e.shiftKey) {
+      if (!list.length || this.suppressed()) return   // keep a way back out of the input
+      e.preventDefault()
+      this.activeIndex.update(v => Math.max(v - 1, 0))
+      return
+    }
+
+    e.preventDefault()
+
+    // Suppressed → re-open rather than give up. Tab always means forward.
+    if (this.suppressed()) { this.suppressed.set(false); return }
+
+    const best = list[this.activeIndex()] ?? list[0]
+    if (best) this.acceptCompletion(best)
+  }
+
+  /** True when the caret sits at the end of the input with no selection. */
+  private caretAtEnd(): boolean {
+    const el = this.inputElement
+    if (!el) return false
+    const end = el.value.length
+    return el.selectionStart === end && el.selectionEnd === end
   }
 
   onShellMouseDown = (e: MouseEvent): void => {
@@ -220,7 +256,12 @@ export class DcpCommandLineComponent implements AfterViewInit {
     if (e.key === 'Escape') { e.preventDefault(); this.suppressed.set(true); return true }
     if (e.key === 'ArrowDown') { e.preventDefault(); this.activeIndex.update(v => Math.min(v + 1, list.length - 1)); return true }
     if (e.key === 'ArrowUp') { e.preventDefault(); this.activeIndex.update(v => Math.max(v - 1, 0)); return true }
-    if (e.key === 'Tab' || e.key === 'ArrowRight') {
+    // ArrowRight accepts only with the caret already at the very end and
+    // nothing selected — "walk into the ghost text". Anywhere else it is an
+    // ordinary caret move, and swallowing it replaced the whole line the
+    // moment a user went back to edit mid-command.
+    if (e.key === 'ArrowRight' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!this.caretAtEnd()) return false
       e.preventDefault()
       const best = list[this.activeIndex()] ?? list[0]
       if (best) this.acceptCompletion(best)

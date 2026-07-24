@@ -51,7 +51,21 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
         el?.scrollIntoView({ block: 'nearest' })
       })
     })
+
+    // Whenever the OPTIONS change, the highlight goes back to the top match.
+    // Clamping instead of resetting leaves the highlight parked on whatever
+    // row that ordinal happens to hold in the new list — so Tab accepts an
+    // item the user never looked at. Reset is the only stable rule.
+    effect(() => {
+      const key = this.#listKey()
+      if (key === this.#lastListKey) return
+      this.#lastListKey = key
+      this.activeIndex.set(0)
+    })
   }
+
+  /** Last list fingerprint seen by the highlight-reset effect. */
+  #lastListKey = ''
 
   /** Compute the dropdown's fixed screen coordinates from the command bar's
    *  rect and feed them in as CSS vars. Opens DOWN when the bar is in the top
@@ -243,8 +257,20 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Emitted when Enter is pressed (not Shift+Enter). */
   readonly commit = output<string>()
 
-  /** Emitted when a suggestion is accepted via Tab/ArrowRight/click. */
+  /** Emitted when a suggestion is accepted by CLICK — the user picked that
+   *  exact rendered row, so the string they saw is the truth. */
   readonly completionAccepted = output<string>()
+
+  /**
+   * Emitted when a suggestion is accepted from the KEYBOARD (Tab/ArrowRight).
+   * Deliberately carries no payload: `suggestions` is a template-bound input,
+   * so it only refreshes when change detection runs — a keystroke landing
+   * before that flush leaves the shell holding the PREVIOUS keystroke's list.
+   * Accepting from it replaced the line with a completion of text the user had
+   * already typed past. The parent owns the computed and is never stale, so it
+   * resolves the item itself; the shell only reports WHICH row is highlighted.
+   */
+  readonly completionAcceptRequested = output<number>()
 
   /**
    * Emitted for keydown events the shell does NOT consume internally
@@ -355,6 +381,14 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     this.showSuggestions() && this.suggestions().length > 0 && !this.suppressed()
   )
 
+  /**
+   * Content fingerprint of the suggestion list. The list recomputes (new array
+   * identity) on unrelated signal churn, so identity is useless for deciding
+   * "did the options actually change?" — the CONTENT is what matters.
+   * The separator is NUL so no suggestion can forge another list's key.
+   */
+  readonly #listKey = computed(() => this.suggestions().join('\u0000'))
+
   // ── lifecycle ───────────────────────────────────────────
 
   ngAfterViewInit(): void {
@@ -382,6 +416,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     const el = this.inputElement
     if (!el) return
     el.value = v
+    // A programmatic value change means a NEW set of options — start the
+    // highlight at the top match rather than wherever the last list left it.
+    this.activeIndex.set(0)
     this.syncSignalsFromDom()
   }
 
@@ -467,6 +504,14 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   }
 
   onKeyDown = (e: KeyboardEvent): void => {
+    // The two ACCEPT keys are handled first and independently of the shell's
+    // (change-detection-lagged) copy of the suggestion list — see handleTab.
+    if (e.key === 'Tab') {
+      this.handleTab(e)
+      return
+    }
+    if (e.key === 'ArrowRight' && this.handleArrowRightAccept(e)) return
+
     // Try completion keys first (when suggestions are visible)
     if (this.handleCompletionKeys(e)) return
 
@@ -495,6 +540,52 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   // ── keyboard navigation ─────────────────────────────────
 
+  /**
+   * Tab — the completion key. It is a TOTAL function: every Tab press either
+   * accepts the highlighted suggestion or is a deliberate no-op, and it NEVER
+   * reaches the browser's default focus-traversal.
+   *
+   * That default was the "it resets and puts me back at the start" bug: any
+   * time the dropdown was suppressed (which is what accepting a completion
+   * does) or the list was momentarily empty, Tab fell through as a plain
+   * keydown, no one called preventDefault, and focus walked off the command
+   * line onto the next focusable element — losing the caret mid-command.
+   *
+   * The rules, in order:
+   *  - Shift+Tab with the list open walks the highlight BACKWARDS (the mirror
+   *    of ArrowUp). With nothing open it is left alone, so keyboard users keep
+   *    a way out of the input.
+   *  - Suppressed → re-open the dropdown. Tab always means "show me / take me
+   *    forward", never "give up".
+   *  - Otherwise → ask the parent to accept the highlighted row. The parent
+   *    owns the live list, so it decides whether there is anything to take;
+   *    either way focus and caret stay exactly where they are.
+   */
+  private handleTab(e: KeyboardEvent): void {
+    const list = this.suggestions()
+
+    if (e.shiftKey) {
+      if (!list.length || this.suppressed()) return   // let the browser move focus back
+      e.preventDefault()
+      this.activeIndex.update(v => Math.max(v - 1, 0))
+      return
+    }
+
+    e.preventDefault()
+
+    // Suppression is checked FIRST: the parent reports an EMPTY list while
+    // suppressed, so "no options" and "options hidden" are indistinguishable
+    // from the list alone. Un-suppressing lets the parent recompute — if there
+    // genuinely are none the dropdown simply stays shut and the next Tab is a
+    // no-op, which is still infinitely better than losing focus.
+    if (this.suppressed()) {
+      this.suppressed.set(false)
+      return
+    }
+
+    this.completionAcceptRequested.emit(this.activeIndex())
+  }
+
   private handleCompletionKeys(e: KeyboardEvent): boolean {
     const list = this.suggestions()
     if (!list.length || this.suppressed()) return false
@@ -518,14 +609,33 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
       return true
     }
 
-    if (e.key === 'Tab' || e.key === 'ArrowRight') {
-      e.preventDefault()
-      const best = list[this.activeIndex()] ?? list[0]
-      if (best) this.completionAccepted.emit(best)
-      return true
-    }
-
     return false
+  }
+
+  /**
+   * ArrowRight — the second accept key ("walk into the ghost text"). Handled
+   * outside handleCompletionKeys for the same reason Tab is: that gate gives
+   * up on the shell's lagging copy of the list, so a fast ArrowRight silently
+   * did nothing. Accepting is delegated to the parent's live list.
+   *
+   * It accepts ONLY with the caret already at the very end and nothing
+   * selected. Anywhere else it is an ordinary caret move — swallowing it
+   * replaced the whole line the moment a user went back to edit mid-command.
+   */
+  private handleArrowRightAccept(e: KeyboardEvent): boolean {
+    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false
+    if (this.suppressed() || !this.caretAtEnd()) return false
+    e.preventDefault()
+    this.completionAcceptRequested.emit(this.activeIndex())
+    return true
+  }
+
+  /** True when the caret sits at the end of the input with no selection. */
+  private caretAtEnd(): boolean {
+    const el = this.inputElement
+    if (!el) return false
+    const end = el.value.length
+    return el.selectionStart === end && el.selectionEnd === end
   }
 
   // ── internal helpers ────────────────────────────────────

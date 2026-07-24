@@ -23,6 +23,8 @@ type Note = {
   id: string
   text: string
   shape: ShapeId | null
+  /** Material icon name from the mark palette; supersedes `shape`. */
+  mark: string | null
   children: Note[]
 }
 

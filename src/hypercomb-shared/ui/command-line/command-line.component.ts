@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/command-line/command-line.component.ts
 
-import { AfterViewInit, Component, computed, signal, ViewChild, type OnDestroy } from '@angular/core'
+import { AfterViewInit, Component, computed, effect, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
@@ -142,8 +142,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   private get cellProvider(): CellSuggestionProvider { return get('@hypercomb.social/CellSuggestionProvider') as CellSuggestionProvider }
 
   private readonly value = signal('')
-  private readonly cellSubPath = signal<readonly string[]>([])
-  private readonly cellLeaf = signal('')
+
+  /**
+   * Where the input is pointing, DERIVED from `value()` — never assigned.
+   *
+   * These used to be imperative signals refreshed by a `updateCellSubPath()`
+   * call that only three of the ~dozen paths that mutate the value remembered
+   * to make. Every other path (Escape peel-back, slash auto-params, move
+   * scrub, history recall, every completion accept) left them describing the
+   * PREVIOUS input — and both the ghost text and the Tab accept handler read
+   * them to decide how to rebuild the line. A stale sub-path is what turned
+   * Tab into "replace the whole line with one name": the accept handler saw
+   * `subPath: []`, took the root-level branch, and threw the typed path away.
+   * Deriving them makes that class of bug unrepresentable.
+   */
+  private readonly cellSubPath = computed<readonly string[]>(() => this.#pathContext().subPath)
+  private readonly cellLeaf = computed<string>(() => this.#pathContext().leaf)
   /**
    * When set, the command line is in plain text-capture mode and ignores
    * all normal parsing (slash, filter, tag, bracket, create). Enter emits
@@ -1723,9 +1737,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#syncDirection = 'idle'
     }
     this.#lastSelectMode = ctx.active && ctx.mode === 'select'
-
-    // update cell sub-path query when input contains '/'
-    this.updateCellSubPath()
+    // Sub-path / leaf / bracket phase are derived from `value()` — see
+    // #pathContext. Nothing to refresh here.
   }
 
   private lastFilterKeyword = ''
@@ -2859,7 +2872,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // completion logic
   // -------------------------------------------------
 
-  /** Bridge: shell accepted a suggestion (Tab/ArrowRight/click). */
+  /**
+   * Bridge: shell asked to accept the highlighted suggestion from the keyboard
+   * (Tab / ArrowRight). Resolved HERE, against the live computed, because the
+   * shell's copy of the list lags a change-detection cycle behind the input —
+   * accepting from that lagging copy is what made fast typing complete the
+   * wrong thing. `index` is the highlighted row; it is clamped rather than
+   * trusted, since it too was chosen against the previous list.
+   */
+  public onShellAcceptRequested = (index: number): void => {
+    const list = this.suggestions()
+    if (!list.length) return
+    const best = list[index] ?? list[0]
+    if (best) this.onShellCompletionAccepted(best)
+  }
+
+  /** Bridge: shell accepted a suggestion (keyboard resolution above, or click). */
   public onShellCompletionAccepted = (best: string): void => {
     const ctx = this.context()
     if (!ctx.active) return
@@ -2986,7 +3014,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       } else {
         this.#setShellValue(before + spacer + best, false)
       }
-      this.updateCellSubPath()
       return
     }
 
@@ -2999,7 +3026,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       } else {
         this.#setShellValue(bracketPrefix + best + '/', false)
       }
-      this.updateCellSubPath()
       return
     }
 
@@ -3007,7 +3033,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (subPath.length > 0) {
       const pathPrefix = subPath.join('/') + '/'
       this.#setShellValue(pathPrefix + best + '/', false)
-      this.updateCellSubPath()
       return
     }
 
@@ -3053,9 +3078,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (wasCapturing) {
       EffectBus.emit('command:exit-mode', { mode: 'note-capture', target: wasCapturing.target })
     }
-    this.cellSubPath.set([])
-    this.cellLeaf.set('')
-    this.cellProvider.query([])
+    // sub-path/leaf follow `value()` — clearing it resets them, and the
+    // #pathContext effect re-queries the provider at the root level.
     if (this.lastFilterKeyword) {
       EffectBus.emit('search:filter', { keyword: '' })
       this.lastFilterKeyword = ''
@@ -3393,11 +3417,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   // bracket mode: 'none' | 'items' (inside []) | 'path' (after ]/)
-  #bracketPhase = signal<'none' | 'items' | 'path'>('none')
+  #bracketPhase = computed<'none' | 'items' | 'path'>(() => this.#pathContext().bracketPhase)
   /** Whether current bracket mode is colon-bracket (cell:[...]) — items are plain tag names. */
-  #colonBracketMode = false
+  get #colonBracketMode(): boolean { return this.#pathContext().colonBracket }
   /** Pending tag adds/removes typed in the current bracket input (not yet persisted). */
-  #bracketPendingTags: { adds: Set<string>; removes: Set<string> } = { adds: new Set(), removes: new Set() }
+  get #bracketPendingTags(): { adds: ReadonlySet<string>; removes: ReadonlySet<string> } {
+    return this.#pathContext().pendingTags
+  }
 
   /**
    * Load a cell's existing tags into the cache signal. Folder-based
@@ -3434,8 +3460,45 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return { adds, removes }
   }
 
-  private readonly updateCellSubPath = (): void => {
-    const raw = this.value().trim()
+  /**
+   * Everything the completion machinery needs to know about WHERE the input
+   * is pointing, parsed fresh from `value()` on every read. Pure — no signal
+   * writes, no provider calls, no tag loads; the side effects live in
+   * `#pathSideEffects` below so this can be read from computeds (ghost text,
+   * suggestions) and from the Tab accept handler with identical results.
+   */
+  readonly #pathContext = computed<PathContext>(() => this.#parsePath(this.value()))
+
+  /**
+   * The side of path tracking that has to reach out: ask the provider for the
+   * cells at the current depth, and load the target cell's tags in bracket-tag
+   * mode. Driven by the derived context, so it fires for EVERY value change
+   * regardless of which code path produced it.
+   */
+  readonly #pathSideEffects = effect(() => {
+    const ctx = this.#pathContext()
+    this.cellProvider.query(ctx.subPath)
+    if (ctx.tagLabel) {
+      if (ctx.tagLabel !== this.#bracketCellLabel) {
+        this.#bracketCellLabel = ctx.tagLabel
+        void this.#loadCellTags(ctx.tagLabel)
+      }
+    } else if (this.#bracketCellLabel) {
+      this.#bracketCellLabel = ''
+      this.#bracketCellTags.set(new Set())
+    }
+  })
+
+  #parsePath(rawValue: string): PathContext {
+    const raw = rawValue.trim()
+    const none: PathContext = {
+      bracketPhase: 'none',
+      colonBracket: false,
+      subPath: [],
+      leaf: '',
+      tagLabel: '',
+      pendingTags: EMPTY_PENDING_TAGS,
+    }
 
     // detect bracket mode: [items]/path
     const bracketOpen = raw.indexOf('[')
@@ -3443,110 +3506,91 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     if (bracketOpen >= 0 && bracketClose < 0) {
       // inside brackets — suggest current surface tiles or tags
-      this.#bracketPhase.set('items')
       const inner = raw.slice(bracketOpen + 1)
       const lastComma = inner.lastIndexOf(',')
       const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trim() : inner.trim()
+      const committed = lastComma >= 0 ? inner.slice(0, lastComma) : ''
 
       // Detect cell:[...] colon-bracket tag mode: colon immediately before '['
       const isColonBracket = bracketOpen > 0 && raw[bracketOpen - 1] === ':'
 
       if (isColonBracket) {
         // ALL items in cell:[...] are tags — no : prefix needed
-        this.#colonBracketMode = true
-        const label = this.completions.normalize(raw.slice(0, bracketOpen - 1).trim())
-        if (label && label !== this.#bracketCellLabel) {
-          this.#bracketCellLabel = label
-          void this.#loadCellTags(label)
+        return {
+          bracketPhase: 'items',
+          colonBracket: true,
+          subPath: [],
+          // Use ~ prefix to signal removal mode, otherwise raw fragment for add mode
+          leaf: fragment.startsWith('~') ? '~:' + fragment.slice(1) : ':' + fragment,
+          tagLabel: this.completions.normalize(raw.slice(0, bracketOpen - 1).trim()),
+          pendingTags: this.#parseBracketTagItems(committed),
         }
-        // gather committed tags (before last comma)
-        const lastCommaIdx = inner.lastIndexOf(',')
-        const committed = lastCommaIdx >= 0 ? inner.slice(0, lastCommaIdx) : ''
-        this.#bracketPendingTags = this.#parseBracketTagItems(committed)
-        this.cellSubPath.set([])
-        // Use ~ prefix to signal removal mode, otherwise raw fragment for add mode
-        this.cellLeaf.set(fragment.startsWith('~') ? '~:' + fragment.slice(1) : ':' + fragment)
-        this.cellProvider.query([])
-        return
       }
 
       // Legacy colon-prefixed fragment → tag mode (e.g. abc[:tag])
-      this.#colonBracketMode = false
       if (fragment.startsWith(':') || fragment.startsWith('~:')) {
-        const label = bracketOpen > 0
-          ? this.completions.normalize(raw.slice(0, bracketOpen).trim())
-          : ''
-        if (label && label !== this.#bracketCellLabel) {
-          this.#bracketCellLabel = label
-          void this.#loadCellTags(label)
+        return {
+          bracketPhase: 'items',
+          colonBracket: false,
+          subPath: [],
+          leaf: fragment,
+          tagLabel: bracketOpen > 0 ? this.completions.normalize(raw.slice(0, bracketOpen).trim()) : '',
+          pendingTags: this.#parsePendingBracketTags(committed),
         }
-        const lastCommaIdx = inner.lastIndexOf(',')
-        const committed = lastCommaIdx >= 0 ? inner.slice(0, lastCommaIdx) : ''
-        this.#bracketPendingTags = this.#parsePendingBracketTags(committed)
-        this.cellSubPath.set([])
-        this.cellLeaf.set(fragment)
-        this.cellProvider.query([])
-        return
       }
-      // clear tag context when not in tag mode
-      if (this.#bracketCellLabel) {
-        this.#bracketCellLabel = ''
-        this.#bracketCellTags.set(new Set())
-        this.#bracketPendingTags = { adds: new Set(), removes: new Set() }
+
+      // plain cell items — no tag context
+      return {
+        ...none,
+        bracketPhase: 'items',
+        leaf: this.completions.normalize(fragment),
       }
-      const leaf = this.completions.normalize(fragment)
-      this.cellSubPath.set([])
-      this.cellLeaf.set(leaf)
-      this.cellProvider.query([])
-      return
     }
 
     if (bracketOpen === 0 && bracketClose > 0 && bracketClose < raw.length - 1 && raw[bracketClose + 1] === '/') {
       // after bracket-path — suggest relative subfolders
-      this.#bracketPhase.set('path')
-      const pathPart = raw.slice(bracketClose + 2) // after ]/
-      const clean = pathPart.replace(/\/+$/, '')
+      const clean = raw.slice(bracketClose + 2).replace(/\/+$/, '') // after ]/
       if (!clean.includes('/')) {
         // single level: leaf is the typed fragment, query at current level
-        const leaf = this.completions.normalize(clean)
-        this.cellSubPath.set([])
-        this.cellLeaf.set(leaf)
-        this.cellProvider.query([])
-        return
+        return { ...none, bracketPhase: 'path', leaf: this.completions.normalize(clean) }
       }
-      const parts = clean.split('/')
-      const leaf = this.completions.normalize((parts.pop() ?? '').trim())
-      const subPath = parts.map(p => this.completions.normalize(p.trim())).filter(Boolean)
-      this.cellSubPath.set(subPath)
-      this.cellLeaf.set(leaf)
-      this.cellProvider.query(subPath)
-      return
+      const { subPath, leaf } = this.#splitPath(clean)
+      return { ...none, bracketPhase: 'path', subPath, leaf }
     }
 
-    // default: no bracket mode
-    this.#bracketPhase.set('none')
-
-    // strip leading '/' (create-goto prefix)
+    // default: no bracket mode. Strip leading '/' (create-goto prefix).
     const clean = raw.replace(/^\/+/, '')
 
     // no '/' means we're at the current level
-    if (!clean.includes('/')) {
-      this.cellSubPath.set([])
-      this.cellLeaf.set('')
-      this.cellProvider.query([])
-      return
-    }
+    if (!clean.includes('/')) return none
 
-    // split on '/' — everything before the last segment is the sub-path,
-    // the last segment (possibly empty after trailing '/') is the leaf filter
+    return { ...none, ...this.#splitPath(clean) }
+  }
+
+  /** Everything before the last '/' is the sub-path; the last segment
+   *  (possibly empty after a trailing '/') is the leaf filter. */
+  #splitPath(clean: string): { subPath: readonly string[]; leaf: string } {
     const parts = clean.split('/')
     const leaf = this.completions.normalize((parts.pop() ?? '').trim())
     const subPath = parts.map(p => this.completions.normalize(p.trim())).filter(Boolean)
-
-    this.cellSubPath.set(subPath)
-    this.cellLeaf.set(leaf)
-    this.cellProvider.query(subPath)
+    return { subPath, leaf }
   }
+}
+
+/** Where the command-line input is pointing — see CommandLineComponent#pathContext. */
+type PathContext = {
+  bracketPhase: 'none' | 'items' | 'path'
+  colonBracket: boolean
+  subPath: readonly string[]
+  leaf: string
+  /** Cell whose existing tags feed bracket-tag intellisense ('' = not in tag mode). */
+  tagLabel: string
+  pendingTags: { adds: ReadonlySet<string>; removes: ReadonlySet<string> }
+}
+
+const EMPTY_PENDING_TAGS: { adds: ReadonlySet<string>; removes: ReadonlySet<string> } = {
+  adds: new Set<string>(),
+  removes: new Set<string>(),
 }
 
 // Tag props helpers now imported from @hypercomb/shared/core/tag-ops

@@ -46,10 +46,22 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 }
 
 // Full-height scroll surface; the inner column is centred within it.
+//
+// The bar is HIDDEN, not the scrolling. This surface covers the whole viewport
+// over the hex canvas, so a gutter paints a bright track down the edge of an
+// otherwise chrome-free page — and it opens the moment the index is a couple of
+// rows tall, which is most of the time. Same treatment as the controls rail
+// (see controls-bar.component.scss, which also explains why a reserved gutter
+// can't be matched deterministically). Content clipping at the edge is the cue
+// that there's more. `overscroll-behavior: contain` keeps a wheel past the end
+// from chaining out to the document behind the landing.
 .landing-scroll {
   position: absolute;
   inset: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;                    // Firefox
+  &::-webkit-scrollbar { display: none; }   // Chromium / Safari
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -59,7 +71,9 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 100%;
   max-width: 1040px;
   margin: 0 auto;
-  padding: clamp(3rem, 9vh, 6rem) 2rem 5rem;
+  // Bottom scales with the viewport like the top does — a fixed 5rem tail was
+  // enough on its own to push a two-row index into scrolling on a short window.
+  padding: clamp(3rem, 9vh, 6rem) 2rem clamp(2rem, 6vh, 5rem);
   box-sizing: border-box;
 }
 

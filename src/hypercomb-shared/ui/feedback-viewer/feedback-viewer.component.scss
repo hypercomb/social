@@ -1,7 +1,8 @@
 // hypercomb-shared/ui/feedback-viewer/feedback-viewer.component.scss
 //
-// Right-docked "Feedback" panel — inbox list on top, share-feedback compose
-// form at the bottom, reach-scope icons in the header. Not a dimming modal —
+// Right-docked "Feedback" panel — one-line header (icon + title + close) over a
+// reach row, then the inbox list, then the share-feedback compose form at the
+// bottom. Not a dimming modal —
 // the hive stays visible behind it (host pointer-events:none; panel auto).
 // Steel accent. Cold, clean chrome.
 
@@ -45,25 +46,52 @@ $steel: rgb(126, 182, 214);
 
 .fv-header {
   @include tw.header;
-  justify-content: space-between;
   border-bottom: 1px solid rgba($steel, 0.22);
 }
 
-.fv-heading { display: flex; flex-direction: column; gap: 0.2rem; }
+// Leading glyph — the same `forum` symbol the command-line toggle that opens
+// this panel carries, so the header names itself the way the button did.
+.fv-header-icon {
+  flex: 0 0 auto;
+  font-family: 'Material Symbols Outlined';
+  font-size: 1.05rem;
+  line-height: 1;
+  color: rgba($steel, 0.85);
+}
 
 .fv-title {
+  // Owns the row: the close button rides hard-right off this flex.
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.9rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: rgba(206, 224, 240, 0.96);
 }
 
+// ── reach row (subtitle + the pheromone panel's three reaches) ──
+.fv-reach {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.9rem 0.45rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .fv-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.68rem;
   color: rgba(206, 224, 240, 0.5);
 }
 
-// ── reach scope (mirrors the pheromone panel's three reaches) ──
 .fv-scope {
   flex-shrink: 0;
   display: flex;

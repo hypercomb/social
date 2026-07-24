@@ -74,89 +74,117 @@
         </div>
       }
 
-      @if (viewToggles().length) {
-        <div class="view-toggles">
-          @for (vt of viewToggles(); track vt.view) {
+      <!-- ── the icon rail ────────────────────────────────────────────
+           ONE rhythm for every icon on the right of the command line: a
+           single box size, a single gap, one baseline. Two groups sit on
+           it, split by a hairline:
+
+             BEHAVIOURS — the views this cell actually carries (website,
+             slides, study, …). Contextual: they appear because the cell
+             has the feature and it is not hidden, and light up when the
+             view is on.
+
+             TOOLS — the standing switches that are always there (notes,
+             pheromones, feedback) plus the swarm antenna when offered.
+
+           Never give one of these buttons its own size or margin — the
+           imbalance is exactly what the rail exists to prevent. Sizing
+           lives in `--hc-rail-*` on .header-bar so the pinned-entrance
+           strip next door keeps the same rhythm. -->
+      <div class="shell-actions">
+
+        @if (viewToggles().length) {
+          <div class="action-group behaviours">
+            @for (vt of viewToggles(); track vt.view) {
+              <button
+                class="rail-btn view-toggle-btn"
+                [class.on]="vt.active"
+                type="button"
+                (mousedown)="onViewToggleDown($event, vt.view)"
+                (mouseup)="onViewToggleUp(vt.view)"
+                (mouseleave)="onViewToggleCancel()"
+                [attr.aria-label]="vt.label"
+                [attr.aria-pressed]="vt.active"
+                [title]="vt.label"
+              >
+                <span class="mat-sym" aria-hidden="true">{{ vt.icon }}</span>
+              </button>
+            }
+          </div>
+
+          <!-- Hairline between "what this cell can do" and "what is always
+               here". Raised only when both groups are populated. -->
+          <span class="rail-divider" aria-hidden="true"></span>
+        }
+
+        <div class="action-group tools">
+          @if (showOpenForSubscribersToggle()) {
             <button
-              class="view-toggle-btn"
-              [class.on]="vt.active"
+              class="rail-btn open-for-subscribers-btn"
+              [class.on]="openForSubscribers()"
               type="button"
-              (mousedown)="onViewToggleDown($event, vt.view)"
-              (mouseup)="onViewToggleUp(vt.view)"
-              (mouseleave)="onViewToggleCancel()"
-              [attr.aria-label]="vt.label"
-              [attr.aria-pressed]="vt.active"
-              [title]="vt.label"
+              (mousedown)="$event.preventDefault(); openForSubscribersToggle.emit()"
+              [attr.aria-label]="openForSubscribersLabel()"
+              [attr.aria-pressed]="openForSubscribers()"
+              [title]="openForSubscribersLabel()"
             >
-              <span class="mat-sym" aria-hidden="true">{{ vt.icon }}</span>
+              <!-- broadcast / antenna icon — on = filled rays, off = outline -->
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="2"/>
+                <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/>
+              </svg>
             </button>
           }
+
+          <!-- notes toggle — always present; lights while the notes strip is
+               open. Post-it yellow (filled glyph) carries its identity; the
+               box stays on the rail's size like every other icon. -->
+          <button
+            class="rail-btn notes-toggle-btn"
+            [class.on]="notesPanelOpen()"
+            type="button"
+            (mousedown)="$event.preventDefault(); notesToggle.emit()"
+            [attr.aria-label]="notesLabel()"
+            [attr.aria-pressed]="notesPanelOpen()"
+            [title]="notesLabel()"
+          >
+            <span class="mat-sym" aria-hidden="true">sticky_note_2</span>
+          </button>
+
+          <!-- pheromones — sits directly right of notes; toggles the pheromone
+               panel from the top chrome and lights while it is open. The glyph
+               reads out the current reach (page → children → global), the same
+               vocabulary as the controls-bar tag-scope button, which stays at
+               the bottom as the second opener. -->
+          <button
+            class="rail-btn pheromone-toggle-btn"
+            [class.on]="pheromonePanelOpen()"
+            type="button"
+            (mousedown)="$event.preventDefault(); pheromonesToggle.emit()"
+            [attr.aria-label]="pheromonesLabel()"
+            [attr.aria-pressed]="pheromonePanelOpen()"
+            [title]="pheromonesLabel()"
+          >
+            <span class="mat-sym" aria-hidden="true">{{ pheromoneScopeIcon() }}</span>
+          </button>
+
+          <!-- feedback — opens the share-feedback panel (replaces the old
+               bottom-right FAB that sat on top of undo/redo) -->
+          <button
+            class="rail-btn feedback-toggle-btn"
+            [class.on]="feedbackPanelOpen()"
+            type="button"
+            (mousedown)="$event.preventDefault(); feedbackToggle.emit()"
+            [attr.aria-label]="feedbackLabel()"
+            [attr.aria-pressed]="feedbackPanelOpen()"
+            [title]="feedbackLabel()"
+          >
+            <span class="mat-sym" aria-hidden="true">forum</span>
+          </button>
         </div>
-      }
 
-      @if (showOpenForSubscribersToggle()) {
-        <button
-          class="open-for-subscribers-btn"
-          [class.on]="openForSubscribers()"
-          type="button"
-          (mousedown)="$event.preventDefault(); openForSubscribersToggle.emit()"
-          [attr.aria-label]="openForSubscribersLabel()"
-          [attr.aria-pressed]="openForSubscribers()"
-          [title]="openForSubscribersLabel()"
-        >
-          <!-- broadcast / antenna icon — on = filled rays, off = outline -->
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="2"/>
-            <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49"/>
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/>
-          </svg>
-        </button>
-      }
-
-      <!-- notes toggle — always present; lights while the notes strip is open.
-           Post-it yellow + larger so it reads as THE notes switch. -->
-      <button
-        class="notes-toggle-btn"
-        [class.on]="notesPanelOpen()"
-        type="button"
-        (mousedown)="$event.preventDefault(); notesToggle.emit()"
-        [attr.aria-label]="notesLabel()"
-        [attr.aria-pressed]="notesPanelOpen()"
-        [title]="notesLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">sticky_note_2</span>
-      </button>
-
-      <!-- pheromones — sits directly right of notes; toggles the pheromone
-           panel from the top chrome and lights while it is open. The glyph
-           reads out the current reach (page → children → global), the same
-           vocabulary as the controls-bar tag-scope button, which stays at the
-           bottom as the second opener. -->
-      <button
-        class="pheromone-toggle-btn"
-        [class.on]="pheromonePanelOpen()"
-        type="button"
-        (mousedown)="$event.preventDefault(); pheromonesToggle.emit()"
-        [attr.aria-label]="pheromonesLabel()"
-        [attr.aria-pressed]="pheromonePanelOpen()"
-        [title]="pheromonesLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">{{ pheromoneScopeIcon() }}</span>
-      </button>
-
-      <!-- feedback — opens the share-feedback panel (replaces the old
-           bottom-right FAB that sat on top of undo/redo) -->
-      <button
-        class="feedback-toggle-btn"
-        [class.on]="feedbackPanelOpen()"
-        type="button"
-        (mousedown)="$event.preventDefault(); feedbackToggle.emit()"
-        [attr.aria-label]="feedbackLabel()"
-        [attr.aria-pressed]="feedbackPanelOpen()"
-        [title]="feedbackLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">forum</span>
-      </button>
+      </div>
 
     </div>
   </div>

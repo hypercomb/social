@@ -32,6 +32,7 @@ import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+import { onSelection } from '../../core/selection-context'
 
 interface ClipboardItem {
   label: string
@@ -83,6 +84,10 @@ export class ClipboardPanelComponent implements OnDestroy {
   readonly visible = signal(false)
   readonly items = signal<ClipboardItem[]>([])
   readonly op = signal<'copy' | 'cut'>('copy')
+  /** Live canvas selection size — this window's selection response
+   *  (documentation/selection-tool-windows.md): while tiles are selected, the
+   *  panel offers capturing THEM, right where the captured result lands. */
+  readonly selectionCount = signal(0)
   /** label -> thumbnail object-URL, for the template. Empty entry => glyph. */
   readonly thumbs = signal<Record<string, string>>({})
   /** label -> number of children at that source location. Best-effort, resolved
@@ -181,8 +186,22 @@ export class ClipboardPanelComponent implements OnDestroy {
     // `clipboard:open` (emitted by #setVisible) so the cascade knows.
     this.#cleanups.push(EffectBus.on('clipboard:close', () => this.close()))
 
+    // Selection notification — replayed, so a panel opened mid-selection is
+    // current immediately.
+    this.#cleanups.push(onSelection(({ selected }) => this.selectionCount.set(selected.length)))
+
     // Subscriptions wired; allow auto-open from here on.
     this.#ready = true
+  }
+
+  /** Capture the current selection from inside the window — same verbs the
+   *  controls bar emits; clipboard.worker answers either way. */
+  readonly cutSelection = (): void => {
+    EffectBus.emit('controls:action', { action: 'cut' })
+  }
+
+  readonly copySelection = (): void => {
+    EffectBus.emit('controls:action', { action: 'copy' })
   }
 
   ngOnDestroy(): void {

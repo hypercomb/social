@@ -8,9 +8,9 @@
 // newest-first, per-item Resolve), the bottom is the share-feedback compose
 // form (category + message; the visitor permission handshake rides along).
 //
-// The list is REACH-SCOPED like the pheromone filter: three icons in the
-// header pick local (this page) / children (this page and below) / global
-// (the whole hive), matched against each record's `route`. The current
+// The list is REACH-SCOPED like the pheromone filter: three icons in the reach
+// row under the header pick local (this page) / children (this page and below)
+// / global (the whole hive), matched against each record's `route`. The current
 // location re-reads on every `navigation:guard-end`, so navigating with the
 // panel open re-filters live. Non-sticky — each session opens at 'local'.
 //

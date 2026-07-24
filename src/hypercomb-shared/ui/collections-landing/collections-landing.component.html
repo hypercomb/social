@@ -1,97 +1,144 @@
 @if (open()) {
-  <div class="landing" role="dialog" [attr.aria-label]="'collections-landing.title' | t">
-    <button class="landing-close mat-sym" type="button" (click)="close()"
-            [attr.aria-label]="'collections-landing.close' | t" [title]="'collections-landing.close' | t">
-      close
-    </button>
+  <aside
+    class="collections-panel"
+    hcDockInset="right"
+    hcDockedPanel="collections-landing"
+    dockSide="right"
+    [minWidth]="240"
+    [maxWidth]="520"
+    [defaultWidth]="300"
+    data-consumes-wheel
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'collections-landing.title' | t"
+  >
+    <header class="collections-header">
+      <div class="collections-heading">
+        <span class="collections-title">{{ 'collections-landing.title' | t }}</span>
+        @if (collections().length > 0) {
+          <span class="collections-total">{{ visibleCollections().length }}</span>
+        }
+      </div>
+      <button class="collections-close mat-sym" type="button" (click)="close()"
+              [attr.aria-label]="'collections-landing.close' | t" [title]="'collections-landing.close' | t">
+        close
+      </button>
+    </header>
 
-    <div class="landing-scroll">
-      <div class="landing-inner">
-        <header class="landing-head">
-          <div class="landing-heading">
-            <h1 class="landing-title">{{ 'collections-landing.title' | t }}</h1>
-            @if (visibleCollections().length > 0) {
-              <span class="landing-count">{{ visibleCollections().length }}</span>
-            }
-          </div>
-          <p class="landing-lede">{{ 'collections-landing.lede' | t }}</p>
-        </header>
-
-        <!-- create a new referenceable collection — the welcome's whole point -->
-        <div class="create">
-          @if (creating()) {
-            <form class="create-row" (submit)="$event.preventDefault(); create(nameField)">
-              <input #nameField class="create-input" type="text" autocomplete="off" autofocus
-                     [placeholder]="'collections-landing.placeholder' | t"
-                     [attr.aria-label]="'collections-landing.placeholder' | t" />
-              <button class="create-submit" type="submit">{{ 'collections-landing.create' | t }}</button>
-            </form>
-          } @else {
-            <button class="create-open" type="button" (click)="toggleCreate()">
-              <span class="mat-sym">add</span>
-              <span>{{ 'collections-landing.new' | t }}</span>
-            </button>
+    <!-- Filter. The name field narrows THIS list; a keyword chip drives the
+         shared tags:filter, so the hive flattens to matching tiles too. -->
+    @if (collections().length > 0) {
+      <div class="filter">
+        <div class="filter-field">
+          <span class="mat-sym filter-icon" aria-hidden="true">search</span>
+          <input class="filter-input" type="text" autocomplete="off"
+                 [value]="query()"
+                 (input)="onQuery($any($event.target).value)"
+                 [placeholder]="'collections-landing.filter' | t"
+                 [attr.aria-label]="'collections-landing.filter' | t" />
+          @if (hasFilter()) {
+            <button class="filter-clear mat-sym" type="button" (click)="clearFilter()"
+                    [attr.aria-label]="'collections-landing.filter-clear' | t"
+                    [title]="'collections-landing.filter-clear' | t">close</button>
           }
         </div>
 
-        @if (visibleCollections().length === 0) {
-          <p class="landing-empty">{{ 'collections-landing.empty' | t }}</p>
-        } @else {
-          <ul class="landing-grid" role="list">
-            @for (name of visibleCollections(); track name) {
-              <li>
-                <div class="set-card" [class.is-renaming]="renaming() === name" [style.--accent]="accent(name)">
-                  <button class="set-open" type="button" (click)="openCollection(name)"
-                          [attr.aria-label]="name">
-                    <span class="set-hex">
-                      @if (images().get(name); as img) {
-                        <img class="set-hex-img" [src]="img" alt="" decoding="async" />
-                      } @else {
-                        <span class="set-hex-fallback">
-                          <span class="set-monogram" aria-hidden="true">{{ monogram(name) }}</span>
-                        </span>
-                      }
-                    </span>
-                    @if (renaming() !== name) {
-                      <span class="set-name">{{ name }}</span>
-                    }
-                    @if (tagsFor(name).length > 0) {
-                      <span class="set-tags" aria-hidden="true">
-                        @for (tag of tagsFor(name); track tag) {
-                          <span class="set-tag" [style.--tag-color]="tagColor(tag)">{{ tag }}</span>
-                        }
-                      </span>
-                    }
-                  </button>
-
-                  @if (renaming() === name) {
-                    <form class="set-rename" (submit)="$event.preventDefault(); renameCollection(name, renameField)">
-                      <input #renameField class="set-rename-input" type="text" [value]="name" autocomplete="off"
-                             [attr.aria-label]="'collections-landing.rename' | t"
-                             (keydown.escape)="cancelRename()" (blur)="cancelRename()" />
-                    </form>
-                  }
-
-                  @if (renaming() !== name) {
-                    <div class="set-actions">
-                      <button class="set-action" type="button" (click)="startRename(name, $event)"
-                              [attr.aria-label]="'collections-landing.rename' | t" [title]="'collections-landing.rename' | t">
-                        <span class="mat-sym">edit</span>
-                      </button>
-                      @if (manageable(name)) {
-                        <button class="set-action set-action-danger" type="button" (click)="deleteCollection(name)"
-                                [attr.aria-label]="'collections-landing.delete' | t" [title]="'collections-landing.delete' | t">
-                          <span class="mat-sym">delete</span>
-                        </button>
-                      }
-                    </div>
-                  }
-                </div>
-              </li>
+        @if (allTags().length > 0) {
+          <div class="filter-tags" role="group" [attr.aria-label]="'collections-landing.filter-tags' | t">
+            @for (tag of allTags(); track tag) {
+              <button class="filter-tag" type="button"
+                      [class.is-active]="isTagActive(tag)"
+                      [style.--tag-color]="tagColor(tag)"
+                      [attr.aria-pressed]="isTagActive(tag)"
+                      (click)="toggleTag(tag)">{{ tag }}</button>
             }
-          </ul>
+          </div>
         }
       </div>
+    }
+
+    <div class="collections-scroll">
+      <!-- create a new referenceable collection — the welcome's whole point -->
+      <div class="create">
+        @if (creating()) {
+          <form class="create-row" (submit)="$event.preventDefault(); create(nameField)">
+            <input #nameField class="create-input" type="text" autocomplete="off" autofocus
+                   [placeholder]="'collections-landing.placeholder' | t"
+                   [attr.aria-label]="'collections-landing.placeholder' | t" />
+            <button class="create-submit" type="submit">{{ 'collections-landing.create' | t }}</button>
+          </form>
+        } @else {
+          <button class="create-open" type="button" (click)="toggleCreate()">
+            <span class="mat-sym">add</span>
+            <span>{{ 'collections-landing.new' | t }}</span>
+          </button>
+        }
+      </div>
+
+      @if (collections().length === 0) {
+        <!-- First run: the welcome is the whole panel. Once a collection
+             exists it gets out of the way and the list takes over. -->
+        <div class="welcome">
+          <p class="welcome-lede">{{ 'collections-landing.lede' | t }}</p>
+          <p class="welcome-empty">{{ 'collections-landing.empty' | t }}</p>
+        </div>
+      } @else if (visibleCollections().length === 0) {
+        <p class="no-match">{{ 'collections-landing.no-match' | t }}</p>
+      } @else {
+        <ul class="collections-grid" role="list">
+          @for (name of visibleCollections(); track name) {
+            <li>
+              <div class="set-card" [class.is-renaming]="renaming() === name" [style.--accent]="accent(name)">
+                <button class="set-open" type="button" (click)="openCollection(name)"
+                        [attr.aria-label]="name">
+                  <span class="set-hex">
+                    @if (images().get(name); as img) {
+                      <img class="set-hex-img" [src]="img" alt="" decoding="async" />
+                    } @else {
+                      <span class="set-hex-fallback">
+                        <span class="set-monogram" aria-hidden="true">{{ monogram(name) }}</span>
+                      </span>
+                    }
+                  </span>
+                  @if (renaming() !== name) {
+                    <span class="set-name">{{ name }}</span>
+                  }
+                  @if (tagsFor(name).length > 0) {
+                    <span class="set-tags" aria-hidden="true">
+                      @for (tag of tagsFor(name); track tag) {
+                        <span class="set-tag" [style.--tag-color]="tagColor(tag)">{{ tag }}</span>
+                      }
+                    </span>
+                  }
+                </button>
+
+                @if (renaming() === name) {
+                  <form class="set-rename" (submit)="$event.preventDefault(); renameCollection(name, renameField)">
+                    <input #renameField class="set-rename-input" type="text" [value]="name" autocomplete="off"
+                           [attr.aria-label]="'collections-landing.rename' | t"
+                           (keydown.escape)="cancelRename()" (blur)="cancelRename()" />
+                  </form>
+                }
+
+                @if (renaming() !== name) {
+                  <div class="set-actions">
+                    <button class="set-action" type="button" (click)="startRename(name, $event)"
+                            [attr.aria-label]="'collections-landing.rename' | t" [title]="'collections-landing.rename' | t">
+                      <span class="mat-sym">edit</span>
+                    </button>
+                    @if (manageable(name)) {
+                      <button class="set-action set-action-danger" type="button" (click)="deleteCollection(name)"
+                              [attr.aria-label]="'collections-landing.delete' | t" [title]="'collections-landing.delete' | t">
+                        <span class="mat-sym">delete</span>
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      }
     </div>
-  </div>
+  </aside>
 }

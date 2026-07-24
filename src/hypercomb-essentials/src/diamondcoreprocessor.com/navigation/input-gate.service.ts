@@ -39,6 +39,14 @@ export class InputGate extends EventTarget {
    *  locks held by other overlays. */
   lockedBy = (owner: string): boolean => this.#lockOwners.has(owner)
 
+  /** True when `owner`'s lock is the ONLY thing holding the gate — nobody else
+   *  locking, no live gesture claim. Lets a consumer that only cares about
+   *  MODAL locks (an overlay is up) ignore a lock that merely freezes the
+   *  viewport: the layer pin holds the gate so pan/zoom bail, but navigating
+   *  away from a pinned page must still work. */
+  lockedOnlyBy = (owner: string): boolean =>
+    this.#owner === null && this.#lockOwners.size === 1 && this.#lockOwners.has(owner)
+
   /** Acquire a tile-input lock under `owner`. Idempotent per owner. While
    *  any lock is held, claim() is rejected and wheel zoom bails — tiles
    *  can't pan/zoom/select. Default owner keeps legacy no-arg callers

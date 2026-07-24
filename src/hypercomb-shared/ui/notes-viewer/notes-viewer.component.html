@@ -54,7 +54,13 @@
              (click)="depth > 0 ? openChild(note.id, $event) : null"
              [attr.role]="depth > 0 ? 'button' : null"
              [attr.tabindex]="depth > 0 ? 0 : null">
-          <span class="hc-shape-glyph viewer-row-shape" aria-hidden="true"></span>
+          <!-- Mark icon when the note carries one (validated to /^[a-z0-9_]+$/
+               before it can reach a note layer), else the legacy shape glyph. -->
+          @if (note.mark) {
+            <span class="mat-sym viewer-row-mark" aria-hidden="true">{{ note.mark }}</span>
+          } @else {
+            <span class="hc-shape-glyph viewer-row-shape" aria-hidden="true"></span>
+          }
           <p class="viewer-row-text">{{ note.text }}</p>
         </div>
         @for (child of note.children; track child.id) {

@@ -10,7 +10,8 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed, referenceTargetForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
+import { MOBILE_FRIENDLY } from '../../preferences/mobile-pheromones.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
@@ -470,7 +471,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -737,6 +738,19 @@ export class ShowCellDrone extends Drone {
   #launcherHexagons = (() => {
     try { return localStorage.getItem('hc:launcher-hexagons') === '1' } catch { return false }
   })()
+  // ── mobile gate (documentation/mobile-experience-plan.md §5) ──
+  // When mobile mode is active the viewer loads ONLY cells carrying the
+  // `mobile:friendly` pheromone — or on the path to one (corridors). Excluded
+  // names are DELETED from `union` before ordering, so their resources are
+  // never fetched (not merely hidden after load). Seeded from MobileModeService
+  // and kept live by the `mobile:mode` EffectBus subscription.
+  #mobileMode = false
+  // Absolute paths ("a/b/c") that are marked OR have a marked descendant.
+  // Populated by #scanMobileReach (async, cross-page) so the sync union filter
+  // can keep unmarked corridors to marked content navigable.
+  #mobileReach: Set<string> | null = null
+  // Location key the reach scan last ran for — a moved location restales it.
+  #mobileScanKey: string | null = null
   // Names of cells in the current render that came from an ephemeral
   // tile source (sync preview, not adopted to OPFS). Used by the pinned
   // index writer to skip per-cell OPFS writes that would NotFound, and
@@ -883,6 +897,12 @@ export class ShowCellDrone extends Drone {
    *  already gone — while the participant builds the list. Nothing is written
    *  until the commit, so this is pure intent, cleared on cancel. */
   #tagRemovalStaged = new Set<string>()
+  /** Tiles painted so far by the armed pheromone brush (PheromoneTilesDrone).
+   *  The mirror of the staged-removal set: those tiles are losing a keyword and
+   *  render as future-removes, these just GAINED one and render as future-adds.
+   *  Without it painting is blind — the click writes and nothing on the hive
+   *  says so. Cleared when the brush is put down. */
+  #tagApplyPainted = new Set<string>()
   /** When cursor is rewound, holds cell→propertiesSig overrides from content-state ops. */
   #cursorPropsOverride: Map<string, string> | null = null
   /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
@@ -2364,6 +2384,16 @@ export class ShowCellDrone extends Drone {
       if ([...segs].join('/') !== this.#filterScanKey) await this.#scanTagsAcrossPages()
     }
 
+    // ── mobile gate reach scan ──────────────────────────────
+    // When the viewer gate is active, precompute which cells are marked or lead
+    // to a mark, so the sync union filter (below) can keep corridors navigable
+    // while dropping unmarked dead-ends before any fetch. One-shot per location.
+    if (this.#mobileMode) {
+      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+      const key = [...segs].join('/')
+      if (key !== this.#mobileScanKey) await this.#scanMobileReach(key)
+    }
+
     // Flatten state describes ONE flatten render and nothing else. Drop it here
     // so an ordinary page can never inherit the previous filter's paths — a
     // stale entry would redirect (or refuse) a click on an unrelated tile. The
@@ -3073,7 +3103,59 @@ export class ShowCellDrone extends Drone {
       }
     }
 
+    // SWARM PRIVACY — inside a swarm your canvas shows ONLY what you chose to
+    // share. World mode (the PREP stage) previews the split by DIMMING the
+    // unshared tiles; the moment you actually join, the preview is over and
+    // the unshared tiles leave the view entirely, so what you look at is what
+    // the swarm looks at ("you wouldn't see your nonshared tiles in a swarm").
+    // Joining exits world mode (mesh-header drops to STAGE_PRIVATE on any
+    // meshPublic change), so the dim never doubles up with this filter.
+    //
+    // Gate = exactly the condition under which our tiles actually leave the
+    // device: master switch on AND room+secret set (the same gate
+    // publishLocalCells and SwarmDrone publish under). Leaving the swarm
+    // flips it back and `mesh:public-changed` repaints, so private tiles
+    // return at once — nothing is deleted, only filtered out of this pass.
+    //
+    // OWN tiles only. A peer/ephemeral contribution is somebody else's
+    // sharing decision, already vetted by THEIR isCellPublic before it left
+    // their device; running our flag over it would blank the swarm. A name
+    // that is both ours and peer-published stays for the same reason.
+    if (this.#publicMode && this.#space && this.#secret) {
+      const shareLocation = String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+      for (const name of union) {
+        if (!localCellSet.has(name)) continue
+        if (peerCellSet.has(name) || ephemeralCellSet.has(name)) continue
+        if (!isCellPublic(shareLocation, name)) union.delete(name)
+      }
+    }
 
+    // ── MOBILE GATE ─────────────────────────────────────────
+    // The viewer experience loads ONLY mobile-marked content. A name survives
+    // iff it carries `mobile:friendly` directly, or it is on the path to a
+    // marked descendant (a corridor — kept navigable so marked leaves under
+    // unmarked parents stay reachable). Everything else is DELETED here, before
+    // ordering and before any image fetch — never loaded, not hidden after.
+    // Composes with (never replaces) the hide/block/privacy filters above, and
+    // applies to peer tiles identically (their tags ride their layers).
+    if (this.#mobileMode) {
+      const locKey = passSegments.join('/')
+      const total = union.size    // what a desktop pass would show here
+      let kept = 0
+      for (const name of union) {
+        const path = locKey ? `${locKey}/${name}` : name
+        const direct = this.#tagsFor(name).includes(MOBILE_FRIENDLY)
+        const corridor = this.#mobileReach?.has(path) ?? false
+        if (direct || corridor) { kept++; continue }
+        union.delete(name)
+        ephemeralCellSet.delete(name)
+        peerCellSet.delete(name)
+      }
+      // Feeds the mobile empty-state prompt: `total` distinguishes "this page
+      // is genuinely empty" (stay quiet) from "tiles exist but none are marked"
+      // (explain + offer the sweep). See mobile-empty-prompt.drone.ts.
+      this.emitEffect('mobile:gate', { active: true, shown: kept, total })
+    }
 
     // Source breakdown for this pass — proves WHERE each tile comes from
     // (layer vs registry vs mesh) so a stray tile (e.g. a phantom "group" in
@@ -3956,6 +4038,98 @@ export class ShowCellDrone extends Drone {
     return [...out]
   }
 
+  /** Walk the current subtree and collect every absolute path that carries
+   *  `mobile:friendly` OR has a descendant that does. The mobile gate keeps
+   *  exactly these names, so corridors to marked content stay navigable while
+   *  unmarked dead-ends are dropped before any fetch. Mirrors
+   *  #scanTagsAcrossPages' walk (sign path → read layer → recurse children).
+   *  One-shot per location (gated by #mobileScanKey); best-effort — on any
+   *  failure the gate falls back to the synchronous direct-mark check. */
+  async #scanMobileReach(scanKey: string): Promise<void> {
+    this.#mobileScanKey = scanKey
+    const reach = new Set<string>()
+    this.#mobileReach = reach
+
+    const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+      sign: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+      currentLayerAt: (sig: string) => Promise<Record<string, unknown> | null>
+      getLayerBySig: (sig: string) => Promise<{ name?: string } | null>
+    } | undefined
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+      getResource: (sig: string) => Promise<Blob | null>
+    } | undefined
+    if (!history?.sign || !history?.currentLayerAt || !history?.getLayerBySig || !store?.getResource) return
+
+    const SIG_RE = /^[0-9a-f]{64}$/
+    const MAX_DEPTH = 32
+    const lineage = this.resolve<any>('lineage')
+    const rootSegs: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
+
+    // Does this layer carry the `mobile:friendly` tag decoration?
+    const isMarked = async (layer: Record<string, unknown>): Promise<boolean> => {
+      const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
+      for (const sig of decorations) {
+        if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
+        try {
+          const blob = await store.getResource(sig)
+          if (!blob) continue
+          const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: { name?: unknown } }
+          if (rec?.kind === 'tag' && rec.payload?.name === MOBILE_FRIENDLY) return true
+        } catch { /* malformed decoration — skip */ }
+      }
+      return false
+    }
+
+    // Returns whether `path`'s subtree (inclusive) contains a mark, and records
+    // every non-root path that does into `reach`. The scope root is a container
+    // (its children ARE the current page), so it is never itself recorded.
+    const walk = async (path: string[], depth: number): Promise<boolean> => {
+      if (depth > MAX_DEPTH) return false
+      let layer: Record<string, unknown> | null
+      try {
+        const sig = await history.sign({ explorerSegments: () => path })
+        layer = await history.currentLayerAt(sig)
+      } catch { return false }
+      if (!layer) return false
+
+      const atRoot = path.length === rootSegs.length
+      const selfMarked = atRoot ? false : await isMarked(layer)
+
+      const rawChildren = Array.isArray(layer['children']) ? layer['children'] as unknown[] : []
+      let childHasMark = false
+      for (const entry of rawChildren) {
+        // Children may be bare layer SIGNATURES (content-addressed) or objects;
+        // the navigable segment is the child's NAME, resolved via getLayerBySig
+        // when the entry is a sig. Mirrors #scanTagsAcrossPages' child walk.
+        const s = typeof entry === 'string'
+          ? entry.trim()
+          : (entry && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string')
+            ? (entry as { name: string }).name.trim()
+            : ''
+        if (!s) continue
+        let childName = s
+        if (SIG_RE.test(s)) {
+          try {
+            const child = await history.getLayerBySig(s)
+            if (!child?.name) continue
+            childName = String(child.name)
+          } catch { continue }
+        }
+        if (await walk([...path, childName], depth + 1)) childHasMark = true
+      }
+
+      const contains = selfMarked || childHasMark
+      if (contains && !atRoot) reach.add(path.join('/'))
+      return contains
+    }
+
+    try {
+      await walk(rootSegs, 0)
+    } catch {
+      /* best-effort — gate falls back to direct marks */
+    }
+  }
+
   /** Emit render:tags (name+count) for the controls-bar tag list — the tags
    *  defining the current page. There is no on-tile tag icon; the bottom tag
    *  list lights up per-tile on hover (tile:hover-tags). */
@@ -4366,6 +4540,16 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // title:indexed — a cell gained, changed or lost its display title. The
+    // atlas keys baked glyphs by the RAW label, so the cached entry still holds
+    // the old text; flush it (same call the locale switch uses) before forcing
+    // the geometry rebuild, or the tile keeps drawing its previous name.
+    this.onEffect('title:indexed', () => {
+      this.atlas?.invalidateLabels()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
     // committing layer state so that any render triggered by the cascade
     // (cursor.onNewLayer) sees post-mutation OPFS. We use it here to
@@ -4613,6 +4797,48 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // tags:apply-pending — the pheromone brush's painted set. Same shape and
+    // same purely-visual contract as the removal staging above, opposite sign:
+    // each tile the brush has landed on marks as a future-ADD, so the keyword
+    // is visibly arriving as you click rather than only showing in a toast.
+    this.onEffect<{ cells?: string[]; active?: boolean }>('tags:apply-pending', ({ cells, active }) => {
+      const next = new Set(active === false ? [] : (Array.isArray(cells) ? cells : []))
+      if (next.size === this.#tagApplyPainted.size
+        && [...next].every(l => this.#tagApplyPainted.has(l))) return
+      this.#tagApplyPainted = next
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // mobile:mode effect — the viewer gate. Flipping mode restales the reach
+    // scan and forces a fresh render; the gate itself runs inline in the pass.
+    // Seed synchronously in case the service emitted before we subscribed
+    // (EffectBus replays the last value, so this is belt-and-suspenders).
+    try {
+      const mm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/MobileMode') as { active?: boolean } | undefined
+      if (mm && typeof mm.active === 'boolean') this.#mobileMode = mm.active
+    } catch { /* service not ready — subscription will sync */ }
+    this.onEffect<{ active: boolean }>('mobile:mode', ({ active }) => {
+      const next = !!active
+      if (next === this.#mobileMode) return
+      this.#mobileMode = next
+      this.#mobileScanKey = null
+      this.#mobileReach = null
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // A programmatic mark change (e.g. /mobile sweep, auto-deposit) deposits
+    // tags via DecorationService directly, bypassing the painter's tags:apply
+    // invalidation. Clear the render cache and restale the reach scan so newly
+    // marked tiles appear without needing a navigation.
+    this.onEffect('mobile:marks-changed', () => {
+      this.#mobileScanKey = null
+      this.#mobileReach = null
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // tags:filter effect — tag flatten, scoped to page / children / global
     this.onEffect<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', ({ active, scope }) => {
       const wasFiltering = this.filterTags.size > 0
@@ -4697,10 +4923,19 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    // listen for space (room) and secret changes — recompute signature
+    // listen for space (room) and secret changes — recompute signature.
+    // Both also drop #layerCellsCache: room+secret are half the swarm gate,
+    // so crossing them changes MEMBERSHIP (the swarm-privacy filter starts or
+    // stops dropping unshared tiles) and flips the zone-scoped hide keys.
+    // Blanking renderedLocationKey alone makes the next pass look like a NAV
+    // pass, which takes the synchronous cached-cells fast path (:2156) and
+    // would repaint the pre-join cells — unfiltered — until something else
+    // invalidated. Credential changes are rare; re-deriving the cells is cheap.
     this.onEffect<{ room: string }>('mesh:room', ({ room }) => {
       if (this.#space !== room) {
         this.#space = room
+        this.#layerCellsCache.clear()
+        this.renderedCellsKey = ''
         this.renderedLocationKey = ''
         this.requestRender()
       }
@@ -4709,6 +4944,8 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
       if (this.#secret !== secret) {
         this.#secret = secret
+        this.#layerCellsCache.clear()
+        this.renderedCellsKey = ''
         this.renderedLocationKey = ''
         this.requestRender()
       }
@@ -5105,8 +5342,11 @@ export class ShowCellDrone extends Drone {
       // a fresh authoritative snapshot so the latest-snapshot-wins consumer
       // drops a now-private tile at once instead of unioning it for ~10 min.
       void this.refreshMeshCells('', true)
-      // Render only changes in world mode (the dim state of unshared tiles).
-      if (!this.#worldMode) return
+      // Render changes in world mode (the dim state of unshared tiles) AND
+      // inside a swarm, where the flag decides MEMBERSHIP: the swarm-privacy
+      // filter drops an unshared tile from the pass, so a flip either adds it
+      // back or takes it away. Everywhere else the flag is invisible.
+      if (!this.#worldMode && !(this.#publicMode && this.#space && this.#secret)) return
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.requestRender()
@@ -5461,11 +5701,21 @@ export class ShowCellDrone extends Drone {
    * Attach the i18n label resolver to the label atlas so cell directory names
    * are rendered as localized display text when a translation is registered.
    */
+  /** The address→display seam. A cell's directory name is its ADDRESS, and
+   *  what gets BAKED is that address READ IN THE CURRENT LOCALE: this tile's
+   *  own title for the locale, else the shared i18n resolution (`cell.<name>`
+   *  overrides + catalogs), else the address itself. Ordering the tile's own
+   *  title first is what makes a rename a decoration rather than a re-address
+   *  (see decoration-kind-index's title sub-index).
+   *
+   *  `locale` is read per call, not captured: `locale:changed` flushes the
+   *  atlas and every label re-resolves through here, so a language switch
+   *  swaps titles with no extra wiring. */
   private readonly attachLabelResolver = (atlas: HexLabelAtlas): void => {
     const i18n = get<I18nProvider>(I18N_IOC_KEY)
-    if (i18n) {
-      atlas.setLabelResolver((directoryName: string) => i18n.resolveCell(directoryName))
-    }
+    atlas.setLabelResolver((directoryName: string) =>
+      titleForLabel(directoryName, i18n?.locale ?? 'en')
+      || (i18n ? i18n.resolveCell(directoryName) : directoryName))
   }
 
   private readonly rebuildRenderResources = (renderer: unknown): void => {
@@ -6309,8 +6559,9 @@ export class ShowCellDrone extends Drone {
       // means. Ahead of the cursor divergence marks — an armed removal is
       // what the participant is looking at right now.
       const div = this.#tagRemovalStaged.has(label) ? 2
-        : this.#divergenceFutureAdds.has(label) ? 1
-          : this.#divergenceFutureRemoves.has(label) ? 2 : 0
+        : this.#tagApplyPainted.has(label) ? 1
+          : this.#divergenceFutureAdds.has(label) ? 1
+            : this.#divergenceFutureRemoves.has(label) ? 2 : 0
       // Heat ring = max(transient activity heat, steady peer-presence glow).
       // The activity pulse (new-cell fade, hover) still plays on top; the
       // presence glow keeps a tile lit while peers are exploring inside it.

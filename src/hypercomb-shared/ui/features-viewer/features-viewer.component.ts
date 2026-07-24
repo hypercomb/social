@@ -34,6 +34,7 @@
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
@@ -267,6 +268,15 @@ export class FeaturesViewerComponent implements OnDestroy {
     return n
   })
 
+  /** Canvas-selection response (documentation/selection-tool-windows.md) —
+   *  distinct from `selectedKeys`/`selectedCount`, which are this panel's OWN
+   *  row selection. `selection:has-features` is the behavior-side selectivity,
+   *  computed + replayed by show-features.drone. */
+  readonly canvasSelectionCount = signal(0)
+  readonly canvasSelectionHasFeatures = signal(false)
+  readonly showCanvasSelectionAffordance = computed(() =>
+    this.canvasSelectionCount() > 0 && this.canvasSelectionHasFeatures())
+
   #cleanups: (() => void)[] = []
 
   /** Last navigation path seen (joined) — the follow-navigation handler only
@@ -274,6 +284,10 @@ export class FeaturesViewerComponent implements OnDestroy {
   #lastNavKey = ''
 
   constructor() {
+    this.#cleanups.push(onSelection(({ selected }) => this.canvasSelectionCount.set(selected.length)))
+    this.#cleanups.push(EffectBus.on<{ value?: boolean }>('selection:has-features', (p) => {
+      this.canvasSelectionHasFeatures.set(p?.value === true)
+    }))
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {
       if (!p?.cell) return
       // Mutually exclusive with the Files panel — they share the right-side
@@ -495,6 +509,13 @@ export class FeaturesViewerComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#clearDownloadLeash()
+  }
+
+  /** Re-target this window at the canvas selection — the verb the retired
+   *  vertical menu emitted; show-features.drone answers with `features:open`
+   *  for the first selected feature-carrying tile. */
+  readonly openSelectionFeatures = (): void => {
+    EffectBus.emit('controls:action', { action: 'features' })
   }
 
   close(): void {

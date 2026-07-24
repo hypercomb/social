@@ -8,15 +8,24 @@
 // Listed in mount order (the `order` field on each registration is what the
 // host actually sorts by — this list is for humans).
 
-import '../selection-context-menu/selection-context-menu.component'
+// The floating vertical selection menu that used to lead this list is RETIRED —
+// selection flows into each behavior's own tool window now
+// (documentation/selection-tool-windows.md).
 import '../history-viewer/history-viewer.component'
 import '../notes-strip/notes-strip.component'
-import '../website-landing/website-landing.component'
-import '../collections-landing/collections-landing.component'
+// ONE index panel for every aggregate — Collections, Websites, and anything
+// that registers a source. The per-aggregate landings it replaced (
+// `website-landing/`, `collections-landing/`) are gone; an aggregate now
+// declares a source and inherits the panel's chrome AND its drag-to-create-
+// meaning. See aggregate-index/aggregate-source.ts.
+import '../aggregate-index/aggregate-index.component'
+import '../aggregate-index/sources/collections.source'
+import '../aggregate-index/sources/websites.source'
 import '../notes-viewer/notes-viewer.component'
 import '../files-viewer/files-viewer.component'
 import '../features-viewer/features-viewer.component'
 import '../tags-viewer/tags-viewer.component'
+import '../pheromone-tiles/pheromone-tiles.component'
 import '../observe-viewer/observe-viewer.component'
 import '../clipboard-panel/clipboard-panel.component'
 import '../contact-card/contact-form.component'

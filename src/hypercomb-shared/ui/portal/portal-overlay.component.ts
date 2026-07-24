@@ -129,9 +129,17 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
    *  `logicalRootSig` when the portal opens and flagging when a later projection
    *  differs. Same value-space on both sides (logicalRootSig vs logicalRootSig),
    *  so there are no cross-namespace false positives. Drives Done alongside the
-   *  content diff; apply() → `actions:available` already resyncs the package. */
+   *  content diff; apply() → `actions:available` already resyncs the package.
+   *
+   *  The baseline is `undefined` until a projection is SEEN and `null` when the
+   *  seen projection is an EMPTY install. Those must stay distinct: on a hive
+   *  with nothing installed yet the installer projects `logicalRootSig: null`,
+   *  so collapsing both onto `null` made the participant's FIRST opt-in look
+   *  like the still-missing baseline — it was absorbed instead of flagged, and
+   *  Done never appeared on a first-run install (only a second change surfaced
+   *  it). Presence of a snapshot, not truthiness of the sig, is the signal. */
   pendingPackageChange = false
-  #openLogicalBaseline: string | null = null
+  #openLogicalBaseline: string | null | undefined = undefined
 
   /** Headless (invisible) install: the DCP runs in an off-screen iframe with no
    *  chrome and no gate lock, resolves + installs the branch's staged code
@@ -360,19 +368,26 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     // and only a SUBSEQUENT, different projection — the participant enabling a
     // new bee/worker/drone — flags a pending commit.
     const cur = this.#snapshotLogicalRootSig()
-    if (this.#openLogicalBaseline === null && cur !== null) this.#openLogicalBaseline = cur
+    if (this.#openLogicalBaseline === undefined && cur !== undefined) this.#openLogicalBaseline = cur
     this.pendingPackageChange =
-      this.#openLogicalBaseline !== null && cur !== null && cur !== this.#openLogicalBaseline
+      this.#openLogicalBaseline !== undefined && cur !== undefined && cur !== this.#openLogicalBaseline
     this.#cdr.detectChanges()
   }
 
-  /** The installer's current logical-config root signature (lowercased), or
-   *  null if no snapshot has been projected yet. Resolved lazily via window.ioc
-   *  (shared must never import from modules). */
-  #snapshotLogicalRootSig(): string | null {
+  /** The installer's current logical-config root signature (lowercased).
+   *
+   *  Three-valued on purpose — an EMPTY install and a MISSING projection are
+   *  different facts and the baseline comparison depends on telling them apart:
+   *    undefined — no snapshot projected yet (nothing known)
+   *    null      — a snapshot exists and the logical install is empty
+   *    string    — the projected root sig
+   *  Resolved lazily via window.ioc (shared must never import from modules). */
+  #snapshotLogicalRootSig(): string | null | undefined {
     const store = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/RegistrySnapshot') as
       { snapshot?: { logicalRootSig?: string | null } | null } | undefined
-    const sig = store?.snapshot?.logicalRootSig
+    const snapshot = store?.snapshot
+    if (!snapshot) return undefined
+    const sig = snapshot.logicalRootSig
     return typeof sig === 'string' && sig ? sig.toLowerCase() : null
   }
 
@@ -622,7 +637,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#activeTarget = null
     this.#activeRequest = null
     this.pendingPackageChange = false
-    this.#openLogicalBaseline = null
+    this.#openLogicalBaseline = undefined
     this.#cdr.detectChanges()
     // Per-branch outcome — a headless install is invisible, so its end must be
     // said out loud: accepted (apply) or discarded (any passive close).

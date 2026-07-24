@@ -10,6 +10,7 @@
 // to open for a specific element. Registered at `@hypercomb.social/IconEditMode`.
 
 import { EffectBus } from '@hypercomb/core'
+import { requestIconPick } from './icon-pick'
 
 export const LONG_PRESS_MS = 5000
 
@@ -34,10 +35,13 @@ export class IconEditMode extends EventTarget {
 
   toggle(): void { this.#on ? this.exit() : this.enter() }
 
-  /** A participating icon was tapped while in edit mode — open the picker for it. */
-  requestPick(id: string): void {
-    if (!id) return
-    EffectBus.emit('icon:pick-request', { id })
+  /** A participating icon was tapped while in edit mode — open the picker for
+   *  it. Write-through: the pick lands in the icon override store and every
+   *  surface re-resolves live, so callers can ignore the promise. Awaiting it
+   *  gives the chosen name (null if the user cancelled). */
+  requestPick(id: string): Promise<string | null> {
+    if (!id) return Promise.resolve(null)
+    return requestIconPick({ id })
   }
 
   #broadcast(): void {

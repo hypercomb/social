@@ -318,12 +318,17 @@
   .mesh-modal-btn { padding: 0.55rem 1.1rem; font-size: 0.72rem; }
 }
 
-@include phone-only {
+// Phones are small in EITHER dimension — the width-only `phone-only` mixin
+// misses a phone held in landscape (wide but short), which would fall back to
+// the centered desktop modal with sub-16px inputs (iOS zooms the page on
+// focus). Same query the rest of the mobile chrome keys on.
+@media (max-width: 599px), (max-height: 449px) {
   .mesh-modal-panel {
     top: auto;
     bottom: 0;
     left: 0;
     right: 0;
+    max-height: min(92dvh, 34rem);
     transform: none;
     width: 100%;
     border-radius: 12px 12px 0 0;
@@ -331,9 +336,31 @@
     animation: mesh-modal-panel-enter-phone 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
+  // Paired with the panel's max-height: a long saved-rooms list scrolls inside
+  // the sheet instead of pushing the action row off-screen.
+  .mesh-modal-body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .mesh-modal-header { padding: 0.85rem 1rem 0.6rem; h3 { font-size: 0.72rem; } }
   .mesh-modal-close { width: 2.5rem; height: 2.5rem; font-size: 1.1rem; }
   .mesh-modal-input { font-size: 16px; padding: 0.65rem 0.8rem; }
   .mesh-modal-eye { width: 2.6rem; }
   .mesh-modal-btn { padding: 0.6rem 1.2rem; font-size: 0.74rem; min-height: 2.5rem; }
+}
+
+// ── reduced motion: the resting state is the truth ────
+// Both enter animations park their `from` frame off-screen / transparent and
+// rely on `forwards` to land the panel. In any environment where the animation
+// does not run — `prefers-reduced-motion`, a throttled/hidden renderer — that
+// from-frame would hold FOREVER and the join dialog would be invisible and
+// unusable. With animations off, the resting styles above already describe the
+// correct final state (centered panel / bottom sheet), so the dialog simply
+// appears in place.
+@media (prefers-reduced-motion: reduce) {
+  .mesh-modal-backdrop,
+  .mesh-modal-panel {
+    animation: none;
+  }
 }

@@ -79,10 +79,27 @@ function normalizeShape(value: unknown): ShapeId | null {
   return typeof value === 'string' && SHAPE_IDS.has(value) ? (value as ShapeId) : null
 }
 
+/** A note's MARK — a Material icon name from the participant's own mark
+ *  palette (the sign('notes:marks') pool). The note stores only the icon
+ *  name; what it MEANS, and whether it makes the row a heading or a list
+ *  item, lives on the palette entry, so re-roling an icon restyles every
+ *  note carrying it.
+ *
+ *  Supersedes `shape` (the fixed six-glyph set) for new notes. `shape` is
+ *  kept on the layer so notes written before marks existed still paint. */
+const MARK_RE = /^[a-z0-9_]{1,48}$/
+
+function normalizeMark(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const clean = value.trim()
+  return MARK_RE.test(clean) ? clean : null
+}
+
 /** Storage shape on disk — the canonical JSON every note blob holds. */
 type NoteLayer = {
   note: string
   shape: ShapeId | null
+  mark: string | null
   children: string[]
 }
 
@@ -98,6 +115,7 @@ export type Note = {
   id: string
   text: string
   shape: ShapeId | null
+  mark: string | null
   children: Note[]
 }
 
@@ -126,6 +144,11 @@ export class NotesService {
   // travels through the command-line's text-only payload without
   // entering the command-line's surface. Reset to null on capture exit.
   #activeShape: ShapeId | null = null
+
+  // Latest MARK staged by the strip's icon rail via `notes:active-mark`.
+  // Same channel as #activeShape: the strip's visual choice rides along
+  // with the text-only commit payload. Null = the note carries no mark.
+  #activeMark: string | null = null
 
   // Memoized cell-locationSig keyed by `parent/cellLabel`. Cleared on
   // lineage navigation (same cellLabel resolves to a different location
@@ -175,7 +198,13 @@ export class NotesService {
       this.#activeShape = normalizeShape(payload?.shape)
     })
 
-    EffectBus.on<{ cellLabel: string; text: string; shape?: unknown; editId?: string }>('note:commit', (payload) => {
+    // Mark counterpart of `notes:active-shape` — the icon rail emits this
+    // whenever the user picks or clears a mark. Last-value wins.
+    EffectBus.on<{ mark?: unknown }>('notes:active-mark', (payload) => {
+      this.#activeMark = normalizeMark(payload?.mark)
+    })
+
+    EffectBus.on<{ cellLabel: string; text: string; shape?: unknown; mark?: unknown; editId?: string }>('note:commit', (payload) => {
       const text = (payload?.text ?? '').trim()
       if (!payload?.cellLabel || !text) return
       // Prefer an explicit shape on the payload (rare — most paths route
@@ -183,7 +212,11 @@ export class NotesService {
       // cached active shape staged by the strip.
       const payloadShape = normalizeShape(payload.shape)
       const shape = payloadShape ?? this.#activeShape
-      void this.#commit(payload.cellLabel, text, shape, payload.editId)
+      // The mark rides the payload directly (the strip always sends the
+      // rail's current pick, including an explicit null to CLEAR it), so a
+      // payload that carries the key at all wins over the staged value.
+      const mark = 'mark' in (payload as object) ? normalizeMark(payload.mark) : this.#activeMark
+      void this.#commit(payload.cellLabel, text, shape, mark, payload.editId)
     })
 
     EffectBus.on<{ cellLabel: string; noteId: string }>('note:delete', (payload) => {
@@ -307,6 +340,7 @@ export class NotesService {
     cellLabel: string,
     text: string,
     shape: ShapeId | null = null,
+    mark: string | null = null,
   ): Promise<void> {
     const cleanedParents = (parentSegments ?? [])
       .map(s => String(s ?? '').trim())
@@ -315,7 +349,7 @@ export class NotesService {
     const cleanedText = String(text ?? '').trim()
     if (!cleanedLabel || !cleanedText) return
     const segments = [...cleanedParents, cleanedLabel]
-    const sig = await this.#writeNoteLayer(cleanedText, normalizeShape(shape), [])
+    const sig = await this.#writeNoteLayer(cleanedText, normalizeShape(shape), normalizeMark(mark), [])
     await this.#commitCellNotes(segments, (prior) => [...prior, sig])
   }
 
@@ -382,14 +416,14 @@ export class NotesService {
 
   // ── Internal: commit + delete + tree-move flows ──────────────────
 
-  async #commit(cellLabel: string, text: string, shape: ShapeId | null, editId?: string): Promise<void> {
+  async #commit(cellLabel: string, text: string, shape: ShapeId | null, mark: string | null, editId?: string): Promise<void> {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) {
       console.warn('[notes] cannot resolve cell location for', cellLabel)
       return
     }
     const { segments } = resolved
-    const newSig = await this.#writeNoteLayer(text, shape, [])
+    const newSig = await this.#writeNoteLayer(text, shape, mark, [])
     if (editId && SIG_REGEX.test(editId)) {
       await this.#commitCellNotes(segments, (prior) => prior.map(s => s === editId ? newSig : s))
     } else {
@@ -493,7 +527,7 @@ export class NotesService {
     for (const child of note.children) {
       childSigs.push(await this.#materializeNote(child))
     }
-    return await this.#writeNoteLayer(note.text, note.shape, childSigs)
+    return await this.#writeNoteLayer(note.text, note.shape, note.mark, childSigs)
   }
 
   /** Resolve a segments array to its locationSig. Used by tree-mutating
@@ -551,10 +585,10 @@ export class NotesService {
 
   // ── Internal: note layer write ────────────────────────────────────
 
-  async #writeNoteLayer(text: string, shape: ShapeId | null, children: readonly string[]): Promise<string> {
+  async #writeNoteLayer(text: string, shape: ShapeId | null, mark: string | null, children: readonly string[]): Promise<string> {
     const store = get<StoreLike>('@hypercomb.social/Store')
     if (!store) throw new Error('[notes] Store missing on ioc')
-    const layer: NoteLayer = { children: children.slice(), note: text, shape }
+    const layer: NoteLayer = { children: children.slice(), mark, note: text, shape }
     const json = canonicalJSON(layer)
     const sig = await store.putResource(new Blob([json], { type: 'application/json' }))
     this.#cache.set(sig, layer)
@@ -604,7 +638,7 @@ export class NotesService {
       const child = await this.#hydrateAsync(childSig)
       if (child) children.push(child)
     }
-    return { id: sig, text: layer.note, shape: layer.shape, children }
+    return { id: sig, text: layer.note, shape: layer.shape, mark: layer.mark, children }
   }
 
   async #loadNoteLayer(sig: string): Promise<NoteLayer | null> {
@@ -615,15 +649,15 @@ export class NotesService {
 
     // New shape: the sig points at a content-addressed resource holding
     // canonical JSON `{ note, shape, children }`. Try the resource path first.
-    // Legacy resources without `shape` parse with shape: null.
+    // Legacy resources without `shape`/`mark` parse as null for both.
     const parsed = await store.resolve<unknown>(sig)
     if (parsed && typeof parsed === 'object') {
-      const p = parsed as { note?: unknown; shape?: unknown; children?: unknown }
+      const p = parsed as { note?: unknown; shape?: unknown; mark?: unknown; children?: unknown }
       if (typeof p.note === 'string') {
         const children = Array.isArray(p.children)
           ? p.children.filter((c): c is string => typeof c === 'string' && SIG_REGEX.test(c))
           : []
-        const layer: NoteLayer = { children, note: p.note, shape: normalizeShape(p.shape) }
+        const layer: NoteLayer = { children, mark: normalizeMark(p.mark), note: p.note, shape: normalizeShape(p.shape) }
         this.#cache.set(sig, layer)
         return layer
       }
@@ -645,7 +679,7 @@ export class NotesService {
     if (!bodyParsed || typeof bodyParsed !== 'object') return null
     const text = (bodyParsed as { text?: unknown }).text
     if (typeof text !== 'string') return null
-    const layer: NoteLayer = { children: [], note: text, shape: null }
+    const layer: NoteLayer = { children: [], mark: null, note: text, shape: null }
     this.#cache.set(sig, layer)
     return layer
   }
@@ -659,7 +693,7 @@ export class NotesService {
       const cached = this.#cache.get(childSig)
       if (cached) children.push(this.#hydrate(childSig, cached))
     }
-    return { id: sig, text: layer.note, shape: layer.shape, children }
+    return { id: sig, text: layer.note, shape: layer.shape, mark: layer.mark, children }
   }
 
   // ── Internal: cell-location resolution ────────────────────────────

@@ -3,36 +3,56 @@
 // Same cold, quiet icon language as the group launchers — normal small
 // glyphs, never launcher tiles. The drop slot is a bare dashed circle that
 // appears only while an entrance drag is in flight.
+//
+// This strip renders immediately after the command shell inside the same
+// header, so it sits on the SHELL'S RAIL: box, glyph and gap all come from
+// `--hc-rail-*` (declared on .header-bar) — never its own numbers, or the
+// pins read as a second, mismatched row of icons. A hairline on the left
+// marks it as its own group, the same tick the shell uses between the
+// behaviour toggles and the standing tools.
 
 :host { display: inline-flex; align-items: center; }
 
 .pinned-entrances {
   display: inline-flex;
   align-items: center;
-  gap: 0.15rem;
+  gap: var(--hc-rail-gap, 0.3rem);
+
+  // Group tick — identical steel + proportions to the shell's
+  // `.rail-divider`, so the whole header reads as one rail of groups.
+  &::before {
+    content: '';
+    flex: 0 0 1px;
+    height: 1.15em;
+    margin: 0 calc(var(--hc-rail-gap, 0.3rem) * 0.5);
+    border-radius: 1px;
+    background: rgba(126, 182, 214, 0.35);
+  }
 }
 
 .pin-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.9rem;
-  height: 1.9rem;
+  width: var(--hc-rail-btn, 1.85rem);
+  height: var(--hc-rail-btn, 1.85rem);
   padding: 0;
   background: none;
   border: none;
-  border-radius: 8px;
-  color: rgba(206, 224, 240, 0.6);
+  // Circle + steel tone + the rail's resting/hover alphas — the shell's
+  // `.rail-btn`, restated here because the two live in separate components.
+  border-radius: 50%;
+  color: rgba(126, 182, 214, 0.42);
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, opacity 150ms ease;
 
   .mat-sym {
     font-family: 'Material Symbols Outlined';
-    font-size: 1.3rem;
+    font-size: var(--hc-rail-glyph, 1.2rem);
     line-height: 1;
   }
 
-  &:hover { color: #eaf5fb; background: rgba(126, 182, 214, 0.12); }
+  &:hover { color: rgba(126, 182, 214, 0.85); background: rgba(126, 182, 214, 0.1); }
   &:active { transform: scale(0.94); }
   &:focus-visible { outline: 1px solid rgba(126, 182, 214, 0.6); outline-offset: 2px; }
 
@@ -45,9 +65,9 @@
 // Drop slot — raised only while an entrance badge drag is in flight.
 .drop-slot {
   display: inline-flex;
-  width: 1.9rem;
-  height: 1.9rem;
-  border-radius: 8px;
+  width: var(--hc-rail-btn, 1.85rem);
+  height: var(--hc-rail-btn, 1.85rem);
+  border-radius: 50%;
   border: 1px dashed rgba(126, 182, 214, 0.55);
   background: rgba(126, 182, 214, 0.08);
 }

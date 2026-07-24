@@ -44,6 +44,23 @@
       >×</button>
     </header>
 
+    <!-- Selection response: while tiles are selected on the canvas, offer
+         capturing them here — the window the result lands in. Hidden while
+         drilled (the drill view is about ONE captured subtree). -->
+    @if (selectionCount() > 0 && !drilled()) {
+      <div class="clipboard-selection" role="group" [attr.aria-label]="'clipboard.selection' | t: { count: selectionCount() }">
+        <span class="clipboard-selection-count">{{ 'clipboard.selection' | t: { count: selectionCount() } }}</span>
+        <button class="clipboard-selection-btn" type="button" (click)="cutSelection()"
+                [attr.aria-label]="'selection.cut' | t" [title]="'selection.cut' | t">
+          <span class="mat-sym" aria-hidden="true">content_cut</span>
+        </button>
+        <button class="clipboard-selection-btn" type="button" (click)="copySelection()"
+                [attr.aria-label]="'selection.copy' | t" [title]="'selection.copy' | t">
+          <span class="mat-sym" aria-hidden="true">content_copy</span>
+        </button>
+      </div>
+    }
+
     @if (displayItems().length === 0) {
       <p class="clipboard-empty">{{ (drilled() ? 'clipboard.noChildren' : 'clipboard.empty') | t }}</p>
     } @else {

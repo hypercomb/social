@@ -2,7 +2,9 @@
   <div class="icon-picker-backdrop" (click)="close()"></div>
   <div class="icon-picker" role="dialog" [attr.aria-label]="'icon-picker.title' | t">
     <div class="ip-head">
-      <span class="ip-title">{{ 'icon-picker.title' | t }}</span>
+      <!-- The requesting window may name what it is choosing an icon FOR
+           ("Add a note mark"); otherwise the generic chooser title. -->
+      <span class="ip-title">{{ title() ?? ('icon-picker.title' | t) }}</span>
       <button class="ip-close" type="button" (click)="close()" [attr.aria-label]="'icon-picker.close' | t">
         <span class="mat-sym" aria-hidden="true">close</span>
       </button>

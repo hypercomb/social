@@ -94,6 +94,15 @@ $actions-corner: 12rem;
     opacity: 0;
     pointer-events: none;
   }
+
+  // Phones: gone entirely, not faded. The crumb line is operator telemetry
+  // ("private ◆ domain ◆ unsecured") — noise to a casual viewer, and the
+  // `.faded` opacity was being overridden in practice, leaving it painted at
+  // the top of the phone screen. `display:none` is unambiguous, drops it from
+  // the a11y tree, and the solo/swarm button already carries share state.
+  @media (max-width: 599px), (max-height: 449px) {
+    display: none;
+  }
 }
 
 // ── tag panel + float (right-aligned) ─────────────────────
@@ -300,10 +309,14 @@ $actions-corner: 12rem;
 // mobile nav's, so a full-width row would run straight under it. The box hugs
 // the right edge but its CONTENT still starts at the left, so the reach glyph
 // leads the row and can never be the thing that gets clipped.
+// On a phone this strip does not work: it is pinned to the bottom edge, which
+// is exactly where the mobile control bar lives, so the two collide and the
+// tag names end up unreachable. The pheromone button ON the control bar is the
+// mobile entry point instead — it opens the panel as a bottom sheet, which
+// carries the same list WITH its filter toggles and the reach control, at
+// touch size. One exposure, not two competing ones.
 .tag-float.mobile {
-  left: auto;
-  right: 0.8rem;
-  max-width: min(22rem, calc(100vw - 1.6rem));
+  display: none;
 }
 
 // ── universal icon protocol: edit-mode jiggle ──
@@ -416,6 +429,10 @@ $actions-corner: 12rem;
 // Right dock: a floating, edge-centered vertical pill (unchanged).
 .pill-stage.dock-right {
   left: auto;
+  // FIXED to its edge — deliberately NOT offset by --hc-inset-right. The
+  // control bar is an anchor, not a follower: a toolwindow opening must never
+  // shove it inboard to float mid-canvas. Panels fit around the bar, not the
+  // other way round (see the docked-panel directive's controls-bar offset).
   right: 0.6rem;
   bottom: auto;
   top: 50%;
@@ -435,6 +452,9 @@ $actions-corner: 12rem;
 // (the row's right end ends up on top), all flowing from the top — except the
 // back button, which is pinned to the bottom-left corner.
 .pill-stage.dock-left {
+  // FIXED flush to the left edge — deliberately NOT offset by --hc-inset-left.
+  // Same rule as dock-right: the rail is the anchor every toolwindow lays out
+  // against, so it never slides inboard when a panel opens.
   left: 0;
   right: auto;
   // clears the header bottom at any size: 2.8rem × the active header zoom
@@ -1268,10 +1288,13 @@ $actions-corner: 12rem;
 
   // Each icon gets its own subtle floating disc so it reads as a tappable
   // affordance against the canvas — but the bar that holds them is invisible.
+  // Bigger, thumb-friendly tap targets. Each icon is its own floating disc so
+  // it reads as tappable against the canvas; the bar that holds them stays
+  // invisible.
   .ctl-btn {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    padding: 0.45rem;
+    min-width: 3.4rem;
+    min-height: 3.4rem;
+    padding: 0.55rem;
     border-radius: 50%;
     background: rgba(14, 18, 24, 0.72);
     backdrop-filter: blur(10px);
@@ -1279,22 +1302,70 @@ $actions-corner: 12rem;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     color: rgba(245, 245, 245, 0.85);
 
-    --icon-size: 1.1rem;
+    --icon-size: 1.5rem;
 
     &:hover { background: rgba(14, 18, 24, 0.88); }
     &:active:not(:disabled) { transform: scale(0.92); }
 
+    // Unavailable ≠ invisible. The bar is a fixed five-slot rhythm, so a
+    // hidden button leaves a hole that reads as a missing icon and throws the
+    // balance off (back is disabled at the hive root — the most common state).
+    // Dim it in place instead: the slot keeps its position, the control is
+    // visibly not-available, and it stays untappable.
     &.disabled,
     &:disabled {
-      opacity: 0;
+      opacity: 0.28;
       pointer-events: none;
     }
   }
 
+  // Balanced three-zone bar: two side groups flank a fixed centre. The centre
+  // column is `auto` (sized to the button) so it stays put and centred no
+  // matter how many controls the sides hold; each side is its own horizontal
+  // scroll region (min-width:0 lets it shrink into its grid track and scroll
+  // rather than push the centre off-axis). With five buttons nothing scrolls.
+  // Full-width bar so the five controls spread EVENLY across the screen edge
+  // rather than bunching toward the middle. The centre column stays `auto`
+  // (fixed, centred); each side is a 1fr track whose buttons distribute evenly
+  // and scroll only if they ever overflow the track (>5 controls).
   .mobile-nav {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.5rem;
+    // Viewport-relative width — NOT 100%: the pill ancestors are content-sized,
+    // so `100%` collapses back to the buttons' intrinsic width and they bunch in
+    // the middle. An explicit near-viewport width makes the ancestors grow, so
+    // the five controls spread evenly across the screen.
+    width: min(94vw, 34rem);
+  }
+
+  .mobile-side {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    justify-content: space-evenly;
+    gap: 0.5rem;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    &::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  }
+
+  // The centre is the anchor by POSITION, not size — the same footprint as its
+  // flanks so the whole row reads evenly balanced. A hair more contrast is the
+  // only cue that it is the fixed one.
+  .ctl-btn.mobile-center {
+    justify-self: center;
+    align-self: center;
+    background: rgba(20, 26, 34, 0.85);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  // Pinned layer — the centre control is gone; the spacer only holds the slot.
+  .ctl-btn.pinned-spacer {
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .badge { top: -4px; right: -4px; }
@@ -1349,15 +1420,44 @@ $actions-corner: 12rem;
 // In landscape the floating icons stay along the bottom of the screen,
 // but the icons themselves rotate 90° so they remain readable / tappable
 // in the orientation the user is holding the device.
+// ── phone landscape → vertical sidebar ───────────────────
+// Rotating to landscape moves the bar off the (now-scarce) bottom and onto the
+// right edge as a vertical strip, so the controls stay in a consistent,
+// thumb-reachable place across the rotation instead of eating vertical space.
+// Same three-zone model — top group / fixed centre / bottom group — stacked;
+// icons stay UPRIGHT (no rotation).
 .pill-stage.mobile.landscape {
-  // Keep horizontal row at bottom-center — same place as portrait.
-  .mobile-nav { flex-direction: row; }
+  left: auto;
+  right: calc(0.9rem + env(safe-area-inset-right, 0px));
+  top: 0;
+  bottom: 0;
+  transform: none;
+  align-items: center;             // centre the strip vertically in the stage
 
-  .ctl-btn .hci,
-  .ctl-btn .mat-sym {
-    display: inline-block;
-    transform: rotate(90deg);
+  &.faded { transform: none; }     // drop the portrait fade-nudge (it re-added translateX)
+
+  .mobile-nav {
+    grid-template-columns: auto;
+    grid-template-rows: 1fr auto 1fr;
+    grid-auto-flow: row;
+    width: auto;
+    max-width: none;
+    height: min(84vh, 26rem);
+    padding: 0.75rem 0;
   }
+
+  .mobile-side {
+    flex-direction: column;
+    overflow-x: visible;
+    overflow-y: auto;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  // Icons upright — the previous 90° rotation is gone now that the strip
+  // itself is vertical.
+  .ctl-btn .hci,
+  .ctl-btn .mat-sym { transform: none; }
 }
 
 // ── 27" monitor (2560px+) ────────────────────────────────

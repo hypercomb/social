@@ -4,6 +4,7 @@
 import {
   Component,
   computed,
+  effect,
   ElementRef,
   EventEmitter,
   inject,
@@ -29,6 +30,16 @@ import { secretTag } from './secret-words'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
+/** Page keys (lineage paths) whose viewport is pinned. The pin is per LAYER. */
+const PINNED_PAGES_KEY = 'hc:pinned-pages'
+
+/** Owner token for the InputGate lock a pinned layer holds. */
+const PIN_OWNER = 'pin'
+
+/** Controls that move the viewport. Hidden while the current layer is pinned —
+ *  a frozen page offers no way to drag or zoom, not even a disabled one. The
+ *  pin button itself is never in this set, so the pin is always releasable. */
+const VIEWPORT_CONTROLS: ReadonlySet<string> = new Set(['fit', 'zoom-in', 'zoom-out'])
 
 /** How long the pin button pulses after a pan/zoom attempt on a pinned view. */
 const LOCK_BUMP_MS = 900
@@ -50,7 +61,7 @@ interface ControlItem {
   id: string
   label: string
   action: string
-  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection'
+  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection' | 'worldSelection'
 }
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
@@ -80,8 +91,19 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // among the header aggregates — it manages referenced hives on different
   // roots; it is not a launch group.
   { id: 'pools',        label: 'pools.title',           action: 'openPools',          visibleWhen: 'always' },
+  // Selection verbs — the floating vertical selection menu is retired
+  // (documentation/selection-tool-windows.md); one-shot verbs live here on the
+  // registry (user-toggleable like every control) while windowed responses
+  // live in each behavior's own tool window. Same `controls:action` bus either
+  // way, so the essentials drones that answer are unchanged.
   { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
   { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
+  { id: 'remove',       label: 'selection.remove',      action: 'remove',             visibleWhen: 'hasSelection' },
+  { id: 'move',         label: 'selection.move',        action: 'moveItem',           visibleWhen: 'hasSelection' },
+  { id: 'promote-to-parent', label: 'selection.promote-to-parent', action: 'promoteToParent', visibleWhen: 'hasSelection' },
+  // World-mode bulk privacy — only meaningful with a selection AND world mode on.
+  { id: 'make-public',  label: 'selection.make-public', action: 'makePublic',         visibleWhen: 'worldSelection' },
+  { id: 'make-branch-public', label: 'selection.make-branch-public', action: 'makeBranchPublic', visibleWhen: 'worldSelection' },
   // The clipboard icon is the way back into the side panel once it's been
   // closed — it appears whenever the clipboard holds something and toggles the
   // panel. (Auto-open on copy/cut alone left no way to reopen.)
@@ -102,7 +124,11 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
   'show-hidden': false, 'neon-mode': false, 'launcher-shapes': false, 'text-only': false,
   'pools': true,
-  'cut': false, 'copy': false,
+  // Selection verbs default ON (they only appear while a selection exists;
+  // the retired floating menu was the old primary path). 'move' stays off —
+  // drag-to-move is native and the button is a niche mode toggle.
+  'cut': true, 'copy': true, 'remove': true, 'move': false,
+  'promote-to-parent': true, 'make-public': true, 'make-branch-public': true,
   'clipboard': true, 'voice': false, 'bees': false,
 }
 
@@ -318,12 +344,39 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #currentPageKey(): string {
     return this.navigation.segmentsRaw().join('/')
   }
+
+  // ── viewport pin — a per-layer setting ────────────────────
+  //
+  // The pin freezes the viewport (no pan, no zoom) and belongs to the LAYER
+  // it was set on, not to the session: pin a page, walk away, come back and
+  // it is still frozen — while every other page stays free. The set of pinned
+  // page keys (lineage path, same key as the fit pins) is persisted; the
+  // shared InputGate lock is derived from it on every navigation (#pinSync).
+  #pinnedPages = signal<ReadonlySet<string>>(this.#restorePinnedPages())
+
+  #restorePinnedPages(): ReadonlySet<string> {
+    try {
+      const raw = localStorage.getItem(PINNED_PAGES_KEY)
+      if (!raw) return new Set()
+      const arr = JSON.parse(raw)
+      return Array.isArray(arr) ? new Set(arr) : new Set()
+    } catch {
+      return new Set()
+    }
+  }
+
+  #persistPinnedPages(set: ReadonlySet<string>): void {
+    try {
+      localStorage.setItem(PINNED_PAGES_KEY, JSON.stringify([...set]))
+    } catch { /* ignore */ }
+  }
   #clipboardAvailable = signal(false)
   // Whether the side panel is currently open. Mirrors the panel's own
   // `clipboard:open` state event so the toolbar button can both toggle it
   // and light up while it's showing.
   #clipboardPanelOpen = signal(false)
   #hasSelection = signal(false)
+  #worldMode = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
   #tags = signal<{ name: string; count: number }[]>([])
@@ -408,7 +461,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // Icon protocol: a long-press just entered edit mode — swallow its trailing
     // click; a tap while editing reskins this control instead of running it.
     if (this.#suppressIconClick) { this.#suppressIconClick = false; return }
-    if (iconEditMode.on) { iconEditMode.requestPick('control:' + ctrl.id); return }
+    if (iconEditMode.on) { void iconEditMode.requestPick('control:' + ctrl.id); return }
     if (this.#editMode()) {
       this.#enabledMap.update(m => ({ ...m, [ctrl.id]: !this.isEnabled(ctrl) }))
       this.#persistEnabledMap()
@@ -431,9 +484,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleNeonMode: () => this.toggleNeonMode(),
     toggleLauncherShapes: () => this.toggleLauncherShapes(),
     toggleTextOnly: () => this.toggleTextOnly(),
-    openPools: () => this.navigateTo(['sets']),
+    openPools: () => this.openPools(),
     cut: () => this.cut(),
     copy: () => this.copy(),
+    remove: () => this.remove(),
+    moveItem: () => this.moveItem(),
+    promoteToParent: () => this.promoteToParent(),
+    makePublic: () => this.makePublic(),
+    makeBranchPublic: () => this.makeBranchPublic(),
     toggleClipboard: () => this.toggleClipboard(),
     toggleVoice: () => this.toggleVoice(),
     toggleBees: () => this.toggleBees(),
@@ -446,7 +504,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'clipboard': return this.#clipboardPanelOpen()
-      case 'pin': return this.#locked()
+      case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
       case 'neon-mode': return this.#neonMode()
@@ -494,6 +552,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'pools':        return 'workspaces'
       case 'cut':          return 'content_cut'
       case 'copy':         return 'content_copy'
+      case 'remove':       return 'delete'
+      case 'move':         return 'open_with'
+      case 'promote-to-parent': return 'arrow_upward'
+      case 'make-public':  return 'public'
+      case 'make-branch-public': return 'share'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
       case 'bees':         return 'hub'
@@ -510,13 +573,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // In edit mode the user is picking which icons should be active — show
     // candidates that are normally state-gated so they can be toggled even
     // when their state isn't currently met (empty clipboard, no selection).
-    if (this.#editMode() && ctrl.visibleWhen === 'clipboardHasItems') return true
+    if (this.#editMode() && (ctrl.visibleWhen === 'clipboardHasItems'
+      || ctrl.visibleWhen === 'hasSelection' || ctrl.visibleWhen === 'worldSelection')) return true
+    // A pinned layer is frozen — the viewport controls come off the bar so
+    // there is literally nothing left to drag or zoom with. Edit mode keeps
+    // them visible so the rail can still be configured from a pinned page.
+    if (!this.#editMode() && VIEWPORT_CONTROLS.has(ctrl.id) && this.pinnedHere()) return false
     switch (ctrl.visibleWhen) {
       case 'always': return true
       case 'clipboardHasItems': return this.#clipboardAvailable() && this.clipboardCount() > 0
       case 'voiceSupported': return this.voiceSupported
       case 'public': return !!this.meshPublic()
       case 'hasSelection': return this.#hasSelection()
+      // world:mode is the mesh-header's world toggle, a distinct broadcast
+      // from the solo/swarm meshPublic input.
+      case 'worldSelection': return this.#worldMode() && this.#hasSelection()
       default: return true
     }
   }
@@ -587,6 +658,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // real header bottom into `--hc-header-bottom`; the CSS docks at
   // `max(static, measured)` so this can only push offsets DOWN, never up.
   #headerObserver: ResizeObserver | null = null
+  // Live probe of the edge the docked control bar occupies, published as
+  // `--hc-controls-<side>` so docked toolwindows sit beside the bar.
+  #controlsObserver: ResizeObserver | null = null
+  /** The `.pill-stage` the observer is currently attached to, so a re-created
+   *  element is re-observed instead of measured while detached. */
+  #observedStage: HTMLElement | null = null
   // Pill stays anchored to the bottom of the viewport. We track the
   // distance from the top of the pill to the bottom of the viewport
   // (`fromBottom`) and recompute y on every window resize so the pill
@@ -712,6 +789,43 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   readonly locked = this.#locked
+
+  /** True when THIS layer is pinned. Re-reads on navigation, so walking off a
+   *  pinned page reads as unpinned the moment the location changes. */
+  readonly pinnedHere = computed(() => {
+    this.#moved$()
+    return this.#pinnedPages().has(this.#currentPageKey())
+  })
+
+  /** Whether `#pinSync` has actually taken the lock. Guards the reconciliation
+   *  below from firing before the effect's first run (a gate change during
+   *  boot would otherwise read as "someone dropped our lock"). */
+  #pinHeld = false
+
+  /** Hold the InputGate lock exactly while the current layer is pinned. This is
+   *  the ONLY writer of the 'pin' lock: navigating away releases it, arriving on
+   *  a pinned layer re-takes it. Locks held by other owners (editor, palette)
+   *  are untouched. */
+  #pinSync = effect(() => {
+    const pinned = this.pinnedHere()
+    if (pinned) this.gate?.lock?.(PIN_OWNER)
+    else if (this.gate?.lockedBy?.(PIN_OWNER)) this.gate.unlock(PIN_OWNER)
+    this.#pinHeld = pinned
+  })
+
+  /** Gate released our pin from outside (the Escape cascade's `clear()`) —
+   *  unpin the layer so the stored setting matches what the viewport does. */
+  #onGateChange = (): void => {
+    if (!this.#pinHeld || !this.pinnedHere()) return
+    if (this.gate?.lockedBy?.(PIN_OWNER)) return
+    this.#pinHeld = false
+    const key = this.#currentPageKey()
+    const next = new Set(this.#pinnedPages())
+    next.delete(key)
+    this.#pinnedPages.set(next)
+    this.#persistPinnedPages(next)
+  }
+
   /** Effective button state — drives color: white/green/blue. */
   readonly fitButtonState = computed<'off' | 'global' | 'page'>(() => {
     // Track navigation so this recomputes when the user moves between layers.
@@ -785,6 +899,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('tags:view-open', undefined)
   }
 
+  /** Pools of Meaning — just SHOW the collections window. Deliberately does NOT
+   *  navigate: the panel's first purpose is dragging collection references onto
+   *  the page you are already standing on, so sending you to `/sets` would take
+   *  away the very surface you meant to drop them on. Clicking a row still opens
+   *  that collection (to manage it), and the panel offers its way back. */
+  readonly openPools = (): void => {
+    EffectBus.emit('aggregate:view-toggle', { id: 'collections' })
+  }
+
   readonly isTagFilterActive = (name: string): boolean => {
     return this.#activeTagFilters().has(name)
   }
@@ -835,6 +958,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #zoomManualUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
+  #worldModeUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
   #beesUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
@@ -866,6 +990,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // locked. Transient (no replay) so a fresh mount never bumps.
     this.#lockBumpUnsub = EffectBus.on('input:locked-attempt', this.#flashLockBump)
 
+    // The Escape cascade force-clears the gate as last-resort recovery. On a
+    // pinned layer that IS the release gesture, so fold it back into the
+    // per-layer setting — otherwise the button would read pinned while the
+    // viewport moved freely.
+    this.gate?.addEventListener?.('change', this.#onGateChange)
+
     // Icon protocol: reflect edit mode (jiggle) + re-resolve glyphs on reskin.
     this.#iconEditUnsub = EffectBus.on<{ on?: boolean }>('icon:edit-mode', ({ on }) => this.iconEditOn.set(!!on))
     iconOverrides.addEventListener('change', this.#onIconOverride)
@@ -881,12 +1011,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     })
 
     // ── mobile detection via matchMedia ──
-    // Only actual smartphones (viewport ≤599px wide) collapse the command
-    // line and show the mobile floating-icon strip. Anything larger —
-    // tablets, laptops, desktops, and phones rotated to landscape (≥600px
-    // wide) — gets the full desktop shell with the command line docked at
-    // the top of the screen.
-    this.#mobileQuery = window.matchMedia('(max-width: 599px)')
+    // A phone is small in EITHER dimension: ≤599px WIDE (portrait) OR ≤449px
+    // TALL (landscape — a phone on its side is wide but short). Both collapse
+    // the command line and show the mobile control strip — a bottom bar in
+    // portrait, a right-edge sidebar in landscape. Tablets/laptops/desktops
+    // exceed both thresholds and keep the full desktop shell. (A very short
+    // desktop window also reads as mobile — an acceptable edge.)
+    this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
     this.isMobile.set(this.#mobileQuery.matches)
     this.#mobileQuery.addEventListener('change', this.#mobileHandler)
 
@@ -925,6 +1056,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
       this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
+    })
+
+    // Gates the worldSelection controls (bulk make-public). Replayed, so a
+    // late-mounting bar picks up an already-on world mode.
+    this.#worldModeUnsub = EffectBus.on<{ active?: boolean }>('world:mode', (payload) => {
+      this.#worldMode.set(payload?.active === true)
     })
 
     // Clipboard contents drive only the toolbar badge count now — the
@@ -1070,6 +1207,89 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       if (pos && !this.#fitsOnScreen(pos.x, pos.y)) this.#resetToDefault()
     }
     this.#observeHeaderHeight()
+    this.#observeControlsEdge()
+  }
+
+  /** Publish how much of a screen edge the control bar occupies, into
+   *  `--hc-controls-left` / `--hc-controls-right`, plus the left rail's top edge
+   *  as `--hc-controls-left-top`.
+   *
+   *  The bar is the ANCHOR: it stays fixed to its edge and docked toolwindows
+   *  lay out against it (hcDockedPanel reads these), so a panel opens BESIDE
+   *  the bar instead of over it. Only a SIDE-DOCKED bar reserves — a
+   *  free-floating pill can be dragged anywhere, so reserving an edge for it
+   *  would strand a permanent gap, and mobile's bottom strip owns no side. */
+  readonly #measureControlsEdge = (): void => {
+    // Re-resolve the stage EVERY time rather than trusting a cached reference.
+    // Angular re-creates `.pill-stage` (dock/mobile class swaps, re-render), and
+    // a detached node reports a 0×0 box — which would silently drop the
+    // reservation and let a panel slide straight under the bar.
+    const stage = this.#host.nativeElement.querySelector('.pill-stage') as HTMLElement | null
+    if (stage && stage !== this.#observedStage) {
+      this.#controlsObserver?.disconnect()
+      this.#observedStage = stage
+      if (typeof ResizeObserver !== 'undefined') {
+        this.#controlsObserver = new ResizeObserver(this.#measureControlsEdge)
+        this.#controlsObserver.observe(stage)
+      }
+    }
+    const side = this.#dockSide()
+    let left = 0
+    let right = 0
+    let leftTop = ''
+    if (stage && side && !this.isMobile()) {
+      // The LAYOUT box (offsetLeft/Width/Top), never getBoundingClientRect().
+      //
+      // `.pill-stage` animates `transform` over 200ms, and its undocked base
+      // rule is `left: 50%; transform: translateX(-50%)`. Measured from the
+      // visual rect, a bar that has just docked left reports its right edge at
+      // HALF the rail width (the centring translate is still in flight, or has
+      // not started at all when we measure in a microtask) — so we reserved
+      // ~30px for a 60px rail and the panel sat ON the bar. A transform change
+      // fires no ResizeObserver either, so nothing ever corrected it.
+      // `offsetLeft`/`offsetWidth` ignore transforms and are correct the instant
+      // the dock class lands: both docked states place themselves horizontally
+      // with plain `left` / `right` (only the vertical centring is a transform).
+      const w = stage.offsetWidth
+      if (w > 0) {
+        // Reserve up to the bar's INNER edge — robust to the pill floating a
+        // gap off the edge (dock-right sits at 0.6rem) rather than flush.
+        if (side === 'left') {
+          left = Math.max(0, stage.offsetLeft + w)
+          // The rail starts below the header (its own `top`, which shifts with
+          // the header zoom and on touch). Publish it so a left-docked panel
+          // aligns flush with the rail's top edge instead of hardcoding the
+          // same offsets a second time and drifting out of step with it.
+          leftTop = `${Math.round(Math.max(0, stage.offsetTop))}px`
+        } else {
+          right = Math.max(0, window.innerWidth - stage.offsetLeft)
+        }
+      }
+    }
+    const root = document.documentElement
+    root.style.setProperty('--hc-controls-left', `${Math.round(left)}px`)
+    root.style.setProperty('--hc-controls-right', `${Math.round(right)}px`)
+    // Removed, not zeroed: panels fall back to their OWN top through the var's
+    // fallback value, which a `0px` would override.
+    if (leftTop) root.style.setProperty('--hc-controls-left-top', leftTop)
+    else root.style.removeProperty('--hc-controls-left-top')
+  }
+
+  /** Re-measure whenever the bar changes edge (or mobile flips) — a dock swap
+   *  moves the pill without necessarily resizing it, so the ResizeObserver
+   *  below can't see it. Field initializer: `effect()` needs an injection
+   *  context, which ngAfterViewInit is not. */
+  #controlsEdgeSync = effect(() => {
+    this.#dockSide()
+    this.isMobile()
+    queueMicrotask(this.#measureControlsEdge)
+  })
+
+  #observeControlsEdge(): void {
+    // The ResizeObserver is attached inside the measure itself, so it always
+    // follows the CURRENT stage element rather than the one that existed here.
+    window.addEventListener('resize', this.#measureControlsEdge)
+    this.#measureControlsEdge()
   }
 
   /** Publish the live header-bar bottom edge into `--hc-header-bottom` so the
@@ -1089,9 +1309,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    // Never leave the gate locked behind a torn-down bar — the pin would be
+    // unreleasable (the only button that releases it went away with us).
+    this.gate?.removeEventListener?.('change', this.#onGateChange)
+    if (this.gate?.lockedBy?.(PIN_OWNER)) this.gate.unlock(PIN_OWNER)
     this.#mobileQuery?.removeEventListener('change', this.#mobileHandler)
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()
+    this.#controlsObserver?.disconnect()
+    window.removeEventListener('resize', this.#measureControlsEdge)
+    // Release the reservation — a torn-down bar occupies no edge.
+    document.documentElement.style.setProperty('--hc-controls-left', '0px')
+    document.documentElement.style.setProperty('--hc-controls-right', '0px')
+    document.documentElement.style.removeProperty('--hc-controls-left-top')
     window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onActivity)
     window.removeEventListener('pointerdown', this.#onActivity)
@@ -1107,6 +1337,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#zoomManualUnsub?.()
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
+    this.#worldModeUnsub?.()
     this.#moveModeUnsub?.()
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
@@ -1399,15 +1630,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly togglePin = (): void => {
-    // Pinning the viewport holds it in place — it locks the shared InputGate
-    // under our OWN 'pin' owner rather than reading the gate's combined
-    // state. Reading gate.locked here would leave the button unable to
-    // release once an overlay (editor, notes strip) also holds a lock — the
-    // gate stays locked by that owner and the toggle would appear stuck.
-    // lockedBy is optional-chained so an older gate build degrades to a
-    // no-op rather than throwing.
-    if (this.gate?.lockedBy?.('pin')) this.gate.unlock('pin')
-    else this.gate?.lock('pin')
+    // The pin is a per-LAYER setting: the click flips THIS page's membership
+    // in the pinned set and `#pinSync` derives the InputGate lock from it. We
+    // never read the gate's combined state here — an overlay (editor, notes
+    // strip) holding its own lock would otherwise make the toggle look stuck.
+    const key = this.#currentPageKey()
+    const next = new Set(this.#pinnedPages())
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    this.#pinnedPages.set(next)
+    this.#persistPinnedPages(next)
   }
 
   readonly zoomIn = (): void => {
@@ -1509,6 +1741,20 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly moveItem = (): void => {
     EffectBus.emit('controls:action', { action: 'move' })
+  }
+
+  /** Promote the selected tiles one level up — move.drone answers. */
+  readonly promoteToParent = (): void => {
+    EffectBus.emit('controls:action', { action: 'promote-to-parent' })
+  }
+
+  /** Bulk privacy on the selection (world mode) — tile-actions.drone answers. */
+  readonly makePublic = (): void => {
+    EffectBus.emit('controls:action', { action: 'make-public' })
+  }
+
+  readonly makeBranchPublic = (): void => {
+    EffectBus.emit('controls:action', { action: 'make-branch-public' })
   }
 
   readonly toggleTextOnly = (): void => {

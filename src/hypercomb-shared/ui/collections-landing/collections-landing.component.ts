@@ -1,33 +1,50 @@
 // hypercomb-shared/ui/collections-landing/collections-landing.component.ts
 //
-// The "Collections" landing — the welcome page of the `sets/` layer, the sibling
-// of the Websites landing (hc-website-landing) but for reference sets. Instead
-// of dropping the participant onto a bare hive page, `sets/` opens a clean,
-// centred directory: a title above, every existing collection as its own hex
-// tile below, and a create row so a new referenceable collection is one line
-// away. Clicking a collection portals to it.
+// The "Collections" entrance — a right-docked tool window over the `sets/`
+// layer, listing every reference set with a filter above it. Clicking one
+// portals to it.
+//
+// ── Why docked, not a full-screen landing (2026-07-23) ──────────────────────
+// This used to be a full-screen takeover: `.landing` at `inset: 0` over opaque
+// ink, plus a `render:set-hive-visible {visible:false}` that HID the Pixi hive.
+// That surface is a fixed-size box, so collections simply fell off the bottom —
+// and the hive was already better at exactly this job: an infinite canvas, fit,
+// pan/zoom, and a real cross-page tag flatten. So `/sets` now renders as an
+// ordinary hive page (collections ARE tiles) and this panel is the refined
+// entrance BESIDE it. `hcDockInset` reserves the edge and the hex content is
+// squeezed into what's left (pixi-host.worker #applyHostInset), so the canvas
+// stays live next to the list instead of being replaced by it. This reverses
+// the 2026-07-06 "keep the overlay" decision, deliberately.
+//
+// Because the hive owns `/sets` again, tile clicks there root-hop on their own
+// (tile-overlay.drone's sets branch) — this panel and the canvas are two ways
+// into the same thing, and neither is load-bearing for the other.
 //
 // A collection (a reference set) is its OWN ROOT lineage — the `sets/` page is
 // just the index of them (the VARIABLE-ROOT hop, see entrances-and-sets.md and
 // tile-overlay.drone's sets branch). So a card click navigates to `/[name]`,
 // never `/sets/[name]`, and a collection's picture is resolved from its root.
-// Current model: `/sets` indexes first-level collection roots. Opening a listed
-// collection navigates to `/<name>`.
+//
+// FILTERING is two-level, because the panel and the canvas answer different
+// questions: the name field narrows THIS list (panel-local, instant), while a
+// keyword chip emits the shared `tags:filter` so the HIVE flattens to every
+// tile carrying it. The chips mirror that same effect, so the panel, the
+// controls-bar pills and the Tags panel always agree on what's filtered.
 //
 // MANAGE (rename / delete): both go through the SAME per-page layer state
 // machine as every other edit — a bare `cell:removed` / `cell:added` (no
 // `viaUpdate`) routes through LayerCommitter's name-delta path and lands ONE
 // history marker in the `/sets` bag, so each is a real, undoable commit. Rename
 // = remove-old + add-new: the new name auto-mints a fresh sigbag (the sanctioned
-// delete+create model — there is no in-place rename; a name is identity). Both
-// are gated on the collection being EMPTY so nothing is silently lost.
+// delete+create model — there is no in-place rename; a name is identity).
 //
-// Shows ONLY while the participant is AT the sets index (segments === ['sets']),
-// mirroring the Websites landing's location gate — never over the hive on boot.
-// Self-registers as a shell surface (no app.html edit, no web/dev drift) and
-// resolves everything through the global ioc at call time. Never imports
-// essentials — every mutation goes through the sanctioned IoC services the
-// command line uses.
+// Opens automatically on arrival at `/sets` (so the pools icon still lands
+// somewhere useful) and on `collections:view-open` from anywhere — an entrance
+// you can't reach from elsewhere isn't an entrance. Closing it is just closing
+// a tool window; it never navigates. Self-registers as a shell surface (no
+// app.html edit, no web/dev drift) and resolves everything through the global
+// ioc at call time. Never imports essentials — every mutation goes through the
+// sanctioned IoC services the command line uses.
 
 import { Component, OnDestroy, computed, signal } from '@angular/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
@@ -35,6 +52,8 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { registerProximityProvider } from '../../core/proximity-registry'
 import { groupRegistry } from '../../core/group-registry'
+import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 
 /** The reserved lineage that indexes every reference set. */
 const SETS = 'sets'
@@ -99,21 +118,40 @@ const sameList = (a: readonly string[], b: readonly string[]): boolean =>
 @Component({
   selector: 'hc-collections-landing',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './collections-landing.component.html',
   styleUrls: ['./collections-landing.component.scss'],
 })
 export class CollectionsLandingComponent implements OnDestroy {
   /** Names of the reference sets under `sets/` (the collection index). */
   readonly collections = signal<readonly string[]>([])
+  /** The name field — narrows THIS list only. Case-insensitive substring; the
+   *  canvas is deliberately untouched, since a typed prefix is a way of finding
+   *  one collection, not a statement about what the hive should be showing. */
+  readonly query = signal('')
   readonly visibleCollections = computed(() => {
     const active = this.#activeTagFilters()
-    if (active.size === 0) return this.collections()
-    return this.collections().filter(name => {
-      const tags = this.tags().get(name) ?? []
-      return tags.some(t => active.has(t))
-    })
+    const q = this.query().trim().toLowerCase()
+    let list = this.collections()
+    if (active.size > 0) {
+      list = list.filter(name => {
+        const tags = this.tags().get(name) ?? []
+        return tags.some(t => active.has(t))
+      })
+    }
+    if (q) list = list.filter(name => name.toLowerCase().includes(q))
+    return list
   })
+  /** Every keyword carried by any collection in the index — the chip row. Sorted
+   *  so the row doesn't reshuffle as tags resolve in. */
+  readonly allTags = computed(() => {
+    const seen = new Set<string>()
+    for (const name of this.collections()) {
+      for (const tag of this.tags().get(name) ?? []) seen.add(tag)
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b))
+  })
+  readonly hasFilter = computed(() => this.#activeTagFilters().size > 0 || this.query().trim().length > 0)
   readonly open = signal(false)
   readonly creating = signal(false)
   /** The collection currently being renamed (its old name), or null. */
@@ -128,9 +166,14 @@ export class CollectionsLandingComponent implements OnDestroy {
 
   #lineage: LineageLike | null = null
   #lineageBound = false
-  /** Only hide the Pixi hive while the landing actually owns the screen, and
-   *  reliably restore it when it doesn't. */
-  #hidHive = false
+  /** Whether the participant is standing ON the sets index. Drives the
+   *  auto-open and gates the cursor binding — NOT the panel's visibility, which
+   *  is now the participant's own (a tool window they opened or closed). */
+  #atSets = signal(false)
+  /** The reach the shared tag filter is currently running at. Mirrored off
+   *  `tags:filter` so a chip toggled here re-broadcasts at the SAME width the
+   *  controls bar / Tags panel last chose, instead of silently resetting it. */
+  #filterScope: 'local' | 'children' | 'global' = 'global'
   #imageUrls = new Map<string, string>()
   #imageRequested = new Set<string>()
   #aggregateNames = new Set<string>()
@@ -151,6 +194,8 @@ export class CollectionsLandingComponent implements OnDestroy {
   #onSynchronize = (): void => this.#scheduleReload()
   #cursorUnsub: (() => void) | null = null
   #filterUnsub: (() => void) | null = null
+  #openUnsub: (() => void) | null = null
+  #closeUnsub: (() => void) | null = null
   #tagsChangedUnsub: (() => void) | null = null
   #groupChanged = (): void => this.#scheduleReload()
 
@@ -159,9 +204,15 @@ export class CollectionsLandingComponent implements OnDestroy {
     window.addEventListener('synchronize', this.#onSynchronize)
     // Undo/redo moves the history cursor; reflect it when it reaches this index.
     this.#cursorUnsub = EffectBus.on('history:cursor-changed', () => this.#scheduleReload())
-    this.#filterUnsub = EffectBus.on<{ active?: readonly string[] }>('tags:filter', (p) => {
+    this.#filterUnsub = EffectBus.on<{ active?: readonly string[]; scope?: string }>('tags:filter', (p) => {
       this.#activeTagFilters.set(new Set((p?.active ?? []).map(t => String(t)).filter(Boolean)))
+      const scope = p?.scope
+      if (scope === 'local' || scope === 'children' || scope === 'global') this.#filterScope = scope
     })
+    // The entrance is reachable from anywhere — that is what makes it an
+    // entrance rather than a page decoration.
+    this.#openUnsub = EffectBus.on('collections:view-open', () => this.openPanel())
+    this.#closeUnsub = EffectBus.on('collections:view-close', () => this.close())
     this.#tagsChangedUnsub = EffectBus.on('tags:changed', () => this.#scheduleReload())
     groupRegistry.addEventListener('change', this.#groupChanged)
     // Declare our cards as proximity: while the grid is showing, every collection
@@ -179,9 +230,10 @@ export class CollectionsLandingComponent implements OnDestroy {
     this.#unregisterProximity?.()
     this.#cursorUnsub?.()
     this.#filterUnsub?.()
+    this.#openUnsub?.()
+    this.#closeUnsub?.()
     this.#tagsChangedUnsub?.()
     groupRegistry.removeEventListener('change', this.#groupChanged)
-    if (this.#hidHive) EffectBus.emit('render:set-hive-visible', { visible: true })
     for (const url of this.#imageUrls.values()) URL.revokeObjectURL(url)
   }
 
@@ -254,10 +306,11 @@ export class CollectionsLandingComponent implements OnDestroy {
 
   /** Create a new referenceable collection: append the membership child under
    *  the `sets/` index via the same importTree primitive the command line uses,
-   *  then pulse the processor. The new tile is shown optimistically — the hive
-   *  is hidden here, so there is no incremental placement to reflect it, and a
-   *  fresh index read can lag a just-made commit. The authoritative read runs on
-   *  the next open. */
+   *  then pulse the processor. The row is shown optimistically because a fresh
+   *  index read can lag a just-made commit; the append is keyed by name and
+   *  `#loadCollections` re-publishes only on a real change (`sameList`), so the
+   *  authoritative read can't double it. The hive paints its own tile for the
+   *  same commit — two views of one write, not two writes. */
   async create(input: HTMLInputElement): Promise<void> {
     const name = safeCellName(input.value)
     if (!name) { input.focus(); return }
@@ -289,15 +342,27 @@ export class CollectionsLandingComponent implements OnDestroy {
     if (!this.manageable(name)) return
     const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as CommitterLike | undefined
     if (!committer?.update) return
-    const next = this.collections().filter(n => n !== name)
+    const members = this.#indexMembers().filter(n => n !== name)
     try {
       EffectBus.emit('cell:removed', { cell: name, segments: [SETS], viaUpdate: true })
-      await committer.update([SETS], { children: next })
+      await committer.update([SETS], { children: members })
       await new hypercomb().act()
     } catch { return }
     this.#syncCursorToHead()
-    this.collections.set(next)
+    this.collections.set(this.collections().filter(n => n !== name))
     this.#forget(name)
+  }
+
+  /** The REAL `sets/` membership — the displayed list minus the launch-group
+   *  aggregates that `#loadCollections` merges in so they're reachable here.
+   *
+   *  Every write to the index must compose from this, never from
+   *  `collections()`: `children` is a NAME list that auto-mints at commit time,
+   *  so committing the display list would materialise each aggregate as a real
+   *  member of `sets/` — permanently polluting the index with launch groups
+   *  that were only ever passing through the view. */
+  #indexMembers(): readonly string[] {
+    return this.collections().filter(n => !this.#aggregateNames.has(n))
   }
 
   // ── rename: re-home a collection's immutable history to a new signature pool ──
@@ -339,18 +404,19 @@ export class CollectionsLandingComponent implements OnDestroy {
       items = raw.map(s => String(s ?? '')).filter(s => SIG.test(s))
     }
 
-    const next = this.collections().map(n => n === oldName ? newName : n)
+    // Membership for the COMMIT excludes aggregates (see #indexMembers).
+    const members = this.#indexMembers().map(n => n === oldName ? newName : n)
     try {
       EffectBus.emit('cell:removed', { cell: oldName, segments: [SETS], viaUpdate: true })
       EffectBus.emit('cell:added', { cell: newName, segments: [SETS], viaUpdate: true })
       // Re-home the items into the new root's signature pool (sigs, not names).
       if (items.length) await committer.update([newName], { children: items }, new Set<string>())
       // Swap the sets/ membership: new name in, old name out.
-      await committer.update([SETS], { children: next })
+      await committer.update([SETS], { children: members })
       await new hypercomb().act()
     } catch { this.renaming.set(null); return }
     this.#syncCursorToHead()
-    this.collections.set(next)
+    this.collections.set(this.collections().map(n => n === oldName ? newName : n))
     this.#forget(oldName)
     this.#empty.set(newName, items.length === 0)   // carried its items (or emptiness) over
     this.empty.set(new Map(this.#empty))
@@ -368,12 +434,54 @@ export class CollectionsLandingComponent implements OnDestroy {
     if (this.#empty.delete(name)) this.empty.set(new Map(this.#empty))
   }
 
-  /** Close the directory — step back out of the sets index (plain navigation),
-   *  which drops segments below ['sets'] and hides this surface. */
+  // ── open / close — a tool window, not a page ────────────────────────────────
+
+  /** Close the entrance. It is a docked panel now, so this closes the PANEL and
+   *  nothing else — it must never navigate. The old full-screen landing had to
+   *  step back out of `/sets` to get off the screen; the hive is right there
+   *  behind this one, already showing the same collections as tiles. */
   close(): void {
-    const nav = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
-    if (nav?.back) nav.back()
-    else nav?.goRaw?.([])
+    if (!this.open()) return
+    this.open.set(false)
+  }
+
+  /** Open from anywhere (`collections:view-open`, the pools icon). Loads the
+   *  index on demand — off `/sets` nothing else has read it. */
+  openPanel(): void {
+    if (!this.open()) {
+      this.open.set(true)
+      void this.#activate()
+    }
+  }
+
+  toggle(): void { this.open() ? this.close() : this.openPanel() }
+
+  // ── filtering ───────────────────────────────────────────────────────────────
+
+  /** The name field. Panel-local — see the header note on why this one does not
+   *  touch the canvas. */
+  onQuery(value: string): void { this.query.set(value ?? '') }
+
+  isTagActive(tag: string): boolean { return this.#activeTagFilters().has(tag) }
+
+  /** Toggle a keyword on the SHARED filter — the same `tags:filter` the
+   *  controls-bar pills and the Tags panel drive, at whatever reach is current.
+   *  So the hive flattens to every tile carrying it and this list narrows to the
+   *  collections that do, from one gesture. */
+  toggleTag(tag: string): void {
+    const next = new Set(this.#activeTagFilters())
+    next.has(tag) ? next.delete(tag) : next.add(tag)
+    this.#activeTagFilters.set(next)
+    EffectBus.emit('tags:filter', { active: [...next], scope: this.#filterScope })
+  }
+
+  /** Drop everything — the keyword filter (shared, so the hive unflattens too)
+   *  and the local name field. */
+  clearFilter(): void {
+    this.query.set('')
+    if (this.#activeTagFilters().size === 0) return
+    this.#activeTagFilters.set(new Set())
+    EffectBus.emit('tags:filter', { active: [], scope: this.#filterScope })
   }
 
   // ── image resolution — the collection's own tile picture (root lineage) ─────
@@ -406,7 +514,9 @@ export class CollectionsLandingComponent implements OnDestroy {
    *  actual bounded subtree walk happens once, in the shell handler. Off-screen we
    *  return nothing, so we stop contributing the moment the landing closes. */
   #proximitySigs = async (): Promise<string[]> => {
-    if (!this.open()) return []
+    // Standing on the index counts even with the panel closed — the hive is
+    // showing the same collections as tiles, so they're still one click away.
+    if (!this.open() && !this.#atSets()) return []
     const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
     if (!history?.sign) return []
     const out: string[] = []
@@ -574,11 +684,19 @@ export class CollectionsLandingComponent implements OnDestroy {
 
   // ── history-cursor binding — undo/redo target THIS index while it's open ─────
 
-  /** Bind the sets/ cursor + load the grid. Binding makes Ctrl+Z / Ctrl+Y
-   *  (history.undo/redo → cursor.undo/redo on the loaded cursor) walk the
-   *  collection index instead of whatever page show-cell last rendered. */
+  /** Load the grid, binding the sets/ cursor ONLY while standing on the index.
+   *
+   *  The bind exists because the old full-screen landing REPLACED the hive, so
+   *  show-cell never loaded this location's cursor and Ctrl+Z walked whatever
+   *  page was last rendered. Now the hive renders `/sets` itself and loads the
+   *  same cursor — binding there is idempotent (same sig) and harmless, and it
+   *  keeps working if show-cell ever doesn't.
+   *
+   *  Off `/sets` it would be a REAL bug: the panel is a tool window you can open
+   *  anywhere, and binding the cursor to the collection index from, say,
+   *  `/music` would silently point that page's undo at the wrong bag. */
   async #activate(): Promise<void> {
-    await this.#bindSetsCursor()
+    if (this.#atSets()) await this.#bindSetsCursor()
     await this.#loadCollections()
   }
 
@@ -593,6 +711,8 @@ export class CollectionsLandingComponent implements OnDestroy {
   /** After a commit here, re-bind the cursor to the fresh head so it picks up the
    *  new marker and any rewound state clears (append-only: an edit lands at head). */
   #syncCursorToHead(): void {
+    // Same rule as #activate: never point another page's cursor at the sets bag.
+    if (!this.#atSets()) return
     const cursor = ioc()?.get('@diamondcoreprocessor.com/HistoryCursorService') as CursorLike | undefined
     if (cursor?.load && this.#setsSig) { try { void cursor.load(this.#setsSig) } catch { /* ignore */ } }
   }
@@ -620,36 +740,49 @@ export class CollectionsLandingComponent implements OnDestroy {
     })
   }
 
+  /** Escape unwinds the innermost thing: a rename field, then the create field,
+   *  then the panel.
+   *
+   *  This listener is on `window` in the CAPTURE phase, which was fine when the
+   *  landing owned the whole screen — nothing else could want the key. Docked
+   *  beside a live hive it must not swallow the shell's escape cascade, so it
+   *  only claims Escape for state that is actually ours: an open field always,
+   *  and the panel itself only when the focus is inside it. Escape pressed out
+   *  on the canvas falls through to the hive, which is what you'd expect while
+   *  the panel is just sitting there. */
   #onKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || !this.open()) return
-    // Escape unwinds the innermost thing: a rename field, then the create field,
-    // then the whole surface.
+    if (this.renaming()) { e.preventDefault(); this.renaming.set(null); return }
+    if (this.creating()) { e.preventDefault(); this.creating.set(false); return }
+    const target = e.target as Node | null
+    const panel = document.querySelector('hc-collections-landing .collections-panel')
+    if (!panel || !target || !panel.contains(target)) return
     e.preventDefault()
-    if (this.renaming()) this.renaming.set(null)
-    else if (this.creating()) this.creating.set(false)
-    else this.close()
+    this.close()
   }
 
   #refresh(): void {
     this.#ensureLineage()
     const segs = (this.#lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
-    const active = segs.length === 1 && segs[0] === SETS
+    const atSets = segs.length === 1 && segs[0] === SETS
+    const arrived = atSets && !this.#atSets()
+    this.#atSets.set(atSets)
 
-    // Replace the floating hive (don't just cover it): hide the Pixi mesh while
-    // the landing owns the screen, restore it when it doesn't. Emit only on the
-    // transition so we never fight the screensaver frame-to-frame.
-    if (active !== this.#hidHive) {
-      this.#hidHive = active
-      EffectBus.emit('render:set-hive-visible', { visible: !active })
-    }
+    // NOTE: the hive is never hidden here any more. `/sets` renders as an
+    // ordinary hive page and this panel sits beside it (see the header note) —
+    // `render:set-hive-visible` belongs to takeover surfaces like the website
+    // landing and the screensaver, not to this one.
 
-    this.open.set(active)
-    if (active) void this.#activate()
+    // Arriving at the index opens the entrance; leaving it does NOT close it (a
+    // tool window you opened stays open while you walk around). Closing it
+    // while standing on /sets sticks — only a fresh ARRIVAL re-opens it.
+    if (arrived) this.open.set(true)
+
+    if (this.open()) void this.#activate()
     else {
-      // Keep the directory warm while a collection root is open. Stepping back
-      // from /<collection> to /sets should show the cached grid immediately,
-      // then #activate refreshes it against history in the background.
+      // Keep the directory warm. Re-opening should show the cached list
+      // immediately, then #activate refreshes it against history in background.
       this.creating.set(false)
       this.renaming.set(null)
     }

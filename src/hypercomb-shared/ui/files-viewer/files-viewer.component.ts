@@ -16,6 +16,7 @@ import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { onSelection } from '../../core/selection-context'
 import { categorize, typeMeta, TYPE_META, TYPE_ORDER, type FileTypeKey, type FileTypeMeta } from './file-icons'
 
 type FileItem = {
@@ -85,9 +86,22 @@ export class FilesViewerComponent implements OnDestroy {
   /** Show the source-tile column when more than one tile is in view. */
   readonly showSource = computed(() => this.scope() !== 'tile')
 
+  /** Selection response (documentation/selection-tool-windows.md): while the
+   *  selected tiles carry documents, offer re-scoping this window to THEM.
+   *  `selection:has-documents` is the behavior-side selectivity — computed and
+   *  replayed by file-drop.drone, so the window never re-derives it. */
+  readonly selectionCount = signal(0)
+  readonly selectionHasDocuments = signal(false)
+  readonly showSelectionAffordance = computed(() =>
+    this.selectionCount() > 0 && this.selectionHasDocuments() && this.scope() !== 'selection')
+
   #cleanups: (() => void)[] = []
 
   constructor() {
+    this.#cleanups.push(onSelection(({ selected }) => this.selectionCount.set(selected.length)))
+    this.#cleanups.push(EffectBus.on<{ value?: boolean }>('selection:has-documents', (p) => {
+      this.selectionHasDocuments.set(p?.value === true)
+    }))
     this.#cleanups.push(EffectBus.on<{ cellLabel: string; segments: string[]; files: FileItem[]; scope?: Scope; reach?: Reach }>('files:open', (p) => {
       if (!p) return
       // Mutually exclusive with the Features panel — they share the right-side
@@ -116,6 +130,12 @@ export class FilesViewerComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
+  }
+
+  /** Re-scope this window to the canvas selection — the same verb the retired
+   *  vertical menu emitted; file-drop.drone answers with `files:open`. */
+  readonly openSelectionDocuments = (): void => {
+    EffectBus.emit('controls:action', { action: 'view-documents' })
   }
 
   close(): void {

@@ -15,10 +15,17 @@
 // design system.
 @use '../../styles/notes-shapes';
 @use '../toolwindow' as tw;
+@use '../breakpoints' as *;
 
 // Match the cold-steel toolwindow chrome shared by the Tags (pheromone),
 // Feedback and Files panels — same hairline colour, same dark glass.
 $steel: #7eb6d6;
+
+// Notes-tree indentation. One step per depth level; the same value drives
+// the row's left padding AND the pitch of the indent guide hairlines, so
+// a guide always lands exactly where its level's text starts.
+$indent-step: 18px;
+$guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 
 :host {
   position: fixed;
@@ -64,10 +71,26 @@ $steel: #7eb6d6;
   border-radius: 0;
   transform: none !important; // override panel-offset translate
 }
+// The docked panel is `position: fixed` against the VIEWPORT, so the
+// `height: 100%` above resolves to the full viewport height while the panel
+// starts below the header — pushing its last ~50px (footer, end of the tile
+// list) off the bottom of the screen. Span the edges instead and let the
+// height fall out of top/bottom.
+:host.is-fullscreen .notes-strip.dock-right {
+  bottom: 0;
+  height: auto !important;
+}
 :host.is-fullscreen .cv2-list {
   max-height: none;
   flex: 1 1 auto;
 }
+
+// Editor-column wrapper. `display: contents` everywhere EXCEPT desktop
+// fullscreen, so the form / filter / tree / footer stay direct flex children
+// of the panel and the docked strip lays out exactly as it did before the
+// wrapper existed. The two-column rules at the bottom of this file give it a
+// box only when there's room for one.
+.cv2-main { display: contents; }
 
 .notes-strip {
   pointer-events: auto;
@@ -510,6 +533,173 @@ $steel: #7eb6d6;
 
 .cv2-toolbar-spacer { flex: 1; }
 
+// ── Mark rail ─────────────────────────────────────────────
+// The participant's icon palette, sitting above the note form. Compact
+// mode is a row of icon buttons (the pick applies to the note being
+// written); the "tune" button flips it into the palette editor where each
+// mark gets a MEANING (its name) and a ROLE (heading / list).
+.cv2-rail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba($steel, 0.16);
+
+  &.is-editing {
+    display: block;
+    padding: 6px 8px 8px;
+  }
+}
+.cv2-rail-marks {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.cv2-rail-spacer { flex: 1; }
+
+.cv2-rail-mark,
+.cv2-rail-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--md-on-surface) 58%, transparent);
+  cursor: pointer;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
+
+  .mat-sym { font-size: 17px; }
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 9%, transparent);
+    color: var(--md-on-surface);
+  }
+  &:focus-visible { outline: 1px solid var(--md-secondary); outline-offset: 1px; }
+}
+
+// The picked mark — what the next commit writes onto the note.
+.cv2-rail-mark.is-active {
+  background: color-mix(in srgb, var(--md-secondary) 22%, transparent);
+  border-color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
+  color: var(--md-on-surface-strong, var(--md-on-surface));
+}
+// Marks roled as headings read heavier in the rail too, so the palette
+// itself shows which icons make section breaks.
+.cv2-rail-mark.is-heading .mat-sym {
+  font-size: 19px;
+  font-variation-settings: 'FILL' 1;
+}
+
+// ── Palette editor ────────────────────────────────────────
+.cv2-rail-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 5px;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+}
+.cv2-mark-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.cv2-mark-row-icon {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
+  color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
+  flex-shrink: 0;
+}
+.cv2-mark-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 3px;
+  padding: 3px 6px;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: 0.76rem;
+  outline: none;
+
+  &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 40%, transparent); }
+  &:focus { border-color: color-mix(in srgb, var(--md-secondary) 55%, transparent); }
+}
+// Role switch — which of the two meanings this icon carries.
+.cv2-mark-roles {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 3px;
+  overflow: hidden;
+
+  button {
+    background: transparent;
+    border: none;
+    padding: 3px 7px;
+    color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+    font-family: inherit;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+
+    &:hover { background: color-mix(in srgb, var(--md-on-surface) 8%, transparent); }
+    &.is-on {
+      background: color-mix(in srgb, var(--md-secondary) 24%, transparent);
+      color: var(--md-on-surface-strong, var(--md-on-surface));
+    }
+  }
+}
+.cv2-mark-remove {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 2px;
+  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover { color: var(--md-error, #ff6b6b); }
+}
+.cv2-mark-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  border: 1px dashed var(--md-outline-variant);
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
+  font-family: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+    color: var(--md-on-surface);
+  }
+}
+.cv2-rail-empty {
+  padding: 4px 0 2px;
+  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
 // ── Embedded note form ────────────────────────────────────
 // The single authoring surface, docked at the top of the panel. Textarea
 // + commit button on one row; the kind toggle (.cv2-kind-row) and
@@ -780,60 +970,116 @@ $steel: #7eb6d6;
   grid-template-columns: 16px 16px 1fr 20px;
   gap: 5px;
   align-items: start;
-  // Trim the right inset so the note text claims more render area toward
-  // the right edge (left stays at 8px to keep the chevron off the border).
-  padding: 8px 6px 8px 8px;
+  // OUTLINE ROWS, NOT CARDS. Every row used to be its own bordered,
+  // rounded, tinted box — at any real note count that reads as a wall of
+  // grey bricks with the hierarchy buried inside it. A row is now a plain
+  // line of text; depth is carried by the indent + the guide hairlines
+  // below, the way a file tree or an outliner does it.
+  padding: 3px 6px 3px calc(8px + var(--depth, 0) * #{$indent-step});
   position: relative;  // anchor for kebab + nest-picker popovers
-  background: color-mix(in srgb, var(--md-on-surface) 2.5%, transparent);
-  border: 1px solid transparent;
-  border-radius: 8px;
-  margin-bottom: 4px;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              border-color var(--md-dur-short) var(--md-easing-standard);
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  transition: background-color var(--md-dur-short) var(--md-easing-standard);
+
+  // Indent guides — one hairline per ancestor level, painted ONLY across
+  // the indent gutter (the gradient's box is exactly depth × step wide, so
+  // a depth-0 row paints nothing). Cheaper and more robust than nesting a
+  // container per level, which the flat recursive template can't produce.
+  background-image: repeating-linear-gradient(
+    to right,
+    #{$guide} 0 1px,
+    transparent 1px #{$indent-step}
+  );
+  background-repeat: no-repeat;
+  background-position: 8px 0;
+  background-size: calc(var(--depth, 0) * #{$indent-step}) 100%;
 
   &:hover {
-    background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
+    background-color: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
   }
 
   &.is-selected {
-    background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
-    border-color: color-mix(in srgb, var(--md-secondary) 32%, transparent);
+    background-color: color-mix(in srgb, var(--md-secondary) 12%, transparent);
   }
 
   &.is-editing {
-    background: color-mix(in srgb, var(--md-secondary) 6%, transparent);
-    border-color: color-mix(in srgb, var(--md-secondary) 36%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-secondary) 8%, transparent);
+    background-color: color-mix(in srgb, var(--md-secondary) 10%, transparent);
   }
 
   &.cv2-note-q {
-    background: color-mix(in srgb, var(--md-secondary) 8%, transparent);
+    background-color: color-mix(in srgb, var(--md-secondary) 7%, transparent);
   }
 
   &.cv2-note-a {
-    background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+    background-color: color-mix(in srgb, var(--md-primary) 7%, transparent);
   }
+
+  // ── Heading rows ────────────────────────────────────────
+  // A note whose mark's meaning is roled `heading` reads as a section
+  // break: air above it, heavier type, the accent on the glyph. The role
+  // lives on the PALETTE entry, so re-roling one icon restyles every row
+  // that carries it — that is what "giving an icon meaning" buys.
+  &.is-heading {
+    margin-top: 12px;
+    padding-top: 5px;
+
+    .cv2-note-text {
+      font-size: 0.84rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      color: var(--md-on-surface);
+    }
+    .cv2-note-mark {
+      font-size: 17px;
+      color: var(--md-secondary);
+    }
+  }
+  // No leading gap when the tree opens on a heading.
+  &.is-heading:first-child { margin-top: 0; }
 }
 
+// The mark glyph a row paints when the note carries an icon (the legacy
+// .hc-shape-glyph is the fallback for notes written before marks existed).
+.cv2-note-mark {
+  font-size: 15px;
+  line-height: 21px;   // match the text's first line box
+  color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
+  flex-shrink: 0;
+  margin-right: 5px;
+  vertical-align: -3px;
+}
+
+// Drag grip — a single slim vertical rail, drawn in CSS. The Material
+// `drag_indicator` six-dot glyph it replaced read as clip-art at this size;
+// a hairline rail is the quiet, professional convention (Linear, Notion) and
+// reads as "grab this edge" without competing with the note text.
 .cv2-note-grip {
   display: flex;
-  // Center the glyph against the note text's first line box (14px × 1.5 =
-  // 21px) instead of pinning it to the top with a baseline nudge.
+  // Center against the note text's first line box (14px × 1.5 = 21px)
+  // instead of pinning to the top with a baseline nudge.
   align-items: center;
   justify-content: center;
   min-height: 21px;
-  color: var(--md-on-surface-faint);
-  cursor: pointer;
-}
-
-.cv2-note-grip {
   opacity: 0;
   cursor: grab;
   user-select: none;
   touch-action: none;  // let the pointer drag take over (no native scroll)
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
+
+  &::before {
+    content: '';
+    width: 2px;
+    height: 15px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--md-on-surface) 30%, transparent);
+    transition: background var(--md-dur-short) var(--md-easing-standard);
+  }
 
   .cv2-note:hover & { opacity: 1; }
+  &:hover::before { background: color-mix(in srgb, var(--md-on-surface) 60%, transparent); }
   &:active { cursor: grabbing; }
+  &:active::before { background: var(--md-secondary); }
 }
 
 // ── note drag-reorder visuals ────────────────────────────
@@ -1077,6 +1323,13 @@ $steel: #7eb6d6;
   &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
 }
 
+// Mark icon on a candidate row — same idea as the note row: the mark when
+// the note has one, the legacy shape glyph otherwise.
+.cv2-nest-picker-mark {
+  font-size: 14px;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
+}
 .cv2-nest-picker-shape {
   width: 12px;
   height: 12px;
@@ -1292,5 +1545,78 @@ $steel: #7eb6d6;
   padding: 0.7rem 0.8rem;
   color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
   font-size: 0.8rem;
+}
+
+// ── Desktop fullscreen — two columns ─────────────────────
+// The wrapping tag cloud earns its keep in the narrow dock, where chips fill
+// the width. At full screen width it becomes a wide band that strands the
+// notes far down the page, so the navigator turns into a vertical list pinned
+// to the LEFT and the editor takes the whole right side. Narrow screens and
+// the docked strip keep the cloud.
+//
+// Rules land last in the file on purpose: they override the cloud/chip base
+// styles below them in specificity AND source order, so hover and active
+// states are restated here rather than inherited.
+@media (min-width: $bp-tablet-land) {
+  :host.is-fullscreen .notes-strip {
+    display: grid;
+    grid-template-columns: clamp(220px, 20%, 340px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  // Header spans both columns; the resize grips are absolutely positioned
+  // (and hidden in fullscreen), so they need no placement.
+  :host.is-fullscreen .cv2-dragbar { grid-column: 1 / -1; }
+
+  :host.is-fullscreen .cv2-main {
+    display: flex;
+    flex-direction: column;
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  :host.is-fullscreen .cv2-tilelist {
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
+    border-top: none;
+    border-right: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+  }
+
+  // Cloud → vertical list: one tile per row, full column width.
+  :host.is-fullscreen .cv2-tilecloud {
+    flex-flow: column nowrap;
+    align-items: stretch;
+    align-content: stretch;
+    gap: 1px;
+    padding: 0.35rem 0.4rem 0.6rem;
+  }
+  :host.is-fullscreen .cv2-tilechip {
+    width: 100%;
+    max-width: none;
+    justify-content: space-between;
+    // The cloud weights each chip by note count via an inline font-size;
+    // in a list that reads as noise, so rows take one uniform size.
+    font-size: 0.8rem !important;
+    padding: 6px 8px 6px 10px;
+    background: transparent;
+    border-color: transparent;
+    text-align: left;
+  }
+  :host.is-fullscreen .cv2-tilechip:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+    border-color: color-mix(in srgb, var(--md-on-surface) 18%, transparent);
+  }
+  :host.is-fullscreen .cv2-tilechip.is-active {
+    background: color-mix(in srgb, var(--md-secondary) 20%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 50%, transparent);
+  }
+  :host.is-fullscreen .cv2-tilechip-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
 }
 

@@ -10,8 +10,13 @@
       "*.jpg",
       "*.ico",
       "*.json",
+      "*.svg",
+      "*.webmanifest",
       "*.woff2",
       "*.map"
     ]
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
   }
 }
