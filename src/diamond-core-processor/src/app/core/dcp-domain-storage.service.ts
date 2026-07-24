@@ -91,6 +91,19 @@ export const LOGICAL_LINEAGE = 'logical'
 // save freezes the current logical HEAD under a name; restore makes a saved
 // (or default) logical root the new HEAD via Make-HEAD append (linear).
 export const HOME_LINEAGE = 'home'
+// `hive` = named snapshots of the PARTICIPANT'S CONTENT, pushed up from
+// hypercomb. Deliberately NOT `home`: a home entry freezes the logical
+// INSTALL root (which packages are on), whereas a hive entry freezes a
+// `sealSubtree([])` merkle root of the participant's tiles + behaviours.
+// Two different kinds of "current", so two lineages — conflating them
+// would make "restore" ambiguous about what it restores.
+//
+// The bytes under a hive entry arrive separately and continuously via
+// the push queue (`intake` → sign('from-hypercomb')). This lineage adds
+// the only thing that pile lacks: a NAMED, durable pointer saying "this
+// signature is a snapshot root" — so the installer can show it, resolve
+// it, and never treat it as garbage.
+export const HIVE_LINEAGE = 'hive'
 
 const MARKER_RE = /^\d{4}$/
 const SIG_RE = /^[a-f0-9]{64}$/i
@@ -612,6 +625,34 @@ export class DcpDomainStorage {
     const label = String(name ?? '').trim() || `save-${count + 1}`
     // The home entry's branchSig = the frozen logical root sig (the snapshot).
     return this.addBranch(HOME_LINEAGE, HOME_LINEAGE, logicalRoot, [], label)
+  }
+
+  /**
+   * Record a hive snapshot: a NAMED pointer at a `sealSubtree([])` merkle
+   * root pushed up from hypercomb. Returns the hive root sig.
+   *
+   * This stores a pointer, never bytes — the closure under `sealSig`
+   * arrives on its own through the push queue's `intake`, sha256-gated
+   * per file. Storing the pointer separately is what lets the installer
+   * distinguish "a snapshot root the participant named" from the
+   * undifferentiated pile of received layers.
+   *
+   * Idempotent on (sealSig, label) via addBranch's own dedup: taking the
+   * same snapshot twice does not grow the lineage.
+   */
+  async saveHiveSnapshot(name: string, sealSig: string): Promise<string | null> {
+    const sig = String(sealSig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(sig)) return null
+    await this.initialize()
+    const count = await this.markerCount(HIVE_LINEAGE)
+    const label = String(name ?? '').trim() || `snapshot-${count + 1}`
+    return this.addBranch(HIVE_LINEAGE, HIVE_LINEAGE, sig, [], label)
+  }
+
+  /** The participant's named hive snapshots, in save order. */
+  async loadHiveSnapshots(): Promise<{ name: string; sealSig: string }[]> {
+    const branches = await this.loadTileBranches(HIVE_LINEAGE, HIVE_LINEAGE)
+    return branches.map(b => ({ name: b.name, sealSig: b.branchSig }))
   }
 
   /** The home revision history: named branch saves, in save order.

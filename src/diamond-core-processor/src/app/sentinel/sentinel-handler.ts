@@ -30,7 +30,11 @@ export type SentinelRequest =
   | { type: 'sync'; rid: string; currentSyncSig?: string; have?: string[] }
   | { type: 'fetch-content'; rid: string; signature: string; kind: 'layer' | 'bee' | 'dependency'; rootSig: string }
   | { type: 'intake'; rid: string; signature: string; kind: IntakeKind; bytes: ArrayBuffer }
-  | { type: 'save-branch'; rid: string; name?: string }
+  // `save-branch` freezes the logical INSTALL root under a name. When
+  // `sealSig` is present the caller is instead naming a HIVE CONTENT root
+  // (a `sealSubtree([])` merkle sig pushed up from hypercomb) — a
+  // different kind of "current", so it lands in its own lineage.
+  | { type: 'save-branch'; rid: string; name?: string; sealSig?: string }
   // Adopt-by-signature resolution: the installer is the MESSENGER — give it a
   // signature, get back the domain(s) that can serve it. The hive then
   // interprets the location (`<domain>/<sig>`) and does the fetch itself.
@@ -102,7 +106,10 @@ export class SentinelHandler {
    */
   async #handleSaveBranch(msg: SentinelRequest & { type: 'save-branch' }, port: MessagePort): Promise<void> {
     try {
-      const rootSig = await this.#domainStorage.saveBranch((msg.name ?? '').toString())
+      const seal = String(msg.sealSig ?? '').trim().toLowerCase()
+      const rootSig = /^[a-f0-9]{64}$/.test(seal)
+        ? await this.#domainStorage.saveHiveSnapshot((msg.name ?? '').toString(), seal)
+        : await this.#domainStorage.saveBranch((msg.name ?? '').toString())
       port.postMessage({ type: 'save-branch-result', rid: msg.rid, ok: !!rootSig, rootSig: rootSig ?? null })
     } catch (e) {
       console.warn('[sentinel] save-branch failed', e)

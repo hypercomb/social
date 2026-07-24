@@ -153,13 +153,22 @@ export class SentinelBridge {
   }
 
   /**
-   * Ask DCP to freeze the current logical HEAD as a named branch
-   * revision — the "Save" action. Returns the new home root sig on
-   * success, or null on failure. The caller is expected to have drained
-   * the push queue first (every leaf received by DCP) so the frozen
-   * branch never dereferences into bytes peers can't fetch.
+   * Ask DCP to freeze a named revision. Returns the new lineage root sig
+   * on success, or null on failure.
+   *
+   * Two shapes, one verb:
+   *   - no `sealSig` → freeze the current logical INSTALL head (the
+   *     "Save" action; which packages are on).
+   *   - with `sealSig` → record a named HIVE CONTENT snapshot: a
+   *     `sealSubtree([])` merkle root of the participant's tiles and
+   *     behaviours. Lands in its own lineage so "restore" is never
+   *     ambiguous about which of the two it restores.
+   *
+   * Either way the caller is expected to have drained the push queue
+   * first (every leaf received by DCP) so the frozen root never
+   * dereferences into bytes that aren't there.
    */
-  async saveBranch(name: string): Promise<string | null> {
+  async saveBranch(name: string, sealSig?: string): Promise<string | null> {
     const rid = this.#nextRid()
 
     return new Promise((resolve) => {
@@ -169,7 +178,7 @@ export class SentinelBridge {
         reject: () => resolve(null),
       })
       try {
-        this.#port.postMessage({ type: 'save-branch', rid, name })
+        this.#port.postMessage({ type: 'save-branch', rid, name, ...(sealSig ? { sealSig } : {}) })
       } catch {
         this.#pending.delete(rid)
         resolve(null)
