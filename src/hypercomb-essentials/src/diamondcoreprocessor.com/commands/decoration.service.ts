@@ -22,12 +22,20 @@ import {
   listDecorations,
   type DecorationRecord,
 } from './decoration-manifest.js'
-import { TAG_DECORATION_KIND, tagSigFor, TITLE_DECORATION_KIND } from './decoration-kind-index.js'
+import { TAG_DECORATION_KIND, tagSigFor, TITLE_DECORATION_KIND, titleForSegments } from './decoration-kind-index.js'
+import { canonicalizeLineageSegment } from '../history/lineage-key.js'
 import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 
 /** The locale a title is written in when the caller doesn't name one. */
 const activeLocale = (): string =>
   (window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale ?? 'en'
+
+/** Just enough of HistoryService to enumerate a cell's siblings. */
+type HistoryLike = {
+  sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
+  currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
+  getLayerBySig(sig: string): Promise<Record<string, unknown> | null>
+}
 
 export class DecorationService {
 
@@ -56,6 +64,74 @@ export class DecorationService {
     segments: readonly string[]
   }): Promise<Array<{ sig: string; record: DecorationRecord<TPayload> }>> {
     return listDecorations<TPayload>(opts)
+  }
+
+  /** This cell's title rendered AS A PATH SEGMENT, for the breadcrumb: the
+   *  same canonicalization a lineage key uses, so every run of non-letter,
+   *  non-number folds to ONE hyphen and edge hyphens are trimmed
+   *  ("Hard Bop, Revisited!" → "Hard-Bop-Revisited"). A crumb is a path, so it
+   *  should read like one even when the words behind it are prose.
+   *
+   *  Synchronous and index-backed — a computed calls this per segment per
+   *  render. '' when the cell has no title for the locale, or when the index
+   *  has not walked it, and the caller falls back to the raw name. */
+  titleSlugAt(segments: readonly string[], locale?: string): string {
+    const title = titleForSegments(segments, locale ?? activeLocale())
+    return title ? canonicalizeLineageSegment(title) : ''
+  }
+
+  /** How a sibling READS right now: its title for this locale if it has one,
+   *  otherwise its own name. This is the string the participant actually sees,
+   *  which is what a duplicate check has to compare against. */
+  async #readingOf(segments: readonly string[], locale: string): Promise<string> {
+    return (await this.titleOf(segments, locale)) || (segments[segments.length - 1] ?? '')
+  }
+
+  /** The reading of a sibling that already looks like `text`, or null.
+   *
+   *  Titles cannot COLLIDE the way names can — the address is untouched and
+   *  `appliesTo: []` means two cells with the same title even share one record.
+   *  This guard is about legibility, not integrity: two tiles side by side
+   *  showing the same words are indistinguishable to the person reading them.
+   *
+   *  Compared case-insensitively and trimmed, against each sibling's READING
+   *  (title-or-name), so titling one tile "Jazz" is refused both when a sibling
+   *  is already titled "jazz" and when a sibling is simply NAMED "jazz". Only
+   *  the active locale matters — it is the only one on screen. */
+  async duplicateTitle(
+    segments: readonly string[],
+    text: string,
+    locale?: string,
+  ): Promise<string | null> {
+    const target = locale ?? activeLocale()
+    const wanted = text.trim().toLowerCase()
+    if (!wanted) return null                       // clearing can never duplicate
+    const parent = segments.slice(0, -1)
+    for (const name of await this.#siblingNames(segments)) {
+      const reading = await this.#readingOf([...parent, name], target)
+      if (reading.trim().toLowerCase() === wanted) return reading
+    }
+    return null
+  }
+
+  /** Names of the cells alongside `segments`, self excluded. Read from the
+   *  parent's `children` sigs, so it reflects committed truth rather than
+   *  whatever the render happens to be showing. */
+  async #siblingNames(segments: readonly string[]): Promise<string[]> {
+    const history = window.ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+    if (!history?.sign || !history.currentLayerAt || !history.getLayerBySig) return []
+    const self = segments[segments.length - 1] ?? ''
+    const parent = segments.slice(0, -1)
+    const parentSig = await history.sign({ explorerSegments: () => parent })
+    const layer = await history.currentLayerAt(parentSig)
+    const children = Array.isArray(layer?.['children']) ? (layer['children'] as unknown[]) : []
+    const names: string[] = []
+    for (const sig of children) {
+      const child = await history.getLayerBySig(String(sig ?? ''))
+      const name = typeof child?.['name'] === 'string' ? (child['name'] as string) : ''
+      if (name && name !== self) names.push(name)
+    }
+    return names
   }
 
   /** This cell's title for `locale` (default: the active locale), or '' when it
@@ -92,9 +168,14 @@ export class DecorationService {
     segments: readonly string[],
     text: string,
     locale?: string,
-  ): Promise<'set' | 'cleared' | 'noop'> {
+  ): Promise<'set' | 'cleared' | 'noop' | 'duplicate'> {
     const target = locale ?? activeLocale()
     const next = text.trim()
+
+    // Guard here, in the funnel, rather than in each caller — a duplicate must
+    // be refused whether it arrives from `/title` or the editor heading.
+    if (next && await this.duplicateTitle(segments, next, target)) return 'duplicate'
+
     const existing = await listDecorations<{ text?: Record<string, string> }>({
       kind: TITLE_DECORATION_KIND,
       segments,

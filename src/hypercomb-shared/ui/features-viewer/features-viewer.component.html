@@ -27,6 +27,17 @@
         spellcheck="false"
         autocomplete="off"
       />
+      <!-- The mode switch. MANAGE: rows are on/off switches for this tile.
+           PAINT: rows narrow to what's ON here and each click picks it into
+           the brush, which lands on the selected tiles in one press. -->
+      <button
+        class="features-mode"
+        type="button"
+        [class.active]="isPainting()"
+        (click)="toggleMode()"
+        [attr.title]="(isPainting() ? 'features.mode.manage.hint' : 'features.mode.paint.hint') | t"
+        [attr.aria-pressed]="isPainting()"
+      ><span class="mat-sym" aria-hidden="true">format_paint</span></button>
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
 
@@ -36,9 +47,31 @@
       <div class="features-tile" [title]="g.cell">{{ g.cell }}</div>
     }
 
+    <!-- ── Paint bar: the brush and where it lands ──
+         Always visible in paint mode so the two halves of the gesture are
+         never guesswork: how many behaviours are picked, and how many tiles
+         are selected to receive them. The button says both. -->
+    @if (isPainting()) {
+      <div class="paint-bar" role="status" aria-live="polite">
+        <span class="paint-count">{{ 'features.paint.picked' | t: { count: brushCount() } }}</span>
+        <button
+          class="paint-apply"
+          type="button"
+          [disabled]="!canApplyBrush()"
+          (click)="applyBrush()"
+          [attr.title]="'features.paint.apply.hint' | t"
+        >{{ 'features.paint.apply' | t: { count: canvasSelectionCount() } }}</button>
+        @if (paintNote(); as note) {
+          <span class="paint-note">{{ note }}</span>
+        } @else if (canvasSelectionCount() === 0) {
+          <span class="paint-hint">{{ 'features.paint.noselection' | t }}</span>
+        }
+      </div>
+    }
+
     <!-- Canvas-selection response: the selected tiles carry features — one
          press re-targets this window at them (show-features.drone answers). -->
-    @if (showCanvasSelectionAffordance()) {
+    @if (showCanvasSelectionAffordance() && !isPainting()) {
       <button class="features-selection" type="button" (click)="openSelectionFeatures()"
               [attr.aria-label]="'features.selection' | t: { count: canvasSelectionCount() }">
         <span class="mat-sym" aria-hidden="true">extension</span>
@@ -153,6 +186,52 @@
       <div class="features-scroll">
           <section class="features-group">
 
+            @if (isPainting()) {
+            <!-- ══ PAINT MODE ══════════════════════════════════════════
+                 Only the behaviours that are ON at this tile — you hand over
+                 what it actually does. Click rows to load the brush, select
+                 the tiles on the hive, press apply: every picked behaviour
+                 lands on every selected tile in one press. -->
+            <div class="section-head">
+              <span class="section-label">{{ 'features.section.paint' | t }}</span>
+              <span class="section-count">{{ paintable(group).length }}</span>
+            </div>
+            @if (paintable(group).length === 0) {
+              <p class="section-empty">{{ 'features.paint.empty' | t }}</p>
+            } @else {
+              <ul class="features-list">
+                @for (feat of paintable(group); track feat.kind) {
+                  <li
+                    class="features-row paint"
+                    role="checkbox"
+                    tabindex="0"
+                    [attr.aria-checked]="isPicked(feat)"
+                    [class.picked]="isPicked(feat)"
+                    [class.unpaintable]="!canPaint(feat)"
+                    (click)="rowClick(group, feat, $event)"
+                    (keydown.enter)="rowClick(group, feat)"
+                    (keydown.space)="rowClick(group, feat); $event.preventDefault()"
+                    [attr.title]="(canPaint(feat) ? 'features.paint.pick.hint' : 'features.paint.unpaintable.hint') | t"
+                  >
+                    <div class="feature-meta">
+                      <span class="feature-name">{{ feat.label }}</span>
+                      <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
+                      @if (feat.foreign) {
+                        <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
+                      }
+                      @if (!canPaint(feat)) {
+                        <span class="feature-desc">{{ 'features.paint.unpaintable' | t }}</span>
+                      }
+                    </div>
+                    @if (isPicked(feat)) {
+                      <span class="feat-check" aria-hidden="true">✓</span>
+                    }
+                  </li>
+                }
+              </ul>
+            }
+            } @else {
+
             <!-- ── On this layer: features the tile already has ── -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
@@ -204,6 +283,12 @@
                         }
                       </span>
                       <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
+                      <!-- A behaviour whose module isn't here: named from its
+                           own kind, with the missing module as PROVENANCE.
+                           It stays inert, and stays fully manageable. -->
+                      @if (feat.foreign) {
+                        <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
+                      }
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
                       }
@@ -340,6 +425,7 @@
                   </li>
                 }
               </ul>
+            }
             }
 
           </section>

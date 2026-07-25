@@ -178,6 +178,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     get('@hypercomb.social/MovementService') as EventTarget,
     () => this.movement.moved,
   )
+  /** Bumped when a title lands or the locale changes, so the breadcrumb
+   *  re-resolves. The index it reads is a plain Map, not reactive. */
+  #titleTick = signal(0)
+  #titleTickUnsub: (() => void) | null = null
+  #localeTickUnsub: (() => void) | null = null
   #room$ = fromRuntime(
     get('@hypercomb.social/RoomStore') as EventTarget,
     () => this.roomStore?.value ?? '',
@@ -703,14 +708,23 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Each segment of the lineage path, with the slice needed to navigate there. */
   readonly pathSegments = computed(() => {
     this.#moved$()
+    this.#titleTick()
     const segs = this.navigation.segmentsRaw()
-    return segs.map((name, i) => ({
-      name,
-      /** all segments up to and including this one */
-      target: segs.slice(0, i + 1),
-      /** true for the last (leaf) segment */
-      leaf: i === segs.length - 1,
-    }))
+    const decorations = get('@diamondcoreprocessor.com/DecorationService') as
+      { titleSlugAt?: (segments: readonly string[], locale?: string) => string } | undefined
+    return segs.map((name, i) => {
+      const target = segs.slice(0, i + 1)
+      return {
+        /** What the crumb READS: the tile's title canonicalized as a path
+         *  segment, else its own name. Display only — `target` below stays the
+         *  raw address, so a retitled tile still navigates to where it lives. */
+        name: decorations?.titleSlugAt?.(target) || name,
+        /** all segments up to and including this one */
+        target,
+        /** true for the last (leaf) segment */
+        leaf: i === segs.length - 1,
+      }
+    })
   })
 
   readonly midPath = computed(() => {
@@ -1003,6 +1017,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
     })
+
+    // Breadcrumb readings are resolved synchronously from the decoration index,
+    // which fills in asynchronously — and they are per-locale. Both events have
+    // to re-run the crumb computation or the trail keeps showing raw addresses
+    // after a retitle, or the previous language after a switch.
+    this.#titleTickUnsub = EffectBus.on('title:indexed', () => this.#titleTick.update(n => n + 1))
+    this.#localeTickUnsub = EffectBus.on('locale:changed', () => this.#titleTick.update(n => n + 1))
 
     // The location dialog's "start" confirmed (join mode) — flip to public
     // now that the where/secret are set. Idempotent: already public → no-op.
@@ -1360,6 +1381,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshJoinUnsub?.()
     this.#lockBumpUnsub?.()
     this.#iconEditUnsub?.()
+    this.#titleTickUnsub?.()
+    this.#localeTickUnsub?.()
     iconOverrides.removeEventListener('change', this.#onIconOverride)
     this.#clearIconPress()
     this.#detachListDrag()   // in case we're torn down mid drag-scroll

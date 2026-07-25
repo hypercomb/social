@@ -55,6 +55,19 @@ export class LlmQueenBee extends QueenBee {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
 
+    // An ask must have somewhere for the answer to LAND: the responder
+    // delivers via note-add, and a note lives ON a tile. At the hive root
+    // with nothing selected there is no tile — the ask would be minted
+    // unanswerable and sit pending forever. Refuse with the fix instead.
+    if (targets.length === 0 && segments.length === 0) {
+      EffectBus.emit('toast:show', {
+        type: 'warning',
+        message: 'Select a tile first (or step into one) — the answer arrives as a note on it.',
+      })
+      console.warn('[ask] refused: no selection and at the hive root — nowhere for the answer note to land')
+      return
+    }
+
     const store = get<StoreLike>('@hypercomb.social/Store')
     if (!store?.putOptimization) {
       console.warn('[ask] Store.putOptimization unavailable')
@@ -78,8 +91,14 @@ export class LlmQueenBee extends QueenBee {
     }
 
     const sig = await store.putOptimization(new Blob([JSON.stringify(record)], { type: 'application/json' }))
-    // Surface it to the UI (a pending-ask indicator can key off this) and log.
+    // Surface it: the command line raises a pending pill off ask:queued (and
+    // drops it on ask:answered); the toast tells the user where to look.
     EffectBus.emit('ask:queued', { sig, prompt, targets, model: this.activeModel })
+    const where = targets.length ? targets.join(', ') : `this page`
+    EffectBus.emit('toast:show', {
+      type: 'tip',
+      message: `Asked — the answer will arrive as a note on ${where}.`,
+    })
     console.log(
       `[ask] queued for the Claude bridge (${this.activeModel}): "${prompt}" `
       + `→ ${targets.join(', ') || `/${segments.join('/') || ''}`}  [${sig.slice(0, 12)}…]`,

@@ -71,6 +71,7 @@
   "editor.point-top": "ポイントトップ",
   "editor.name": "名前",
   "editor.name-hint": "この言語でのタイルの読み方。タイル自体は移動しません。空欄にすると本来の名前を表示します。",
+  "editor.name-taken": "ここにある別のタイルが同じ読み方です。区別できる名前を選んでください。",
   "editor.link": "リンク",
   "editor.link-placeholder": "https://...",
   "editor.bg": "背景",

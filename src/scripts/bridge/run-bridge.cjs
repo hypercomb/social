@@ -2,7 +2,9 @@
 // Mirrors hypercomb-cli/src/bridge/server.ts so we don't need to build the CLI.
 const { WebSocketServer, WebSocket } = require('ws')
 
-const BRIDGE_PORT = 2401
+// BRIDGE_PORT env override lets a test stack run its own broker beside the
+// production one (default 2401 unchanged).
+const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 2401)
 const wss = new WebSocketServer({ port: BRIDGE_PORT })
 
 let renderer = null

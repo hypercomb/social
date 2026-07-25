@@ -32,7 +32,7 @@
 
 const WebSocket = require('ws')
 
-const BRIDGE = 'ws://localhost:2401'
+const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const POLL_MS = Math.max(2_000, Number(process.env.ASK_POLL_MS || 6_000))
 const ONCE = process.argv.includes('--once')
 
@@ -65,7 +65,11 @@ let reportedOutage = false
 
 function onFail(reason) {
   failCount++
-  const threshold = ONCE ? 1 : OUTAGE_TICKS
+  // Timeouts are the renderer-churn signature (rebuild pushes, background-tab
+  // throttling) and self-heal in seconds — they only matter if they STICK, so
+  // they get a much longer fuse (~1 min of consecutive failure). Refusals and
+  // renderer-missing stay on the short fuse: those mean a process is gone.
+  const threshold = ONCE ? 1 : (reason === 'bridge-timeout' ? 10 : OUTAGE_TICKS)
   if (failCount >= threshold && !reportedOutage) {
     reportedOutage = true
     console.log(JSON.stringify({ watch: reason }))

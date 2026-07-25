@@ -60,13 +60,21 @@ const iocTable: Record<string, unknown> = {
 const { EffectBus } = await import('@hypercomb/core')
 const index = await import('./decoration-kind-index.js')
 
-/** Put a decoration resource in the store and return its (fake) sig. Tag sigs
- *  are content-addressed for real, so two cells tagged `family` genuinely
- *  share ONE sig — the fixture reproduces that, since it is the property that
- *  makes a label-keyed index unrecoverable. */
+/** Sig per distinct content — a stand-in for SHA-256 that keeps the two
+ *  properties the index depends on: identical content yields the SAME sig (so
+ *  two cells tagged `family` genuinely share one, which is what makes a
+ *  label-keyed index unrecoverable), and it is 64 hex characters. The hydration
+ *  walk VALIDATES that shape before fetching, so a readable fake sig would make
+ *  every walk silently skip and leave only the event path under test. */
+const sigOf = new Map<string, string>()
+
 function putResource(record: unknown): string {
   const json = JSON.stringify(record)
-  const sig = `sig:${json}`
+  let sig = sigOf.get(json)
+  if (!sig) {
+    sig = String(sigOf.size + 1).padStart(64, '0')
+    sigOf.set(json, sig)
+  }
   resources.set(sig, json)
   return sig
 }
@@ -76,6 +84,9 @@ const tagSig = (name: string) =>
 
 const referenceSig = (targetSegments: string[]) =>
   putResource({ kind: 'reference', appliesTo: [], payload: { targetSegments } })
+
+const titleSig = (text: Record<string, string>) =>
+  putResource({ kind: 'title', appliesTo: [], payload: { text } })
 
 /** Commit a decoration onto the cell at `segments`, the way DecorationService
  *  does — and wait for the index's async record fetch to settle. */
@@ -181,6 +192,24 @@ describe('decoration index — location is the identity', () => {
     await decorate(['south', 'members'], tagSig('active'))
 
     expect(index.countLabelsWithTag('active')).toBe(2)
+  })
+
+  it('indexes the ancestors of the page you land on', async () => {
+    // The breadcrumb's crumbs are ancestors, and an ancestor is never a cell on
+    // the page you are standing on — so nothing else in the index ever walks
+    // one. Walking IN warms them incidentally; arriving by a jump (deep link,
+    // restored session, reference portal) does not, which is why the crumbs
+    // kept reading raw addresses after the title feature landed.
+    layers.set('venue', [titleSig({ en: 'The Blue Note' })])
+    layers.set('venue/room', [titleSig({ en: 'Back Room' })])
+
+    goTo('venue', 'room')
+    EffectBus.emit('render:cell-count', { labels: [], flatPaths: {} })
+
+    await vi.waitFor(() => {
+      expect(index.titleForSegments(['venue'], 'en')).toBe('The Blue Note')
+      expect(index.titleForSegments(['venue', 'room'], 'en')).toBe('Back Room')
+    })
   })
 
   it('hydrates a flattened match at its real location, not here + label', async () => {

@@ -1,6 +1,9 @@
 <!-- Fixed bottom-right cluster: Undo · Redo, plus the word "save" that
      appears only once you've rewound (the merge — choose what to move
-     forward with). Sits just left of the round feedback FAB. -->
+     forward with). While tiles are selected (at head) the cluster also
+     grows the selection verbs — visually cut · copy · remove, left of
+     undo. Container is row-reverse: later DOM children extend LEFT, so
+     undo never moves under the cursor. -->
 <div class="edit-actions" role="group" [attr.aria-label]="'controls.edit-actions' | t">
   <button
     class="ea-btn"
@@ -35,5 +38,36 @@
       [attr.aria-label]="'controls.save' | t"
       [title]="'controls.save' | t"
     >{{ 'controls.save' | t }}</button>
+  }
+
+  @if (!rewound() && selectionCount() > 0) {
+    <span class="ea-divider" aria-hidden="true"></span>
+    <button
+      class="ea-btn"
+      type="button"
+      (click)="remove()"
+      [attr.aria-label]="'selection.remove' | t"
+      [title]="'selection.remove' | t"
+    >
+      <span class="mat-sym">delete</span>
+    </button>
+    <button
+      class="ea-btn"
+      type="button"
+      (click)="copy()"
+      [attr.aria-label]="'selection.copy' | t"
+      [title]="'selection.copy' | t"
+    >
+      <span class="mat-sym">content_copy</span>
+    </button>
+    <button
+      class="ea-btn"
+      type="button"
+      (click)="cut()"
+      [attr.aria-label]="'selection.cut' | t"
+      [title]="'selection.cut' | t"
+    >
+      <span class="mat-sym">content_cut</span>
+    </button>
   }
 </div>

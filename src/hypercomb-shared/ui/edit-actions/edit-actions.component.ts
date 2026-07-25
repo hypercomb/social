@@ -7,6 +7,14 @@
 //                       rewound (pressed undo at least once); before that
 //                       there's nothing to redo and nothing to merge.
 //
+// While tiles are SELECTED (and the cursor is at head) the cluster also
+// grows the selection verbs — cut · copy · remove — to the left of undo.
+// They emit the same `controls:action` bus the controls-bar pills and the
+// retired floating selection menu used, so the essentials drones that
+// answer (ClipboardWorker, RemoveQueenBee) are unchanged. Hidden while
+// rewound: scrub-back is view-only — cut/remove commits are refused there,
+// and the cluster should read as the merge decision alone.
+//
 // Undo/redo reuse the EXACT keyboard path: they emit the same
 // `keymap:invoke` command the Ctrl+Z / Ctrl+Y bindings fire (the same call
 // the history right-click menu makes), so the HistorySliderDrone handler —
@@ -62,8 +70,11 @@ export class EditActionsComponent implements OnInit, OnDestroy {
   readonly rewound = signal(false)
   // saving: guards re-entry while the merge (promote + optional branch) runs.
   readonly saving = signal(false)
+  // selected tiles — gates the cut/copy/remove verbs.
+  readonly selectionCount = signal(0)
 
   #cursorUnsub: (() => void) | null = null
+  #selectionUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // Start the shared inset→CSS-var bridge. edit-actions is template-mounted in
@@ -82,10 +93,17 @@ export class EditActionsComponent implements OnInit, OnDestroy {
       this.canRedo.set(rewound)
       this.rewound.set(rewound)
     })
+
+    // SelectionService broadcasts every mutation (clicks, URL brackets,
+    // Escape-clear) — last-value replayed, so a late mount sees the live set.
+    this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (s) => {
+      this.selectionCount.set(s?.selected?.length ?? 0)
+    })
   }
 
   ngOnDestroy(): void {
     this.#cursorUnsub?.()
+    this.#selectionUnsub?.()
   }
 
   // ── undo / redo ──────────────────────────────────────────
@@ -100,6 +118,23 @@ export class EditActionsComponent implements OnInit, OnDestroy {
   readonly redo = (): void => {
     if (!this.canRedo()) return
     EffectBus.emit('keymap:invoke', { cmd: 'history.redo' })
+  }
+
+  // ── selection verbs (shown only while tiles are selected) ─
+  // Same `controls:action` bus as the controls-bar pills — ClipboardWorker
+  // answers cut/copy (capturing the selection), RemoveQueenBee answers
+  // remove (with its own nested-children confirm).
+
+  readonly cut = (): void => {
+    EffectBus.emit('controls:action', { action: 'cut' })
+  }
+
+  readonly copy = (): void => {
+    EffectBus.emit('controls:action', { action: 'copy' })
+  }
+
+  readonly remove = (): void => {
+    EffectBus.emit('controls:action', { action: 'remove' })
   }
 
   // ── save = merge (only meaningful while rewound) ─────────

@@ -47,6 +47,20 @@
 // starts blaring on navigation is hostile); stepping away pauses and unmounts
 // the player so nothing keeps running off-screen.
 //
+// ── TWO SURFACES, ONE ENGINE ─────────────────────────────────────────
+//
+// `slides` plays a deck's CHILDREN (above). `lightbox` (LightboxQueenBee,
+// `visual:lightbox:gallery`) shows the pictures a tile HOLDS: its gallery
+// images, then its own picture (link, else display image), then its children's
+// pictures. Same stage, same keys, same exit — a lightbox is a deck whose
+// source is the tile itself, so nothing about it needed a second viewer.
+//
+// The children pass is what makes the drop flow streamline: put the lightbox on
+// a container once and every image dropped into it afterwards shows up with
+// nothing to type. In that pass a child's plain DISPLAY picture counts as a
+// slide (`picturesToo`); a deck stays strict — a slide is something attached or
+// linked, never a tile's incidental picture.
+//
 // Mirrors HomeViewDrone's lifecycle (lineage + ViewMode listeners, re-entrancy
 // guard, fixed host below the Pixi layer, `view:active` canvas/chrome hiding —
 // zero shell edits) and PhotoView's image fit (object-fit:contain, max vw/vh).
@@ -55,6 +69,7 @@ import { Drone, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hy
 import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { DECK_KIND, SLIDE_KIND } from '../../commands/present.queen.js'
+import { GALLERY_KIND, LIGHTBOX_VIEW } from '../../commands/lightbox.queen.js'
 import { isImageUrl, sniffImageMime } from '../../link/photo.js'
 import { embedUrlFor, mediaKindForUrl, kindForMime, type PlayableKind } from '../../link/media.js'
 import { TAG_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
@@ -62,7 +77,19 @@ import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../e
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
-const GALLERY_KIND = 'visual:lightbox:gallery'
+
+/** The two surfaces this one engine renders. SLIDES plays a deck's CHILDREN;
+ *  LIGHTBOX shows the pictures a tile HOLDS (its gallery images, its own
+ *  picture, then its children's pictures). Same stage, same keys, same exit —
+ *  a lightbox is a deck whose source is the tile itself. */
+type Surface = typeof SLIDES_VIEW | typeof LIGHTBOX_VIEW
+
+/** The decoration kind that GATES each surface — what the Beehaviors panel's
+ *  off-switch hides, and what the tile must carry for the view to mount. */
+const GATE_KIND: Readonly<Record<Surface, string>> = {
+  [SLIDES_VIEW]: DECK_KIND,
+  [LIGHTBOX_VIEW]: GALLERY_KIND,
+}
 
 /** Steel accent shared with the site-view exit chrome — cold/clean, no glow. */
 const STEEL = 'rgba(126,182,214,0.92)'
@@ -214,11 +241,12 @@ export class SlidesViewDrone extends Drone {
       // A tile carrying this behaviour was clicked (tile-overlay), or the
       // Beehaviors panel's Open was used. Play THAT deck in place.
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', (p) => {
-        if (String(p?.view ?? '') !== SLIDES_VIEW) return
+        const view = String(p?.view ?? '')
+        if (view !== SLIDES_VIEW && view !== LIGHTBOX_VIEW) return
         const segments = Array.isArray(p?.segments)
           ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean)
           : []
-        void this.#openTarget(segments)
+        void this.#openTarget(segments, view)
       })
       this.#effectsBound = true
     }
@@ -239,16 +267,22 @@ export class SlidesViewDrone extends Drone {
 
   readonly #onChange = (): void => { void this.#reconcile() }
 
+  /** Which of our surfaces is up right now (null = neither — we're inert). */
+  #surface(): Surface | null {
+    const mode = this.#vm()?.mode
+    return mode === SLIDES_VIEW || mode === LIGHTBOX_VIEW ? mode : null
+  }
+
   readonly #onContextMenu = (e: MouseEvent): void => {
     const vm = this.#vm()
-    if (!vm || vm.mode !== SLIDES_VIEW) return
+    if (!vm || !this.#surface()) return
     e.preventDefault()
     vm.setMode('hexagons')
   }
 
   readonly #onKeyDown = (e: KeyboardEvent): void => {
     const vm = this.#vm()
-    if (!vm || vm.mode !== SLIDES_VIEW) return
+    if (!vm || !this.#surface()) return
     switch (e.key) {
       case 'Escape':
         e.preventDefault(); e.stopImmediatePropagation(); vm.setMode('hexagons'); return
@@ -293,7 +327,8 @@ export class SlidesViewDrone extends Drone {
       // EXIT — closed via Escape / right-click / the exit button / a raw flip.
       // Drop the targeted deck too, so the next bare `/present` presents
       // wherever the participant actually is.
-      if (!vm || vm.mode !== SLIDES_VIEW) { this.#targetSegments = null; this.#teardown(); return }
+      const surface = this.#surface()
+      if (!vm || !surface) { this.#targetSegments = null; this.#teardown(); return }
 
       const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
       const store = this.resolve<StoreShape>('store')
@@ -307,18 +342,22 @@ export class SlidesViewDrone extends Drone {
         : [...(lineage.explorerSegments?.() ?? [])]
       // Honor the Beehaviors panel's off switch: a hidden deck stays inert (torn
       // down) until restored — the same hidden-pool gate SiteViewDrone uses.
-      if (await isFeatureHidden(segments, DECK_KIND)) { this.#teardown(); return }
-      const slides = await this.#collectSlides(segments, history, store)
-      if (this.#vm()?.mode !== SLIDES_VIEW) { this.#targetSegments = null; this.#teardown(); return } // flipped mid-read
+      if (await isFeatureHidden(segments, GATE_KIND[surface])) { this.#teardown(); return }
+      const slides = surface === LIGHTBOX_VIEW
+        ? await this.#collectPictures(segments, history, store)
+        : await this.#collectSlides(segments, history, store)
+      if (this.#surface() !== surface) { this.#targetSegments = null; this.#teardown(); return } // flipped mid-read
 
-      const deckKey = segments.join('/')
+      // Surface-scoped identity: flipping between the deck and the lightbox of
+      // the SAME cell is a different view and must remount, not refresh.
+      const deckKey = `${surface}:${segments.join('/')}`
       if (this.#mount && this.#mount.deckKey === deckKey) {
         // Same deck — refresh the slide set in place, keep position where we can.
         this.#mount.slides = slides
         this.#show(this.#index)
         return
       }
-      this.#mountDeck(deckKey, slides)
+      this.#mountDeck(deckKey, slides, surface)
     } finally {
       this.#reconciling = false
       if (this.#queued) { this.#queued = false; void this.#reconcile() }
@@ -333,23 +372,143 @@ export class SlidesViewDrone extends Drone {
    *  When the behaviour is turned OFF in the Beehaviors panel there is nothing
    *  to play, so fall back to what the click would otherwise have done — enter
    *  the tile normally — rather than appearing to do nothing. */
-  async #openTarget(segments: readonly string[]): Promise<void> {
+  async #openTarget(segments: readonly string[], surface: Surface): Promise<void> {
     if (segments.length === 0) return
-    if (await isFeatureHidden(segments, DECK_KIND)) {
+    if (await isFeatureHidden(segments, GATE_KIND[surface])) {
       window.ioc?.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
         ?.goRaw?.([...segments])
       return
     }
     this.#targetSegments = [...segments]
-    this.#vm()?.setMode(SLIDES_VIEW)
+    this.#vm()?.setMode(surface)
     void this.#reconcile()
+  }
+
+  /** LIGHTBOX source — every picture this tile holds, in the order a
+   *  participant would expect to meet them:
+   *
+   *    1. its own gallery images (`/lightbox add` → payload.images[])
+   *    2. its own picture — the tile's link, then its display image, so a tile
+   *       made by dropping ONE image is already a one-picture lightbox with
+   *       nothing else to do
+   *    3. its children's pictures — a lightbox on a CONTAINER is the gallery of
+   *       what was dropped inside it, and the next dropped image joins it with
+   *       nothing to type
+   *
+   *  Deduped by source, so a picture that is both the tile's link and one of
+   *  its gallery images appears once. */
+  async #collectPictures(segments: readonly string[], history: HistoryShape, store: StoreShape): Promise<Slide[]> {
+    const name = segments[segments.length - 1] ?? ''
+    const out: Slide[] = []
+    const seen = new Set<string>()
+    const push = (slide: Slide | null): void => {
+      if (!slide || seen.has(slide.src)) return
+      seen.add(slide.src)
+      out.push(slide)
+    }
+
+    try {
+      const sig = await history.sign({ explorerSegments: () => segments })
+      const layer = await history.currentLayerAt(sig)
+      if (layer) {
+        // 1 — the gallery held on this tile.
+        const images = await this.#galleryImages(layer, store)
+        images.forEach((imgSig, i) => push({
+          kind: 'auto',
+          src: imgSig,
+          title: images.length > 1 ? `${name} ${i + 1}` : name,
+        }))
+
+        // 2 — the tile's own picture: its link first (what a dropped image
+        // sets), then its display image (tiles made before that did).
+        const link = await this.#childLink(layer, name, segments.slice(0, -1), store)
+        const own = this.#slideFromLink(link, name, 0)
+        if (own) push({ kind: own.kind, src: own.src, title: own.title })
+        else {
+          const picture = await this.#tilePictureSig(layer, name, segments.slice(0, -1), store)
+          if (picture) push({ kind: 'auto', src: picture, title: name })
+        }
+      }
+    } catch { /* cold read — the children pass may still find pictures */ }
+
+    // 3 — the children, resolved by the SAME rules the deck uses, plus each
+    // child's display image as a last resort (an image tile from before links
+    // were set on drop still belongs in its container's lightbox).
+    for (const slide of await this.#collectSlides(segments, history, store, true)) push(slide)
+
+    return out
+  }
+
+  /** The image signatures held in this layer's gallery decoration ([] when it
+   *  carries none). Read LOCAL-ONLY, like every other resolution here. */
+  async #galleryImages(layer: Record<string, unknown>, store: StoreShape): Promise<string[]> {
+    const sigs = Array.isArray(layer['decorations'])
+      ? (layer['decorations'] as unknown[]).map(s => String(s)).filter(s => SIG.test(s))
+      : []
+    const out: string[] = []
+    for (const sig of sigs) {
+      try {
+        const blob = await store.getResourceLocal(sig)
+        if (!blob) continue
+        const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: Record<string, unknown> }
+        if (rec?.kind !== GALLERY_KIND) continue
+        const imgs = rec.payload?.['images']
+        if (!Array.isArray(imgs)) continue
+        for (const s of imgs) {
+          const v = String(s)
+          if (SIG.test(v) && !out.includes(v)) out.push(v)
+        }
+      } catch { /* malformed record — skip */ }
+    }
+    return out
+  }
+
+  /** A tile's DISPLAY picture signature (`large.image` in its properties) —
+   *  the lightbox's last resort for a tile that has a picture but no link.
+   *  Reads the same two prop stores `#childLink` does, in the same order. */
+  async #tilePictureSig(
+    layer: Record<string, unknown>,
+    name: string,
+    parentSegments: readonly string[],
+    store: StoreShape,
+  ): Promise<string> {
+    const fromPropsSig = async (sig: string): Promise<string> => {
+      if (!SIG.test(sig)) return ''
+      try {
+        const blob = await store.getResourceLocal(sig)
+        if (!blob) return ''
+        const props = JSON.parse(await blob.text()) as { large?: { image?: unknown } }
+        const image = props?.large?.image
+        return typeof image === 'string' && SIG.test(image) ? image : ''
+      } catch { return '' }
+    }
+
+    const slot = layer['properties']
+    const canonical = await fromPropsSig(Array.isArray(slot) && typeof slot[0] === 'string' ? slot[0] : '')
+    if (canonical) return canonical
+
+    try {
+      const key = name ? await cellLocationSig(parentSegments, name) : ''
+      const indexed = lookupTilePropsSig(readTilePropsIndex(), key, name)
+      if (indexed) return await fromPropsSig(indexed)
+    } catch { /* index unavailable */ }
+    return ''
   }
 
   /** Walk the deck cell's children and resolve each to zero-or-more slides.
    *  Children are read through the parent's child-sig slot (getLayerBySig), so a
    *  never-navigated child (empty own bag) still resolves. Ordered by each
    *  slide's `order` (else child order). */
-  async #collectSlides(segments: readonly string[], history: HistoryShape, store: StoreShape): Promise<Slide[]> {
+  async #collectSlides(
+    segments: readonly string[],
+    history: HistoryShape,
+    store: StoreShape,
+    /** LIGHTBOX pass: also take a child's DISPLAY picture when it resolves no
+     *  slide of its own. A deck stays strict (a slide is something you attached
+     *  or linked); a lightbox is about the pictures, so a plain image tile
+     *  belongs in it. */
+    picturesToo = false,
+  ): Promise<Slide[]> {
     const out: Array<Slide & { order: number }> = []
     try {
       const deckSig = await history.sign({ explorerSegments: () => segments })
@@ -374,7 +533,7 @@ export class SlidesViewDrone extends Drone {
             if (fresh) child = fresh
           } catch { /* keep the ref layer */ }
         }
-        const found = await this.#slidesFromChild(child, name, childIndex, store, segments)
+        const found = await this.#slidesFromChild(child, name, childIndex, store, segments, picturesToo)
         out.push(...found)
         childIndex++
       }
@@ -390,6 +549,7 @@ export class SlidesViewDrone extends Drone {
     childIndex: number,
     store: StoreShape,
     deckSegments: readonly string[],
+    picturesToo = false,
   ): Promise<Array<Slide & { order: number }>> {
     const decorationSigs = Array.isArray(child['decorations'])
       ? (child['decorations'] as unknown[]).map(s => String(s)).filter(s => SIG.test(s))
@@ -453,7 +613,15 @@ export class SlidesViewDrone extends Drone {
     // writes it), with a legacy top-level `link` as fallback.
     const link = await this.#childLink(child, name, deckSegments, store)
     const slide = this.#slideFromLink(link, name, childIndex)
-    return slide ? [slide] : []
+    if (slide) return [slide]
+
+    // 4 (lightbox only): the child's own DISPLAY picture. An image tile made
+    // before drops set the link still belongs in its container's lightbox.
+    if (picturesToo) {
+      const picture = await this.#tilePictureSig(child, name, deckSegments, store)
+      if (picture) return [{ kind: 'auto', src: picture, title: name, order: childIndex }]
+    }
+    return []
   }
 
   /** Classify a link into a playable slide — the whole point of the universal
@@ -586,7 +754,7 @@ export class SlidesViewDrone extends Drone {
 
   // ── DOM ────────────────────────────────────────────────────
 
-  #mountDeck(deckKey: string, slides: Slide[]): void {
+  #mountDeck(deckKey: string, slides: Slide[], surface: Surface = SLIDES_VIEW): void {
     this.#teardown()
 
     const host = document.createElement('div')
@@ -646,7 +814,9 @@ export class SlidesViewDrone extends Drone {
     const empty = document.createElement('div')
     empty.style.cssText = `color:${DIM};font-size:15px;line-height:1.6;text-align:center;max-width:34rem;padding:2rem;`
     const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
-    empty.textContent = i18n?.t('slides.empty') ?? 'No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.'
+    empty.textContent = surface === LIGHTBOX_VIEW
+      ? (i18n?.t('lightbox.empty') ?? 'No pictures here yet. Drop images on this tile or inside it, or run /lightbox add.')
+      : (i18n?.t('slides.empty') ?? 'No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.')
     host.appendChild(empty)
 
     this.#mount = { host, deckKey, slides, stage, titleEl, captionEl, counterEl, dots, empty, emptyDefault: empty.textContent ?? '' }

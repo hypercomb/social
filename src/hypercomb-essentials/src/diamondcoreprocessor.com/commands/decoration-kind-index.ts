@@ -268,6 +268,17 @@ export function titleForLabel(label: string, locale: string): string {
   return titleByKey.get(keyForLabel(label))?.[locale] ?? ''
 }
 
+/** The same lookup by FULL PATH rather than a bare label.
+ *
+ *  `titleForLabel` resolves a label against the page being read, which is right
+ *  for tiles on screen but wrong for the breadcrumb: its entries are ancestors,
+ *  not children of the current location. Keying by the whole path answers for
+ *  any cell the index has walked. A miss returns '' and the caller shows the
+ *  raw name — the breadcrumb degrades to addresses rather than going blank. */
+export function titleForSegments(segments: readonly string[], locale: string): string {
+  return titleByKey.get(locationKey(segments))?.[locale] ?? ''
+}
+
 /** Map<locationKey, shapeId> — the owning group's silhouette for a launcher tile. */
 const launchShapeByKey = new Map<string, string>()
 
@@ -764,6 +775,28 @@ export async function ensureDecorationsIndexed(
   await Promise.all(labels.map(label => hydrateLabel(label, parentSegments, history, false)))
 }
 
+/** Walk the ANCESTORS of the current location — every prefix of the path we
+ *  are standing on, including the location itself.
+ *
+ *  Every other hydration path walks a page's CHILDREN, so a cell is only ever
+ *  indexed while its parent is on screen. That leaves the breadcrumb reading
+ *  raw addresses: standing at `/a/b/c`, the crumbs ARE `a`, `b` and `c`, and
+ *  none of them is a cell here. Walking in warms them incidentally (each was a
+ *  child one level up), but arriving by any jump does not — a deep link, a
+ *  restored session, or a reference portal (`goRaw`, the whole point of a
+ *  reference) lands with every ancestor cold, so every crumb falls back to its
+ *  name and titles never appear.
+ *
+ *  Rides `hydrateLabel`'s per-path memo, so this is one layer read per ancestor
+ *  per session and a synchronous no-op on every later visit. */
+async function hydrateAncestors(
+  segments: readonly string[],
+  history: HistoryServiceLike,
+): Promise<void> {
+  await Promise.all(segments.map((label, i) =>
+    hydrateLabel(label, segments.slice(0, i), history, true, segments.slice(0, i + 1))))
+}
+
 type RenderCellCountPayload = {
   readonly labels?: readonly string[]
   /** Absolute path per label — populated ONLY while a tag filter flattens the
@@ -784,12 +817,18 @@ EffectBus.on('render:cell-count', (payload: RenderCellCountPayload | undefined) 
     }
   }
 
-  const labels = payload?.labels
-  if (!Array.isArray(labels) || labels.length === 0) return
   const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
   const history = window.ioc.get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
   if (!history) return
   const parentSegments = lineage?.explorerSegments?.() ?? []
+
+  // The path we are STANDING on, before the early bail below — an empty page
+  // still has a breadcrumb, and a jump into an empty location is exactly the
+  // case that leaves every crumb cold.
+  void hydrateAncestors(parentSegments, history)
+
+  const labels = payload?.labels
+  if (!Array.isArray(labels) || labels.length === 0) return
   // Walk each label in parallel — independent layer fetches. When a first-time
   // walk discovers tags on a cell, signal `tags:indexed` so the tag renderers
   // (controls-bar aggregation, on-tile badge) repaint without waiting for the

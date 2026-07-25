@@ -10,6 +10,11 @@ import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sig
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
 const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
+// Optional port override (`?claudeBridgePort=2411`) so a TEST stack — its own
+// broker + its own renderer tab — can run the full ask loop in isolation
+// without seizing the production broker's single renderer slot on 2401.
+// Query-only (never persisted): an override is a per-tab, per-session choice.
+const BRIDGE_PORT_QUERY_KEY = 'claudeBridgePort'
 const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
 
 /** Per-cell context bag slot — value is a sig array. Each entry is a
@@ -118,9 +123,18 @@ export class ClaudeBridgeWorker extends Worker {
 
   #connected = false
 
+  #port(): number {
+    try {
+      const raw = new URLSearchParams(window.location.search).get(BRIDGE_PORT_QUERY_KEY)
+      const port = Number(raw)
+      if (Number.isInteger(port) && port > 0 && port < 65_536) return port
+    } catch { /* fall through to default */ }
+    return BRIDGE_PORT
+  }
+
   #connect(): void {
     try {
-      const ws = new WebSocket(`ws://localhost:${BRIDGE_PORT}`)
+      const ws = new WebSocket(`ws://localhost:${this.#port()}`)
 
       ws.onopen = () => {
         this.#connected = true
@@ -326,11 +340,31 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #optimizationRemove(req: BridgeRequest): Promise<BridgeResponse> {
-    const store = get<{ removeOptimization?: (sig: string) => Promise<boolean> }>('@hypercomb.social/Store')
+    const store = get<{
+      removeOptimization?: (sig: string) => Promise<boolean>
+      getOptimization?: (sig: string) => Promise<Blob | null>
+    }>('@hypercomb.social/Store')
     if (!store?.removeOptimization) return { id: req.id, ok: false, error: 'Store.removeOptimization not available' }
     const sig = typeof req.sig === 'string' ? req.sig.trim() : ''
     if (!isSignature(sig)) return { id: req.id, ok: false, error: 'optimization-remove requires `sig` (64-hex)' }
+
+    // Peek at the record before it goes: retiring an ASK is the "your answer
+    // has landed" moment — the responder writes the note first, then retires
+    // (the drain contract) — so this is where the UI learns the wait is over.
+    // Best-effort: a read failure never blocks the removal.
+    let askAnswered: { appliesTo: unknown } | null = null
+    try {
+      const blob = await store.getOptimization?.(sig)
+      if (blob) {
+        const parsed = JSON.parse(await blob.text()) as { kind?: string; appliesTo?: unknown }
+        if (parsed?.kind === 'ask') askAnswered = { appliesTo: parsed.appliesTo }
+      }
+    } catch { /* unreadable record — still remove it */ }
+
     const removed = await store.removeOptimization(sig)
+    if (removed && askAnswered) {
+      EffectBus.emit('ask:answered', { sig, appliesTo: askAnswered.appliesTo })
+    }
     return { id: req.id, ok: true, data: { sig, removed } }
   }
 

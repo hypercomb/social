@@ -5374,7 +5374,10 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    this.onEffect<{ q: number; r: number }>('tile:hover', (payload) => {
+    // q/r are absent on the "nothing hovered" broadcast (pointer over
+    // chrome) — the key lookup then misses and the ring clears, which is
+    // exactly the wanted read: chrome is not the hive.
+    this.onEffect<{ q?: number; r?: number }>('tile:hover', (payload) => {
       if (!this.shader) return
       const idx = this.#axialToIndex.get(`${payload.q},${payload.r}`)
 

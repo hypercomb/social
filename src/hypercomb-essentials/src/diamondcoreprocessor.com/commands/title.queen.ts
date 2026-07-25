@@ -44,7 +44,12 @@ type DecorationShape = {
     segments: readonly string[],
     text: string,
     locale?: string,
-  ): Promise<'set' | 'cleared' | 'noop'>
+  ): Promise<'set' | 'cleared' | 'noop' | 'duplicate'>
+  duplicateTitle(
+    segments: readonly string[],
+    text: string,
+    locale?: string,
+  ): Promise<string | null>
 }
 
 export class TitleQueenBee extends QueenBee {
@@ -100,6 +105,13 @@ export class TitleQueenBee extends QueenBee {
     const label = segments[segments.length - 1]
     try {
       const outcome = await decorations.setTitle(segments, text, locale)
+      if (outcome === 'duplicate') {
+        // Name the tile that took it — "already used" without saying by what
+        // leaves the participant hunting for it.
+        const clash = await decorations.duplicateTitle(segments, text, locale)
+        this.#log(`Title — a tile here already reads "${clash ?? text}"`)
+        return
+      }
       if (outcome === 'noop') { this.#log(`Title — "${label}" already reads that way in ${locale}`); return }
       this.#log(outcome === 'cleared'
         ? `Title — cleared the ${locale} title, "${label}" draws under its own name`

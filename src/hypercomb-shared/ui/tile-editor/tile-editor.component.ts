@@ -125,6 +125,14 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
    *  change detection, so the input stays visibly empty; a signal write does. */
   public readonly titleValue = signal('')
   #titleLoadedFor = ''
+
+  /** True while the heading is a field. */
+  public readonly renaming = signal(false)
+
+  /** Set when a commit was refused because a sibling already reads that way.
+   *  Cleared as soon as the participant edits again — the warning describes the
+   *  text that was rejected, not the field's current contents. */
+  public readonly renameDenied = signal(false)
   public linkDenied = false
   public linkWarned = false
   public linkSafetyReason = ''
@@ -173,6 +181,8 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       this.linkValue = ''
       this.titleValue.set('')
       this.#titleLoadedFor = ''
+      this.renaming.set(false)
+      this.renameDenied.set(false)
       this.borderColorValue = ''
       this.backgroundColorValue = ''
       this.qaItems = []
@@ -215,14 +225,64 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     }).catch(() => { /* no title is a normal state, not an error */ })
   }
 
-  /** Commit the typed reading for the active locale. Empty clears it. */
-  onTitleBlur(): void {
+  /** Typing clears a refusal — the warning described the rejected text. */
+  onTitleInput(value: string): void {
+    this.titleValue.set(value)
+    if (this.renameDenied()) this.renameDenied.set(false)
+  }
+
+  /** Turn the heading into a field and put the caret in it. Pre-selected so
+   *  typing replaces — the common case is renaming outright, not appending. */
+  startRenaming(): void {
+    if (this.renaming()) return
+    this.renaming.set(true)
+    setTimeout(() => {
+      const el = document.querySelector('.header-rename') as HTMLInputElement | null
+      el?.focus()
+      el?.select()
+    }, 0)
+  }
+
+  /** Commit the typed reading for the active locale. Empty clears it.
+   *
+   *  Reached from blur, and from the panel-wide Enter that saves the editor —
+   *  that handler lives on `document`, so this element handler runs first and
+   *  the rename lands before the panel closes. The `renaming()` guard makes the
+   *  second arrival a no-op; `setTitle` also reports 'noop' when nothing moved,
+   *  so an unchanged heading costs no commit and no repaint. */
+  commitRename(): void {
+    if (!this.renaming()) return
+    this.renaming.set(false)
     const decorations = get('@diamondcoreprocessor.com/DecorationService') as
       { setTitle?: (segments: readonly string[], text: string, locale?: string) => Promise<string> } | undefined
     const segments = this.#cellSegments()
     if (!decorations?.setTitle || segments.length === 0) return
     void decorations.setTitle(segments, this.titleValue().trim())
+      .then(outcome => {
+        if (outcome !== 'duplicate') return
+        // Refused: hand the field back with the rejected text still in it, so
+        // the participant can adjust rather than retype from nothing.
+        this.renameDenied.set(true)
+        this.startRenaming()
+      })
       .catch((err: unknown) => console.warn('[tile-editor] title failed', err))
+  }
+
+  /** Abandon the edit and restore what is stored — the typed text is never
+   *  committed.
+   *
+   *  VERIFIED BEHAVIOUR: Escape also closes the whole editor. The app-wide
+   *  escape cascade listens in the capture phase, so it runs before this
+   *  handler and `stopPropagation` cannot hold it back; the call below is kept
+   *  because it is correct the moment the cascade moves to bubble. Backing out
+   *  of the rename ALONE would mean registering it with the mode stack so the
+   *  cascade pops this first — the sanctioned route, not a rival capture-phase
+   *  listener. Either way no unwanted text is stored, which is what matters. */
+  cancelRename(event?: Event): void {
+    event?.stopPropagation()
+    this.renaming.set(false)
+    this.renameDenied.set(false)
+    this.#loadTitle()
   }
 
   #refreshQaItems(): void {

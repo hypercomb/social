@@ -78,6 +78,16 @@ interface FeatureRow {
    *  panel is describing (scope features — per-page/branch off), absent =
    *  at the feature's attach point (node-local features, unchanged). */
   hideAt?: 'node' | 'origin'
+  /** True when no module here declares this kind — named from its kind, inert
+   *  until its module arrives. Never an "unrecognized" row: it is fully
+   *  nameable, toggleable and paintable meanwhile. */
+  foreign?: boolean
+  /** The module a foreign behaviour is waiting on (from `visual:<module>:x`). */
+  module?: string
+  /** True when the behaviour rides a decoration the painter can copy onto other
+   *  tiles. Slot-backed behaviours (a tutor deck, a website page) are false —
+   *  their content must be authored at the target. */
+  paintable?: boolean
   /** True when the community verification gate currently blocks activation —
    *  the row's switch renders OFF + disabled with the "needs your OK" chip
    *  and the allow override beside it. */
@@ -184,6 +194,34 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  on close; Escape clears it before it closes the panel. */
   readonly query = signal('')
 
+  // ── the two modes ────────────────────────────────────────────────
+  //
+  // MANAGE (default) — the rows are switches: click one to turn the behaviour
+  // on or off at this tile. Everything the tile carries is listed, on and off
+  // alike; nothing moves when it flips.
+  //
+  // PAINT — the panel narrows to the behaviours that are ON here (an off
+  // behaviour is not something you'd hand to another tile) and each row becomes
+  // a PICK. The picked set is the brush; one press lands it on every selected
+  // tile. Painting copies the behaviour's decoration record, so it works for a
+  // behaviour whose module hasn't arrived yet too. Slot-backed behaviours (a
+  // tutor deck, a website page) can't be brushed — they say so on the row.
+
+  readonly mode = signal<'manage' | 'paint'>('manage')
+
+  /** The behaviour kinds loaded in the brush. Picked in paint mode; cleared
+   *  when the mode closes, the subject changes, or the paint lands. */
+  readonly brush = signal<ReadonlySet<string>>(new Set())
+
+  /** Names of the tiles currently selected on the canvas — the paint targets.
+   *  The selection IS the target set (same shape the pheromone painter uses),
+   *  so painting never has to guess which tile you meant. */
+  readonly canvasSelection = signal<readonly string[]>([])
+
+  /** Plain-words outcome of the last paint ('' = none) — shown in the paint
+   *  bar, cleared on the next pick. */
+  readonly paintNote = signal('')
+
   /** Multi-selected rows (by stable row key). The bulk bar at the top acts on
    *  this set: allow the blocked ones, download the selected ones. */
   readonly selectedKeys = signal<ReadonlySet<string>>(new Set())
@@ -284,7 +322,26 @@ export class FeaturesViewerComponent implements OnDestroy {
   #lastNavKey = ''
 
   constructor() {
-    this.#cleanups.push(onSelection(({ selected }) => this.canvasSelectionCount.set(selected.length)))
+    this.#cleanups.push(onSelection(({ selected }) => {
+      this.canvasSelectionCount.set(selected.length)
+      this.canvasSelection.set(selected.map(String).filter(Boolean))
+    }))
+
+    // The painter's answer — how many behaviours landed on how many tiles, or
+    // why nothing did. Plain words, on the bar that asked.
+    this.#cleanups.push(EffectBus.on<{ painted?: number; tiles?: number; skipped?: string[] }>(
+      'features:paint-result',
+      (p) => {
+        const painted = Number(p?.painted ?? 0) || 0
+        const tiles = Number(p?.tiles ?? 0) || 0
+        if (painted > 0) {
+          this.paintNote.set(this.#tp('features.paint.done', { count: painted, tiles }, `${painted} on ${tiles} tiles`))
+          this.brush.set(new Set())
+        } else {
+          this.paintNote.set(this.#t('features.paint.nothing', 'nothing to paint — no record to copy'))
+        }
+      },
+    ))
     this.#cleanups.push(EffectBus.on<{ value?: boolean }>('selection:has-features', (p) => {
       this.canvasSelectionHasFeatures.set(p?.value === true)
     }))
@@ -307,6 +364,10 @@ export class FeaturesViewerComponent implements OnDestroy {
         this.selectedKeys.set(new Set())
         this.rowNotes.set(new Map())   // notes describe the OLD subject's rows
         this.query.set('')             // a stale filter would hide the new subject's rows
+        // The brush belongs to the tile it was picked from — a new subject
+        // starts empty rather than silently carrying another tile's rows.
+        this.brush.set(new Set())
+        this.paintNote.set('')
       }
       this.group.set(group)
       if (!this.visible()) this.visible.set(true)
@@ -525,6 +586,9 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.pending.set(new Set())
     this.rowNotes.set(new Map())
     this.query.set('')
+    this.mode.set('manage')
+    this.brush.set(new Set())
+    this.paintNote.set('')
     this.downloadResults.set([])
     // In-flight downloads keep running (the bytes still land, and the header
     // sync pill keeps showing them) — only the panel-local status resets.
@@ -729,10 +793,87 @@ export class FeaturesViewerComponent implements OnDestroy {
     return feat.openable === true && this.isOn(group, feat)
   }
 
+  // ── paint mode ────────────────────────────────────────────────────
+
+  /** Flip between managing this tile's behaviours and painting them onto
+   *  others. Leaving paint mode empties the brush — a brush that survives the
+   *  mode is a brush you forget you are holding. */
+  toggleMode(): void {
+    if (this.mode() === 'paint') {
+      this.mode.set('manage')
+      this.brush.set(new Set())
+      this.paintNote.set('')
+      return
+    }
+    this.mode.set('paint')
+    this.selectedKeys.set(new Set())   // row selection is a manage-mode idea
+  }
+
+  isPainting(): boolean {
+    return this.mode() === 'paint'
+  }
+
+  /** The rows paint mode shows: the behaviours that are ON at this tile, through
+   *  the same search filter. Off behaviours are excluded — you hand over what
+   *  this tile actually does, not what it has switched off. */
+  paintable(group: FeatureGroup): FeatureRow[] {
+    return this.visibleApplied(group).filter(f => this.isOn(group, f))
+  }
+
+  /** Can this row go in the brush? Only decoration-backed behaviours: a
+   *  slot-backed one (a tutor deck, a website page) has no record to copy, and
+   *  saying so on the row beats a switch that silently does nothing. */
+  canPaint(feat: FeatureRow): boolean {
+    return feat.paintable === true
+  }
+
+  isPicked(feat: FeatureRow): boolean {
+    return this.brush().has(feat.kind)
+  }
+
+  /** Pick / unpick a behaviour into the brush. */
+  pick(feat: FeatureRow): void {
+    if (!this.canPaint(feat)) return
+    this.paintNote.set('')
+    this.brush.update(cur => {
+      const next = new Set(cur)
+      if (next.has(feat.kind)) next.delete(feat.kind)
+      else next.add(feat.kind)
+      return next
+    })
+  }
+
+  readonly brushCount = computed(() => this.brush().size)
+
+  /** True when a press would actually do something — something in the brush,
+   *  something selected on the canvas. */
+  readonly canApplyBrush = computed(() =>
+    this.brush().size > 0 && this.canvasSelection().length > 0)
+
+  /** Land the brush: every picked behaviour onto every selected tile, in one
+   *  press. ShowFeaturesDrone copies each behaviour's decoration record to the
+   *  targets and answers with `features:paint-result`. */
+  applyBrush(): void {
+    const group = this.group()
+    if (!group || !this.canApplyBrush()) return
+    this.paintNote.set('')
+    EffectBus.emit('features:paint', {
+      source: [...group.segments],
+      kinds: [...this.brush()],
+      targets: [...this.canvasSelection()],
+    })
+  }
+
   /** The ROW is the toggle. A plain click flips the behavior in place (the
    *  row never moves or disappears); Ctrl/Shift-click selects the row for the
-   *  bulk bar instead. */
+   *  bulk bar instead. In PAINT mode the same click PICKS the behaviour into
+   *  the brush — the mode is the whole difference, so there is no second
+   *  control to hunt for. */
   rowClick(group: FeatureGroup, feat: FeatureRow, event?: MouseEvent): void {
+    if (this.mode() === 'paint') {
+      this.pick(feat)
+      return
+    }
     if (event && (event.ctrlKey || event.metaKey || event.shiftKey)) {
       this.selectRow(group, feat)
       return
@@ -851,6 +992,14 @@ export class FeaturesViewerComponent implements OnDestroy {
     const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ t: (k: string) => string }>('@hypercomb.social/I18n')
     const v = i18n?.t?.(key)
+    return typeof v === 'string' && v && v !== key ? v : fallback
+  }
+
+  /** Same as `#t`, with interpolation params (counts, tile names). */
+  #tp(key: string, params: Record<string, unknown>, fallback: string): string {
+    const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ t: (k: string, p?: Record<string, unknown>) => string }>('@hypercomb.social/I18n')
+    const v = i18n?.t?.(key, params)
     return typeof v === 'string' && v && v !== key ? v : fallback
   }
 
@@ -1056,9 +1205,10 @@ export class FeaturesViewerComponent implements OnDestroy {
   onKey(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return
     event.preventDefault()
-    // Escape backs out of an in-progress review first, then clears an active
-    // search, and only then closes the panel.
+    // Escape backs out of an in-progress review first, then drops the brush /
+    // leaves paint mode, then clears an active search, and only then closes.
     if (this.reviewTarget()) { this.cancelReview(); return }
+    if (this.mode() === 'paint') { this.toggleMode(); return }
     if (this.query()) { this.query.set(''); return }
     this.close()
   }

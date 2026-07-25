@@ -6,7 +6,7 @@
 // Emits `tile:saved` so the renderer picks up the new image/link without
 // the user ever opening the tile editor UI.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from './tile-properties.js'
 
 type Store = {
@@ -71,6 +71,15 @@ export class ResourceAttachDrone {
 
     if (payload.url) {
       ;(props as any).link = payload.url
+    } else if (payload.type === 'image' && payload.largeSig) {
+      // A dropped image IS the tile's content, so it is also its LINK — the
+      // picture at full size is what "open this tile" should mean. That makes
+      // the drop flow whole with nothing else to type: clicking a leaf image
+      // tile shows the picture, `name@lightbox` turns it (or its container)
+      // into a lightbox, and the lightbox view reads exactly this link.
+      // Only when the arming flow supplied no url of its own (a dropped
+      // youtube/link arms with one and keeps it).
+      ;(props as any).link = `${RESOURCE_URL_PREFIX}${payload.largeSig}`
     }
 
     // persist as content-addressed resource + update cell → props-sig index

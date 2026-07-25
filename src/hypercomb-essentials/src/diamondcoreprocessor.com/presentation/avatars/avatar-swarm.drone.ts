@@ -255,11 +255,16 @@ export class AvatarSwarmDrone extends Drone {
       this.#hexGeo = geo
     })
 
-    // track which tile the local user is hovering / viewing
-    this.onEffect<{ label: string; q: number; r: number }>('tile:hover', ({ label, q, r }) => {
+    // track which tile the local user is hovering / viewing. A "nothing
+    // hovered" broadcast (pointer crossed chrome) carries no hex — keep the
+    // last real anchor so the swarm doesn't jump when the cursor grazes a
+    // panel; #viewingCell still clears so presence reads "not on a tile".
+    this.onEffect<{ label: string; q?: number; r?: number }>('tile:hover', ({ label, q, r }) => {
       this.#viewingCell = label
-      this.#viewingQ = q
-      this.#viewingR = r
+      if (Number.isFinite(q) && Number.isFinite(r)) {
+        this.#viewingQ = q as number
+        this.#viewingR = r as number
+      }
     })
 
     // operation cue: bees swarm while a long install/sync runs. Lanes are

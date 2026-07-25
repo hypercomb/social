@@ -2,9 +2,37 @@
   <div class="editor-backdrop" (click)="save()"></div>
 
   <div class="editor-panel" role="dialog" [attr.aria-label]="'editor.title' | t">
+    <!-- The heading IS the rename control: click it (or the edit icon) and it
+         becomes a field. Editing it never moves the tile — only how the tile
+         reads in the current language changes, so links, history and peers are
+         untouched. Empty restores its own name, shown here as the placeholder. -->
     <header class="editor-header">
-      <span class="mat-sym header-icon">edit</span>
-      <h3>{{ cell() }}</h3>
+      <span
+        class="mat-sym header-icon"
+        role="button"
+        tabindex="0"
+        (click)="startRenaming()"
+        (keydown.enter)="startRenaming()"
+        [attr.aria-label]="'editor.name' | t"
+        [attr.title]="'editor.name-hint' | t"
+      >edit</span>
+      @if (renaming()) {
+        <input
+          class="header-rename"
+          [class.rename-denied]="renameDenied()"
+          type="text"
+          name="tile-name"
+          [placeholder]="cell()"
+          [ngModel]="titleValue()"
+          (ngModelChange)="onTitleInput($event)"
+          (blur)="commitRename()"
+          (keydown.escape)="cancelRename($event)"
+          [attr.aria-label]="'editor.name' | t"
+          [title]="(renameDenied() ? 'editor.name-taken' : 'editor.name-hint') | t"
+        />
+      } @else {
+        <h3 (click)="startRenaming()" [attr.title]="'editor.name-hint' | t">{{ titleValue() || cell() }}</h3>
+      }
       <button class="editor-close" type="button" (click)="cancel()" [attr.aria-label]="'editor.cancel' | t">
         <span class="mat-sym">arrow_back</span>
       </button>
@@ -51,23 +79,6 @@
 
       <!-- property fields -->
       <div class="fields">
-        <!-- Name: the tile's reading in the CURRENT language. Editing this
-             never moves the tile — the address stays put and only the
-             interpretation changes, so links, history and peers are unaffected.
-             Empty restores the raw address. -->
-        <label class="field-row">
-          <span class="field-label"><span class="mat-sym">label</span> {{ 'editor.name' | t }}</span>
-          <input
-            class="field-input name-input"
-            type="text"
-            name="tile-name"
-            [placeholder]="cell()"
-            [ngModel]="titleValue()"
-            (ngModelChange)="titleValue.set($event)"
-            (blur)="onTitleBlur()"
-            [title]="'editor.name-hint' | t"
-          />
-        </label>
         <label class="field-row">
           <span class="field-label"><span class="mat-sym">link</span> {{ 'editor.link' | t }}</span>
           <input

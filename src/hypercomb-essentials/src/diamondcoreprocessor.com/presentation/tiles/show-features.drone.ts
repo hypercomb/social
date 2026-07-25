@@ -80,17 +80,28 @@ const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
-/** Non-visual cascading CAPABILITIES — behaviors a container declares that
- *  apply to its whole subtree (top-down). Unlike visual bees these don't
- *  RENDER, so they aren't in the VisualBeeRegistry; we describe them here so
- *  the panel can surface them and report where they cascade from. Add new
- *  cascading capability kinds here as they appear. */
-const CASCADING_CAPABILITIES: Readonly<Record<string, {
+/** CAPABILITIES — behaviors that are NOT registered visual bees (they have no
+ *  view of their own to enter) but ARE features a tile carries. Two flavours:
+ *  cascading ones a container declares for its whole subtree (the typed file
+ *  dropbox), and node-local content behaviours whose kind is written by a bee
+ *  that renders it somewhere ELSE (an image gallery, which the slides engine
+ *  plays as a deck's slides).
+ *
+ *  Every decoration kind essentials itself reads MUST be declared here or in
+ *  the VisualBeeRegistry — an in-house kind reaching the panel as "foreign"
+ *  is the bug this table exists to prevent. */
+const CAPABILITIES: Readonly<Record<string, {
   view: string
   slashCommand: string
   labelKey: string
   descriptionKey: string
   fallbackLabel: string
+  /** True when declaring it on a container applies it to the whole subtree. */
+  cascades: boolean
+  /** True when the panel can attach it mechanically (payload-free decoration).
+   *  False for capabilities whose payload IS content (a gallery's images) —
+   *  those are never offered in "Available to add"; there is nothing to add. */
+  addable: boolean
 }>> = {
   'files:dropbox': {
     view: 'dropbox',
@@ -98,7 +109,25 @@ const CASCADING_CAPABILITIES: Readonly<Record<string, {
     labelKey: 'features.cap.dropbox',
     descriptionKey: 'features.cap.dropbox.desc',
     fallbackLabel: 'File dropbox',
+    cascades: true,
+    addable: true,
   },
+}
+
+/** Human name for a decoration kind nobody here declares — `visual:x:y` → "Y",
+ *  falling back to the module segment, then the whole kind. A foreign
+ *  behaviour is still a NAMED behaviour: "unrecognized" is never an identity. */
+function nameFromKind(kind: string): string {
+  const parts = kind.split(':').filter(Boolean)
+  const noun = parts[2] ?? parts[1] ?? kind
+  return noun.replace(/[-_]+/g, ' ').replace(/^./, c => c.toUpperCase())
+}
+
+/** The module segment of a `visual:<module>:<noun>` kind ('' when malformed) —
+ *  what the panel names as the module a foreign behaviour is waiting on. */
+function moduleFromKind(kind: string): string {
+  const parts = kind.split(':').filter(Boolean)
+  return parts.length >= 3 ? parts[1] : ''
 }
 
 /** Where a feature applies to the clicked tile from. */
@@ -125,6 +154,17 @@ interface FeatureItem {
   label: string
   description: string
   branchSig?: string
+  /** True when no module here declares this kind — the behaviour is named from
+   *  its kind and stays inert until its module arrives. Never "unrecognized":
+   *  the row is fully nameable, toggleable and paintable meanwhile. */
+  foreign?: boolean
+  /** The module segment a foreign behaviour is waiting on (`visual:<module>:x`). */
+  module?: string
+  /** True when this behaviour rides a DECORATION we can read and re-write — so
+   *  the painter can put it on other tiles. False for slot-backed behaviours
+   *  (a tutor deck, a website page in its slot): their content must be
+   *  authored at the target, not copied by a brush. */
+  paintable?: boolean
   /** True when this feature, declared on a container, flows to its subtree. */
   cascades: boolean
   /** `direct` = on this tile; `cascade` = inherited from an ancestor. */
@@ -237,8 +277,8 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'feature:apply']
-  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'feature:apply', 'features:paint']
+  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:paint-result']
 
   constructor() {
     super()
@@ -303,6 +343,79 @@ export class ShowFeaturesDrone extends Drone {
       void this.#applyFeature(view, segments, p?.remove === true)
     })
 
+    // The PAINTER: put the behaviours picked in the panel onto other tiles.
+    // The brush carries decoration-backed behaviours only — painting one is
+    // copying its record (kind + payload) to each target, which is why it works
+    // for a FOREIGN behaviour too: no module is needed to carry a decoration,
+    // and the painted tiles are correct the day its module lands.
+    this.onEffect<{ source?: string[]; kinds?: string[]; targets?: string[] }>('features:paint', (p) => {
+      const source = Array.isArray(p?.source) ? p!.source!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      const kinds = Array.isArray(p?.kinds) ? p!.kinds!.map(k => String(k ?? '').trim()).filter(Boolean) : []
+      const targets = Array.isArray(p?.targets) ? p!.targets!.map(t => String(t ?? '').trim()).filter(Boolean) : []
+      if (source.length === 0 || kinds.length === 0 || targets.length === 0) return
+      void this.#paint(source, kinds, targets)
+    })
+
+  }
+
+  /** Copy every picked behaviour from `source` onto each target tile. Targets
+   *  are TILE NAMES on the layer the participant is standing on (the canvas
+   *  selection), resolved against the live lineage — the same resolution the
+   *  pheromone drop uses, so painting always lands where you can see it.
+   *
+   *  A behaviour whose content is a first-class SLOT (a tutor deck, a website
+   *  page in its slot) has no record to copy: it is reported as skipped rather
+   *  than half-applied — authoring belongs to its own bee. */
+  async #paint(source: readonly string[], kinds: readonly string[], targets: readonly string[]): Promise<void> {
+    const lineage = this.#ioc()?.get<LineageLike>(LINEAGE_KEY)
+    const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const sourceKey = source.join('/')
+
+    const skipped: string[] = []
+    const touched = new Set<string>()
+    const paintedKinds = new Set<string>()
+
+    for (const kind of kinds) {
+      let records: Array<{ record: { payload: unknown; mark?: 'persistent' } }> = []
+      try {
+        records = await listDecorations<unknown>({ kind, segments: source })
+      } catch {
+        records = []
+      }
+      if (records.length === 0) { skipped.push(kind); continue }
+      for (const label of targets) {
+        const targetSegments = [...here, label]
+        if (targetSegments.join('/') === sourceKey) continue   // painting a tile onto itself
+        try {
+          for (const { record } of records) {
+            await writeDecoration({
+              kind,
+              appliesTo: targetSegments,
+              segments: targetSegments,
+              payload: record.payload,
+              ...(record.mark ? { mark: record.mark } : {}),
+            })
+          }
+          paintedKinds.add(kind)
+          touched.add(label)
+        } catch (err) {
+          console.warn('[show-features] paint failed', { kind, label, err })
+          skipped.push(`${kind} → ${label}`)
+        }
+      }
+    }
+
+    const tiles = touched.size
+    const painted = paintedKinds.size
+    this.emitEffect('activity:log', {
+      message: painted > 0
+        ? `${painted} beehavior${painted === 1 ? '' : 's'} onto ${tiles} tile${tiles === 1 ? '' : 's'}`
+        : 'nothing to paint — those beehaviors carry no record to copy',
+      icon: painted > 0 ? '●' : '○',
+    })
+    this.emitEffect('features:paint-result', {
+      painted, tiles, skipped, targets: [...touched],
+    })
   }
 
   /** Attach (or detach) an ATTACHABLE view behaviour at `segments` by writing
@@ -344,9 +457,15 @@ export class ShowFeaturesDrone extends Drone {
   async #enableAt(segments: readonly string[], kind: string): Promise<void> {
     const label = segments[segments.length - 1] ?? ''
     try {
+      const attachable = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)?.byDecorationKind?.(kind)
       if (kind === 'files:dropbox') {
         await writeDropbox(segments, parseAccept(''))
         this.emitEffect('activity:log', { message: `dropbox on "${label}"`, icon: '●' })
+        this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
+      } else if (attachable?.attachable) {
+        // Declaratively attachable view bee — the same write `name@lightbox`
+        // performs, so the panel's switch and the command line agree.
+        await this.#applyFeature(attachable.view, segments, false)
         this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
       } else {
         // Row-level outcome: the refusal lands on the panel row that asked,
@@ -356,11 +475,29 @@ export class ShowFeaturesDrone extends Drone {
         this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `"${kind}" can't be added from the panel — use its command` })
         return
       }
+      // The decoration write returns as soon as the append is QUEUED — the
+      // layer commit rides the committer's FIFO. Refreshing straight away read
+      // the pre-commit layer, so the row the participant just switched on came
+      // back missing until they re-opened the panel. Wait (briefly, bounded)
+      // for the kind to actually be on the layer, then refresh in place.
+      await this.#settleKind(segments, kind)
       if (label) await this.#open(label)   // refresh the panel group in place
     } catch (err) {
       console.warn('[show-features] enable failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
       this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't add "${kind}" to "${label}"` })
+    }
+  }
+
+  /** Wait until `kind` is readable on the layer at `segments` — the commit
+   *  cascade landing — so a refresh reads the tile as it now IS. Bounded: on
+   *  timeout we refresh anyway (the write is queued; the next open is correct)
+   *  rather than hanging the switch. */
+  async #settleKind(segments: readonly string[], kind: string, timeoutMs = 2500): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if ((await this.#decorationKindsAt(segments)).includes(kind)) return
+      await new Promise(r => setTimeout(r, 120))
     }
   }
 
@@ -426,25 +563,37 @@ export class ShowFeaturesDrone extends Drone {
       if (feature) {
         if (appliedViews.has(feature.view)) continue
         appliedViews.add(feature.view)
-        applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
+        // Decoration-backed (both sources here ARE decoration kinds) — the
+        // painter can copy this row's record onto other tiles.
+        applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments, true))
         continue
       }
-      // UNRECOGNIZED feature kind — a community module's decoration whose bee
-      // isn't installed here. Surface it (visual:* kinds only — tags, images
-      // and attachments are decorations but not features) so foreign features
-      // are never invisible: the row can still be hidden or allowed, and the
-      // participant can see WHAT an adopted tile carries before its module
-      // arrives. Inert until its module is adopted.
+      // FOREIGN feature kind — a community module's decoration whose bee isn't
+      // installed here. It is still a NAMED behaviour: the name comes from the
+      // kind itself (`visual:lightbox:gallery` → "Gallery", from the lightbox
+      // module) and the missing module is PROVENANCE, not identity. Nothing is
+      // ever listed as "unrecognized" — a row you can't name is a row you can't
+      // decide about. Surfaced for visual:* kinds only (tags, images and
+      // attachments are decorations, not features); inert until its module
+      // arrives, and toggleable/paintable meanwhile.
       if (kind.startsWith('visual:') && !appliedViews.has(kind)) {
         appliedViews.add(kind)
+        const moduleName = moduleFromKind(kind)
         applied.push({
           view: kind,
           kind,
-          label: this.#t(i18n, 'features.unknown', kind),
-          description: this.#t(i18n, 'features.unknown.desc', ''),
+          label: nameFromKind(kind),
+          description: this.#t(i18n, 'features.foreign.desc', '')
+            .replace('{module}', moduleName || kind),
+          foreign: true,
+          ...(moduleName ? { module: moduleName } : {}),
           cascades: false,
           origin: 'direct',
           originSegments: [...segments],
+          // Decoration-backed: a foreign behaviour can still be PAINTED onto
+          // other tiles — copying its record needs no module here, and the
+          // tiles are correct the day the module lands.
+          paintable: true,
           ...(branchSig ? { branchSig } : {}),
         })
       }
@@ -480,7 +629,7 @@ export class ShowFeaturesDrone extends Drone {
         const feature = this.#recognize(kind, registry)
         if (!feature || !feature.cascades || appliedViews.has(feature.view)) continue
         appliedViews.add(feature.view)
-        applied.push(this.#describe(feature, kind, i18n, 'cascade', from, undefined, ancestor))
+        applied.push(this.#describe(feature, kind, i18n, 'cascade', from, undefined, ancestor, true))
       }
     }
 
@@ -625,10 +774,17 @@ export class ShowFeaturesDrone extends Drone {
         label: this.#t(i18n, bee.labelKey, bee.view),
         description: this.#t(i18n, bee.descriptionKey, ''),
         cascades: bee.cascades === true,
+        // An ATTACHABLE view bee (the lightbox: its content is what the tile
+        // already holds) can be added right here — writing the decoration IS
+        // the install. Bees whose content must be authored (a website page, a
+        // tutor deck) keep the slash-command chip instead of a switch.
+        addable: bee.attachable === true,
       })
     }
-    for (const [kind, cap] of Object.entries(CASCADING_CAPABILITIES)) {
-      if (appliedViews.has(cap.view) || seen.has(cap.view)) continue
+    for (const [kind, cap] of Object.entries(CAPABILITIES)) {
+      // Only ATTACHABLE capabilities are offerable — a gallery with no images
+      // is not a thing you can add, so it never shows as "available".
+      if (!cap.addable || appliedViews.has(cap.view) || seen.has(cap.view)) continue
       seen.add(cap.view)
       out.push({
         view: cap.view,
@@ -636,9 +792,9 @@ export class ShowFeaturesDrone extends Drone {
         slashCommand: cap.slashCommand,
         label: this.#t(i18n, cap.labelKey, cap.fallbackLabel),
         description: this.#t(i18n, cap.descriptionKey, ''),
-        cascades: true,
-        // Cascading capabilities attach mechanically (payload-free decoration
-        // at the tile's segments) — these rows get the live ADD switch.
+        cascades: cap.cascades,
+        // Attaches mechanically (payload-free decoration at the tile's
+        // segments) — these rows get the live ADD switch.
         addable: true,
       })
     }
@@ -671,15 +827,15 @@ export class ShowFeaturesDrone extends Drone {
         opensInPlace: bee.opensOnTileClick === true,
       }
     }
-    const cap = CASCADING_CAPABILITIES[kind]
+    const cap = CAPABILITIES[kind]
     if (cap) {
       return {
         view: cap.view,
-        slashCommand: cap.slashCommand,
+        slashCommand: cap.slashCommand || undefined,
         labelKey: cap.labelKey,
         descriptionKey: cap.descriptionKey,
         fallbackLabel: cap.fallbackLabel,
-        cascades: true,
+        cascades: cap.cascades,
         isVisualBee: false,
         opensInPlace: false,
       }
@@ -697,6 +853,7 @@ export class ShowFeaturesDrone extends Drone {
     originCell: string | undefined,
     branchSig: string | undefined,
     originSegments: readonly string[] | undefined,
+    paintable = false,
   ): FeatureItem {
     return {
       view: feature.view,
@@ -705,6 +862,7 @@ export class ShowFeaturesDrone extends Drone {
       behavior: feature.behavior,
       openable: feature.isVisualBee,
       opensInPlace: feature.opensInPlace,
+      paintable,
       label: this.#t(i18n, feature.labelKey, feature.fallbackLabel),
       description: this.#t(i18n, feature.descriptionKey, ''),
       cascades: feature.cascades,

@@ -2818,7 +2818,12 @@ export class TileOverlayDrone extends Drone {
     this.#currentAxial = null
     this.#currentIndex = undefined
     this.#clearHint()
-    this.emitEffect('tile:hover', { q: 0, r: 0, label: null })
+    // "Nothing hovered" carries NO hex. Broadcasting a placeholder axial here
+    // lied to every q/r consumer: (0,0) is the origin slot, so crossing any
+    // chrome (docked panel, edit-actions cluster) lit the hover ring on
+    // whatever tile happens to sit at index 0 and yanked the avatar-swarm
+    // anchor there. Absence, not a sentinel.
+    this.emitEffect('tile:hover', { label: null })
   }
 
   #positionOverlay(q: number, r: number): void {

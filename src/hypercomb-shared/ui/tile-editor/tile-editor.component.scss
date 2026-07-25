@@ -69,12 +69,41 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--md-on-surface-strong);
+    cursor: text;             // it IS the rename control
+  }
+}
+
+// Sits exactly where the heading was — same metrics, so revealing the field
+// shifts nothing. Chrome only on focus; no border box to avoid a jolt.
+.header-rename {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.95em;
+  font-weight: 500;
+  color: var(--md-on-surface-strong);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--md-outline-variant);
+  padding: 0;
+  outline: none;
+
+  &:focus { border-bottom-color: var(--md-secondary); }
+  &::placeholder { color: var(--md-on-surface-faint); }
+
+  // Refused: a sibling already reads this way. Same token as .link-denied.
+  &.rename-denied,
+  &.rename-denied:focus {
+    border-bottom-color: #e05050;
+    color: #e05050;
   }
 }
 
 .header-icon {
   font-size: 1.1em;
   color: var(--md-secondary);
+  cursor: pointer;
 }
 
 .editor-close {

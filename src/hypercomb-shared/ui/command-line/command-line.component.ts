@@ -1404,6 +1404,30 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       },
     )
 
+    // Ask lifecycle feedback — the visible answer to "did anything happen?".
+    // ask:queued (llm.queen) raises a non-dismissable pending pill on the
+    // command line; ask:answered (bridge worker, emitted when the responder
+    // retires the ask AFTER writing its note) drops the pill once no asks
+    // remain and toasts where the answer landed. Count-based: several asks
+    // in flight share one pill, and it only clears when the last resolves.
+    this.#askQueuedUnsub = EffectBus.on<{ sig: string }>('ask:queued', () => {
+      this.#pendingAsks++
+      this.#indicators.update(m => {
+        const n = new Map(m)
+        n.set('ask-pending', { key: 'ask-pending', icon: 'psychology', label: 'Waiting for an answer — it will arrive as a note', dismissable: false })
+        return n
+      })
+    })
+    this.#askAnsweredUnsub = EffectBus.on<{ sig: string; appliesTo?: unknown }>('ask:answered', ({ appliesTo }) => {
+      this.#pendingAsks = Math.max(0, this.#pendingAsks - 1)
+      if (this.#pendingAsks === 0) {
+        this.#indicators.update(m => { const n = new Map(m); n.delete('ask-pending'); return n })
+      }
+      const list = Array.isArray(appliesTo) ? appliesTo.map(x => String(x ?? '')).filter(Boolean) : []
+      const where = list.length ? list.join(', ') : 'the page'
+      EffectBus.emit('toast:show', { type: 'success', title: 'Answered', message: `Note added to ${where} — open its notes to read it.` })
+    })
+
     // Bi-directional sync: external selection changes → update command line
     this.#selectionSyncUnsub = EffectBus.on<{ selected: string[]; active: string | null }>('selection:changed', (payload) => {
       if (this.#syncDirection === 'command') return // prevent feedback loop
@@ -1540,6 +1564,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** True when the command-line should be collapsed on mobile (toggle off). */
   readonly mobileHidden = signal(false)
   #mobileVisibilityUnsub?: () => void
+  #askQueuedUnsub?: () => void
+  #askAnsweredUnsub?: () => void
+  /** Asks currently in flight — the pending pill shows while > 0. */
+  #pendingAsks = 0
   readonly voiceSupported = VoiceInputService.supported()
   readonly pushToTalkEnabled = signal(localStorage.getItem('hc:push-to-talk') === 'true')
   #voiceActiveUnsub?: () => void
@@ -1674,6 +1702,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
     this.#mobileVisibilityUnsub?.()
+    this.#askQueuedUnsub?.()
+    this.#askAnsweredUnsub?.()
     this.#selectionSyncUnsub?.()
     this.#voiceInterimUnsub?.()
     this.#voiceSubmitUnsub?.()

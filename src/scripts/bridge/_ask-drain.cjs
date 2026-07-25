@@ -17,7 +17,7 @@
 // note appears in the tile's notes live; never trust visual confirmation.
 
 const WebSocket = require('ws')
-const BRIDGE = 'ws://localhost:2401'
+const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 
 let counter = 0
 const nextId = () => `askdrain-${Date.now()}-${++counter}`
