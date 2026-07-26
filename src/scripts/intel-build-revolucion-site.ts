@@ -2823,7 +2823,12 @@ async function main(): Promise<void> {
       segments: p.segments,
       kind: 'visual:website:page',
       appliesTo: p.segments,
-      payload: { htmlSig, icon: 'local_fire_department', label: p.label, order: 0, createdAt: Date.now() },
+      // NO createdAt. A wall-clock stamp makes every rebuild mint a NEW
+      // decoration record even when the HTML is byte-identical — which moves
+      // the branch head, invalidates the sig every consumer was handed, and
+      // obliges another round of syncing for a no-op. Nothing reads it.
+      // Identical content must produce an identical record.
+      payload: { htmlSig, icon: 'local_fire_department', label: p.label, order: 0 },
       mark: 'persistent',
       replaceKind: true,
     })
