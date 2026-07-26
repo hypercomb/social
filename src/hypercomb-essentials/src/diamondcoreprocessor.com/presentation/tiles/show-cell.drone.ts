@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed, referenceTargetForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { MOBILE_FRIENDLY } from '../../preferences/mobile-pheromones.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
@@ -4550,6 +4550,20 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // reference:indexed — the index resolved a reference tile's FACE from its
+    // target, after this page had already painted the tile blank (the pointer
+    // is in its layer, the picture is one hop away and read async). The image
+    // resolver short-circuits on a cached entry, and the first pass cached
+    // "no image" for this label — so drop that entry before rebuilding, or the
+    // tile keeps its substrate fallback until an unrelated render evicts it.
+    this.onEffect<{ label: string }>('reference:indexed', (payload) => {
+      const label = payload?.label
+      if (typeof label !== 'string' || !label) return
+      this.cellImageCache.delete(label)
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
     // committing layer state so that any render triggered by the cascade
     // (cursor.onNewLayer) sees post-mutation OPFS. We use it here to
@@ -6906,6 +6920,17 @@ export class ShowCellDrone extends Drone {
           await loadImageOnce(smallSig)
           cell.imageSig = smallSig
           this.cellImageCache.set(cell.label, smallSig)
+        } else if (referenceFaceForLabel(cell.label)) {
+          // A REFERENCE tile owns no image: its layer is a pointer, not
+          // content. Wear the TARGET's face instead, resolved through the
+          // pointer at paint time, so one item looks like itself in every
+          // place it appears and an edit at the canonical reaches all of
+          // them. Display-time only — writing this sig into the reference's
+          // own layer would freeze it into a copy that drifts.
+          const faceSig = referenceFaceForLabel(cell.label)
+          await loadImageOnce(faceSig)
+          cell.imageSig = faceSig
+          this.cellImageCache.set(cell.label, faceSig)
         } else {
           // No image on this tile's persistent props (commonly label-only
           // tiles with viewport state). Ask substrate for a deterministic

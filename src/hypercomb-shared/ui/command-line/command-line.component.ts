@@ -109,6 +109,10 @@ function isSelectExecution(v: string): boolean {
   return !!m && SELECT_OPS.has(m[1].toLowerCase())
 }
 
+/** Slash commands that DESTROY — never fired from a completion Enter accepted
+ *  on the user's behalf; those complete the line and wait for a second Enter. */
+const DESTRUCTIVE_SLASH_RE = /^\/(remove|rm|delete|del)[\s\[]/i
+
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
   ArrowLeft:  { dq: -1, dr:  0 },
   ArrowRight: { dq:  1, dr:  0 },
@@ -1864,14 +1868,87 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Bridge: shell Enter pressed — tag pre-process then execute. */
+  /**
+   * Bridge: shell Enter pressed — accept the completion, then tag pre-process
+   * then execute.
+   *
+   * Enter is the ACCEPT-AND-SEND key: what the dropdown is offering (the ghost
+   * text you can read, or the row you arrowed onto) is taken first and the
+   * COMPLETED line is what runs. Tab stays the pure completion key — it fills
+   * the line and never sends.
+   */
   public onShellCommit = (v: string): void => {
     const capture = this.#captureMode()
     if (capture) {
       this.#commitCapture(capture, v)
       return
     }
-    void this.#preprocessTagsThenExecute(v)
+    const completed = this.#completeOnEnter(v)
+    if (completed === null) return
+    void this.#preprocessTagsThenExecute(completed)
+  }
+
+  /**
+   * Apply the highlighted completion before Enter executes, and decide whether
+   * the completed line is ready to run.
+   *
+   * Returns the string to execute, or `null` when Enter must NOT execute —
+   * either the completion WAS the action (tag mode persists the tag) or the
+   * accepted fragment expects more input (a command's arguments, the next item
+   * of a bracket list, a deeper path). "Expects more input" is not re-derived
+   * here: {@link onShellCompletionAccepted} already encodes it by leaving the
+   * dropdown OPEN, so a completion that suppresses the dropdown is terminal and
+   * sends. The one override is a slash ARGUMENT, which stays open so Tab can
+   * chain but is a finished command far more often than not.
+   *
+   * Completion only happens when something is visibly on offer: a typed
+   * fragment WITH ghost text, or a row the user deliberately arrowed onto.
+   * Escape suppresses the dropdown and `suggestions()` then reports empty, so
+   * Escape-then-Enter still sends exactly what was typed.
+   */
+  #completeOnEnter(raw: string): string | null {
+    // A dropped resource is a "make THIS" gesture — the seeded name is the
+    // name, never a prefix of some other tile the dropdown happens to know.
+    if (this.armedResource()) return raw
+
+    const list = this.suggestions()
+    if (!list.length) return raw
+
+    const ctx = this.context()
+    if (!ctx.active) return raw
+
+    const index = this.shell?.activeIndex() ?? 0
+    const best = list[index] ?? list[0]
+    if (!best) return raw
+
+    // Ghost text alone is not enough: with an empty fragment (`projects/`, a
+    // bare `/`) every suggestion "extends" it, and Enter would silently walk
+    // into the first child instead of sending what is already a whole command.
+    const moved = index > 0
+    const offered = this.completionTypedPrefix().trim().length > 0 && this.ghostValue() !== ''
+    if (!moved && !offered) return raw
+
+    // tag mode accepts by PERSISTING the tag — nothing is left to run.
+    if (ctx.mode === 'tag') {
+      this.onShellCompletionAccepted(best)
+      return null
+    }
+
+    this.onShellCompletionAccepted(best)
+    const completed = this.value()
+    if (!completed.trim()) return null
+
+    // A trailing space/comma is the accept handler saying "your argument goes
+    // here" — never run a parameterised command with the argument missing.
+    if (/[\s,]$/.test(completed)) return null
+
+    if (this.shell?.suppressed()) return completed
+
+    if (ctx.mode === 'slash' && ctx.head !== '/' && !DESTRUCTIVE_SLASH_RE.test(ctx.head)) {
+      return completed
+    }
+
+    return null
   }
 
   /**

@@ -42,36 +42,80 @@ export class LlmQueenBee extends QueenBee {
   /** Set by the provider before invoke() — carried into the ask as a model hint. */
   activeModel = 'opus'
 
+  /** The command now OPENS THE ASK SCREEN (request first, tile context
+   *  second — see ask-screen.view.ts) with whatever was typed as the
+   *  prefill. Minting moved to `submitAsk`, which the screen calls on OK. */
   protected async execute(args: string): Promise<void> {
-    const prompt = args.trim()
-    if (!prompt) {
-      console.warn('[ask] empty question — usage: [tiles]/opus your question here')
-      return
-    }
+    EffectBus.emit('ask:open', { model: this.activeModel, prefill: args.trim() })
+  }
 
-    const selection = get<SelectionLike>('@diamondcoreprocessor.com/SelectionService')
-    const targets = selection ? Array.from(selection.selected) : []
+  /** Mint a CHAT-mode ask — one turn of the ask screen's refinement
+   *  conversation. The responder replies via the `chat-reply` bridge op
+   *  (surfaced as `ask:chat-reply`), never as a note, so this deliberately
+   *  emits NO `ask:queued` pill and NO toast: the conversation window owns
+   *  its own thinking indicator. `transcript` carries the recent turns so a
+   *  stateless responder still has the thread. */
+  async submitChat(
+    convoId: string,
+    message: string,
+    targets: string[],
+    transcript: ReadonlyArray<{ role: string; text: string }>,
+  ): Promise<boolean> {
+    const prompt = message.trim()
+    if (!prompt || !convoId) return false
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    if (!store?.putOptimization) return false
+
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+
+    const record = {
+      kind: ASK_KIND,
+      appliesTo: targets.length ? targets : segments,
+      payload: {
+        mode: 'chat',
+        convoId,
+        prompt,
+        transcript: transcript.slice(-12),
+        model: this.activeModel,
+        targets,
+        segments,
+        status: 'pending',
+        askedAt: Date.now(),
+      },
+      mark: 'persistent',
+    }
+    const sig = await store.putOptimization(new Blob([JSON.stringify(record)], { type: 'application/json' }))
+    console.log(`[ask] chat turn queued (${this.activeModel}) convo=${convoId} [${sig.slice(0, 12)}…]`)
+    return true
+  }
+
+  /** Mint the ask record. Called by the ask screen with the CHOSEN targets
+   *  (empty = the current page). Returns false when refused so the screen
+   *  can stay open. */
+  async submitAsk(prompt: string, targets: string[]): Promise<boolean> {
+    if (!prompt.trim()) return false
 
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
 
     // An ask must have somewhere for the answer to LAND: the responder
     // delivers via note-add, and a note lives ON a tile. At the hive root
-    // with nothing selected there is no tile — the ask would be minted
+    // with no chosen tiles there is no tile — the ask would be minted
     // unanswerable and sit pending forever. Refuse with the fix instead.
     if (targets.length === 0 && segments.length === 0) {
       EffectBus.emit('toast:show', {
         type: 'warning',
-        message: 'Select a tile first (or step into one) — the answer arrives as a note on it.',
+        message: 'Pick a tile first — the answer arrives as a note on it.',
       })
-      console.warn('[ask] refused: no selection and at the hive root — nowhere for the answer note to land')
-      return
+      console.warn('[ask] refused: no targets and at the hive root — nowhere for the answer note to land')
+      return false
     }
 
     const store = get<StoreLike>('@hypercomb.social/Store')
     if (!store?.putOptimization) {
       console.warn('[ask] Store.putOptimization unavailable')
-      return
+      return false
     }
 
     // The ask record — content-addressed, participant-local (never shared).
@@ -103,6 +147,7 @@ export class LlmQueenBee extends QueenBee {
       `[ask] queued for the Claude bridge (${this.activeModel}): "${prompt}" `
       + `→ ${targets.join(', ') || `/${segments.join('/') || ''}`}  [${sig.slice(0, 12)}…]`,
     )
+    return true
   }
 }
 

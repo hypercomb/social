@@ -249,6 +249,511 @@ const FAMILIES: Fam[] = [
   { label: 'Smoke & Char', color: '#2C3E50', flavors: ['Campfire', 'Tobacco', 'Ash', 'Burnt Caramel', 'Charcoal', 'Incense'] },
 ]
 
+// ─── the starter catalog (INVENTED — no real brands) ─────────────────
+// Shared by the flavor wheel's matcher and the lounge concierge, so the two
+// pages can never disagree about what is in the humidor.
+
+type Cigar = { n: string; v: string; w: string; o: string; s: number; m: string; f: string[] }
+const CIGARS: Cigar[] = [
+  { n: 'Reflexión Nº 1', v: 'Toro', w: 'Maduro', o: 'Nicaragua', s: 3, m: 'reflection', f: ['Dark Chocolate', 'Cedar', 'Molasses', 'Leather'] },
+  { n: 'Sobremesa', v: 'Corona', w: 'Habano', o: 'Nicaragua', s: 3, m: 'conversation', f: ['Cedar', 'Black Pepper', 'Caramel', 'Toast'] },
+  { n: 'Primera Luz', v: 'Petit Corona', w: 'Connecticut', o: 'Ecuador', s: 1, m: 'first light', f: ['Cream', 'Butter', 'Honey', 'Hay'] },
+  { n: 'Fogata', v: 'Robusto', w: 'Oscuro', o: 'Nicaragua', s: 5, m: 'fireside', f: ['Campfire', 'Charred Wood', 'Black Pepper', 'Espresso'] },
+  { n: 'Biblioteca', v: 'Lancero', w: 'Colorado', o: 'Dominican Republic', s: 2, m: 'focus', f: ['Sandalwood', 'Tea', 'Honey', 'Toast'] },
+  { n: 'Celebración', v: 'Torpedo', w: 'Colorado Maduro', o: 'Honduras', s: 4, m: 'celebration', f: ['Red Pepper', 'Brown Sugar', 'Cocoa', 'Oak'] },
+  { n: 'Cacao Real', v: 'Gordo', w: 'Maduro', o: 'Brazil', s: 4, m: 'unwind', f: ['Dark Chocolate', 'Espresso', 'Raisin', 'Molasses'] },
+  { n: 'La Cosecha', v: 'Churchill', w: 'Sumatra', o: 'Ecuador', s: 3, m: 'gratitude', f: ['Fig', 'Cedar', 'Hay', 'Almond'] },
+  { n: 'Patio Dorado', v: 'Robusto', w: 'Natural', o: 'Honduras', s: 2, m: 'golden hour', f: ['Caramel', 'Peanut', 'Grass', 'Citrus'] },
+  { n: 'Niebla', v: 'Belicoso', w: 'Claro', o: 'Mexico', s: 2, m: 'morning', f: ['Mineral', 'Cream', 'Jasmine', 'White Pepper'] },
+  { n: 'Medianoche', v: 'Perfecto', w: 'Oscuro', o: 'Nicaragua', s: 5, m: 'late night', f: ['Charcoal', 'Dark Chocolate', 'Peat', 'Clove'] },
+  { n: 'Compañero', v: 'Lonsdale', w: 'Habano', o: 'Cuba', s: 3, m: 'close friends', f: ['Leather', 'Nutmeg', 'Mocha', 'Dried Fruit'] },
+  { n: 'Brisa', v: 'Panatela', w: 'Connecticut', o: 'Dominican Republic', s: 1, m: 'a breeze outside', f: ['Grass', 'Citrus', 'Cream', 'Mint'] },
+  { n: 'El Faro', v: 'Toro', w: 'Colorado', o: 'Cameroon', s: 4, m: 'milestone', f: ['Hickory', 'Anise', 'Burnt Caramel', 'Walnut'] },
+]
+
+// ─── the lounge concierge ────────────────────────────────────────────
+// Walk-in (full-screen room + Chat | Decorate sidebar) and the deterministic
+// concierge behind the Chat tab. It answers from the site's own catalog and
+// taxonomy, drives the room (slots + camera), takes cigar requests, and takes
+// journal moments. NO network: every answer is computed in the page, and
+// requests/moments are kept in localStorage until the journal claims them.
+
+const CONCIERGE_JS = /* html */ `<script>
+(function(){
+  var CIGARS = ${JSON.stringify(CIGARS)};
+  var FAM = ${JSON.stringify(FAMILIES)};
+  var STR = ['mild','mild-medium','medium','medium-full','full'];
+  var PAIR = {'Earth':'espresso or an aged rum','Wood':'a peaty scotch','Spice':'rum, or a rye',
+    'Sweet':'coffee, or a tawny port','Coffee & Chocolate':'espresso, or a stout',
+    'Cream & Bread':'coffee with cream, or a light tea','Nut':'an aged rum',
+    'Fruit':'a red wine, or a fruit tea','Herbal & Floral':'green tea','Smoke & Char':'an Islay whisky'};
+  var famOf = {}; FAM.forEach(function(f){ f.flavors.forEach(function(x){ famOf[x] = f.label; }); });
+
+  var log = document.getElementById('chatlog');
+  var form = document.getElementById('chatform');
+  var input = document.getElementById('chatinput');
+  var full = document.getElementById('loungeFull');
+  var stageHome = null;
+
+  function fold(s){ return String(s || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''); }
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function store(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+  function load(k, d){ try { return JSON.parse(localStorage.getItem(k)) || d; } catch(e){ return d; } }
+
+  var RESERVED = load('rev:lounge:reserved', []);
+  var MOMENTS = load('rev:lounge:moments', []);
+
+  // ── walk in / leave ──────────────────────────────────────────────────
+  function openFull(){
+    if (!full || !full.hidden) return;
+    var wrap = document.querySelector('.stagewrap');
+    var slot = document.getElementById('lfStage');
+    if (wrap && slot) { stageHome = wrap.parentNode; slot.appendChild(wrap); }
+    full.hidden = false;
+    document.documentElement.style.overflow = 'hidden';
+    if (!log.childNodes.length) greet();
+    if (input) input.focus();
+  }
+  function closeFull(){
+    if (!full || full.hidden) return;
+    var wrap = document.querySelector('.stagewrap');
+    if (wrap && stageHome) stageHome.insertBefore(wrap, stageHome.firstChild);
+    full.hidden = true;
+    document.documentElement.style.overflow = '';
+  }
+  var openBtn = document.getElementById('lfOpen');
+  if (openBtn) openBtn.addEventListener('click', openFull);
+  var closeBtn = document.getElementById('lfClose');
+  if (closeBtn) closeBtn.addEventListener('click', closeFull);
+
+  // click the room to walk in — but never mistake a drag-to-look for a click
+  var stage = document.getElementById('lounge3d');
+  if (stage) {
+    var down = null;
+    stage.addEventListener('pointerdown', function(e){ down = { x: e.clientX, y: e.clientY, t: Date.now() }; }, true);
+    stage.addEventListener('pointerup', function(e){
+      if (!down || !full.hidden) { down = null; return; }
+      var moved = Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y);
+      var quick = Date.now() - down.t < 400;
+      down = null;
+      if (moved < 6 && quick) openFull();
+    }, true);
+  }
+
+  // ── tabs ─────────────────────────────────────────────────────────────
+  var tabs = document.querySelectorAll('.lf-tabs button');
+  for (var t = 0; t < tabs.length; t++) {
+    tabs[t].addEventListener('click', function(e){
+      var name = e.currentTarget.getAttribute('data-tab');
+      for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle('on', tabs[j] === e.currentTarget);
+      document.getElementById('paneChat').hidden = name !== 'chat';
+      document.getElementById('paneDecorate').hidden = name !== 'decorate';
+      if (name === 'chat' && input) input.focus();
+    });
+  }
+  function showTab(name){
+    for (var j = 0; j < tabs.length; j++)
+      if (tabs[j].getAttribute('data-tab') === name) tabs[j].click();
+  }
+
+  // ── the log ──────────────────────────────────────────────────────────
+  function say(who, html){
+    var d = document.createElement('div');
+    d.className = 'msg' + (who === 'you' ? ' you' : '');
+    d.innerHTML = '<span class="who">' + (who === 'you' ? 'you' : 'Revoluci\\u00f3n') + '</span>' +
+      '<span class="body">' + html + '</span>';
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+  function greet(){
+    say('rev', 'Evening. Pull up a chair \\u2014 the fire is going.<br><br>' +
+      'Ask me about a cigar, a pairing, or the flavor wheel. I can also ' +
+      '<b>reserve</b> something for you (\\u201creserve another Reflexi\\u00f3n\\u201d), ' +
+      '<b>journal</b> the moment (\\u201cjournal: rain on the window, Fogata\\u201d), ' +
+      'or change the room (\\u201cshow me the humidor\\u201d, \\u201cturn off the lamp\\u201d).');
+  }
+
+  // ── knowledge ────────────────────────────────────────────────────────
+  function findCigar(q){
+    var f = fold(q);
+    for (var i = 0; i < CIGARS.length; i++) {
+      var name = fold(CIGARS[i].n);
+      if (f.indexOf(name) >= 0) return CIGARS[i];
+      var first = name.split(' ')[0];
+      if (first.length > 4 && f.indexOf(first) >= 0) return CIGARS[i];
+    }
+    return null;
+  }
+  function famsOf(c){
+    var seen = [], out = [];
+    c.f.forEach(function(fl){ var fm = famOf[fl]; if (fm && seen.indexOf(fm) < 0) { seen.push(fm); out.push(fm); } });
+    return out;
+  }
+  function card(c){
+    var fams = famsOf(c);
+    return '<b>' + esc(c.n) + '</b> \\u2014 ' + esc(c.v) + ', ' + esc(c.w) + ' wrapper, ' + esc(c.o) +
+      '<br>' + STR[c.s - 1] + ' \\u00b7 for ' + esc(c.m) +
+      '<br>Notes: ' + c.f.map(esc).join(', ') +
+      '<br>Pour ' + (PAIR[fams[0]] || 'something you already love') + '.';
+  }
+  function pick(pred){
+    var hits = CIGARS.filter(pred);
+    return hits.length ? hits[Math.floor(Math.random() * hits.length)] : null;
+  }
+  // longest phrases first: "a box" must beat the bare "a" in "a box of Fogata"
+  var WORD_N = [['a box', 25], ['box', 25], ['dozen', 12], ['couple', 2], ['pair', 2],
+    ['one', 1], ['two', 2], ['three', 3], ['four', 4], ['five', 5], ['six', 6],
+    ['seven', 7], ['eight', 8], ['nine', 9], ['ten', 10], ['a', 1], ['an', 1]];
+  function countIn(q){
+    var digits = q.match(/\\b(\\d{1,2})\\b/);
+    if (digits) return parseInt(digits[1], 10);
+    for (var i = 0; i < WORD_N.length; i++)
+      if (new RegExp('\\\\b' + WORD_N[i][0] + '\\\\b').test(q)) return WORD_N[i][1];
+    return 1;
+  }
+  var lastCigar = null;
+
+  var TOPICS = [
+    { k: ['flavor wheel','wheel','flavour'], a: 'Sixty-three flavors in ten families \\u2014 Earth, Wood, Spice, Sweet, ' +
+      'Coffee &amp; Chocolate, Cream &amp; Bread, Nut, Fruit, Herbal &amp; Floral, Smoke &amp; Char. ' +
+      'Spin it, put a flavor in the notch, and it scores the catalog against what you picked: ' +
+      '<a href="/revolucion/flavor-wheel">open the wheel</a>.' },
+    { k: ['humidor','store','storage','humidity','dry out'], a: 'Keep them at <b>69&ndash;70% RH</b> and around 18&ndash;21&#176;C. ' +
+      'Season a new humidor before you fill it, never soak the cigars, and rotate the box every few weeks. ' +
+      'A dried-out cigar can be brought back slowly \\u2014 days, not hours. ' +
+      'Yours lives in <a href="/revolucion/humidor">the humidor</a>.' },
+    { k: ['cut','cutter','punch','guillotine'], a: 'Cut just above the cap line \\u2014 a couple of millimetres. ' +
+      'A straight cut for most, a punch for a tighter draw, a V for something in between. ' +
+      'The cutter is on the low table; go too deep and the cap unravels.' },
+    { k: ['light','lighter','toast','match'], a: 'Toast the foot first, flame just off the leaf, turning until the edge glows. ' +
+      'Then draw gently while you finish the light. Never rush it, and never use anything that smells of fuel.' },
+    { k: ['ash','relight','burn'], a: 'Let the ash build \\u2014 an inch is fine, it insulates the burn. ' +
+      'If it goes out, tap the ash off, toast the foot again, relight. A relit cigar is not a ruined cigar; ' +
+      'it just gets bolder from there.' },
+    { k: ['pair','pairing','drink','whiskey','whisky','rum','coffee','scotch'], a: 'Match weight to weight. ' +
+      'Maduro and dark chocolate notes want espresso or an aged rum; a Connecticut morning cigar wants coffee with cream; ' +
+      'anything charred wants an Islay. Tell me the cigar and I will pour for it.' },
+    { k: ['origin','where','country','nicaragua','cuba','dominican'], a: 'Nicaragua for pepper and earth, ' +
+      'the Dominican Republic for balance, Honduras for sweetness with a bite, Ecuador for wrappers grown under cloud, ' +
+      'Cameroon and Sumatra for spice. The map above the bar shows where the leaf comes from.' },
+    { k: ['vitola','size','shape','ring gauge','robusto','toro'], a: 'Size sets the time and the temperature. ' +
+      'A Petit Corona is half an hour; a Toro or Churchill is a whole evening. Thinner rings burn hotter and read spicier; ' +
+      'thicker rings pull cooler and sweeter.' },
+    { k: ['reward','trophy','trophies','earn','unlock','furniture'], a: 'The room is earned. Post moments in the journal and ' +
+      'you unlock trophies, furniture and upgrades \\u2014 the shelves fill, the lighting gets richer. ' +
+      'Nothing here is bought: <a href="/revolucion/journal">start with one moment</a>.' },
+    { k: ['journal code','code','account','login','sign in','privacy'], a: 'No account, no login. With your first entry we hand ' +
+      'you a code; leave it on any future entry and the journal knows it is you. What you write is yours \\u2014 ' +
+      'makers only ever see anonymized, aggregated patterns.' },
+    { k: ['who are you','revolucion','about','mission','company'], a: 'We do not sell cigars \\u2014 we curate meaningful ' +
+      'experiences, and the journal is the foundation that grows the mission. ' +
+      'Read <a href="/revolucion/mission">the manifesto</a>.' },
+    { k: ['room','lounge','this place','3d'], a: 'Your corner of the ecosystem, rendered in three dimensions. ' +
+      'Drag to look around, use the view buttons to move, and open <b>Decorate</b> to turn any piece on or off. ' +
+      'Everything you see is a slot \\u2014 your own art and bottles land here as you earn them.' }
+  ];
+
+  var IDEAS = 'A few things worth trying:<br>' +
+    '\\u2022 \\u201cwhat should I smoke tonight?\\u201d \\u2014 or name a mood: reflection, celebration, late night<br>' +
+    '\\u2022 \\u201cwhat pairs with Fogata?\\u201d<br>' +
+    '\\u2022 \\u201creserve two more Reflexi\\u00f3n\\u201d \\u2014 I keep the request until the journal claims it<br>' +
+    '\\u2022 \\u201cjournal: first cold night, Medianoche, nobody talking\\u201d<br>' +
+    '\\u2022 \\u201cshow me the wall\\u201d / \\u201ctake me to my chair\\u201d<br>' +
+    '\\u2022 \\u201cturn off the lamp\\u201d, \\u201cno cat\\u201d, \\u201chide the records\\u201d';
+
+  var VIEWS = [
+    { k: ['the wall','gallery','art','frames','paintings'], v: 'gallery', s: 'The gallery wall.' },
+    { k: ['humidor','cabinet','cigars behind'], v: 'humidor', s: 'The humidor cabinet.' },
+    { k: ['fire','hearth','fireplace','flames'], v: 'fire', s: 'The hearth.' },
+    { k: ['my chair','your chair','chair','sit','seat'], v: 'chair', s: 'Sit down. The fire is right there.' },
+    { k: ['the room','whole room','back','wide','everything'], v: 'room', s: 'The whole room.' }
+  ];
+
+  // ── the reply ────────────────────────────────────────────────────────
+  function respond(raw){
+    var q = fold(raw);
+    if (!q) return 'Say anything \\u2014 or ask what I can do.';
+
+    if (/^(hi|hey|hello|good evening|evening|yo)\\b/.test(q))
+      return 'Evening. Something in particular, or shall I pour you a recommendation?';
+    if (/(thank|cheers|appreciate)/.test(q)) return 'Any time. The chair is yours as long as you want it.';
+    if (/(what can you do|what can i do|help|ideas|suggest something|options)/.test(q)) return IDEAS;
+
+    if (/(wheel|taxonomy|flavou?rs)/.test(q) && /(open|show|bring|let me see|pull up|use|tap)/.test(q)) {
+      openWheel();
+      return 'On the gallery wall \\u2014 opened. Tap a family, then the flavors you are tasting; ' +
+        'the humidor sorts itself against them.';
+    }
+
+    // ── move the room ──
+    for (var v = 0; v < VIEWS.length; v++) {
+      for (var vk = 0; vk < VIEWS[v].k.length; vk++) {
+        if (q.indexOf(VIEWS[v].k[vk]) >= 0 && /(show|take|look|go|see|walk|turn to|face)/.test(q)) {
+          if (window.__loungeView) window.__loungeView(VIEWS[v].v);
+          return VIEWS[v].s;
+        }
+      }
+    }
+
+    // ── flip a slot ──
+    var wantOff = /(turn off|switch off|hide|kill|no more|lose the|put out|without|remove)/.test(q);
+    var wantOn = /(turn on|switch on|show|light|bring back|put on|add)/.test(q);
+    if (wantOff || wantOn) {
+      var slots = window.__loungeSlots || [];
+      for (var s = 0; s < slots.length; s++) {
+        var words = fold(slots[s].label.replace(/&amp;/g, ' ')).split(/[^a-z]+/).filter(function(w){ return w.length > 3; });
+        for (var w = 0; w < words.length; w++) {
+          if (q.indexOf(words[w]) >= 0) {
+            if (window.__loungeSetSlot) window.__loungeSetSlot(slots[s].id, !wantOff);
+            return (wantOff ? 'Done \\u2014 ' : 'Back on \\u2014 ') + slots[s].label.toLowerCase() +
+              '. Everything in here is a switch; the full list is under <b>Decorate</b>.';
+          }
+        }
+      }
+    }
+
+    // ── reserve ── (the LIST question is checked first, or "what have I
+    // reserved" would book another one)
+    if (/(what have i reserved|my list|my requests|reservations|on hold|what did i reserve)/.test(q)) {
+      if (!RESERVED.length) return 'Nothing on your list yet. Say \\u201creserve another Sobremesa\\u201d when something lands.';
+      return 'On your list:<br>' + RESERVED.map(function(r){
+        return '\\u2022 ' + (r.q > 1 ? r.q + ' \\u00d7 ' : '') + esc(r.n);
+      }).join('<br>');
+    }
+    if (/(reserve|order|another|more of|get me|set aside|hold me|box of|put aside)/.test(q)) {
+      var c = findCigar(q) || lastCigar;
+      if (!c) return 'Happy to \\u2014 which one? Try \\u201creserve two Reflexi\\u00f3n\\u201d, or ask me to ' +
+        'recommend one first.';
+      lastCigar = c;
+      var qty = countIn(q);
+      RESERVED.push({ n: c.n, q: qty, at: Date.now() });
+      store('rev:lounge:reserved', RESERVED);
+      var total = 0; RESERVED.forEach(function(r){ total += r.q; });
+      return 'Set aside: <b>' + (qty > 1 ? qty + ' \\u00d7 ' : '') + esc(c.n) + '</b>. ' +
+        'That is ' + total + ' on your list now \\u2014 it stays here until you take it to ' +
+        '<a href="/revolucion/humidor">the humidor</a>. Nothing is charged and nothing is sent; ' +
+        'a request is just a request.';
+    }
+
+    // ── journal ──
+    if (/^(journal|log|record|note)\\b/.test(q) || /(journal this|log this|record this|write this down)/.test(q)) {
+      var text = raw.replace(/^\\s*(journal|log|record|note)\\s*[:,-]?\\s*/i, '')
+                    .replace(/^(this|it)\\s*[:,-]?\\s*/i, '').trim();
+      if (!text) return 'Tell me the moment and I will hold it \\u2014 \\u201cjournal: rain on the window, Fogata, ' +
+        'nobody talking\\u201d. It waits here until you open <a href="/revolucion/journal">the journal</a>.';
+      MOMENTS.push({ t: text, at: Date.now() });
+      store('rev:lounge:moments', MOMENTS);
+      var cg = findCigar(text);
+      if (cg) lastCigar = cg;
+      return 'Held: \\u201c' + esc(text) + '\\u201d' + (cg ? ' \\u2014 with ' + esc(cg.n) : '') +
+        '.<br>That is ' + MOMENTS.length + ' moment' + (MOMENTS.length === 1 ? '' : 's') +
+        ' waiting. Take them to <a href="/revolucion/journal">the journal</a> when you are ready.';
+    }
+    if (/(my moments|what have i written|my journal)/.test(q)) {
+      if (!MOMENTS.length) return 'No moments yet. The first one is the one that hands you your journal code.';
+      return 'Waiting to be journaled:<br>' + MOMENTS.slice(-6).map(function(m){
+        return '\\u2022 ' + esc(m.t);
+      }).join('<br>');
+    }
+
+    // ── a named cigar ──
+    var named = findCigar(q);
+    if (named) {
+      lastCigar = named;
+      if (/(pair|drink|pour|with what|goes with)/.test(q)) {
+        var f0 = famsOf(named)[0];
+        return 'With <b>' + esc(named.n) + '</b> \\u2014 ' + named.f.slice(0, 2).join(' and ').toLowerCase() +
+          ' up front \\u2014 pour ' + (PAIR[f0] || 'something you already love') + '.';
+      }
+      return card(named);
+    }
+
+    // ── recommend ──
+    if (/(recommend|what should i|suggest|pick|choose|smoke tonight|smoke now|start with)/.test(q) ||
+        /(mild|full|strong|light|gentle|bold)/.test(q) ||
+        /(reflection|celebration|late night|conversation|focus|gratitude|unwind|morning|milestone|first light|golden hour|fireside)/.test(q)) {
+      var want = null;
+      if (/(mild|light|gentle|easy|beginner|first cigar|new to)/.test(q)) want = function(c){ return c.s <= 2; };
+      else if (/(full|strong|bold|heavy|powerful)/.test(q)) want = function(c){ return c.s >= 4; };
+      var moods = ['reflection','celebration','late night','conversation','focus','gratitude','unwind','morning','milestone','first light','golden hour','fireside','close friends'];
+      for (var m = 0; m < moods.length; m++) {
+        if (q.indexOf(moods[m]) >= 0) { var mood = moods[m]; want = function(c){ return c.m === mood; }; break; }
+      }
+      for (var fi = 0; fi < FAM.length; fi++) {
+        var fl = FAM[fi].flavors;
+        for (var fj = 0; fj < fl.length; fj++) {
+          if (q.indexOf(fold(fl[fj])) >= 0) { var flav = fl[fj]; want = function(c){ return c.f.indexOf(flav) >= 0; }; break; }
+        }
+      }
+      var rec = pick(want || function(){ return true; }) || pick(function(){ return true; });
+      lastCigar = rec;
+      return 'Then <b>' + esc(rec.n) + '</b>.<br>' + card(rec) +
+        '<br><br>Say \\u201creserve it\\u201d and I will set one aside.';
+    }
+
+    // ── topics ──
+    for (var i = 0; i < TOPICS.length; i++) {
+      for (var k = 0; k < TOPICS[i].k.length; k++) {
+        if (q.indexOf(TOPICS[i].k[k]) >= 0) return TOPICS[i].a;
+      }
+    }
+
+    return 'I did not catch that one. ' + IDEAS;
+  }
+
+  if (form) {
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var text = (input.value || '').trim();
+      if (!text) return;
+      input.value = '';
+      say('you', esc(text));
+      var answer = respond(text);
+      setTimeout(function(){ say('rev', answer); }, 160);
+    });
+  }
+
+  // ── the wheel plate ──────────────────────────────────────────────────
+  // A tidy, in-room instance of the taxonomy: one ring, drill into a family,
+  // tap flavors, watch the humidor sort itself. Deliberately NOT the full
+  // page — that one spins, has the selector station, and owns the deep tool.
+  var plate = document.getElementById('wheelPlate');
+  var wsvg = document.getElementById('wheelSvg');
+  var wchips = document.getElementById('wheelChips');
+  var wmatch = document.getElementById('wheelMatches');
+  var wtitle = document.getElementById('wheelTitle');
+  var wback = document.getElementById('wheelBack');
+  var openFam = null;
+  var picked = [];
+
+  function ringSvg(items, colorOf, labelOf, isOn){
+    var C = 160, R = 148, r = 62, n = items.length, seg = 360 / n, out = [];
+    function polar(rad, deg){ var a = (deg - 90) * Math.PI / 180;
+      return [ (C + rad * Math.cos(a)).toFixed(1), (C + rad * Math.sin(a)).toFixed(1) ]; }
+    for (var i = 0; i < n; i++) {
+      var a0 = i * seg + 0.9, a1 = (i + 1) * seg - 0.9;
+      var p0 = polar(R, a0), p1 = polar(R, a1), p2 = polar(r, a1), p3 = polar(r, a0);
+      var big = (a1 - a0) > 180 ? 1 : 0;
+      var on = isOn ? isOn(items[i]) : false;
+      out.push('<path class="seg" data-i="' + i + '" d="M' + p0 + 'A' + R + ',' + R + ' 0 ' + big + ' 1 ' + p1 +
+        'L' + p2 + 'A' + r + ',' + r + ' 0 ' + big + ' 0 ' + p3 + 'Z" fill="' + colorOf(items[i]) +
+        '" fill-opacity="' + (isOn ? (on ? '1' : '.42') : '1') +
+        '" stroke="' + (on ? '#e0b578' : '#1b1520') + '" stroke-width="' + (on ? 3 : 2) + '"></path>');
+      var mid = (a0 + a1) / 2, tp = polar((R + r) / 2, mid);
+      var rot = mid > 180 ? mid + 90 : mid - 90;
+      out.push('<text class="seg" data-i="' + i + '" x="' + tp[0] + '" y="' + tp[1] +
+        '" text-anchor="middle" dominant-baseline="middle" transform="rotate(' + rot.toFixed(1) +
+        ' ' + tp[0] + ' ' + tp[1] + ')" font-size="9.5" font-family="Georgia,serif" ' +
+        'fill="' + (isLight(colorOf(items[i])) ? '#171017' : '#f0e6d6') + '" style="pointer-events:none">' +
+        esc(labelOf(items[i])) + '</text>');
+    }
+    out.push('<circle cx="160" cy="160" r="' + (r - 6) + '" fill="#141017" stroke="#c8975a" stroke-width="2"/>');
+    out.push('<text x="160" y="156" text-anchor="middle" font-size="17" font-family="Georgia,serif" fill="#c8975a">' +
+      (openFam ? picked.length : '63') + '</text>');
+    out.push('<text x="160" y="174" text-anchor="middle" font-size="8" letter-spacing="2" ' +
+      'font-family="Georgia,serif" fill="#8d7f6f">' + (openFam ? 'PICKED' : 'FLAVORS') + '</text>');
+    return '<svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" role="img" ' +
+      'aria-label="Flavor wheel">' + out.join('') + '</svg>';
+  }
+  function isLight(hex){
+    var c = hex.replace('#',''); if (c.length !== 6) return false;
+    var v = (parseInt(c.slice(0,2),16) * 299 + parseInt(c.slice(2,4),16) * 587 + parseInt(c.slice(4,6),16) * 114) / 1000;
+    return v > 150;
+  }
+  function drawWheel(){
+    if (openFam) {
+      wsvg.innerHTML = ringSvg(openFam.flavors, function(){ return openFam.color; }, function(x){ return x; },
+        function(x){ return picked.indexOf(x) >= 0; });
+      wtitle.textContent = openFam.label;
+      wback.hidden = false;
+    } else {
+      wsvg.innerHTML = ringSvg(FAM, function(f){ return f.color; }, function(f){ return f.label; },
+        picked.length ? function(f){
+          return f.flavors.some(function(x){ return picked.indexOf(x) >= 0; });
+        } : null);
+      wtitle.textContent = 'The Flavor Wheel';
+      wback.hidden = true;
+    }
+    var segs = wsvg.querySelectorAll('.seg');
+    for (var i = 0; i < segs.length; i++) {
+      segs[i].addEventListener('click', function(e){
+        var idx = parseInt(e.currentTarget.getAttribute('data-i'), 10);
+        if (!openFam) { openFam = FAM[idx]; drawWheel(); return; }
+        var fl = openFam.flavors[idx];
+        var at = picked.indexOf(fl);
+        if (at >= 0) picked.splice(at, 1); else picked.push(fl);
+        drawWheel(); drawPicked();
+      });
+    }
+  }
+  function drawPicked(){
+    if (!picked.length) {
+      wchips.innerHTML = '<p class="wempty">Tap a family, then the flavors you are tasting. ' +
+        'They stack up here.</p>';
+      wmatch.innerHTML = '<p class="wempty">Pick a flavor and the catalog sorts itself against it.</p>';
+      return;
+    }
+    wchips.innerHTML = picked.map(function(f){
+      return '<span class="chip" data-f="' + esc(f) + '">' + esc(f) + '<span class="x">\\u00d7</span></span>';
+    }).join('');
+    var chips = wchips.querySelectorAll('.chip');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].addEventListener('click', function(e){
+        var f = e.currentTarget.getAttribute('data-f');
+        var at = picked.indexOf(f); if (at >= 0) picked.splice(at, 1);
+        drawWheel(); drawPicked();
+      });
+    }
+    var scored = CIGARS.map(function(c){
+      var hits = c.f.filter(function(f){ return picked.indexOf(f) >= 0; });
+      var union = c.f.length + picked.length - hits.length;
+      return { c: c, hits: hits, score: union ? hits.length / union : 0 };
+    }).filter(function(s){ return s.hits.length; })
+      .sort(function(a, b){ return b.score - a.score; }).slice(0, 3);
+    if (!scored.length) {
+      wmatch.innerHTML = '<p class="wempty">Nothing in the starter catalog carries that ' +
+        'combination yet \\u2014 which is its own kind of answer.</p>';
+      return;
+    }
+    wmatch.innerHTML = scored.map(function(s){
+      var fam = famOf[s.hits[0]];
+      return '<div class="match"><b>' + esc(s.c.n) + '</b>' +
+        '<span class="meta">' + esc(s.c.v) + ' \\u00b7 ' + STR[s.c.s - 1] + ' \\u00b7 for ' + esc(s.c.m) + '</span>' +
+        '<span class="hits">' + s.hits.map(esc).join(' \\u00b7 ') + '</span>' +
+        '<span class="meta">Pour ' + (PAIR[fam] || 'what you already love') + '.</span></div>';
+    }).join('');
+  }
+  function openWheel(){
+    if (!plate) return;
+    plate.hidden = false;
+    drawWheel(); drawPicked();
+  }
+  function closeWheel(){ if (plate) plate.hidden = true; }
+  var wc = document.getElementById('wheelClose');
+  if (wc) wc.addEventListener('click', closeWheel);
+  if (wback) wback.addEventListener('click', function(){ openFam = null; drawWheel(); });
+  if (plate) plate.addEventListener('click', function(e){ if (e.target === plate) closeWheel(); });
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Escape') return;
+    if (plate && !plate.hidden) { closeWheel(); return; }
+    closeFull();
+  }, true);
+
+  // the room says which print was clicked; the page decides what opens
+  document.addEventListener('lounge3d:pick', function(e){
+    var id = e.detail && e.detail.id;
+    if (id !== 'flavor-wheel') return;
+    openFull();
+    openWheel();
+  });
+
+  // the concierge can pull the room open from anywhere on the page
+  window.__loungeWalkIn = openFull;
+  window.__loungeShowTab = showTab;
+  window.__loungeWheel = openWheel;
+})();
+</script>`
+
 function wheelSvg(): string {
   const C = 360, R = 330, r = 196
   const polar = (radius: number, deg: number): [number, number] => {
@@ -293,7 +798,11 @@ const familyCards = FAMILIES.map(f => `
 
 // ─── pages ───────────────────────────────────────────────────────────
 
-function buildPages(chromeSig: string, art: Record<string, string | undefined> = {}): Array<{ segments: string[]; label: string; html: string }> {
+function buildPages(
+  chromeSig: string,
+  art: Record<string, string | undefined> = {},
+  loungeScript = '',
+): Array<{ segments: string[]; label: string; html: string }> {
   const P = (route: string, title: string, body: string) => page(chromeSig, route, title, body)
   // sig-addressed tile art from the hive itself — SiteViewDrone rewrites
   // resource:<sig> to /@resource/<sig>, and the decoration closure carries it
@@ -928,22 +1437,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
   (function(){
     var FAM = ${JSON.stringify(FAMILIES)};
     var STR = ['Mild','Mild-Medium','Medium','Medium-Full','Full'];
-    var CIGARS = [
-      {n:'Reflexi\\u00f3n N\\u00ba 1',v:'Toro',w:'Maduro',o:'Nicaragua',s:3,m:'reflection',f:['Dark Chocolate','Cedar','Molasses','Leather']},
-      {n:'Sobremesa',v:'Corona',w:'Habano',o:'Nicaragua',s:3,m:'conversation',f:['Cedar','Black Pepper','Caramel','Toast']},
-      {n:'Primera Luz',v:'Petit Corona',w:'Connecticut',o:'Ecuador',s:1,m:'first light',f:['Cream','Butter','Honey','Hay']},
-      {n:'Fogata',v:'Robusto',w:'Oscuro',o:'Nicaragua',s:5,m:'fireside',f:['Campfire','Charred Wood','Black Pepper','Espresso']},
-      {n:'Biblioteca',v:'Lancero',w:'Colorado',o:'Dominican Republic',s:2,m:'focus',f:['Sandalwood','Tea','Honey','Toast']},
-      {n:'Celebraci\\u00f3n',v:'Torpedo',w:'Colorado Maduro',o:'Honduras',s:4,m:'celebration',f:['Red Pepper','Brown Sugar','Cocoa','Oak']},
-      {n:'Cacao Real',v:'Gordo',w:'Maduro',o:'Brazil',s:4,m:'unwind',f:['Dark Chocolate','Espresso','Raisin','Molasses']},
-      {n:'La Cosecha',v:'Churchill',w:'Sumatra',o:'Ecuador',s:3,m:'gratitude',f:['Fig','Cedar','Hay','Almond']},
-      {n:'Patio Dorado',v:'Robusto',w:'Natural',o:'Honduras',s:2,m:'golden hour',f:['Caramel','Peanut','Grass','Citrus']},
-      {n:'Niebla',v:'Belicoso',w:'Claro',o:'Mexico',s:2,m:'morning',f:['Mineral','Cream','Jasmine','White Pepper']},
-      {n:'Medianoche',v:'Perfecto',w:'Oscuro',o:'Nicaragua',s:5,m:'late night',f:['Charcoal','Dark Chocolate','Peat','Clove']},
-      {n:'Compa\\u00f1ero',v:'Lonsdale',w:'Habano',o:'Cuba',s:3,m:'close friends',f:['Leather','Nutmeg','Mocha','Dried Fruit']},
-      {n:'Brisa',v:'Panatela',w:'Connecticut',o:'Dominican Republic',s:1,m:'a breeze outside',f:['Grass','Citrus','Cream','Mint']},
-      {n:'El Faro',v:'Toro',w:'Colorado',o:'Cameroon',s:4,m:'milestone',f:['Hickory','Anise','Burnt Caramel','Walnut']}
-    ];
+    var CIGARS = ${JSON.stringify(CIGARS)};
     var PAIR = {'Earth':['espresso','rum'],'Wood':['scotch','whiskey'],'Spice':['rum','scotch'],'Sweet':['coffee','hot chocolate'],'Coffee & Chocolate':['espresso','beer'],'Cream & Bread':['coffee','tea'],'Nut':['rum','beer'],'Fruit':['wine','tea'],'Herbal & Floral':['tea','wine'],'Smoke & Char':['whiskey','scotch']};
     var MOOD = {'Earth':'reflection','Wood':'focus','Spice':'celebration','Sweet':'gratitude','Coffee & Chocolate':'unwind','Cream & Bread':'a gentle first light','Nut':'conversation','Fruit':'a golden hour','Herbal & Floral':'a clear morning','Smoke & Char':'a fireside evening'};
     var famOf = {}; FAM.forEach(function(fm){ fm.flavors.forEach(function(lb){ famOf[lb] = fm; }); });
@@ -1603,6 +2097,104 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     @media(max-width:960px){.lounge{grid-template-columns:1fr}}
     .scene{border:1px solid var(--hairline);background:#120d16}
     .scene svg{display:block;width:100%;height:auto}
+    .stagewrap{display:flex;flex-direction:column;gap:0}
+    .scene.stage{aspect-ratio:16/10;width:100%;position:relative;overflow:hidden;
+      background:radial-gradient(ellipse at 50% 62%,#241a2a 0%,#0d0912 74%)}
+    .scene.stage::after{content:'lighting the room…';position:absolute;inset:auto 0 46% 0;text-align:center;
+      color:var(--faint);font-size:.8rem;letter-spacing:.28em;text-transform:uppercase}
+    .scene.stage[data-ready]::after{display:none}
+    .scene.stage canvas{position:relative;z-index:1}
+    .stagebar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.6rem;
+      border:1px solid var(--hairline);border-top:none;background:var(--coal);padding:.5rem .6rem}
+    .views{display:flex;flex-wrap:wrap;gap:0}
+    .vbtn{font:inherit;font-size:.76rem;letter-spacing:.2em;text-transform:uppercase;color:var(--cream-dim);
+      background:transparent;border:1px solid var(--hairline);border-right-width:0;padding:.42rem .8rem;cursor:pointer}
+    .vbtn:last-child{border-right-width:1px}
+    .vbtn:hover{background:rgba(200,151,90,.1);color:var(--cream)}
+    .vbtn.on{background:var(--gold);border-color:var(--gold);color:#171017}
+    .stagebar .hint{color:var(--faint);font-size:.8rem;font-style:italic;padding-right:.35rem}
+    .vbtn.open{color:var(--gold-bright);border-color:var(--gold)}
+
+    /* full-screen room: stage left, tabbed sidebar right */
+    /* above the site's own sticky header — walking in means the room, only */
+    .lfull{position:fixed;inset:0;z-index:9999;background:var(--night);display:flex}
+    .lfull[hidden]{display:none}
+    .lf-stage{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+    .lf-stage .stagewrap{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
+    .lf-stage .scene.stage{flex:1 1 auto;aspect-ratio:auto;height:auto;min-height:0}
+    .lf-side{flex:0 0 340px;display:flex;flex-direction:column;border-left:1px solid var(--hairline);
+      background:var(--coal);min-height:0}
+    @media(max-width:820px){.lfull{flex-direction:column}.lf-side{flex:0 0 46%;border-left:none;border-top:1px solid var(--hairline)}}
+    .lf-tabs{display:flex;border-bottom:1px solid var(--hairline);flex:0 0 auto}
+    .lf-tabs button{flex:1;font:inherit;font-size:.76rem;letter-spacing:.24em;text-transform:uppercase;
+      color:var(--cream-dim);background:transparent;border:none;border-right:1px solid var(--hairline);
+      padding:.85rem .5rem;cursor:pointer}
+    .lf-tabs button:last-child{border-right:none}
+    .lf-tabs button:hover{background:rgba(200,151,90,.08);color:var(--cream)}
+    .lf-tabs button.on{background:var(--gold);color:#171017}
+    .lf-pane{flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column}
+    .lf-pane[hidden]{display:none}
+    .lf-pane .dpanel{border:none;background:transparent}
+    .lf-close{position:absolute;top:.6rem;right:calc(340px + .6rem);z-index:2;font:inherit;font-size:.72rem;
+      letter-spacing:.24em;text-transform:uppercase;color:var(--cream-dim);background:rgba(20,16,23,.8);
+      border:1px solid var(--hairline);padding:.4rem .8rem;cursor:pointer}
+    .lf-close:hover{color:var(--cream);background:rgba(200,151,90,.16)}
+    @media(max-width:820px){.lf-close{right:.6rem}}
+    /* chat */
+    .chatlog{flex:1 1 auto;overflow:auto;padding:1rem 1.05rem;display:flex;flex-direction:column;gap:.8rem}
+    .msg{max-width:92%;font-size:.94rem;line-height:1.62}
+    .msg .who{display:block;font-size:.64rem;letter-spacing:.28em;text-transform:uppercase;
+      color:var(--gold);margin-bottom:.25rem}
+    .msg.you{align-self:flex-end;text-align:right}
+    .msg.you .who{color:var(--faint)}
+    .msg .body{border:1px solid var(--hairline);padding:.55rem .7rem;background:rgba(200,151,90,.05);
+      color:var(--cream);display:inline-block;text-align:left}
+    .msg.you .body{background:rgba(240,230,214,.05)}
+    .msg .body a{color:var(--gold-bright)}
+    .chatform{flex:0 0 auto;display:flex;border-top:1px solid var(--hairline)}
+    .chatform input{flex:1;font:inherit;font-size:.94rem;color:var(--cream);background:transparent;
+      border:none;padding:.85rem .9rem}
+    .chatform input:focus{outline:none;background:rgba(200,151,90,.06)}
+    .chatform button{font:inherit;font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;
+      color:#171017;background:var(--gold);border:none;padding:.7rem 1.1rem;cursor:pointer}
+    .chatform button:hover{background:var(--gold-bright)}
+
+    /* the wheel plate — what the framed wheel opens into, in-room and tidy */
+    .plate{position:fixed;inset:0;z-index:10000;background:rgba(10,7,14,.78);
+      display:flex;align-items:center;justify-content:center;padding:2vh 2vw}
+    .plate[hidden]{display:none}
+    .plate-card{width:min(880px,96vw);max-height:96vh;overflow:auto;background:var(--coal);
+      border:1px solid var(--gold);box-shadow:0 0 0 1px rgba(0,0,0,.5),0 24px 60px rgba(0,0,0,.6)}
+    .plate-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
+      padding:.9rem 1.1rem;border-bottom:1px solid var(--hairline)}
+    .plate-head h3{margin:0;font-size:.74rem;letter-spacing:.34em;text-transform:uppercase;
+      color:var(--gold);font-weight:400}
+    .plate-head button{font:inherit;font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;
+      color:var(--cream-dim);background:transparent;border:1px solid var(--hairline);
+      padding:.34rem .7rem;cursor:pointer}
+    .plate-head button:hover{color:var(--cream);background:rgba(200,151,90,.14)}
+    .plate-body{display:grid;grid-template-columns:minmax(260px,1fr) minmax(230px,.85fr);gap:1.2rem;
+      padding:1.1rem}
+    @media(max-width:700px){.plate-body{grid-template-columns:1fr}}
+    .plate-body svg{display:block;width:100%;height:auto;touch-action:manipulation}
+    .plate-body svg .seg{cursor:pointer}
+    .plate-body svg .seg:hover{opacity:.86}
+    .wsub h4{margin:0 0 .5rem;font-size:.68rem;letter-spacing:.28em;text-transform:uppercase;
+      color:var(--gold);font-weight:400}
+    .wsub{margin-bottom:1.1rem}
+    .chips{display:flex;flex-wrap:wrap;gap:.3rem}
+    .chip{font-size:.8rem;border:1px solid var(--hairline);padding:.22rem .5rem;color:var(--cream);
+      cursor:pointer;background:rgba(200,151,90,.06)}
+    .chip:hover{border-color:var(--gold)}
+    .chip .x{color:var(--faint);margin-left:.35rem}
+    .wempty{color:var(--faint);font-size:.86rem;font-style:italic;line-height:1.6}
+    .match{border-left:2px solid var(--gold);padding:.4rem 0 .4rem .6rem;margin-bottom:.7rem}
+    .match b{color:var(--cream)}
+    .match .meta{display:block;color:var(--faint);font-size:.82rem}
+    .match .hits{display:block;color:var(--gold-bright);font-size:.82rem}
+    .plate-foot{border-top:1px solid var(--hairline);padding:.75rem 1.1rem;font-size:.86rem;
+      color:var(--faint)}
+    .plate-foot a{color:var(--gold-bright)}
     .dpanel{border:1px solid var(--hairline);background:var(--coal)}
     .dpanel section{padding:1.05rem 1.15rem;border-bottom:1px solid var(--hairline)}
     .dpanel section:last-child{border-bottom:none}
@@ -1635,12 +2227,27 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="hero" style="padding:9vh 0 2vh">
       <p class="kicker">the cigar lounge &middot; your corner of the ecosystem</p>
       <h1>Pull up a <i>chair</i>.</h1>
-      <p class="lede">The fire is lit and the good seat is yours. This room is built to take your
-      things — art on the walls, bottles on the shelf, trophies where they belong. The add-ons
-      below are just the start; the scene is made of slots.</p>
+      <p class="lede">The fire is lit and the good seat is yours — and now you can walk around it.
+      Drag the room to look: framed art on the gallery wall, the humidor cabinet lit behind glass,
+      a cigar going in the ashtray, cutter and lighter within reach. Every piece is a slot, and
+      the room fills up as your journal does.</p>
     </section>
     <section class="lounge">
-      <div class="scene"><svg viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A warm cigar lounge: a fire going, a wingback chair with a throw, whiskey poured, and a cat asleep on the rug">
+      <div class="stagewrap">
+        <div class="scene stage" id="lounge3d" role="img"
+             aria-label="A three-dimensional cigar lounge: a fire in the hearth, leather wingbacks, framed art on the walls, a humidor cabinet, and a cigar going in the ashtray"></div>
+        <div class="stagebar">
+          <span class="views">
+            <button type="button" class="vbtn on" data-view="room">the room</button>
+            <button type="button" class="vbtn" data-view="fire">the fire</button>
+            <button type="button" class="vbtn" data-view="gallery">the wall</button>
+            <button type="button" class="vbtn" data-view="humidor">the humidor</button>
+            <button type="button" class="vbtn" data-view="chair">your chair</button>
+            <button type="button" class="vbtn open" id="lfOpen">walk in</button>
+          </span>
+          <span class="hint" id="stageHint">drag to look around &middot; click the room to walk in</span>
+        </div>
+        <div class="scene fallback" id="loungeFallback" hidden><svg viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A warm cigar lounge: a fire going, a wingback chair with a throw, whiskey poured, and a cat asleep on the rug">
         <defs>
           <linearGradient id="lwall" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#241b2c"/><stop offset="100%" stop-color="#181020"/>
@@ -1854,17 +2461,25 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
         <circle cx="520" cy="330" r="1.6" fill="#f2c47e" class="l-fly"/>
         <circle cx="475" cy="380" r="1.4" fill="#f2c47e" class="l-fly s2"/>
         <circle cx="840" cy="300" r="1.5" fill="#f2c47e" class="l-fly s3"/>
-      </svg></div>
+        </svg></div>
+      </div>
       <aside class="dpanel">
         <section>
           <h3>Decorate</h3>
-          <div id="decorList"></div>
+          <div data-decor-list></div>
+        </section>
+        <section>
+          <h3>On the walls</h3>
+          <p class="dnote">The frames hang your hive's own art — the tiles you already have,
+          resolved by signature, lit by their own picture lights. The rest are prints painted
+          in code: the band, the leaf, the wheel, the map of where the leaf comes from.</p>
         </section>
         <section>
           <h3>Bring your own</h3>
           <p class="dnote">Every piece in this room is a slot. Soon you will hang your own art,
           shelve your own bottles, and pin the bands of cigars you have loved — straight from
-          your <a href="/revolucion/journal">journal</a> and <a href="/revolucion/humidor">humidor</a>.</p>
+          your <a href="/revolucion/journal">journal</a> and <a href="/revolucion/humidor">humidor</a>.
+          Post a moment, earn the room: see <a href="/revolucion/journal">rewards</a>.</p>
         </section>
       </aside>
     </section>
@@ -1879,46 +2494,174 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       </div>
     </section>
   </main>
+
+  <!-- walk-in: the room fills the screen, the sidebar carries Chat | Decorate -->
+  <div class="lfull" id="loungeFull" hidden>
+    <div class="lf-stage" id="lfStage"></div>
+    <button type="button" class="lf-close" id="lfClose">leave the room</button>
+    <aside class="lf-side">
+      <div class="lf-tabs">
+        <button type="button" data-tab="chat" class="on">Chat</button>
+        <button type="button" data-tab="decorate">Decorate</button>
+      </div>
+      <div class="lf-pane" id="paneChat">
+        <div class="chatlog" id="chatlog"></div>
+        <form class="chatform" id="chatform" autocomplete="off">
+          <input id="chatinput" type="text" placeholder="Ask Revolución&hellip;" aria-label="Ask Revolución">
+          <button type="submit">Send</button>
+        </form>
+      </div>
+      <div class="lf-pane" id="paneDecorate" hidden>
+        <div class="dpanel">
+          <section>
+            <h3>Decorate</h3>
+            <div data-decor-list></div>
+          </section>
+          <section>
+            <h3>On the walls</h3>
+            <p class="dnote">The frames hang your hive's own art, lit by their own picture
+            lights. The rest are prints painted in code — the band, the leaf, the wheel,
+            and the map of where the leaf comes from.</p>
+          </section>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- the framed wheel on the gallery wall opens into this, not the full page -->
+  <div class="plate" id="wheelPlate" hidden>
+    <div class="plate-card">
+      <div class="plate-head">
+        <h3 id="wheelTitle">The Flavor Wheel</h3>
+        <button type="button" id="wheelBack" hidden>&larr; families</button>
+        <button type="button" id="wheelClose">close</button>
+      </div>
+      <div class="plate-body">
+        <div id="wheelSvg"></div>
+        <div>
+          <div class="wsub">
+            <h4>In your glass</h4>
+            <div id="wheelChips"><p class="wempty">Tap a family, then the flavors you are
+            tasting. They stack up here.</p></div>
+          </div>
+          <div class="wsub">
+            <h4>From the humidor</h4>
+            <div id="wheelMatches"><p class="wempty">Pick a flavor and the catalog sorts
+            itself against it.</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="plate-foot">The whole taxonomy &mdash; 63 flavors, spinnable, with the
+      selector station &mdash; lives on <a href="/revolucion/flavor-wheel">the flavor wheel page</a>.</div>
+    </div>
+  </div>
+  <script>
+  window.REV_LOUNGE = {
+    mount: '#lounge3d',
+    fallback: '#loungeFallback',
+    controls: '.stagebar',
+    // the hive's own sig-addressed tile art, hung in the room's frames
+    art: ${JSON.stringify(
+      Object.fromEntries(
+        (['lounge', 'cigars', 'journal', 'flavor-wheel', 'humidor', 'community'] as const)
+          .filter(k => art[k])
+          .map(k => [k, `resource:${art[k]}/art.png`]),
+      ),
+    )}
+  };
+  </script>
+  ${loungeScript}
   <script>
   (function(){
+    // One decorate list, two renderers: the ids address groups in the SVG
+    // fallback AND slots in the 3D room, so whichever came up obeys the same
+    // switches. Ids the running renderer doesn't know are simply ignored.
     var SLOTS = [
-      { id: 'slot-fire',    label: 'A fire going' },
-      { id: 'slot-lamp',    label: 'Reading lamp' },
-      { id: 'slot-window',  label: 'Night window' },
-      { id: 'slot-rug',     label: 'Rug' },
-      { id: 'slot-cat',     label: 'The lounge cat' },
-      { id: 'slot-whiskey', label: 'Whiskey, neat-ish' },
-      { id: 'slot-smoke',   label: 'A cigar going' },
-      { id: 'slot-frames',  label: 'Wall art' },
-      { id: 'slot-shelf',   label: 'Mantel keepsakes' },
-      { id: 'slot-plant',   label: 'Plant' },
-      { id: 'slot-records', label: 'Record console' }
+      { id: 'slot-fire',        label: 'A fire going' },
+      { id: 'slot-lamp',        label: 'Reading lamp' },
+      { id: 'slot-window',      label: 'Night window' },
+      { id: 'slot-rug',         label: 'Rug' },
+      { id: 'slot-chairs',      label: 'The wingbacks' },
+      { id: 'slot-tables',      label: 'Tables' },
+      { id: 'slot-cat',         label: 'The lounge cat' },
+      { id: 'slot-whiskey',     label: 'Whiskey, neat-ish' },
+      { id: 'slot-smoke',       label: 'A cigar going' },
+      { id: 'slot-accessories', label: 'Cutter, lighter, ashtray' },
+      { id: 'slot-humidor',     label: 'Humidor cabinet' },
+      { id: 'slot-frames',      label: 'Wall art' },
+      { id: 'slot-shelf',       label: 'Shelves &amp; keepsakes' },
+      { id: 'slot-plant',       label: 'Plant' },
+      { id: 'slot-records',     label: 'Record console' }
     ];
     var KEY = 'rev:lounge:decor';
     var on = {};
     try { on = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch(e){ on = {}; }
     SLOTS.forEach(function(s){ if (!(s.id in on)) on[s.id] = true; });
-    function apply(){
+    function paintScene(){
       SLOTS.forEach(function(s){
         // a slot may have overlay pieces outside its group (data-slot),
         // e.g. the hearth glow painted above the rug — hide both together
         var nodes = document.querySelectorAll('#' + s.id + ', [data-slot="' + s.id + '"]');
         for (var i = 0; i < nodes.length; i++) nodes[i].style.display = on[s.id] ? '' : 'none';
-      });
-      try { localStorage.setItem(KEY, JSON.stringify(on)); } catch(e){}
-      var list = document.getElementById('decorList');
-      list.innerHTML = '';
-      SLOTS.forEach(function(s){
-        var d = document.createElement('div');
-        d.className = 'drow' + (on[s.id] ? '' : ' off');
-        d.innerHTML = '<span class="mark">' + (on[s.id] ? '\\u25a0' : '\\u25a1') + '</span>' + s.label;
-        d.addEventListener('click', function(){ on[s.id] = !on[s.id]; apply(); });
-        list.appendChild(d);
+        if (window.RevLounge3D) window.RevLounge3D.setSlot(s.id, !!on[s.id]);
       });
     }
+    function apply(){
+      paintScene();
+      try { localStorage.setItem(KEY, JSON.stringify(on)); } catch(e){}
+      var lists = document.querySelectorAll('[data-decor-list]');
+      for (var li = 0; li < lists.length; li++) {
+        var list = lists[li];
+        list.innerHTML = '';
+        SLOTS.forEach(function(s){
+          var d = document.createElement('div');
+          d.className = 'drow' + (on[s.id] ? '' : ' off');
+          d.innerHTML = '<span class="mark">' + (on[s.id] ? '\\u25a0' : '\\u25a1') + '</span>' + s.label;
+          d.addEventListener('click', function(){ on[s.id] = !on[s.id]; apply(); });
+          list.appendChild(d);
+        });
+      }
+    }
     apply();
+    // the concierge flips switches too — one code path, one saved state
+    window.__loungeSetSlot = function(id, val){
+      if (!(id in on)) return false;
+      on[id] = !!val; apply(); return true;
+    };
+    window.__loungeSlots = SLOTS;
+    // the room boots on idle — re-apply the saved switches once it is up
+    document.addEventListener('lounge3d:ready', paintScene);
+
+    // Belt and braces: if the room never reports ready (no WebGL, or the
+    // bundle resource didn't resolve at all), show the drawn lounge instead
+    // of an empty stage.
+    setTimeout(function(){
+      var stage = document.getElementById('lounge3d');
+      if (!stage || stage.dataset.ready) return;
+      stage.hidden = true;
+      var bar = document.querySelector('.stagebar');
+      if (bar) bar.hidden = true;
+      var fb = document.getElementById('loungeFallback');
+      if (fb) fb.hidden = false;
+    }, 4000);
+
+    var views = document.querySelectorAll('.vbtn[data-view]');
+    for (var i = 0; i < views.length; i++) {
+      views[i].addEventListener('click', function(e){
+        var btn = e.currentTarget;
+        for (var j = 0; j < views.length; j++) views[j].classList.remove('on');
+        btn.classList.add('on');
+        if (window.RevLounge3D) window.RevLounge3D.view(btn.getAttribute('data-view'));
+      });
+    }
+    window.__loungeView = function(name){
+      for (var j = 0; j < views.length; j++)
+        views[j].classList.toggle('on', views[j].getAttribute('data-view') === name);
+      if (window.RevLounge3D) window.RevLounge3D.view(name);
+    };
   })();
-  </script>`)
+  </script>
+  ${CONCIERGE_JS}`)
 
   return [
     { segments: ['revolucion'], label: 'Revolución', html: home },
@@ -1934,6 +2677,40 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     { segments: ['revolucion', 'humidor'], label: 'The Humidor', html: humidor },
     { segments: ['revolucion', 'mission'], label: 'The Manifesto', html: mission },
   ]
+}
+
+// ─── the 3D lounge bundle ────────────────────────────────────────────
+// scripts/lounge3d/lounge-3d.ts (three.js) → one minified IIFE. Stored as its
+// OWN sig-addressed resource and referenced from the page with
+// `resource:<sig>/lounge-3d.js` — the `.js` tail is what makes the service
+// worker serve it as application/javascript. Keeping it out of the page HTML
+// means page-copy edits don't re-upload half a megabyte, and the bundle
+// dedupes by signature across every rebuild.
+
+async function bundleLounge(): Promise<string> {
+  const esbuild = await import('esbuild')
+  const { existsSync } = await import('node:fs')
+  const path = await import('node:path')
+  // Run from the monorepo root (`tsx scripts/…`) or from scripts/ — resolve
+  // both without depending on import.meta (this file runs as CJS under tsx).
+  const entry = ['scripts/lounge3d/lounge-3d.ts', 'lounge3d/lounge-3d.ts']
+    .map(p => path.resolve(process.cwd(), p))
+    .find(existsSync)
+  if (!entry) throw new Error('lounge-3d.ts not found — run from the monorepo root (src/)')
+  const out = await esbuild.build({
+    entryPoints: [entry],
+    entryPoints: [entry],
+    bundle: true,
+    format: 'iife',
+    minify: true,
+    target: 'es2020',
+    platform: 'browser',
+    write: false,
+    legalComments: 'none',
+  })
+  const text = out.outputFiles?.[0]?.text
+  if (!text) throw new Error('lounge bundle produced no output')
+  return text
 }
 
 // ─── main ────────────────────────────────────────────────────────────
@@ -1952,7 +2729,10 @@ async function main(): Promise<void> {
     const fakeArt = new Proxy({}, { get: () => fakeSig }) as Record<string, string | undefined>
     const placeholder = 'data:image/svg+xml,' + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="#2a1c26"/><polygon points="100,38 154,69 154,131 100,162 46,131 46,69" fill="none" stroke="#c8975a" stroke-width="3"/><circle cx="100" cy="100" r="14" fill="#b3542f"/></svg>')
-    for (const p of buildPages('PREVIEW', fakeArt)) {
+    // Preview has no OPFS to resolve `resource:` from, so the 3D bundle is
+    // inlined here instead of referenced by signature.
+    const loungeScript = `<script>${await bundleLounge()}</script>`
+    for (const p of buildPages('PREVIEW', fakeArt, loungeScript)) {
       let html = p.html.replace('<link rel="stylesheet" href="resource:PREVIEW/chrome.css">', `<style>${CHROME_CSS}</style>`)
       html = html.split(`resource:${fakeSig}/art.png`).join(placeholder)
       writeFileSync(`${dir}/${p.segments.join('-')}.html`, html)
@@ -2020,8 +2800,16 @@ async function main(): Promise<void> {
   const chromeSig = chrome.data.sig as string
   console.log(`[site] chrome.css → ${chromeSig.slice(0, 12)}… (${chrome.data.bytes} bytes)`)
 
+  // 1b. The 3D lounge bundle — its own resource, referenced by signature.
+  const bundle = await bundleLounge()
+  const loungePut = await send({ op: 'put-resource', text: bundle })
+  if (!loungePut.ok) { console.error(`[site] lounge-3d.js FAIL: ${loungePut.error}`); process.exit(1) }
+  const loungeSig = loungePut.data.sig as string
+  console.log(`[site] lounge-3d.js → ${loungeSig.slice(0, 12)}… (${loungePut.data.bytes} bytes)`)
+  const loungeScript = `<script src="resource:${loungeSig}/lounge-3d.js"></script>`
+
   // 2. Pages: put-resource + decoration-add per cell.
-  const pages = buildPages(chromeSig, art)
+  const pages = buildPages(chromeSig, art, loungeScript)
   const written: Array<{ path: string; htmlSig: string; decoSig: string }> = []
   for (const p of pages) {
     const route = '/' + p.segments.join('/')

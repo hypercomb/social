@@ -225,6 +225,96 @@ export function referenceTargetForLabel(label: string): readonly string[] | null
   return referenceTargetByKey.get(keyForLabel(label)) ?? null
 }
 
+/** Map<locationKey, targetSig> — the target's LINEAGE signature (bag address).
+ *  Absent for every reference written before the field existed, which is the
+ *  normal case rather than a fault. */
+const referenceSigByKey = new Map<string, string>()
+
+/** The target's lineage signature for a reference cell, or '' when the cell is
+ *  not a reference or predates the field.
+ *
+ *  This is the reference's IDENTITY, as opposed to `referenceTargetForLabel`'s
+ *  ROUTE: the route follows the target's head and is what a click walks, the
+ *  signature is what survives the target being renamed or rehomed and is what
+ *  lets a reference join a layer closure. Never a content hash — that would
+ *  name a frozen value and make the reference a copy. */
+export function referenceSigForLabel(label: string): string {
+  return referenceSigByKey.get(keyForLabel(label)) ?? ''
+}
+
+// ── Reference FACE (resolve-through) ──────────────────────────────────
+//
+// A reference cell's layer is `{name, decorations:[sig]}` — a pointer, with no
+// `properties` and therefore no image of its own. Rendered from its own layer
+// it is a blank named tile, so a collection of references paints as a page of
+// empty hexagons even though the addressing underneath is correct.
+//
+// So a reference resolves its FACE through the pointer: the picture shown is
+// the TARGET's, read at paint time from the target's current head. One item in
+// many places looks like itself in all of them, and an edit at the canonical
+// reaches every appearance with no sync, because nothing was copied.
+//
+// The face is deliberately NOT written into the reference cell's layer. Baking
+// the target's image sig at creation time would convert an alias into a frozen
+// copy: it would stop tracking the moment the target changed, and the N places
+// would silently drift apart — the one failure this whole model exists to
+// prevent.
+//
+// Keyed by the TARGET's location, not by the referring cell, so every reference
+// to one target shares a single record and a single read.
+
+/** Map<locationKey(TARGET), imageSig> — the picture a reference should wear.
+ *  Absent = not resolved yet (or the target genuinely has no image); the caller
+ *  then falls back exactly as it does for any imageless tile. */
+const referenceFaceByKey = new Map<string, string>()
+
+/** Target locations whose face has been walked, successful or not — one read
+ *  per target per session. Separate from `checkedLabels` because a target is a
+ *  LOCATION we resolve through, not a cell on the page being rendered. */
+const walkedFaceKeys = new Set<string>()
+
+/** The image sig a reference cell should render, or '' when the cell is not a
+ *  reference / the target has no image / it hasn't resolved yet.
+ *
+ *  Synchronous and O(1) — show-cell calls this per visible cell while composing
+ *  geometry, so it must never touch OPFS. A miss returns '' and the tile falls
+ *  back to the ordinary imageless path, which is why an unresolved face degrades
+ *  to today's appearance rather than to a hole. */
+export function referenceFaceForLabel(label: string): string {
+  const target = referenceTargetByKey.get(keyForLabel(label))
+  if (!target) return ''
+  return referenceFaceByKey.get(locationKey(target)) ?? ''
+}
+
+/** Read the target's layer and remember its picture. Runs once per target per
+ *  session off the back of the walk that discovered the reference. */
+async function hydrateReferenceFace(
+  targetSegments: readonly string[],
+  history: HistoryServiceLike,
+): Promise<boolean> {
+  const key = locationKey(targetSegments)
+  if (walkedFaceKeys.has(key)) return false
+  walkedFaceKeys.add(key)
+  try {
+    const locationSig = await history.sign({ explorerSegments: () => targetSegments })
+    const layer = await history.currentLayerAt(locationSig) as { properties?: unknown } | null
+    const props = Array.isArray(layer?.properties)
+      ? (layer.properties as Record<string, unknown>[])[0]
+      : undefined
+    const small = props?.['small'] as Record<string, unknown> | undefined
+    const image = small?.['image']
+    if (typeof image !== 'string' || !/^[0-9a-f]{64}$/.test(image)) return false
+    referenceFaceByKey.set(key, image)
+    return true
+  } catch {
+    // Target unreadable (not adopted, deleted, or a cold bag) — leave the face
+    // unset and let the tile render as it does today. Drop the memo so a later
+    // pass retries once the target arrives.
+    walkedFaceKeys.delete(key)
+    return false
+  }
+}
+
 // ── Title sub-index (the display name) ────────────────────────────────
 //
 // A tile's layer `name` is its ADDRESS, not its caption. The lineage bag is
@@ -466,6 +556,20 @@ function targetSegmentsOf(record: DecorationShape): readonly string[] | null {
   return raw.map(s => String(s)).filter(s => s.length > 0)
 }
 
+/** Pull the target's LINEAGE signature out of a `reference` payload.
+ *
+ *  This is the bag address, never a content hash — a content hash would name a
+ *  frozen value and turn the reference into a copy. Optional by design: every
+ *  reference written before this field existed carries only the route, and must
+ *  keep working, so a miss is normal rather than a defect. */
+function targetSigOf(record: DecorationShape): string {
+  const payload = record.payload
+  const raw = payload && typeof payload === 'object'
+    ? (payload as { targetSig?: unknown }).targetSig
+    : undefined
+  return typeof raw === 'string' && /^[0-9a-f]{64}$/.test(raw) ? raw : ''
+}
+
 /** Pull the per-locale titles out of a `title` payload's `{ text }` map.
  *  Blank or whitespace-only entries are dropped rather than stored, so a
  *  cleared title falls back to the raw label — a tile must never draw as an
@@ -543,6 +647,9 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
     const target = targetSegmentsOf(record)
     if (target) referenceTargetByKey.set(key, target)
     else referenceTargetByKey.delete(key)
+    const sig = targetSigOf(record)
+    if (sig) referenceSigByKey.set(key, sig)
+    else referenceSigByKey.delete(key)
   }
   if (kind === TITLE_DECORATION_KIND) {
     const text = textOf(record)
@@ -635,6 +742,17 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
         && JSON.stringify(titleByKey.get(key) ?? null) !== priorTitle) {
       EffectBus.emit('title:indexed', { label })
     }
+    // A reference minted LIVE (`/reference`, a drop) must resolve its face here
+    // or never: the navigation walk memoizes each label+path and will not
+    // re-walk this cell, so waiting for the next render would leave the tile
+    // blank until a reload.
+    if (record.kind === REFERENCE_DECORATION_KIND) {
+      const target = referenceTargetByKey.get(key)
+      const history = window.ioc.get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+      if (target && history && await hydrateReferenceFace(target, history)) {
+        EffectBus.emit('reference:indexed', { label })
+      }
+    }
   } else if (payload.op === 'removeSig') {
     const kind = kindBySig.get(sig)
     if (kind) {
@@ -656,6 +774,7 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     }
     if (kind === REFERENCE_DECORATION_KIND) {
       referenceTargetByKey.delete(key)
+      referenceSigByKey.delete(key)
     }
     if (kind === TITLE_DECORATION_KIND) {
       titleByKey.delete(key)
@@ -749,6 +868,14 @@ async function hydrateLabel(
     // Same post-paint race for a title found on this walk: the tile has already
     // painted under its raw label, so flush and repaint it under the title.
     if (nudge && titleByKey.has(pathKey)) EffectBus.emit('title:indexed', { label })
+    // This cell turned out to be a REFERENCE: resolve the face it should wear
+    // from its target. The walk above only reads the pointer; the picture lives
+    // one hop away, at the target's own head. Same post-paint race as a title —
+    // the tile has already painted blank, so nudge a repaint once it lands.
+    const refTarget = referenceTargetByKey.get(pathKey)
+    if (refTarget && await hydrateReferenceFace(refTarget, history) && nudge) {
+      EffectBus.emit('reference:indexed', { label })
+    }
     return tagsByKey.has(pathKey)
   } catch {
     // Layer unavailable or fetch error — skip this location; another render

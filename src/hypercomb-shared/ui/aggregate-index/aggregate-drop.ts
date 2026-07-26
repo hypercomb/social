@@ -71,13 +71,31 @@ type CommitterLike = {
   ) => Promise<unknown>
 }
 
-/** A reference's payload. `scope` carries the pheromone parameters that define
- *  the collection this reference stands for — see the locked-scope note in the
- *  panel. Absent `scope` is an ordinary unscoped reference, exactly what
- *  `/reference` has always written, so existing references are untouched. */
+/** A reference's payload.
+ *
+ *  The target is carried TWICE because the two answer different questions:
+ *  `targetSegments` is the ROUTE (a sequence of steps, resolved live, so the
+ *  reference always lands on the target's current head) and `targetSig` is the
+ *  IDENTITY — the target's LINEAGE signature, i.e. its bag address, NEVER a
+ *  content hash. A content hash would freeze the reference into a copy that
+ *  stops tracking the moment the target changes, which is the one failure this
+ *  whole model exists to prevent. A route can be re-walked but can never serve
+ *  as a name: it breaks on a rename or rehome, and being path-only is what puts
+ *  a reference outside the layer closure.
+ *
+ *  `requiredMarks` carries the pheromones this reference FILTERS its target by
+ *  ("People, but only family"). Deliberately NOT stored as tag decorations: tags
+ *  are what the pheromone painter writes, so a filter living there would be
+ *  silently rewritten by painting the tile, and on-tile chips would mix filter
+ *  marks with identity marks indistinguishably.
+ *
+ *  Every field but `targetSegments` is optional, and absent means exactly the
+ *  shape `/reference` has always written — so existing references are untouched
+ *  and every reader must tolerate their absence. */
 export interface ReferencePayload {
   targetSegments: string[]
-  scope?: string[]
+  targetSig?: string
+  requiredMarks?: string[]
 }
 
 /**
@@ -85,16 +103,17 @@ export interface ReferencePayload {
  *
  * `appliesTo: []` is deliberate and matches `reference.queen.ts`: it makes the
  * decoration content-addressed by its payload alone, so two references to the
- * same target (with the same scope) dedup to ONE sig. Adding a different scope
- * is different content and therefore mints its own sig — which is exactly what
- * we want, since scope is part of what the reference IS.
+ * same target (with the same marks) dedup to ONE sig. Different marks are
+ * different content and therefore mint their own sig — which is exactly what we
+ * want, since the marks are part of what the reference IS. `People(family)` and
+ * `People(work)` are genuinely distinct references to one place.
  *
  * Returns the created tile name, or null if the write could not be made.
  */
 export const dropReferenceTile = async (
   item: AggregateItem,
   parentSegments: readonly string[],
-  scope?: readonly string[],
+  requiredMarks?: readonly string[],
 ): Promise<string | null> => {
   const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
   const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
@@ -105,9 +124,14 @@ export const dropReferenceTile = async (
   if (!name) return null
 
   const payload: ReferencePayload = { targetSegments: [...item.segments] }
-  if (scope && scope.length) payload.scope = [...scope]
+  if (requiredMarks && requiredMarks.length) payload.requiredMarks = [...requiredMarks]
 
   try {
+    // The target's LINEAGE signature — its bag address, resolved the same way
+    // every location is. Never a content hash: that would be a copy.
+    const targetSig = await history.sign({ explorerSegments: () => [...item.segments] })
+    if (targetSig) payload.targetSig = targetSig
+
     const record = { kind: REFERENCE_KIND, appliesTo: [] as string[], payload }
     const decorationSig = await store.putResource(
       new Blob([JSON.stringify(record)], { type: 'application/json' }))

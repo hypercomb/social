@@ -116,7 +116,26 @@ export class ReferenceQueenBee extends QueenBee {
 
       // appliesTo:[] so identical references (same target) dedup to ONE sig —
       // the same location can be referenced from many tiles at zero extra cost.
-      const record = { kind: REFERENCE_DECORATION_KIND, appliesTo: [], payload: { targetSegments: [...targetSegments] } }
+      //
+      // The payload carries the target TWICE, deliberately, because they answer
+      // different questions:
+      //   targetSegments — the ROUTE. A sequence of steps, resolved live, so
+      //     the reference always lands on the target's current head.
+      //   targetSig      — the IDENTITY. The target's LINEAGE signature (the
+      //     bag address), NOT a content hash: a content hash would freeze this
+      //     into a copy that stops tracking the moment the target changes.
+      // A route can be re-walked but can never be a name — it breaks the
+      // instant the target is renamed or rehomed, and being path-only is what
+      // puts a reference OUTSIDE the layer closure, so a shared subtree can
+      // adopt as "complete" while pointing at a path the receiver lacks.
+      // Absent targetSig is exactly the old shape, so existing references are
+      // untouched and readers must treat it as optional.
+      const targetSig = await history.sign({ explorerSegments: () => [...targetSegments] })
+      const record = {
+        kind: REFERENCE_DECORATION_KIND,
+        appliesTo: [],
+        payload: { targetSegments: [...targetSegments], targetSig },
+      }
       const decorationSig = await store.putResource(
         new Blob([JSON.stringify(record)], { type: 'application/json' }))
 

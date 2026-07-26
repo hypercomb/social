@@ -213,6 +213,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
+      case 'chat-reply':   return this.#chatReply(req)
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
       case 'feedback-channel-status': return this.#feedbackChannelStatus(req)
@@ -317,6 +318,23 @@ export class ClaudeBridgeWorker extends Worker {
     return { id: req.id, ok: true, data: { sig, bytes: bytes.byteLength } }
   }
 
+  // ─── chat-reply ────────────────────────────────────────────────────
+  //
+  // The responder's half of the ASK SCREEN's refinement conversation: a
+  // chat-mode ask (payload.mode === 'chat') is answered by sending this op,
+  // which surfaces the text INTO the open conversation via the
+  // `ask:chat-reply` effect — never as a note. The screen matches on
+  // `convoId`; text is capped defensively so a runaway reply can't wedge
+  // the UI.
+  async #chatReply(req: BridgeRequest): Promise<BridgeResponse> {
+    const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
+    const text = typeof req.text === 'string' ? req.text.slice(0, 20_000) : ''
+    if (!convoId) return { id: req.id, ok: false, error: 'chat-reply requires `cell` (the convoId)' }
+    if (!text) return { id: req.id, ok: false, error: 'chat-reply requires `text`' }
+    EffectBus.emit('ask:chat-reply', { convoId, text })
+    return { id: req.id, ok: true }
+  }
+
   async #optimizationList(req: BridgeRequest): Promise<BridgeResponse> {
     const store = get<{
       listOptimizations?: () => Promise<string[]>
@@ -351,13 +369,16 @@ export class ClaudeBridgeWorker extends Worker {
     // Peek at the record before it goes: retiring an ASK is the "your answer
     // has landed" moment — the responder writes the note first, then retires
     // (the drain contract) — so this is where the UI learns the wait is over.
-    // Best-effort: a read failure never blocks the removal.
+    // CHAT-mode asks are excluded: their replies route into the ask screen's
+    // conversation (the `chat-reply` op), not to notes, so the "note added"
+    // moment never happens for them. Best-effort: a read failure never blocks
+    // the removal.
     let askAnswered: { appliesTo: unknown } | null = null
     try {
       const blob = await store.getOptimization?.(sig)
       if (blob) {
-        const parsed = JSON.parse(await blob.text()) as { kind?: string; appliesTo?: unknown }
-        if (parsed?.kind === 'ask') askAnswered = { appliesTo: parsed.appliesTo }
+        const parsed = JSON.parse(await blob.text()) as { kind?: string; appliesTo?: unknown; payload?: { mode?: string } }
+        if (parsed?.kind === 'ask' && parsed?.payload?.mode !== 'chat') askAnswered = { appliesTo: parsed.appliesTo }
       }
     } catch { /* unreadable record — still remove it */ }
 

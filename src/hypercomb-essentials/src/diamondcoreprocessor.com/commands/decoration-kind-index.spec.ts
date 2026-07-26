@@ -36,6 +36,10 @@ let here: readonly string[] = []
 /** `decorations` slot per location key — what the hydration walk finds. */
 const layers = new Map<string, string[]>()
 
+/** `properties[0].small.image` per location key — the picture a cell wears. A
+ *  reference cell has none of its own, so this is what its TARGET supplies. */
+const layerImages = new Map<string, string>()
+
 const iocTable: Record<string, unknown> = {
   '@hypercomb.social/Store': {
     getResource: async (sig: string) => {
@@ -52,7 +56,12 @@ const iocTable: Record<string, unknown> = {
       (l.explorerSegments?.() ?? []).join('/'),
     currentLayerAt: async (sig: string) => {
       const decorations = layers.get(sig)
-      return decorations ? { decorations } : null
+      const image = layerImages.get(sig)
+      if (!decorations && !image) return null
+      return {
+        ...(decorations ? { decorations } : {}),
+        ...(image ? { properties: [{ small: { image } }] } : {}),
+      }
     },
   },
 }
@@ -82,8 +91,12 @@ function putResource(record: unknown): string {
 const tagSig = (name: string) =>
   putResource({ kind: 'tag', appliesTo: [], payload: { name } })
 
-const referenceSig = (targetSegments: string[]) =>
-  putResource({ kind: 'reference', appliesTo: [], payload: { targetSegments } })
+const referenceSig = (targetSegments: string[], targetSig?: string) =>
+  putResource({
+    kind: 'reference',
+    appliesTo: [],
+    payload: targetSig ? { targetSegments, targetSig } : { targetSegments },
+  })
 
 const titleSig = (text: Record<string, string>) =>
   putResource({ kind: 'title', appliesTo: [], payload: { text } })
@@ -107,6 +120,7 @@ function goTo(...segments: string[]): void {
 beforeEach(() => {
   resources.clear()
   layers.clear()
+  layerImages.clear()
   here = []
 })
 
@@ -229,5 +243,63 @@ describe('decoration index — location is the identity', () => {
     // …and the flatten's paths must not survive into the next ordinary page.
     EffectBus.emit('render:cell-count', { labels: ['people'], flatPaths: {} })
     expect(index.tagsForLabel('people')).toEqual([])
+  })
+
+  // ── Reference FACE: resolve THROUGH the pointer ─────────────────────────
+  //
+  // A reference cell's layer is a pointer with no `properties`, so rendered
+  // from its own layer it is a blank named tile — a collection of references
+  // paints as a page of empty hexagons. The face has to come from the target,
+  // read at paint time, so one item looks like itself everywhere it appears.
+
+  it('wears its target’s picture, not its own (which it has none of)', async () => {
+    layerImages.set('friends/rosa', 'a'.repeat(64))
+    await decorate(['gathering', 'rosa'], referenceSig(['friends', 'rosa']))
+
+    goTo('gathering')
+    await vi.waitFor(() => expect(index.referenceFaceForLabel('rosa')).toBe('a'.repeat(64)))
+  })
+
+  it('gives every place the SAME face, from one shared record', async () => {
+    // The point of the whole model: two collections holding the same person
+    // resolve one target, so an edit at the canonical reaches both. Keyed by
+    // the TARGET's location, never by the referring cell.
+    layerImages.set('friends/mira', 'b'.repeat(64))
+    await decorate(['inner', 'mira'], referenceSig(['friends', 'mira']))
+    await decorate(['outer', 'mira'], referenceSig(['friends', 'mira']))
+
+    goTo('inner')
+    await vi.waitFor(() => expect(index.referenceFaceForLabel('mira')).toBe('b'.repeat(64)))
+    goTo('outer')
+    expect(index.referenceFaceForLabel('mira')).toBe('b'.repeat(64))
+  })
+
+  it('carries the target’s identity alongside the route — and tolerates its absence', async () => {
+    // The route (`targetSegments`) is what a click walks and it follows the
+    // target's head. The signature is what survives the target being renamed or
+    // rehomed, and what lets a reference join a layer closure. Both, not either.
+    const identity = 'd'.repeat(64)
+    await decorate(['party', 'ines'], referenceSig(['friends', 'ines'], identity))
+    // Written before the field existed — must keep working, route intact.
+    await decorate(['party', 'older'], referenceSig(['friends', 'older']))
+
+    goTo('party')
+    await vi.waitFor(() => expect(index.referenceSigForLabel('ines')).toBe(identity))
+    expect(index.referenceTargetForLabel('ines')).toEqual(['friends', 'ines'])
+    expect(index.referenceTargetForLabel('older')).toEqual(['friends', 'older'])
+    expect(index.referenceSigForLabel('older')).toBe('')
+  })
+
+  it('answers nothing for a non-reference, and for a target with no picture', async () => {
+    // A miss must degrade to the ordinary imageless path, never to a hole —
+    // and it must never hand back some other cell's face.
+    layerImages.set('shed', 'c'.repeat(64))
+    await decorate(['yard', 'shed'], tagSig('tools'))
+    await decorate(['yard', 'faceless'], referenceSig(['nowhere']))
+
+    goTo('yard')
+    expect(index.referenceFaceForLabel('shed')).toBe('')
+    await vi.waitFor(() => expect(index.referenceTargetForLabel('faceless')).toEqual(['nowhere']))
+    expect(index.referenceFaceForLabel('faceless')).toBe('')
   })
 })

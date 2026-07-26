@@ -107,7 +107,13 @@ async function tick() {
     seen.add(sig)
     console.log(JSON.stringify({
       ask: sig,
+      // mode 'chat' = a refinement-conversation turn: reply via the
+      // `chat-reply` bridge op (cell=convoId, text=reply) then retire —
+      // NEVER note-add. Absent mode = classic note-bound ask.
+      mode: it.payload?.mode ?? '',
+      convoId: it.payload?.convoId ?? '',
       prompt: it.payload?.prompt ?? '',
+      transcript: it.payload?.transcript ?? [],
       model: it.payload?.model ?? '',
       targets: it.payload?.targets ?? [],
       segments: it.payload?.segments ?? [],

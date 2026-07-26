@@ -1,0 +1,1706 @@
+// The Cigar Lounge — a three.js room for /revolucion/lounge.
+//
+// Bundled by intel-build-revolucion-site.ts (esbuild → IIFE) and stored as a
+// sig-addressed hive resource; the page loads it with
+// `<script src="resource:<sig>/lounge-3d.js">`. Everything it draws is built
+// in code: geometry is composed from primitives, every texture is painted on
+// a canvas at runtime. No fetching, no stock imagery, no external requests —
+// the same rule the rest of the Revolución site follows.
+//
+// The page hands us a config on `window.REV_LOUNGE`:
+//   { mount, fallback, art: { key: url } }   // art = the hive's own tile PNGs
+// and drives us through `window.RevLounge3D`:
+//   { setSlot(id, on), view(name), ready }
+// Slot ids are shared with the SVG fallback scene, so one decorate list drives
+// whichever renderer came up.
+//
+// Passive by doctrine: the room boots on idle (never on the boot path), pauses
+// when scrolled out of view or the tab is hidden, and disposes itself the
+// moment its canvas leaves the document — SiteViewDrone unmounts a page by
+// dropping its nodes, and an orphaned animation loop would otherwise keep a
+// WebGL context alive behind the hive's own canvas.
+
+import * as THREE from 'three'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+
+interface LoungeConfig {
+  mount?: string
+  fallback?: string
+  controls?: string
+  art?: Record<string, string | undefined>
+}
+
+declare global {
+  interface Window {
+    REV_LOUNGE?: LoungeConfig
+    RevLounge3D?: {
+      setSlot: (id: string, on: boolean) => void
+      view: (name: string) => void
+      /** Force one frame. The animation loop is rAF-driven and rAF starves in
+       *  an occluded window, so this is how a still gets taken (and how the
+       *  room is verified) without a composited tab. */
+      frame: () => void
+      /** Current camera + orbit target, for tuning the presets above. */
+      pose: () => { pos: number[]; target: number[] }
+      ready: Promise<boolean>
+    }
+  }
+}
+
+// ─── palette (the site's chrome.css, in linear-friendly hex) ───────────────
+
+const C = {
+  wall: 0x241b2c,
+  wallLow: 0x1c1424,
+  ceiling: 0x150f1c,
+  floor: 0x3a2417,
+  wood: 0x3a2417,
+  woodDark: 0x241610,
+  leather: 0x4a2b21,
+  leatherDark: 0x331d17,
+  brass: 0xc8975a,
+  brassBright: 0xe0b578,
+  ember: 0xb3542f,
+  cream: 0xf0e6d6,
+  ink: 0x171017,
+  green: 0x2f4a35,
+} as const
+
+const ROOM = { w: 11, h: 3.6, d: 9 } as const
+const HALF_W = ROOM.w / 2
+const HALF_D = ROOM.d / 2
+
+// ─── canvas texture helpers ───────────────────────────────────────────────
+
+function paint(
+  w: number,
+  h: number,
+  draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
+): THREE.CanvasTexture {
+  const cv = document.createElement('canvas')
+  cv.width = w
+  cv.height = h
+  const ctx = cv.getContext('2d')
+  if (ctx) draw(ctx, w, h)
+  const t = new THREE.CanvasTexture(cv)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = 8
+  return t
+}
+
+function tiled(t: THREE.CanvasTexture, rx: number, ry: number): THREE.CanvasTexture {
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  t.repeat.set(rx, ry)
+  return t
+}
+
+/** Deterministic value noise — the room looks the same on every visit. */
+function rng(seed: number): () => number {
+  let s = seed >>> 0
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0
+    return s / 4294967296
+  }
+}
+
+function grain(ctx: CanvasRenderingContext2D, w: number, h: number, amount: number, seed = 7): void {
+  const r = rng(seed)
+  const img = ctx.getImageData(0, 0, w, h)
+  const d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (r() - 0.5) * amount
+    d[i] = Math.max(0, Math.min(255, d[i] + n))
+    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + n))
+    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + n))
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+// ─── surface textures ─────────────────────────────────────────────────────
+
+const floorTexture = (): THREE.CanvasTexture =>
+  tiled(
+    paint(512, 512, (ctx, w, h) => {
+      const r = rng(21)
+      ctx.fillStyle = '#2a1a12'
+      ctx.fillRect(0, 0, w, h)
+      const rows = 8
+      const rh = h / rows
+      for (let y = 0; y < rows; y++) {
+        const offset = (y % 2) * (w / 6)
+        for (let x = -1; x < 4; x++) {
+          const px = x * (w / 3) + offset
+          const shade = 26 + Math.floor(r() * 22)
+          ctx.fillStyle = `rgb(${shade + 30},${shade + 12},${shade})`
+          ctx.fillRect(px + 1, y * rh + 1, w / 3 - 2, rh - 2)
+          // grain streaks along the plank
+          ctx.strokeStyle = `rgba(20,12,8,${0.18 + r() * 0.2})`
+          ctx.lineWidth = 1
+          for (let g = 0; g < 6; g++) {
+            const gy = y * rh + 3 + r() * (rh - 6)
+            ctx.beginPath()
+            ctx.moveTo(px + 2, gy)
+            ctx.bezierCurveTo(px + w / 9, gy + (r() - 0.5) * 5, px + w / 4.5, gy + (r() - 0.5) * 5, px + w / 3 - 2, gy)
+            ctx.stroke()
+          }
+        }
+      }
+      grain(ctx, w, h, 14, 3)
+    }),
+    5,
+    4,
+  )
+
+const wallTexture = (): THREE.CanvasTexture =>
+  tiled(
+    paint(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#241b2c'
+      ctx.fillRect(0, 0, w, h)
+      // a quiet damask: interlocking diamonds, barely-there
+      ctx.strokeStyle = 'rgba(200,151,90,.055)'
+      ctx.lineWidth = 1.5
+      for (let y = 0; y <= h; y += 64) {
+        for (let x = 0; x <= w; x += 64) {
+          ctx.beginPath()
+          ctx.moveTo(x + 32, y)
+          ctx.quadraticCurveTo(x + 64, y + 32, x + 32, y + 64)
+          ctx.quadraticCurveTo(x, y + 32, x + 32, y)
+          ctx.stroke()
+        }
+      }
+      grain(ctx, w, h, 10, 11)
+    }),
+    4,
+    2,
+  )
+
+const rugTexture = (): THREE.CanvasTexture =>
+  paint(512, 384, (ctx, w, h) => {
+    ctx.fillStyle = '#5b1f21'
+    ctx.fillRect(0, 0, w, h)
+    const band = (inset: number, color: string, lw: number) => {
+      ctx.strokeStyle = color
+      ctx.lineWidth = lw
+      ctx.strokeRect(inset, inset * 0.75, w - inset * 2, h - inset * 1.5)
+    }
+    band(14, '#2c1420', 10)
+    band(30, '#c8975a', 3)
+    band(42, '#2c1420', 6)
+    // medallion
+    ctx.save()
+    ctx.translate(w / 2, h / 2)
+    ctx.fillStyle = '#2c1420'
+    ctx.beginPath()
+    ctx.ellipse(0, 0, w * 0.24, h * 0.3, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#c8975a'
+    ctx.lineWidth = 3
+    ctx.stroke()
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2
+      ctx.save()
+      ctx.rotate(a)
+      ctx.fillStyle = i % 2 ? '#b3542f' : '#c8975a'
+      ctx.beginPath()
+      ctx.ellipse(0, -h * 0.19, w * 0.028, h * 0.05, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+    ctx.fillStyle = '#c8975a'
+    ctx.beginPath()
+    ctx.ellipse(0, 0, w * 0.05, h * 0.065, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+    // corner sprigs
+    const sprig = (x: number, y: number, sx: number, sy: number) => {
+      ctx.save()
+      ctx.translate(x, y)
+      ctx.scale(sx, sy)
+      ctx.strokeStyle = 'rgba(200,151,90,.75)'
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.moveTo(0, 0)
+      ctx.quadraticCurveTo(40, 6, 52, 40)
+      ctx.moveTo(0, 0)
+      ctx.quadraticCurveTo(6, 40, 40, 52)
+      ctx.stroke()
+      ctx.restore()
+    }
+    sprig(58, 44, 1, 1)
+    sprig(w - 58, 44, -1, 1)
+    sprig(58, h - 44, 1, -1)
+    sprig(w - 58, h - 44, -1, -1)
+    grain(ctx, w, h, 16, 5)
+  })
+
+const leatherTexture = (): THREE.CanvasTexture =>
+  tiled(
+    paint(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#63402e'
+      ctx.fillRect(0, 0, w, h)
+      const r = rng(31)
+      for (let i = 0; i < 900; i++) {
+        const x = r() * w
+        const y = r() * h
+        ctx.fillStyle = `rgba(${r() > 0.5 ? '124,80,56' : '48,26,18'},${0.05 + r() * 0.14})`
+        ctx.beginPath()
+        ctx.ellipse(x, y, 2 + r() * 7, 2 + r() * 6, r() * 3, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      grain(ctx, w, h, 12, 13)
+    }),
+    2,
+    2,
+  )
+
+const skyTexture = (): THREE.CanvasTexture =>
+  paint(512, 512, (ctx, w, h) => {
+    const g = ctx.createLinearGradient(0, 0, 0, h)
+    g.addColorStop(0, '#0a1024')
+    g.addColorStop(0.62, '#16203c')
+    g.addColorStop(1, '#2a2038')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, w, h)
+    const r = rng(97)
+    for (let i = 0; i < 160; i++) {
+      const x = r() * w
+      const y = r() * h * 0.7
+      ctx.fillStyle = `rgba(240,230,214,${0.15 + r() * 0.7})`
+      ctx.beginPath()
+      ctx.arc(x, y, r() * 1.4 + 0.4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    // moon
+    ctx.fillStyle = 'rgba(232,220,200,.16)'
+    ctx.beginPath()
+    ctx.arc(w * 0.68, h * 0.24, 66, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#e8dcc8'
+    ctx.beginPath()
+    ctx.arc(w * 0.68, h * 0.24, 40, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = 'rgba(20,16,26,.12)'
+    ctx.beginPath()
+    ctx.arc(w * 0.66, h * 0.22, 8, 0, Math.PI * 2)
+    ctx.arc(w * 0.71, h * 0.27, 6, 0, Math.PI * 2)
+    ctx.fill()
+    // city skyline at the bottom, a few lit windows
+    ctx.fillStyle = '#0d1322'
+    ctx.beginPath()
+    ctx.moveTo(0, h)
+    const steps = 14
+    for (let i = 0; i <= steps; i++) {
+      const x = (i / steps) * w
+      const y = h * (0.74 + (i % 3) * 0.035 + r() * 0.05)
+      ctx.lineTo(x, y)
+      ctx.lineTo(x + w / steps, y)
+    }
+    ctx.lineTo(w, h)
+    ctx.closePath()
+    ctx.fill()
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(224,181,120,${0.35 + r() * 0.5})`
+      ctx.fillRect(r() * w, h * (0.78 + r() * 0.18), 3, 4)
+    }
+  })
+
+const softDot = (): THREE.CanvasTexture =>
+  paint(64, 64, (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2)
+    g.addColorStop(0, 'rgba(255,255,255,1)')
+    g.addColorStop(0.45, 'rgba(255,255,255,.35)')
+    g.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, w, h)
+  })
+
+const flameTexture = (): THREE.CanvasTexture =>
+  paint(128, 256, (ctx, w, h) => {
+    // a defined tongue of flame — hot core, thin cool edge, hard falloff at
+    // the tip so five of these read as fire and not as one soft blob
+    const tongue = (): void => {
+      ctx.beginPath()
+      ctx.moveTo(w / 2, h * 0.04)
+      ctx.bezierCurveTo(w * 0.92, h * 0.46, w * 0.8, h * 0.98, w / 2, h)
+      ctx.bezierCurveTo(w * 0.2, h * 0.98, w * 0.08, h * 0.46, w / 2, h * 0.04)
+      ctx.closePath()
+    }
+    const outer = ctx.createLinearGradient(0, h * 0.02, 0, h)
+    outer.addColorStop(0, 'rgba(224,120,60,0)')
+    outer.addColorStop(0.35, 'rgba(224,120,60,.55)')
+    outer.addColorStop(1, 'rgba(179,84,47,.85)')
+    ctx.fillStyle = outer
+    tongue()
+    ctx.fill()
+    // inner core
+    ctx.save()
+    ctx.translate(w / 2, h)
+    ctx.scale(0.52, 0.7)
+    ctx.translate(-w / 2, -h)
+    const core = ctx.createLinearGradient(0, h * 0.02, 0, h)
+    core.addColorStop(0, 'rgba(245,190,110,0)')
+    core.addColorStop(0.4, 'rgba(250,214,150,.85)')
+    core.addColorStop(1, 'rgba(255,246,220,1)')
+    ctx.fillStyle = core
+    tongue()
+    ctx.fill()
+    ctx.restore()
+  })
+
+// ─── framed artwork (painted, never fetched) ──────────────────────────────
+
+type ArtPainter = (ctx: CanvasRenderingContext2D, w: number, h: number) => void
+
+function artBoard(ctx: CanvasRenderingContext2D, w: number, h: number, bg: string): void {
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, w, h)
+}
+
+const artCigarBand: ArtPainter = (ctx, w, h) => {
+  artBoard(ctx, w, h, '#f4ead6')
+  ctx.save()
+  ctx.translate(w / 2, h / 2)
+  ctx.fillStyle = '#5b1f21'
+  ctx.beginPath()
+  ctx.ellipse(0, 0, w * 0.38, h * 0.26, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#c8975a'
+  ctx.lineWidth = 6
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.ellipse(0, 0, w * 0.33, h * 0.21, 0, 0, Math.PI * 2)
+  ctx.lineWidth = 2
+  ctx.stroke()
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2
+    ctx.save()
+    ctx.rotate(a)
+    ctx.fillStyle = i % 2 ? '#c8975a' : '#e0b578'
+    ctx.beginPath()
+    ctx.ellipse(0, -h * 0.335, w * 0.012, h * 0.026, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }
+  ctx.fillStyle = '#e0b578'
+  ctx.textAlign = 'center'
+  ctx.font = `600 ${Math.round(h * 0.115)}px Georgia, serif`
+  ctx.fillText('REVOLUCIÓN', 0, h * 0.02)
+  ctx.font = `italic ${Math.round(h * 0.062)}px Georgia, serif`
+  ctx.fillStyle = '#f0e6d6'
+  ctx.fillText('hecho a mano', 0, h * 0.12)
+  ctx.restore()
+}
+
+const artLeaf: ArtPainter = (ctx, w, h) => {
+  artBoard(ctx, w, h, '#efe4cd')
+  ctx.strokeStyle = '#4a3a22'
+  ctx.lineWidth = 3
+  ctx.save()
+  ctx.translate(w / 2, h * 0.56)
+  ctx.beginPath()
+  ctx.moveTo(0, h * 0.36)
+  ctx.bezierCurveTo(w * 0.34, h * 0.14, w * 0.3, -h * 0.3, 0, -h * 0.42)
+  ctx.bezierCurveTo(-w * 0.3, -h * 0.3, -w * 0.34, h * 0.14, 0, h * 0.36)
+  ctx.fillStyle = 'rgba(122,101,54,.34)'
+  ctx.fill()
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(0, h * 0.36)
+  ctx.lineTo(0, -h * 0.42)
+  ctx.stroke()
+  ctx.lineWidth = 1.6
+  for (let i = -7; i <= 7; i++) {
+    const y = i * h * 0.048
+    const spread = (1 - Math.abs(i) / 8.5) * w * 0.27
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.quadraticCurveTo(spread * 0.6, y - h * 0.03, spread, y - h * 0.07)
+    ctx.moveTo(0, y)
+    ctx.quadraticCurveTo(-spread * 0.6, y - h * 0.03, -spread, y - h * 0.07)
+    ctx.stroke()
+  }
+  ctx.restore()
+  ctx.fillStyle = '#4a3a22'
+  ctx.textAlign = 'center'
+  ctx.font = `italic ${Math.round(h * 0.055)}px Georgia, serif`
+  ctx.fillText('Nicotiana tabacum', w / 2, h * 0.955)
+}
+
+const artWheel: ArtPainter = (ctx, w, h) => {
+  artBoard(ctx, w, h, '#181020')
+  const cx = w / 2
+  const cy = h * 0.47
+  const R = Math.min(w, h) * 0.36
+  const families = [
+    ['#8d5524', 'EARTH'], ['#c0392b', 'SPICE'], ['#d4a017', 'SWEET'], ['#7d6608', 'WOOD'],
+    ['#a04000', 'ROAST'], ['#5d4037', 'LEATHER'], ['#27ae60', 'HERB'], ['#8e44ad', 'FRUIT'],
+    ['#e0b578', 'CREAM'], ['#2e86c1', 'MINERAL'],
+  ] as const
+  families.forEach(([color, label], i) => {
+    const a0 = (i / families.length) * Math.PI * 2 - Math.PI / 2
+    const a1 = ((i + 1) / families.length) * Math.PI * 2 - Math.PI / 2
+    ctx.beginPath()
+    ctx.moveTo(cx, cy)
+    ctx.arc(cx, cy, R, a0, a1)
+    ctx.closePath()
+    ctx.fillStyle = color
+    ctx.fill()
+    ctx.strokeStyle = '#181020'
+    ctx.lineWidth = 3
+    ctx.stroke()
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.rotate((a0 + a1) / 2)
+    ctx.fillStyle = '#141017'
+    ctx.textAlign = 'right'
+    ctx.font = `600 ${Math.round(R * 0.11)}px Georgia, serif`
+    ctx.fillText(label, R * 0.92, R * 0.04)
+    ctx.restore()
+  })
+  ctx.beginPath()
+  ctx.arc(cx, cy, R * 0.3, 0, Math.PI * 2)
+  ctx.fillStyle = '#141017'
+  ctx.fill()
+  ctx.strokeStyle = '#c8975a'
+  ctx.lineWidth = 3
+  ctx.stroke()
+  ctx.fillStyle = '#c8975a'
+  ctx.textAlign = 'center'
+  ctx.font = `${Math.round(R * 0.13)}px Georgia, serif`
+  ctx.fillText('63', cx, cy + R * 0.02)
+  ctx.font = `${Math.round(R * 0.075)}px Georgia, serif`
+  ctx.fillText('FLAVORS', cx, cy + R * 0.17)
+  ctx.fillStyle = '#f0e6d6'
+  ctx.font = `${Math.round(h * 0.052)}px Georgia, serif`
+  ctx.fillText('THE FLAVOR WHEEL', cx, h * 0.94)
+}
+
+const artPoster: ArtPainter = (ctx, w, h) => {
+  artBoard(ctx, w, h, '#1b1520')
+  ctx.strokeStyle = '#c8975a'
+  ctx.lineWidth = 4
+  ctx.strokeRect(w * 0.07, h * 0.06, w * 0.86, h * 0.88)
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#c8975a'
+  ctx.font = `${Math.round(h * 0.045)}px Georgia, serif`
+  ctx.fillText('E S T ·  T H E  ·  L O U N G E', w / 2, h * 0.19)
+  ctx.fillStyle = '#f0e6d6'
+  ctx.font = `italic ${Math.round(h * 0.13)}px Georgia, serif`
+  ctx.fillText('Pull up', w / 2, h * 0.42)
+  ctx.fillText('a chair.', w / 2, h * 0.57)
+  // a smoking cigar rule
+  ctx.strokeStyle = 'rgba(240,230,214,.35)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(w * 0.28, h * 0.68)
+  ctx.lineTo(w * 0.72, h * 0.68)
+  ctx.stroke()
+  ctx.fillStyle = '#5b3a24'
+  ctx.fillRect(w * 0.36, h * 0.74, w * 0.26, h * 0.035)
+  ctx.fillStyle = '#c8975a'
+  ctx.fillRect(w * 0.36, h * 0.74, w * 0.05, h * 0.035)
+  ctx.fillStyle = '#b3542f'
+  ctx.fillRect(w * 0.62, h * 0.74, w * 0.014, h * 0.035)
+  ctx.fillStyle = '#8d7f6f'
+  ctx.font = `${Math.round(h * 0.038)}px Georgia, serif`
+  ctx.fillText('one moment, journaled', w / 2, h * 0.87)
+}
+
+const artMap: ArtPainter = (ctx, w, h) => {
+  artBoard(ctx, w, h, '#e6d8ba')
+  ctx.strokeStyle = 'rgba(90,66,40,.5)'
+  ctx.lineWidth = 1
+  for (let i = 1; i < 8; i++) {
+    ctx.beginPath()
+    ctx.moveTo(0, (i / 8) * h)
+    ctx.lineTo(w, (i / 8) * h)
+    ctx.moveTo((i / 8) * w, 0)
+    ctx.lineTo((i / 8) * w, h)
+    ctx.stroke()
+  }
+  // loose landmasses — evocative, not cartographic
+  const blobs: Array<[number, number, number, number]> = [
+    [0.24, 0.42, 0.13, 0.2], [0.36, 0.62, 0.09, 0.13], [0.52, 0.36, 0.1, 0.12],
+    [0.66, 0.55, 0.14, 0.17], [0.8, 0.34, 0.08, 0.1],
+  ]
+  ctx.fillStyle = 'rgba(122,101,54,.5)'
+  ctx.strokeStyle = '#5a4228'
+  ctx.lineWidth = 2
+  for (const [x, y, rx, ry] of blobs) {
+    ctx.beginPath()
+    ctx.ellipse(x * w, y * h, rx * w, ry * h, x * 3, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  }
+  ctx.fillStyle = '#5b1f21'
+  ctx.textAlign = 'center'
+  const marks: Array<[number, number, string]> = [
+    [0.24, 0.42, 'CUBA'], [0.36, 0.63, 'NICARAGUA'], [0.52, 0.36, 'DOM. REP.'],
+    [0.66, 0.55, 'CAMEROON'], [0.8, 0.34, 'SUMATRA'],
+  ]
+  ctx.font = `600 ${Math.round(h * 0.045)}px Georgia, serif`
+  for (const [x, y, label] of marks) {
+    ctx.beginPath()
+    ctx.arc(x * w, y * h, 4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillText(label, x * w, y * h - 10)
+  }
+  ctx.fillStyle = '#4a3a22'
+  ctx.font = `italic ${Math.round(h * 0.055)}px Georgia, serif`
+  ctx.fillText('where the leaf comes from', w / 2, h * 0.94)
+}
+
+const ART_PAINTERS: ArtPainter[] = [artCigarBand, artLeaf, artWheel, artPoster, artMap]
+
+// ─── small builders ───────────────────────────────────────────────────────
+
+const std = (params: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial =>
+  new THREE.MeshStandardMaterial(params)
+
+function box(
+  w: number, h: number, d: number,
+  mat: THREE.Material, x = 0, y = 0, z = 0, radius = 0.012,
+): THREE.Mesh {
+  const g = radius > 0
+    ? new RoundedBoxGeometry(w, h, d, 2, Math.min(radius, Math.min(w, h, d) / 2.05))
+    : new THREE.BoxGeometry(w, h, d)
+  const m = new THREE.Mesh(g, mat)
+  m.position.set(x, y, z)
+  m.castShadow = true
+  m.receiveShadow = true
+  return m
+}
+
+function cyl(
+  rt: number, rb: number, h: number, seg: number,
+  mat: THREE.Material, x = 0, y = 0, z = 0,
+): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat)
+  m.position.set(x, y, z)
+  m.castShadow = true
+  m.receiveShadow = true
+  return m
+}
+
+// ─── the room ─────────────────────────────────────────────────────────────
+
+export interface Room {
+  scene: THREE.Scene
+  slots: Map<string, THREE.Object3D[]>
+  /** Meshes that answer a click, each carrying `userData.pick` — the id the
+   *  page receives on `lounge3d:pick`. */
+  pickables: THREE.Object3D[]
+  attachCamera: (c: THREE.Camera) => void
+  tick: (t: number, dt: number) => void
+  dispose: () => void
+}
+
+function buildRoom(art: Record<string, string | undefined>): Room {
+  const scene = new THREE.Scene()
+  scene.background = new THREE.Color(0x0d0912)
+  scene.fog = new THREE.Fog(0x140f1a, 9, 24)
+
+  const disposables: Array<{ dispose: () => void }> = []
+  const track = <T extends { dispose: () => void }>(x: T): T => {
+    disposables.push(x)
+    return x
+  }
+  const slots = new Map<string, THREE.Object3D[]>()
+  const slot = (id: string, obj: THREE.Object3D): THREE.Object3D => {
+    const list = slots.get(id)
+    if (list) list.push(obj)
+    else slots.set(id, [obj])
+    return obj
+  }
+
+  const woodMat = std({ map: track(tiled(floorTexture(), 1, 1)), roughness: 0.78, metalness: 0.05 })
+  const darkWood = std({ color: C.woodDark, roughness: 0.65, metalness: 0.08 })
+  const trimWood = std({ color: C.wood, roughness: 0.55, metalness: 0.12 })
+  const leatherMat = std({ map: track(leatherTexture()), roughness: 0.62, metalness: 0.04 })
+  const leatherDeep = std({ color: C.leatherDark, roughness: 0.68 })
+  const brassMat = std({ color: C.brass, roughness: 0.28, metalness: 0.85 })
+  const brassGlow = std({ color: C.brassBright, emissive: C.brassBright, emissiveIntensity: 0.35, roughness: 0.3, metalness: 0.7 })
+  const stoneMat = std({ color: 0x2a2230, roughness: 0.92 })
+  const glassMat = std({ color: 0xd8e4e8, roughness: 0.06, metalness: 0.0, transparent: true, opacity: 0.28 })
+  const whiskeyMat = std({ color: 0xb3542f, roughness: 0.15, transparent: true, opacity: 0.85, emissive: 0x3a1408, emissiveIntensity: 0.35 })
+  const clothMat = std({ color: 0x3a2a3c, roughness: 0.95 })
+
+  // ── shell ──────────────────────────────────────────────────────────────
+  const shell = new THREE.Group()
+  scene.add(shell)
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d), woodMat)
+  floor.rotation.x = -Math.PI / 2
+  floor.receiveShadow = true
+  shell.add(floor)
+
+  const wallMat = std({ map: track(wallTexture()), roughness: 0.95, side: THREE.FrontSide })
+  const mkWall = (w: number, x: number, z: number, ry: number): THREE.Mesh => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, ROOM.h), wallMat)
+    m.position.set(x, ROOM.h / 2, z)
+    m.rotation.y = ry
+    m.receiveShadow = true
+    shell.add(m)
+    return m
+  }
+  mkWall(ROOM.w, 0, -HALF_D, 0)
+  mkWall(ROOM.d, -HALF_W, 0, Math.PI / 2)
+  mkWall(ROOM.d, HALF_W, 0, -Math.PI / 2)
+  // back-of-camera wall, so an orbit past the doorway still reads as a room
+  mkWall(ROOM.w, 0, HALF_D, Math.PI)
+
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d), std({ color: C.ceiling, roughness: 1 }))
+  ceiling.rotation.x = Math.PI / 2
+  ceiling.position.y = ROOM.h
+  shell.add(ceiling)
+
+  // beams, baseboard, chair rail
+  for (let i = -2; i <= 2; i++) {
+    shell.add(box(ROOM.w, 0.16, 0.22, darkWood, 0, ROOM.h - 0.08, i * 1.7))
+  }
+  const trim = (w: number, d: number, x: number, z: number, ry: number, y: number, h: number) => {
+    const m = box(w, h, d, trimWood, x, y, z)
+    m.rotation.y = ry
+    shell.add(m)
+  }
+  trim(ROOM.w, 0.08, 0, -HALF_D + 0.04, 0, 0.09, 0.18)
+  trim(ROOM.d, 0.08, -HALF_W + 0.04, 0, Math.PI / 2, 0.09, 0.18)
+  trim(ROOM.d, 0.08, HALF_W - 0.04, 0, Math.PI / 2, 0.09, 0.18)
+  trim(ROOM.w, 0.06, 0, -HALF_D + 0.03, 0, 1.05, 0.07)
+  trim(ROOM.d, 0.06, -HALF_W + 0.03, 0, Math.PI / 2, 1.05, 0.07)
+  trim(ROOM.d, 0.06, HALF_W - 0.03, 0, Math.PI / 2, 1.05, 0.07)
+
+  // ── lighting ───────────────────────────────────────────────────────────
+  // Dusk in a lounge: enough ambient to read the leather and the woodwork,
+  // with the fire, the lamp and the picture lights doing the shaping.
+  scene.add(new THREE.HemisphereLight(0x6a5878, 0x2a1c22, 1.15))
+  const roomFill = new THREE.PointLight(0xe0b578, 13, 20, 2)
+  roomFill.position.set(0, ROOM.h - 0.5, 1.2)
+  scene.add(roomFill)
+
+  // brass chandelier over the seating
+  const chandelier = new THREE.Group()
+  chandelier.position.set(0, ROOM.h - 0.02, 0.9)
+  scene.add(chandelier)
+  chandelier.add(cyl(0.03, 0.03, 0.45, 8, brassMat, 0, -0.22, 0))
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.022, 8, 28), brassMat)
+  ring.rotation.x = Math.PI / 2
+  ring.position.y = -0.45
+  chandelier.add(ring)
+  const bulbMat = std({ color: 0xf6e2b8, emissive: 0xffc98a, emissiveIntensity: 2.2, roughness: 0.6 })
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2
+    const arm = cyl(0.012, 0.012, 0.16, 6, brassMat, Math.cos(a) * 0.42, -0.38, Math.sin(a) * 0.42)
+    chandelier.add(arm)
+    const shade = cyl(0.05, 0.075, 0.11, 12, std({
+      color: 0xe8cfa0, emissive: 0xffbe72, emissiveIntensity: 0.7,
+      roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.92,
+    }), Math.cos(a) * 0.42, -0.3, Math.sin(a) * 0.42)
+    chandelier.add(shade)
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), bulbMat)
+    bulb.position.set(Math.cos(a) * 0.42, -0.36, Math.sin(a) * 0.42)
+    chandelier.add(bulb)
+  }
+  const chandelierLight = new THREE.PointLight(0xffc98a, 16, 12, 2)
+  chandelierLight.position.set(0, -0.42, 0)
+  chandelier.add(chandelierLight)
+
+  // ── rug ────────────────────────────────────────────────────────────────
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 4), std({ map: track(rugTexture()), roughness: 1 }))
+  rug.rotation.x = -Math.PI / 2
+  rug.position.set(0, 0.012, 0.6)
+  rug.receiveShadow = true
+  scene.add(slot('slot-rug', rug))
+
+  // ── fireplace (back wall, centre) ──────────────────────────────────────
+  const hearth = new THREE.Group()
+  hearth.position.set(0, 0, -HALF_D + 0.02)
+  scene.add(hearth)
+  // A chimney breast built AROUND a real opening — jambs, lintel, firebox —
+  // so the fire sits in a recess instead of glowing on a flat slab.
+  const OPEN_W = 1.7
+  const OPEN_H = 1.45
+  const BREAST_D = 0.34
+  const jambW = (3.4 - OPEN_W) / 2
+  hearth.add(box(jambW, OPEN_H, BREAST_D, stoneMat, -(OPEN_W + jambW) / 2, OPEN_H / 2, BREAST_D / 2))
+  hearth.add(box(jambW, OPEN_H, BREAST_D, stoneMat, (OPEN_W + jambW) / 2, OPEN_H / 2, BREAST_D / 2))
+  hearth.add(box(3.4, ROOM.h - OPEN_H, BREAST_D, stoneMat, 0, (OPEN_H + ROOM.h) / 2, BREAST_D / 2))
+  const soot = std({ color: 0x0b0710, roughness: 1 })
+  hearth.add(box(OPEN_W, OPEN_H, 0.05, soot, 0, OPEN_H / 2, 0.06)) // firebox back
+  hearth.add(box(0.06, OPEN_H, BREAST_D, soot, -OPEN_W / 2 + 0.03, OPEN_H / 2, BREAST_D / 2))
+  hearth.add(box(0.06, OPEN_H, BREAST_D, soot, OPEN_W / 2 - 0.03, OPEN_H / 2, BREAST_D / 2))
+  hearth.add(box(OPEN_W, 0.06, BREAST_D, soot, 0, OPEN_H - 0.03, BREAST_D / 2))
+  hearth.add(box(3.9, 0.15, 0.66, trimWood, 0, OPEN_H + 0.14, 0.3)) // mantel shelf
+  hearth.add(box(3.5, 0.1, 0.95, stoneMat, 0, 0.05, 0.62)) // hearthstone
+  // a fire iron and a log basket on the hearth
+  hearth.add(cyl(0.02, 0.02, 0.7, 8, brassMat, -1.4, 0.38, 0.5))
+  const basket = cyl(0.26, 0.22, 0.26, 14, std({ color: 0x2a2230, roughness: 0.7, metalness: 0.4 }), 1.42, 0.22, 0.55)
+  hearth.add(basket)
+  for (let i = 0; i < 3; i++) {
+    const l = cyl(0.055, 0.055, 0.44, 8, std({ color: 0x4a3020, roughness: 1 }), 1.42 + (i - 1) * 0.09, 0.36 + (i % 2) * 0.05, 0.55)
+    l.rotation.z = Math.PI / 2
+    l.rotation.y = i * 0.2
+    hearth.add(l)
+  }
+
+  // fire: logs, billboard flames, ember points, flicker light
+  const fire = new THREE.Group()
+  fire.position.set(0, 0.14, -HALF_D + 0.55)
+  scene.add(slot('slot-fire', fire))
+  const logMat = std({ color: 0x2a1a10, roughness: 1 })
+  for (const [x, y, z, rz] of [[-0.28, 0.08, 0, 0.22], [0.24, 0.08, 0.08, -0.3], [0, 0.2, -0.05, 0.08]]) {
+    const log = cyl(0.09, 0.09, 0.9, 8, logMat, x, y, z)
+    log.rotation.z = Math.PI / 2 + rz
+    fire.add(log)
+  }
+  const flameMap = track(flameTexture())
+  // One material per flame — the tick animates opacity individually, and a
+  // shared material would let the last write win for all five.
+  const flames: Array<{ mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number }> = []
+  for (let i = 0; i < 5; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      map: flameMap, transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, opacity: 0.9,
+    })
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.7), mat)
+    mesh.position.set((i - 2) * 0.16, 0.34 + (i % 2) * 0.08, ((i % 3) - 1) * 0.05)
+    fire.add(mesh)
+    flames.push({ mesh, mat, phase: i * 1.31 })
+  }
+  const fireLight = new THREE.PointLight(0xff9a4a, 22, 11, 2)
+  fireLight.position.set(0, 0.7, 0.2)
+  fireLight.castShadow = true
+  fireLight.shadow.mapSize.set(1024, 1024)
+  fireLight.shadow.bias = -0.0015
+  fire.add(fireLight)
+
+  const emberGeo = new THREE.BufferGeometry()
+  const EMBERS = 40
+  const emberPos = new Float32Array(EMBERS * 3)
+  const emberVel = new Float32Array(EMBERS)
+  const er = rng(404)
+  for (let i = 0; i < EMBERS; i++) {
+    emberPos[i * 3] = (er() - 0.5) * 0.8
+    emberPos[i * 3 + 1] = er() * 1.2
+    emberPos[i * 3 + 2] = (er() - 0.5) * 0.2
+    emberVel[i] = 0.25 + er() * 0.5
+  }
+  emberGeo.setAttribute('position', new THREE.BufferAttribute(emberPos, 3))
+  const embers = new THREE.Points(
+    emberGeo,
+    new THREE.PointsMaterial({
+      size: 0.05, map: track(softDot()), color: 0xf2c47e,
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  )
+  fire.add(embers)
+
+  // ── wall art: the hive's own tile imagery, then painted prints ─────────
+  const frames = new THREE.Group()
+  scene.add(slot('slot-frames', frames))
+
+  const artUrls = ['lounge', 'cigars', 'journal', 'flavor-wheel', 'humidor', 'community']
+    .map(k => art[k])
+    .filter((u): u is string => typeof u === 'string' && u.length > 0)
+
+  const loader = new THREE.TextureLoader()
+  let painterIdx = 0
+  const nextPainted = (w: number, h: number): THREE.Texture => {
+    const painter = ART_PAINTERS[painterIdx % ART_PAINTERS.length]
+    painterIdx++
+    return track(paint(Math.round(w * 320), Math.round(h * 320), painter))
+  }
+
+  let urlIdx = 0
+  const pickables: THREE.Object3D[] = []
+  /** A framed picture: gilt frame, cream mat, canvas, and a brass picture light.
+   *  `pin` forces a specific painted print (and makes the canvas clickable —
+   *  the page opens the matching panel from `lounge3d:pick`). */
+  const hangFrame = (
+    w: number, h: number, x: number, y: number, z: number, ry: number,
+    preferHiveArt: boolean,
+    pin?: { painter: ArtPainter; pick: string },
+  ): void => {
+    const g = new THREE.Group()
+    g.position.set(x, y, z)
+    g.rotation.y = ry
+    frames.add(g)
+
+    const canvasMat = std({ color: 0xf0e6d6, roughness: 0.85 })
+    const canvas = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.16, h - 0.16), canvasMat)
+    canvas.position.z = 0.031
+    g.add(canvas)
+
+    const hiveUrl = pin ? undefined : (preferHiveArt ? artUrls[urlIdx++] : undefined)
+    if (pin) {
+      canvasMat.map = track(paint(Math.round(w * 320), Math.round(h * 320), pin.painter))
+      canvasMat.color.set(0xffffff)
+      canvasMat.needsUpdate = true
+      canvas.userData.pick = pin.pick
+      pickables.push(canvas)
+    } else if (hiveUrl) {
+      loader.load(
+        hiveUrl,
+        t => {
+          t.colorSpace = THREE.SRGBColorSpace
+          canvasMat.map = track(t)
+          canvasMat.color.set(0xffffff)
+          canvasMat.needsUpdate = true
+        },
+        undefined,
+        () => {
+          canvasMat.map = nextPainted(w, h)
+          canvasMat.color.set(0xffffff)
+          canvasMat.needsUpdate = true
+        },
+      )
+    } else {
+      canvasMat.map = nextPainted(w, h)
+      canvasMat.color.set(0xffffff)
+      canvasMat.needsUpdate = true
+    }
+
+    // gilt frame — four moulding bars around the canvas
+    const bar = 0.08
+    const frameMat = std({ color: C.brass, roughness: 0.42, metalness: 0.6 })
+    g.add(box(w, bar, 0.07, frameMat, 0, h / 2 - bar / 2, 0.02))
+    g.add(box(w, bar, 0.07, frameMat, 0, -h / 2 + bar / 2, 0.02))
+    g.add(box(bar, h - bar * 2, 0.07, frameMat, -w / 2 + bar / 2, 0, 0.02))
+    g.add(box(bar, h - bar * 2, 0.07, frameMat, w / 2 - bar / 2, 0, 0.02))
+    g.add(box(w - 0.14, h - 0.14, 0.02, std({ color: 0x0e0a12, roughness: 1 }), 0, 0, 0.01))
+
+    // picture light
+    const arm = cyl(0.012, 0.012, 0.16, 6, brassMat, 0, h / 2 + 0.06, 0.07)
+    arm.rotation.x = Math.PI / 2
+    g.add(arm)
+    const hood = cyl(0.045, 0.055, 0.22, 10, brassGlow, 0, h / 2 + 0.11, 0.15)
+    hood.rotation.z = Math.PI / 2
+    g.add(hood)
+    const spot = new THREE.PointLight(0xffd9a0, 2.2, 2.4, 2)
+    spot.position.set(0, h / 2 - 0.02, 0.28)
+    g.add(spot)
+
+    // a clickable print gets a brighter light and a warm halo, so the room
+    // says "this one opens" without a label
+    if (pin) {
+      spot.intensity = 3.6
+      const halo = new THREE.Mesh(
+        new THREE.PlaneGeometry(w + 0.5, h + 0.5),
+        new THREE.MeshBasicMaterial({
+          map: track(softDot()), color: 0xe0b578, transparent: true,
+          opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false,
+        }),
+      )
+      halo.position.z = -0.006
+      g.add(halo)
+    }
+  }
+
+  // gallery wall (left), flanking the fireplace (back), and one over the bar
+  hangFrame(1.0, 1.3, -HALF_W + 0.09, 1.85, -1.9, Math.PI / 2, true)
+  hangFrame(0.86, 0.86, -HALF_W + 0.09, 1.75, -0.55, Math.PI / 2, true)
+  // the flavor wheel hangs on the gallery wall and OPENS when you click it
+  hangFrame(0.86, 1.1, -HALF_W + 0.09, 1.82, 0.85, Math.PI / 2, false,
+    { painter: artWheel, pick: 'flavor-wheel' })
+  hangFrame(0.72, 0.9, -HALF_W + 0.09, 1.8, 2.2, Math.PI / 2, false)
+  hangFrame(1.15, 1.4, -2.55, 1.95, -HALF_D + 0.08, 0, true)
+  hangFrame(1.15, 1.4, 2.55, 1.95, -HALF_D + 0.08, 0, true)
+  // over the mantel, hung on the face of the chimney breast
+  hangFrame(1.5, 1.05, 0, 2.42, -HALF_D + 0.42, 0, false)
+  hangFrame(0.9, 1.15, HALF_W - 0.09, 1.85, -2.2, -Math.PI / 2, false)
+
+  // ── window (right wall) ────────────────────────────────────────────────
+  const windowGroup = new THREE.Group()
+  windowGroup.position.set(HALF_W - 0.04, 1.85, 1.1)
+  windowGroup.rotation.y = -Math.PI / 2
+  scene.add(slot('slot-window', windowGroup))
+  const night = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.1, 1.7),
+    new THREE.MeshBasicMaterial({ map: track(skyTexture()) }),
+  )
+  night.position.z = -0.02
+  windowGroup.add(night)
+  const mull = std({ color: C.wood, roughness: 0.6 })
+  windowGroup.add(box(2.34, 0.12, 0.14, mull, 0, 0.91, 0.02))
+  windowGroup.add(box(2.34, 0.12, 0.14, mull, 0, -0.91, 0.02))
+  windowGroup.add(box(0.12, 1.94, 0.14, mull, -1.11, 0, 0.02))
+  windowGroup.add(box(0.12, 1.94, 0.14, mull, 1.11, 0, 0.02))
+  windowGroup.add(box(0.07, 1.7, 0.1, mull, 0, 0, 0.02))
+  windowGroup.add(box(2.1, 0.07, 0.1, mull, 0, 0, 0.02))
+  const curtain = std({ color: 0x3a1c26, roughness: 1 })
+  windowGroup.add(box(0.42, 2.3, 0.1, curtain, -1.42, -0.1, 0.06))
+  windowGroup.add(box(0.42, 2.3, 0.1, curtain, 1.42, -0.1, 0.06))
+  const moon = new THREE.PointLight(0x8fa8d8, 3.2, 8, 2)
+  moon.position.set(0, 0.4, 0.6)
+  windowGroup.add(moon)
+
+  // ── seating: two wingbacks + a settee-ish ottoman ──────────────────────
+  const chairs = new THREE.Group()
+  scene.add(slot('slot-chairs', chairs))
+
+  const wingback = (x: number, z: number, ry: number): THREE.Group => {
+    const g = new THREE.Group()
+    g.position.set(x, 0, z)
+    g.rotation.y = ry
+    // frame
+    g.add(box(0.86, 0.16, 0.86, leatherMat, 0, 0.44, 0))
+    const cushion = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.62, 4, 10), leatherMat)
+    cushion.rotation.z = Math.PI / 2
+    cushion.position.set(0, 0.56, 0.02)
+    cushion.castShadow = true
+    g.add(cushion)
+    // back + wings
+    const back = box(0.86, 1.05, 0.16, leatherMat, 0, 1.0, -0.36, 0.06)
+    back.rotation.x = -0.08
+    g.add(back)
+    for (const s of [-1, 1]) {
+      const wing = box(0.16, 0.66, 0.34, leatherMat, s * 0.35, 1.18, -0.2, 0.05)
+      wing.rotation.y = s * 0.12
+      g.add(wing)
+      const arm = box(0.16, 0.5, 0.8, leatherMat, s * 0.35, 0.62, 0.02, 0.06)
+      g.add(arm)
+      const roll = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.62, 4, 8), leatherDeep)
+      roll.rotation.x = Math.PI / 2
+      roll.position.set(s * 0.35, 0.88, 0.02)
+      roll.castShadow = true
+      g.add(roll)
+    }
+    // brass tacks along the wings
+    for (let i = 0; i < 8; i++) {
+      for (const s of [-1, 1]) {
+        const tack = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), brassMat)
+        tack.position.set(s * 0.44, 0.92 + i * 0.075, -0.16)
+        g.add(tack)
+      }
+    }
+    // legs
+    for (const [lx, lz] of [[-0.34, 0.34], [0.34, 0.34], [-0.34, -0.34], [0.34, -0.34]]) {
+      g.add(cyl(0.035, 0.045, 0.36, 8, darkWood, lx, 0.18, lz))
+    }
+    chairs.add(g)
+    return g
+  }
+  wingback(-1.5, 1.15, 0.42)
+  wingback(1.5, 1.15, -0.42)
+
+  // a throw folded over the right chair's arm
+  const throwCloth = box(0.22, 0.05, 0.62, std({ color: 0x7a4133, roughness: 1 }), 1.79, 0.92, 1.3, 0.02)
+  throwCloth.rotation.set(0, -0.42, 0)
+  chairs.add(throwCloth)
+  const throwFall = box(0.2, 0.34, 0.1, std({ color: 0x7a4133, roughness: 1 }), 1.9, 0.75, 1.02, 0.02)
+  throwFall.rotation.set(0, -0.42, 0)
+  chairs.add(throwFall)
+
+  const ottoman = box(0.8, 0.34, 0.6, leatherMat, 0, 0.2, 1.75, 0.07)
+  chairs.add(ottoman)
+  for (const [lx, lz] of [[-0.3, 1.53], [0.3, 1.53], [-0.3, 1.97], [0.3, 1.97]]) {
+    chairs.add(cyl(0.03, 0.03, 0.06, 6, brassMat, lx, 0.03, lz))
+  }
+
+  // ── side table + the accessories that live on it ───────────────────────
+  const tables = new THREE.Group()
+  scene.add(slot('slot-tables', tables))
+
+  const sideTable = (x: number, z: number): THREE.Group => {
+    const g = new THREE.Group()
+    g.position.set(x, 0, z)
+    const top = cyl(0.34, 0.34, 0.05, 24, trimWood, 0, 0.58, 0)
+    g.add(top)
+    g.add(cyl(0.05, 0.07, 0.53, 10, darkWood, 0, 0.31, 0))
+    g.add(cyl(0.2, 0.24, 0.05, 16, darkWood, 0, 0.05, 0))
+    g.add(cyl(0.35, 0.35, 0.012, 24, brassMat, 0, 0.607, 0))
+    tables.add(g)
+    return g
+  }
+  const tableL = sideTable(-2.35, 1.0)
+  const tableR = sideTable(2.35, 1.0)
+
+  // low table in front of the fire
+  const lowTable = new THREE.Group()
+  lowTable.position.set(0, 0, 0.55)
+  tables.add(lowTable)
+  lowTable.add(box(1.5, 0.07, 0.8, trimWood, 0, 0.42, 0, 0.02))
+  lowTable.add(box(1.36, 0.04, 0.66, std({ color: 0x1a1220, roughness: 0.25, metalness: 0.1 }), 0, 0.455, 0, 0.01))
+  for (const [lx, lz] of [[-0.62, 0.3], [0.62, 0.3], [-0.62, -0.3], [0.62, -0.3]]) {
+    lowTable.add(cyl(0.03, 0.04, 0.4, 8, darkWood, lx, 0.2, lz))
+  }
+  lowTable.add(box(1.3, 0.03, 0.6, darkWood, 0, 0.14, 0, 0.01)) // lower shelf
+  // books on the shelf
+  for (let i = 0; i < 3; i++) {
+    lowTable.add(box(0.34, 0.045, 0.24, std({ color: [0x5b1f21, 0x2c3d52, 0x3a2a1c][i], roughness: 0.9 }), -0.3 + i * 0.02, 0.18 + i * 0.05, 0.02 + i * 0.03, 0.006))
+  }
+
+  // ── cigar accessories ──────────────────────────────────────────────────
+  const accessories = new THREE.Group()
+  scene.add(slot('slot-accessories', accessories))
+
+  const cigarBody = std({ color: 0x6b4326, roughness: 0.85 })
+  const cigarBand = std({ color: C.brass, roughness: 0.4, metalness: 0.5 })
+
+  /** A cigar: rolled body, gold band, and a lit cap when `lit`. */
+  const cigar = (len: number, lit: boolean): THREE.Group => {
+    const g = new THREE.Group()
+    const body = cyl(0.017, 0.02, len, 12, cigarBody, 0, 0, 0)
+    body.rotation.z = Math.PI / 2
+    g.add(body)
+    const band = cyl(0.0205, 0.0205, 0.035, 12, cigarBand, -len * 0.32, 0, 0)
+    band.rotation.z = Math.PI / 2
+    g.add(band)
+    if (lit) {
+      const ash = cyl(0.017, 0.017, 0.06, 10, std({ color: 0xb8b0a4, roughness: 1 }), len * 0.5, 0, 0)
+      ash.rotation.z = Math.PI / 2
+      g.add(ash)
+      const coal = cyl(0.016, 0.016, 0.012, 10, std({ color: C.ember, emissive: 0xff5a1e, emissiveIntensity: 2.4, roughness: 1 }), len * 0.53, 0, 0)
+      coal.rotation.z = Math.PI / 2
+      g.add(coal)
+      g.userData.coal = coal
+      const glow = new THREE.PointLight(0xff6a28, 0.9, 0.7, 2)
+      glow.position.set(len * 0.55, 0, 0)
+      g.add(glow)
+      g.userData.glow = glow
+    }
+    return g
+  }
+
+  // ashtray on the low table, with a cigar resting in it
+  const ashtray = new THREE.Group()
+  ashtray.position.set(0.3, 0.475, 0.55)
+  accessories.add(ashtray)
+  const ashMat = std({ color: 0x14101a, roughness: 0.2, metalness: 0.1 })
+  ashtray.add(cyl(0.15, 0.13, 0.045, 24, ashMat, 0, 0.022, 0))
+  const bowl = cyl(0.115, 0.1, 0.03, 24, std({ color: 0x0a0810, roughness: 0.35 }), 0, 0.048, 0)
+  ashtray.add(bowl)
+  for (let i = 0; i < 4; i++) {
+    const notch = box(0.05, 0.02, 0.035, ashMat, Math.cos((i / 4) * Math.PI * 2) * 0.14, 0.05, Math.sin((i / 4) * Math.PI * 2) * 0.14)
+    notch.rotation.y = -(i / 4) * Math.PI * 2
+    ashtray.add(notch)
+  }
+  const restingCigar = cigar(0.22, true)
+  restingCigar.position.set(0.06, 0.075, 0.09)
+  restingCigar.rotation.y = -0.7
+  restingCigar.rotation.z = 0.07
+  ashtray.add(restingCigar)
+  slot('slot-smoke', restingCigar) // the ember + smoke ride with "a cigar going"
+
+  // cutter, lighter, matchbook, and a leather cigar case on the low table
+  const cutter = new THREE.Group()
+  cutter.position.set(-0.42, 0.49, 0.66)
+  cutter.rotation.y = 0.4
+  accessories.add(cutter)
+  const steel = std({ color: 0xbfc4c8, roughness: 0.24, metalness: 0.92 })
+  cutter.add(box(0.13, 0.012, 0.075, steel, 0, 0, 0, 0.006))
+  const cutterRing = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.006, 8, 20), steel)
+  cutterRing.rotation.x = Math.PI / 2
+  cutterRing.position.set(0, 0.007, 0)
+  cutter.add(cutterRing)
+
+  const lighter = box(0.05, 0.075, 0.026, std({ color: 0x8a6a3a, roughness: 0.3, metalness: 0.8 }), -0.16, 0.495, 0.72, 0.008)
+  lighter.rotation.y = -0.3
+  accessories.add(lighter)
+  accessories.add(box(0.05, 0.008, 0.032, brassMat, -0.16, 0.535, 0.72, 0.004))
+
+  const matchbook = box(0.07, 0.012, 0.05, std({ color: C.ember, roughness: 0.9 }), 0.56, 0.462, 0.72, 0.004)
+  matchbook.rotation.y = 0.9
+  accessories.add(matchbook)
+
+  const cigarCase = box(0.2, 0.055, 0.09, std({ color: 0x3b2118, roughness: 0.7 }), -0.55, 0.48, 0.4, 0.014)
+  cigarCase.rotation.y = -0.25
+  accessories.add(cigarCase)
+  accessories.add(box(0.2, 0.008, 0.09, brassMat, -0.55, 0.512, 0.4, 0.004))
+
+  // a fresh cigar + cutter on the right side table
+  const readyCigar = cigar(0.2, false)
+  readyCigar.position.set(2.3, 0.62, 1.02)
+  readyCigar.rotation.y = 0.6
+  accessories.add(readyCigar)
+
+  // smoke drifting off the lit cigar
+  const SMOKE = 60
+  const smokeGeo = new THREE.BufferGeometry()
+  const smokePos = new Float32Array(SMOKE * 3)
+  const smokeSeed = new Float32Array(SMOKE)
+  const sr = rng(88)
+  for (let i = 0; i < SMOKE; i++) {
+    smokePos[i * 3] = 0
+    smokePos[i * 3 + 1] = sr() * 1.6
+    smokePos[i * 3 + 2] = 0
+    smokeSeed[i] = sr() * 6.28
+  }
+  smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePos, 3))
+  const smoke = new THREE.Points(
+    smokeGeo,
+    new THREE.PointsMaterial({
+      size: 0.08, map: track(softDot()), color: 0xcbbfae,
+      transparent: true, opacity: 0.13, depthWrite: false,
+    }),
+  )
+  smoke.position.set(0.5, 0.56, 0.62)
+  scene.add(slot('slot-smoke', smoke))
+
+  // ── whiskey: decanter + two glasses ────────────────────────────────────
+  const bar = new THREE.Group()
+  scene.add(slot('slot-whiskey', bar))
+  const decanter = new THREE.Group()
+  decanter.position.set(-0.5, 0.46, 0.42)
+  bar.add(decanter)
+  decanter.add(cyl(0.075, 0.09, 0.17, 16, glassMat, 0, 0.085, 0))
+  decanter.add(cyl(0.072, 0.086, 0.1, 16, whiskeyMat, 0, 0.052, 0))
+  decanter.add(cyl(0.032, 0.055, 0.06, 12, glassMat, 0, 0.2, 0))
+  const stopper = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 10), glassMat)
+  stopper.position.y = 0.255
+  decanter.add(stopper)
+
+  const tumbler = (x: number, y: number, z: number): THREE.Group => {
+    const g = new THREE.Group()
+    g.position.set(x, y, z)
+    g.add(cyl(0.048, 0.042, 0.1, 16, glassMat, 0, 0.05, 0))
+    g.add(cyl(0.045, 0.04, 0.045, 16, whiskeyMat, 0, 0.025, 0))
+    g.add(cyl(0.044, 0.044, 0.012, 16, std({ color: 0x1a1220, roughness: 0.1 }), 0, 0.006, 0))
+    bar.add(g)
+    return g
+  }
+  tumbler(-2.3, 0.605, 1.06)
+  tumbler(0.66, 0.455, 0.36)
+
+  // ── humidor cabinet (right wall) + an open humidor on the low table ────
+  const humidor = new THREE.Group()
+  scene.add(slot('slot-humidor', humidor))
+  const cab = new THREE.Group()
+  cab.position.set(HALF_W - 0.35, 0, -1.6)
+  cab.rotation.y = -Math.PI / 2
+  humidor.add(cab)
+  // carcass as an open case, so the glass doors show the cigars behind them
+  cab.add(box(1.5, 0.14, 0.55, darkWood, 0, 0.07, 0, 0.016)) // base
+  cab.add(box(1.5, 0.1, 0.55, darkWood, 0, 1.17, 0, 0.016)) // top rail
+  cab.add(box(1.58, 0.06, 0.62, trimWood, 0, 1.25, 0, 0.015)) // cornice
+  cab.add(box(0.09, 1.15, 0.55, darkWood, -0.7, 0.62, 0, 0.014))
+  cab.add(box(0.09, 1.15, 0.55, darkWood, 0.7, 0.62, 0, 0.014))
+  cab.add(box(1.5, 1.15, 0.05, std({ color: 0x2a1a12, roughness: 0.8 }), 0, 0.62, -0.26, 0.01))
+  cab.add(box(1.44, 0.04, 0.5, trimWood, 0, 0.62, 0, 0.01)) // interior shelf
+  // cigars on both interior shelves
+  for (const y of [0.28, 0.83]) {
+    for (let i = 0; i < 9; i++) {
+      const c = cyl(0.016, 0.016, 0.34, 8, cigarBody, -0.6 + i * 0.15, y, -0.02)
+      c.rotation.x = Math.PI / 2
+      cab.add(c)
+    }
+  }
+  const cabGlow = new THREE.PointLight(0xffc078, 2.6, 2.2, 2)
+  cabGlow.position.set(0, 1.05, -0.05)
+  cab.add(cabGlow)
+  // glass doors: a slim frame around a pane, hung in front of the interior
+  for (const s of [-1, 1]) {
+    const doorMat = std({ color: 0x2a1a12, roughness: 0.5 })
+    const bar = 0.06
+    cab.add(box(0.68, bar, 0.05, doorMat, s * 0.35, 1.09, 0.27, 0.008))
+    cab.add(box(0.68, bar, 0.05, doorMat, s * 0.35, 0.17, 0.27, 0.008))
+    cab.add(box(bar, 0.92, 0.05, doorMat, s * 0.35 - 0.31, 0.63, 0.27, 0.008))
+    cab.add(box(bar, 0.92, 0.05, doorMat, s * 0.35 + 0.31, 0.63, 0.27, 0.008))
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.86), glassMat)
+    pane.position.set(s * 0.35, 0.63, 0.272)
+    cab.add(pane)
+    cab.add(cyl(0.011, 0.011, 0.1, 8, brassMat, s * 0.05, 0.63, 0.29))
+  }
+  // hygrometer, on the interior back panel
+  const hygro = cyl(0.055, 0.055, 0.02, 20, brassMat, 0.52, 1.0, -0.22)
+  hygro.rotation.x = Math.PI / 2
+  cab.add(hygro)
+
+  // open humidor box on the low table
+  const openBox = new THREE.Group()
+  openBox.position.set(-0.05, 0.455, 0.3)
+  openBox.rotation.y = 0.18
+  humidor.add(openBox)
+  openBox.add(box(0.42, 0.1, 0.26, std({ color: 0x4a2f1c, roughness: 0.45 }), 0, 0.05, 0, 0.012))
+  openBox.add(box(0.38, 0.06, 0.22, std({ color: 0x2a1a12, roughness: 0.8 }), 0, 0.075, 0, 0.008))
+  const lid = box(0.42, 0.04, 0.26, std({ color: 0x4a2f1c, roughness: 0.45 }), 0, 0.16, -0.16, 0.012)
+  lid.rotation.x = -1.15
+  openBox.add(lid)
+  for (let i = 0; i < 5; i++) {
+    const c = cyl(0.017, 0.017, 0.22, 10, cigarBody, -0.14 + i * 0.07, 0.1, 0)
+    c.rotation.x = Math.PI / 2
+    openBox.add(c)
+  }
+
+  // ── bookshelf + keepsakes (left wall, by the fire) ─────────────────────
+  const shelf = new THREE.Group()
+  shelf.position.set(-HALF_W + 0.3, 0, -3.0)
+  shelf.rotation.y = Math.PI / 2
+  scene.add(slot('slot-shelf', shelf))
+  // An open case: back panel, two sides, top and bottom. A solid carcass
+  // would swallow the books that make it worth having.
+  shelf.add(box(1.9, 2.3, 0.06, darkWood, 0, 1.15, -0.18, 0.01))
+  shelf.add(box(0.08, 2.3, 0.42, darkWood, -0.91, 1.15, 0, 0.012))
+  shelf.add(box(0.08, 2.3, 0.42, darkWood, 0.91, 1.15, 0, 0.012))
+  shelf.add(box(1.9, 0.1, 0.44, trimWood, 0, 2.3, 0, 0.014))
+  shelf.add(box(1.9, 0.12, 0.44, darkWood, 0, 0.06, 0, 0.014))
+  const shelfR = rng(55)
+  for (let level = 0; level < 4; level++) {
+    const y = 0.34 + level * 0.55
+    shelf.add(box(1.8, 0.05, 0.38, trimWood, 0, y, 0.02))
+    let x = -0.82
+    while (x < 0.78) {
+      const bw = 0.035 + shelfR() * 0.045
+      const bh = 0.2 + shelfR() * 0.11
+      const shade = shelfR()
+      const color = shade < 0.3 ? 0x5b1f21 : shade < 0.55 ? 0x2c3d52 : shade < 0.78 ? 0x3a2a1c : 0x25402e
+      const b = box(bw, bh, 0.26, std({ color, roughness: 0.9 }), x + bw / 2, y + 0.025 + bh / 2, 0.02, 0.004)
+      if (shelfR() > 0.86) b.rotation.z = 0.22
+      shelf.add(b)
+      x += bw + 0.006
+    }
+  }
+  // trophies on the top shelf — what the journal earns you
+  const trophy = (x: number, s: number): void => {
+    const g = new THREE.Group()
+    g.position.set(x, 2.28, 0.02)
+    g.scale.setScalar(s)
+    g.add(cyl(0.06, 0.075, 0.04, 12, darkWood, 0, 0.02, 0))
+    g.add(cyl(0.02, 0.02, 0.07, 10, brassMat, 0, 0.075, 0))
+    const cup = new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), brassMat)
+    cup.rotation.x = Math.PI
+    cup.position.y = 0.14
+    g.add(cup)
+    shelf.add(g)
+  }
+  trophy(-0.55, 1)
+  trophy(-0.2, 0.8)
+  trophy(0.62, 0.9)
+  // mantel keepsakes: a clock and two candlesticks
+  const clock = cyl(0.19, 0.19, 0.07, 20, trimWood, 0, 1.86, -HALF_D + 0.33)
+  clock.rotation.x = Math.PI / 2
+  slot('slot-shelf', clock)
+  scene.add(clock)
+  const clockFace = new THREE.Mesh(
+    new THREE.CircleGeometry(0.155, 24),
+    new THREE.MeshBasicMaterial({
+      map: track(paint(128, 128, (ctx, w, h) => {
+        ctx.fillStyle = '#f0e6d6'
+        ctx.beginPath()
+        ctx.arc(w / 2, h / 2, w / 2, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = '#171017'
+        ctx.lineWidth = 3
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2
+          ctx.beginPath()
+          ctx.moveTo(w / 2 + Math.cos(a) * 48, h / 2 + Math.sin(a) * 48)
+          ctx.lineTo(w / 2 + Math.cos(a) * 56, h / 2 + Math.sin(a) * 56)
+          ctx.stroke()
+        }
+        ctx.lineWidth = 5
+        ctx.beginPath()
+        ctx.moveTo(w / 2, h / 2)
+        ctx.lineTo(w / 2 + 26, h / 2 - 16)
+        ctx.moveTo(w / 2, h / 2)
+        ctx.lineTo(w / 2 - 8, h / 2 - 42)
+        ctx.stroke()
+      })),
+    }),
+  )
+  clockFace.position.set(0, 1.86, -HALF_D + 0.375)
+  scene.add(slot('slot-shelf', clockFace))
+  for (const s of [-1, 1]) {
+    const stick = new THREE.Group()
+    stick.position.set(s * 1.35, 1.7, -HALF_D + 0.35)
+    scene.add(slot('slot-shelf', stick))
+    stick.add(cyl(0.05, 0.06, 0.03, 12, brassMat, 0, 0.015, 0))
+    stick.add(cyl(0.016, 0.016, 0.16, 10, brassMat, 0, 0.11, 0))
+    stick.add(cyl(0.024, 0.024, 0.12, 10, std({ color: 0xf0e6d6, roughness: 0.9 }), 0, 0.25, 0))
+    const wick = new THREE.Mesh(
+      new THREE.SphereGeometry(0.016, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd08a, transparent: true, opacity: 0.9 }),
+    )
+    wick.position.y = 0.325
+    wick.scale.y = 1.9
+    stick.add(wick)
+    const cl = new THREE.PointLight(0xffb060, 0.9, 1.6, 2)
+    cl.position.y = 0.34
+    stick.add(cl)
+  }
+
+  // ── floor lamp ─────────────────────────────────────────────────────────
+  const lamp = new THREE.Group()
+  lamp.position.set(-2.75, 0, 0.35)
+  scene.add(slot('slot-lamp', lamp))
+  lamp.add(cyl(0.2, 0.24, 0.04, 20, darkWood, 0, 0.02, 0))
+  lamp.add(cyl(0.028, 0.028, 1.55, 12, brassMat, 0, 0.8, 0))
+  const shadeMat = std({
+    color: 0xe8cfa0, emissive: 0xffbe72, emissiveIntensity: 0.9,
+    roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.94,
+  })
+  lamp.add(cyl(0.2, 0.31, 0.34, 24, shadeMat, 0, 1.7, 0))
+  const lampLight = new THREE.PointLight(0xffc98a, 14, 7.5, 2)
+  lampLight.position.set(0, 1.62, 0)
+  lampLight.castShadow = true
+  lampLight.shadow.mapSize.set(1024, 1024)
+  lampLight.shadow.bias = -0.002
+  lamp.add(lampLight)
+
+  // ── record console + spinning record ───────────────────────────────────
+  const records = new THREE.Group()
+  records.position.set(-HALF_W + 0.32, 0, 2.6)
+  records.rotation.y = Math.PI / 2
+  scene.add(slot('slot-records', records))
+  records.add(box(1.7, 0.62, 0.5, trimWood, 0, 0.62, 0, 0.02))
+  for (const [lx, lz] of [[-0.72, 0.18], [0.72, 0.18], [-0.72, -0.18], [0.72, -0.18]]) {
+    records.add(cyl(0.025, 0.03, 0.32, 8, darkWood, lx, 0.16, lz))
+  }
+  records.add(box(1.62, 0.03, 0.44, std({ color: 0x14101a, roughness: 0.3 }), 0, 0.94, 0, 0.008))
+  const platter = cyl(0.21, 0.21, 0.02, 32, std({ color: 0x2a2230, roughness: 0.5, metalness: 0.3 }), -0.36, 0.96, 0)
+  records.add(platter)
+  const disc = cyl(0.2, 0.2, 0.008, 40, std({ color: 0x0a0810, roughness: 0.35 }), -0.36, 0.972, 0)
+  records.add(disc)
+  const label = cyl(0.07, 0.07, 0.009, 24, std({ color: C.ember, roughness: 0.8 }), -0.36, 0.974, 0)
+  records.add(label)
+  const tonearm = cyl(0.008, 0.008, 0.3, 8, brassMat, -0.12, 1.0, -0.06)
+  tonearm.rotation.set(0, 0.55, Math.PI / 2)
+  records.add(tonearm)
+  records.add(cyl(0.03, 0.035, 0.03, 12, brassMat, 0.0, 0.99, -0.14))
+  // sleeves leaning in the console
+  for (let i = 0; i < 6; i++) {
+    const sleeve = box(0.02, 0.4, 0.4, std({ color: [0x5b1f21, 0x2c3d52, 0x3a2a1c, 0x25402e, 0x4a2b21, 0x2a2230][i], roughness: 0.9 }), 0.35 + i * 0.03, 0.5, 0, 0.004)
+    sleeve.rotation.z = 0.08
+    records.add(sleeve)
+  }
+
+  // ── plant ──────────────────────────────────────────────────────────────
+  const plant = new THREE.Group()
+  plant.position.set(HALF_W - 0.75, 0, 3.1)
+  scene.add(slot('slot-plant', plant))
+  plant.add(cyl(0.22, 0.16, 0.34, 16, std({ color: 0x6b4326, roughness: 0.9 }), 0, 0.17, 0))
+  plant.add(cyl(0.235, 0.235, 0.04, 16, std({ color: 0x8a5a34, roughness: 0.9 }), 0, 0.35, 0))
+  const leafMat = std({ color: C.green, roughness: 0.85, side: THREE.DoubleSide })
+  const pr = rng(19)
+  for (let i = 0; i < 14; i++) {
+    const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.52), leafMat)
+    const a = (i / 14) * Math.PI * 2
+    const lean = 0.4 + pr() * 0.5
+    leaf.position.set(Math.cos(a) * 0.18 * lean, 0.62 + pr() * 0.4, Math.sin(a) * 0.18 * lean)
+    leaf.rotation.set(lean * 0.7, -a, Math.sin(a) * lean * 0.5)
+    leaf.castShadow = true
+    plant.add(leaf)
+  }
+
+  // ── the lounge cat, asleep on the rug ──────────────────────────────────
+  const cat = new THREE.Group()
+  cat.position.set(0.55, 0.03, 1.65)
+  cat.rotation.y = -0.5
+  scene.add(slot('slot-cat', cat))
+  const furMat = std({ color: 0x3d3138, roughness: 1 })
+  const bodyC = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), furMat)
+  bodyC.scale.set(1.5, 0.75, 1)
+  bodyC.position.y = 0.12
+  bodyC.castShadow = true
+  cat.add(bodyC)
+  const headC = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 12), furMat)
+  headC.position.set(-0.2, 0.15, 0.04)
+  headC.castShadow = true
+  cat.add(headC)
+  for (const s of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.06, 4), furMat)
+    ear.position.set(-0.21, 0.23, 0.04 + s * 0.055)
+    cat.add(ear)
+  }
+  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.022, 8, 20, Math.PI * 1.4), furMat)
+  tail.position.set(0.2, 0.08, 0.06)
+  tail.rotation.set(Math.PI / 2, 0, 0.6)
+  cat.add(tail)
+
+  // ── the doorway back to the hive (front wall) ──────────────────────────
+  const doorway = new THREE.Group()
+  doorway.position.set(3.1, 0, HALF_D - 0.06)
+  doorway.rotation.y = Math.PI
+  scene.add(doorway)
+  doorway.add(box(1.3, 2.3, 0.1, darkWood, 0, 1.15, 0, 0.02))
+  doorway.add(box(1.1, 2.1, 0.06, std({ color: 0x0a0810, roughness: 1 }), 0, 1.06, 0.04, 0.01))
+  doorway.add(box(1.44, 0.1, 0.14, trimWood, 0, 2.34, 0.02))
+
+  // ─── per-frame ─────────────────────────────────────────────────────────
+  const smokeAttr = smokeGeo.getAttribute('position') as THREE.BufferAttribute
+  const emberAttr = emberGeo.getAttribute('position') as THREE.BufferAttribute
+  const camPos = new THREE.Vector3()
+  const flamePos = new THREE.Vector3()
+  let cameraRef: THREE.Camera | null = null
+
+  const tick = (t: number, dt: number): void => {
+    // fire: flicker the flames and the light together
+    const flick = 0.82 + Math.sin(t * 11.3) * 0.06 + Math.sin(t * 4.1) * 0.07 + Math.sin(t * 23.7) * 0.03
+    fireLight.intensity = 22 * flick
+    if (cameraRef) cameraRef.getWorldPosition(camPos)
+    for (const { mesh, mat, phase } of flames) {
+      mesh.scale.set(0.85 + Math.sin(t * 5.5 + phase) * 0.12, 0.86 + Math.sin(t * 7.1 + phase) * 0.18, 1)
+      mat.opacity = 0.72 + Math.sin(t * 9 + phase) * 0.2
+      if (cameraRef) {
+        // billboard on Y only, so the flame never tips over
+        mesh.getWorldPosition(flamePos)
+        mesh.lookAt(camPos.x, flamePos.y, camPos.z)
+      }
+    }
+    // embers rise and recycle
+    for (let i = 0; i < EMBERS; i++) {
+      let y = emberAttr.getY(i) + emberVel[i] * dt
+      if (y > 1.4) {
+        y = 0
+        emberAttr.setX(i, (Math.sin(i * 12.9 + t) * 0.4))
+      }
+      emberAttr.setY(i, y)
+      emberAttr.setZ(i, Math.sin(t * 1.4 + i) * 0.08)
+    }
+    emberAttr.needsUpdate = true
+
+    // cigar smoke: a slow, widening column
+    for (let i = 0; i < SMOKE; i++) {
+      let y = smokeAttr.getY(i) + dt * 0.16
+      if (y > 1.7) y = 0
+      smokeAttr.setY(i, y)
+      const s = smokeSeed[i]
+      const spread = 0.02 + y * 0.13
+      smokeAttr.setX(i, Math.sin(t * 0.5 + s + y * 2.2) * spread)
+      smokeAttr.setZ(i, Math.cos(t * 0.42 + s * 1.7 + y * 1.9) * spread)
+    }
+    smokeAttr.needsUpdate = true
+
+    // the lit coal breathes
+    const coal = restingCigar.userData.coal as THREE.Mesh | undefined
+    if (coal) {
+      const mat = coal.material as THREE.MeshStandardMaterial
+      mat.emissiveIntensity = 1.8 + Math.sin(t * 1.7) * 0.9
+    }
+    const glow = restingCigar.userData.glow as THREE.PointLight | undefined
+    if (glow) glow.intensity = 0.7 + Math.sin(t * 1.7) * 0.35
+
+    // the record turns
+    disc.rotation.y += dt * 3.5
+    label.rotation.y = disc.rotation.y
+  }
+
+  const dispose = (): void => {
+    for (const d of disposables) d.dispose()
+    scene.traverse(o => {
+      const mesh = o as THREE.Mesh
+      if (mesh.geometry) mesh.geometry.dispose()
+      const mat = mesh.material
+      if (Array.isArray(mat)) mat.forEach(m => m.dispose())
+      else if (mat) (mat as THREE.Material).dispose()
+    })
+  }
+
+  // The camera is attached after construction so the flames can billboard.
+  return { scene, slots, pickables, attachCamera: c => { cameraRef = c }, tick, dispose }
+}
+
+// ─── camera presets ───────────────────────────────────────────────────────
+
+const VIEWS: Record<string, { pos: [number, number, number]; target: [number, number, number] }> = {
+  room: { pos: [0.4, 1.75, 4.35], target: [0, 1.15, -1.6] },
+  fire: { pos: [0.1, 1.4, 2.3], target: [0, 0.95, -4.2] },
+  gallery: { pos: [1.35, 1.7, -0.3], target: [-5.4, 1.75, -0.7] },
+  humidor: { pos: [1.1, 1.5, -0.9], target: [5.4, 0.9, -1.6] },
+  // seated, just in front of the left wingback, facing the hearth
+  chair: { pos: [-0.72, 1.24, 2.75], target: [0.05, 0.85, -4.0] },
+}
+
+// ─── boot ─────────────────────────────────────────────────────────────────
+
+function boot(): boolean {
+  const cfg: LoungeConfig = window.REV_LOUNGE ?? {}
+  const host = document.querySelector<HTMLElement>(cfg.mount ?? '#lounge3d')
+  if (!host) return false
+
+  let renderer: THREE.WebGLRenderer
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'default' })
+  } catch {
+    return false
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75))
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.22
+  const canvas = renderer.domElement
+  canvas.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;cursor:grab'
+  host.appendChild(canvas)
+
+  const room = buildRoom(cfg.art ?? {})
+  const camera = new THREE.PerspectiveCamera(52, 16 / 10, 0.1, 60)
+  room.attachCamera(camera)
+  camera.position.set(...VIEWS.room.pos)
+
+  const controls = new OrbitControls(camera, canvas)
+  controls.target.set(...VIEWS.room.target)
+  controls.enableDamping = true
+  controls.dampingFactor = 0.06
+  controls.enablePan = false
+  // Wheel zoom would eat the page's scroll — the site host IS the scroll
+  // surface. Dolly stays on pinch and the in-page view buttons.
+  controls.enableZoom = false
+  controls.minDistance = 1.2
+  controls.maxDistance = 9
+  controls.minPolarAngle = 0.55
+  controls.maxPolarAngle = Math.PI / 2 - 0.02
+  controls.rotateSpeed = 0.55
+  controls.update()
+  // ── picking: a click (never a drag) on a marked print opens its panel ──
+  const ray = new THREE.Raycaster()
+  const ndc = new THREE.Vector2()
+  const hitAt = (e: PointerEvent): string | null => {
+    const r = canvas.getBoundingClientRect()
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
+    ray.setFromCamera(ndc, camera)
+    const hits = ray.intersectObjects(room.pickables, false)
+    const id = hits[0]?.object?.userData?.pick
+    return typeof id === 'string' ? id : null
+  }
+  let press: { x: number; y: number; t: number } | null = null
+  let hovering = false
+  canvas.addEventListener('pointerdown', e => {
+    canvas.style.cursor = 'grabbing'
+    press = { x: e.clientX, y: e.clientY, t: Date.now() }
+  })
+  canvas.addEventListener('pointermove', e => {
+    if (press) return
+    const over = !!hitAt(e)
+    if (over !== hovering) {
+      hovering = over
+      canvas.style.cursor = over ? 'pointer' : 'grab'
+    }
+  })
+  window.addEventListener('pointerup', e => {
+    canvas.style.cursor = hovering ? 'pointer' : 'grab'
+    if (!press) return
+    const moved = Math.abs(e.clientX - press.x) + Math.abs(e.clientY - press.y)
+    const quick = Date.now() - press.t < 400
+    press = null
+    if (moved > 6 || !quick || e.target !== canvas) return
+    const id = hitAt(e as PointerEvent)
+    if (id) host.dispatchEvent(new CustomEvent('lounge3d:pick', { detail: { id }, bubbles: true }))
+  })
+
+  // Vertical FOV, clamped so a very wide stage (the walk-in fills the screen)
+  // can't blow the horizontal FOV out to a fisheye.
+  const FOV_V = 52
+  const HFOV_MAX = (80 * Math.PI) / 180
+  const resize = (): void => {
+    const w = host.clientWidth || 960
+    const h = host.clientHeight || Math.round(w * 0.58)
+    renderer.setSize(w, h, false)
+    camera.aspect = w / h
+    const capped = (2 * Math.atan(Math.tan(HFOV_MAX / 2) / camera.aspect) * 180) / Math.PI
+    camera.fov = Math.min(FOV_V, capped)
+    camera.updateProjectionMatrix()
+  }
+  resize()
+  const ro = new ResizeObserver(resize)
+  ro.observe(host)
+
+  // camera tween for the preset views
+  let tween: { from: THREE.Vector3; to: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t: number } | null = null
+  const view = (name: string): void => {
+    const v = VIEWS[name]
+    if (!v) return
+    tween = {
+      from: camera.position.clone(),
+      to: new THREE.Vector3(...v.pos),
+      fromT: controls.target.clone(),
+      toT: new THREE.Vector3(...v.target),
+      t: 0,
+    }
+  }
+
+  const clock = new THREE.Clock()
+  let onScreen = true
+  const io = new IntersectionObserver(entries => { onScreen = entries[0]?.isIntersecting ?? true }, { threshold: 0.02 })
+  io.observe(host)
+  // Swallow the elapsed gap so the room doesn't lurch when the tab comes back.
+  const onVisibility = (): void => { clock.getDelta() }
+  document.addEventListener('visibilitychange', onVisibility)
+
+  let disposed = false
+  const dispose = (): void => {
+    if (disposed) return
+    disposed = true
+    renderer.setAnimationLoop(null)
+    ro.disconnect()
+    io.disconnect()
+    document.removeEventListener('visibilitychange', onVisibility)
+    controls.dispose()
+    room.dispose()
+    renderer.dispose()
+    canvas.remove()
+    if (window.RevLounge3D) delete window.RevLounge3D
+  }
+
+  const frame = (dt: number): void => {
+    const t = clock.elapsedTime
+    if (tween) {
+      tween.t = Math.min(1, tween.t + dt * 1.5)
+      const e = 1 - Math.pow(1 - tween.t, 3)
+      camera.position.lerpVectors(tween.from, tween.to, e)
+      controls.target.lerpVectors(tween.fromT, tween.toT, e)
+      if (tween.t >= 1) tween = null
+    }
+    room.tick(t, dt)
+    controls.update()
+    renderer.render(room.scene, camera)
+  }
+
+  renderer.setAnimationLoop(() => {
+    // SiteViewDrone unmounts by dropping the page's nodes; without this the
+    // loop would outlive the page and hold a live GL context.
+    if (!canvas.isConnected) { dispose(); return }
+    const dt = Math.min(clock.getDelta(), 0.05)
+    if (!onScreen || document.hidden) return
+    frame(dt)
+  })
+
+  window.RevLounge3D = {
+    setSlot: (id, on) => {
+      const objs = room.slots.get(id)
+      if (objs) for (const o of objs) o.visible = on
+    },
+    view,
+    frame: () => frame(1 / 60),
+    pose: () => ({
+      pos: camera.position.toArray().map(n => +n.toFixed(2)),
+      target: controls.target.toArray().map(n => +n.toFixed(2)),
+    }),
+    ready: Promise.resolve(true),
+  }
+  host.dataset.ready = '1'
+  host.dispatchEvent(new CustomEvent('lounge3d:ready', { bubbles: true }))
+  return true
+}
+
+// Passive start: never on the critical path. If WebGL is unavailable or the
+// room throws, reveal the page's SVG fallback instead.
+function start(): void {
+  let ok = false
+  try {
+    ok = boot()
+  } catch (err) {
+    console.warn('[lounge3d] scene failed, falling back to the drawn room', err)
+  }
+  if (!ok) revealFallback()
+}
+
+function revealFallback(): void {
+  const cfg: LoungeConfig = window.REV_LOUNGE ?? {}
+  const stage = document.querySelector<HTMLElement>(cfg.mount ?? '#lounge3d')
+  const bar = cfg.controls ? document.querySelector<HTMLElement>(cfg.controls) : null
+  const fb = document.querySelector<HTMLElement>(cfg.fallback ?? '#loungeFallback')
+  if (stage) stage.hidden = true
+  if (bar) bar.hidden = true
+  if (fb) fb.hidden = false
+}
+
+const idle = (fn: () => void): void => {
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+  if (ric) ric(fn, { timeout: 1200 })
+  else setTimeout(fn, 260)
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => idle(start), { once: true })
+else idle(start)

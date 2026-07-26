@@ -74,7 +74,21 @@ async function answer(askSig, cellPath, text) {
   const cell = segs[segs.length - 1]
   const parent = segs.slice(0, -1)
 
-  const noteRes = await withRenderer({ op: 'note-add', segments: parent, cell, text })
+  // CARRY THE QUESTION INTO THE NOTE. An answer alone reads as a floating
+  // statement months later — and the routine that reads notes as instructions
+  // has no idea what prompted it. Look the ask up by sig and prefix its
+  // question, so every answer note is self-documenting. Best-effort: if the
+  // record can't be read, the answer still lands (never lose an answer over
+  // provenance).
+  let question = ''
+  try {
+    const listed = await withRenderer({ op: 'optimization-list', kind: 'ask' }, 2)
+    const found = (listed.data?.items ?? []).find(it => it.sig === askSig)
+    question = String(found?.payload?.prompt ?? '').trim()
+  } catch { /* unreadable — fall through to a bare answer */ }
+  const body = question ? `Asked: ${question}\n\n${text}` : text
+
+  const noteRes = await withRenderer({ op: 'note-add', segments: parent, cell, text: body })
   if (!noteRes.ok) { console.error('note-add failed:', noteRes.error); process.exit(1) }
 
   const rm = await withRenderer({ op: 'optimization-remove', sig: askSig })
@@ -83,11 +97,21 @@ async function answer(askSig, cellPath, text) {
   console.log(`[ask-drain] answered /${segs.join('/')} and retired ask ${askSig.slice(0, 12)}…`)
 }
 
+// Retire an ask WITHOUT writing a note — the chat-turn path (the reply went
+// through _chat-reply.cjs instead) or an undeliverable ask.
+async function retire(askSig) {
+  if (!askSig) { console.error('Usage: _ask-drain.cjs retire <ask-sig>'); process.exit(1) }
+  const rm = await withRenderer({ op: 'optimization-remove', sig: askSig })
+  if (!rm.ok) { console.error('optimization-remove failed:', rm.error); process.exit(1) }
+  console.log(`[ask-drain] retired ${askSig.slice(0, 12)}…`)
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
   if (cmd === 'list') return list()
   if (cmd === 'answer') return answer(rest[0], rest[1], rest[2])
-  console.error('Usage:\n  _ask-drain.cjs list\n  _ask-drain.cjs answer <ask-sig> <cell-path> "<answer>"')
+  if (cmd === 'retire') return retire(rest[0])
+  console.error('Usage:\n  _ask-drain.cjs list\n  _ask-drain.cjs answer <ask-sig> <cell-path> "<answer>"\n  _ask-drain.cjs retire <ask-sig>')
   process.exit(1)
 }
 
