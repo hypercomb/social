@@ -2245,7 +2245,7 @@ function buildPages(
             <button type="button" class="vbtn" data-view="chair">your chair</button>
             <button type="button" class="vbtn open" id="lfOpen">walk in</button>
           </span>
-          <span class="hint" id="stageHint">drag to look around &middot; click the room to walk in</span>
+          <span class="hint" id="stageHint">drag to look around &middot; pick a view (or click the room) to walk in</span>
         </div>
         <div class="scene fallback" id="loungeFallback" hidden><svg viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A warm cigar lounge: a fire going, a wingback chair with a throw, whiskey poured, and a cat asleep on the rug">
         <defs>
@@ -2651,6 +2651,8 @@ function buildPages(
         var btn = e.currentTarget;
         for (var j = 0; j < views.length; j++) views[j].classList.remove('on');
         btn.classList.add('on');
+        // every view is a way INTO the room — walk in first, then move
+        if (window.__loungeWalkIn) window.__loungeWalkIn();
         if (window.RevLounge3D) window.RevLounge3D.view(btn.getAttribute('data-view'));
       });
     }
