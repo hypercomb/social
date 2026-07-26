@@ -65,11 +65,14 @@ let reportedOutage = false
 
 function onFail(reason) {
   failCount++
-  // Timeouts are the renderer-churn signature (rebuild pushes, background-tab
-  // throttling) and self-heal in seconds — they only matter if they STICK, so
-  // they get a much longer fuse (~1 min of consecutive failure). Refusals and
-  // renderer-missing stay on the short fuse: those mean a process is gone.
-  const threshold = ONCE ? 1 : (reason === 'bridge-timeout' ? 10 : OUTAGE_TICKS)
+  // Both renderer-side failures are CHURN signatures — a dev-server rebuild
+  // reloads the tab (clean disconnect → renderer-missing) and a throttled or
+  // half-dead socket times out — and both self-heal within seconds. They only
+  // matter if they STICK, so both get the long fuse (~1 min of consecutive
+  // failure). `bridge-unreachable` (connect refused = no broker at all) keeps
+  // the short fuse: that one is a process being gone, not churn.
+  const churn = reason === 'bridge-timeout' || reason === 'renderer-missing'
+  const threshold = ONCE ? 1 : (churn ? 10 : OUTAGE_TICKS)
   if (failCount >= threshold && !reportedOutage) {
     reportedOutage = true
     console.log(JSON.stringify({ watch: reason }))

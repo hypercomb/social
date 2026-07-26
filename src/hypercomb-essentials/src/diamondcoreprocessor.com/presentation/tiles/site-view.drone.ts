@@ -13,7 +13,10 @@
 // navigates the lineage one level down, and that cell's `context`
 // page mounts. No bundle, no manifest, no path-table.
 
-import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import {
+  Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY,
+  type I18nProvider,
+} from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
@@ -27,6 +30,27 @@ type MountState = {
   sitePath: readonly string[]
   /** unmount handler — drops style/link/script nodes and listeners. */
   unmount: () => void
+}
+
+/** The inline background longhands the hive's own backdrop occupies —
+ *  CanvasBackgroundService paints `<body>` with a colour, a gradient image and
+ *  its size/repeat/position, pinned with `attachment: fixed`. Snapshot/restore
+ *  works longhand-by-longhand rather than through the `background` shorthand:
+ *  the shorthand getter re-serialises a multi-value backdrop to "", so
+ *  round-tripping it would silently drop size/repeat/position/attachment and
+ *  leave the gradient re-tiled at its default. */
+const BG_PROPS = [
+  'backgroundColor', 'backgroundImage', 'backgroundRepeat',
+  'backgroundSize', 'backgroundPosition', 'backgroundAttachment',
+] as const
+
+const snapshotBackground = (s: CSSStyleDeclaration): string[] => BG_PROPS.map(p => s[p])
+
+/** Clear whatever the page stamped (the shorthand resets every longhand,
+ *  including ones the hive never sets), then put the snapshot back. */
+const restoreBackground = (s: CSSStyleDeclaration, snap: readonly string[]): void => {
+  s.background = ''
+  BG_PROPS.forEach((p, i) => { s[p] = snap[i] })
 }
 
 /** Inline style for the raw-DOM exit overlay. A near-max z-index keeps it
@@ -211,22 +235,16 @@ export class SiteViewDrone extends Drone {
     } else {
       const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
-      // Exiting the site back to the HIVE lands on the layer the website was
-      // OPENED from (the site root captured at entry), not whatever page the
-      // reader browsed to — reading a site is not tile navigation. Only for
-      // exits to hexagons: a view toggle onto another surface (slides/tutor)
-      // stays on the current cell, and the launcher's dismiss-then-enter
-      // navigates itself right after this listener (goRaw here is transient).
-      if (entry && vm?.mode === 'hexagons') {
-        const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
-        const current = [...(lineage?.explorerSegments?.() ?? [])]
-        const atEntry = current.length === entry.length && entry.every((seg, i) => current[i] === seg)
-        if (!atEntry) {
-          (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-            ?.get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
-            ?.goRaw?.(entry)
-        }
-      }
+      // Exiting the site back to the HIVE lands on the ENTRANCE — the site's
+      // root website tile — not whatever page the reader browsed to, and not
+      // merely the cell the site was opened from. Reading a site is not tile
+      // navigation, so the browser history collapses back to where it stood
+      // before the site opened (see #leaveToEntrance). Only for exits to
+      // hexagons: a view toggle onto another surface (slides/tutor) stays on
+      // the current cell, and the launcher's dismiss-then-enter navigates
+      // itself right after this listener. Gated on a site having actually been
+      // on screen this session, so an unrelated mode flip never moves anyone.
+      if (vm?.mode === 'hexagons' && (entry || this.#mount)) void this.#leaveToEntrance(entry)
     }
     void this.#reconcile()
   }
@@ -300,7 +318,9 @@ export class SiteViewDrone extends Drone {
     if (vm && vm.mode !== 'website') {
       this.#removeExitOverlay()
       this.#removeReviewGate()
+      const wasMounted = this.#mount !== null
       this.#teardown()
+      this.#restoreHiveChrome(wasMounted)
       return
     }
     // In website mode the raw-DOM exit overlay is ALWAYS present — even on a
@@ -590,10 +610,8 @@ export class SiteViewDrone extends Drone {
     // alone (e.g. --hc-header-bottom the chrome sets on <html>).
     const htmlStyle = document.documentElement.style
     const bodyStyle = document.body.style
-    const prevBg = {
-      hBg: htmlStyle.background, hColor: htmlStyle.backgroundColor, hImg: htmlStyle.backgroundImage,
-      bBg: bodyStyle.background, bColor: bodyStyle.backgroundColor, bImg: bodyStyle.backgroundImage,
-    }
+    const prevHtmlBg = snapshotBackground(htmlStyle)
+    const prevBodyBg = snapshotBackground(bodyStyle)
 
     // Snapshot the hive's own theme attribute too. A site carries its own
     // light/dark choice and stamps it straight onto <html data-theme> — the
@@ -695,12 +713,8 @@ export class SiteViewDrone extends Drone {
         for (const node of scriptNodes) node.remove()
         // Revert any background a page script stamped onto <html>/<body> so the
         // hive's own theme background (or dark default) shows again on exit.
-        htmlStyle.background = prevBg.hBg
-        htmlStyle.backgroundColor = prevBg.hColor
-        htmlStyle.backgroundImage = prevBg.hImg
-        bodyStyle.background = prevBg.bBg
-        bodyStyle.backgroundColor = prevBg.bColor
-        bodyStyle.backgroundImage = prevBg.bImg
+        restoreBackground(htmlStyle, prevHtmlBg)
+        restoreBackground(bodyStyle, prevBodyBg)
         // Restore the hive's own theme — a site stamps its light/dark choice
         // onto <html data-theme>, which otherwise persists into hexagon mode and
         // shows the site's light styles where the hive should be dark.
@@ -813,6 +827,37 @@ export class SiteViewDrone extends Drone {
       this.#reviewOverlay.remove()
       this.#reviewOverlay = null
     }
+  }
+
+  /** Hand the hive's chrome back to its OWNERS after a website session, instead
+   *  of trusting the mount's snapshot alone.
+   *
+   *  A page stamps two things the hive also owns: `<html data-theme>` (its own
+   *  light/dark choice, written raw by its pre-paint script and its in-page
+   *  toggle) and an inline background on `<html>`/`<body>`. unmount() reverts
+   *  what it snapshotted, but a snapshot is only as good as the moment it was
+   *  taken — it can't cover a stamp that lands after unmount (a page script
+   *  firing late, a toggle handler still bound to a detached node), a session
+   *  where no mount was ever up, or a longhand the site set that the hive
+   *  didn't. And the miss is loud rather than subtle: the base token set is the
+   *  LIGHT one (dark is the `[data-theme="dark"]` override), and the canvas
+   *  backdrop's auto palette reads that same attribute — so a leftover `light`
+   *  turns the whole hive cream and repaints the backdrop in `daylight`.
+   *
+   *  So both owners re-assert from their own truth: the theme service re-applies
+   *  the participant's stored theme, and the canvas backdrop repaints. Called on
+   *  every reconcile in hexagons mode, so any drift heals on the next
+   *  navigation, not just on the exit that caused it. The repaint is the only
+   *  non-trivial part, so it runs only when the theme actually drifted or a page
+   *  was just torn down. */
+  #restoreHiveChrome(repaint: boolean): void {
+    const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+    // Structural shape, not ThemeProvider: reassert() is optional on the
+    // contract, so a module built against an older shell still resolves the
+    // service and simply finds nothing to call.
+    const drifted = ioc?.get<{ reassert?: () => boolean }>(THEME_IOC_KEY)?.reassert?.() ?? false
+    if (!drifted && !repaint) return
+    ioc?.get<{ apply?: () => void }>('@diamondcoreprocessor.com/CanvasBackground')?.apply?.()
   }
 
   #teardown(): void {
@@ -959,12 +1004,58 @@ export class SiteViewDrone extends Drone {
       } catch { /* private mode / older browser — non-fatal */ }
     }
 
-    const current: string[] = [...(lineage.explorerSegments?.() ?? [])]
     const next = [...path]
+
+    // Reading a site is not tile navigation. Move the explorer in ONE step
+    // that REPLACES the history entry, so browsing a site never grows the
+    // browser back-stack — the whole session collapses back to where it stood
+    // when the site was opened (see Lineage.explorerReplace). The per-segment
+    // enter/up walk stays as the fallback for a shell without it.
+    if (typeof lineage.explorerReplace === 'function') {
+      lineage.explorerReplace(next)
+      return
+    }
+
+    const current: string[] = [...(lineage.explorerSegments?.() ?? [])]
     let common = 0
     while (common < current.length && common < next.length && current[common] === next[common]) common++
     for (let i = 0; i < current.length - common; i++) lineage.explorerUp?.()
     for (let i = common; i < next.length; i++) lineage.explorerEnter?.(next[i])
+  }
+
+  /** The ENTRANCE is the site's ROOT website tile — the topmost ancestor that
+   *  still carries a page — not merely the cell the reader happened to open
+   *  the site from. Walking up stops at the first ancestor WITHOUT a page (and
+   *  never reaches the hive root, which has no site of its own). */
+  async #entranceOf(from: readonly string[]): Promise<string[]> {
+    let entrance = [...from]
+    for (let i = from.length - 1; i >= 1; i--) {
+      const up = from.slice(0, i)
+      if (!(await this.#hasPage(up))) break
+      entrance = up
+    }
+    return entrance
+  }
+
+  /** Leaving a website: land on the entrance tile, with the browser history
+   *  collapsed back to where it was before the site was opened. `entry` is the
+   *  captured session start; an INDIRECT entry (session booted straight into
+   *  website mode) has none, so the entrance is derived from where the reader
+   *  actually is. */
+  async #leaveToEntrance(entry: readonly string[] | null): Promise<void> {
+    const lineage = this.resolve<any>('lineage')
+    const current: string[] = [...(lineage?.explorerSegments?.() ?? [])]
+    const base = entry && entry.length ? entry : current
+    if (!base.length) return
+    const entrance = await this.#entranceOf(base)
+    if (current.length === entrance.length && entrance.every((seg, i) => current[i] === seg)) return
+    if (typeof lineage?.explorerReplace === 'function') {
+      lineage.explorerReplace(entrance)
+      return
+    }
+    ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
+      ?.goRaw?.(entrance)
   }
 }
 

@@ -77,6 +77,27 @@ export class ThemeService extends EventTarget implements ThemeProvider {
     this.dispatchEvent(new CustomEvent('change'))
   }
 
+  // Re-apply the participant's theme, returning true only when the live
+  // attribute had DRIFTED from it. An embedded website page stamps the same
+  // `<html data-theme>` this service owns — a pre-paint script and an in-page
+  // toggle both write it raw — and the base token set in _material-tokens.scss
+  // is the LIGHT one (dark is the `[data-theme="dark"]` override), so any
+  // leftover stamp, or the attribute going missing on a light-OS machine, paints
+  // the whole hive cream. Callers leaving a foreign surface use this to hand the
+  // attribute back to its owner instead of trusting a snapshot.
+  //
+  // Emitting theme:changed only on a real correction keeps the derived surfaces
+  // honest (the canvas backdrop repaints its auto palette off this effect)
+  // without a repaint on every idempotent call.
+  reassert(): boolean {
+    const want = this.#theme === SYSTEM ? null : this.#theme
+    if (document.documentElement.getAttribute('data-theme') === want) return false
+    this.#apply(this.#theme)
+    EffectBus.emit('theme:changed', { theme: this.#theme })
+    this.dispatchEvent(new CustomEvent('change'))
+    return true
+  }
+
   registerTheme(name: string, tokens: ThemeTokens): void {
     this.#registered.set(name, { ...tokens })
     this.#renderRegistry()

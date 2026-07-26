@@ -56,6 +56,29 @@ export class Lineage extends EventTarget {
     }
   }
 
+  /** Jump the explorer to an absolute path in ONE step, REPLACING the browser
+   *  history entry instead of pushing one.
+   *
+   *  Reading a website is not tile navigation. A reader who walks twelve pages
+   *  of a site must not leave twelve entries on the back-stack — the whole site
+   *  session collapses back to where it stood when the site was opened, and
+   *  leaving lands on the site's entrance tile. `explorerEnter`/`explorerUp`
+   *  push per SEGMENT (that's right for hexagon navigation, where each step IS
+   *  a place the user chose to be); this is the site-reading counterpart. */
+  public explorerReplace = (segments: readonly string[]): void => {
+    this.explorerPath = segments
+      .map(s => (s ?? '').trim())
+      .filter(s => s && s !== '.' && s !== '..')
+    this.invalidate()
+
+    // explorer drives navigation (best effort)
+    try {
+      this.navigation.replaceRaw(this.explorerPath)
+    } catch {
+      this.dispatchNavigateFallback()
+    }
+  }
+
   // keeps old name so you don't have to refactor callers
   // this now means "show domain root"
   public showDomainRoot = (): void => {

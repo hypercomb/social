@@ -34,6 +34,22 @@ export interface ThemeProvider {
    * replaces its tokens.
    */
   registerTheme(name: string, tokens: ThemeTokens): void
+  /**
+   * Re-apply the participant's theme onto `<html data-theme>` and report whether
+   * it had to CORRECT a drift (true) or found it already right (false).
+   *
+   * The hive owns its own chrome, but an embedded website page writes the SAME
+   * attribute directly — its pre-paint script and in-page light/dark toggle both
+   * do `documentElement.setAttribute('data-theme', …)`, a raw DOM write this
+   * service never sees. Whatever the reason for the drift, the surface leaving a
+   * foreign page calls this to hand the attribute back to its owner rather than
+   * trusting a snapshot it took earlier. Idempotent, so it is safe to call on
+   * every reconcile.
+   *
+   * Optional so a module still runs against an older shell whose theme service
+   * predates it.
+   */
+  reassert?(): boolean
 }
 
 export const THEME_IOC_KEY = '@hypercomb.social/Theme'
