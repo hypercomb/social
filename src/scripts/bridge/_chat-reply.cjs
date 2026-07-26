@@ -12,6 +12,8 @@
 
 const WebSocket = require('ws')
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
+// Only needed when driving a REMOTE broker (loopback senders are trusted).
+const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
 
 const [convoId, text] = process.argv.slice(2)
 if (!convoId || !text) {
@@ -19,7 +21,7 @@ if (!convoId || !text) {
   process.exit(1)
 }
 
-const ws = new WebSocket(BRIDGE)
+const ws = new WebSocket(BRIDGE, TOKEN ? { headers: { Authorization: `Bearer ${TOKEN}` } } : undefined)
 const t = setTimeout(() => { console.error('bridge timeout'); process.exit(1) }, 15_000)
 ws.on('open', () => ws.send(JSON.stringify({ op: 'chat-reply', cell: convoId, text, id: `chatreply-${Date.now()}` })))
 ws.on('message', raw => {

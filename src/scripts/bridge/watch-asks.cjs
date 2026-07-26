@@ -33,6 +33,9 @@
 const WebSocket = require('ws')
 
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
+// Only needed when driving a REMOTE broker (loopback senders are trusted).
+const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
+const WS_OPTS = TOKEN ? { headers: { Authorization: `Bearer ${TOKEN}` } } : undefined
 const POLL_MS = Math.max(2_000, Number(process.env.ASK_POLL_MS || 6_000))
 const ONCE = process.argv.includes('--once')
 
@@ -41,7 +44,7 @@ const nextId = () => `askwatch-${Date.now()}-${++counter}`
 
 function send(req) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(BRIDGE)
+    const ws = new WebSocket(BRIDGE, WS_OPTS)
     const t = setTimeout(() => { try { ws.close() } catch {} ; reject(new Error('bridge timeout')) }, 10_000)
     ws.on('open', () => ws.send(JSON.stringify({ ...req, id: nextId() })))
     ws.on('message', raw => {

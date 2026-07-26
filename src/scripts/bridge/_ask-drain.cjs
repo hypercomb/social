@@ -18,13 +18,16 @@
 
 const WebSocket = require('ws')
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
+// Only needed when driving a REMOTE broker (loopback senders are trusted).
+const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
+const WS_OPTS = TOKEN ? { headers: { Authorization: `Bearer ${TOKEN}` } } : undefined
 
 let counter = 0
 const nextId = () => `askdrain-${Date.now()}-${++counter}`
 
 function send(req) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(BRIDGE)
+    const ws = new WebSocket(BRIDGE, WS_OPTS)
     const t = setTimeout(() => { ws.close(); reject(new Error('bridge timeout')) }, 15_000)
     ws.on('open', () => ws.send(JSON.stringify({ ...req, id: nextId() })))
     ws.on('message', raw => {

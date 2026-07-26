@@ -38,7 +38,13 @@ const nextId = () => `putfile-${Date.now()}-${++counter}`
 
 function send(req) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(BRIDGE, { maxPayload: 64 * 1024 * 1024 })
+    const ws = new WebSocket(BRIDGE, {
+      maxPayload: 64 * 1024 * 1024,
+      // Only needed when driving a REMOTE broker (loopback senders are trusted).
+      ...(process.env.HYPERCOMB_BRIDGE_TOKEN
+        ? { headers: { Authorization: `Bearer ${String(process.env.HYPERCOMB_BRIDGE_TOKEN).trim()}` } }
+        : {}),
+    })
     const t = setTimeout(() => { try { ws.close() } catch {} ; reject(new Error('bridge timeout')) }, 30_000)
     ws.on('open', () => ws.send(JSON.stringify({ ...req, id: nextId() })))
     ws.on('message', raw => {
