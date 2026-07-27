@@ -32,7 +32,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   // header-bottom offset every other tool window uses, for when there is no
   // left rail. Hardcoding the rail's own offsets here instead is how the two
   // drifted apart — the rail's top moves with the header zoom AND on touch.
-  top: var(--hc-controls-left-top, calc(2.8rem * var(--hc-header-zoom, 1.0)));
+  top: var(--hc-controls-left-top, max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
   left: 0;
   bottom: 0;
   width: 280px;
@@ -494,6 +494,36 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
 }
 
+// MOVE — the second verb, and the heavier one: it takes custody, so the tiles
+// leave the page they were on. Same size and rhythm as Add (they are peers, not
+// a primary and a secondary), distinguished by a SOLID border rather than Add's
+// dashed one — dashed reads as "an outline of the thing, placed here", which is
+// exactly what a reference is, and solid reads as the thing itself arriving.
+.ai-staged-move {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  width: 100%;
+  margin-top: 0.35em;
+  padding: 0.4em 0.6em;
+  border: 1px solid rgba($steel, 0.5);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(207, 226, 238, 0.88);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78em;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  .mat-sym { font-size: 1.15em; line-height: 1; }
+
+  &:hover { background: rgba($steel, 0.14); border-color: rgba($steel, 0.8); color: #f4fafd; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+}
+
+.ai-staged-move-label { min-width: 0; }
+
 // ── manage actions — revealed on hover ───────────────────────────────────────
 
 // STANDING, never hover-only. These were `opacity: 0` until `.ai-row:hover`,
@@ -547,8 +577,17 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 // been is not the same thing as a revision the installer holds deployed, and a
 // single unlabelled list would invite reading across that line.
 .ai-versions {
+  // BORDER-BOX IS LOAD-BEARING. The page is content-box, so `flex-basis: 100%`
+  // sized this block to the container's CONTENT width and then ADDED its own
+  // padding on top — 42px of it — pushing the block ~32px past the panel's
+  // right edge, where `.ai-list { overflow-x: hidden }` silently clipped it.
+  // The timestamps and the "current" flag were cut off at every panel width.
+  box-sizing: border-box;
   flex: 0 0 100%;
-  padding: 0.1em 0.4em 0.45em 2.4em;   // indented under the row's hex
+  // Indented under the row's hex. Kept modest: this padding comes straight off
+  // the width the version rows have to work with, and the panel can be dragged
+  // down to 220px.
+  padding: 0.1em 0.4em 0.45em 1.6em;
 }
 
 .ai-versions-note,
@@ -573,8 +612,13 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-version {
   width: 100%;
   display: flex;
+  // WRAP rather than overflow. A version row carries three things that cannot
+  // all shrink — a label, a fixed-width mono timestamp, and the active flag —
+  // so at a narrow panel the last of them used to run off the edge. Wrapping
+  // drops the timestamp to a second line instead of losing it.
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.5em;
+  gap: 0.1em 0.5em;
   padding: 0.22em 0.45em;
   border: 1px solid transparent;
   border-radius: 5px;
@@ -599,10 +643,25 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   &:disabled:not(.is-active) { opacity: 0.5; cursor: default; }
 }
 
-.ai-version-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+// `auto` basis, not `0`: with wrapping on, a zero-basis label grows to fill the
+// first line and would push the time and flag onto a second one at EVERY width.
+// The small floor keeps it readable while it still ellipsizes.
+.ai-version-label {
+  flex: 1 1 auto;
+  min-width: 3em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .ai-version-time {
-  flex: 0 0 auto;
+  // Shrinkable as a last resort — a truncated timestamp beats a clipped one,
+  // and the flag beside it can never give ground.
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--hc-mono, system-ui);
   font-size: 0.85em;
   color: rgba(207, 226, 238, 0.5);

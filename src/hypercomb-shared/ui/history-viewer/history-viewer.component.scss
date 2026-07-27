@@ -13,7 +13,7 @@
   // notes-strip offset (`3rem * --hc-header-zoom + 14px`) so both side
   // panels sit on the same horizontal line below the command line —
   // tracking the active header size — and never overlap it.
-  top: calc(3rem * var(--hc-header-zoom, 1.0) + 14px);
+  top: max(calc(3rem * var(--hc-header-zoom, 1.0) + 14px), calc(var(--hc-header-anchor) + 0.17rem + 14px));
   left: 0;
   bottom: 0;
   width: max-content;

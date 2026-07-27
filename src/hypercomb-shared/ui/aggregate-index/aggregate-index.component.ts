@@ -196,6 +196,16 @@ export class AggregateIndexComponent implements OnDestroy {
     return this.selection().filter(e => !known.has(e.label))
   })
 
+  /** Is filing the staged tiles away a live act right now?
+   *
+   *  Only ever INTO a collection — moving needs somewhere for the tiles to land,
+   *  and the index itself is a list of pointers, not a place content lives. So
+   *  the Move button appears exactly when you have walked into a collection and
+   *  have tiles picked, which is also the moment it reads as obvious: the
+   *  destination is the page in front of you. */
+  readonly canMove = computed<boolean>(() =>
+    !!this.source()?.move && !!this.destination() && this.staged().length > 0)
+
   /** Can the page we are standing on be saved into the index? The canvas route
    *  cannot reach it — you would have to stand on its PARENT and select it —
    *  so a page can only add itself from in here. Hidden at the hive root (not a
@@ -228,15 +238,39 @@ export class AggregateIndexComponent implements OnDestroy {
   /** The source whose `changed` we are subscribed to, so switching aggregates
    *  doesn't leave us listening to the old one. */
   #boundSource: AggregateSource | null = null
+  /** The page the staged capture was taken on — how an empty selection update
+   *  from a NAVIGATION is told apart from a real deselect (see the constructor). */
+  #stagedAt: readonly string[] | null = null
   #pending: { item: AggregateItem; x: number; y: number } | null = null
   #swallowClick = false
 
   constructor() {
     // Selection is last-value replayed, so opening the panel after selecting
     // still stages what is already picked.
+    //
+    // THE TRAY IS A CAPTURE, NOT A MIRROR — and this is what makes the whole
+    // destination flow possible. SelectionService is derived from the URL: every
+    // `navigate` reconciles it against what the new address carries, which for a
+    // fresh page is nothing. So walking into a collection to add tiles TO it
+    // arrived here as "selection is now empty", the tray emptied, and both
+    // buttons vanished at the exact moment they were meant to be pressed —
+    // "select tiles, step into the collection, press Add" could never complete
+    // (verified on the dev hive: the staged tray was gone the instant the row
+    // was clicked). Capturing each entry with its own absolute `segments` was
+    // always half of the fix; keeping the capture across the hop is the other.
+    //
+    // An empty update is only honoured when it arrives AT THE PAGE THE CAPTURE
+    // WAS MADE ON — a real deselect out on the canvas. Verified in a real
+    // browser: Lineage has already moved by the time the clear event fires, so
+    // this comparison distinguishes the two cases with no timing guess. Every
+    // other way the tray empties is deliberate: completing an Add or a Move,
+    // going back to the origin, or closing the window.
     this.#cleanups.push(onSelection(({ selected }) => {
       const here = this.#segments()
+      if (selected.length === 0 && this.selection().length > 0
+        && this.#stagedAt && !sameSegments(this.#stagedAt, here)) return
       this.selection.set(selected.map(label => ({ label, segments: [...here, label] })))
+      if (selected.length > 0) this.#stagedAt = here
       this.#cdr.detectChanges()
     }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-open', (p) => this.openPanel(p?.id)))
@@ -311,8 +345,20 @@ export class AggregateIndexComponent implements OnDestroy {
   returnToOrigin(): void {
     const o = this.origin()
     if (!o) return
+    // Explicitly, because the tray now SURVIVES navigation: this control's whole
+    // purpose is to drop what is staged and start again, so it must say so
+    // rather than rely on a clear that no longer reaches the tray.
+    this.#dropStaged()
     ;(ioc()?.get('@hypercomb.social/Navigation') as { goRaw?(s: readonly string[]): void } | undefined)
       ?.goRaw?.(o)
+  }
+
+  /** Empty the tray on purpose — after a completed gesture, or on the way back
+   *  to the origin. The one place `#stagedAt` is forgotten with it. */
+  #dropStaged(): void {
+    withSelectionService(s => s.clear())
+    this.selection.set([])
+    this.#stagedAt = null
   }
 
   /** Whether this row is the collection currently being managed (the hive is
@@ -540,9 +586,28 @@ export class AggregateIndexComponent implements OnDestroy {
     let added: AddedRows = undefined
     try { added = await src.add(entries, this.destination() ?? undefined) }
     catch { /* fall through — the re-read shows the truth */ }
-    withSelectionService(s => s.clear())
-    this.selection.set([])
+    this.#dropStaged()
     this.#showAdded(added)
+  }
+
+  /** File the staged tiles away INTO the collection we are standing in — they
+   *  leave the page they were picked on and land here.
+   *
+   *  No optimistic row: a move does not change THIS list (the collection is
+   *  already a row in it), it changes what that collection holds — and the tiles
+   *  land on the page in front of you, which is feedback enough. The selection is
+   *  cleared for the same reason Add clears it: those tiles are somewhere else
+   *  now, and offering to move them again would name tiles that have moved. */
+  async moveStaged(): Promise<void> {
+    const src = this.source()
+    const into = this.destination()
+    const entries = this.staged()
+    if (!src?.move || !into || entries.length === 0) return
+    try { await src.move(entries, into) }
+    catch { /* fall through — the re-read shows the truth */ }
+    this.#dropStaged()
+    this.#cdr.markForCheck()
+    void this.reload()
   }
 
   /** Save the page we are standing on into the index. */

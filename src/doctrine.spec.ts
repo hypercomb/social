@@ -232,6 +232,54 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual, [], 'raw view:active emit')
   })
 
+  it('multi-anchor producers end their pass with build-record — atomicity is not optional', () => {
+    // The build-revisions standard (documentation/build-revisions.md): a
+    // pass that mints resources AND stamps more than one anchor must end
+    // with `build-record`, so the whole build is ONE restorable step.
+    // Heuristic: a script under scripts/ containing `put-resource` plus
+    // `decoration-add`/`bag-set` is a producer; lacking `build-record` it
+    // appears here. The allowlist has two frozen tiers: single-anchor
+    // producers where a build record is n/a by design, and KNOWN DEBT —
+    // multi-anchor producers not yet wired. Wiring one = remove it here
+    // AND in scripts/audit-atomicity.cjs (the live twin) so both click.
+    const scriptsDir = join(ROOT, 'scripts')
+    const files: string[] = []
+    const walkScripts = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) walkScripts(full)
+        else if (/\.(cjs|mjs|ts|js)$/.test(entry.name)) files.push(full)
+      }
+    }
+    walkScripts(scriptsDir)
+
+    const unwired: string[] = []
+    for (const file of files) {
+      const rel = relative(ROOT, file).replace(/\\/g, '/')
+      if (rel === 'scripts/audit-atomicity.cjs') continue        // the auditor names every token
+      let code: string
+      try { code = readFileSync(file, 'utf8') } catch { continue }
+      const producer = code.includes('put-resource') && (code.includes('decoration-add') || code.includes('bag-set'))
+      if (producer && !code.includes('build-record')) unwired.push(rel)
+    }
+
+    assertRatchet(unwired.sort(), [
+      // single-anchor by design — build record n/a (page-slot chain already versions them)
+      'scripts/ai-inside/test-edge-aihive.cjs',
+      'scripts/bridge/_dashboard-refresh.cjs',
+      'scripts/bridge/_put-file.cjs',
+      'scripts/bridge/_tutor-deck.cjs',
+      'scripts/build-hypercomb-articles.cjs',
+      'scripts/meaning-loop-phase1.ts',
+      // KNOWN DEBT — multi-anchor producers awaiting their end-of-pass build-record
+      'scripts/bridge/_ai-privacy-build.cjs',
+      'scripts/bridge/_ai-privacy-chart.cjs',
+      'scripts/bridge/_generate-dolphin-pages.cjs',
+      'scripts/bridge/_pheromone-workflow.cjs',
+    ].sort(), 'unwired multi-anchor producer')
+  })
+
   it('no NEW bare-word pool meaning — a new pool meaning must carry a colon', () => {
     // Pools of meaning and lineage sigbags share ONE flat OPFS root
     // namespace:

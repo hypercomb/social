@@ -98,13 +98,43 @@ export const DEAD_ZONE = 20
  *  it, mid-gesture, without releasing. Just past the far edge of the ring. */
 export const DESCEND_DISTANCE = RING_DISTANCE + HEX_RADIUS * 0.75
 
-/** Which slot a displacement from the origin selects. Returns `centre`
- *  inside the dead zone, otherwise the nearest of the six ring directions
- *  — at any distance, because direction is the whole signal. */
-export function directionAt(dx: number, dy: number): QuickMenuDirection {
+/**
+ * How far INTO a neighbouring slot the pointer must travel before that slot
+ * takes over, in degrees. Each sector is 60° wide, so the raw boundary sits
+ * 30° off a slot's centre line; with this much hysteresis the swap happens at
+ * 18°, meaningfully inside the new hexagon.
+ *
+ * Without it the highlight flips the instant you cross the boundary — while
+ * the pointer is still visually over the hexagon you are leaving — which
+ * reads as the menu changing its mind under your hand. You want to be a
+ * little way into a hexagon before it is yours.
+ */
+export const HYSTERESIS_DEGREES = 12
+
+/**
+ * Which slot a displacement from the origin selects. Returns `centre` inside
+ * the dead zone, otherwise the nearest of the six ring directions — at any
+ * distance, because direction is the whole signal.
+ *
+ * `current` is the slot already held. Passing it engages the hysteresis: an
+ * established slot keeps the highlight until the pointer is genuinely inside
+ * its neighbour. First acquisition (from `centre`) is always immediate, and
+ * so is the return to `centre`, because cancelling must never feel sticky.
+ */
+export function directionAt(
+  dx: number,
+  dy: number,
+  current: QuickMenuDirection = 'centre',
+): QuickMenuDirection {
   if (Math.hypot(dx, dy) <= DEAD_ZONE) return 'centre'
   const degrees = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360
-  return QUICK_MENU_RING[Math.round(degrees / 60) % 6]
+  const index = Math.round(degrees / 60) % 6
+  const nearest = QUICK_MENU_RING[index]
+  if (current === 'centre' || current === nearest) return nearest
+
+  // Signed offset from the candidate slot's centre line, in [-30, 30].
+  const offset = Math.abs((((degrees - index * 60) % 360) + 540) % 360 - 180)
+  return offset <= 30 - HYSTERESIS_DEGREES ? nearest : current
 }
 
 /** Pixel offset of a slot's hexagon centre from the ring centre. */

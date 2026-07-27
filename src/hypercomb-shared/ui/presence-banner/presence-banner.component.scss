@@ -11,7 +11,7 @@
   // global --hc-header-zoom knob). The header bar is z-index 60000 with a
   // frosted background, so anchoring at top:0 would render the badges
   // underneath it. Clearing the header keeps the strip glanceable.
-  top: calc(2.5rem * var(--hc-header-zoom, 1) + 0.4rem);
+  top: max(calc(2.5rem * var(--hc-header-zoom, 1) + 0.4rem), calc(var(--hc-header-anchor) + 0.07rem));
   left: 50%;
   transform: translateX(-50%);
   z-index: 55;
@@ -23,7 +23,7 @@
 // Touch shells render a taller (3.5rem) header — drop the strip further.
 @media (pointer: coarse) {
   :host {
-    top: calc(3.5rem * var(--hc-header-zoom, 1) + 0.4rem);
+    top: max(calc(3.5rem * var(--hc-header-zoom, 1) + 0.4rem), calc(var(--hc-header-anchor) + 1.07rem));
   }
 }
 

@@ -125,6 +125,58 @@ tutorialLessons.register({
 })
 
 tutorialLessons.register({
+  id: 'into',
+  level: L,
+  order: 45,
+  title: 'File a tile away',
+  pheromones: ['tutorial', 'lesson', 'intermediate', 'structure'],
+  teaches: ['into'],
+  requires: () => hasBehaviour('into'),
+  async run(stage) {
+    // Three tiles: two to file, one to file them INTO. Everything happens inside
+    // the practice page — the Organizer half of this lesson is narrated, because
+    // a real collection is a root of its own and that is outside our sandbox.
+    const three = await subjects(stage, 3, names(stage), 11)
+    const box = three[2]
+
+    await stage.flyToCell(box)
+    await stage.say('into', 'Filing things away',
+      'A reference lends a tile a second doorway and leaves it where it is. Filing is the other act: the tile MOVES. It goes inside another tile and stops being on this page at all.')
+    stage.highlight(null)
+
+    stage.select([three[0], three[1]])
+    await stage.wait(300)
+    await stage.flyToRect(stage.commandInput())
+    await stage.typeAndSubmit(`/into ${box}`, true)
+    await stage.wait(1400)
+    stage.highlight(null)
+
+    await stage.enterCell(box)
+    await stage.wait(600)
+    await stage.say('into-done', 'Moved in',
+      'There they are, living in “{cell}”. The page you took them from does not hold them any more — that is what makes this tidying rather than tagging. Undo puts them straight back; nothing was deleted.',
+      { params: { cell: box } })
+    await stage.leave()
+    await stage.wait(500)
+
+    // The same act at hive scale. Shown, not performed: pressing Move needs a
+    // real collection to land in, and making one would reach outside the
+    // practice page.
+    const pools = stage.chrome('pools.title')
+    if (pools) {
+      await stage.flyToRect(pools)
+      await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
+      await stage.wait(900)
+      await stage.say('into-organizer', 'Anywhere in the hive',
+        'The Organizer does this across your whole hive. Walk into a collection, pick tiles wherever they are, and it offers both verbs: Add leaves them where they live, Move brings them in. Holding Ctrl while you drag one tile onto another is the same act again, on one page.')
+      await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
+      await stage.wait(400)
+      stage.highlight(null)
+    }
+  },
+})
+
+tutorialLessons.register({
   id: 'palette',
   level: L,
   order: 50,

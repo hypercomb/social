@@ -44,7 +44,24 @@ const TEXT_BACK = 'rgba(216,230,238,0.38)'
 const CANCEL_FILL = 'rgba(214,126,126,0.12)'
 const CANCEL_STROKE = 'rgba(214,126,126,0.55)'
 const CANCEL_TEXT = 'rgb(214,146,146)'
-const TRAIL = 'rgba(126,182,214,0.45)'
+const CURSOR = 'rgb(126,182,214)'
+
+/**
+ * Above everything the participant can be looking at.
+ *
+ * The census this is derived from, so the next person needn't re-derive it:
+ * the Pixi tile canvas (`#pixi-host`) sits at 59989 — far above the 2400 this
+ * overlay first used, which is exactly why the ring came up UNDERNEATH the
+ * tiles. The shell's viewer/panel family occupies 100002–100004 (tags, files,
+ * clipboard, workflow designer, action card, contact form), and the pixi debug
+ * panels sit alone at 999999.
+ *
+ * The quick menu belongs above the panel family: it is transient, summoned
+ * deliberately, and dismissed the moment it is used, so it must be readable
+ * even when raised over an open panel. It stays below the debug surfaces,
+ * which are meant to sit on top of everything including this.
+ */
+const Z_INDEX = 100050
 
 const PAD = 6
 const HALF_WIDTH = RING_DISTANCE + HEX_RADIUS + PAD
@@ -69,7 +86,9 @@ type SlotElements = {
 
 type BuiltMenu = {
   readonly svg: SVGSVGElement
-  readonly trail: SVGLineElement
+  /** The drawn pointer. The real cursor is locked away while the ring is up,
+   *  so this is the only thing telling you where your hand is. */
+  readonly cursor: SVGGElement
   readonly slots: Map<QuickMenuDirection, SlotElements>
 }
 
@@ -120,7 +139,7 @@ export class QuickMenuOverlay {
     const host = document.createElement('div')
     host.id = 'hc-quick-menu'
     host.style.cssText =
-      'position:fixed;inset:0;z-index:2400;pointer-events:none;' +
+      `position:fixed;inset:0;z-index:${Z_INDEX};pointer-events:none;` +
       'contain:layout style;display:none;'
     document.body.appendChild(host)
     this.#host = host
@@ -138,15 +157,9 @@ export class QuickMenuOverlay {
     svg.setAttribute('aria-hidden', 'true')
     svg.style.cssText = 'position:absolute;overflow:visible;'
 
-    const trail = document.createElementNS(SVG_NS, 'line')
-    trail.setAttribute('x1', String(HALF_WIDTH))
-    trail.setAttribute('y1', String(HALF_HEIGHT))
-    trail.setAttribute('x2', String(HALF_WIDTH))
-    trail.setAttribute('y2', String(HALF_HEIGHT))
-    trail.setAttribute('stroke', TRAIL)
-    trail.setAttribute('stroke-width', '1.5')
-    trail.setAttribute('stroke-linecap', 'round')
-    svg.appendChild(trail)
+    // No travel line. Selection is by ROLL-OVER — the lit hexagon is the
+    // whole readout, and a line from the origin only repeats what the
+    // highlight already says.
 
     const declared = slotsByDirection(definition)
     const slots = new Map<QuickMenuDirection, SlotElements>()
@@ -180,7 +193,26 @@ export class QuickMenuOverlay {
       slots.set(direction, { hex, text, label })
     }
 
-    return { svg, trail, slots }
+    // The drawn pointer, appended last so it rides over the hexagons. Two
+    // shapes: a dark halo so it stays visible on a lit slot, and the mark
+    // itself. Small and quiet — it reports position, it does not decorate.
+    const cursor = document.createElementNS(SVG_NS, 'g')
+    const halo = document.createElementNS(SVG_NS, 'circle')
+    halo.setAttribute('r', '5')
+    halo.setAttribute('fill', 'rgba(11,15,20,0.85)')
+    const dot = document.createElementNS(SVG_NS, 'circle')
+    dot.setAttribute('r', '2.5')
+    dot.setAttribute('fill', CURSOR)
+    cursor.appendChild(halo)
+    cursor.appendChild(dot)
+    svg.appendChild(cursor)
+
+    return { svg, cursor, slots }
+  }
+
+  /** Move the drawn pointer to `dx`,`dy` from the ring centre. */
+  setCursor(dx: number, dy: number): void {
+    this.#active?.cursor.setAttribute('transform', `translate(${(HALF_WIDTH + dx).toFixed(1)},${(HALF_HEIGHT + dy).toFixed(1)})`)
   }
 
   // ── paint ───────────────────────────────────────────────────────────
@@ -219,7 +251,7 @@ export class QuickMenuOverlay {
       elements.text.textContent = direction === backDirection ? backLabel : elements.label
       this.#style(direction, elements, false)
     }
-    this.setTrail(0, 0)
+    this.setCursor(0, 0)
   }
 
   /** Which menu is on screen, by name. */
@@ -263,14 +295,6 @@ export class QuickMenuOverlay {
   /** Supply the localised word for the armed centre. */
   set cancelLabel(value: string) {
     this.#cancelLabel = value
-  }
-
-  /** Draw the travel so far, origin → pointer. */
-  setTrail(dx: number, dy: number): void {
-    const trail = this.#active?.trail
-    if (!trail) return
-    trail.setAttribute('x2', String(HALF_WIDTH + dx))
-    trail.setAttribute('y2', String(HALF_HEIGHT + dy))
   }
 
   #style(direction: QuickMenuDirection, elements: SlotElements, on: boolean): void {

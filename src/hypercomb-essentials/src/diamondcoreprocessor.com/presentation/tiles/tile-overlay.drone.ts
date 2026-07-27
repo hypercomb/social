@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-import { Drone, EffectBus, consumePointerGesture, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest } from '@hypercomb/core'
+import { Drone, EffectBus, consumePointerGesture, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
@@ -8,6 +8,7 @@ import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
+import { cellLocationSig } from '../../editor/tile-properties.js'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
@@ -261,11 +262,6 @@ export class TileOverlayDrone extends Drone {
   #substrateLabels = new Set<string>()
   #linkLabels = new Set<string>()
   #hiddenLabels = new Set<string>()
-  /** Readiness shade mirror (render:cell-count.shadedLabels): tiles whose
-   *  content is still arriving render dimmed and are INERT here — no press,
-   *  no click, no action overlay — so a bright tile always means
-   *  "preloaded, the click lands instantly". */
-  #shadedLabels = new Set<string>()
 
   // break-apart effect state
   #shatterContainer: Container | null = null
@@ -396,7 +392,7 @@ export class TileOverlayDrone extends Drone {
     'icon:edit-mode', 'icon:override-changed',
     'tags:removal-pending', 'tags:apply-pending',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
 
   #dropDragging = false
 
@@ -634,7 +630,6 @@ export class TileOverlayDrone extends Drone {
         this.#substrateLabels = new Set(payload.substrateLabels ?? [])
         this.#linkLabels = new Set(payload.linkLabels ?? [])
         this.#hiddenLabels = new Set(payload.hiddenLabels ?? [])
-        this.#shadedLabels = new Set(payload.shadedLabels ?? [])
         this.#flatPaths = new Map(Object.entries(payload.flatPaths ?? {}))
         this.#filterBlocked = new Set(payload.filterBlocked ?? [])
         this.#rebuildOccupiedMap()
@@ -1053,7 +1048,8 @@ export class TileOverlayDrone extends Drone {
   // #updatePerTileVisibility). Ordered main → feature → danger so `remove`
   // lands last, then chunked at MAX_ROW_ICONS. The rows are centred as a BLOCK
   // on ICON_Y, so one row sits dead centre of the doubled band and two rows
-  // straddle it — one per band row.
+  // straddle it — one per band row. Horizontally every row shares the first
+  // row's left edge (see below), so a wrap reads as one left-aligned block.
 
   #layoutIconRow(): void {
     const base = this.#actions.filter(a => a.button.visible)
@@ -1080,17 +1076,29 @@ export class TileOverlayDrone extends Drone {
     // Only what is laid out is shown, so hit-testing matches what is drawn.
     const inSeq = new Set(rows.flat())
     for (const a of this.#actions) a.button.visible = inSeq.has(a)
+
+    // Tell the renderer how tall to draw this tile's band. One row of icons
+    // keeps the text's own height — the band grows only when the icons
+    // actually wrap. Emitted every layout so it tracks per-tile visibility.
+    this.emitEffect('overlay:band-rows', { rows: Math.max(1, rows.length) })
+
     if (rows.length === 0) return
 
-    // Hex horizontal bound (mirrors computeIconPositions) — rows compress to fit.
+    // ONE origin for every row: the FIRST row is centred, and each row after it
+    // starts at that same x and reads left to right. The lefts line up on a
+    // wrap instead of a short second row floating centred under a full first
+    // one. Row 0 is always the widest (chunking fills it before wrapping), so
+    // centring on it also centres the block — and a lone row is centred, which
+    // is the same rule, not a special case.
+    // Hex horizontal bound (mirrors computeIconPositions) — the row compresses to fit.
     const available = (27.7 - 3) * 2
+    let spacing = ICON_SPACING
+    if (rows[0].length > 1 && (rows[0].length - 1) * spacing > available) {
+      spacing = available / (rows[0].length - 1)
+    }
+    const startX = Math.round(-(rows[0].length - 1) * spacing / 2)
     const top = ICON_Y - (rows.length - 1) * ICON_ROW_PITCH / 2
     rows.forEach((items, r) => {
-      let spacing = ICON_SPACING
-      if (items.length > 1 && (items.length - 1) * spacing > available) {
-        spacing = available / (items.length - 1)
-      }
-      const startX = Math.round(-(items.length - 1) * spacing / 2)
       const y = Math.round(top + r * ICON_ROW_PITCH)
       items.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), y))
     })
@@ -1792,7 +1800,7 @@ export class TileOverlayDrone extends Drone {
     // while armed), so the brush keeps working as the pointer keeps moving.
     if (this.#applyStroke) {
       const label = this.labelAtClient(e.clientX, e.clientY)
-      if (label && !this.#applyStrokeTouched.has(label) && !this.#shadedLabels.has(label)) {
+      if (label && !this.#applyStrokeTouched.has(label)) {
         this.#applyStrokeTouched.add(label)
         this.emitEffect('tags:apply-paint', { label, add: this.#applyStroke.add })
       }
@@ -1830,15 +1838,11 @@ export class TileOverlayDrone extends Drone {
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label))
 
-      // Readiness gate: no action overlay over a shaded (still-warming)
-      // tile — it is inert until it brightens. The hover ring is
-      // suppressed renderer-side (show-cell checks the same set on
-      // tile:hover), so hovering reads as empty space.
-      if (entry?.label && this.#shadedLabels.has(entry.label)) {
-        this.#overlay.visible = false
-        this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry.label })
-        return
-      }
+      // A shaded tile keeps ALL of its affordances — hover ring, action
+      // overlay, press, click. The shade tells you the inside is not loaded
+      // yet; it never tells you that you may not go. Hovering lifts it back
+      // to full opacity (show-cell), and clicking loads on demand — you wait,
+      // but the choice is yours.
 
       // Recompute on EVERY hover-tile change (cheap key compare; rebuild only
       // on transitions). Previously gated on #meshPublic — which meant that
@@ -2084,11 +2088,6 @@ export class TileOverlayDrone extends Drone {
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
     if (!entry?.label) return
 
-    // Readiness gate: a SHADED tile (content still arriving — dimmed by the
-    // renderer) is inert. The press falls through as if the hex were empty;
-    // the tile brightens in place when its bytes land and only then acts.
-    if (this.#shadedLabels.has(entry.label)) return
-
     // Bind this press to the TILE the user saw, not the position: capture the
     // map generation + resolved label. If the axial map is rebuilt between
     // now and the trailing click (render:cell-count for a new layer), #onClick
@@ -2182,7 +2181,6 @@ export class TileOverlayDrone extends Drone {
       if (this.#editing || this.#editCooldown) return
       if (this.#hasSelection || this.#touchDragging) return
       if (this.#tagRemovalArmed || this.#tagApplyArmed) return
-      if (this.#shadedLabels.has(label)) return
       this.#consumedPointerId = pointerId
       consumePointerGesture(pointerId)
       this.#pressCapture = null
@@ -2265,9 +2263,6 @@ export class TileOverlayDrone extends Drone {
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       if (!entry?.label) return
-      // Readiness gate — shaded tiles are inert to selection clicks too.
-      if (this.#shadedLabels.has(entry.label)) return
-
       this.emitEffect('tile:click', {
         q: axial.q,
         r: axial.r,
@@ -2329,10 +2324,6 @@ export class TileOverlayDrone extends Drone {
       TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
     )
     if (!entry?.label) { diag('no-entry-at-axial'); return }
-
-    // Readiness gate: a SHADED tile is inert — no action buttons, no
-    // selection, no navigation, no open — until it brightens.
-    if (this.#shadedLabels.has(entry.label)) { diag('shaded'); return }
 
     const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
@@ -2586,6 +2577,14 @@ export class TileOverlayDrone extends Drone {
     // CURRENT location (a no-op) can release the guard instead of stranding it.
     const before = this.#currentLocationKey()
 
+    // COUNT THE INTERACTION, at the choke point every entry gesture passes
+    // through — the tile you MEET is the tile whose insides deserve to be
+    // preloaded first, next time. Keyed by the tile's own location sig (the
+    // same key its properties use), fire-and-forget, durable through the
+    // tracker's write-ahead queue. A settled visit is counted separately by
+    // the tracker's lineage hook; both feed one weight.
+    void this.#countInteraction(label)
+
     // Block re-entry for the duration of this transition — every branch below
     // commits a navigation (reference portal, sets-root hop, or explorerEnter).
     this.#beginNavigationTransition()
@@ -2647,6 +2646,19 @@ export class TileOverlayDrone extends Drone {
     // a segment (explorerEnter guards empty/'.'/'..'), so this is never a no-op
     // on the normal path — the check is belt-and-braces and simply won't fire.
     this.#releaseGuardIfNoMove(before)
+  }
+
+  /** Record one interaction with the tile at `label` under the current
+   *  location. Best-effort: no tracker (or an older contract without `bump`)
+   *  ⇒ silent no-op, exactly like every other usage read. */
+  async #countInteraction(label: string): Promise<void> {
+    try {
+      const ranker = window.ioc.get<UsageRanker>(USAGE_IOC_KEY)
+      if (!ranker?.bump) return
+      const segs = (this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+        ?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      ranker.bump(await cellLocationSig(segs, label))
+    } catch { /* local telemetry — never blocks navigation */ }
   }
 
   // Shared guard + commit for the back-navigation gesture (right-click or
@@ -2845,9 +2857,9 @@ export class TileOverlayDrone extends Drone {
   #beginApplyStroke(e: PointerEvent): void {
     if (e.target !== this.#canvas) return
     const label = this.labelAtClient(e.clientX, e.clientY)
-    // Empty hex or a still-warming (shaded) tile: no stroke starts, so a press
-    // on empty canvas doesn't arm a phantom drag.
-    if (!label || this.#shadedLabels.has(label)) return
+    // Empty hex: no stroke starts, so a press on empty canvas doesn't arm a
+    // phantom drag.
+    if (!label) return
     const add = !this.#tagApplyStaged.has(label)
     this.#applyStroke = { add }
     this.#applyStrokeTouched = new Set([label])

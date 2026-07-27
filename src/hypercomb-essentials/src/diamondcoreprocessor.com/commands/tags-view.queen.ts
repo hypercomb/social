@@ -11,6 +11,7 @@ export class TagsViewQueenBee extends QueenBee {
   readonly command = 'tags'
   override readonly aliases = []
   override description = 'Open the tag view'
+  override descriptionKey = 'slash.tags'
   override examples = [
     { input: '/tags', result: 'Opens the right-docked tags panel' },
   ]

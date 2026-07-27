@@ -65,13 +65,31 @@
         </ul>
         <!-- The label names the destination rather than leaving it implicit:
              standing inside a collection sends the selection THERE, standing
-             anywhere else turns them into collections. -->
+             anywhere else turns them into collections.
+
+             TWO verbs, side by side, because "put this in there" means two
+             different things and the difference matters: ADD leaves the tile
+             where it lives and gives this collection a doorway onto it (so one
+             thing can belong to many collections), while MOVE files it away —
+             the tile leaves the page it was on and lives in here. Both are
+             offered rather than one being chosen for you, and the second line of
+             each button's title says which is which. -->
         @if (destination(); as into) {
           <button class="ai-staged-add" type="button" (click)="addStaged()"
                   [attr.aria-label]="'collections-landing.add-to' | t: { count: staged().length, name: into.label }"
-                  [title]="'collections-landing.add-to' | t: { count: staged().length, name: into.label }">
+                  [title]="'collections-landing.add-hint' | t: { count: staged().length, name: into.label }">
             {{ 'collections-landing.add-to' | t: { count: staged().length, name: into.label } }}
           </button>
+          @if (canMove()) {
+            <button class="ai-staged-move" type="button" (click)="moveStaged()"
+                    [attr.aria-label]="'collections-landing.move-to' | t: { count: staged().length, name: into.label }"
+                    [title]="'collections-landing.move-hint' | t: { count: staged().length, name: into.label }">
+              <span class="mat-sym" aria-hidden="true">move_down</span>
+              <span class="ai-staged-move-label">
+                {{ 'collections-landing.move-to' | t: { count: staged().length, name: into.label } }}
+              </span>
+            </button>
+          }
         } @else {
           <button class="ai-staged-add" type="button" (click)="addStaged()"
                   [attr.aria-label]="addKey | t: { count: staged().length }"

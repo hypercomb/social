@@ -584,13 +584,12 @@ export class MoveDrone extends Drone {
     const movedLabels = [...this.#movedGroup.keys()]
     if (movedLabels.length === 0) { this.cancelMove(source); return }
 
-    const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
-    const committer = window.ioc.get<CopyCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
     const lineage = this.resolve<any>('lineage')
-    if (!history || !committer || !lineage) { this.cancelMove(source); return }
+    if (!lineage) { this.cancelMove(source); return }
 
-    // Refuse while the history cursor is rewound (scrub-back is view-only) — the
-    // same guard copy/reorder use. Feedback, then decline; never half-run.
+    // Refuse while the history cursor is rewound (scrub-back is view-only) —
+    // BEFORE the animation, so a declined drag never plays a suck-in it will not
+    // honour. commitMoveInto guards it again for the doors that reach it directly.
     const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
       const i18nMove = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
@@ -604,115 +603,44 @@ export class MoveDrone extends Drone {
     }
 
     const sourceSegments: readonly string[] = lineage.explorerSegments?.() ?? []
-    const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
-    if (!sourceParent) {
-      console.warn('[move] drop-into aborted — source parent unresolved', { movedLabels })
-      this.cancelMove(source)
-      return
-    }
-    // Sig-space membership: manifest-first name→sig pairs. The commits
-    // below are DELTA-shaped (removeSig / append / swap), so a cold
-    // sibling can no longer be wiped by a re-listing — the old strict
-    // reads and their cold aborts are structurally unnecessary.
-    const { entries: sourceEntries } = await childEntriesOf(history, sourceParent)
-    const sigByName = new Map(sourceEntries.map(e => [e.name, e.sig]))
-    if (!movedLabels.every(l => sigByName.has(l))) {
-      console.warn('[move] drop-into aborted — dragged tiles not resolvable in the source parent', { movedLabels })
-      this.cancelMove(source)
-      return
-    }
 
-    // The target tile becomes a parent: its layer + existing children, so
-    // the moved tiles land AFTER them and never collide by name.
-    const targetOldSig = sigByName.get(targetLabel)
-    const targetLayer = targetOldSig ? await history.getLayerBySig(targetOldSig) : null
-    if (!targetLayer) {
-      console.warn('[move] drop-into aborted — target layer unresolved', { targetLabel })
-      this.cancelMove(source)
-      return
-    }
-    const { entries: targetEntries } = await childEntriesOf(history, targetLayer)
-    const targetTaken = new Set(targetEntries.map(e => e.name))
-    const targetParentSegments = [...sourceSegments, targetLabel]
-
-    // Suck-into-tile animation up front (purely visual); the commits below
-    // are the authoritative MOVE.
+    // Suck-into-tile animation up front (purely visual); the commit below is
+    // the authoritative MOVE.
     this.emitEffect('move:drop-into-commit', { label: targetLabel, dragged: [...movedLabels] })
 
-    // Each dragged tile is ONE collection sig — captured live (sealSubtree)
-    // with its stored child sig as fallback, then re-minted once if it needs
-    // a landing index. The subtree is never re-committed.
-    const { appends, removes, landed } = await this.#captureMoves(
-      history, sourceSegments, movedLabels, sigByName, targetTaken, targetEntries.length, 'drop-into',
-    )
+    // ONE primitive, three doors. Dragging a tile onto another tile, typing
+    // `/into`, and pressing Move in the Organizer are the SAME act — a re-home
+    // into a destination — so they must not be three implementations of it.
+    // Here the destination is a child of the page we are standing on, which is
+    // the topology commitMoveInto commits with the free ancestor swap.
+    const landed = await this.commitMoveInto(movedLabels, sourceSegments, [...sourceSegments, targetLabel])
     if (landed.length === 0) { this.cancelMove(source); return }
 
-    EffectBus.emit('fs:changed', { segments: [...sourceSegments] })
-
-    // Seed the participant-local render index (hc:tile-props-index) for the
-    // moved tiles at their NEW location under the target. show-cell resolves
-    // a local tile's image ONLY through this index — without the seed a
-    // re-homed tile renders BLANK until a reload heals it. A pure sig-walk
-    // over the (warm) collections; no commits.
-    await this.#seedPropsIndex(history, appends, targetParentSegments)
-
-    // TWO surgical commits, deepest FIRST: the target gains the collection
-    // sigs, then the source parent drops the moved sigs and — in the SAME
-    // marker, for free — swaps the target's now-stale sig for its post-gain
-    // one. Because the source's new children exclude the moved sigs, this is
-    // a true MOVE; the tiles can never linger as copies. Nothing is deleted:
-    // every moved subtree's bytes, markers and bag survive, so undo at either
-    // page restores the prior state.
-    const targetNewSig = await committer.commitChildrenDeltas(targetParentSegments, { appends })
-    await committer.commitChildrenDeltas(sourceSegments, {
-      removes,
-      swaps: (targetOldSig && targetNewSig && targetOldSig !== targetNewSig)
-        ? [{ from: targetOldSig, to: targetNewSig }]
-        : [],
-    })
-
-    // The moved cells leave THIS level (now children of the target). Carry the
-    // source segments explicitly — the awaited commit means a segment-less emit
-    // could bind the removal to wherever the user navigated mid-commit.
-    for (const label of landed) {
-      EffectBus.emit('cell:removed', { cell: label, segments: [...sourceSegments] })
-    }
-
     // Stay at the current level — the moved tiles simply vanish into the target
-    // ("you won't see them anymore"). No navigation; clear the now-gone tiles
-    // from the selection.
-    const selection = this.resolve<any>('selection')
-    selection?.clear?.()
-
+    // ("you won't see them anymore"). No navigation.
     this.emitEffect('move:preview', null)
     this.emitEffect('move:drop-into', null)
-    this.emitEffect('move:committed', { order: [] })
 
     this.#dropIntoActive = false
     this.#dropIntoLabel = null
     this.#lastHoverAxial = null
     this.#reset(source)
-
-    void new hypercomb().act()
   }
 
   /**
    * Promote tiles UP one level — re-home them from the CURRENT location into its
-   * PARENT, as siblings of the current location's own tile (the inverse of
-   * drop-into). No-op at the root (no parent). Two sig-native delta commits
-   * (deepest first — see the commit block below), the same primitive drop-into
-   * and clipboard paste use, and it seeds the render index so the promoted tiles
-   * aren't blank at their new location. Driven from the selection menu (whole
-   * selection) and the tile kebab (one label).
+   * PARENT, as siblings of the current location's own tile. That is
+   * commitMoveInto at the inverse topology of drop-into (the source is the child
+   * of the destination), so this declares only what is genuinely its own: the
+   * destination, and the refusal at the root where there is no parent. Driven
+   * from the selection menu (whole selection) and the tile kebab (one label).
    */
   commitPromoteToParent = async (labels: readonly string[]): Promise<void> => {
     const moved = [...new Set(labels)].filter(Boolean)
     if (moved.length === 0) return
 
-    const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
-    const committer = window.ioc.get<CopyCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
     const lineage = this.resolve<any>('lineage')
-    if (!history || !committer || !lineage) return
+    if (!lineage) return
 
     const sourceSegments: readonly string[] = lineage.explorerSegments?.() ?? []
     if (sourceSegments.length === 0) {
@@ -720,79 +648,221 @@ export class MoveDrone extends Drone {
       EffectBus.emit('toast:show', { type: 'info', title: i18n0?.t('move.promote.at-root.title') ?? 'Already at the top', message: i18n0?.t('move.promote.at-root.message') ?? 'These tiles are at the root — there is no parent to promote to.' })
       return
     }
-    const parentSegments = sourceSegments.slice(0, -1)
+
+    await this.commitMoveInto(moved, sourceSegments, sourceSegments.slice(0, -1))
+  }
+
+  /**
+   * Re-home tiles into an ARBITRARY destination — the GENERAL form of the move
+   * that drop-into and promote each perform against one fixed neighbour.
+   *
+   * Drop-into can only reach a tile that is on the page and promote only the
+   * parent, so "file this away in that collection over there" had no path at
+   * all. The Organizer's Add is not that act: it writes a REFERENCE, so the tile
+   * gains a doorway and stays exactly where it was — right for belonging in
+   * several places, wrong for tidying up. This is CUSTODY. The tile leaves the
+   * layer it was on and lives inside the destination, which is why it vanishes
+   * from where it used to be.
+   *
+   * Same primitives as the other two: one collection sig per tile
+   * (captureCollectionSig), a landing index folded in by re-minting only the top
+   * node, the participant-local render-index seed, and children DELTAS so a
+   * sibling nobody has read stays untouched. What differs is the COMMIT SHAPE,
+   * which follows the topology of the two locations:
+   *
+   *   • destination INSIDE the source (drop-into) → the destination gains, then
+   *     the source loses AND swaps the destination's now-stale sig, free, in the
+   *     same marker.
+   *   • source INSIDE the destination (promote) → the inverse ordering.
+   *   • UNRELATED locations → two plain commits, no swap. There is no shared
+   *     edge for a swap to ride on, and a location resolves from its OWN bag
+   *     head (the parent's stored child sig is only a hint), so both pages read
+   *     correctly afterwards. This is the shape clipboard cut+paste already
+   *     commits in — see clipboard-sig-native.md.
+   *
+   * Returns the labels that actually LANDED. A name already taken at the
+   * destination is skipped rather than clobbered, because a name is an address.
+   */
+  commitMoveInto = async (
+    labels: readonly string[],
+    sourceSegments: readonly string[],
+    targetSegments: readonly string[],
+  ): Promise<readonly string[]> => {
+    const moved = [...new Set(labels)].filter(Boolean)
+    if (moved.length === 0) return []
+
+    const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const committer = window.ioc.get<CopyCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    const lineage = this.resolve<any>('lineage')
+    if (!history || !committer || !lineage) return []
+
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    const refuse = (key: string, title: string, message: string): readonly string[] => {
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        title: i18n?.t(`move.into.${key}.title`) ?? title,
+        message: i18n?.t(`move.into.${key}.message`) ?? message,
+      })
+      return []
+    }
 
     const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
-      const i18n1 = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
-      EffectBus.emit('toast:show', { type: 'info', title: i18n1?.t('move.promote.rewound.title') ?? 'Viewing history', message: i18n1?.t('move.promote.rewound.message') ?? "Can't move while scrubbed back — return to the latest (Restore) to edit." })
-      return
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        title: i18n?.t('move.rewound.title') ?? 'Viewing history',
+        message: i18n?.t('move.rewound.message') ?? "Can’t move while scrubbed back — return to the latest (Restore) to edit.",
+      })
+      return []
+    }
+
+    const source = [...sourceSegments]
+    const target = [...targetSegments]
+    const same = (a: readonly string[], b: readonly string[]): boolean =>
+      a.length === b.length && a.every((s, i) => s === b[i])
+    /** Is `outer` a strict ancestor path of `inner`? */
+    const inside = (outer: readonly string[], inner: readonly string[]): boolean =>
+      outer.length < inner.length && outer.every((s, i) => s === inner[i])
+
+    if (same(source, target)) {
+      return refuse('here', 'Already there',
+        'These tiles are already on that page — there is nothing to move.')
+    }
+    // A tile can never contain itself. Both the destination BEING a moved tile
+    // and the destination living INSIDE one would detach the subtree from the
+    // tree it is part of, and the tiles would be reachable from nowhere.
+    for (const label of moved) {
+      const own = [...source, label]
+      if (same(own, target) || inside(own, target)) {
+        return refuse('self', 'Can’t move a tile into itself',
+          `“${label}” is where you are trying to put it — pick a destination outside it.`)
+      }
     }
 
     try {
-      const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
+      // ── read both ends ──────────────────────────────────────────────────────
+      const sourceParent = same(source, (lineage.explorerSegments?.() ?? []).map(String))
+        ? await this.#resolveCurrentParent(history, lineage, source)
+        : await resolveLayerAt(history, lineage.domain, source)
       if (!sourceParent) {
-        console.warn('[move] promote aborted — source unresolved', { moved })
-        return
+        console.warn('[move] move-into aborted — source unresolved', { source, moved })
+        return []
       }
-      // Sig-space membership — the commits below are delta-shaped, so no
-      // strict read and no cold abort: an unseen sibling rides through the
-      // source's marker verbatim instead of being wiped by a re-listing.
       const { entries: sourceEntries } = await childEntriesOf(history, sourceParent)
       const sigByName = new Map(sourceEntries.map(e => [e.name, e.sig]))
       if (!moved.every(l => sigByName.has(l))) {
-        console.warn('[move] promote aborted — tiles not resolvable in the source', { moved })
-        return
+        console.warn('[move] move-into aborted — tiles not resolvable in the source', { source, moved })
+        return []
       }
 
-      const destParent = await resolveLayerAt(history, lineage.domain, parentSegments)
-      if (!destParent) {
-        console.warn('[move] promote aborted — destination parent unresolved', { parentSegments })
-        return
+      const destLayer = await this.#warmDestination(history, lineage, target)
+      if (!destLayer) {
+        console.warn('[move] move-into aborted — destination unresolved', { target })
+        return refuse('unreachable', 'Can’t reach that page',
+          'The destination could not be read, so nothing was moved.')
       }
-      const { entries: destEntries } = await childEntriesOf(history, destParent)
+      const { entries: destEntries } = await childEntriesOf(history, destLayer)
       const destTaken = new Set(destEntries.map(e => e.name))
-      // The current location is itself a CHILD of the destination — its sig
-      // changes when it drops the promoted tiles, so the destination's marker
-      // must swap it (folded into the same commit below, for free).
-      const sourceOldSig = destEntries.find(e => e.name === sourceSegments[sourceSegments.length - 1])?.sig
 
       const { appends, removes, landed } = await this.#captureMoves(
-        history, sourceSegments, moved, sigByName, destTaken, destEntries.length, 'promote',
+        history, source, moved, sigByName, destTaken, destEntries.length, 'move-into',
       )
-      if (landed.length === 0) return
+      if (landed.length === 0) {
+        const name = target[target.length - 1] ?? 'there'
+        return refuse('taken', 'Those names are taken',
+          `“${name}” already holds a tile by each of those names, and a name is an address — nothing was overwritten.`)
+      }
 
-      EffectBus.emit('fs:changed', { segments: [...sourceSegments] })
+      EffectBus.emit('fs:changed', { segments: [...source] })
+      await this.#seedPropsIndex(history, appends, target)
 
-      // Seed the render index for the promoted tiles at their NEW (parent)
-      // location — same gap/fix as drop-into and clipboard paste.
-      await this.#seedPropsIndex(history, appends, parentSegments)
+      // ── commit, in the order the topology dictates (see the header) ─────────
+      if (inside(source, target) && target.length === source.length + 1) {
+        const label = target[target.length - 1]
+        const oldSig = sigByName.get(label)
+        const newSig = await committer.commitChildrenDeltas(target, { appends })
+        await committer.commitChildrenDeltas(source, {
+          removes,
+          swaps: (oldSig && newSig && oldSig !== newSig) ? [{ from: oldSig, to: newSig }] : [],
+        })
+      } else if (inside(target, source) && source.length === target.length + 1) {
+        const label = source[source.length - 1]
+        const oldSig = destEntries.find(e => e.name === label)?.sig
+        const newSig = await committer.commitChildrenDeltas(source, { removes })
+        await committer.commitChildrenDeltas(target, {
+          appends,
+          swaps: (oldSig && newSig && oldSig !== newSig) ? [{ from: oldSig, to: newSig }] : [],
+        })
+      } else {
+        // Unrelated ends: the destination GAINS first, so a failure between the
+        // two commits leaves the tiles reachable twice rather than nowhere.
+        await committer.commitChildrenDeltas(target, { appends })
+        await committer.commitChildrenDeltas(source, { removes })
+      }
 
-      // TWO surgical commits, deepest FIRST (the inverse of drop-into: here
-      // the LOSING location is the child). The current location drops the
-      // promoted sigs; then the parent gains them and, in the same marker,
-      // swaps the current location's now-stale sig. Nothing is deleted.
-      const sourceNewSig = await committer.commitChildrenDeltas(sourceSegments, { removes })
-      await committer.commitChildrenDeltas(parentSegments, {
-        appends,
-        swaps: (sourceOldSig && sourceNewSig && sourceOldSig !== sourceNewSig)
-          ? [{ from: sourceOldSig, to: sourceNewSig }]
-          : [],
-      })
-
-      // The promoted cells leave THIS level (they're at the parent now). Carry
-      // the source segments explicitly.
+      // Carry the segments explicitly on both sides — the awaited commits mean a
+      // segment-less emit would bind to wherever the participant has navigated.
       for (const label of landed) {
-        EffectBus.emit('cell:removed', { cell: label, segments: [...sourceSegments] })
+        EffectBus.emit('cell:removed', { cell: label, segments: [...source] })
+        EffectBus.emit('cell:added', { cell: label, segments: [...target], viaUpdate: true })
+      }
+
+      // Whichever end is the page ON SCREEN has a new head, and the history
+      // cursor is what that page reads THROUGH — left pinned to its previous
+      // position it renders the pre-move layer until something else moves it.
+      // (Drop-into never needed this: its destination is inside the page, so the
+      // page's own marker carries the change. A destination somewhere else does.)
+      const current = (lineage.explorerSegments?.() ?? []).map(String)
+      if (same(current, target) || same(current, source)) {
+        const cursor = window.ioc.get<{
+          refreshForLocation?: (sig: string) => Promise<void> | void
+          jumpToLatest?: () => void
+        }>('@diamondcoreprocessor.com/HistoryCursorService')
+        const locSig = await history.sign({ domain: lineage.domain, explorerSegments: () => current })
+          .catch(() => '')
+        if (locSig) {
+          await cursor?.refreshForLocation?.(locSig)
+          cursor?.jumpToLatest?.()
+        }
       }
 
       const selection = this.resolve<any>('selection')
       selection?.clear?.()
       this.emitEffect('move:committed', { order: [] })
       void new hypercomb().act()
+      return landed
     } catch (err) {
-      console.warn('[move] commitPromoteToParent failed:', err)
+      console.warn('[move] commitMoveInto failed:', err)
+      return []
     }
+  }
+
+  /**
+   * The destination layer, guaranteed to have a MARKER of its own.
+   *
+   * A children delta hydrates from the destination's own bag head. When that bag
+   * is cold — the page has never been committed at, so its contents exist only
+   * as its parent's carried hint — the delta would hydrate from a bare `{name}`
+   * husk and the new head would silently DROP every carried child. Drop-into and
+   * promote never meet that case (their destination is always the page on screen
+   * or its parent, hence warm); an arbitrary destination is exactly where it
+   * bites. So plant the hint as a real marker first: identical bytes, no change
+   * to what the page holds, and the delta then lands on a warm bag.
+   */
+  async #warmDestination(
+    history: PlacementHistory,
+    lineage: any,
+    segments: readonly string[],
+  ): Promise<PlacementLayer | null> {
+    const resolved = await resolveLayerAt(history, lineage.domain, segments)
+    if (!resolved) return null
+    const locSig = await history.sign({ domain: lineage.domain, explorerSegments: () => segments })
+      .catch(() => '')
+    if (!locSig) return resolved
+    const own = await history.currentLayerAt(locSig).catch(() => null)
+    if (own) return own
+    await history.commitLayer(locSig, resolved)
+    return resolved
   }
 
   /**

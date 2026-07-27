@@ -8,7 +8,7 @@
   position: fixed;
   // Clear the top header bar (2.5rem desktop, scaled by --hc-header-zoom);
   // sit a step below the presence strip so both can coexist.
-  top: calc(2.5rem * var(--hc-header-zoom, 1) + 2.6rem);
+  top: max(calc(2.5rem * var(--hc-header-zoom, 1) + 2.6rem), calc(var(--hc-header-anchor) + 2.27rem));
   left: 50%;
   transform: translateX(-50%);
   z-index: 56;
@@ -19,7 +19,7 @@
 
 @media (pointer: coarse) {
   :host {
-    top: calc(3.5rem * var(--hc-header-zoom, 1) + 2.6rem);
+    top: max(calc(3.5rem * var(--hc-header-zoom, 1) + 2.6rem), calc(var(--hc-header-anchor) + 3.27rem));
   }
 }
 

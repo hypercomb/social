@@ -1,9 +1,13 @@
 // hypercomb-shared/core/usage-tracker.ts
 //
-// Local, per-participant usage-timing framework. Records how heavily each
-// location (lineage sig) is visited — visit COUNT + recency-decayed DWELL —
-// and exposes a ranking so the preloader warms the tiles a participant
+// Local, per-participant usage-timing framework. Records how heavily each TILE
+// (by its own location sig) is met — INTERACTION count + recency-decayed DWELL
+// — and exposes a ranking so the preloader warms the tiles a participant
 // actually uses FIRST (so they brighten out of the readiness shade first).
+//
+// Every increment is queued write-ahead (synchronous, local) and only leaves
+// the queue once the pool write confirms, so a count is never lost to a crash,
+// a kill, or a reload inside the persist debounce.
 //
 // LOCAL ONLY. Like the clipboard, this is participant-local behaviour: never
 // shared, never written to history, never in the mesh. It is NOT a derived
@@ -27,6 +31,14 @@ import type { Store } from './store'
 const USAGE_MEANING = 'usage:dwell'
 const USAGE_SUBKEY = 'v1'
 
+// WRITE-AHEAD QUEUE. The pool doc is written debounced + async (OPFS shares one
+// queue with the render path, so it must never be synchronous on the hot path).
+// Every increment therefore lands FIRST in this synchronous local queue as a
+// DELTA, and is only subtracted once the pool write has actually succeeded. A
+// crash, a kill, or a reload mid-debounce loses nothing: the queue is read back
+// at construction and merged on top of the persisted doc.
+const PENDING_KEY = 'hc:usage-pending'
+
 const SIG_RE = /^[0-9a-f]{64}$/
 const HALF_LIFE_MS = 14 * 24 * 60 * 60 * 1000   // 14 days — stale trails fade
 const VISIT_BIAS_MS = 500                        // each visit ≈ 0.5s of dwell, so frequent-but-brief still ranks
@@ -39,6 +51,7 @@ type UsageRecord = { c: number; d: number; t: number }
 
 export class UsageTracker extends EventTarget implements UsageRanker {
   #records = new Map<string, UsageRecord>()
+  #pending = new Map<string, UsageRecord>()   // write-ahead deltas not yet in the pool doc
   #currentSig = ''
   #enteredAt = 0                 // Date.now() when the current timer started; 0 = paused
   #store: Store | undefined
@@ -47,6 +60,10 @@ export class UsageTracker extends EventTarget implements UsageRanker {
 
   constructor() {
     super()
+    // Recover the previous session's un-flushed increments BEFORE anything can
+    // record a new one — they seed #records, and stay queued on disk until a
+    // pool write actually succeeds.
+    this.#loadPending()
     // Resolve deps via IoC — robust to barrel order. Both register in the
     // shared/core barrel; whenReady fires immediately if already present.
     window.ioc?.whenReady?.('@hypercomb.social/Store', (s: unknown) => {
@@ -85,6 +102,28 @@ export class UsageTracker extends EventTarget implements UsageRanker {
       .map(x => x.sig)
   }
 
+  interactions(sig: string): number {
+    return this.#records.get(sig)?.c ?? 0
+  }
+
+  /** Count an interaction with a tile — TILE LEVEL, keyed by the tile's own
+   *  location sig. Called when a tile is met (entered/opened), so the count
+   *  reflects intent even when the navigation that follows is slow, blocked,
+   *  or abandoned; a visit that does settle is counted once by #onChange.
+   *  Queued write-ahead, so an increment survives a crash before the flush. */
+  bump(sig: string, n = 1): void {
+    if (!SIG_RE.test(sig) || !(n > 0)) return
+    const now = Date.now()
+    const rec = this.#records.get(sig) ?? { c: 0, d: 0, t: now }
+    rec.d = this.#decayTo(rec, now)
+    rec.c += n
+    rec.t = now
+    this.#records.set(sig, rec)
+    this.#queue(sig, n, 0, now)
+    this.#schedulePersist()
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
   // ── dwell timing ────────────────────────────────────────────────────
   async #onChange(lineage: Lineage): Promise<void> {
     let sig = ''
@@ -98,6 +137,7 @@ export class UsageTracker extends EventTarget implements UsageRanker {
     rec.c += 1
     rec.t = now
     this.#records.set(sig, rec)
+    this.#queue(sig, 1, 0, now)
     this.#enteredAt = now
     this.#schedulePersist()
     this.dispatchEvent(new CustomEvent('change'))
@@ -116,6 +156,7 @@ export class UsageTracker extends EventTarget implements UsageRanker {
     rec.d = this.#decayTo(rec, now) + dwellMs
     rec.t = now
     this.#records.set(sig, rec)
+    this.#queue(sig, 0, dwellMs, now)
     this.#schedulePersist()
   }
 
@@ -126,6 +167,66 @@ export class UsageTracker extends EventTarget implements UsageRanker {
     const age = now - rec.t
     if (age <= 0) return rec.d
     return rec.d * Math.pow(0.5, age / HALF_LIFE_MS)
+  }
+
+  // ── write-ahead queue (synchronous, crash-durable) ───────────────────
+  /** Append a delta to the queue and write it out immediately. Increments are
+   *  rare (a navigation, a tile entry, a dwell close-out), so a synchronous
+   *  local write here costs nothing and buys "never lost". */
+  #queue(sig: string, dc: number, dd: number, now: number): void {
+    const cur = this.#pending.get(sig) ?? { c: 0, d: 0, t: now }
+    cur.c += dc
+    cur.d += dd
+    cur.t = now
+    this.#pending.set(sig, cur)
+    this.#writePending()
+  }
+
+  #writePending(): void {
+    try {
+      if (this.#pending.size === 0) { localStorage.removeItem(PENDING_KEY); return }
+      if (this.#pending.size > MAX_RECORDS) {
+        // Bound the queue the same way the doc is bounded: keep the heaviest.
+        const kept = [...this.#pending.entries()]
+          .sort((a, b) => (b[1].c - a[1].c) || (b[1].d - a[1].d))
+          .slice(0, MAX_RECORDS)
+        this.#pending = new Map(kept)
+      }
+      const out: Record<string, UsageRecord> = {}
+      for (const [sig, rec] of this.#pending) out[sig] = rec
+      localStorage.setItem(PENDING_KEY, JSON.stringify(out))
+    } catch { /* storage full / unavailable — the pool doc is still the path home */ }
+  }
+
+  /** Read the queue back at construction: these are increments that were
+   *  recorded but never confirmed into the pool doc. They seed the in-memory
+   *  records and STAY queued until a write succeeds. */
+  #loadPending(): void {
+    try {
+      const raw = localStorage.getItem(PENDING_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      for (const [sig, val] of Object.entries(parsed ?? {})) {
+        const rec = val as UsageRecord
+        if (!SIG_RE.test(sig) || !rec ||
+          typeof rec.c !== 'number' || typeof rec.d !== 'number' || typeof rec.t !== 'number') continue
+        this.#pending.set(sig, { c: rec.c, d: rec.d, t: rec.t })
+        this.#records.set(sig, { c: rec.c, d: rec.d, t: rec.t })
+      }
+    } catch { /* unreadable queue — fall back to the pool doc alone */ }
+  }
+
+  /** Subtract what a successful write actually carried, so increments recorded
+   *  DURING the write stay queued rather than being silently dropped. */
+  #settle(flushed: Map<string, UsageRecord>): void {
+    for (const [sig, done] of flushed) {
+      const cur = this.#pending.get(sig)
+      if (!cur) continue
+      cur.c -= done.c
+      cur.d -= done.d
+      if (cur.c <= 0 && cur.d <= 0) this.#pending.delete(sig)
+    }
+    this.#writePending()
   }
 
   // ── persistence (local-only pool of meaning) ────────────────────────
@@ -142,9 +243,14 @@ export class UsageTracker extends EventTarget implements UsageRanker {
     try {
       const pool = await this.#store.getPool(USAGE_MEANING)
       if (!pool) return
+      // Snapshot the queue BEFORE the write: what this doc carries is exactly
+      // what may leave the queue afterwards.
+      const inFlight = new Map<string, UsageRecord>()
+      for (const [sig, rec] of this.#pending) inFlight.set(sig, { ...rec })
       const bytes = new TextEncoder().encode(JSON.stringify({ v: 1, records: this.#topRecords() }))
       await this.#store.putPoolDoc(pool, bytes.buffer as ArrayBuffer, USAGE_SUBKEY)
-    } catch { /* local telemetry — non-fatal */ }
+      this.#settle(inFlight)
+    } catch { /* local telemetry — non-fatal; the queue keeps the increments */ }
   }
 
   #topRecords(): Record<string, UsageRecord> {
@@ -185,6 +291,9 @@ export class UsageTracker extends EventTarget implements UsageRanker {
       }
     } catch { /* non-fatal */ }
     this.#loaded = true
+    // Recovered queue from a previous session — fold it into the doc now, so a
+    // participant who never navigates again still keeps yesterday's counts.
+    if (this.#pending.size > 0) this.#schedulePersist()
   }
 }
 

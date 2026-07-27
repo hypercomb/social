@@ -19,6 +19,16 @@ export interface UsageRanker {
    * Never throws; returns a new array.
    */
   rank(sigs: readonly string[]): string[]
+  /**
+   * Record an INTERACTION with a tile — meeting it counts, whether or not the
+   * navigation that follows ever settles. Optional so a host without a tracker
+   * (or an older one) collapses to no-op; callers use `ranker.bump?.(sig)`.
+   * Durable: each bump lands in a write-ahead queue before it is folded into
+   * the persisted record, so a crash never loses the count.
+   */
+  bump?(sig: string, n?: number): void
+  /** Raw interaction count for a tile (visits + bumps); 0 when unseen. */
+  interactions?(sig: string): number
 }
 
 export const USAGE_IOC_KEY = '@hypercomb.social/UsageTracker'

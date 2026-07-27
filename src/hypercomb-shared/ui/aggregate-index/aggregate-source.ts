@@ -146,6 +146,25 @@ export interface AggregateSource {
    *  that collection instead. Same act at two grains: promote, or gather. */
   add?(entries: readonly StagedEntry[], into?: AggregateItem): Promise<AddedRows>
 
+  /** i18n key + handler for MOVING the current selection into a destination.
+   *
+   *  Add and move are the two things "put this in there" can mean, and they are
+   *  not interchangeable:
+   *    • `add`  — writes a REFERENCE. The tile gains a doorway here and stays
+   *      exactly where it lives, which is what lets one thing belong to several
+   *      collections at once.
+   *    • `move` — CUSTODY. The tile leaves the layer it was on and lives inside
+   *      the destination, so it disappears from where it used to be.
+   *  Tidying up is the second one, and it is the reason this exists: every route
+   *  the app had (Add, /reference) left the tile where it was.
+   *
+   *  Only ever called WITH a destination. Moving into the index itself would mean
+   *  re-homing content under `sets/`, and `sets/` holds pointers, not content.
+   *  A source with no meaning for custody omits this and the panel never offers
+   *  the button. */
+  readonly moveKey?: string
+  move?(entries: readonly StagedEntry[], into: AggregateItem): Promise<void>
+
   /** The chain of versions behind a row, newest first. A source that has no
    *  meaning for "what has this been before" omits it and the panel never
    *  offers the affordance — same rule as every other gesture here. */

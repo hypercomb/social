@@ -23,6 +23,36 @@
 // no calc() in `zoom`, which keeps it robust across browsers). At the default
 // size this matches the original chrome exactly: 1.0 base, 1.15 in the band.
 
+// ── the header's bottom edge — ONE anchor for everything below it ────
+//
+// Every header-anchored surface used to recompute its own offset as
+// `calc(<base>rem * var(--hc-header-zoom))`, which silently assumes the bar
+// renders exactly its nominal height. That assumption broke twice: on devices
+// where the bar renders taller, and now that the ICON RAIL WRAPS — a cell
+// carrying several branch-scoped behaviours pushes the rail to two or three
+// rows, and the bar grows with it.
+//
+// `max()` of the nominal height and the LIVE measured bottom
+// (`--hc-header-bottom`, published by controls-bar's ResizeObserver) means
+// this can only ever push offsets DOWN, never up. With the var unset it is
+// exactly the old nominal value, so a one-row rail renders pixel-identically.
+//
+// Panels add their own air on top: `calc(var(--hc-header-anchor) + <air>)`.
+// Never go back to a bare `<base>rem * zoom` — that is the bug this replaces.
+:root {
+  --hc-header-nominal: 2.83rem;   // 2.5rem bar + padding + border, desktop
+  --hc-header-anchor: max(
+    calc(var(--hc-header-nominal) * var(--hc-header-zoom, 1.0)),
+    var(--hc-header-bottom, 0px)
+  );
+}
+
+// Touch chrome is the taller 3.5rem bar (see _header-bar.scss `@include touch`,
+// which expands to exactly this query).
+@media (pointer: coarse) {
+  :root { --hc-header-nominal: 3.83rem; }
+}
+
 :root                        { --hc-header-zoom: 1.0;  }  // size 1 / compact (default — slim)
 :root[data-header-size='1']  { --hc-header-zoom: 1.0;  }  // compact (= default)
 :root[data-header-size='2']  { --hc-header-zoom: 1.15; }  // medium (+15%)

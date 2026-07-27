@@ -39,11 +39,10 @@ import type { InputMode } from '../navigation/input-mode-stack.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
 import {
-  DEAD_ZONE,
-  DESCEND_DISTANCE,
+  HEX_RADIUS,
   OPPOSITE_DIRECTION,
+  RING_DISTANCE,
   directionAt,
-  slotOffset,
   slotsByDirection,
   type QuickMenuDefinition,
   type QuickMenuDirection,
@@ -66,15 +65,17 @@ const JITTER_PX = 12
 
 const OWNER = 'quick-menu'
 
+/** How far the drawn pointer may travel from the ring centre. Clamping the
+ *  magnitude never changes the angle, so the slot you are on is unaffected —
+ *  it only stops the pointer wandering off into empty screen while locked. */
+const REACH = RING_DISTANCE + HEX_RADIUS * 1.1
+
 type SlashLike = { execute(name: string, args: string): unknown }
 type GateLike = { lock(owner: string): void; unlock(owner: string): void }
 type StackLike = { push(mode: InputMode): void; pop(name: string): void }
 
 type Level = {
   readonly definition: QuickMenuDefinition
-  /** Screen point this ring is centred on. Re-anchored on every descend and
-   *  ascend so the ring always blooms under the hand. */
-  origin: { x: number; y: number }
   /** Direction that returns to the parent ring; null on the root ring. */
   readonly back: QuickMenuDirection | null
 }
@@ -96,6 +97,20 @@ export class QuickMenuInput {
   #holdTimer: ReturnType<typeof setTimeout> | null = null
   #warmed = false
 
+  /** Key currently holding the ring open, when summoned from the keyboard. */
+  #heldKey: string | null = null
+  /** Where a touch landed, while the long-press is still deciding. */
+  #touchDown: { x: number; y: number } | null = null
+
+  /**
+   * Where the DRAWN pointer is, in screen coordinates. The real cursor is
+   * locked away the whole time the ring is up, so this — not the OS pointer —
+   * is what aims. It starts at the ring centre and moves by raw deltas.
+   */
+  #virtual = { x: 0, y: 0 }
+  /** True once the browser has granted pointer lock. */
+  #locked = false
+
   #mode: InputMode = {
     name: OWNER,
     // Nothing to mount: this drone's listeners are global and always live.
@@ -110,11 +125,35 @@ export class QuickMenuInput {
     window.addEventListener('pointerup', this.#onPointerUp, { passive: false })
     window.addEventListener('pointercancel', this.#onPointerCancel)
     window.addEventListener('keydown', this.#onKeyDown, { capture: true })
+    window.addEventListener('keyup', this.#onKeyUp, { capture: true })
+
+    // The keyboard trigger. KeymapService owns the keydown — it already knows
+    // about focus suppression and user overrides — and hands us the raw event
+    // so we can watch for the matching keyup and finish the gesture.
+    EffectBus.on<{ cmd?: string; event?: KeyboardEvent }>('keymap:invoke', payload => {
+      if (payload?.cmd !== 'ui.quickMenu') return
+      this.#summonFromKey(payload.event)
+    })
     // Chrome opens autoscroll on a middle mousedown; only preventDefault on
     // the mouse event itself reliably suppresses it.
     window.addEventListener('mousedown', this.#suppressMiddleMouse, { capture: true })
     window.addEventListener('auxclick', this.#suppressAux, { capture: true })
     window.addEventListener('contextmenu', this.#onContextMenu, { capture: true })
+
+    // Losing the lock IS the end of the gesture — the browser drops it on
+    // Escape, on tab switch, and on anything that steals focus. Treating that
+    // as a cancel is what stops a ring being stranded on screen with the real
+    // cursor already back.
+    document.addEventListener('pointerlockchange', this.#onLockChange)
+    document.addEventListener('pointerlockerror', this.#onLockChange)
+
+    // The ring is anchored to the middle of the screen, so the middle moving
+    // has to move it.
+    window.addEventListener('resize', () => {
+      if (!this.#painted) return
+      this.#virtual = this.#centre()
+      this.#paint()
+    })
 
     // Relabel on locale change — the built subtrees hold resolved strings.
     const i18n = get<EventTarget>('@hypercomb.social/I18n')
@@ -187,11 +226,12 @@ export class QuickMenuInput {
     if (e.pointerType === 'touch') {
       if (this.#isChrome(e.target)) return
       this.#pointerId = e.pointerId
-      const origin = { x: e.clientX, y: e.clientY }
+      this.#touchDown = { x: e.clientX, y: e.clientY }
       this.#holdTimer = setTimeout(() => {
         this.#holdTimer = null
+        this.#touchDown = null
         try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
-        this.#begin(origin, e.pointerId)
+        this.#begin(e.pointerId)
         this.#paint()
       }, HOLD_MS)
       return
@@ -202,27 +242,85 @@ export class QuickMenuInput {
     if (this.#isChrome(e.target)) return
     e.preventDefault()
     e.stopPropagation()
-    this.#begin({ x: e.clientX, y: e.clientY }, e.pointerId)
+    this.#begin(e.pointerId)
     this.#bloomTimer = setTimeout(() => {
       this.#bloomTimer = null
       this.#paint()
     }, BLOOM_MS)
   }
 
+  /** The ring's anchor: always the middle of the screen. */
+  #centre(): { x: number; y: number } {
+    return { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  }
+
   /** Claim the pointer and start tracking direction — with or without paint. */
-  #begin(origin: { x: number; y: number }, pointerId: number): void {
+  #begin(pointerId: number): void {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (!registry) return
     this.warmup()
 
-    this.#levels = [{ definition: registry.forContext(), origin, back: null }]
+    this.#levels = [{ definition: registry.forContext(), back: null }]
     this.#pointerId = pointerId
     this.#armed = true
     this.#current = 'centre'
     this.#leftDeadZone = false
+    this.#virtual = this.#centre()
 
     get<GateLike>('@diamondcoreprocessor.com/InputGate')?.lock(OWNER)
     get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.push(this.#mode)
+    this.#requestLock()
+  }
+
+  /**
+   * Take the real cursor out of play. Pointer lock is precisely the primitive
+   * this gesture wants: it hides the OS cursor, reports raw movement deltas
+   * instead of positions — so the aim can never be clipped by a screen edge —
+   * and on release puts the cursor back exactly where it was picked up.
+   *
+   * Refusal is NORMAL and must be silent. A sandboxed iframe without
+   * `allow="pointer-lock"` throws WrongDocumentError; a browser may want a
+   * fresher user gesture; an engine may not support `unadjustedMovement`.
+   * In every case the gesture still works — `#advance` falls back to absolute
+   * positions and the CSS rule still hides the cursor — so a failed lock is a
+   * graceful degradation, not an error to log. Only the recentring and the
+   * screen-edge immunity are lost.
+   */
+  #requestLock(): void {
+    if (this.#locked) return
+    const target = document.body as HTMLElement & {
+      requestPointerLock?: (options?: { unadjustedMovement?: boolean }) => Promise<void> | void
+    }
+    if (!target.requestPointerLock) return
+
+    // Swallows BOTH failure shapes: the synchronous throw of older engines and
+    // the rejected promise of newer ones. An unhandled rejection here would
+    // surface as a console error on every summon in a sandboxed frame.
+    const attempt = (options?: { unadjustedMovement?: boolean }): Promise<boolean> => {
+      try {
+        const result = target.requestPointerLock!(options)
+        if (result && typeof (result as Promise<void>).then === 'function') {
+          return (result as Promise<void>).then(() => true, () => false)
+        }
+        return Promise.resolve(true)
+      } catch {
+        return Promise.resolve(false)
+      }
+    }
+
+    // `unadjustedMovement` asks for raw deltas with no OS pointer acceleration
+    // — steadier aim. If that flavour is unsupported, retry plain before
+    // giving up on the lock entirely.
+    void attempt({ unadjustedMovement: true })
+      .then(granted => (granted ? true : attempt()))
+      .then(() => undefined, () => undefined)
+  }
+
+  #onLockChange = (): void => {
+    this.#locked = document.pointerLockElement === document.body
+    // The browser dropped the lock (Escape, tab switch, focus theft) while a
+    // ring was up. The cursor is already back, so the ring must go too.
+    if (!this.#locked && (this.#armed || this.#sticky)) this.#end()
   }
 
   #paint(): void {
@@ -231,10 +329,12 @@ export class QuickMenuInput {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (!registry) return
 
+    const centre = this.#centre()
     const backLabel = registry.label({ label: 'back', labelKey: 'quickmenu.back' })
-    this.#overlay.paint(level.definition, level.origin, level.back, registry.label, backLabel)
+    this.#overlay.paint(level.definition, centre, level.back, registry.label, backLabel)
     this.#overlay.highlight(this.#current)
     this.#overlay.setCancelArmed(this.#leftDeadZone)
+    this.#overlay.setCursor(this.#virtual.x - centre.x, this.#virtual.y - centre.y)
     document.documentElement.classList.add('hc-quick-menu-active')
     this.#painted = true
   }
@@ -243,35 +343,67 @@ export class QuickMenuInput {
 
   #onPointerMove = (e: PointerEvent): void => {
     if (this.#sticky) {
-      this.#track(e.clientX, e.clientY)
+      this.#advance(e)
       return
     }
     if (!this.#armed) {
       // Un-armed touch press: drift past the jitter box means the finger was
       // panning, not summoning.
-      if (this.#holdTimer && e.pointerId === this.#pointerId) {
-        const level = this.#levels[0]
-        const origin = level?.origin
-        if (origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > JITTER_PX) {
+      if (this.#holdTimer && this.#touchDown && e.pointerId === this.#pointerId) {
+        const start = this.#touchDown
+        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > JITTER_PX) {
           this.#clearTimers()
           this.#pointerId = null
+          this.#touchDown = null
         }
       }
       return
     }
-    if (e.pointerId !== this.#pointerId) return
+    // A key-summoned ring has no pointer of its own (#pointerId stays null),
+    // so it aims with whatever pointer is moving.
+    if (this.#pointerId !== null && e.pointerId !== this.#pointerId) return
     e.preventDefault()
-    this.#track(e.clientX, e.clientY)
+    this.#advance(e)
   }
 
-  #track(x: number, y: number): void {
+  /**
+   * Move the drawn pointer. While locked we integrate raw deltas, which is
+   * what lets the ring sit at screen centre no matter where the real cursor
+   * happened to be — and what stops the aim dying at a screen edge. Unlocked,
+   * we fall back to the absolute position.
+   */
+  #advance(e: PointerEvent): void {
+    const centre = this.#centre()
+    if (this.#locked) {
+      this.#virtual.x += e.movementX ?? 0
+      this.#virtual.y += e.movementY ?? 0
+    } else {
+      this.#virtual = { x: e.clientX, y: e.clientY }
+    }
+
+    // Clamp the reach. Magnitude only — the angle, and therefore the slot, is
+    // untouched.
+    let dx = this.#virtual.x - centre.x
+    let dy = this.#virtual.y - centre.y
+    const distance = Math.hypot(dx, dy)
+    if (distance > REACH) {
+      const scale = REACH / distance
+      dx *= scale
+      dy *= scale
+      this.#virtual = { x: centre.x + dx, y: centre.y + dy }
+    }
+    this.#track(dx, dy)
+  }
+
+  #track(dx: number, dy: number): void {
     const level = this.#levels[this.#levels.length - 1]
     if (!level) return
 
-    const dx = x - level.origin.x
-    const dy = y - level.origin.y
-    const distance = Math.hypot(dx, dy)
-    const direction = directionAt(dx, dy)
+    // Passing the held slot engages the hysteresis: the highlight only moves
+    // once the pointer is properly inside the next hexagon, not the moment it
+    // crosses the boundary.
+    const previous = this.#current
+    const direction = directionAt(dx, dy, previous)
 
     if (direction !== 'centre' && !this.#leftDeadZone) {
       this.#leftDeadZone = true
@@ -281,21 +413,26 @@ export class QuickMenuInput {
     this.#current = direction
     if (this.#painted) {
       this.#overlay.highlight(direction)
-      this.#overlay.setTrail(dx, dy)
+      this.#overlay.setCursor(dx, dy)
     }
 
-    if (distance < DESCEND_DISTANCE || direction === 'centre') return
+    if (direction === previous || direction === 'centre') return
 
-    // Past the far edge. Either this slot opens a ring, or this is the way
-    // back out of one. Both re-anchor to the hand so the next reading of
-    // direction starts from zero — which is also what stops an ascend from
-    // immediately re-descending down the way it came.
+    // ROLLING ONTO A PATHWAY CHANGES THE MENU. No click, no reaching past the
+    // ring's edge — arriving on the hexagon is the whole act, which is what
+    // "each one is a pathway to the next honeycomb" has to mean if the six
+    // are to be read as doorways rather than buttons.
+    //
+    // The new ring takes the same anchor (screen centre) and the drawn pointer
+    // returns to the middle, so every ring is a fresh reach from the same
+    // place. That is also what stops an ascend from instantly re-descending
+    // back down the direction it just came from.
     if (level.back && direction === level.back) {
-      this.#ascend({ x, y })
+      this.#ascend()
       return
     }
     const slot = this.#slotFor(direction)
-    if (slot?.action.kind === 'menu') this.#descend(slot.action.menu, direction, { x, y })
+    if (slot?.action.kind === 'menu') this.#descend(slot.action.menu, direction)
   }
 
   #slotFor(direction: QuickMenuDirection): QuickMenuSlot | undefined {
@@ -305,25 +442,25 @@ export class QuickMenuInput {
     return slotsByDirection(level.definition).get(direction)
   }
 
-  #descend(menu: string, via: QuickMenuDirection, origin: { x: number; y: number }): void {
+  #descend(menu: string, via: QuickMenuDirection): void {
     const definition = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')?.byName(menu)
     if (!definition) return
-    this.#levels.push({ definition, origin, back: OPPOSITE_DIRECTION[via] })
+    this.#levels.push({ definition, back: OPPOSITE_DIRECTION[via] })
     this.#resetLevel()
   }
 
-  #ascend(origin: { x: number; y: number }): void {
+  #ascend(): void {
     if (this.#levels.length <= 1) return
     this.#levels.pop()
-    const level = this.#levels[this.#levels.length - 1]
-    level.origin = origin
     this.#resetLevel()
   }
 
-  /** A fresh ring starts un-travelled: centre commits, nothing is lit. */
+  /** A fresh ring starts un-travelled: the drawn pointer returns to the
+   *  middle, centre commits, nothing is lit. */
   #resetLevel(): void {
     this.#current = 'centre'
     this.#leftDeadZone = false
+    this.#virtual = this.#centre()
     if (this.#painted) this.#paint()
   }
 
@@ -331,6 +468,8 @@ export class QuickMenuInput {
 
   #onPointerUp = (e: PointerEvent): void => {
     if (this.#sticky) return
+    // A key is holding this open — lifting a mouse button is not the release.
+    if (this.#heldKey) return
     if (!this.#armed) {
       if (e.pointerId === this.#pointerId) { this.#clearTimers(); this.#pointerId = null }
       return
@@ -347,7 +486,6 @@ export class QuickMenuInput {
   }
 
   #release(): void {
-    const level = this.#levels[this.#levels.length - 1]
     const direction = this.#current
 
     // Left and came back — the escape hatch. Nothing fires.
@@ -356,16 +494,10 @@ export class QuickMenuInput {
     const slot = this.#slotFor(direction)
     if (!slot) { this.#end(); return }
 
-    // A ring released on a ring: keep it up and free the pointer, so the
-    // gesture can be finished with a look rather than a held button. The
-    // child blooms on the hexagon that opened it, so the ring visibly grows
-    // out of the slot you chose.
-    if (slot.action.kind === 'menu' && level) {
-      const offset = slotOffset(direction)
-      this.#descend(slot.action.menu, direction, {
-        x: level.origin.x + offset.x,
-        y: level.origin.y + offset.y,
-      })
+    // A pathway already swapped the ring the moment you rolled onto it, so
+    // releasing on one can only mean "stay here" — keep the new ring up and
+    // free the button.
+    if (slot.action.kind === 'menu') {
       this.#sticky = true
       if (!this.#painted) this.#paint()
       return
@@ -402,6 +534,46 @@ export class QuickMenuInput {
   }
 
   // ── end ─────────────────────────────────────────────────────────────
+
+  /**
+   * Summon from the keyboard. Same as every other summon: the ring appears in
+   * the middle of the screen and the gesture is the one the mouse makes — aim
+   * by moving, release the key to choose.
+   *
+   * One deliberate difference from the mouse trigger. Middle-press and
+   * release without moving fires the centre, because that is an unambiguous
+   * click. A key TAP is not — the pointer never moved, and someone pressing a
+   * key to see what it does should get a menu, not a command. So a tap leaves
+   * the ring up sticky, and only a hold-then-flick commits.
+   */
+  #summonFromKey(event?: KeyboardEvent): void {
+    if (this.#armed || this.#sticky) return
+    const key = event?.key
+    if (!key || event?.repeat) return
+
+    this.#begin(-1)
+    this.#pointerId = null
+    this.#heldKey = key
+    this.#bloomTimer = setTimeout(() => {
+      this.#bloomTimer = null
+      this.#paint()
+    }, BLOOM_MS)
+  }
+
+  #onKeyUp = (e: KeyboardEvent): void => {
+    if (!this.#heldKey || e.key !== this.#heldKey) return
+    this.#heldKey = null
+    if (!this.#armed) return
+
+    // Never left the centre — this was a tap. Show the ring and let go of it.
+    if (!this.#leftDeadZone) {
+      this.#clearTimers()
+      this.#sticky = true
+      if (!this.#painted) this.#paint()
+      return
+    }
+    this.#release()
+  }
 
   #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return
@@ -441,11 +613,19 @@ export class QuickMenuInput {
     this.#sticky = false
     this.#painted = false
     this.#pointerId = null
+    this.#heldKey = null
+    this.#touchDown = null
     this.#levels = []
     this.#current = 'centre'
     this.#leftDeadZone = false
     this.#overlay.clear()
     document.documentElement.classList.remove('hc-quick-menu-active')
+    // Give the cursor back. The browser restores it to exactly where it was
+    // when the lock was taken — the participant's pointer picks up where it
+    // left off, having never visibly moved.
+    if (document.pointerLockElement) {
+      try { document.exitPointerLock?.() } catch { /* already gone */ }
+    }
     if (!wasClaimed) return
     get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.pop(OWNER)
     get<GateLike>('@diamondcoreprocessor.com/InputGate')?.unlock(OWNER)
@@ -455,10 +635,10 @@ export class QuickMenuInput {
 
   /**
    * Open a ring without the gesture — `/menu`, or any surface that wants to
-   * offer it. Opens sticky: aim with a free pointer, click to fire, Escape
-   * to dismiss.
+   * offer it. Opens sticky: roll to aim, click to fire, Escape to dismiss.
+   * Like every summon it lands in the middle of the screen.
    */
-  open(name?: string, at?: { x: number; y: number }): boolean {
+  open(name?: string): boolean {
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (!registry) return false
     const definition = name ? registry.byName(name) : registry.forContext()
@@ -466,14 +646,15 @@ export class QuickMenuInput {
 
     this.#end()
     this.warmup()
-    const origin = at ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-    this.#levels = [{ definition, origin, back: null }]
+    this.#levels = [{ definition, back: null }]
     this.#sticky = true
     this.#current = 'centre'
     this.#leftDeadZone = false
+    this.#virtual = this.#centre()
     get<GateLike>('@diamondcoreprocessor.com/InputGate')?.lock(OWNER)
     get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.push(this.#mode)
     this.#paint()
+    this.#requestLock()
     return true
   }
 

@@ -2834,6 +2834,26 @@ export class HistoryService {
     // Best-effort throughout: never AWAIT the tracker, never gate real-time.
     const ranker = get<UsageRanker>(USAGE_IOC_KEY)
     const weightOf = (sig: string): number => (ranker ? ranker.weight(sig) : 0)
+    // BALANCE, not dominance. Raw usage weight is milliseconds of dwell plus a
+    // visit bias, so it runs to hundreds of thousands: sorting on it directly
+    // let ONE visited tile at depth 5 outrank every unvisited tile in front of
+    // the participant, and the walk dived down a single corridor while the
+    // page they are looking at stayed cold. Two corrections:
+    //   · log1p compresses usage into a small span (an unseen tile is 0, a
+    //     heavily-used one ~13), so "used more" is a nudge, not a veto;
+    //   · every level down costs DEPTH_COST of that span, so a tile must be
+    //     genuinely more used to justify being fetched from further away.
+    // A tile with no history at all scores -depth·DEPTH_COST, which is exactly
+    // the shallow-first walk a cold participant had before.
+    const DEPTH_COST = 2
+    // Interest runs downhill: the children of a tile you use are likelier than
+    // a stranger's, even before you have ever opened them. Passing a share of
+    // the parent's score down means a hot BRANCH warms its insides ahead of an
+    // unrelated cold tile at the same depth — without pretending the child was
+    // itself visited.
+    const INHERIT = 0.4
+    const scoreOf = (sig: string, depth: number, inherited: number): number =>
+      Math.log1p(Math.max(0, weightOf(sig))) + inherited - depth * DEPTH_COST
     const store = get<StoreContentWarm>('@hypercomb.social/Store')
     // Superseded-by-navigation check: captured now, compared per node. The
     // moment the user navigates again this walk is warming a STALE
@@ -2842,13 +2862,18 @@ export class HistoryService {
     const gen = this.#preloadGeneration
     let superseded = false
 
-    type WarmNode = { sig: string; depth: number; weight: number }
-    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, weight: weightOf(rootSig) }]
+    // `segments` rides along so each warmed layer can also have its VIEW
+    // prepared (child membership resolved + memoised under the layer's content
+    // sig). That memo is what makes a click instant — bytes alone never were —
+    // and because it is keyed by an immutable content sig it is valid GLOBALLY:
+    // preparing a view anywhere prepares it everywhere, permanently.
+    type WarmNode = { sig: string; depth: number; score: number; parentSegments: readonly string[] }
+    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, score: scoreOf(rootSig, 0, 0), parentSegments: [] }]
     const CONCURRENCY = 12
 
     while (frontier.length && walked < HistoryService.#PRELOAD_NODE_BUDGET && this.#preloadGeneration === gen) {
-      // Highest-usage first; equal weight → shallower first (cold ⇒ BFS).
-      frontier.sort((a, b) => (b.weight - a.weight) || (a.depth - b.depth))
+      // Best balance first: usage compressed against distance, ties shallower.
+      frontier.sort((a, b) => (b.score - a.score) || (a.depth - b.depth))
       const slice = frontier.splice(0, CONCURRENCY)
       let cursor = 0
       const worker = async (): Promise<void> => {
@@ -2879,13 +2904,53 @@ export class HistoryService {
           // trickle (the earlier flood was staging's per-sig durable-queue
           // writes, not the reads themselves).
           if (node.depth <= 2) this.#warmTileContent(layer, store, gen)
+          // PREPARE THE VIEW as well as the bytes. Warming content makes the
+          // tiles able to appear; resolving this layer's child membership is
+          // what makes opening it INSTANT (measured: ~160-190ms cold vs 4ms
+          // prepared, with images decoded either way). Fire-and-forget, no-op
+          // when already prepared, and globally reusable — the memo is keyed by
+          // this layer's content sig, so the most-USED path down the hive gets
+          // its views prepared first, and proximity is served by the visible
+          // branches doing the same from the render side.
+          // This node's own path: the root is the empty path, every other node
+          // is its parent's path plus its own name.
+          const ownSegments = node.depth === 0
+            ? []
+            : [...node.parentSegments, String(layer.name ?? '')].filter(Boolean)
+          if (node.depth <= 2) {
+            const renderer = get<{ prepareView?: (sig: string, segments: readonly string[]) => Promise<boolean> }>('@diamondcoreprocessor.com/ShowCellDrone')
+            if (renderer?.prepareView) {
+              // Under this location's OWN HEAD sig — the key the render pass
+              // looks the memo up by. The sig the parent recorded for this
+              // child goes stale the moment the child commits (per-page
+              // history), and a memo keyed by it would never hit.
+              void (async () => {
+                try {
+                  const name = String(layer.name ?? '')
+                  const locSig = await this.sign({ explorerSegments: () => ownSegments })
+                  const head = ownSegments.length && name
+                    ? await this.latestMarkerSigFor(locSig, name)
+                    : node.sig
+                  await renderer.prepareView!(head || node.sig, ownSegments)
+                } catch { /* opportunistic */ }
+              })()
+            }
+          }
           // Enqueue children weighted by usage, bounded by depth.
           if (node.depth + 1 < maxDepth) {
             const children = Array.isArray(layer.children) ? layer.children : []
             for (const childSig of children) {
               if (HistoryService.#SIG_RE.test(childSig) && !visited.has(childSig)) {
                 visited.add(childSig)
-                frontier.push({ sig: childSig, depth: node.depth + 1, weight: weightOf(childSig) })
+                frontier.push({
+                  sig: childSig,
+                  depth: node.depth + 1,
+                  // Its own history, plus the share of its parent's standing
+                  // that interest passes down (see INHERIT), minus the cost of
+                  // being one level further away.
+                  score: scoreOf(childSig, node.depth + 1, Math.max(0, node.score) * INHERIT),
+                  parentSegments: ownSegments,
+                })
               }
             }
           }

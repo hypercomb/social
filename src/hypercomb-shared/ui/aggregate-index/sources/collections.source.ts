@@ -12,6 +12,10 @@
 // MANAGE:
 //   • add — the participant selects tiles on the canvas and presses Add; each
 //     becomes a REFERENCE under `sets/` pointing at where it already lives.
+//   • move — the same selection, filed away instead: the tiles LEAVE the page
+//     they were on and become children of the collection you are standing in.
+//     Add and move are the two readings of "put this in there" and the panel
+//     offers both side by side; add is an appearance, move is custody.
 //   • create — the + beside the panel's search field. This ADDS a way in rather
 //     than replacing add: you have somewhere to gather things before you have
 //     the things, and the tile it makes is PARENTLESS — a root at `/<name>`,
@@ -66,6 +70,16 @@ type CommitterLike = {
     },
   ) => Promise<unknown>
 }
+/** MoveDrone's one re-home primitive — see move.drone.ts. Returns the labels
+ *  that actually landed; a name already taken at the destination is skipped
+ *  rather than clobbered, because a name is an address. */
+type MoveLike = {
+  commitMoveInto?: (
+    labels: readonly string[],
+    sourceSegments: readonly string[],
+    targetSegments: readonly string[],
+  ) => Promise<readonly string[]>
+}
 type DecorationServiceLike = {
   list<T>(o: { kind: string; segments: readonly string[] }): Promise<Array<{ sig: string; record: { payload?: T } }>>
   setTitle?(
@@ -105,6 +119,7 @@ class CollectionsSource implements AggregateSource {
   readonly ledeKey = 'collections-landing.lede'
   readonly createKey = 'collections-landing.new'
   readonly addKey = 'collections-landing.add'
+  readonly moveKey = 'collections-landing.move'
   readonly activeAt = [SETS] as const
 
   /** name → object URL of its representative tile picture. Revoked when the
@@ -276,6 +291,47 @@ class CollectionsSource implements AggregateSource {
     if (into) return   // these landed in a collection, not in this index
     await this.#syncCursorToHead()
     return written
+  }
+
+  /** MOVE the staged tiles into the collection being managed — custody, not an
+   *  appearance. They leave the page they were on and live in here.
+   *
+   *  This is the other half of Add, and the half that was missing: Add writes a
+   *  reference, so the tile stays where it is and merely gains a doorway. That is
+   *  right for "this belongs in several places" and wrong for "put this away".
+   *  Filing something is a MOVE, and until now nothing in the app could do it
+   *  across pages — drag-onto-a-tile only reaches the page you are standing on.
+   *
+   *  The write is MoveDrone's one re-home primitive (the same act as Ctrl+drag
+   *  onto a tile and `/into`), reached through IoC the way every write from this
+   *  window is. Nothing is deleted: the moved subtree keeps its bytes, markers
+   *  and history bag, so undo at either page puts it back.
+   *
+   *  Grouped by SOURCE PAGE, because a selection survives navigation: two staged
+   *  tiles may well have been picked on two different pages, and each of those
+   *  pages needs its own removal commit. */
+  async move(entries: readonly StagedEntry[], into: AggregateItem): Promise<void> {
+    const mover = ioc()?.get('@diamondcoreprocessor.com/MoveDrone') as MoveLike | undefined
+    if (!mover?.commitMoveInto || !into.segments.length) return
+    const groups = new Map<string, { parent: string[]; labels: string[] }>()
+    for (const entry of entries) {
+      if (!entry.segments.length) continue                        // the hive root is not a tile
+      const parent = entry.segments.slice(0, -1).map(String)
+      const label = String(entry.segments[entry.segments.length - 1])
+      if (!label) continue
+      // JSON, not a joined string: it needs no separator, so there is no character
+      // a tile name could contain that would make two different pages look like one.
+      const key = JSON.stringify(parent)
+      const group = groups.get(key) ?? { parent, labels: [] }
+      group.labels.push(label)
+      groups.set(key, group)
+    }
+    // Sequentially: each group is two commits on the same lineage machine, and
+    // the destination's own head has to settle before the next group appends to
+    // it — concurrent groups would both read the pre-move head.
+    for (const group of groups.values()) {
+      await mover.commitMoveInto(group.labels, group.parent, into.segments)
+    }
   }
 
   /** Make a brand-new collection from a typed name — the + on the search field.

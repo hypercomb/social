@@ -32,6 +32,20 @@ export const globalKeyMap: KeyMapLayer = {
       pierce: true,
     },
     {
+      // HOLD it — the quick menu is a gesture, not a toggle. Holding blooms
+      // the ring at the pointer and releasing fires whatever you flicked to;
+      // a plain tap leaves it up so you can aim and click. Bare `q` because
+      // the left hand has to hold it while the right hand does the aiming,
+      // and it is the only free left-side letter (c, x, a, b, k, p are taken).
+      // The keymap owns the keydown so focus suppression is handled here;
+      // QuickMenuInput watches the matching keyup for the release.
+      cmd: 'ui.quickMenu',
+      sequence: [[{ key: 'q' }]],
+      description: 'Hold for the quick menu — flick a direction, release to choose',
+      descriptionKey: 'keymap.quick-menu',
+      category: 'Navigation',
+    },
+    {
       cmd: 'render.togglePivot',
       sequence: [[{ key: '8', code: 'digit8', primary: true, shift: true }]],
       description: 'Toggle hex orientation',

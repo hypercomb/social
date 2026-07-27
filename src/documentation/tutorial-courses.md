@@ -7,7 +7,7 @@ lessons organised into four courses.
 ```
 /tutorial                  the starter course — move, make, get home
 /tutorial beginner         the everyday verbs
-/tutorial intermediate     meaning: marks, filters, titles, references, history
+/tutorial intermediate     meaning: marks, filters, titles, references, filing, history
 /tutorial expert           paths, hives, views, the assistant, the swarm
 /tutorial <lesson>         one lesson on its own (e.g. /tutorial go-in)
 /tutorial list             what is on offer

@@ -36,7 +36,7 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   // and is ~3rem tall, so we reserve 5rem at the bottom to clear it.
   // Top tracks the active header size (~3rem intrinsic × the header zoom);
   // flush against the command line — no extra gap.
-  top: calc(3rem * var(--hc-header-zoom, 1.0));
+  top: max(calc(3rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.17rem));
   bottom: 5rem;
   left: 0;
   right: 0;
@@ -57,7 +57,7 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 // toolbar at the bottom IS covered intentionally — users asked for
 // "everything except the command line".
 :host.is-fullscreen {
-  top: calc(3rem * var(--hc-header-zoom, 1.0));
+  top: max(calc(3rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.17rem));
   bottom: 0;
   padding: 0;
 }
@@ -149,7 +149,7 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   right: 0;
   // Match the pheromone / feedback panels' header clearance so the docked
   // column's tops line up.
-  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
+  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 0;
   margin: 0;
   height: auto !important;

@@ -1,6 +1,28 @@
 <!-- swipe-back edge indicator -->
 <div class="swipe-back-indicator" [class.active]="swipeIndicatorActive()"></div>
 
+<!-- COURSE PICKER — Ctrl/⌘+click on the bee. The tour is four courses now, so
+     the deeper ones need a way in that isn't typing a slash command. Fixed
+     position off the button's own rect: the rail is a scrolling, clipped box,
+     so a menu rendered inside it would be cut off. Rows come from the tutorial's
+     lesson registry, so a build ships exactly the courses it has. -->
+@if (tourMenuOpen()) {
+  <div class="tour-menu"
+       [style.left.px]="tourMenuPos().x"
+       [style.top.px]="tourMenuPos().y"
+       role="menu"
+       [attr.aria-label]="'controls.tutorial.levels' | t">
+    <div class="tour-menu-title">{{ 'controls.tutorial.levels' | t }}</div>
+    @for (course of tourCourses(); track course.level) {
+      <button class="tour-row" role="menuitem" (click)="pickTour(course.level)">
+        <span class="mat-sym">emoji_nature</span>
+        <span class="tour-label">{{ course.label }}</span>
+        <span class="tour-count">{{ course.count }}</span>
+      </button>
+    }
+  </div>
+}
+
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
   @if (meshPublic()) {
@@ -15,6 +37,13 @@
     } @else {
       <span class="domain-crumb crumb-link" (click)="navigateTo(seg.target)"><span class="sep-crumb">◆</span>{{ seg.name }}</span>
     }
+  }
+  <!-- The tile under the pointer. Hovering swaps a tile's name for its action
+       icons, so this is the only place the name still shows while you are on
+       it. Trails the path because that is where you would land if you entered
+       it, and is styled apart from the branch crumb: you are NOT there yet. -->
+  @if (hoveredCell()) {
+    <span class="sep-crumb">◆</span><span class="hover-crumb">{{ hoveredCell() }}</span>
   }
   @if (secretWords()) {
     <span class="sep-crumb">◆</span><span class="secret-crumb">{{ secretWords() }}</span>
@@ -232,9 +261,10 @@
                    /tutorial runs). It sits above pin because "how does this
                    work?" comes before any control. -->
               <button class="ctl-btn rail-tutorial"
-                      (click)="startTutorial()"
+                      [class.active]="tourMenuOpen()"
+                      (click)="startTutorial($event)"
                       [attr.aria-label]="'controls.tutorial' | t"
-                      [title]="'controls.tutorial' | t"
+                      [title]="('controls.tutorial' | t) + ' — ' + ('controls.tutorial.pick' | t)"
                       data-ctrl-id="tutorial">
                 <span class="mat-sym">emoji_nature</span>
               </button>
@@ -266,7 +296,6 @@
                       [class.lock-bump]="ctrl.id === 'pin' && lockBump()"
                       [class.muted]="!isEnabled(ctrl)"
                       [class.editing]="editMode()"
-                      [class.eye-btn]="ctrl.id === 'show-hidden'"
                       [class.text-only-btn]="ctrl.id === 'text-only'"
                       [class.mic-btn]="ctrl.id === 'voice'"
                       [class.bee-btn]="ctrl.id === 'bees'"

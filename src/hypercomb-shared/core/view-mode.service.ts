@@ -26,11 +26,20 @@ export type ViewMode = string
 const STORAGE_KEY = 'hc:view-mode'
 const DEFAULT_MODE: ViewMode = 'hexagons'
 
-// Transient surfaces hide the Pixi canvas, so they must NEVER be restored on
-// boot: a stale one strands the hive on a blank, body-coloured screen with no
-// page mounted (the "white overlay over all tiles" regression). They are only
-// ever entered live, and fall back to the hexagon canvas across a reload.
-const TRANSIENT_MODES = new Set<ViewMode>(['website', 'home', 'slides', 'tree'])
+// Transient surfaces hide (or fully cover) the Pixi canvas, so they must
+// NEVER be restored on boot: a stale one strands the hive on a blank,
+// body-coloured screen with no page mounted (the "white overlay over all
+// tiles" regression). They are only ever entered live, and fall back to the
+// hexagon canvas across a reload.
+//
+// MAINTENANCE RULE: every view whose renderer takes over the surface
+// belongs here. Hand-maintained because this shell file cannot import the
+// essentials VisualBeeRegistry (dependency direction) — when a new
+// full-surface view registers, add its mode string. Missing entries were
+// exactly the 2026-07-27 lightbox/tutor boot-strand bug.
+const TRANSIENT_MODES = new Set<ViewMode>([
+  'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
+])
 
 export class ViewModeService extends EventTarget {
   #mode: ViewMode

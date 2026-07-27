@@ -156,12 +156,13 @@ const COURSES: Course[] = [
   },
   {
     level: 'intermediate', color: '#4f9d6e',
-    note: 'Giving the hive meaning: pheromones and the collections they build, live filtering, titles that rename without moving, references, the palette, and history as a place you can travel.',
+    note: 'Giving the hive meaning: pheromones and the collections they build, live filtering, titles that rename without moving, references, filing things away, the palette, and history as a place you can travel.',
     lessons: [
       ['keyword', 'Paint a pheromone — anything wearing the same mark belongs together, wherever it lives.', ['meaning']],
-      ['filter', '>? filters the page live, by name or by mark; /clear puts it back.', ['meaning']],
+      ['filter', '? filters the page live as you type, by name or by mark; /clear puts it back.', ['meaning']],
       ['title', 'The name is the address, so /title changes the words a tile draws under, not where it lives.', ['structure']],
       ['reference', 'A reference tile is a live doorway to the real thing, not a copy.', ['structure']],
+      ['into', '/into files a tile away: it MOVES inside another tile and leaves the page it was on. The Organizer offers the same verb across the whole hive — Add lends a doorway, Move takes custody.', ['structure']],
       ['palette', 'Every action in one searchable list — you never have to remember a shortcut.', ['guidance']],
       ['history', 'The history panel walks every revision you have ever made.', ['history']],
       ['snapshot', 'Named checkpoints of the WHOLE hive — narrated, never fired: it reaches past the practice page.', ['history']],

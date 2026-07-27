@@ -25,7 +25,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .collections-panel {
   pointer-events: auto;
   position: absolute;
-  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
+  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   right: 0;
   bottom: 0;
   width: 300px;

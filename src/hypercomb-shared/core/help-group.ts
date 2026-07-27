@@ -154,7 +154,6 @@ const TIERS: readonly { header: string; keys: readonly string[] }[] = [
       'render.togglePivot',
       'mesh.togglePublic',
       'slash:language',
-      'slash:border',
       'slash:accent',
     ],
   },

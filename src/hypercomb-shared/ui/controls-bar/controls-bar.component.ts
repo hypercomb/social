@@ -61,7 +61,7 @@ interface ControlItem {
   id: string
   label: string
   action: string
-  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection' | 'worldSelection'
+  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection'
 }
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
@@ -72,15 +72,12 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always' },
   { id: 'pin',          label: 'controls.pin',          action: 'togglePin',          visibleWhen: 'always' },
   { id: 'fullscreen',   label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always' },
-  { id: 'show-hidden',  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
+  // 'show-hidden' (the eye) is off the bar — hiding and revealing is a tile
+  // verb, reached from the tile's own icons; the shell only restores the
+  // persisted `hc:show-hidden` state at boot (see the initial emit below).
   // 'world-mode' (the world-view share toggle) moved to the header's
   // mesh-header — it now lives beside the solo/swarm icon and only shows in
   // swarm mode (see MeshHeaderComponent).
-  { id: 'neon-mode',    label: 'controls.neon-mode',    action: 'toggleNeonMode',     visibleWhen: 'always' },
-  // Launcher silhouettes (games → Space Invader) back
-  // to plain hexagons. Global toggle; only has a visible effect on `agg-*`
-  // launch-group pages — every normal hive page is hexagons regardless.
-  { id: 'launcher-shapes', label: 'controls.launcher-shapes', action: 'toggleLauncherShapes', visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
   // 'notes' moved to the command-line header (the post-it toggle at the right
   // of the input) — notes ride along with every page, so their switch lives in
@@ -96,14 +93,14 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // registry (user-toggleable like every control) while windowed responses
   // live in each behavior's own tool window. Same `controls:action` bus either
   // way, so the essentials drones that answer are unchanged.
-  { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
-  { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
-  { id: 'remove',       label: 'selection.remove',      action: 'remove',             visibleWhen: 'hasSelection' },
-  { id: 'move',         label: 'selection.move',        action: 'moveItem',           visibleWhen: 'hasSelection' },
+  //
+  // cut / copy / remove / move are NOT on the bar — they are tile verbs and
+  // ride the tile's own hover icons, the edit-actions strip and the keyboard.
+  // The `controls:action` emitters below stay: those surfaces use them.
   { id: 'promote-to-parent', label: 'selection.promote-to-parent', action: 'promoteToParent', visibleWhen: 'hasSelection' },
-  // World-mode bulk privacy — only meaningful with a selection AND world mode on.
-  { id: 'make-public',  label: 'selection.make-public', action: 'makePublic',         visibleWhen: 'worldSelection' },
-  { id: 'make-branch-public', label: 'selection.make-branch-public', action: 'makeBranchPublic', visibleWhen: 'worldSelection' },
+  // World-mode bulk privacy (make-public / make-branch-public) is off the bar
+  // too — privacy is set on the tile, not from the shell rail. The header's
+  // world-mode toggle is untouched.
   // The clipboard icon is the way back into the side panel once it's been
   // closed — it appears whenever the clipboard holds something and toggles the
   // panel. (Auto-open on copy/cut alone left no way to reopen.)
@@ -122,13 +119,11 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
-  'show-hidden': false, 'neon-mode': false, 'launcher-shapes': false, 'text-only': false,
+  'text-only': false,
   'pools': true,
   // Selection verbs default ON (they only appear while a selection exists;
-  // the retired floating menu was the old primary path). 'move' stays off —
-  // drag-to-move is native and the button is a niche mode toggle.
-  'cut': true, 'copy': true, 'remove': true, 'move': false,
-  'promote-to-parent': true, 'make-public': true, 'make-branch-public': true,
+  // the retired floating menu was the old primary path).
+  'promote-to-parent': true,
   'clipboard': true, 'voice': false, 'bees': false,
 }
 
@@ -291,13 +286,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
-  // Neon mode — an on/off toggle. When on, the renderer lights every tile's
-  // border with an additive glow. Persisted so a refresh keeps the mode.
-  #neonMode = signal(localStorage.getItem('hc:neon-mode') === '1')
-  // Launcher-shapes toggle — when on, launch-group pages (websites/games/mix)
-  // render their tiles as plain hexagons instead of their decorative silhouettes.
-  // Persisted so a refresh keeps the mode. Off by default (decorative shapes).
-  #launcherHexagons = signal(localStorage.getItem('hc:launcher-hexagons') === '1')
   // Fit button has three states:
   //  - 'off'    (white): regular click performs a one-shot fit; no pin
   //  - 'global' (green): every layer auto-fits on navigation
@@ -381,7 +369,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // and light up while it's showing.
   #clipboardPanelOpen = signal(false)
   #hasSelection = signal(false)
-  #worldMode = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
   #tags = signal<{ name: string; count: number }[]>([])
@@ -394,6 +381,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // not a filter state, so a hive that lives on its tags stays opened out.
   #tagsExpanded = signal(localStorage.getItem('hc:tags-expanded') === '1')
   #hoveredTags = signal<Set<string>>(new Set())
+  /** Tile under the pointer, or null. Read by the breadcrumb — see the
+   *  `tile:hover` subscription for why it has to be shown there. */
+  readonly hoveredCell = computed(() => this.#hoveredCell())
+  #hoveredCell = signal<string | null>(null)
   readonly addressHover = signal(false)
   #atomizeTarget = signal('')
   #atomizeStrategy = signal('')
@@ -486,8 +477,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     togglePin: () => this.togglePin(),
     toggleFullscreen: () => this.toggleFullscreen(),
     toggleShowHidden: () => this.toggleShowHidden(),
-    toggleNeonMode: () => this.toggleNeonMode(),
-    toggleLauncherShapes: () => this.toggleLauncherShapes(),
     toggleTextOnly: () => this.toggleTextOnly(),
     openPools: () => this.openPools(),
     cut: () => this.cut(),
@@ -511,9 +500,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'clipboard': return this.#clipboardPanelOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
-      case 'show-hidden': return this.#showHidden()
-      case 'neon-mode': return this.#neonMode()
-      case 'launcher-shapes': return this.#launcherHexagons()
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
@@ -550,18 +536,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'zoom-in':      return 'zoom_in'
       case 'pin':          return 'push_pin'
       case 'fullscreen':   return 'fullscreen'
-      case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
-      case 'neon-mode':    return 'flare'
-      case 'launcher-shapes': return 'hexagon'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
       case 'pools':        return 'workspaces'
-      case 'cut':          return 'content_cut'
-      case 'copy':         return 'content_copy'
-      case 'remove':       return 'delete'
-      case 'move':         return 'open_with'
       case 'promote-to-parent': return 'arrow_upward'
-      case 'make-public':  return 'public'
-      case 'make-branch-public': return 'share'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
       case 'bees':         return 'hub'
@@ -579,7 +556,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // candidates that are normally state-gated so they can be toggled even
     // when their state isn't currently met (empty clipboard, no selection).
     if (this.#editMode() && (ctrl.visibleWhen === 'clipboardHasItems'
-      || ctrl.visibleWhen === 'hasSelection' || ctrl.visibleWhen === 'worldSelection')) return true
+      || ctrl.visibleWhen === 'hasSelection')) return true
     // A pinned layer is frozen — the viewport controls come off the bar so
     // there is literally nothing left to drag or zoom with. Edit mode keeps
     // them visible so the rail can still be configured from a pinned page.
@@ -592,7 +569,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'hasSelection': return this.#hasSelection()
       // world:mode is the mesh-header's world toggle, a distinct broadcast
       // from the solo/swarm meshPublic input.
-      case 'worldSelection': return this.#worldMode() && this.#hasSelection()
       default: return true
     }
   }
@@ -972,7 +948,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #zoomManualUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
-  #worldModeUnsub: (() => void) | null = null
+  #hoverCrumbUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
   #beesUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
@@ -981,8 +957,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
-  #neonModeUnsub: (() => void) | null = null
-  #launcherShapesUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
@@ -1079,10 +1053,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
     })
 
-    // Gates the worldSelection controls (bulk make-public). Replayed, so a
-    // late-mounting bar picks up an already-on world mode.
-    this.#worldModeUnsub = EffectBus.on<{ active?: boolean }>('world:mode', (payload) => {
-      this.#worldMode.set(payload?.active === true)
+    // The name of the tile under the pointer, tacked onto the breadcrumb.
+    // Hovering a tile REPLACES its name with the action icons (the band is the
+    // menu now — hex-sdf.shader.ts), so without this there is nothing on screen
+    // telling you which tile you are about to act on. `label` is null over an
+    // empty hex and over chrome, which clears the crumb.
+    this.#hoverCrumbUnsub = EffectBus.on<{ label?: string | null }>('tile:hover', (payload) => {
+      this.#hoveredCell.set(payload?.label ?? null)
     })
 
     // Clipboard contents drive only the toolbar badge count now — the
@@ -1154,16 +1131,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#textOnly.set(textOnly)
     })
 
-    // keep the neon-glow icon in sync when toggled elsewhere (the /border command)
-    this.#neonModeUnsub = EffectBus.on<{ active: boolean }>('neon:mode', ({ active }) => {
-      this.#neonMode.set(active)
-    })
-
-    // keep the launcher-shapes icon in sync if toggled elsewhere
-    this.#launcherShapesUnsub = EffectBus.on<{ active: boolean }>('launcher:hexagons', ({ active }) => {
-      this.#launcherHexagons.set(active)
-    })
-
     this.#atomizeModeUnsub = EffectBus.on<{ active: boolean; target: string; strategy: string }>(
       'atomize:mode',
       ({ active, target, strategy }) => {
@@ -1197,16 +1164,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
       EffectBus.emit('visibility:show-hidden', { active: true })
-    }
-
-    // emit initial neon-mode state so the renderer picks it up
-    if (this.#neonMode()) {
-      EffectBus.emit('neon:mode', { active: true })
-    }
-
-    // emit initial launcher-shapes state so the renderer picks it up
-    if (this.#launcherHexagons()) {
-      EffectBus.emit('launcher:hexagons', { active: true })
     }
 
     // fit-locked: install the navigation listener if any fit pin exists.
@@ -1317,12 +1274,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  breadcrumb (and any other header-anchored offset) can dock at
    *  `max(static, measured)` and never ride up under a taller-than-expected
    *  header. `.header-bar` is a shell sibling (app.html), shared by web + dev. */
-  #observeHeaderHeight(): void {
+  #observeHeaderHeight(attempt = 0): void {
+    if (typeof ResizeObserver === 'undefined') return
     const header = document.querySelector('.header-bar') as HTMLElement | null
-    if (!header || typeof ResizeObserver === 'undefined') return
+    if (!header) {
+      // The header is a SIBLING component and may not be in the DOM yet when
+      // the control bar's view initializes. Bailing here used to be permanent,
+      // which left `--hc-header-bottom` unset for the whole session and every
+      // anchored surface silently on its static fallback. Retry a few frames.
+      if (attempt < 30) requestAnimationFrame(() => this.#observeHeaderHeight(attempt + 1))
+      return
+    }
     const measure = (): void => {
-      const h = header.offsetHeight
-      if (h > 0) document.documentElement.style.setProperty('--hc-header-bottom', `${h}px`)
+      // getBoundingClientRect, NOT offsetHeight: `.header-bar` carries a CSS
+      // `zoom` (--hc-header-zoom, 1.15 by default in the 13" width band), and
+      // offsetHeight reports the UNZOOMED box — 45px where the real bottom edge
+      // is 51.7px. Anchored panels position in viewport pixels, so the rect is
+      // the only measure that can be compared against them.
+      const bottom = header.getBoundingClientRect().bottom
+      if (bottom > 0) document.documentElement.style.setProperty('--hc-header-bottom', `${bottom}px`)
     }
     measure()
     this.#headerObserver = new ResizeObserver(measure)
@@ -1330,6 +1300,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    // The picker's window listeners are capture-phase and live only while it
+    // is open — closing releases them.
+    this.closeTourMenu()
     // Never leave the gate locked behind a torn-down bar — the pin would be
     // unreleasable (the only button that releases it went away with us).
     this.gate?.removeEventListener?.('change', this.#onGateChange)
@@ -1358,7 +1331,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#zoomManualUnsub?.()
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
-    this.#worldModeUnsub?.()
+    this.#hoverCrumbUnsub?.()
     this.#moveModeUnsub?.()
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
@@ -1367,8 +1340,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
     this.#textOnlyUnsub?.()
-    this.#neonModeUnsub?.()
-    this.#launcherShapesUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
     this.#tagsUnsub?.()
@@ -1438,9 +1409,102 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Start the guided beeing tour — the same entry point /tutorial uses, so
    *  the rail's bee and the slash behaviour run one identical tour. The drone
-   *  ignores a second start while one is already running. */
-  readonly startTutorial = (): void => {
+   *  ignores a second start while one is already running.
+   *
+   *  CTRL (or ⌘) + click opens the COURSE PICKER instead: the tour is four
+   *  courses now (starter, then beginner → intermediate → expert), and the
+   *  deeper ones need a way in that isn't typing a slash command. Plain click
+   *  keeps meaning "just show me" — the starter tour, unchanged. */
+  readonly startTutorial = (event?: MouseEvent): void => {
+    if (event && (event.ctrlKey || event.metaKey)) {
+      this.#openTourMenu(event)
+      return
+    }
+    this.closeTourMenu()
     EffectBus.emit('tutorial:start', {})
+  }
+
+  // ── the course picker ─────────────────────────────────
+  //
+  // Fed by the tutorial's OWN lesson registry over IoC (never imported — a
+  // shell surface must not depend on essentials), so the list is whatever
+  // courses this build actually ships: a level with no lessons is not offered,
+  // and a module that registers its own lessons shows up here for free.
+
+  readonly tourMenuOpen = signal(false)
+  readonly tourMenuPos = signal<{ x: number; y: number; flip: boolean }>({ x: 0, y: 0, flip: false })
+  readonly tourCourses = signal<{ level: string; label: string; count: number }[]>([])
+
+  #openTourMenu(event: MouseEvent): void {
+    const registry = get<{ levels?: () => string[]; course?: (l: string) => unknown[] }>(
+      '@diamondcoreprocessor.com/TutorialLessonRegistry')
+    const levels = registry?.levels?.() ?? []
+    if (levels.length === 0) {
+      // No roster (the tutorial module isn't loaded) — fall back to the tour
+      // rather than opening an empty menu.
+      EffectBus.emit('tutorial:start', {})
+      return
+    }
+    this.tourCourses.set(levels.map(level => ({
+      level,
+      label: this.#tourLabel(level),
+      count: registry?.course?.(level)?.length ?? 0,
+    })))
+
+    // Fixed positioning off the button's own rect: the rail is a scrolling,
+    // overflow-hidden box, so a menu rendered inside it would be clipped.
+    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+    const width = 232
+    const x = rect ? rect.right + 10 : 12
+    const flip = x + width > window.innerWidth - 8
+    this.tourMenuPos.set({
+      x: flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x,
+      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - 260)),
+      flip,
+    })
+    this.tourMenuOpen.set(true)
+    window.addEventListener('pointerdown', this.#onTourMenuOutside, true)
+    window.addEventListener('keydown', this.#onTourMenuKey, true)
+  }
+
+  readonly closeTourMenu = (): void => {
+    if (!this.tourMenuOpen()) return
+    this.tourMenuOpen.set(false)
+    window.removeEventListener('pointerdown', this.#onTourMenuOutside, true)
+    window.removeEventListener('keydown', this.#onTourMenuKey, true)
+  }
+
+  /** Fly the picked course. Same effect the slash behaviour raises, so the
+   *  picker and `/tutorial <level>` are one path. */
+  readonly pickTour = (level: string): void => {
+    this.closeTourMenu()
+    EffectBus.emit('tutorial:start', { level })
+  }
+
+  #tourLabel(level: string): string {
+    const fallback: Record<string, string> = {
+      starter: 'Starter tour', beginner: 'Beginner',
+      intermediate: 'Intermediate', expert: 'Expert',
+    }
+    const key = `tutorial.level.${level}`
+    const i18n = get<{ t?: (k: string) => string }>('@hypercomb.social/I18n')
+    const resolved = i18n?.t?.(key)
+    return resolved && resolved !== key ? resolved : (fallback[level] ?? level)
+  }
+
+  readonly #onTourMenuOutside = (event: PointerEvent): void => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest?.('.tour-menu, .rail-tutorial')) return
+    this.closeTourMenu()
+  }
+
+  readonly #onTourMenuKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return
+    // Take Escape before the global cascade — the menu is the innermost thing
+    // open, so it is what Escape must close.
+    event.stopPropagation()
+    event.preventDefault()
+    this.closeTourMenu()
   }
 
   // ── view actions ──────────────────────────────────────
@@ -1871,29 +1935,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('visibility:show-hidden', { active: next })
   }
 
-  // ── neon mode (on/off) ───────────────────────────────────
-  // Lights every tile's border with an additive glow. The actual glow is
-  // painted by the renderer (hex SDF shader), which listens for 'neon:mode'.
-
-  readonly toggleNeonMode = (): void => {
-    const next = !this.#neonMode()
-    this.#neonMode.set(next)
-    localStorage.setItem('hc:neon-mode', next ? '1' : '0')
-    EffectBus.emit('neon:mode', { active: next })
-  }
-
-  // ── launcher shapes (decorative ⇄ plain hexagons) ────────
-  // Launch-group pages draw their tiles as group-specific silhouettes (games →
-  // marching Space Invader; websites' cloud is retired). When this is on, the
-  // renderer (hex SDF shader, via show-cell) forces those pages back to plain
-  // hexagons. Pure shader-mode flip; no geometry/cell-list change.
-
-  readonly toggleLauncherShapes = (): void => {
-    const next = !this.#launcherHexagons()
-    this.#launcherHexagons.set(next)
-    localStorage.setItem('hc:launcher-hexagons', next ? '1' : '0')
-    EffectBus.emit('launcher:hexagons', { active: next })
-  }
 
   // ── voice ────────────────────────────────────────────
 

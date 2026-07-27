@@ -474,10 +474,26 @@ $bp-phone-max: 599px;
   // divider). Adding more here made that seam wider than the rail's.
 }
 
+// A group wraps rather than squeezing. `--hc-rail-cols` icons per row, then
+// the next row — one, two, three rows deep as the cell's behaviours pile up.
+// Rows fill from the RIGHT (`justify-content: flex-end`) so the rail stays
+// flush against the edge it lives on and a half-full last row reads as part
+// of the same block instead of a stray icon adrift on the left.
 .action-group {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
+  // Multi-row groups need align-CONTENT to stay centred in the bar;
+  // align-items only centres within a single row.
+  align-content: center;
   gap: var(--hc-rail-gap, 0.3rem);
+  // The wrap point, expressed in the rail's own metrics so it can never
+  // drift from the button size: N boxes + (N − 1) gaps.
+  max-width: calc(
+    var(--hc-rail-cols, 5) * var(--hc-rail-btn, 1.85rem) +
+    (var(--hc-rail-cols, 5) - 1) * var(--hc-rail-gap, 0.3rem)
+  );
 }
 
 // Hairline group separator — the same steel the header frame and the

@@ -22,7 +22,12 @@
 .header-bar {
   display: flex;
   align-items: stretch;
-  height: 2.5rem;
+  // min-height, not height: the icon rail WRAPS (see command-shell
+  // `.action-group`), and a cell carrying several branch-scoped behaviours
+  // takes two or three rows. The bar grows to hold them and everything below
+  // follows via `--hc-header-anchor` (styles/_header-size.scss). A one-row
+  // rail — the common case — still renders at exactly 2.5rem.
+  min-height: 2.5rem;
 
   // ── the icon rail's metrics ────────────────────────────
   // One box, one glyph size, one gap for EVERY icon on the right of the
@@ -34,6 +39,11 @@
   --hc-rail-btn: 1.85rem;
   --hc-rail-glyph: 1.2rem;
   --hc-rail-gap: 0.3rem;
+  // How many icons a group fits before wrapping to the next row. The rail
+  // NEVER shrinks an icon to make room (that raggedness is what the rail
+  // exists to prevent) — it takes another row instead, same box, same gap,
+  // same baseline. Matches the tile icon band's rhythm.
+  --hc-rail-cols: 5;
 
   // Switchable size: `--hc-header-zoom` (1.0 / 1.15 / 1.45, see
   // `styles/_header-size.scss`) scales the box AND every child

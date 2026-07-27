@@ -170,21 +170,9 @@ class KeywordProvider implements SlashBehaviourProvider {
   }
 }
 
-class DebugProvider implements SlashBehaviourProvider {
-  readonly name = 'debug-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', descriptionKey: 'slash.debug',
-      examples: [{ input: '/debug', result: 'Toggles the Pixi display-tree inspector' }] }
-  ]
-
-  async execute(): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/DebugQueenBee') as any
-    if (queen?.invoke) {
-      await queen.invoke('')
-    }
-  }
-}
+// DebugProvider removed — DebugQueenBee carries its own description,
+// descriptionKey and examples, so auto-discovery below wraps it directly.
+// A manual provider that only forwards to `queen.invoke` is pure drift risk.
 
 class RemoveProvider implements SlashBehaviourProvider {
   readonly name = 'remove-provider'
@@ -356,19 +344,8 @@ class ExpandProvider implements SlashBehaviourProvider {
 // Pinned is the only layout mode and cell positions are owned by
 // per-cell indices stored in 0000 properties.
 
-class ArrangeProvider implements SlashBehaviourProvider {
-  readonly name = 'arrange-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'arrange', description: 'Toggle icon arrangement mode on the tile overlay', descriptionKey: 'slash.arrange',
-      examples: [{ input: '/arrange', result: 'Overlay icons become draggable; repeat to exit' }] }
-  ]
-
-  async execute(): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/ArrangeQueenBee') as any
-    if (queen?.invoke) await queen.invoke('')
-  }
-}
+// ArrangeProvider removed — same reason as DebugProvider: ArrangeQueenBee
+// declares everything the provider was repeating, and auto-discovery wraps it.
 
 class VoiceProvider implements SlashBehaviourProvider {
   readonly name = 'voice-provider'
@@ -487,12 +464,10 @@ const _slashBehaviours = new SlashBehaviourDrone()
 _slashBehaviours.addProvider(new HelpProvider())
 _slashBehaviours.addProvider(new ClearProvider())
 _slashBehaviours.addProvider(new KeywordProvider())
-_slashBehaviours.addProvider(new DebugProvider())
 _slashBehaviours.addProvider(new RemoveProvider())
 _slashBehaviours.addProvider(new AccentProvider())
 _slashBehaviours.addProvider(new MoveProvider())
 _slashBehaviours.addProvider(new ExpandProvider())
-_slashBehaviours.addProvider(new ArrangeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
 _slashBehaviours.addProvider(new TextOnlyProvider())

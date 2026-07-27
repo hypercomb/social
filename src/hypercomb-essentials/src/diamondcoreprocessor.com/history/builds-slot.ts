@@ -49,7 +49,8 @@
 // tree-shaking by builds.queen.ts and claude-bridge.worker.ts importing
 // `BUILDS_SLOT` / `mintBuildRecord`.
 
-import { get } from '@hypercomb/core'
+import { get, SignatureService } from '@hypercomb/core'
+import { HistoryService } from './history.service.js'
 import type { LayerSlotRegistry } from './layer-slot-registry.js'
 
 /**
@@ -79,6 +80,7 @@ interface HistoryLike {
   currentLayerAt?: (sig: string) => Promise<Record<string, unknown> | null>
   sealSubtree?: (segments: readonly string[]) => Promise<string | null>
   healSubtreeBags?: (segments: readonly string[]) => Promise<unknown>
+  getLayerBySig?: (sig: string) => Promise<Record<string, unknown> | null>
 }
 interface StoreLike {
   putResource?: (b: Blob) => Promise<string>
@@ -128,6 +130,26 @@ export async function readBuildsAt(segments: readonly string[]): Promise<BuildRe
 }
 
 /**
+ * The seal a build revision is COMPARED by: the sealed root layer with
+ * its `builds` slot stripped, re-signed (no commit). Appending a record
+ * changes the root layer — the snapshots doc's benign recursion — so the
+ * RAW seal can never equal itself across a mint; the index is a map of
+ * history, not content, and must not count as change. Restore still
+ * walks the RAW seal (with the index carried forward). Falls back to the
+ * raw seal when the sealed layer cannot be loaded.
+ */
+async function contentSealOf(rawSeal: string): Promise<string> {
+  const history = get<HistoryLike>(HISTORY_KEY)
+  const layer = await history?.getLayerBySig?.(rawSeal)
+  if (!layer) return rawSeal
+  const stripped = { ...layer } as Record<string, unknown>
+  delete stripped[BUILDS_SLOT]
+  const canonical = HistoryService.canonicalizeLayer(stripped as { name: string })
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical))
+  return SignatureService.sign(bytes.buffer as ArrayBuffer)
+}
+
+/**
  * Mint a build revision at `segments`: seal the subtree, no-op if the
  * head record already names that seal (idempotent rebuild), otherwise
  * write the record and append its sig to the `builds` slot — one commit,
@@ -136,11 +158,17 @@ export async function readBuildsAt(segments: readonly string[]): Promise<BuildRe
  * The single implementation behind the bridge `build-record` op and the
  * `/builds record` gesture, so producers and participants mint the exact
  * same record.
+ *
+ * `dryRun` seals and compares but NEVER writes — the atomicity audit's
+ * probe (`scripts/audit-atomicity.cjs`): `unchanged` then answers "does
+ * the live subtree still match its last recorded build?" and an empty
+ * `sig` answers "has this root never recorded one?".
  */
 export async function mintBuildRecord(
   segments: readonly string[],
   label?: string,
-): Promise<{ sig: string; seal: string; label: string; unchanged: boolean } | { error: string }> {
+  opts?: { dryRun?: boolean },
+): Promise<{ sig: string; seal: string; label: string; unchanged: boolean; dryRun?: boolean } | { error: string }> {
   const history = get<HistoryLike>(HISTORY_KEY)
   const store = get<StoreLike>(STORE_KEY)
   const committer = get<CommitterLike>(COMMITTER_KEY)
@@ -161,8 +189,17 @@ export async function mintBuildRecord(
 
   const existing = await readBuildsAt(segments)
   const head = existing.length ? existing[existing.length - 1] : null
-  if (head && head.seal === seal) {
-    return { sig: head.sig ?? '', seal, label: head.label, unchanged: true }
+  // Compare by CONTENT seal (builds slot stripped): the record's own
+  // append must not read as change, or no mint could ever be a no-op.
+  const unchanged = head
+    ? (head.seal === seal || (await contentSealOf(head.seal)) === (await contentSealOf(seal)))
+    : false
+  if (head && unchanged) {
+    return { sig: head.sig ?? '', seal: head.seal, label: head.label, unchanged: true, ...(opts?.dryRun ? { dryRun: true } : {}) }
+  }
+  if (opts?.dryRun) {
+    // Probe only: report the head (or its absence) without minting.
+    return { sig: head?.sig ?? '', seal, label: head?.label ?? '', unchanged: false, dryRun: true }
   }
 
   const name = (label ?? '').trim() || `build-${existing.length + 1}`

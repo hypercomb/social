@@ -858,14 +858,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     const v = this.value()
 
-    // >? prefix enters filter mode
-    if (v.startsWith('>?')) {
-      const raw = v.slice(2)
+    // `?` enters filter mode — bare `?keyword` is the form people actually
+    // type (and the one the tutorial is read as teaching); `>?keyword` is
+    // kept because it is what the lesson text spells and what muscle memory
+    // holds. Nothing is lost by claiming a leading `?`: normalizeCell strips
+    // `?` entirely, so it can never begin a real cell name.
+    const filterHead = v.startsWith('>?') ? '>?' : v.startsWith('?') ? '?' : ''
+    if (filterHead) {
+      const raw = v.slice(filterHead.length)
       const keyword = this.completions.normalize(raw)
       return {
         active: true,
         mode: 'filter',
-        head: '>?',
+        head: filterHead,
         raw,
         normalized: keyword,
         style: 'space'

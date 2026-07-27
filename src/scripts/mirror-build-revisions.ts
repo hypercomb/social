@@ -111,6 +111,10 @@ const PARTS: Part[] = [
    'the producer\'s gesture — the `build-record` bridge op: the LAST call of every multi-file build pass, behind which mintBuildRecord seals, compares, and appends'],
   ['documentation/build-revisions.md',
    'the doctrine — R1 standalone sig resources, R2a sig-only content refs, R2b name links made safe by whole-build restore, R3 one build record per pass; the audit table and the rejected revision-code shape'],
+  ['scripts/audit-atomicity.cjs',
+   'the continuous audit — static: every multi-anchor producer script must end with build-record (frozen debt list, may only shrink); live: dry-run seal-vs-builds-slot probe per site root over the bridge, never a write; exit 1 on drift, run periodically'],
+  ['doctrine.spec.ts',
+   'the ratchet — the audit\'s always-on twin in the vitest doctrine suite: an unwired multi-anchor producer fails the tests; wiring one clicks the ratchet tight'],
 ]
 
 const behaviorSeg = [ROOT_KEY, COLLECTION, BEHAVIOR]

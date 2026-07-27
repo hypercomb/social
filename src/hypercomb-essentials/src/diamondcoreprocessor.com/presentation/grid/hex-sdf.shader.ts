@@ -18,9 +18,13 @@ export class HexSdfTextureShader {
       u_flat: { value: 0, type: 'f32' },
       u_pivot: { value: 0, type: 'f32' },
       u_hoveredIndex: { value: -1, type: 'f32' },
+      // Rows the HOVERED tile's label band must hold — 1 while its icons fit
+      // one row, 2 once they wrap. The band grows only when it has to, so a
+      // tile with few icons keeps the text's own height. Owned by the overlay
+      // (it does the wrapping) and pushed through `overlay:band-rows`.
+      u_bandRows: { value: 1, type: 'f32' },
       u_labelMix: { value: 1.0, type: 'f32' },
       u_imageMix: { value: 1.0, type: 'f32' },
-      u_neon: { value: 0, type: 'f32' },
       u_accentColor: { value: [0.4, 0.85, 1.0], type: 'vec3<f32>' },
       // Launcher motion (vertex stage). u_driftAmp = 0 disables it entirely
       // (the common case); > 0 lets the game tiles march to u_time. See
@@ -68,13 +72,14 @@ export class HexSdfTextureShader {
     this.#ug.update()
   }
 
-  public setNeon = (on: boolean): void => {
-    this.#ug.uniforms.u_neon = on ? 1.0 : 0.0
+  public setHoveredIndex = (index: number): void => {
+    this.#ug.uniforms.u_hoveredIndex = index
     this.#ug.update()
   }
 
-  public setHoveredIndex = (index: number): void => {
-    this.#ug.uniforms.u_hoveredIndex = index
+  /** Rows the hovered tile's label band must hold (1 or 2). */
+  public setBandRows = (rows: number): void => {
+    this.#ug.uniforms.u_bandRows = rows
     this.#ug.update()
   }
 
@@ -216,9 +221,9 @@ export class HexSdfTextureShader {
     uniform float u_flat;
     uniform float u_pivot;
     uniform float u_hoveredIndex;
+    uniform float u_bandRows;
     uniform float u_labelMix;
     uniform float u_imageMix;
-    uniform float u_neon;
     uniform vec3 u_accentColor;
     uniform float u_time;
 
@@ -441,14 +446,16 @@ export class HexSdfTextureShader {
 
       vec4 color = base;
 
-      // ── label band: ONE row at rest, TWO on hover ────────────────
-      // The band is the label's BACKGROUND. At rest it is the single-row
-      // pill behind the name on an imaged tile. On HOVER it DOUBLES in
-      // height and stays CENTRED — the added height is balanced upward and
-      // downward in equal parts — so the band becomes two rows: the name
-      // gives way to the icons, which fill BOTH rows (5 per row, wrapping —
-      // tile-overlay.drone.ts). That band IS the icons' backing; the overlay
-      // draws no tray of its own.
+      // ── label band: the icons' home, sized to what it holds ──────
+      // The band is the label's BACKGROUND. At rest it is the single-row strip
+      // behind the name on an imaged tile. On HOVER the name gives way to the
+      // icons and the band takes the height of exactly the rows they need:
+      // u_bandRows is 1 while the icons fit one row (so the band keeps the
+      // text's own height and nothing grows), 2 once they wrap. It grows
+      // CENTRED — the added height balanced equally above and below — so the
+      // rows straddle the hex centre. That band IS the icons' backing; the
+      // overlay draws no tray of its own. Row count comes from the overlay,
+      // which does the wrapping (tile-overlay.drone.ts, overlay:band-rows).
       float hovered = (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) ? 1.0 : 0.0;
       float rowH = u_radiusPx * 0.15;   // half-height of ONE row
 
@@ -478,29 +485,38 @@ export class HexSdfTextureShader {
       // Drawn BEFORE the glyphs so the band can never paint over the letters.
       // At rest it only shows over an image (imgBlend) — exactly the pill it
       // has always been; on hover it shows on every tile.
+      //
+      // FLUSH TO THE BORDER. There is NO horizontal bound: the band is a plain
+      // strip and the hexagon itself trims it (color.a *= hexAlpha at the
+      // end of main), so it meets the tile border exactly, at any radius and
+      // in either orientation. The old fixed half-width (0.88 × radius) was
+      // measured 4px short of the edge on each side and read as a floating
+      // pill rather than a band.
+      //
       // The band edge is a RULE, not a gradient: feather it by well under a
       // pixel. The hex's own aa is ~1.5px, which read as a blurry smudge on a
       // ~19px band — bandAA lands the top and bottom as defined lines.
-      float bandW = u_radiusPx * 0.88;
-      float bandH = rowH * (1.0 + hovered);
+      float bandH = rowH * mix(1.0, u_bandRows, hovered);
       float bandAA = max(u_radiusPx * 0.02, 0.6);
-      vec2 bandP = abs(local) - vec2(bandW, bandH);
-      float bandD = length(max(bandP, 0.0)) + min(max(bandP.x, bandP.y), 0.0);
+      float bandD = abs(local.y) - bandH;
       float bandMask = (1.0 - smoothstep(0.0, bandAA, bandD)) * max(labelPresent, hovered);
       // Hover sits DARKER than the resting pill — the icons ride this, so it
       // has to hold them against any picture. At rest the pill is untouched.
       color.rgb = mix(color.rgb, vec3(0.0), bandMask * mix(imgBlend * 0.55, 0.72, hovered) * u_labelMix);
 
-      // Hairline ruler on the seam between the two rows — hover only, since at
-      // rest there is one row and nothing to divide. Inset from both ends and
-      // faded out there, so it reads as a rule sitting inside the band rather
-      // than a full-width divider cutting it in half. A sub-pixel core with a
-      // sub-pixel feather: it must read as a drawn LINE, not a soft gradient.
-      // Local units are px, so the core holds at any hex radius.
-      float rulerHalfW = bandW * 0.80;
+      // Hairline ruler on the seam between the two rows — only when there ARE
+      // two (hovered AND wrapped); a single-row band has nothing to divide.
+      // Inset from both ends and faded out there, so it reads as a rule
+      // sitting inside the band rather than a full-width divider cutting it in
+      // half. A sub-pixel core with a sub-pixel feather: it must read as a
+      // drawn LINE, not a soft gradient. Local units are px, so the core holds
+      // at any hex radius. Keeps its own inset now that the band runs edge to
+      // edge — the rule is not meant to reach the border.
+      float rulerHalfW = u_radiusPx * 0.70;
       float rulerCore = 1.0 - smoothstep(0.27, 0.54, abs(local.y));
       float rulerSpan = 1.0 - smoothstep(rulerHalfW - 4.0, rulerHalfW, abs(local.x));
-      color.rgb = mix(color.rgb, vec3(1.0), rulerCore * rulerSpan * bandMask * hovered * 0.30 * u_labelMix);
+      float rulerOn = hovered * step(1.5, u_bandRows);
+      color.rgb = mix(color.rgb, vec3(1.0), rulerCore * rulerSpan * bandMask * rulerOn * 0.30 * u_labelMix);
 
       // The glyph body is now FULLY opaque white (was 0.92 / 0.88). At 0.88 a
       // letter was 12% transparent, so the noise of whatever sat behind it —
@@ -604,23 +620,6 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, vec3(sgray), 0.8);
         color.rgb *= 0.38;
         color.a *= 0.85;
-      }
-
-      // neon mode (control-bar toggle): every tile's border lights up with an
-      // additive glow — a wide soft bloom, a mid bloom, and a crisp core rim —
-      // mirroring the screensaver's neon edge. The hue leans from the active
-      // accent colour toward each tile's own border colour, so peer groups glow
-      // their own hue. The shape is untouched; only the rim lights up. Bloom is
-      // clipped to the hex by hexAlpha below, so it reads as an inner-edge neon.
-      if (u_neon > 0.5) {
-        float edge = abs(d);
-        float rim  = 1.0 - smoothstep(0.0, aa * 1.6,  edge);
-        float midB = 1.0 - smoothstep(0.0, aa * 4.5,  edge);
-        float wide = 1.0 - smoothstep(0.0, aa * 10.0, edge);
-        vec3 neon = mix(u_accentColor, vBorderColor, 0.45);
-        color.rgb += neon * wide * 0.10;
-        color.rgb += neon * midB * 0.22;
-        color.rgb = mix(color.rgb, neon, rim * 0.92);
       }
 
       // hover accent: TWO distinct border highlights so a pathway tile (has

@@ -68,6 +68,10 @@ $actions-corner: 12rem;
   .domain-crumb { color: rgba(210, 215, 220, 0.6); padding: 0; }
   .branch-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; font-weight: 500; font-size: 1.12em; }
   .branch-bracket { font-size: 1.45em; font-weight: 400; vertical-align: -0.06em; }
+  // The tile under the pointer — the only place its name shows while hovered.
+  // Cool and unweighted against the branch crumb's warm 500: it says "this is
+  // what you are ON", never "this is where you ARE".
+  .hover-crumb { color: rgba(150, 200, 230, 0.9); padding: 0; font-weight: 400; }
 
   .install-crumb {
     padding: 0;
@@ -458,7 +462,7 @@ $actions-corner: 12rem;
   left: 0;
   right: auto;
   // clears the header bottom at any size: 2.8rem × the active header zoom
-  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
+  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 0;
   transform: none;
   align-items: stretch; // let the rail fill the full height
@@ -676,7 +680,7 @@ $actions-corner: 12rem;
 // folded into `--hc-header-zoom` (see `styles/_header-size.scss`), so no
 // per-band override is needed here.
 @include touch {
-  .pill-stage.dock-left { top: calc(3.85rem * var(--hc-header-zoom, 1.0)); }
+  .pill-stage.dock-left { top: max(calc(3.85rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
 }
 
 // Tooltips flip to the inner side of a docked bar so they don't spill off
@@ -1515,4 +1519,86 @@ $actions-corner: 12rem;
   // kept proportional to the base size — at 0.7rem this override had fallen
   // BELOW the base, so pheromones shrank on the widest monitors
   .tag-strip { font-size: 0.8rem; }
+}
+
+// ── tour course picker ───────────────────────────────────
+//
+// Ctrl/⌘+click on the rail's bee. Same elevated-surface tier as the controls
+// pill so it reads as chrome, not as content: cold, hairline, no glow. Fixed
+// positioning is set inline from the button's rect (see the template comment)
+// because the rail scrolls and clips.
+
+.tour-menu {
+  position: fixed;
+  z-index: 60003;
+  width: 232px;
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+
+  background: color-mix(in srgb, var(--md-surface-c-low) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-s);
+  box-shadow: var(--md-elev-3);
+  color: var(--md-on-surface);
+}
+
+.tour-menu-title {
+  padding: 0.2rem 0.4rem 0.35rem;
+  font-family: var(--hc-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+}
+
+.tour-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.42rem 0.45rem;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+
+  .mat-sym {
+    font-size: 1.05rem;
+    color: color-mix(in srgb, #ffc65c 72%, var(--md-on-surface));
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+    .mat-sym { color: #ffc65c; }
+  }
+}
+
+.tour-label { flex: 1; min-width: 0; }
+
+// Lesson count — the indicator-pill convention: a number in a chip, never a
+// sentence.
+.tour-count {
+  flex-shrink: 0;
+  min-width: 1.35rem;
+  padding: 0.05rem 0.32rem;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 999px;
+  font-family: var(--hc-mono);
+  font-size: 0.62rem;
+  text-align: center;
+  color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
+}
+
+// The bee stays lit while its menu is open.
+.rail-tutorial.active {
+  color: #ffc65c;
+  background: rgba(255, 198, 92, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 198, 92, 0.4);
 }

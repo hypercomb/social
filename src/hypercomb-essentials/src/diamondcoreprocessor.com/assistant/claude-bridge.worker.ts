@@ -61,6 +61,9 @@ type BridgeRequest = {
   replaceKind?: boolean
   /** Build revision name (build-record). */
   label?: string
+  /** build-record probe mode: seal + compare, never write (the
+   *  atomicity audit's non-mutating check). */
+  dryRun?: boolean
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -781,7 +784,11 @@ export class ClaudeBridgeWorker extends Worker {
     if (segments.length === 0) {
       return { id: req.id, ok: false, error: 'build-record requires `segments` (for the whole hive, use /snapshot)' }
     }
-    const result = await mintBuildRecord(segments, typeof req.label === 'string' ? req.label : undefined)
+    const result = await mintBuildRecord(
+      segments,
+      typeof req.label === 'string' ? req.label : undefined,
+      req.dryRun === true ? { dryRun: true } : undefined,
+    )
     if ('error' in result) return { id: req.id, ok: false, error: result.error }
     return { id: req.id, ok: true, data: result }
   }
