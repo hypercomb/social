@@ -253,11 +253,22 @@ function dispatchEnterAction(action: string, label: string | undefined): void {
   if (!bee || bee.behavior === 'navigation') return
 
   const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
+  const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+
+  // TAKEOVER views (a slides deck, a lightbox) mount over the CURRENT layer —
+  // the same in-place open a tile click performs, so closing drops you back on
+  // the layer you clicked from. This icon is also how you reach a view the
+  // tile-click default OUTRANKS (see takeoverRank): the event names the view
+  // explicitly, so the picker's precedence never applies here.
+  if (bee.opensOnTileClick) {
+    EffectBus.emit('view:open-for-tile', { view: bee.view, segments: [...here, label] })
+    return
+  }
+
   const nav = window.ioc.get<NavigationLike>('@hypercomb.social/Navigation')
   const vm = window.ioc.get<ViewModeLike>('@hypercomb.social/ViewMode')
   if (!nav?.goRaw || !vm?.setMode) return
 
-  const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
   nav.goRaw([...here, label])
   vm.setMode(bee.view)
 }

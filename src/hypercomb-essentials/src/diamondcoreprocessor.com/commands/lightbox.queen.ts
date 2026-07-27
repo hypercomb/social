@@ -223,6 +223,11 @@ window.ioc.register('@diamondcoreprocessor.com/LightboxQueenBee', _lightbox)
       // A lightbox is a takeover by definition: clicking the tile shows the
       // pictures in place, and closing returns you to the layer you came from.
       opensOnTileClick: true,
+      // When a tile ALSO carries a slides deck, the authored deck is the click
+      // default and the gallery yields — reachable from the tile's hover band
+      // and the Beehaviors panel, or made the default by switching slides off
+      // on that tile.
+      takeoverRank: 1,
       // Ships mobile-friendly: full-screen pictures are a first-class mobile
       // surface, and the viewer is the slides engine (already mobile-friendly).
       pheromones: ['mobile:friendly'],

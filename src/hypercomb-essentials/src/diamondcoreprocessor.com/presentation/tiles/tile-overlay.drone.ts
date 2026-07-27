@@ -7,8 +7,8 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
-import { hasDecorationKind, referenceTargetForLabel, kindsForLabel } from '../../commands/decoration-kind-index.js'
-import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
+import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
+import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
@@ -2519,15 +2519,23 @@ export class TileOverlayDrone extends Drone {
   /** The view of a behaviour on this tile that TAKES OVER the click — opening
    *  its view instead of entering the tile. Null when the tile carries none.
    *  Both reads are synchronous (the hot decoration index + the registry), so
-   *  this stays safe inside the click path. */
+   *  this stays safe inside the click path.
+   *
+   *  When SEVERAL behaviours on the tile open on click, the winner is the
+   *  lowest `takeoverRank` (unset = 0), then registration order — never the
+   *  decoration index's insertion order, which is an accident of which
+   *  decoration resolved first this session. Switching a behaviour off on the
+   *  tile (the hidden pool) removes it from contention here, because
+   *  `hasDecorationKind` already filters hidden kinds. */
   #viewTakeoverFor(label: string): string | null {
     const registry = window.ioc.get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
-    if (!registry?.byDecorationKind) return null
-    for (const kind of kindsForLabel(label)) {
-      const bee = registry.byDecorationKind(kind)
-      if (bee?.opensOnTileClick) return bee.view
+    if (!registry?.all) return null
+    let winner: VisualBeeDescriptor | null = null
+    for (const bee of registry.all()) {
+      if (!bee.opensOnTileClick || !hasDecorationKind(label, bee.decorationKind)) continue
+      if (!winner || (bee.takeoverRank ?? 0) < (winner.takeoverRank ?? 0)) winner = bee
     }
-    return null
+    return winner?.view ?? null
   }
 
   #navigateInto(label: string): void {

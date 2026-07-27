@@ -273,6 +273,18 @@ export type VisualBeeDescriptor = {
   readonly opensOnTileClick?: boolean
 
   /**
+   * Tie-break when SEVERAL behaviours on one tile all declare
+   * `opensOnTileClick`: the lowest rank is the tile's click default (unset =
+   * 0), and equal ranks fall back to registration order. The rule is fixed and
+   * code-declared so the winner never depends on which decoration happened to
+   * resolve first this session; the per-tile override is switching the
+   * unwanted behaviour off (the hidden pool), which the picker already honors.
+   * The other views stay reachable from the tile's hover band (`view-enter:*`
+   * icons) and the Beehaviors panel.
+   */
+  readonly takeoverRank?: number
+
+  /**
    * Capability pheromones this behaviour SHIPS — how a module self-declares
    * what it is good for, so no one has to chase modules down to tag them.
    * e.g. `['mobile:friendly']` marks a view the mobile shell may activate.
