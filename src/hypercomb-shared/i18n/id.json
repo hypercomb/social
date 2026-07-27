@@ -474,6 +474,8 @@
   "view.home.description": "Tampilan beranda yang hangat dari area ubin ini — ubin anak menjadi widget dan pintu masuk.",
   "view.slides": "Slide",
   "view.slides.description": "Tayangan slide dari ubin diagram area ini, satu layar setiap kali.",
+  "view.tree": "Pohon",
+  "view.tree.description": "Cabang ini digambar sebagai peta pikiran menyamping — batang di kiri, satu kolom per cincin.",
   "home.title.root": "sarang Anda",
   "home.subtitle": "Ini tempat Anda. Ubin di sini adalah bagian dari desain — beri fitur dan ubin menjadi widget, pintu masuk, galeri. Apa pun yang fiturnya Anda miliki.",
   "home.exit": "kembali ke sarang",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Permainan Arkanoid — alihkan hidup/mati",
   "command-line.pinned": "Tersemat — lepas pin untuk menggeser atau memperbesar",
   "pinned.aggregate-hint": "{label} — Ctrl+klik: {group}",
+
+  "pinned.return": "Kembali dari {group}",
   "swarm.consent.title": "Permintaan berlangganan",
   "swarm.consent.message": "{requester} ingin berlangganan sarang Anda",
   "swarm.consent.accept": "Terima",

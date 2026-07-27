@@ -22,6 +22,7 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { parseTreeTarget, TREE_VIEW } from '../presentation/tiles/tree-view.drone.js'
 import type { TreeRoot } from '../presentation/tiles/tree-walk.js'
+import type { VisualBeeRegistry } from './visual-bee-registry.js'
 
 const get = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -191,3 +192,40 @@ export class TreeQueenBee extends QueenBee {
 
 const _tree = new TreeQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/TreeQueenBee', _tree)
+
+// ── The tree as a VISUAL BEE — a branch-scoped entrance ────────────────
+//
+// `/tree` was slash-command-only: no icon anywhere, so the one way in was to
+// know the command. It is now a declared view like any other, with the ONE
+// difference that makes it fit the tree: `scope: 'branch'`. Mark a cell with
+// `visual:tree:branch` (the bee is `attachable`, so `name@tree` from the
+// command line IS the whole install) and the toggle appears in the icon rail
+// for that cell AND everywhere beneath it — click to open the tree, click to
+// close. Step outside the branch and the icon drops.
+//
+// Nothing here is behaviors-specific. The `behaviors` root is simply the
+// first cell to carry the mark; any branch a participant wants navigable as
+// a tree gets the same entrance by being marked, with no code change. That
+// is the point — the classification lives on the tile, not in this file.
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
+  '@diamondcoreprocessor.com/VisualBeeRegistry',
+  (registry) => {
+    registry.register({
+      view: TREE_VIEW,
+      slashCommand: '/tree',
+      iconName: 'tree',
+      toggleIcon: 'account_tree',
+      decorationKind: 'visual:tree:branch',
+      scope: 'branch',
+      labelKey: 'view.tree',
+      descriptionKey: 'view.tree.description',
+      queenKey: '@diamondcoreprocessor.com/TreeQueenBee',
+      // The tree's content IS the branch the cell already has — there is
+      // nothing to author first, so the mark alone installs it.
+      attachable: true,
+      // Marking a root says "this branch reads as a tree", which is exactly
+      // the kind of statement that should travel with the branch.
+      adoptScope: 'hierarchy',
+    })
+  },
+)

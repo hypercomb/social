@@ -431,6 +431,12 @@ const proseHtml = (paras) => paras && paras.length ? `<div class="s-prose">${par
     if (r.ok) console.log(`   Q on ${q.sectionName}`)
   }
 
+  // 8. One build revision for the whole pass (documentation/build-revisions.md)
+  const rev = await withRenderer({ op: 'build-record', segments: [ROOT], label: 'susan site build' })
+  console.log(rev.ok
+    ? `   build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `   build revision FAILED: ${rev.error}`)
+
   console.log(`\nDone. ${ok} pages stamped, ${fail} failed. art=${Object.keys(artSig).length}.`)
   console.log('Renderer → navigate to susan, /website on (or toggle web) to view.')
 })().catch(e => { console.error('FATAL', e); process.exit(1) })

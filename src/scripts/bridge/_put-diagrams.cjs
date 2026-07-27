@@ -93,6 +93,12 @@ async function main() {
     } catch { /* skip */ }
   }
   if (!verified) throw new Error('verification failed — gallery decoration not found on read-back')
+
+  // One build revision for the whole pass (documentation/build-revisions.md)
+  const rev = await send({ op: 'build-record', segments: [ROOT], label: 'diagram gallery build' })
+  console.log(rev.ok
+    ? `BUILD REV     ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `BUILD REV     FAILED: ${rev.error}`)
   console.log('\nDONE. Navigate to /diagrams and run /lightbox (after build:essentials loads the LightboxDrone).')
 }
 

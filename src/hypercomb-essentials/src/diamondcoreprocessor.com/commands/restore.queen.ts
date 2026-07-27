@@ -9,7 +9,7 @@
 //
 // A snapshot names a sealed merkle root. Restoring walks that root and
 // appends a head marker at every location whose content differs, via
-// `promoteToHead` → `commitLayer`. Nothing is deleted and nothing is
+// the shared seal-restore walk (`commitLayer`). Nothing is deleted and nothing is
 // rewritten: history stays linear and append-only, exactly like the
 // Make-HEAD promote the history viewer already performs. Locations whose
 // head already matches cost nothing — commitLayer dedups byte-identical
@@ -36,9 +36,8 @@
 
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, QueenBee, type I18nProvider } from '@hypercomb/core'
 import { SNAPSHOTS_SLOT, readSnapshots, findSnapshot } from '../history/snapshots-slot.js'
-import type { HistoryService } from '../history/history.service.js'
+import { applySealAt } from '../history/seal-restore.js'
 
-const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
 
@@ -111,7 +110,7 @@ export class RestoreQueenBee extends QueenBee {
     }
 
     this.#activity(this.#t(i18n, 'restore.working', 'restoring “{name}”…', { name: target.label }), '●')
-    const result = await this.#applySeal(target.seal)
+    const result = await applySealAt([], target.seal, [SNAPSHOTS_SLOT])
 
     if (result.failed > 0 && result.changed === 0) {
       this.#toast('error', this.#t(i18n, 'restore.title', 'Restore'),
@@ -128,59 +127,6 @@ export class RestoreQueenBee extends QueenBee {
         : this.#t(i18n, 'restore.done-partial',
           'Restored “{name}” — {changed} places changed, {failed} could not be resolved.',
           { name: target.label, changed: result.changed, failed: result.failed }))
-  }
-
-  /**
-   * Walk the sealed tree and bring every location's head to it.
-   *
-   * Recursion is BY LOCATION (parent segments + the sealed child's own
-   * `name`), the same addressing sealSubtree used on the way out, so a
-   * child lands in the bag it belongs to rather than wherever a stale
-   * hint pointed.
-   */
-  async #applySeal(seal: string): Promise<{ changed: number; failed: number }> {
-    const history = get<HistoryService>(HISTORY_KEY)
-    if (!history?.getLayerBySig || !history?.promoteToHead || !history?.commitLayer) {
-      return { changed: 0, failed: 1 }
-    }
-
-    let changed = 0
-    let failed = 0
-    const seen = new Set<string>()
-
-    const visit = async (segments: readonly string[], sealedSig: string, isRoot: boolean): Promise<void> => {
-      if (seen.has(sealedSig)) return
-      seen.add(sealedSig)
-
-      const layer = await history.getLayerBySig(sealedSig)
-      if (!layer) { failed++; return }
-
-      const locSig = await history.sign({ explorerSegments: () => [...segments] })
-      if (!locSig) { failed++; return }
-
-      const before = await history.currentLayerAt(locSig)
-      const beforeSnapshots = (before as Record<string, unknown> | null)?.[SNAPSHOTS_SLOT]
-
-      // Safety 2 — the index is monotonic; never let a restore eat the map.
-      const toCommit = (isRoot && Array.isArray(beforeSnapshots) && beforeSnapshots.length > 0)
-        ? { ...layer, [SNAPSHOTS_SLOT]: beforeSnapshots }
-        : layer
-
-      const headBefore = await history.latestMarkerSigFor(locSig, layer.name ?? '')
-      const after = await history.commitLayer(locSig, toCommit)
-      if (after !== headBefore) changed++
-
-      for (const raw of (Array.isArray(layer.children) ? layer.children : [])) {
-        const childSig = String(raw ?? '').trim().toLowerCase()
-        const child = await history.getLayerBySig(childSig)
-        const childName = (child?.name ?? '').trim()
-        if (!childName) { failed++; continue }
-        await visit([...segments, childName], childSig, false)
-      }
-    }
-
-    await visit([], seal, true)
-    return { changed, failed }
   }
 
   // ── helpers ─────────────────────────────────────────────

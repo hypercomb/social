@@ -66,6 +66,7 @@
 // into your bee and silently breaks the singleton.
 
 import { BEHAVIOR_PHEROMONES_KEY } from '../preferences/mobile-pheromones.js'
+import type { AgentAvatarSpec } from '../presentation/avatars/agent-avatar.js'
 
 export type VisualBeeDescriptor = {
   /**
@@ -159,6 +160,25 @@ export type VisualBeeDescriptor = {
    * ViewBee shows the toggle if EITHER is present on the cell.
    */
   readonly slot?: string
+
+  /**
+   * How far this view's availability REACHES from the cell that carries it.
+   *   - `'node'` (default when absent): node-local. The toggle surfaces only
+   *     on the cell holding the slot / decoration (home, slides, tutor).
+   *   - `'branch'`: an APPLICATION SCOPE declared at a ROOT — every descendant
+   *     is a member WITHOUT stamping. ViewBee walks the lineage outermost-first
+   *     and surfaces the toggle anywhere INSIDE the hierarchy whose root
+   *     carries the feature. The walk probes STRICT prefixes only, so standing
+   *     on the PARENT of a scope root (where it merely sits as a child) never
+   *     matches — step outside the hierarchy and the toggle drops.
+   *
+   * This is the doctrine-pure way to say "the icon follows you around inside
+   * this tree": the classification lives on the root TILE as a decoration, so
+   * ANY cell becomes a scope root by being marked (`name@view` when the bee is
+   * `attachable`) — no per-feature code, no hardcoded path. Also widens the
+   * hidden-pool gate to hide by BRANCH, the same reach as `cascades`.
+   */
+  readonly scope?: 'node' | 'branch'
 
   /** i18n key for the view's label (tooltips, palette entries). */
   readonly labelKey?: string
@@ -264,6 +284,18 @@ export type VisualBeeDescriptor = {
    * `effectivePheromones` / `withPheromone` and mobile-experience-plan.md §4.4.
    */
   readonly pheromones?: readonly string[]
+
+  /**
+   * This behaviour's AVATAR — the bee the hive shows while it is working (see
+   * presentation/avatars/agent-avatar.ts). Colours, or a resource signature
+   * for a custom image.
+   *
+   * DECLARED, NEVER SEEDED, same as `pheromones`: a participant override wins,
+   * and a behaviour that declares nothing still gets a distinct bee derived
+   * from its `view` name. Declare one only when the behaviour has a look it
+   * wants to be recognised by.
+   */
+  readonly avatar?: AgentAvatarSpec
 }
 
 /**

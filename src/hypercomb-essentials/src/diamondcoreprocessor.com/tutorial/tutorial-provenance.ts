@@ -31,6 +31,15 @@ export type TutorialArtifactRecord = {
    *  crash leftover is reclaimed WITHOUT the sig gate. Kept structures (the
    *  older keep-flow) stay sig-gated. */
   transient?: boolean
+  /** GROUP SIGNATURE of the course that minted this — `sign('group:tutorial:
+   *  course:<level>')`. Everything one course makes carries the same one, so a
+   *  course's artifacts are addressable, countable, and removable as ONE unit
+   *  instead of as whatever a cleanup function happens to remember. See
+   *  core/group-signature.ts. */
+  groupSig?: string
+  /** Human-readable meaning behind `groupSig`, so a record is legible without
+   *  re-deriving the signature. */
+  groupMeaning?: string
 }
 
 type StoreApi = {

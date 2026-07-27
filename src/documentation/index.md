@@ -27,6 +27,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity layer: script + resource → deterministic result
 - [history-sigbag-as-root.md](history-sigbag-as-root.md) — *(design — aspirational)* History sigbag as root: store, discovery, self-heal, and integrity
 - [llm-primitive.md](llm-primitive.md) — Hypergraph primitive connecting signatures through LLM command transforms
+- [group-signatures.md](group-signatures.md) — Group identity as a first-class citizen: sign('group:<meaning>') carried by every member, so a set adds and deletes as one unit
 
 ## Architecture
 
@@ -51,6 +52,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 ## Features
 
+- [tutorial-courses.md](tutorial-courses.md) — Everything is a tutorial: independent lessons in four courses, flown by the bee
 - [cell-localization.md](cell-localization.md) — Tile label translation via the I18nProvider
 - [tile-overlay-architecture.md](tile-overlay-architecture.md) — Contextual actions, overlays, and particle animations
 - [embedded-sites.md](embedded-sites.md) — Website bundles as cell decoration

@@ -36,6 +36,17 @@ export interface GroupMember {
    *  the island by identity regardless of the (slot-sorted) render order. Ids
    *  sort by their trailing number to order the islands. Absent = ungrouped. */
   group?: string
+  /** GROUP SIGNATURE — the first-class identity of the set this member belongs
+   *  to: `sign('group:<meaning>')` (see core/group-signature.ts). Written into
+   *  the member's `launch:target` decoration, so a group of tiles is
+   *  ADDRESSABLE as a unit: everything wearing one signature was made together
+   *  and can be added or removed together, by anyone holding the signature.
+   *
+   *  Deliberately SEPARATE from `group` above: that one is a layout ordinal
+   *  ('g0', 'g1' — the renderer sorts islands by its trailing digits), this one
+   *  is identity and never encodes order. Absent while the derivation (async
+   *  sha-256) is still in flight; the group re-renders when it lands. */
+  groupSig?: string
 }
 
 export interface LaunchGroup {
@@ -44,7 +55,7 @@ export interface LaunchGroup {
   icon: string
   label: string
   /** Launcher-tile silhouette for THIS group's members in the aggregator —
-   *  a string the renderer maps to a shape (e.g. 'flower-pot', 'space-invader').
+   *  a string the renderer maps to a shape (e.g. 'space-invader').
    *  Each group owns its own look; groups never share a visual type. Omit for
    *  the plain hexagon (help). Written into each member's
    *  `launch:target` decoration so show-cell can pick the shape PER TILE. */

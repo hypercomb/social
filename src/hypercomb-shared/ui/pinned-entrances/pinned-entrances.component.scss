@@ -60,6 +60,21 @@
   // once outside the bar, fade further — "let go here removes it".
   &.dragging { opacity: 0.55; }
   &.dragging-out { opacity: 0.25; }
+
+  // Ctrl/Cmd held over a pin whose group HAS an aggregate page: the accent
+  // says "this click goes somewhere else". Only the hovered one lights, so
+  // the rail never turns into a row of shouting icons.
+  &.ctrl-armed:hover {
+    color: var(--hc-accent, rgba(120, 210, 255, 0.95));
+    background: rgba(120, 210, 255, 0.16);
+  }
+
+  // Standing on the group page this pin opened — lit like any on-state
+  // switch, and a click goes back. Same steel family, full strength.
+  &.at-aggregate {
+    color: rgba(126, 182, 214, 0.95);
+    background: rgba(126, 182, 214, 0.16);
+  }
 }
 
 // Drop slot — raised only while an entrance badge drag is in flight.

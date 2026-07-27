@@ -1393,6 +1393,14 @@ async function pinStyleDecisions() {
   if (dashDec.ok) console.log(`   /dashboard → ${dashboardSig.slice(0, 12)} (dec=${dashDec.data.sig.slice(0, 12)})`)
   else console.log(`   FAILED dashboard stamp: ${dashDec.error}`)
 
+  // one build revision per root the pass touched (documentation/build-revisions.md)
+  for (const root of [['dolphin'], ['dashboard']]) {
+    const rev = await withRenderer({ op: 'build-record', segments: root, label: `${root[0]} site build` })
+    console.log(rev.ok
+      ? `   build revision /${root[0]}: ${rev.data.label} seal=${rev.data.seal.slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+      : `   build revision /${root[0]} FAILED: ${rev.error}`)
+  }
+
   console.log(`\nDone. chrome=${chromeSig.slice(0, 12)}, ${stamped} pages stamped, ${failed} failed.`)
   console.log('Refresh the dev shell to see the new revision (or navigate away + back).')
 })().catch(err => { console.error('FATAL:', err); process.exit(1) })

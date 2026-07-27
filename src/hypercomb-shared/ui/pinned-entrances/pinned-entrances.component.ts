@@ -16,6 +16,14 @@
 //                      groups don't); otherwise the modifier degrades to the
 //                      plain open. This is the sole header route to a group
 //                      page — no auto strip exists when nothing is pinned.
+//                      Holding ctrl/cmd tints every pin that HAS such a page,
+//                      so the modifier advertises itself before the click.
+//   the jump is a TOGGLE. While standing on the page it opened, the pin stays
+//                      on the rail wearing the GROUP's own icon, lit — and a
+//                      plain click on it goes back where you were. The return
+//                      address is remembered only for that trip: navigate off
+//                      the group page any other way and it is forgotten (a
+//                      stale "back" is worse than none).
 //   drag a pin OFF   → let go to remove it
 //   drop-target      → while an entrance badge drag is in flight
 //                      (EffectBus `entrance:drag-start` / `entrance:drag-end`,
@@ -58,7 +66,13 @@ type PinView = {
   /** The owning group has a browsable aggregate page (/websites, …) for
    *  Ctrl+click to open. False for openDirectly groups and unknown groups. */
   hasAggregate: boolean
+  /** We are STANDING on the group page this pin's Ctrl+click opened. The pin
+   *  wears the group's icon, lights up, and clicks back to where we came
+   *  from — the other half of the toggle. */
+  atAggregate: boolean
 }
+
+type LineageNav = { goRaw?: (segments: readonly string[]) => void }
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
 
@@ -91,6 +105,9 @@ export class PinnedEntrancesComponent implements OnDestroy {
   readonly draggingKey = signal('')
   /** Dragged pin has left the bar — releasing now removes it. */
   readonly draggingOut = signal(false)
+  /** Ctrl/Cmd is held right now — pins that HAVE an aggregate page tint on
+   *  hover, so the modifier's extra route is visible before it is used. */
+  readonly ctrlHeld = signal(false)
 
   readonly #host = inject<ElementRef<HTMLElement>>(ElementRef)
   #onChange = (): void => this.#refresh()
@@ -106,6 +123,11 @@ export class PinnedEntrancesComponent implements OnDestroy {
 
   // ── drag-off-to-remove state ──
   #drag: { pin: PinView; startX: number; startY: number; pointerId: number; moved: boolean } | null = null
+
+  /** The open trip into a group page: which group, which pin took us there,
+   *  and the location to return to. Session-only chrome state — a return
+   *  address is not worth persisting, and a stale one would lie. */
+  #jump: { groupId: string; from: readonly string[]; pin: PinView; arrived: boolean } | null = null
 
   constructor() {
     groupRegistry.addEventListener('change', this.#onChange)
@@ -134,6 +156,11 @@ export class PinnedEntrancesComponent implements OnDestroy {
     )
     document.addEventListener('pointermove', this.#onDocMove)
     document.addEventListener('pointerup', this.#onDocUp)
+    // Modifier affordance. keyup alone is not enough — a window that loses
+    // focus mid-hold never delivers it, and the rail would stay armed.
+    window.addEventListener('keydown', this.#onModifierKey)
+    window.addEventListener('keyup', this.#onModifierKey)
+    window.addEventListener('blur', this.#onWindowBlur)
   }
 
   ngOnDestroy(): void {
@@ -145,7 +172,16 @@ export class PinnedEntrancesComponent implements OnDestroy {
     for (const u of this.#unsubs) { try { u() } catch { /* noop */ } }
     document.removeEventListener('pointermove', this.#onDocMove)
     document.removeEventListener('pointerup', this.#onDocUp)
+    window.removeEventListener('keydown', this.#onModifierKey)
+    window.removeEventListener('keyup', this.#onModifierKey)
+    window.removeEventListener('blur', this.#onWindowBlur)
   }
+
+  #onModifierKey = (ev: KeyboardEvent): void => {
+    this.ctrlHeld.set(ev.ctrlKey || ev.metaKey)
+  }
+
+  #onWindowBlur = (): void => this.ctrlHeld.set(false)
 
   /** Press on a pin: arm a possible drag-off; a plain release is a click. */
   onPinDown(pin: PinView, ev: PointerEvent): void {
@@ -175,6 +211,9 @@ export class PinnedEntrancesComponent implements OnDestroy {
     this.draggingKey.set('')
     this.draggingOut.set(false)
     if (!wasDrag) { this.#open(d.pin, ev.ctrlKey || ev.metaKey); return }
+    // The lit return pin is a borrowed affordance, not a pin stored on THIS
+    // level — dragging it off must never delete the real one it stands for.
+    if (d.pin.atAggregate) return
     // Dragged off the bar and let go → remove the pin. Target the level that
     // STORES it, which for a cascaded pin is an ancestor page, not the one
     // we're standing on — removing from here would silently no-op and the
@@ -213,16 +252,34 @@ export class PinnedEntrancesComponent implements OnDestroy {
   }
 
   #open(pin: PinView, wantAggregate = false): void {
+    // Standing on the page this pin opened: the click is the way BACK, whether
+    // or not a modifier is held. Nothing else on the rail leaves a group page.
+    if (pin.atAggregate) { this.#returnFromAggregate(); return }
     const group = groupRegistry.get(pin.groupId)
     if (!group) return
     // Ctrl/Cmd+click = the owning group's aggregate page, when it has one to
     // show. Without one the modifier click degrades to the plain open — a
     // held modifier must never turn a working pin into a dead end.
-    if (wantAggregate && !group.openDirectly) { groupRegistry.show(group.id); return }
+    if (wantAggregate && !group.openDirectly) {
+      // Remember the trip BEFORE navigating: `show` moves the lineage, and
+      // from there we can no longer tell where we came from.
+      this.#jump = { groupId: group.id, from: this.#segments(), pin, arrived: false }
+      groupRegistry.show(group.id)
+      return
+    }
     const member = pin.member
       ?? group.members().find(m => m.key === pin.memberKey)
       ?? null
     if (member) group.open(member)
+  }
+
+  /** The toggle's return leg — back to the location the Ctrl+click left. */
+  #returnFromAggregate(): void {
+    const jump = this.#jump
+    this.#jump = null
+    if (!jump) return
+    get<LineageNav>('@hypercomb.social/Navigation')?.goRaw?.(jump.from)
+    this.#refresh()
   }
 
   /** Hover intent: warm the owning group's aggregate page so a Ctrl+click
@@ -282,11 +339,27 @@ export class PinnedEntrancesComponent implements OnDestroy {
   #refresh(): void {
     const here = this.#segments()
     const hereKey = here.join('/')
+    // The return leg of a Ctrl+click. The group page is its own level, so the
+    // pin that opened it is NOT among this level's pins — we carry it across
+    // ourselves, wearing the GROUP's icon so it reads as "you are in websites"
+    // rather than "this one site". Left the page by any other route → the
+    // return address is dropped rather than kept as a lie.
+    const jump = this.#jump
+    if (jump) {
+      // `show()` is async, so refreshes fire while we are still standing at the
+      // origin — a jump is only "arrived" once the location IS the group page.
+      // Before that it is pending; after that, leaving the page ends it. A
+      // pending jump that never lands (nav refused, group empty) is dropped as
+      // soon as the participant goes anywhere other than where they started.
+      if (groupRegistry.currentId() === jump.groupId) jump.arrived = true
+      else if (jump.arrived || hereKey !== jump.from.join('/')) this.#jump = null
+    }
+
     const entries = pinnedEntrances.pinsForLocation(here, (pin) => ({
       cascades: this.#cascades(pin),
       root: this.#rootOf(pin, this.#memberFor(pin)),
     }))
-    this.pins.set(entries.map(({ level, pin }) => {
+    const views: PinView[] = entries.map(({ level, pin }) => {
       const group: LaunchGroup | undefined = groupRegistry.get(pin.groupId)
       const member = this.#memberFor(pin)
       return {
@@ -299,8 +372,23 @@ export class PinnedEntrancesComponent implements OnDestroy {
         cascaded: level.join('/') !== hereKey,
         groupLabel: group?.label || pin.groupId,
         hasAggregate: !!group && !group.openDirectly,
+        atAggregate: false,
       }
-    }))
+    })
+    // Only a LANDED jump shows the return pin — while it is still in flight the
+    // rail keeps the origin level's own pins.
+    const active = this.#jump?.arrived ? this.#jump : null
+    if (active) {
+      const group = groupRegistry.get(active.groupId)
+      views.unshift({
+        ...active.pin,
+        icon: group?.icon || active.pin.icon,
+        groupLabel: group?.label || active.pin.groupLabel,
+        cascaded: false,
+        atAggregate: true,
+      })
+    }
+    this.pins.set(views)
   }
 
   #memberFor(pin: PinnedEntrance): GroupMember | null {

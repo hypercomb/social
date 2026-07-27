@@ -199,7 +199,7 @@ export function tagSigFor(
 //
 // Launch-group tiles (on the aggregator page) carry a `launch:target`
 // decoration whose payload includes the owning group's `shape` (e.g.
-// 'flower-pot', 'space-invader'). show-cell reads this PER CELL to pick each
+// 'space-invader'). show-cell reads this PER CELL to pick each
 // launcher tile's silhouette so groups never share a visual type. Hydrates
 // through the same decorations:changed / render:cell-count paths as every other
 // decoration — no extra OPFS walk.

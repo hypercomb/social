@@ -474,6 +474,8 @@
   "view.home.description": "Una cálida representación de hogar de esta área de mosaicos — los hijos se convierten en widgets y puertas.",
   "view.slides": "Diapositivas",
   "view.slides.description": "Un pase de diapositivas de los mosaicos de diagrama de esta área, una pantalla a la vez.",
+  "view.tree": "Árbol",
+  "view.tree.description": "Esta rama dibujada como un mapa mental horizontal: tronco a la izquierda, una columna por anillo.",
   "home.title.root": "tu colmena",
   "home.subtitle": "Este es tu lugar. Los mosaicos aquí son piezas del diseño — dales comportamientos y se convierten en widgets, puertas, galerías. Cualquier cosa para la que tengas un comportamiento.",
   "home.exit": "volver a la colmena",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Juego Arkanoid — alternar encendido/apagado",
   "command-line.pinned": "Fijado — desfijar para desplazar o hacer zoom",
   "pinned.aggregate-hint": "{label} — Ctrl+clic: {group}",
+
+  "pinned.return": "Volver desde {group}",
   "swarm.consent.title": "Solicitud de suscripción",
   "swarm.consent.message": "{requester} quiere suscribirse a tu colmena",
   "swarm.consent.accept": "Aceptar",

@@ -591,6 +591,11 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
       // still opens sites from their ROOTS; this is the child-page entrance
       // the launcher can't provide.
       decorationKind: 'visual:website:page',
+      // A website is an APPLICATION SCOPE declared at its root — the toggle
+      // follows you into every page below it without each page stamping
+      // itself. This flag USED to be a `v.view === 'website'` special case
+      // inside ViewBee; it is now the generic reach any view can declare.
+      scope: 'branch',
       labelKey: 'view.website',
       descriptionKey: 'view.website.description',
       queenKey: '@diamondcoreprocessor.com/WebsiteQueenBee',

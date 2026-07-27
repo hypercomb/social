@@ -27,8 +27,101 @@ export interface BeeAtlas {
   cellPx: number
 }
 
+/** The four colours that make a bee LOOK like a particular kind of bee.
+ *  Everything else in the drawing (highlights, shading) is derived from these
+ *  by mixing toward white/black, so a caller only ever picks colours it can
+ *  reason about. AB — the approved default — is `AB_PALETTE`. */
+export interface BeePalette {
+  /** Striped abdomen base. */
+  body: string
+  /** The dark stripes, and every outline (legs, antennae, smile). */
+  stripe: string
+  /** Head + thorax fur. */
+  head: string
+  /** Wing fill (translucent) — the wing edge is derived from it. */
+  wing: string
+}
+
+export const AB_PALETTE: BeePalette = {
+  body: '#f7b733',
+  stripe: '#2c1e10',
+  head: '#c58a38',
+  wing: '#cfe1ff',
+}
+
+/** A small mark worn on the bee's back, saying what KIND of worker it is —
+ *  readable at a glance across a hive without reading any text.
+ *    burst  an AI model is thinking      gear  a script is running
+ *    ring   background housekeeping      eye   the orchestrator, watching
+ *  `none` is a plain bee. */
+export type BeeEmblem = 'none' | 'burst' | 'gear' | 'ring' | 'eye'
+
+/** Centre of the emblem on the abdomen, between the two stripes. */
+const EMBLEM_AT = { x: 100, y: 137, r: 9.5 }
+
+const emblemSvg = (emblem: BeeEmblem, ink: string): string => {
+  const { x, y, r } = EMBLEM_AT
+  switch (emblem) {
+    case 'burst': {
+      // Six spokes — the "thinking" star. Drawn, not rotated, so the bake
+      // stays one flat string per frame.
+      const spokes = [0, 30, 60, 90, 120, 150].map(deg => {
+        const a = (deg * Math.PI) / 180
+        const dx = Math.cos(a) * r
+        const dy = Math.sin(a) * r
+        return `<line x1="${(x - dx).toFixed(1)}" y1="${(y - dy).toFixed(1)}" x2="${(x + dx).toFixed(1)}" y2="${(y + dy).toFixed(1)}"/>`
+      }).join('')
+      return `<g stroke="${ink}" stroke-width="2.1" stroke-linecap="round" opacity="0.92">${spokes}</g>`
+    }
+    case 'gear':
+      return `<g stroke="${ink}" stroke-width="2" fill="none" opacity="0.9">`
+        + `<circle cx="${x}" cy="${y}" r="${(r * 0.6).toFixed(1)}"/>`
+        + [0, 45, 90, 135].map(deg => {
+          const a = (deg * Math.PI) / 180
+          const dx = Math.cos(a); const dy = Math.sin(a)
+          return `<line x1="${(x + dx * r * 0.75).toFixed(1)}" y1="${(y + dy * r * 0.75).toFixed(1)}" x2="${(x + dx * r).toFixed(1)}" y2="${(y + dy * r).toFixed(1)}"/>`
+            + `<line x1="${(x - dx * r * 0.75).toFixed(1)}" y1="${(y - dy * r * 0.75).toFixed(1)}" x2="${(x - dx * r).toFixed(1)}" y2="${(y - dy * r).toFixed(1)}"/>`
+        }).join('')
+        + `</g>`
+    case 'ring':
+      return `<circle cx="${x}" cy="${y}" r="${(r * 0.8).toFixed(1)}" fill="none" stroke="${ink}" stroke-width="2.1" opacity="0.9"/>`
+    case 'eye':
+      return `<g opacity="0.92"><path d="M${x - r},${y} Q${x},${y - r * 0.85} ${x + r},${y} Q${x},${y + r * 0.85} ${x - r},${y} Z" fill="none" stroke="${ink}" stroke-width="1.9"/>`
+        + `<circle cx="${x}" cy="${y}" r="${(r * 0.3).toFixed(1)}" fill="${ink}"/></g>`
+    default:
+      return ''
+  }
+}
+
 const DEFAULT_FRAMES = 8
 const DEFAULT_CELL = 96 // 3× the ~32px bee quad — crisp without LOD; bump for closer zoom
+
+// ── colour helpers ───────────────────────────────────────────────────
+// Derive the highlight/shade tones from the palette so a blue bee doesn't
+// carry AB's honey-coloured gloss. Pure arithmetic on #rrggbb.
+
+const hex = (value: string): [number, number, number] => {
+  const h = value.replace('#', '')
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h
+  const n = Number.parseInt(full.slice(0, 6) || '000000', 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+const rgb = (c: [number, number, number]): string =>
+  '#' + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')
+
+/** Mix `value` toward `target` by `amount` ∈ [0,1]. */
+const mix = (value: string, target: string, amount: number): string => {
+  const a = hex(value)
+  const b = hex(target)
+  return rgb([0, 1, 2].map(i => a[i] + (b[i] - a[i]) * amount) as [number, number, number])
+}
+
+/** `#rrggbb` → `rgba(r,g,b,alpha)` — wings are translucent. */
+const alpha = (value: string, a: number): string => {
+  const [r, g, b] = hex(value)
+  return `rgba(${r},${g},${b},${a})`
+}
 
 /** sin²(πp): 0 at p=0, 1 at p=0.5, 0 at p=1 — the eased flap sweep. */
 const flapSweep = (p: number): number => {
@@ -37,40 +130,55 @@ const flapSweep = (p: number): number => {
 }
 
 /** The AB bee as an SVG string with wings rotated for flap phase `p` ∈ [0,1).
- *  Left wing sweeps -16°→+12°→-16°; right wing mirrors (+16°→-12°→+16°). */
-const beeSvg = (p: number, px: number): string => {
+ *  Left wing sweeps -16°→+12°→-16°; right wing mirrors (+16°→-12°→+16°).
+ *  `palette` recolours the same drawing — one bee shape, many kinds of bee. */
+const beeSvg = (
+  p: number,
+  px: number,
+  palette: BeePalette = AB_PALETTE,
+  emblem: BeeEmblem = 'none',
+): string => {
   const sweep = flapSweep(p)
   const lAng = (-16 + 28 * sweep).toFixed(2)
   const rAng = (16 - 28 * sweep).toFixed(2)
+  const { body, stripe, head, wing } = palette
+  const wingFill = alpha(mix(wing, '#ffffff', 0.25), 0.56)
+  const wingEdge = mix(wing, '#7f93ad', 0.45)
+  const bodyLight = mix(body, '#ffffff', 0.42)
+  const bodyShade = mix(body, '#000000', 0.35)
+  const headLight = mix(head, '#ffffff', 0.3)
+  const eye = mix(stripe, '#000000', 0.25)
+  const blush = mix(body, '#ff6a4b', 0.5)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 200 200">
     <g transform="rotate(${lAng} 78 92)">
-      <path d="M78,92 C50,76 22,78 18,95 C16,110 44,108 70,100 C76,98 79,95 78,92 Z" fill="rgba(216,232,255,0.56)" stroke="#a7c2e2" stroke-width="1.2"/>
-      <path d="M74,94 C52,84 34,84 24,90" fill="none" stroke="#a7c2e2" stroke-width="0.8" opacity="0.6"/>
+      <path d="M78,92 C50,76 22,78 18,95 C16,110 44,108 70,100 C76,98 79,95 78,92 Z" fill="${wingFill}" stroke="${wingEdge}" stroke-width="1.2"/>
+      <path d="M74,94 C52,84 34,84 24,90" fill="none" stroke="${wingEdge}" stroke-width="0.8" opacity="0.6"/>
     </g>
     <g transform="rotate(${rAng} 122 92)">
-      <path d="M122,92 C150,76 178,78 182,95 C184,110 156,108 130,100 C124,98 121,95 122,92 Z" fill="rgba(216,232,255,0.56)" stroke="#a7c2e2" stroke-width="1.2"/>
-      <path d="M126,94 C148,84 166,84 176,90" fill="none" stroke="#a7c2e2" stroke-width="0.8" opacity="0.6"/>
+      <path d="M122,92 C150,76 178,78 182,95 C184,110 156,108 130,100 C124,98 121,95 122,92 Z" fill="${wingFill}" stroke="${wingEdge}" stroke-width="1.2"/>
+      <path d="M126,94 C148,84 166,84 176,90" fill="none" stroke="${wingEdge}" stroke-width="0.8" opacity="0.6"/>
     </g>
     <clipPath id="ab"><path d="M100,98 C129,98 142,115 142,134 C142,153 126,166 108,164 C90,162 58,153 58,132 C58,114 71,98 100,98 Z"/></clipPath>
     <g clip-path="url(#ab)">
-      <rect x="50" y="95" width="100" height="80" fill="#f7b733"/>
-      <path d="M57,118 Q100,128 143,118 L143,131 Q100,141 57,131 Z" fill="#2c1e10"/>
-      <path d="M60,144 Q100,153 135,143 L134,155 Q100,164 64,155 Z" fill="#2c1e10"/>
-      <ellipse cx="100" cy="114" rx="40" ry="11" fill="#ffd96f" opacity="0.4"/>
-      <ellipse cx="100" cy="156" rx="28" ry="8" fill="#b9760f" opacity="0.28"/>
+      <rect x="50" y="95" width="100" height="80" fill="${body}"/>
+      <path d="M57,118 Q100,128 143,118 L143,131 Q100,141 57,131 Z" fill="${stripe}"/>
+      <path d="M60,144 Q100,153 135,143 L134,155 Q100,164 64,155 Z" fill="${stripe}"/>
+      <ellipse cx="100" cy="114" rx="40" ry="11" fill="${bodyLight}" opacity="0.4"/>
+      <ellipse cx="100" cy="156" rx="28" ry="8" fill="${bodyShade}" opacity="0.28"/>
+      ${emblemSvg(emblem, mix(stripe, '#ffffff', 0.82))}
     </g>
-    <path d="M108,163 C113,168 117,172 117,172 C113,170 109,168 106,165 Z" fill="#3a2814"/>
-    <g stroke="#3a2814" stroke-width="2.6" stroke-linecap="round" fill="none">
+    <path d="M108,163 C113,168 117,172 117,172 C113,170 109,168 106,165 Z" fill="${stripe}"/>
+    <g stroke="${stripe}" stroke-width="2.6" stroke-linecap="round" fill="none">
       <path d="M90,158 C86,166 86,172 90,177"/><path d="M108,160 C112,168 112,174 108,179"/><path d="M100,162 C99,170 100,176 100,180"/>
     </g>
-    <circle cx="100" cy="98" r="20" fill="#c58a38"/><circle cx="94" cy="93" r="11" fill="#e6ae57" opacity="0.5"/>
-    <circle cx="100" cy="66" r="36" fill="#c58a38"/>
-    <path d="M86,38 C81,25 80,16 82,8" fill="none" stroke="#3a2814" stroke-width="2.6" stroke-linecap="round"/><circle cx="82" cy="6" r="3.8" fill="#3a2814"/>
-    <path d="M114,37 C120,24 126,16 131,11" fill="none" stroke="#3a2814" stroke-width="2.6" stroke-linecap="round"/><circle cx="132" cy="9" r="3.8" fill="#3a2814"/>
-    <circle cx="73" cy="80" r="6" fill="#ff9d5b" opacity="0.34"/><circle cx="125" cy="78" r="6" fill="#ff9d5b" opacity="0.34"/>
-    <ellipse cx="85" cy="69" rx="8.5" ry="11.5" fill="#211710"/><circle cx="88" cy="63.5" r="3.1" fill="#fff"/><circle cx="82" cy="74" r="1.4" fill="#fff" opacity="0.72"/>
-    <ellipse cx="116" cy="67" rx="11" ry="14" fill="#211710"/><circle cx="120" cy="60.5" r="4" fill="#fff"/><circle cx="112" cy="73" r="1.8" fill="#fff" opacity="0.72"/>
-    <path d="M94,86 q9,7 18,1" fill="none" stroke="#3a2814" stroke-width="1.8" stroke-linecap="round"/>
+    <circle cx="100" cy="98" r="20" fill="${head}"/><circle cx="94" cy="93" r="11" fill="${headLight}" opacity="0.5"/>
+    <circle cx="100" cy="66" r="36" fill="${head}"/>
+    <path d="M86,38 C81,25 80,16 82,8" fill="none" stroke="${stripe}" stroke-width="2.6" stroke-linecap="round"/><circle cx="82" cy="6" r="3.8" fill="${stripe}"/>
+    <path d="M114,37 C120,24 126,16 131,11" fill="none" stroke="${stripe}" stroke-width="2.6" stroke-linecap="round"/><circle cx="132" cy="9" r="3.8" fill="${stripe}"/>
+    <circle cx="73" cy="80" r="6" fill="${blush}" opacity="0.34"/><circle cx="125" cy="78" r="6" fill="${blush}" opacity="0.34"/>
+    <ellipse cx="85" cy="69" rx="8.5" ry="11.5" fill="${eye}"/><circle cx="88" cy="63.5" r="3.1" fill="#fff"/><circle cx="82" cy="74" r="1.4" fill="#fff" opacity="0.72"/>
+    <ellipse cx="116" cy="67" rx="11" ry="14" fill="${eye}"/><circle cx="120" cy="60.5" r="4" fill="#fff"/><circle cx="112" cy="73" r="1.8" fill="#fff" opacity="0.72"/>
+    <path d="M94,86 q9,7 18,1" fill="none" stroke="${stripe}" stroke-width="1.8" stroke-linecap="round"/>
   </svg>`
 }
 
@@ -89,6 +197,8 @@ const svgToImage = async (svg: string, px: number): Promise<HTMLImageElement> =>
 export const bakeBeeAtlas = async (
   frames: number = DEFAULT_FRAMES,
   cellPx: number = DEFAULT_CELL,
+  palette: BeePalette = AB_PALETTE,
+  emblem: BeeEmblem = 'none',
 ): Promise<BeeAtlas | null> => {
   const canvas = document.createElement('canvas')
   canvas.width = cellPx * frames
@@ -97,9 +207,19 @@ export const bakeBeeAtlas = async (
   if (!ctx) return null
 
   for (let i = 0; i < frames; i++) {
-    const img = await svgToImage(beeSvg(i / frames, cellPx), cellPx)
+    const img = await svgToImage(beeSvg(i / frames, cellPx, palette, emblem), cellPx)
     ctx.drawImage(img, i * cellPx, 0, cellPx, cellPx)
   }
 
   return { texture: Texture.from(canvas), frames, cellPx }
 }
+
+/** One still frame of a bee as an SVG data URL — for DOM chrome (the agent
+ *  panel's header chip, a behaviour's avatar swatch) where a Pixi texture is
+ *  the wrong currency. Same drawing, same palette, no canvas. */
+export const beeImageUrl = (
+  palette: BeePalette = AB_PALETTE,
+  px = 64,
+  emblem: BeeEmblem = 'none',
+): string =>
+  'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(beeSvg(0.5, px, palette, emblem))

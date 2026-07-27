@@ -52,19 +52,57 @@ async function withRenderer(req, attempts = 4) {
 
 const parseSegments = (arg) => String(arg ?? '').split(/[\\/]/).map(s => s.trim()).filter(Boolean)
 
-async function list() {
+// Pull every ask record once and split it into the three shapes that ride the
+// same channel: real asks, chat turns (answered via _chat-reply.cjs), and
+// CONTEXT records — follow-ups the participant added from the agent panel
+// after asking, each pointing at its parent ask's sig. Context is folded into
+// the ask it belongs to, so a responder answers the question as it stands NOW,
+// not as it was first typed.
+async function fetchAsks() {
   const r = await withRenderer({ op: 'optimization-list', kind: 'ask' })
   if (!r.ok) { console.error('optimization-list failed:', r.error); process.exit(1) }
-  const items = (r.data?.items ?? []).map(it => ({
-    sig: it.sig,
-    prompt: it.payload?.prompt ?? '',
-    model: it.payload?.model ?? '',
-    targets: it.payload?.targets ?? [],
-    segments: it.payload?.segments ?? [],
-    appliesTo: it.appliesTo ?? [],
-    askedAt: it.payload?.askedAt ?? 0,
-  }))
-  console.log(JSON.stringify(items, null, 2))
+  const all = r.data?.items ?? []
+  const contextByAsk = new Map()
+  for (const it of all) {
+    if (it.payload?.mode !== 'context') continue
+    const of = String(it.payload?.askSig ?? '')
+    if (!of) continue
+    const bucket = contextByAsk.get(of) ?? []
+    bucket.push({ sig: it.sig, text: String(it.payload?.prompt ?? ''), addedAt: it.payload?.askedAt ?? 0 })
+    contextByAsk.set(of, bucket)
+  }
+  const asks = all
+    .filter(it => it.payload?.mode !== 'context')
+    .map(it => ({
+      sig: it.sig,
+      mode: it.payload?.mode ?? '',
+      prompt: it.payload?.prompt ?? '',
+      model: it.payload?.model ?? '',
+      targets: it.payload?.targets ?? [],
+      segments: it.payload?.segments ?? [],
+      appliesTo: it.appliesTo ?? [],
+      askedAt: it.payload?.askedAt ?? 0,
+      context: (contextByAsk.get(it.sig) ?? []).sort((a, b) => a.addedAt - b.addedAt),
+    }))
+  return { asks, contextByAsk }
+}
+
+async function list() {
+  const { asks } = await fetchAsks()
+  console.log(JSON.stringify(asks, null, 2))
+}
+
+// Tell the hive what this ask's bee is DOING. Pure UI signal — writes nothing,
+// so report as often as the work has something to say.
+//   _ask-drain.cjs progress <ask-sig> "reading 12 notes" [working|done|failed]
+async function progress(askSig, text, status) {
+  if (!askSig || !text) {
+    console.error('Usage: _ask-drain.cjs progress <ask-sig> "<activity>" [status]')
+    process.exit(1)
+  }
+  const r = await withRenderer({ op: 'agent-progress', cell: askSig, text, kind: status || 'working' }, 2)
+  if (!r.ok) { console.error('agent-progress failed:', r.error); process.exit(1) }
+  console.log(`[ask-drain] ${askSig.slice(0, 12)}… ${text}`)
 }
 
 async function answer(askSig, cellPath, text) {
@@ -84,15 +122,31 @@ async function answer(askSig, cellPath, text) {
   // record can't be read, the answer still lands (never lose an answer over
   // provenance).
   let question = ''
+  let contextRecords = []
   try {
-    const listed = await withRenderer({ op: 'optimization-list', kind: 'ask' }, 2)
-    const found = (listed.data?.items ?? []).find(it => it.sig === askSig)
-    question = String(found?.payload?.prompt ?? '').trim()
+    const { asks, contextByAsk } = await fetchAsks()
+    const found = asks.find(it => it.sig === askSig)
+    question = String(found?.prompt ?? '').trim()
+    contextRecords = contextByAsk.get(askSig) ?? []
   } catch { /* unreadable — fall through to a bare answer */ }
-  const body = question ? `Asked: ${question}\n\n${text}` : text
+  const added = contextRecords.map(c => c.text).filter(Boolean)
+  const asked = question
+    ? added.length
+      ? `Asked: ${question}\n\nAlso: ${added.join('\n\n')}`
+      : `Asked: ${question}`
+    : ''
+  const body = asked ? `${asked}\n\n${text}` : text
 
   const noteRes = await withRenderer({ op: 'note-add', segments: parent, cell, text: body })
   if (!noteRes.ok) { console.error('note-add failed:', noteRes.error); process.exit(1) }
+
+  // Retire the context records BEFORE the ask: `optimization-remove` of the
+  // ask is what emits `ask:answered` (the bee lands, the pill drops), so it
+  // goes last and any leftover follow-up is already gone.
+  for (const record of contextRecords) {
+    const gone = await withRenderer({ op: 'optimization-remove', sig: record.sig }, 2)
+    if (!gone.ok) console.error('context record not retired:', record.sig, gone.error)
+  }
 
   const rm = await withRenderer({ op: 'optimization-remove', sig: askSig })
   if (!rm.ok) { console.error('optimization-remove failed (note was written):', rm.error); process.exit(1) }
@@ -114,7 +168,8 @@ async function main() {
   if (cmd === 'list') return list()
   if (cmd === 'answer') return answer(rest[0], rest[1], rest[2])
   if (cmd === 'retire') return retire(rest[0])
-  console.error('Usage:\n  _ask-drain.cjs list\n  _ask-drain.cjs answer <ask-sig> <cell-path> "<answer>"\n  _ask-drain.cjs retire <ask-sig>')
+  if (cmd === 'progress') return progress(rest[0], rest[1], rest[2])
+  console.error('Usage:\n  _ask-drain.cjs list\n  _ask-drain.cjs answer <ask-sig> <cell-path> "<answer>"\n  _ask-drain.cjs retire <ask-sig>\n  _ask-drain.cjs progress <ask-sig> "<activity>" [working|done|failed]')
   process.exit(1)
 }
 

@@ -6,6 +6,7 @@ import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
 import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closure.js'
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
+import { mintBuildRecord } from '../history/builds-slot.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -58,6 +59,8 @@ type BridgeRequest = {
    *  sig. Preserves the "one per kind" semantic for single-output bees
    *  like /website. */
   replaceKind?: boolean
+  /** Build revision name (build-record). */
+  label?: string
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -214,6 +217,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
+      case 'agent-progress': return this.#agentProgress(req)
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
       case 'feedback-channel-status': return this.#feedbackChannelStatus(req)
@@ -226,6 +230,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'bag-add':      return this.#bagMutate(req, 'add')
       case 'bag-remove':   return this.#bagMutate(req, 'remove')
       case 'bag-set':      return this.#bagSet(req)
+      case 'build-record': return this.#buildRecord(req)
       case 'stamp':        return this.#stamp(req)
       case 'add':          return this.#add(req)        // legacy: delegates to update
       case 'remove':       return this.#remove(req)     // legacy: delegates to update
@@ -333,6 +338,31 @@ export class ClaudeBridgeWorker extends Worker {
     if (!text) return { id: req.id, ok: false, error: 'chat-reply requires `text`' }
     EffectBus.emit('ask:chat-reply', { convoId, text })
     return { id: req.id, ok: true }
+  }
+
+  // ─── agent-progress ────────────────────────────────────────────────
+  //
+  // What a bee is DOING. The hive draws one bee per agent in flight
+  // (presentation/avatars/agent-bee.drone.ts); without this op the bee can
+  // only ever say "pending", because the work happens in another process.
+  // A responder sends `{ cell: <ask sig or agent id>, text: <activity>,
+  // kind: <status> }` as it goes, and the panel behind the bee shows it live.
+  //
+  // Read-only as far as the hive is concerned: this writes no layer, no note
+  // and no record — it moves a UI needle and nothing else, so a chatty
+  // responder can report as often as it likes.
+  async #agentProgress(req: BridgeRequest): Promise<BridgeResponse> {
+    const id = typeof req.cell === 'string' ? req.cell.trim() : ''
+    if (!id) return { id: req.id, ok: false, error: 'agent-progress requires `cell` (the agent id / ask sig)' }
+    const activity = typeof req.text === 'string' ? req.text.slice(0, 400) : ''
+    const status = typeof req.kind === 'string' ? req.kind.trim() : ''
+    const allowed = new Set(['pending', 'working', 'done', 'failed'])
+    EffectBus.emit('agent:progress', {
+      id,
+      activity,
+      ...(allowed.has(status) ? { status } : {}),
+    })
+    return { id: req.id, ok: true, data: { id } }
   }
 
   async #optimizationList(req: BridgeRequest): Promise<BridgeResponse> {
@@ -739,6 +769,21 @@ export class ClaudeBridgeWorker extends Worker {
     const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
     await committer.update(segments, nextLayer)
     return { id: req.id, ok: true, data: { slot, count: next.length } }
+  }
+
+  /** Mint a build revision for the subtree at `segments` — the LAST call
+   *  of every multi-file build pass (documentation/build-revisions.md).
+   *  Seals the subtree, no-ops when the head record already names that
+   *  seal (idempotent rebuild), else writes the record and appends its
+   *  sig to the `builds` slot. `{ op: 'build-record', segments, label? }`. */
+  async #buildRecord(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0) {
+      return { id: req.id, ok: false, error: 'build-record requires `segments` (for the whole hive, use /snapshot)' }
+    }
+    const result = await mintBuildRecord(segments, typeof req.label === 'string' ? req.label : undefined)
+    if ('error' in result) return { id: req.id, ok: false, error: result.error }
+    return { id: req.id, ok: true, data: result }
   }
 
   // ─── property stamp ────────────────────────────────────────────────

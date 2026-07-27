@@ -2859,6 +2859,12 @@ async function main(): Promise<void> {
     else { fail++; console.error(`[verify] FAIL ${w.path} — decoration:${found} html:${roundTrip}`) }
   }
   console.log(`[site] verify: ${pass}/${written.length} pages confirmed, ${fail} failed`)
+
+  // One build revision for the whole pass (documentation/build-revisions.md)
+  const rev = await send({ op: 'build-record', segments: ['revolucion'], label: 'revolucion site build' })
+  console.log(rev.ok
+    ? `[site] build revision: ${(rev.data as any).label} seal=${String((rev.data as any).seal).slice(0, 12)}${(rev.data as any).unchanged ? ' (unchanged)' : ''}`
+    : `[site] build revision FAILED: ${rev.error}`)
   console.log(`[site] DONE — toggle the global /website view mode on /revolucion to see it mount.`)
 }
 

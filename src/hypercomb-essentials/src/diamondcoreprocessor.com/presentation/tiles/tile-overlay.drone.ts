@@ -139,33 +139,32 @@ export type OverlayProfileKey = 'private' | 'public-own' | 'public-external' | '
 
 // ── Icon sizing ──────────────────────────────────────────────────
 const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
-/** Feature-row icons render BIGGER — the reveal is a showcase of what the
- *  tile actually carries (a website, files, …), not another utility strip.
- *  ~80% of the first cut (12 was too big inside the ⋮); integer for
- *  pixel-perfect rendering. */
-const FEATURE_ICON_SIZE = 10
+// Feature icons used to render BIGGER, back when a ⋮ revealed them as their
+// own showcase row. Everything a tile offers is now on screen together and
+// wraps through the same two rows, so a second size would only make the block
+// ragged — one size throughout.
 
-// ── Row layout + ⋮ reveal ────────────────────────────────────────
-// The hover row holds at most MAX_ROW_ICONS icons. A ⋮ (more) toggle appends
-// when there is anything hidden: main-row overflow, the tile's FEATURE icons
-// (bigger, on their own row(s)), and — only when the tile has NO visible
-// features — the danger row (delete). Features must be removed before delete
-// surfaces, so a feature-bearing tile is never one reveal away from its
-// garbage can. #dangerRevealed is in-memory only, so it resets on refresh.
+// ── Two icon rows, wrapping ──────────────────────────────────────
+// The hovered tile's band is two rows tall and the name steps aside
+// (hex-sdf.shader.ts), so BOTH rows are icons: fill a row, wrap at
+// MAX_ROW_ICONS, done. No toggle, no reveal, no set to choose — everything the
+// tile offers is on screen at once.
+//
+// Order is main → feature → danger, so `remove` lands last (bottom-right, the
+// furthest point from where the pointer enters the band).
 const MAX_ROW_ICONS = 5
-const ROW_GAP = 11              // vertical center-to-center between wrapped rows
-/** Edge-to-edge vertical padding between heterogeneous rows (matches the
- *  ROW_GAP feel: 11 center-to-center at size 7 = 4px between edges). */
-const ROW_PAD = 4
-/** Feature icons per row — larger glyphs need more horizontal room. */
-const FEATURE_ROW_MAX = 4
-const FEATURE_ICON_SPACING = 14
+/** Rows the band can hold. Its height is fixed at two rows. */
+const MAX_ICON_ROWS = 2
+/** Centre-to-centre between the two rows — one band row each (0.15 × 32 ≈ 4.8,
+ *  doubled). The block is centred on ICON_Y, so a single row sits dead centre
+ *  and two rows straddle it. */
+const ICON_ROW_PITCH = 10
 
 // ── Arrange mode constants ────────────────────────────────────────
 
-// Moved down 2 with ICON_Y (tile-actions.drone.ts) so the arrange pool keeps
+// Moved up 7 with ICON_Y (tile-actions.drone.ts) so the arrange pool keeps
 // its spacing under the action row. Absolute, so it does NOT follow on its own.
-const POOL_Y_OFFSET = 18
+const POOL_Y_OFFSET = 11
 const POOL_ICON_SIZE = 5        // pool icons scaled proportionally
 const POOL_SPACING = 8         // tighter to match smaller pool icons
 const POOL_BG_PADDING = 2
@@ -183,7 +182,7 @@ const DROP_HIGHLIGHT_TINT = 0x88ffff
 // ── Action hint constants ────────────────────────────────────────
 const HINT_DELAY_MS = 110       // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
 const HINT_EXPAND_DELAY_MS = 1100 // sustained hover after the label appears → expanded description; clicks always fire the action
-const HINT_Y_OFFSET = 24        // below the icon row — moved down 2 with ICON_Y (absolute, does not follow on its own)
+const HINT_Y_OFFSET = 17        // below the label band — moved up 7 with ICON_Y (absolute, does not follow on its own)
 const HINT_FONT_SIZE = 6
 const HINT_COLOR = 0xeaf0ff     // near-white — reads crisp against the dark hint pill
 const HINT_EXPANDED_FONT_SIZE = 5.5
@@ -221,14 +220,10 @@ export class TileOverlayDrone extends Drone {
 
   #overlay: Container | null = null
   #hexBg: HexOverlayMesh | null = null
-  #buttonTray: Graphics | null = null
   #actions: OverlayAction[] = []
   /** Unhook for the ioc.onRegister watch that un-shades a feature affordance
    *  the moment its backing bee registers (feature-readiness shade). */
   #unregisterBackingWatch: (() => void) | undefined
-  // Danger row (delete) revealed by tapping the ⋮ toggle. In-memory only —
-  // resets when the hovered tile changes (see #onPointerMove) and on refresh.
-  #dangerRevealed = false
   #animTime = 0
   #animTickBound: ((ticker: any) => void) | null = null
   #meshOffset = { x: 0, y: 0 }
@@ -340,6 +335,8 @@ export class TileOverlayDrone extends Drone {
   // The screensaver has taken over the screen — keep the icon overlay hidden
   // until it ends. Enforced centrally in #updateVisibility.
   #screensaverActive = false
+  /** The mesh is hidden under a takeover (image hive, dive, screensaver). */
+  #hiveHidden = false
 
   /** Registered descriptors from provider bees, keyed by name */
   #registeredDescriptors = new Map<string, OverlayActionDescriptor>()
@@ -386,7 +383,7 @@ export class TileOverlayDrone extends Drone {
 
   protected override listens = [
     'render:host-ready', 'render:mesh-offset', 'render:cell-count',
-    'render:set-orientation', 'render:geometry-changed',
+    'render:set-orientation', 'render:geometry-changed', 'render:set-hive-visible',
     'navigation:guard-start', 'navigation:guard-end',
     'mesh:public-changed', 'world:mode', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
@@ -723,6 +720,16 @@ export class TileOverlayDrone extends Drone {
       // screen" signal and a second release for paths that emit it.
       this.onEffect('navigation:guard-end', () => { this.#endNavigationTransition() })
 
+      // A takeover feature (the image hive, a dive, the screensaver) hides the
+      // mesh while it owns the screen. These icons belong to a tile in THAT
+      // mesh, so they must go with it — left up they float over the takeover,
+      // wired to a tile nobody can see.
+      this.onEffect<{ visible: boolean }>('render:set-hive-visible', ({ visible }) => {
+        this.#hiveHidden = !visible
+        if (this.#hiveHidden) { if (this.#overlay) this.#overlay.visible = false }
+        else this.#updateVisibility()
+      })
+
       this.onEffect<{ active: boolean }>('touch:dragging', ({ active }) => {
         this.#touchDragging = active
         if (active && this.#overlay && !this.#arrangeMode) this.#overlay.visible = false
@@ -872,7 +879,6 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.destroy({ children: true })
       this.#overlay = null
       this.#hexBg = null
-      this.#buttonTray = null
       this.#actions = []
     }
   }
@@ -889,10 +895,9 @@ export class TileOverlayDrone extends Drone {
     this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat)
     this.#overlay.addChild(this.#hexBg.mesh)
 
-    // semi-transparent tray behind action buttons (visible only when tile has an image)
-    this.#buttonTray = new Graphics()
-    this.#buttonTray.visible = false
-    this.#overlay.addChild(this.#buttonTray)
+    // No tray here: the icons sit on the SECOND row of the tile's own label
+    // band, which the hex shader doubles while the tile is hovered (see
+    // hex-sdf.shader.ts). One background, two rows — name above, icons below.
 
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
@@ -1012,7 +1017,7 @@ export class TileOverlayDrone extends Drone {
     for (const desc of descs) {
       const btn = new HexIconButton({
         // Feature icons are the showcase — bigger glyph, bigger hit area.
-        size: desc.featureRow ? FEATURE_ICON_SIZE : DEFAULT_ICON_SIZE,
+        size: DEFAULT_ICON_SIZE,
         hoverTint: desc.hoverTint,
       })
       this.#overlay.addChild(btn)
@@ -1043,89 +1048,61 @@ export class TileOverlayDrone extends Drone {
     this.#updatePerTileVisibility()
   }
 
-  // ── Icon row layout (wraps at MAX_ROW_ICONS; ⋮ reveals features/danger) ──
+  // ── Icon layout: fill a row, wrap, stop at two ─────────────────────
   // `base` = icons that passed their per-tile visibleWhen (set upstream by
-  // #updatePerTileVisibility). Split into the normal `main` icons, the `more`
-  // (⋮) toggle, the FEATURE icons, and the `danger` icons (delete). Collapsed
-  // shows the capped main row + ⋮. Revealed appends: main overflow, then the
-  // feature row(s) — BIGGER icons showcasing what the tile carries — then the
-  // danger row ONLY when the tile has no visible features (the garbage can
-  // never shares a reveal with features; remove the features first).
+  // #updatePerTileVisibility). Ordered main → feature → danger so `remove`
+  // lands last, then chunked at MAX_ROW_ICONS. The rows are centred as a BLOCK
+  // on ICON_Y, so one row sits dead centre of the doubled band and two rows
+  // straddle it — one per band row.
 
   #layoutIconRow(): void {
     const base = this.#actions.filter(a => a.button.visible)
-    const more = base.find(a => a.name === 'more') ?? null
-    const feature = base.filter(a => a.featureRow)
-    const main = base.filter(a => a.name !== 'more' && !a.dangerRow && !a.featureRow)
-    const danger = feature.length === 0 ? base.filter(a => a.dangerRow) : []
-    const hasHidden = main.length > MAX_ROW_ICONS || feature.length > 0 || danger.length > 0
+    const ordered = [
+      ...base.filter(a => !a.featureRow && !a.dangerRow),
+      ...base.filter(a => a.featureRow),
+      ...base.filter(a => a.dangerRow),
+    ]
 
-    const mainSeq: OverlayAction[] = this.#dangerRevealed ? [...main] : main.slice(0, MAX_ROW_ICONS)
-    // The ⋮ toggle trails the icons only when there's something to reveal.
-    if (more && hasHidden) mainSeq.push(more)
-
-    // Heterogeneous rows: main (+overflow) at the default size, features
-    // bigger on their own row(s), danger last (only feature-less tiles).
-    const rows: { items: OverlayAction[]; size: number; spacing: number }[] = []
-    for (let i = 0; i < mainSeq.length; i += MAX_ROW_ICONS) {
-      rows.push({ items: mainSeq.slice(i, i + MAX_ROW_ICONS), size: DEFAULT_ICON_SIZE, spacing: ICON_SPACING })
+    const rows: OverlayAction[][] = []
+    for (let i = 0; i < ordered.length; i += MAX_ROW_ICONS) {
+      rows.push(ordered.slice(i, i + MAX_ROW_ICONS))
     }
-    if (this.#dangerRevealed) {
-      for (let i = 0; i < feature.length; i += FEATURE_ROW_MAX) {
-        rows.push({ items: feature.slice(i, i + FEATURE_ROW_MAX), size: FEATURE_ICON_SIZE, spacing: FEATURE_ICON_SPACING })
-      }
-      for (let i = 0; i < danger.length; i += MAX_ROW_ICONS) {
-        rows.push({ items: danger.slice(i, i + MAX_ROW_ICONS), size: DEFAULT_ICON_SIZE, spacing: ICON_SPACING })
-      }
+    // The band is two rows tall — anything past that has nowhere to render.
+    // Never silently: say what was dropped (it takes 11 visible affordances on
+    // one tile to reach here, which no profile currently does).
+    if (rows.length > MAX_ICON_ROWS) {
+      const dropped = rows.slice(MAX_ICON_ROWS).flat()
+      rows.length = MAX_ICON_ROWS
+      console.warn(`[tile-overlay] ${dropped.length} icon(s) past the ${MAX_ICON_ROWS}-row band, not shown:`,
+        dropped.map(a => a.name).join(', '))
     }
 
-    // Only the laid-out sequence is shown — hide collapsed feature/danger/
-    // overflow and the ⋮ when nothing is hidden, so hit-testing matches.
-    const inSeq = new Set(rows.flatMap(r => r.items))
+    // Only what is laid out is shown, so hit-testing matches what is drawn.
+    const inSeq = new Set(rows.flat())
     for (const a of this.#actions) a.button.visible = inSeq.has(a)
+    if (rows.length === 0) return
 
     // Hex horizontal bound (mirrors computeIconPositions) — rows compress to fit.
     const available = (27.7 - 3) * 2
-    let maxRowWidth = 0
-    let y = ICON_Y
-    for (let r = 0; r < rows.length; r++) {
-      const { items, size } = rows[r]
-      let spacing = rows[r].spacing
+    const top = ICON_Y - (rows.length - 1) * ICON_ROW_PITCH / 2
+    rows.forEach((items, r) => {
+      let spacing = ICON_SPACING
       if (items.length > 1 && (items.length - 1) * spacing > available) {
         spacing = available / (items.length - 1)
       }
-      if (r > 0) y += rows[r - 1].size / 2 + ROW_PAD + size / 2
       const startX = Math.round(-(items.length - 1) * spacing / 2)
-      items.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), Math.round(y)))
-      maxRowWidth = Math.max(maxRowWidth, (items.length - 1) * spacing + size)
-    }
-
-    const top = rows.length ? ICON_Y - rows[0].size / 2 - 3 : 0
-    const bottom = rows.length ? y + rows[rows.length - 1].size / 2 + 3 : 0
-    this.#drawButtonTray(maxRowWidth, rows.length, top, bottom)
-  }
-
-  /** Translucent tray behind every laid-out row. */
-  #drawButtonTray(contentWidth: number, rows: number, top: number, bottom: number): void {
-    if (!this.#buttonTray) return
-    this.#buttonTray.clear()
-    if (rows === 0) return
-
-    const pad = 3
-    const totalWidth = contentWidth + pad * 2
-
-    this.#buttonTray.roundRect(-(totalWidth / 2), top, totalWidth, bottom - top, 2)
-    this.#buttonTray.fill({ color: 0x0c0c1a, alpha: 0.6 })
+      const y = Math.round(top + r * ICON_ROW_PITCH)
+      items.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), y))
+    })
   }
 
   // ── Per-tile icon visibility ───────────────────────────────────────
 
-  /** Hide every action button + the tray. The single reset used by all of
+  /** Hide every action button. The single reset used by all of
    *  #updatePerTileVisibility's "nothing to show here" exits, so no exit path
    *  can leave the buttons in a stale visible/hidden state from a prior call. */
   #hideAllButtons(): void {
     for (const action of this.#actions) action.button.visible = false
-    if (this.#buttonTray) this.#buttonTray.visible = false
   }
 
   #updatePerTileVisibility(): void {
@@ -1184,11 +1161,7 @@ export class TileOverlayDrone extends Drone {
       action.button.alpha = action.inert ? INERT_ALPHA : 1
     }
 
-    if (this.#buttonTray) {
-      this.#buttonTray.visible = true
-    }
-
-    // Re-layout so visible icons form a tight centered row
+    // Re-layout so the tile's current icon set forms a tight centered row
     this.#layoutIconRow()
   }
 
@@ -1851,8 +1824,8 @@ export class TileOverlayDrone extends Drone {
       this.#currentAxial = axial
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
       this.#clearHint()
-      // Moving to a new tile collapses any revealed danger row.
-      this.#dangerRevealed = false
+      // Nothing to collapse on a new tile: every icon the tile offers is
+      // already on screen, wrapped across the band's two rows.
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label))
@@ -2389,13 +2362,6 @@ export class TileOverlayDrone extends Drone {
             this.emitEffect(ICON_PICK_REQUEST, { id: 'overlay:' + action.name } satisfies IconPickRequest)
             return
           }
-          // ⋮ toggle — reveal/hide the feature row(s) (and, on a feature-less
-          // tile, the danger row) in place; never a tile action.
-          if (action.name === 'more') {
-            this.#dangerRevealed = !this.#dangerRevealed
-            this.#updatePerTileVisibility()
-            return
-          }
           // break-apart: play shatter animation first, then emit action
           if (action.name === 'break-apart') {
             this.playShatterAnimation(
@@ -2743,6 +2709,10 @@ export class TileOverlayDrone extends Drone {
     // Screensaver owns the screen — keep the icon overlay hidden regardless of
     // hover/selection state. Released when screensaver:active goes false.
     if (this.#screensaverActive) { this.#overlay.visible = false; return }
+
+    // The mesh itself is hidden under a takeover — nothing these icons point
+    // at is on screen. Released when the hive comes back.
+    if (this.#hiveHidden) { this.#overlay.visible = false; return }
 
     // An armed pheromone removal / apply brush owns tile clicks — every icon
     // here would be unreachable, so show none of them rather than dead ones.

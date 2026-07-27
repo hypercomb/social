@@ -112,6 +112,12 @@ function imgSig(node) {
     const root = await send({ op: 'inflate', segments: ['humanity-centres'] })
     const kids = (root.data?.children || []).map(c => c.name)
     console.log(`\nRoot /humanity-centres children intact: [${kids.join(', ')}]`)
+
+    // 5. One build revision for the whole pass (documentation/build-revisions.md)
+    const rev = await send({ op: 'build-record', segments: ['humanity-centres'], label: 'humanity-centres site build' })
+    console.log(rev.ok
+      ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+      : `build revision FAILED: ${rev.error}`)
   }
   console.log(`\n${DRY ? '[DRY] ' : ''}Done. chrome=${chromeSig.slice(0, 12)} · ${ok} stamped · ${failed} failed.`)
 })().catch(e => { console.error('FATAL', e.message); process.exit(2) })

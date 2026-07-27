@@ -77,7 +77,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // mesh-header — it now lives beside the solo/swarm icon and only shows in
   // swarm mode (see MeshHeaderComponent).
   { id: 'neon-mode',    label: 'controls.neon-mode',    action: 'toggleNeonMode',     visibleWhen: 'always' },
-  // Launcher silhouettes (websites → flower-in-pot, games → Space Invader) back
+  // Launcher silhouettes (games → Space Invader) back
   // to plain hexagons. Global toggle; only has a visible effect on `agg-*`
   // launch-group pages — every normal hive page is hexagons regardless.
   { id: 'launcher-shapes', label: 'controls.launcher-shapes', action: 'toggleLauncherShapes', visibleWhen: 'always' },
@@ -1883,8 +1883,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // ── launcher shapes (decorative ⇄ plain hexagons) ────────
-  // Launch-group pages draw their tiles as group-specific silhouettes (websites
-  // → flower-in-pot, games → marching Space Invader). When this is on, the
+  // Launch-group pages draw their tiles as group-specific silhouettes (games →
+  // marching Space Invader; websites' cloud is retired). When this is on, the
   // renderer (hex SDF shader, via show-cell) forces those pages back to plain
   // hexagons. Pure shader-mode flip; no geometry/cell-list change.
 

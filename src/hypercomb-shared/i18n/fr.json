@@ -474,6 +474,8 @@
   "view.home.description": "Un rendu accueil chaleureux de cette zone de tuiles — les enfants deviennent widgets et portes d'entrée.",
   "view.slides": "Diapositives",
   "view.slides.description": "Un diaporama des tuiles-diagrammes de cette zone, un écran à la fois.",
+  "view.tree": "Arbre",
+  "view.tree.description": "Cette branche dessinée en carte mentale horizontale — le tronc à gauche, une colonne par anneau.",
   "home.title.root": "votre ruche",
   "home.subtitle": "C'est votre espace. Les tuiles ici sont des pièces du design — donnez-leur des fonctionnalités et elles deviennent widgets, portes, galeries. Tout ce pour quoi vous avez une fonctionnalité.",
   "home.exit": "retour à la ruche",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Jeu Arkanoid — activer/désactiver",
   "command-line.pinned": "Épinglé — désépinglez pour balayer ou zoomer",
   "pinned.aggregate-hint": "{label} — Ctrl+clic : {group}",
+
+  "pinned.return": "Retour depuis {group}",
   "swarm.consent.title": "Demande d'abonnement",
   "swarm.consent.message": "{requester} souhaite s'abonner à votre ruche",
   "swarm.consent.accept": "Accepter",

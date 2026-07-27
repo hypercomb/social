@@ -531,6 +531,12 @@ function chipsFromNotes(notes) {
     }
   }
 
+  // One build revision for the whole pass (documentation/build-revisions.md)
+  const rev = await withRenderer({ op: 'build-record', segments: [ROOT], label: 'howard site build' })
+  console.log(rev.ok
+    ? `   build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `   build revision FAILED: ${rev.error}`)
+
   console.log(`\nDone. ${ok} pages stamped, ${fail} failed. art=${Object.keys(artSig).length} illustrations.`)
   console.log('Navigate the renderer to howard and run /website on (or toggle the web icon) to view.')
 })().catch(e => { console.error('FATAL', e); process.exit(1) })

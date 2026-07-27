@@ -230,29 +230,27 @@ export class ViewBee extends Worker {
         }
       }
 
-      if (v.view === 'website') {
-        // Slot-only page on THIS node — the website bee declares no
-        // descriptor `slot`; its first-class home is the `website` layer
-        // slot, so the generic check above can't see it.
-        if (!present && this.#hasWebsiteSlot(layer)) present = true
+      // Slot-only page on THIS node — the website bee declares no descriptor
+      // `slot`; its first-class home is the `website` layer slot, so the
+      // generic check above can't see it.
+      if (!present && v.view === 'website' && this.#hasWebsiteSlot(layer)) present = true
 
-        // WEBSITE SCOPE — a website is an APPLICATION SCOPE declared at its
-        // root; descendants are members WITHOUT stamping. When this node has
-        // no page of its own, walk the lineage outermost-first: the first
-        // ancestor carrying the website feature is the site root, and being
-        // under it makes the view available here. The walk probes only
-        // STRICT prefixes of the current path, so standing on the PARENT of
-        // a site root (where the site tile merely sits as a child) never
-        // matches — step outside the hierarchy and the toggle drops.
-        if (!present && segments.length > 1) {
-          const root = await this.#websiteScopeRoot(segments, v)
-          if (root) {
-            present = true
-            const record = v.decorationKind ? root.records.find(r => r.kind === v.decorationKind) : undefined
-            const payload = record?.payload
-            payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
-            payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
-          }
+      // BRANCH SCOPE — an APPLICATION SCOPE declared at its root; descendants
+      // are members WITHOUT stamping (a website's pages; a tree-scoped
+      // branch). When this node carries nothing of its own, walk the lineage
+      // outermost-first: the first ancestor carrying the feature is the scope
+      // root, and being under it makes the view available here. The walk
+      // probes only STRICT prefixes of the current path, so standing on the
+      // PARENT of a scope root (where it merely sits as a child) never
+      // matches — step outside the hierarchy and the toggle drops.
+      if (!present && v.scope === 'branch' && segments.length > 1) {
+        const root = await this.#branchScopeRoot(segments, v)
+        if (root) {
+          present = true
+          const record = v.decorationKind ? root.records.find(r => r.kind === v.decorationKind) : undefined
+          const payload = record?.payload
+          payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
+          payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
         }
       }
       if (!present) continue
@@ -265,7 +263,7 @@ export class ViewBee extends Worker {
       // a node-local view (home, slides, tutor) hides exactly where the record
       // sits.
       if (v.decorationKind) {
-        const branchScoped = v.view === 'website' || !!v.cascades
+        const branchScoped = v.scope === 'branch' || !!v.cascades
         const hidden = await (branchScoped
           ? isFeatureHiddenWithin(segments, v.decorationKind)
           : isFeatureHidden(segments, v.decorationKind)).catch(() => false)
@@ -320,19 +318,29 @@ export class ViewBee extends Worker {
     return Array.isArray(slot) && slot.some(s => typeof s === 'string' && SIG_RE.test(s))
   }
 
-  /** Outermost-first ancestor walk for the website APPLICATION SCOPE.
-   *  Returns the site root's layer + parsed decoration records when the
-   *  current node sits INSIDE a website hierarchy, null otherwise. Probes
-   *  only strict prefixes of the path, so the parent of a site root never
-   *  matches. Mirrors ShowFeaturesDrone's scope pass. */
-  async #websiteScopeRoot(
+  /** Outermost-first ancestor walk for a `scope: 'branch'` APPLICATION SCOPE.
+   *  Returns the scope root's layer + parsed decoration records when the
+   *  current node sits INSIDE the hierarchy, null otherwise. Probes only
+   *  strict prefixes of the path, so the parent of a scope root never
+   *  matches. Mirrors ShowFeaturesDrone's scope pass.
+   *
+   *  A root "carries" the feature the same three ways a node does: the
+   *  descriptor's first-class `slot`, the website slot (the one bee whose
+   *  slot the descriptor can't name), or a `decorationKind` record. */
+  async #branchScopeRoot(
     segments: readonly string[],
     v: VisualBeeDescriptor,
   ): Promise<{ layer: LayerLike; records: DecorationRecord[] } | null> {
     for (let d = 1; d < segments.length; d++) {
       const layer = await this.#layerAtSegments(segments.slice(0, d))
       if (!layer) continue
-      if (this.#hasWebsiteSlot(layer)) {
+      if (v.slot) {
+        const slotVal = (layer as Record<string, unknown>)[v.slot]
+        if (Array.isArray(slotVal) && slotVal.some(s => typeof s === 'string' && SIG_RE.test(s))) {
+          return { layer, records: await this.#decorationRecords(layer) }
+        }
+      }
+      if (v.view === 'website' && this.#hasWebsiteSlot(layer)) {
         return { layer, records: await this.#decorationRecords(layer) }
       }
       if (v.decorationKind) {

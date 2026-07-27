@@ -105,6 +105,61 @@ export const plannerCoverImage = async (): Promise<Blob> => {
 }
 
 /**
+ * Generic lesson cover, seeded: a hairline hex ring whose lit node walks with
+ * the seed, on the shared slate base in a golden-angle hue. Deterministic, so
+ * re-running a lesson draws the same tile — and distinct enough that a page of
+ * practice tiles never looks like a page of duplicates.
+ */
+export const lessonCoverImage = async (seed: number): Promise<Blob> => {
+  const hue = Math.round((seed * 137.508) % 360)
+  const { canvas, ctx } = makeCanvas()
+  drawBase(ctx, hue)
+
+  const cx = SIZE / 2
+  const cy = SIZE / 2
+  const R = 268
+  const lit = ((seed % 6) + 6) % 6
+  const accent = (alpha: number): string => `hsla(${hue}, 48%, 64%, ${alpha})`
+
+  hexPath(ctx, cx, cy, R)
+  ctx.strokeStyle = 'rgba(255,255,255,0.13)'
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  for (let k = 0; k < 6; k++) {
+    const a = -Math.PI / 2 + (k * TAU) / 6
+    const x = cx + R * Math.cos(a)
+    const y = cy + R * Math.sin(a)
+    if (k === lit) {
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, 92)
+      glow.addColorStop(0, accent(0.32))
+      glow.addColorStop(1, accent(0))
+      ctx.fillStyle = glow
+      ctx.beginPath()
+      ctx.arc(x, y, 92, 0, TAU)
+      ctx.fill()
+
+      ctx.beginPath()
+      ctx.arc(x, y, 27, 0, TAU)
+      ctx.fillStyle = accent(0.95)
+      ctx.fill()
+    } else {
+      ctx.beginPath()
+      ctx.arc(x, y, 13, 0, TAU)
+      ctx.fillStyle = 'rgba(255,255,255,0.15)'
+      ctx.fill()
+    }
+  }
+
+  hexPath(ctx, cx, cy, 78)
+  ctx.strokeStyle = accent(0.55)
+  ctx.lineWidth = 4
+  ctx.stroke()
+
+  return toBlob(canvas)
+}
+
+/**
  * Day cover (0 = Monday … 6 = Sunday): a hairline heptagon of seven nodes;
  * the day's node is lit in its accent hue, with a thin arc sweeping from the
  * top of the ring to that node — the day's position in the week.

@@ -107,12 +107,39 @@ async function tick() {
   failCount = 0
   if (reportedOutage) { reportedOutage = false; console.log(JSON.stringify({ watch: 'recovered' })) }
   const r = a.r
-  for (const it of r.data?.items ?? []) {
+  const items = r.data?.items ?? []
+
+  // CONTEXT records are follow-ups the participant added from the agent panel
+  // (clicking the ask's bee) after the ask was already minted. They ride the
+  // same channel and point at their parent ask's sig. Fold them in: an ask
+  // seen for the first time carries whatever context already exists, and
+  // context that lands LATER prints its own wake-up line, because the session
+  // may already be answering the question it changes.
+  const contextByAsk = new Map()
+  for (const it of items) {
+    if (it.payload?.mode !== 'context') continue
+    const of = String(it.payload?.askSig ?? '')
+    if (!of) continue
+    contextByAsk.set(of, [...(contextByAsk.get(of) ?? []), String(it.payload?.prompt ?? '')])
+  }
+
+  for (const it of items) {
     const sig = String(it.sig || '')
-    if (!sig || seen.has(sig)) continue
+    if (!sig) continue
+    if (it.payload?.mode === 'context') {
+      if (seen.has(sig)) continue
+      seen.add(sig)
+      const of = String(it.payload?.askSig ?? '')
+      // Context for an ask this watcher never announced (a previous session's)
+      // still deserves the line — the sig identifies what it belongs to.
+      console.log(JSON.stringify({ context: of, text: it.payload?.prompt ?? '' }))
+      continue
+    }
+    if (seen.has(sig)) continue
     seen.add(sig)
     console.log(JSON.stringify({
       ask: sig,
+      context: contextByAsk.get(sig) ?? [],
       // mode 'chat' = a refinement-conversation turn: reply via the
       // `chat-reply` bridge op (cell=convoId, text=reply) then retire —
       // NEVER note-add. Absent mode = classic note-bound ask.

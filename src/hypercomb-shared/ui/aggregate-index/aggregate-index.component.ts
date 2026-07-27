@@ -70,15 +70,8 @@ const KEY_SEP = '\u0000'
 export class AggregateIndexComponent implements OnDestroy {
   readonly open = signal(false)
   readonly items = signal<readonly AggregateItem[]>([])
+  /** The ONE field. There is no create mode — see `creatable`. */
   readonly query = signal('')
-  /** Create mode. The ONE field at the top of the panel is the search box until
-   *  this flips, then it names the new member — the + hands that field over
-   *  instead of opening a second input further down. */
-  readonly creating = signal(false)
-  /** What is typed in that field while creating. Held apart from `query` so the
-   *  list doesn't narrow to nothing while you name something new, and so
-   *  cancelling gives back the search you already had. */
-  readonly draft = signal('')
   readonly renaming = signal<string | null>(null)
   /** The row whose version chain is showing, by key — at most one. */
   readonly versionsFor = signal<string | null>(null)
@@ -120,61 +113,53 @@ export class AggregateIndexComponent implements OnDestroy {
     return list
   })
 
-  readonly allTags = computed(() => {
-    const seen = new Set<string>()
-    for (const i of this.items()) for (const t of i.tags ?? []) seen.add(t)
-    return [...seen].sort((a, b) => a.localeCompare(b))
-  })
-
-  // ── armed demand ────────────────────────────────────────────────────────────
+  // ── no mark palette here, deliberately ──────────────────────────────────────
   //
-  // Dropping an Organizer item onto the hive says "here is a reference". This is
-  // the moment to say what it is FOR — the same tile filed under two purposes is
-  // two references demanding different things, and a reference's demand is fixed
-  // once written (it lives in the payload, never as a chip that could be
-  // switched off).
+  // This window used to carry its own copy of the hive's pheromone vocabulary,
+  // to "arm" the marks a dropped reference would demand. It is gone. Pheromones
+  // have ONE home — the pheromone panel — and every index that grew a private
+  // palette made the same gesture mean something slightly different in a third
+  // place. Marks will reach a reference by being dragged from that one surface.
   //
-  // ARMED rather than asked: a drag interrupted by a dialog is a worse gesture
-  // than no gesture at all. You pick the marks once, and every reference you
-  // drop carries them until you clear them — which is also what makes "arm
-  // family, drop; arm work, drop elsewhere" a two-step act instead of two
-  // dialogs.
-
-  /** Marks every reference dropped from here will demand. Empty = demand
-   *  nothing, which is exactly what dropping did before this existed. */
-  readonly armedMarks = signal<ReadonlySet<string>>(new Set())
-
-  /** The hive's declared pheromone vocabulary — NOT `allTags()`, which is only
-   *  the keywords the listed collections happen to carry. A demand is about the
-   *  target's contents, so it draws on everything the hive knows. Never minted
-   *  here: a typo'd demand matches nothing and reads as "this is empty". */
-  readonly vocabulary = signal<readonly string[]>([])
-
-  isArmed(mark: string): boolean { return this.armedMarks().has(mark) }
-
-  toggleArmed(mark: string): void {
-    const next = new Set(this.armedMarks())
-    next.has(mark) ? next.delete(mark) : next.add(mark)
-    this.armedMarks.set(next)
-  }
-
-  clearArmed(): void { this.armedMarks.set(new Set()) }
-
-  /** Read the vocabulary when the panel opens. Cheap and idempotent; the
-   *  registry caches, so a cold read costs one load and later ones nothing. */
-  async #loadVocabulary(): Promise<void> {
-    const registry = ioc()?.get('@hypercomb.social/TagRegistry') as
-      { names: string[]; ensureLoaded(): Promise<void> } | undefined
-    if (!registry) return
-    try {
-      await registry.ensureLoaded()
-      this.vocabulary.set([...(registry.names ?? [])].sort((a, b) => a.localeCompare(b)))
-      this.#cdr.markForCheck()
-    } catch { /* cold registry — the row simply doesn't appear */ }
-  }
+  // The reference payload still carries `requiredMarks` (see aggregate-drop.ts);
+  // what was removed is this window's private way of setting them, so nothing
+  // downstream changed shape — references written before simply keep the marks
+  // they were born with.
 
   readonly hasFilter = computed(() => this.#activeTags().size > 0 || this.query().trim().length > 0)
   readonly canCreate = computed(() => !!this.source()?.create)
+
+  // ── typing IS naming ────────────────────────────────────────────────────────
+  //
+  // There is no create MODE. The field you search in is the field you name in,
+  // because looking for something and not finding it is the same gesture as
+  // deciding to make it — you have already typed the name by the time you know
+  // it isn't there. Flipping a mode first made you say twice what you had
+  // already said once.
+  //
+  // So the + means one thing at all times: MAKE WHAT I TYPED. It is live exactly
+  // when that is a real act — there is a name, and nothing already answers to it.
+  // Narrowing to existing rows and creating are not alternatives here: a query
+  // that matches "music-archive" can still create "music", because a name that
+  // reads like part of another name is not the same name. That is the whole
+  // reason the + stays available while the list is showing matches.
+
+  /** The name the + would make: what is typed, cleaned the way a cell name must
+   *  be (a name becomes a path segment). Empty when there is nothing to make. */
+  readonly draft = computed(() => safeCellName(this.query()))
+
+  /** Whether a row already answers to the drafted name — the only thing that
+   *  makes creating meaningless. Compared case-insensitively against BOTH the
+   *  address and the reading: a row titled "Jazz" over the address `jazz-1` is
+   *  a duplicate to the person looking at it either way. */
+  readonly draftExists = computed(() => {
+    const name = this.draft().toLowerCase()
+    if (!name) return false
+    return this.items().some(i => i.key.toLowerCase() === name || i.label.toLowerCase() === name)
+  })
+
+  /** Is the + a live act right now? */
+  readonly creatable = computed(() => this.canCreate() && !!this.draft() && !this.draftExists())
 
   /** Labels currently selected on the canvas, with the location they were
    *  selected AT. Captured rather than derived on read: a selection outlives
@@ -339,7 +324,6 @@ export class AggregateIndexComponent implements OnDestroy {
   close(): void {
     if (!this.open()) return
     this.open.set(false)
-    this.cancelCreate()
     this.renaming.set(null)
     this.#closeVersions()
   }
@@ -376,9 +360,6 @@ export class AggregateIndexComponent implements OnDestroy {
     if (!src || !this.open()) return
     this.#bindSourceChanges(src)
     try { this.items.set(await src.items()) } catch { /* keep the last good list */ }
-    // Independent of the rows and allowed to fail quietly — a cold registry
-    // just means the demands row doesn't appear, never a broken panel.
-    void this.#loadVocabulary()
     this.#cdr.markForCheck()
   }
 
@@ -396,17 +377,10 @@ export class AggregateIndexComponent implements OnDestroy {
   // ── filtering ───────────────────────────────────────────────────────────────
 
   onQuery(v: string): void { this.query.set(v ?? '') }
-  isTagActive(tag: string): boolean { return this.#activeTags().has(tag) }
 
-  /** Toggle a keyword on the SHARED filter — the same `tags:filter` the controls
-   *  bar and Tags panel drive, at the reach they last chose, so the hive
-   *  flattens to matching tiles and this list narrows from one gesture. */
-  toggleTag(tag: string): void {
-    const next = new Set(this.#activeTags())
-    next.has(tag) ? next.delete(tag) : next.add(tag)
-    this.#activeTags.set(next)
-    EffectBus.emit('tags:filter', { active: [...next], scope: this.#filterScope })
-  }
+  // No tag toggles here. This window still LISTENS to `tags:filter` (below), so a
+  // keyword chosen on the one pheromone surface still narrows the list — it just
+  // has no second set of chips of its own to choose it from.
 
   clearFilter(): void {
     this.query.set('')
@@ -516,46 +490,25 @@ export class AggregateIndexComponent implements OnDestroy {
 
   // ── manage ──────────────────────────────────────────────────────────────────
 
-  /** Hand the search field over to naming a new member (or hand it back). */
-  toggleCreate(): void {
-    const next = !this.creating()
-    this.creating.set(next)
-    this.draft.set('')
-    if (next) this.#focusSoon('.ai-filter-input')
-  }
-
-  /** The + beside the search field. Idle, it opens create mode ON that field;
-   *  already creating, it commits what is typed (same as Enter) — and with an
-   *  empty field it simply steps back out. */
-  onPlus(): void {
-    if (!this.creating()) { this.toggleCreate(); return }
-    if (!this.draft().trim()) { this.cancelCreate(); return }
-    void this.submitCreate()
-  }
-
-  /** One field, two jobs — route the keystrokes to whichever is live. */
-  onFieldInput(value: string): void {
-    if (this.creating()) this.draft.set(value ?? '')
-    else this.query.set(value ?? '')
-  }
-
-  cancelCreate(): void {
-    if (!this.creating()) return
-    this.creating.set(false)
-    this.draft.set('')
-  }
-
+  /** Make what is typed. The + and Enter are the same act — there is only one
+   *  thing this field can commit — and both are inert unless `creatable`, so
+   *  Enter while merely narrowing the list does nothing rather than minting a
+   *  second row for a name that is already there.
+   *
+   *  The field is CLEARED on success, which also drops the filter: you have just
+   *  made the thing you were looking for, so the list should show it among its
+   *  siblings rather than stay narrowed to the one word you typed. */
   async submitCreate(): Promise<void> {
-    if (!this.creating()) return   // Enter and the form's submit can both land
+    if (!this.creatable()) return
     const src = this.source()
-    const name = safeCellName(this.draft())
-    // A failed or empty name leaves the field as it is, so the typing survives.
-    if (!src?.create || !name) { this.#focusSoon('.ai-filter-input'); return }
+    const name = this.draft()
+    if (!src?.create || !name) return
     let added: AddedRows
+    // A failed create leaves the typing intact so it can be retried.
     try { added = await src.create(name) } catch { return }
-    this.draft.set('')
-    this.creating.set(false)
+    this.query.set('')
     this.#showAdded(added)
+    this.#focusSoon('.ai-filter-input')
   }
 
   startRename(item: AggregateItem, ev?: Event): void {
@@ -725,16 +678,15 @@ export class AggregateIndexComponent implements OnDestroy {
       EffectBus.emit('tags:changed', { segments: [...here, label] })
       return
     }
-    // Dropped on empty hive → a reference to the item, here, demanding whatever
-    // is armed. The demand is written INTO the reference at birth: it is part of
-    // what this reference IS, not a setting on it, which is why the same item
-    // dropped twice with different marks armed gives two distinct references to
-    // one place rather than one reference that changed its mind.
+    // Dropped on empty hive → a plain reference to the item, here. It demands
+    // NOTHING at birth: what a reference filters its target by is a pheromone
+    // act, and pheromones come from the pheromone panel, not from a palette this
+    // window keeps of its own (see the note above `hasFilter`).
     //
     // The pulse is HERE rather than inside the write: one gesture, one repaint
     // (see dropReferenceTile). The re-read isn't awaited — the tile is on the
     // hive already, and this list only changes if the drop landed in the index.
-    await dropReferenceTile(item, here, [...this.armedMarks()])
+    await dropReferenceTile(item, here)
     await new hypercomb().act()
     void this.reload()
   }
@@ -778,7 +730,7 @@ export class AggregateIndexComponent implements OnDestroy {
       this.open.set(true)
     }
     if (this.open()) void this.reload()
-    else { this.cancelCreate(); this.renaming.set(null) }
+    else this.renaming.set(null)
   }
 
   #focusSoon(selector: string): void {
@@ -789,14 +741,18 @@ export class AggregateIndexComponent implements OnDestroy {
     }, 0)
   }
 
-  /** Escape unwinds the innermost thing that is OURS — a rename field, then the
-   *  create field, then the panel, and the panel only when focus is inside it.
-   *  The panel is docked beside a live hive, so it must not swallow the shell's
-   *  escape cascade when the participant is out on the canvas. */
+  /** Escape unwinds the innermost thing that is OURS — a rename field, then what
+   *  is typed in the search field, then the panel, and the panel only when focus
+   *  is inside it. The panel is docked beside a live hive, so it must not swallow
+   *  the shell's escape cascade when the participant is out on the canvas.
+   *
+   *  Only the LOCAL query is cleared, never the keyword filter: that one is
+   *  shared with the controls bar and the hive, so unwinding it from in here
+   *  would silently unflatten the canvas too. */
   #onKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || !this.open()) return
     if (this.renaming()) { e.preventDefault(); this.renaming.set(null); return }
-    if (this.creating()) { e.preventDefault(); this.cancelCreate(); return }
+    if (this.query()) { e.preventDefault(); this.query.set(''); return }
     const target = e.target as Node | null
     const panel = document.querySelector('hc-aggregate-index .ai-panel')
     if (!panel || !target || !panel.contains(target)) return

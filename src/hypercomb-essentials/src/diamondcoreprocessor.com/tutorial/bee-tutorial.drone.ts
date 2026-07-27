@@ -1,17 +1,24 @@
 // diamondcoreprocessor.com/tutorial/bee-tutorial.drone.ts
 //
-// A beeing gives complete beginners a guided tour: going into and out of
-// tiles with the mouse, creating a tile from the command line, giving it
-// seven children, travelling between them, zoom, pan, and Home. Every
-// demonstrated action runs through the SAME paths a real user action takes —
-// `Lineage.explorerEnter` / `Navigation.back()` for movement, the command
-// line's `search:prefill` + `command-line:remote-submit` for creation, and
-// `cell:attach-resource` for the professional cover images — so what the
-// participant watches is exactly what will happen when they do it.
+// THE COURSE RUNNER — a beeing flies the screen and teaches the hive.
 //
-// The tour is Continue-gated: after each explanation the bee waits for the
-// participant, so they can think about it, then continue. Escape or the
-// Skip button ends it at any point. Start with /tutorial (alias /tour).
+// This drone owns none of the teaching. It owns the STAGE: the overlay bee, a
+// disposable practice page, the geometry that turns a cell into a screen
+// position, and a small set of verbs that all run through the SAME paths a real
+// participant's action takes — `Lineage.explorerEnter` for movement, the
+// command line's `search:prefill` + `command-line:remote-submit` for typing,
+// `keymap:invoke` for bound actions, `cell:attach-resource` for covers. What
+// the participant watches is exactly what will happen when they do it.
+//
+// The lessons live in `lessons/*.lessons.ts` — independent pieces, registered
+// in the TutorialLessonRegistry, sorted by their `order` (most obvious and
+// simplest first) and grouped into courses by `level`. A course is therefore
+// DATA: adding a lesson is registering one, and any module can contribute.
+//
+// Run a course:  /tutorial            (starter)
+//                /tutorial beginner | intermediate | expert
+// Run one alone: /tutorial go-in
+// Stop:          /tutorial stop, the Skip button, or Escape.
 
 import { Drone, EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { removeTilesAt } from '../commands/remove.queen.js'
@@ -19,14 +26,25 @@ import { readTutorialRecord, writeTutorialRecord, clearTutorialRecord, tutorialP
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import { storeImageResources, type ImageResources } from '../editor/arm-resource.js'
-import { plannerCoverImage, dayCoverImage } from './tutorial-images.js'
 import type { BeeTutorialOverlayElement, SayResult } from './tutorial-overlay.view.js'
+import {
+  tutorialLessons, courseMeaning, courseSignature,
+  type TutorialLesson, type TutorialLevel,
+} from './tutorial-lesson.js'
+import type { CoverFactory, StageRect, TutorialStage } from './tutorial-stage.js'
+// Registering the shipped courses is a side effect of loading them — the
+// runner never names a lesson, so a course can grow without touching this file.
+import './lessons/starter.lessons.js'
+import './lessons/beginner.lessons.js'
+import './lessons/intermediate.lessons.js'
+import './lessons/expert.lessons.js'
 
 type Pt = { x: number; y: number }
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels?: string[]; coords?: Axial[]; branchLabels?: string[] }
 type LineageApi = { explorerSegments(): readonly string[]; explorerEnter(name: string): void; explorerUp(): void }
 type NavigationApi = { goRaw(segments: readonly string[]): void; segmentsRaw?(): readonly string[] }
+type SelectionApi = { add(label: string): void; clear(): void; count: number }
 
 const OVERLAY_KEY = '@diamondcoreprocessor.com/BeeTutorialOverlay'
 
@@ -41,10 +59,12 @@ const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 const slug = (s: string): string =>
   s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
 
+export type TutorialRequest = { level?: string; lesson?: string }
+
 export class BeeTutorialDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   public override description =
-    'A beeing flies the screen and teaches the basics: enter and leave tiles, create from the command line, children, travel, zoom, pan, Home.'
+    'A beeing flies the screen and teaches the hive — a course of independent lessons per level: starter, beginner, intermediate, expert.'
 
   protected override deps = {
     lineage: '@hypercomb.social/Lineage',
@@ -58,7 +78,7 @@ export class BeeTutorialDrone extends Drone {
   ]
   protected override emits = [
     'search:prefill', 'command-line:remote-submit', 'cell:attach-resource',
-    'keymap:invoke', 'mobile:input-visible',
+    'keymap:invoke', 'mobile:input-visible', 'tile:action',
   ]
 
   // the tour is effect-driven, never pulse-driven
@@ -86,6 +106,11 @@ export class BeeTutorialDrone extends Drone {
    *  abort; a crash leftover is reclaimed by the provenance GC next start. */
   #sandbox: { name: string; base: readonly string[] } | null = null
 
+  /** The course being run, and its GROUP SIGNATURE — everything this run mints
+   *  carries it, so a course's artifacts add and delete as one unit. */
+  #level: TutorialLevel = 'starter'
+  #groupSig = ''
+
   constructor() {
     super()
 
@@ -99,7 +124,7 @@ export class BeeTutorialDrone extends Drone {
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => { this.#geo = geo })
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => { this.#cells = payload })
 
-    this.onEffect('tutorial:start', () => { void this.#run() })
+    this.onEffect<TutorialRequest>('tutorial:start', (request) => { void this.#run(request ?? {}) })
     this.onEffect('tutorial:stop', () => { this.#stop() })
   }
 
@@ -109,15 +134,25 @@ export class BeeTutorialDrone extends Drone {
 
   #stop(): void {
     this.#cancelled = true
-    const overlay = this.#overlay()
-    overlay?.dismiss()
+    this.#overlay()?.dismiss()
   }
 
   #overlay(): BeeTutorialOverlayElement | undefined {
     return window.ioc.get<BeeTutorialOverlayElement>(OVERLAY_KEY) ?? undefined
   }
 
-  async #run(): Promise<void> {
+  /** Which lessons this request means. A named lesson runs alone (in its own
+   *  course's context); a level runs its whole course in curriculum order. */
+  #resolveLessons(request: TutorialRequest): { level: TutorialLevel; lessons: TutorialLesson[] } {
+    const named = request.lesson ? tutorialLessons.get(request.lesson) : undefined
+    if (named) return { level: named.level, lessons: [named] }
+    const level = (request.level ?? 'starter') as TutorialLevel
+    const lessons = tutorialLessons.course(level)
+    if (lessons.length > 0) return { level, lessons }
+    return { level: 'starter', lessons: tutorialLessons.course('starter') }
+  }
+
+  async #run(request: TutorialRequest): Promise<void> {
     if (this.#running) return
     const overlay = await this.#awaitOverlay()
     if (!overlay) {
@@ -125,14 +160,22 @@ export class BeeTutorialDrone extends Drone {
       return
     }
 
+    const { level, lessons } = this.#resolveLessons(request)
+    if (lessons.length === 0) {
+      console.warn('[tutorial] no lessons available for', request)
+      return
+    }
+
     this.#running = true
     this.#cancelled = false
     this.#coverSigs = []
+    this.#level = level
+    this.#groupSig = await courseSignature(level).catch(() => '')
     overlay.onSkipRequested = () => { this.#cancelled = true }
     overlay.activate()
 
     try {
-      await this.#script(overlay)
+      await this.#course(overlay, level, lessons)
       await overlay.waggle()
     } catch (err) {
       if (!(err instanceof TutorialAborted)) console.warn('[tutorial] tour ended early', err)
@@ -171,10 +214,10 @@ export class BeeTutorialDrone extends Drone {
   }
 
   // -----------------------------------------------
-  // the script
+  // the course
   // -----------------------------------------------
 
-  async #script(overlay: BeeTutorialOverlayElement): Promise<void> {
+  async #course(overlay: BeeTutorialOverlayElement, level: TutorialLevel, lessons: TutorialLesson[]): Promise<void> {
     // A selection URL (`/…/[a,b]`) is a filter, not a place. Scripted
     // navigation must never stack a path on top of a bracket segment
     // (phantom-path self-heal is deliberately off) — start from the real
@@ -182,13 +225,13 @@ export class BeeTutorialDrone extends Drone {
     const nav = this.resolve<NavigationApi>('navigation')
     const raw = nav?.segmentsRaw?.() ?? []
     if (raw.some(s => s.startsWith('['))) {
-      window.ioc.get<{ clear(): void }>('@diamondcoreprocessor.com/SelectionService')?.clear()
+      window.ioc.get<SelectionApi>('@diamondcoreprocessor.com/SelectionService')?.clear()
       nav?.goRaw(raw.filter(s => !s.startsWith('[')))
       await this.#pause(400)
     }
 
-    // a PRIOR run's untouched practice planner is tour-owned scratch — GC it
-    // first so every tour runs the full create arc on a clean stage
+    // a PRIOR run's untouched practice page is tour-owned scratch — GC it first
+    // so every course runs on a clean stage
     await this.#gcPriorPractice()
 
     const center = this.#canvasCenter()
@@ -196,107 +239,182 @@ export class BeeTutorialDrone extends Drone {
     // ---- welcome -------------------------------------------------------
     await overlay.flyTo(center.x - 120, Math.max(150, center.y * 0.55))
     const opening = await overlay.say({
-      chip: this.#t('tutorial.chip.welcome', 'Welcome'),
-      text: this.#t('tutorial.welcome', 'Hi — I’m a beeing! This is Hypercomb, a world made of hexagonal tiles. Let me fly you around and show you how everything works.'),
+      chip: this.#t(`tutorial.chip.welcome.${level}`, this.#t('tutorial.chip.welcome', 'Welcome')),
+      text: this.#t(`tutorial.welcome.${level}`, this.#t('tutorial.welcome',
+        'Hi — I’m a beeing! This is Hypercomb, a world made of hexagonal tiles. Let me fly you around and show you how everything works.')),
       continueLabel: this.#t('tutorial.btn.start', 'Let’s go'),
       skipLabel: this.#t('tutorial.btn.not-now', 'Not now'),
     })
     if (opening !== 'continue') throw new TutorialAborted()
     this.#ck()
 
-    // ---- open the empty practice page — the whole tour happens there ----
-    const practice = await this.#stepOpenPractice(overlay)
+    // ---- open the empty practice page — every lesson happens inside it ---
+    const practice = await this.#openPractice(overlay)
+    const stage = this.#stage(overlay, level, practice)
 
-    // ---- create → go in → go out → children → travel, all on the stage --
-    const plannerName = await this.#stepCreatePlanner(overlay)
-    await this.#stepGoIn(overlay, plannerName)
-    await this.#stepGoOut(overlay)
-    const dayNames = await this.#stepChildren(overlay, plannerName)
-    await this.#stepTravel(overlay, dayNames)
+    // ---- the lessons ----------------------------------------------------
+    let recorded = false
+    for (const lesson of lessons) {
+      this.#ck()
+      if (lesson.requires?.() === false) continue
+      try {
+        await lesson.run(stage)
+      } catch (err) {
+        if (err instanceof TutorialAborted) throw err
+        // One lesson failing must never take the course down — the bee moves
+        // on and the participant still gets the rest.
+        console.warn(`[tutorial] lesson "${lesson.id}" ended early`, err)
+        overlay.highlight(null)
+      }
+      // Every lesson leaves the stage as it found it: back at the practice
+      // page's own level, nothing selected, no ring left burning.
+      await this.#returnToPractice(practice)
+      window.ioc.get<SelectionApi>('@diamondcoreprocessor.com/SelectionService')?.clear()
+      overlay.highlight(null)
 
-    // ---- zoom (the stage is nicely busy now) ----------------------------
-    await overlay.flyTo(center.x + 40, center.y - 60)
-    await this.#speak(overlay, 'zoom', 'Zoom',
-      'Roll the mouse wheel to zoom in and out — pinch on a touch screen. A quick demo…')
-    await this.#demoZoom()
-
-    // ---- pan ------------------------------------------------------------
-    await this.#speak(overlay, 'pan', 'Pan',
-      'Hold the Space bar and drag to glide across the honeycomb. On touch screens, drag with two fingers.')
+      // An EMPTY page has not materialized yet, so the record written when it
+      // opened carries a null sig. Re-write it once the first lesson has put
+      // something on it — from here a crash leaves a leftover the GC can find
+      // AND a merkle sig it can compare.
+      if (!recorded && (this.#cells?.labels?.length ?? 0) > 0) {
+        recorded = true
+        await this.#writePracticeRecord(practice.base, practice.name)
+      }
+    }
 
     // ---- tidy the practice page away ------------------------------------
-    await this.#stepCleanup(overlay, practice)
-
-    // ---- home -----------------------------------------------------------
-    await this.#stepHome(overlay)
+    await this.#cleanupPractice(overlay, practice)
 
     // ---- recap ----------------------------------------------------------
     const recapCenter = this.#canvasCenter()
     await overlay.flyTo(recapCenter.x, recapCenter.y - 60)
-    await this.#speak(overlay, 'done', 'All set',
-      'That’s the basics! Click to go in · Shift+click to go out · type a name to create · wheel zooms · Space drags · Home resets. Type /help whenever you want more. Happy building!',
+    await this.#speak(overlay, `done.${level}`, this.#t('tutorial.chip.done', 'All set'),
+      this.#t('tutorial.done',
+        'That’s the basics! Click to go in · Shift+click to go out · type a name to create · wheel zooms · Space drags · Home resets. Type /help whenever you want more. Happy building!'),
       this.#t('tutorial.btn.finish', 'Finish'))
   }
 
   // -----------------------------------------------
-  // steps
+  // the stage handed to every lesson
   // -----------------------------------------------
 
-  async #stepGoIn(overlay: BeeTutorialOverlayElement, label: string): Promise<void> {
-    await this.#hoverCell(overlay, label)
-    await this.#speak(overlay, 'go-in', 'Going in',
-      'To go inside a tile, just left-click it. Watch me!')
+  #stage(overlay: BeeTutorialOverlayElement, level: TutorialLevel, practice: { name: string; base: readonly string[] }): TutorialStage {
+    const selection = (): SelectionApi | undefined =>
+      window.ioc.get<SelectionApi>('@diamondcoreprocessor.com/SelectionService')
 
-    const point = this.#cellClientPoint(label) ?? this.#canvasCenter()
-    overlay.highlight(null)
-    await overlay.ghostClick(point.x, point.y)
-    await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerEnter(label))
-    await this.#pause(400)
+    return {
+      level,
+      practice,
 
-    // point out the address (breadcrumb) while explaining where we are
-    const crumb = this.#breadcrumbRect()
-    if (crumb) {
-      await overlay.flyTo(crumb.left - 44, crumb.top + crumb.height / 2 + 10)
-      overlay.highlight(crumb)
-    } else {
-      const center = this.#canvasCenter()
-      await overlay.flyTo(center.x, center.y - 50)
+      say: (chip, chipFallback, text, opts) =>
+        this.#speak(overlay, chip, chipFallback, text, opts?.continueLabel, opts?.key, opts?.params),
+      t: (key, fallback, params) => this.#t(key, fallback, params),
+
+      flyTo: (x, y) => overlay.flyTo(x, y),
+      flyToCell: (label) => this.#hoverCell(overlay, label),
+      flyToRect: async (rect) => {
+        if (!rect) {
+          const c = this.#canvasCenter()
+          await overlay.flyTo(c.x, Math.max(120, c.y - 90))
+          return
+        }
+        // Below a top strip, above a bottom one — never on top of the thing.
+        const below = rect.top < window.innerHeight / 2
+        await overlay.flyTo(
+          rect.left + rect.width / 2,
+          below ? rect.top + rect.height + 46 : rect.top - 46,
+        )
+        overlay.highlight(rect)
+      },
+      highlight: (target) => overlay.highlight(target),
+      ghostClick: (x, y, opts) => overlay.ghostClick(x, y, opts ?? {}),
+
+      enterCell: async (label) => {
+        const point = this.#cellClientPoint(label) ?? this.#canvasCenter()
+        await overlay.ghostClick(point.x, point.y)
+        await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerEnter(label))
+        await this.#pause(400)
+      },
+      leave: async () => {
+        const c = this.#canvasCenter()
+        await overlay.ghostClick(c.x - 120, c.y + 80, { shift: true })
+        // The REAL gesture rides window.history.back(); the scripted tour uses
+        // explorerUp() — same destination, but synchronous and incapable of
+        // walking the browser out of the app when tab history is shallow.
+        await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerUp())
+        await this.#pause(400)
+      },
+      leaveTo: async (depth) => {
+        const lineage = this.resolve<LineageApi>('lineage')
+        let guard = 0
+        while ((lineage?.explorerSegments?.() ?? []).length > depth && guard++ < 12) {
+          await this.#navigate(() => lineage?.explorerUp())
+        }
+      },
+      goHome: async () => {
+        await this.#navigate(() => this.resolve<NavigationApi>('navigation')?.goRaw([]))
+        await this.#pause(400)
+      },
+      depth: () => (this.resolve<LineageApi>('lineage')?.explorerSegments?.() ?? []).length,
+
+      typeAndSubmit: (text, slow = true) => this.#typeAndSubmit(text, slow),
+      invoke: (cmd) => { this.emitEffect('keymap:invoke', { cmd, binding: null, event: null }) },
+      emit: (effect, payload) => { this.emitEffect(effect, payload) },
+
+      create: (name, cover) => this.#create(name, cover),
+      createMany: (names, cover) => this.#createMany(names, cover),
+      editCell: async (label) => {
+        const cells = this.#cells
+        const wanted = slug(label)
+        const index = (cells?.labels ?? []).findIndex(l => slug(l) === wanted)
+        const axial = index >= 0 ? cells?.coords?.[index] : undefined
+        if (index < 0 || !axial) return
+        // Same payload the pencil icon sends — TileEditorDrone opens from here.
+        this.emitEffect('tile:action', { action: 'edit', q: axial.q, r: axial.r, index, label: cells?.labels?.[index] ?? label })
+        await this.#pause(300)
+      },
+
+      select: (labels) => {
+        const sel = selection()
+        for (const label of labels) {
+          const rendered = this.#renderedLabel(label)
+          if (rendered) sel?.add(rendered)
+        }
+      },
+      clearSelection: () => { selection()?.clear() },
+      selectionCount: () => selection()?.count ?? 0,
+
+      labels: () => this.#cells?.labels ?? [],
+      point: (label) => this.#cellClientPoint(label),
+      radius: () => this.#cellClientRadius(),
+      center: () => this.#canvasCenter(),
+      chrome: (key) => this.#buttonRect(key),
+      commandInput: () => this.#commandInputRect(),
+      breadcrumb: () => this.#breadcrumbRect(),
+      element: (selector) => this.#elementRect(selector),
+
+      wait: (ms) => this.#pause(ms),
+      waitForLabel: (name) => this.#waitForLabel(name),
+      waitForCells: (pred, timeoutMs = 8000) =>
+        this.#waitForCells(p => pred((p?.labels ?? []).map(l => String(l))), timeoutMs),
+      check: () => this.#ck(),
     }
-    await this.#speak(overlay, 'inside', 'Inside',
-      'We’re in! Everything here lives inside “{cell}”. The address up here always shows where you are.',
-      undefined, undefined, { cell: label })
-    overlay.highlight(null)
   }
 
-  async #stepGoOut(overlay: BeeTutorialOverlayElement): Promise<void> {
-    const backRect = this.#buttonRect('controls.go-back')
-    if (backRect) {
-      await overlay.flyTo(backRect.left - 40, backRect.top + backRect.height / 2)
-      overlay.highlight(backRect)
-    }
-    await this.#speak(overlay, 'go-out', 'Going out',
-      'Three ways back out: right-click anywhere, hold Shift and click, or press the Back button. I’ll use Back.')
-    overlay.highlight(null)
-
-    if (backRect) {
-      await overlay.ghostClick(backRect.left + backRect.width / 2, backRect.top + backRect.height / 2)
-    }
-    // The REAL gestures ride window.history.back(); the scripted tour uses
-    // explorerUp() — same destination, but synchronous and incapable of
-    // walking the browser out of the app when the tab's history is shallow.
-    await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerUp())
-    await this.#pause(400)
-
-    const center = this.#canvasCenter()
-    await overlay.flyTo(center.x - 80, center.y - 40)
-    await this.#speak(overlay, 'back', 'Back',
-      'And we’re back where we started. In and out — that’s the heartbeat of Hypercomb.')
+  /** The label as RENDERED (canonical slug) for a name a lesson knows. */
+  #renderedLabel(name: string): string | null {
+    const wanted = slug(name)
+    return this.#cells?.labels?.find(l => slug(l) === wanted) ?? null
   }
+
+  // -----------------------------------------------
+  // the practice page
+  // -----------------------------------------------
 
   /** Open a clean practice page (a transient tile at the participant's
-   *  location) — the whole lesson happens inside it, and it is tidied away
-   *  at the end, on abort, and by the provenance GC after a crash. */
-  async #stepOpenPractice(overlay: BeeTutorialOverlayElement): Promise<{ name: string; base: readonly string[] }> {
+   *  location) — every lesson happens inside it, and it is tidied away at the
+   *  end, on abort, and by the provenance GC after a crash. */
+  async #openPractice(overlay: BeeTutorialOverlayElement): Promise<{ name: string; base: readonly string[] }> {
     await this.#speak(overlay, 'practice', 'Practice page',
       'First, let me open a clean practice page — nothing on your pages will change, and I’ll tidy it away when we’re done.')
 
@@ -306,149 +424,57 @@ export class BeeTutorialDrone extends Drone {
     this.#sandbox = { name, base }
     await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerEnter(name))
     await this.#pause(400)
+
+    // Record it in the sign('tutorial:artifacts') pool STAMPED WITH THE COURSE'S
+    // GROUP SIGNATURE, so a crashed run's leftover is reclaimed at the next
+    // start and every artifact of this course is addressable as one group.
+    await this.#writePracticeRecord(base, name)
     return { name, base }
   }
 
-  async #stepCreatePlanner(overlay: BeeTutorialOverlayElement): Promise<string> {
-    const name = this.#freeName(this.#t('tutorial.name.planner', 'Weekly Planner'))
-    const coverReady = this.#storeCover(plannerCoverImage()) // bake while we talk
-
-    const inputRect = this.#commandInputRect()
-    if (inputRect) {
-      await overlay.flyTo(inputRect.left + inputRect.width / 2, inputRect.bottom + 46)
-      overlay.highlight(inputRect)
-    } else {
-      const c = this.#canvasCenter()
-      await overlay.flyTo(c.x, 120)
-    }
-    await this.#speak(overlay, 'create', 'Create',
-      'This is the command line — the fastest way to build. Type a name and press Enter, and a tile is born. I’ll make “{name}”.',
-      undefined, undefined, { name })
-    overlay.highlight(null)
-
-    this.#lock(name)
-    await this.#typeAndSubmit(name, true)
-    await this.#waitForLabel(name)
-    this.#attachStored(name, await coverReady)
-
-    // the practice page just materialized in the parent layer — record it in
-    // the sign('tutorial:artifacts') pool so a crashed tour's leftover is
-    // reclaimed at the next start (transient: no sig gate)
-    if (this.#sandbox) {
-      const sandbox = this.#sandbox
-      try {
-        await writeTutorialRecord({
-          label: slug(sandbox.name),
-          segments: sandbox.base,
-          plannerSig: await tutorialPlannerSig(sandbox.base, slug(sandbox.name)),
-          coverSigs: [],
-          updatedAt: Date.now(),
-          transient: true,
-        })
-      } catch (err) { console.warn('[tutorial] provenance record failed', err) }
-    }
-    await this.#pause(700)
-
-    const point = this.#cellClientPoint(name)
-    if (point) {
-      await overlay.flyTo(point.x, point.y - this.#cellClientRadius() - 22)
-      overlay.highlight({ x: point.x, y: point.y, r: this.#cellClientRadius() + 8 })
-    }
-    await this.#speak(overlay, 'your-tile', 'Your tile',
-      'Meet “{name}” — a brand-new tile with a proper cover image. Anything you can name, you can make.',
-      undefined, undefined, { name })
-    overlay.highlight(null)
-    return name
+  async #writePracticeRecord(base: readonly string[], name: string): Promise<void> {
+    try {
+      await writeTutorialRecord({
+        label: slug(name),
+        segments: base,
+        plannerSig: await tutorialPlannerSig(base, slug(name)),
+        coverSigs: this.#coverSigs,
+        updatedAt: Date.now(),
+        transient: true,
+        groupSig: this.#groupSig,
+        groupMeaning: courseMeaning(this.#level),
+      })
+    } catch (err) { console.warn('[tutorial] provenance record failed', err) }
   }
 
-  async #stepChildren(overlay: BeeTutorialOverlayElement, plannerName: string): Promise<string[]> {
-    await this.#speak(overlay, 'children', 'Children',
-      'Tiles hold tiles. Let’s step inside and give it seven children — one for each day of the week.',
-      undefined, 'tutorial.children-intro')
-
-    const point = this.#cellClientPoint(plannerName) ?? this.#canvasCenter()
-    await overlay.ghostClick(point.x, point.y)
-    await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerEnter(plannerName))
-    await this.#pause(400)
-
-    const dayFallbacks = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    const dayNames = dayFallbacks.map((fb, i) => this.#t(`tutorial.name.day${i}`, fb))
-    // bake all seven covers while the bubble is up; lock before anything commits
-    const coversReady = dayNames.map((_, i) => this.#storeCover(dayCoverImage(i)))
-    for (const name of dayNames) this.#lock(name)
-
-    const inputRect = this.#commandInputRect()
-    if (inputRect) {
-      await overlay.flyTo(inputRect.left + inputRect.width / 2, inputRect.bottom + 46)
-      overlay.highlight(inputRect)
+  /** Back to the practice page's own level after a lesson wandered off. */
+  async #returnToPractice(practice: { name: string; base: readonly string[] }): Promise<void> {
+    const lineage = this.resolve<LineageApi>('lineage')
+    const want = practice.base.length + 1
+    const here = (lineage?.explorerSegments?.() ?? []).length
+    if (here === want) return
+    if (here > want) {
+      let guard = 0
+      while ((lineage?.explorerSegments?.() ?? []).length > want && guard++ < 12) {
+        await this.#navigate(() => lineage?.explorerUp())
+      }
+      return
     }
-    await this.#speak(overlay, 'brackets', 'One line',
-      'A power move: square brackets create many tiles at once. One line, seven days — watch!')
-    overlay.highlight(null)
-
-    // one atomic bracket create — all seven days in a single commit
-    await this.#typeAndSubmit(`[${dayNames.join(', ')}]`, true)
-    const wanted = dayNames.map(slug)
-    const ok = await this.#waitForCells(
-      p => wanted.every(w => !!p?.labels?.some(l => slug(l) === w)), 12000)
-    if (!ok) console.warn('[tutorial] not all day tiles appeared in time')
-    this.#ck()
-
-    // the bracket leaves the newborns selected — tidy the stage
-    window.ioc.get<{ clear(): void }>('@diamondcoreprocessor.com/SelectionService')?.clear()
-
-    const stored = await Promise.all(coversReady)
-    dayNames.forEach((name, i) => this.#attachStored(name, stored[i]))
-    await this.#pause(700)
-
-    const c = this.#canvasCenter()
-    await overlay.flyTo(c.x, c.y - 80)
-    await this.#speak(overlay, 'children', 'Children',
-      'Monday through Sunday — seven child tiles, each with its own cover. Your world grows tile by tile, as deep as you like.',
-      undefined, 'tutorial.children-done')
-    return dayNames
-  }
-
-  async #stepTravel(overlay: BeeTutorialOverlayElement, dayNames: string[]): Promise<void> {
-    await this.#speak(overlay, 'travel', 'Travel',
-      'Now let’s travel between them, exactly like before: click a tile to go in, Shift+click to come back out.')
-
-    const visit = async (label: string): Promise<void> => {
-      const point = this.#cellClientPoint(label) ?? this.#canvasCenter()
-      await overlay.flyTo(point.x, point.y - this.#cellClientRadius() - 22)
-      await overlay.ghostClick(point.x, point.y)
-      await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerEnter(label))
-      await this.#pause(650)
-
-      const c = this.#canvasCenter()
-      await overlay.ghostClick(c.x - 120, c.y + 80, { shift: true })
-      await this.#navigate(() => this.resolve<LineageApi>('lineage')?.explorerUp())
-      await this.#pause(450)
-    }
-
-    await visit(dayNames[0])
-    await visit(dayNames[4])
-
-    const c = this.#canvasCenter()
-    await overlay.flyTo(c.x - 60, c.y - 60)
-    await this.#speak(overlay, 'travel', 'Travel',
-      'In, out, and across — you can wander anywhere. You can’t get lost: Back and Home always know the way.',
-      undefined, 'tutorial.travel-done')
+    // A lesson went Home (or above the page) — walk straight back to it.
+    const nav = this.resolve<NavigationApi>('navigation')
+    await this.#navigate(() => nav?.goRaw([...practice.base, practice.name]))
+    await this.#pause(300)
   }
 
   /** The practice page is disposable by contract — step out to where it was
    *  minted, show it once, then tidy it away for real. */
-  async #stepCleanup(overlay: BeeTutorialOverlayElement, practice: { name: string; base: readonly string[] }): Promise<void> {
+  async #cleanupPractice(overlay: BeeTutorialOverlayElement, practice: { name: string; base: readonly string[] }): Promise<void> {
     this.#ck()
-    const lineage = this.resolve<LineageApi>('lineage')
-    while ((lineage?.explorerSegments?.() ?? []).length > practice.base.length) {
-      await this.#navigate(() => lineage?.explorerUp())
-      this.#ck()
-    }
+    const nav = this.resolve<NavigationApi>('navigation')
+    await this.#navigate(() => nav?.goRaw([...practice.base]))
     await this.#pause(350)
 
-    const wanted = slug(practice.name)
-    const target = this.#cells?.labels?.find(l => slug(l) === wanted) ?? wanted
+    const target = this.#renderedLabel(practice.name) ?? slug(practice.name)
     const point = this.#cellClientPoint(target)
     if (point) {
       await overlay.flyTo(point.x, point.y - this.#cellClientRadius() - 22)
@@ -472,8 +498,7 @@ export class BeeTutorialDrone extends Drone {
     if (!practice) return
     this.#sandbox = null
     try {
-      const wanted = slug(practice.name)
-      const target = this.#cells?.labels?.find(l => slug(l) === wanted) ?? wanted
+      const target = this.#renderedLabel(practice.name) ?? slug(practice.name)
       await removeTilesAt(practice.base, [target])
       await clearTutorialRecord(practice.base)
       await new hypercomb().act()
@@ -505,23 +530,6 @@ export class BeeTutorialDrone extends Drone {
     }
   }
 
-  async #stepHome(overlay: BeeTutorialOverlayElement): Promise<void> {
-    const homeRect = this.#buttonRect('controls.home')
-    if (homeRect) {
-      await overlay.flyTo(homeRect.left - 40, homeRect.top + homeRect.height / 2)
-      overlay.highlight(homeRect)
-    }
-    await this.#speak(overlay, 'home', 'Home',
-      'And whenever you’re done exploring, the Home button brings you straight back to your front door.')
-    overlay.highlight(null)
-
-    if (homeRect) {
-      await overlay.ghostClick(homeRect.left + homeRect.width / 2, homeRect.top + homeRect.height / 2)
-    }
-    await this.#navigate(() => this.resolve<NavigationApi>('navigation')?.goRaw([]))
-    await this.#pause(400)
-  }
-
   // -----------------------------------------------
   // demonstrated actions — always the real paths
   // -----------------------------------------------
@@ -533,7 +541,7 @@ export class BeeTutorialDrone extends Drone {
     this.emitEffect('keymap:invoke', { cmd: 'ui.commandLineToggle' })
 
     if (slow) {
-      const per = name.length > 30 ? 14 : 36 // long bracket lines type brisker
+      const per = name.length > 30 ? 14 : 36 // long lines type brisker
       for (let i = 1; i <= name.length; i++) {
         this.#ck()
         this.emitEffect('search:prefill', { value: name.slice(0, i) })
@@ -547,6 +555,46 @@ export class BeeTutorialDrone extends Drone {
     this.emitEffect('command-line:remote-submit', { text: name })
   }
 
+  /** One tile, created the way a participant creates one, with its cover baked
+   *  while the bee is still talking so the attach at reveal is instant. */
+  async #create(name: string, cover?: CoverFactory): Promise<string> {
+    const free = this.#freeName(name)
+    const ready = cover ? this.#storeCover(cover()) : Promise.resolve(null)
+    this.#lock(free)
+    await this.#typeAndSubmit(free, true)
+    await this.#waitForLabel(free)
+    this.#attachStored(free, await ready)
+    await this.#pause(500)
+    return this.#renderedLabel(free) ?? free
+  }
+
+  /** Several tiles in ONE bracket commit — the atomic path `[a, b, c]`. */
+  async #createMany(names: readonly string[], cover?: (index: number) => Promise<Blob>): Promise<string[]> {
+    const free = names.map(n => this.#freeName(n))
+    const ready = free.map((_, i) => (cover ? this.#storeCover(cover(i)) : Promise.resolve(null)))
+    for (const name of free) this.#lock(name)
+
+    await this.#typeAndSubmit(`[${free.join(', ')}]`, true)
+    // Only TOP-LEVEL names land on this page — a bracket item carrying a path
+    // creates at depth, and its leaf never renders here.
+    const tops = free.map(n => slug(n.split('/')[0] ?? n))
+    const ok = await this.#waitForCells(
+      p => tops.every(w => !!p?.labels?.some(l => slug(l) === w)), 12000)
+    if (!ok) console.warn('[tutorial] not all bracket tiles appeared in time')
+    this.#ck()
+
+    // the bracket leaves the newborns selected — tidy the stage
+    window.ioc.get<SelectionApi>('@diamondcoreprocessor.com/SelectionService')?.clear()
+
+    const stored = await Promise.all(ready)
+    free.forEach((name, i) => {
+      if (name.includes('/')) { this.#unlock(name); return } // lives a level down
+      this.#attachStored(name, stored[i])
+    })
+    await this.#pause(600)
+    return free.map(n => this.#renderedLabel(n) ?? n)
+  }
+
   /** Substrate lock — no default image may ever appear on a tutorial tile.
    *  ResourceAttachDrone releases the lock itself after the cover's canonical
    *  write; #unlockAll covers aborted tours. */
@@ -555,10 +603,13 @@ export class BeeTutorialDrone extends Drone {
     this.emitEffect('cell:attach-pending', { cell, pending: true })
   }
 
+  #unlock(cell: string): void {
+    this.#locked.delete(cell)
+    this.emitEffect('cell:attach-pending', { cell, pending: false })
+  }
+
   #unlockAll(): void {
-    for (const cell of this.#locked) {
-      this.emitEffect('cell:attach-pending', { cell, pending: false })
-    }
+    for (const cell of [...this.#locked]) this.#unlock(cell)
     this.#locked.clear()
   }
 
@@ -601,16 +652,6 @@ export class BeeTutorialDrone extends Drone {
     this.#ck()
   }
 
-  async #demoZoom(): Promise<void> {
-    const zoom = window.ioc.get<{ zoomByFactor?: (f: number, pivot: Pt) => void }>('@diamondcoreprocessor.com/ZoomDrone')
-    if (!zoom?.zoomByFactor) return
-    const pivot = this.#canvasCenter()
-    zoom.zoomByFactor(0.8, pivot)
-    await this.#pause(650)
-    zoom.zoomByFactor(1.25, pivot)
-    await this.#pause(450)
-  }
-
   // -----------------------------------------------
   // waiting on the renderer
   // -----------------------------------------------
@@ -637,7 +678,7 @@ export class BeeTutorialDrone extends Drone {
 
   async #waitForLabel(name: string): Promise<void> {
     const wanted = slug(name)
-    // generous — during the seven-child speed-run renders arrive in bursts
+    // generous — during a bracket speed-run renders arrive in bursts
     const ok = await this.#waitForCells(p => !!p?.labels?.some(l => slug(l) === wanted), 12000)
     if (!ok) console.warn('[tutorial] tile did not appear in time:', name)
     this.#ck()
@@ -703,23 +744,24 @@ export class BeeTutorialDrone extends Drone {
   // chrome targets
   // -----------------------------------------------
 
-  #commandInputRect(): DOMRect | null {
-    const input = document.querySelector<HTMLElement>('hc-command-line input.command-input')
-    if (!input) return null
-    const rect = input.getBoundingClientRect()
+  #elementRect(selector: string): StageRect | null {
+    const node = document.querySelector<HTMLElement>(selector)
+    if (!node) return null
+    const rect = node.getBoundingClientRect()
     return rect.width > 4 && rect.height > 4 ? rect : null
+  }
+
+  #commandInputRect(): StageRect | null {
+    return this.#elementRect('hc-command-line input.command-input')
   }
 
   /** The address bar — the breadcrumb strip in the controls bar (desktop). */
-  #breadcrumbRect(): DOMRect | null {
-    const crumb = document.querySelector<HTMLElement>('hc-controls-bar .breadcrumb-top')
-    if (!crumb) return null
-    const rect = crumb.getBoundingClientRect()
-    return rect.width > 4 && rect.height > 4 ? rect : null
+  #breadcrumbRect(): StageRect | null {
+    return this.#elementRect('hc-controls-bar .breadcrumb-top')
   }
 
   /** Locate a controls-bar button by its localized aria-label. */
-  #buttonRect(i18nKey: string): DOMRect | null {
+  #buttonRect(i18nKey: string): StageRect | null {
     const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
     const label = i18n?.t(i18nKey)
     if (!label || label === i18nKey) return null
@@ -742,7 +784,7 @@ export class BeeTutorialDrone extends Drone {
     return fallback.replace(/\{(\w+)\}/g, (_, token) => String(params?.[token] ?? `{${token}}`))
   }
 
-  /** One Continue-gated bubble. `skip` result aborts the tour. */
+  /** One Continue-gated bubble. `skip` result aborts the course. */
   async #speak(
     overlay: BeeTutorialOverlayElement,
     chipId: string,

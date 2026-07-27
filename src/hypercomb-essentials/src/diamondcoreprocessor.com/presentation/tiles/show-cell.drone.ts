@@ -62,13 +62,14 @@ function isLauncherLocation(segs: readonly unknown[]): boolean {
 }
 
 /** Map a launch group's shape id (from its `launch:target` decoration) to the
- *  shader's aShapeMode value: 0 = hexagon · 1 = flower-in-pot (websites) ·
- *  2 = Space Invader (games). Unknown / empty → hexagon, so a normal hive tile
- *  (no launch decoration) and any future group default to the plain shape.
- *  (Help tiles carry no shape — hexagons; a retired 'keycap' silhouette in
- *  old decorations falls through to hexagon here, no migration needed.) */
+ *  shader's aShapeMode value: 0 = hexagon · 2 = Space Invader (games).
+ *  Unknown / empty → hexagon, so a normal hive tile (no launch decoration) and
+ *  any future group default to the plain shape.
+ *  (Help tiles carry no shape — hexagons. RETIRED silhouettes fall through to
+ *  hexagon here, no migration needed: 'keycap', and 'flower-pot' — the
+ *  websites cloud, phased out; 2 stays put so games' decorations keep working.) */
 function launchShapeToMode(shape: string): number {
-  return shape === 'flower-pot' ? 1 : shape === 'space-invader' ? 2 : 0
+  return shape === 'space-invader' ? 2 : 0
 }
 
 /** Cold-steel border (126,182,214 → 0..1) for the clustered-help category
@@ -732,7 +733,7 @@ export class ShowCellDrone extends Drone {
   #labelsVisible = true
   #substrateFadeStart: number | null = null
   #substrateFadeRaf = 0
-  // Launcher "cloud" drift — a per-tile float driven entirely in the vertex
+  // Launcher motion (the games march) — a per-tile float driven in the vertex
   // shader (u_time + u_driftAmp). Active only on launch-group aggregator pages;
   // a single rAF advances the clock, geometry is never rebuilt.
   #driftRaf = 0
@@ -3852,14 +3853,15 @@ export class ShowCellDrone extends Drone {
     this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
 
     // Per-group launcher visuals — NOT universal, and chosen PER TILE so a mixed
-    // launch-group page shows each group's OWN silhouette (websites → flower-in-
-    // pot, games → marching Space Invader) and groups never share a visual type.
+    // launch-group page shows each group's OWN silhouette (games → marching
+    // Space Invader) and groups never share a visual type. Websites members
+    // carry no shape any more — plain picture hexagons like the rest of the hive.
     // The shape is a per-vertex attribute (aShapeMode) packed in applyGeometry
     // from each cell's `launch:target` decoration `shape`; every normal hive page
     // (no such decoration) stays plain hexagons. Here we only run the motion
     // clock when on a launch-group page with the hexagon toggle off — the
     // per-vertex gate (aShapeMode > 1.5) limits the actual march to game tiles,
-    // leaving flowers and hexagons still. Drift amplitude is a small fraction of
+    // leaving hexagons still. Drift amplitude is a small fraction of
     // the hex radius so a marching invader never costs the participant a click.
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
     const onLauncherPage = isLauncherLocation(segs)
@@ -7639,7 +7641,7 @@ export class ShowCellDrone extends Drone {
     // #cellIsShaded). Brightening is an attribute flip on the heal repaint,
     // never a geometry change, so nothing moves when a tile becomes ready.
     const shaded = new Float32Array(cells.length * 4)
-    // Per-tile launcher silhouette (0 hex · 1 flower-pot · 2 invader) — lets a
+    // Per-tile launcher silhouette (0 hex · 2 invader; 1 retired) — lets a
     // mixed launch-group page render each group's own shape without sharing.
     const shapeAttr = new Float32Array(cells.length * 4)
     // Per-tile portal flag — a reference tile (doorway to another lineage) gets

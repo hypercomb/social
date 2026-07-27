@@ -222,9 +222,6 @@ const ICONS = {
   public: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'),
   // share — Material Icons Filled (make this tile + its whole BRANCH public)
   share: md('M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z'),
-  // more_vert (⋮) — Material Icons Filled. The overlay's "more" toggle: tapping
-  // it reveals the danger row (delete) instead of firing a tile action.
-  more: md('M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -301,15 +298,12 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // never appears, and the merged-available filter strips it from default
   // arrangements.
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
-  // The trash-bin `remove` icon stays OFF the always-visible row (too easy to
-  // misclick). It lives in the hidden DANGER ROW (`dangerRow: true`) that the
-  // overlay's ⋮ (more) toggle reveals on tap — see tile-overlay.drone.ts. The
-  // selection menu and Delete/Backspace remain as the other deletion paths.
+  // `dangerRow: true` no longer HIDES the trash bin — every icon a tile offers
+  // is on screen at once now — but it still orders it LAST, so delete lands at
+  // the end of the bottom row, the furthest point from where the pointer
+  // enters the band. The selection menu and Delete/Backspace remain as the
+  // other deletion paths.
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'private', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
-  // ⋮ overflow toggle — handled specially in the overlay (toggles the danger
-  // row); it never emits a tile action. Registered on profiles that own a
-  // hidden row (private / public-own).
-  { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'private' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // Promote this tile UP one level into its parent (the inverse of drop-into).
   // Shown only when there IS a parent (not at the root). MoveDrone owns the
@@ -347,7 +341,6 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // misclick risk. Hide doesn't belong here: it's a session-scoped per-view
   // filter, but you OWN this tile and the correct dismissal is to delete it.
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'public-own', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
-  { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'public-own' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   { name: 'promote-to-parent', svgMarkup: ICONS.arrowUpward, hoverTint: 0xc8d4ff, profile: 'public-own', visibleWhen: () => (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).length > 0, labelKey: 'action.promote-to-parent', descriptionKey: 'action.promote-to-parent.description' },
   // NOTE: there is still NO `sync` button — but ADOPT COMES BACK when a peer
@@ -386,9 +379,6 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // immediately without needing to adopt them first.
   { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden, labelKey: 'action.hide', descriptionKey: 'action.hide.description' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external', labelKey: 'action.block', descriptionKey: 'action.block.description' },
-  // ⋮ toggle for peer tiles too — provider icons that ride the hidden row
-  // (e.g. share-link) register on public-external and need a reveal.
-  { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'public-external' },
   // ── files (all profiles) ──
   // The file icon appears on any tile that has at least one `files:attachment`
   // decoration — your own (private / public-own) or a peer's (public-external,
@@ -419,41 +409,39 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  // `more` (⋮) + `remove` are last. The overlay routes `remove` (dangerRow)
-  // into the hidden danger row and treats `more` as its reveal toggle, so
-  // delete is never an always-visible one-tap. `more` only renders when there
-  // IS something hidden to reveal (handled in the overlay layout).
-  'private': ['command', 'edit', 'features', 'break-apart', 'files', 'invite', 'more', 'remove'],
+  // `remove` is last: the overlay orders dangerRow icons to the end, so delete
+  // sits at the tail of the bottom row rather than under the entering pointer.
+  'private': ['command', 'edit', 'features', 'break-apart', 'files', 'invite', 'remove'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
-  // Your own tile in public mode. `more` + `remove` ride the same danger-row
-  // reveal as private. `features` (puzzle-piece) opens the SHOW FEATURES
+  // Your own tile in public mode. `remove` rides the same ordering rule
+  // as private. `features` (puzzle-piece) opens the SHOW FEATURES
   // panel for any tile carrying a registered visual bee — it stays in the
   // hive and has NO peer-broadcast requirement. (Still no `sync` icon.)
   // `adopt` leads because when it IS visible a peer is offering something
   // this tile doesn't have — it is the only entry here gated on live swarm
   // evidence, so it renders on nothing but a real merge.
-  'public-own': ['adopt', 'features', 'break-apart', 'files', 'invite', 'more', 'remove'],
+  'public-own': ['adopt', 'features', 'break-apart', 'files', 'invite', 'remove'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
   // etc.) via the content broker. Different mechanism from auto-
   // adopt: auto-adopt follows a participant continuously, single-
   // adopt is one tile + its resources, on demand. `hide` dismisses
-  // a peer tile from view without taking ownership. `more` (⋮) only
-  // renders when a hidden-row icon (e.g. share-link) is present.
-  'public-external': ['adopt', 'hide', 'files', 'invite', 'more'],
+  // a peer tile from view without taking ownership.
+  'public-external': ['adopt', 'hide', 'files', 'invite'],
 }
 
 // ── Position computation ──────────────────────────────────────────
 
-// Icon row sits BELOW the tile's label band, which is centred on the hex.
-// Nudged down 2 from the original 10 so the row stops crowding the name —
-// 10 was tried and sat far too low. HINT_Y_OFFSET and POOL_Y_OFFSET in
-// tile-overlay.drone.ts are absolute and must be moved by the same amount;
-// the tray and the arrange hit-test derive from this constant and follow on
-// their own.
-const ICON_Y = 12
+// Icons sit INSIDE the tile's label band, which doubles in height on hover
+// (hex-sdf.shader.ts) while the name steps aside — so BOTH of its rows are
+// icons. ICON_Y is the CENTRE of that block: the overlay centres one row on it
+// and straddles it with two (ICON_ROW_PITCH in tile-overlay.drone.ts), which
+// lands them on the band's two rows. The band is centred on the hex, so this
+// is 0. HINT_Y_OFFSET and POOL_Y_OFFSET there are absolute and do not follow;
+// the arrange hit-test derives from this constant and does.
+const ICON_Y = 0
 const ICON_SPACING = 10       // tighter to match 75 % icon scale
 const ICON_SIZE = 7           // matches DEFAULT_ICON_SIZE in tile-overlay
 const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound

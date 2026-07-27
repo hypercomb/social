@@ -474,6 +474,8 @@
   "view.home.description": "将此磁贴区域温馨地渲染为主页 — 子磁贴变成小组件和入口。",
   "view.slides": "幻灯片",
   "view.slides.description": "将此区域的图示磁贴逐屏播放的幻灯片。",
+  "view.tree": "树",
+  "view.tree.description": "将此分支绘制为横向思维导图 — 主干在左，每环一列。",
   "home.title.root": "你的蜂巢",
   "home.subtitle": "这里是你的地方。这里的磁贴是设计的组成部分 — 赋予它们行为，它们就会变成小组件、入口、画廊。只要有对应的行为，什么都可以。",
   "home.exit": "返回蜂巢",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Arkanoid 游戏 — 开/关",
   "command-line.pinned": "已固定 — 取消固定以平移或缩放",
   "pinned.aggregate-hint": "{label} — Ctrl+点击：{group}",
+
+  "pinned.return": "从{group}返回",
   "swarm.consent.title": "订阅请求",
   "swarm.consent.message": "{requester} 想要订阅您的蜂巢",
   "swarm.consent.accept": "接受",

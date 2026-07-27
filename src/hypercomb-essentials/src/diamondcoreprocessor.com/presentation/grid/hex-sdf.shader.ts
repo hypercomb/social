@@ -22,13 +22,13 @@ export class HexSdfTextureShader {
       u_imageMix: { value: 1.0, type: 'f32' },
       u_neon: { value: 0, type: 'f32' },
       u_accentColor: { value: [0.4, 0.85, 1.0], type: 'vec3<f32>' },
-      // Launcher "cloud" drift (vertex stage). u_driftAmp = 0 disables it
-      // entirely (the common case); > 0 makes each tile wander on a very slow
-      // per-tile Lissajous orbit driven by u_time. See vertexSource.
+      // Launcher motion (vertex stage). u_driftAmp = 0 disables it entirely
+      // (the common case); > 0 lets the game tiles march to u_time. See
+      // vertexSource.
       u_time: { value: 0, type: 'f32' },
       u_driftAmp: { value: 0, type: 'f32' },
       // Tile silhouette is PER-TILE — the `aShapeMode` vertex attribute (0 =
-      // hexagon · 1 = websites silhouette · 2 = Space Invader), so a mixed
+      // hexagon · 2 = Space Invader; 1 retired), so a mixed
       // launch-group page renders each group's OWN shape and groups never share a
       // visual type. There is no global u_shapeMode uniform; see both shaders.
     }
@@ -164,23 +164,16 @@ export class HexSdfTextureShader {
     void main() {
       mat3 mvp = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
 
-      // Launcher motion, per group. Websites' CLOUDS drift gently on their own
-      // slow Lissajous orbit (golden-angle phase decorrelates them); GAMES do a
-      // Space-Invaders FORMATION march (shared phase → step together, small hop).
-      // Every normal hive page has u_driftAmp = 0 and is skipped. Offsets are
+      // Launcher motion, per group. GAMES do a Space-Invaders FORMATION march
+      // (shared phase → step together, small hop). Every other shape — including
+      // every normal hive page (u_driftAmp = 0) — is still. Offsets are
       // identical across a quad's 4 vertices, so the tile translates rigidly and
       // its centre stays inside its pointer→axial click catchment (TileOverlay).
       vec2 p = aPosition;
-      if (u_driftAmp > 0.0) {
-        if (aShapeMode > 1.5) {
-          float stepX = floor(sin(u_time * 0.55) * 4.0) / 4.0;   // quantized → stepped sway
-          float bob   = sin(u_time * 2.0) * 0.06;
-          p += vec2(stepX * u_driftAmp * 1.6, bob * u_driftAmp);
-        } else if (aShapeMode > 0.5) {
-          float phase = aCellIndex * 2.39996323;                 // golden angle (rad)
-          p += vec2(sin(u_time * 0.16 + phase),
-                    sin(u_time * 0.13 + phase * 1.7 + 1.5707963)) * u_driftAmp;
-        }
+      if (u_driftAmp > 0.0 && aShapeMode > 1.5) {
+        float stepX = floor(sin(u_time * 0.55) * 4.0) / 4.0;   // quantized → stepped sway
+        float bob   = sin(u_time * 2.0) * 0.06;
+        p += vec2(stepX * u_driftAmp * 1.6, bob * u_driftAmp);
       }
       gl_Position = vec4((mvp * vec3(p, 1.0)).xy, 0.0, 1.0);
       vUV = aUV;
@@ -268,17 +261,6 @@ export class HexSdfTextureShader {
       return max(p.x * 0.8660254 + p.y * 0.5, p.y) - r;
     }
 
-    float sdCircle(vec2 p, vec2 c, float r) {
-      return length(p - c) - r;
-    }
-
-    // Polynomial smooth-min — rounds the seam where two circles meet so the
-    // cloud reads as one puffy mass, not overlapping discs.
-    float smin(float a, float b, float k) {
-      float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-      return mix(b, a, h) - k * h * (1.0 - h);
-    }
-
     float sdRoundedBox(vec2 p, vec2 b, float r) {
       vec2 q = abs(p) - b + r;
       return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
@@ -328,66 +310,11 @@ export class HexSdfTextureShader {
       vec2 local = (vUV - 0.5) * u_quadSize;
       // point-top: rotate 30° so sdHex clips correctly; flat-top: no rotation needed
       vec2 rotated = u_flat > 0.5 ? local : rot30(local);
-      // Websites: a fluffy cartoon CLOUD — a website lives IN the cloud, so the
-      // site's snapshot is clipped to a big, round, cumulus silhouette with a
-      // bold drawn outline and the name across the bottom. Drifts gently (vertex
-      // shader). Drawn and returned here (skips the hex/image/label pipeline
-      // below). r = hex radius.
-      if (vShapeMode > 0.5 && vShapeMode < 1.5) {
-        float r = u_radiusPx;
-        float aa = max(r * 0.04, 1.5);
-
-        // round overlapping puffs → a fat, fluffy cumulus. Small smooth-min keeps
-        // the bumps defined (fluffy), not melted into one blob; a flat-ish bottom
-        // sells the cloud. Extents stay within ±0.85r so it never clips the quad.
-        float k = r * 0.13;
-        float d =      sdCircle(local, vec2( 0.00 * r,  0.04 * r), 0.44 * r);   // body
-        d = smin(d,    sdCircle(local, vec2(-0.42 * r,  0.10 * r), 0.30 * r), k); // left
-        d = smin(d,    sdCircle(local, vec2( 0.44 * r,  0.08 * r), 0.30 * r), k); // right
-        d = smin(d,    sdCircle(local, vec2(-0.20 * r, -0.22 * r), 0.31 * r), k); // upper-left puff
-        d = smin(d,    sdCircle(local, vec2( 0.18 * r, -0.26 * r), 0.30 * r), k); // upper-right puff
-        d = smin(d,    sdCircle(local, vec2(-0.64 * r,  0.18 * r), 0.22 * r), k); // far-left shoulder
-        d = smin(d,    sdCircle(local, vec2( 0.66 * r,  0.18 * r), 0.20 * r), k); // far-right shoulder
-        d = max(d, local.y - 0.42 * r);   // flat bottom
-
-        float alpha = 1.0 - smoothstep(-aa, aa, d);
-        if (alpha < 0.005) discard;
-
-        // the website lives in the cloud: snapshot clipped to the silhouette; a
-        // soft top-lit white puff when imageless.
-        vec2 cMin = vec2(-0.84 * r, -0.58 * r);
-        vec2 cMax = vec2( 0.84 * r,  0.42 * r);
-        vec2 cuv = clamp((local - cMin) / (cMax - cMin), 0.0, 1.0);
-        vec3 col = (vHasImage > 0.5 && u_imageMix > 0.001)
-          ? texture(u_cellImages, mix(vImageUV.xy, vImageUV.zw, cuv)).rgb
-          : mix(vec3(0.97, 0.99, 1.0), vec3(0.76, 0.85, 0.95), clamp(local.y / r * 0.7 + 0.5, 0.0, 1.0));
-
-        // name across the bottom of the cloud — a soft dark band so it stays
-        // legible over the snapshot, with the BIG name on it. The atlas glyph is
-        // baked large (see LABEL_BAND), so the sample window is divided by it to
-        // keep the displayed name the same size, just crisp; text lands centre-band.
-        float inBar = smoothstep(0.14 * r - aa, 0.14 * r + aa, local.y);
-        col = mix(col, vec3(0.05, 0.08, 0.11), inBar * 0.52);
-
-        // bold rounded cartoon outline tracing the puffy silhouette — drawn
-        // BEFORE the name so the dark band can never paint over the letters.
-        // (It used to composite after the label; near the cloud's flat bottom
-        // the band crossed the glyph descenders and read as a stroke on the
-        // text. Text must always be the last thing composited.)
-        float lineW = aa * 1.9;
-        col = mix(col, vec3(0.16, 0.24, 0.36), (1.0 - smoothstep(lineW, lineW + aa * 1.6, abs(d))) * 0.9);
-
-        vec2 labC = vec2(0.0, 0.28 * r);
-        vec2 labHalf = vec2(0.78 * r / LABEL_BAND);   // LABEL_BAND unchanged → same on-screen size
-        vec2 labUV = (local - (labC - labHalf)) / (2.0 * labHalf);
-        float textA = (labUV.x >= 0.0 && labUV.x <= 1.0 && labUV.y >= 0.0 && labUV.y <= 1.0)
-          ? labelFill(mix(vLabelUV.xy, vLabelUV.zw, labUV)) * u_labelMix
-          : 0.0;
-        col = mix(col, vec3(1.0), textA);
-
-        fragColor = vec4(col * alpha, alpha);
-        return;
-      }
+      // Silhouette 1 (websites' cartoon CLOUD) is RETIRED — websites launcher
+      // tiles render as ordinary picture hexagons like the rest of the hive.
+      // The per-tile aShapeMode attribute stays: other groups own their own
+      // shapes, and a stale flower-pot decoration simply resolves to 0 now
+      // (launchShapeToMode in show-cell), so nothing needs migrating.
 
       // Games: the Space Invader IS the tile — its lit pixel-squares each show a
       // piece of the game's snapshot (one continuous image sampled across the
@@ -514,24 +441,77 @@ export class HexSdfTextureShader {
 
       vec4 color = base;
 
-      // label text — always rendered. Sample the central 1/LABEL_BAND of the
-      // cell (glyphs are baked large; see LABEL_BAND) so the on-screen size
-      // matches the old 9px bake but with 3× the texels → crisp. Clamp keeps
-      // out-of-band UVs on this cell's transparent border, never a neighbour.
+      // ── label band: ONE row at rest, TWO on hover ────────────────
+      // The band is the label's BACKGROUND. At rest it is the single-row
+      // pill behind the name on an imaged tile. On HOVER it DOUBLES in
+      // height and stays CENTRED — the added height is balanced upward and
+      // downward in equal parts — so the band becomes two rows: the name
+      // gives way to the icons, which fill BOTH rows (5 per row, wrapping —
+      // tile-overlay.drone.ts). That band IS the icons' backing; the overlay
+      // draws no tray of its own.
+      float hovered = (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) ? 1.0 : 0.0;
+      float rowH = u_radiusPx * 0.15;   // half-height of ONE row
+
+      // label text. Sample the central 1/LABEL_BAND of the cell (glyphs are
+      // baked large; see LABEL_BAND) so the on-screen size matches the old 9px
+      // bake but with 3× the texels → crisp. Clamp keeps out-of-band UVs on
+      // this cell's transparent border, never a neighbour.
+      //
+      // HOVER HIDES THE NAME. Both rows of the doubled band are icons now, so
+      // the name would have nowhere to sit — hovering swaps the tile from
+      // "what it is called" to "what you can do to it". A tile that already
+      // hides its name is unaffected and gets the identical doubled band, so
+      // the two kinds of tile behave the same under the pointer.
       vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, clamp((vUV - 0.5) * LABEL_BAND + 0.5, 0.0, 1.0));
-      float la = labelFill(luv);   // vector-sharp glyph fill — plain white, nothing else
+      float la = labelFill(luv) * (1.0 - hovered);   // plain white fill, nothing else
 
       // Is there a label at all? Hidden text collapses aLabelUV to the
       // degenerate rect [0,0,0,0] (show-cell's hideText path / hover
-      // re-hide), so the glyphs sample a transparent corner. The pill is
+      // re-hide), so the glyphs sample a transparent corner. The band is
       // the label's BACKGROUND — with no text it is a bare dark bar, so
       // gate it on the same signal. A real atlas rect always has a
       // non-zero far corner, so this only ever fires on the hidden state.
+      // HOVER overrides the gate: the icons need their backing even on a
+      // nameless tile.
       float labelPresent = step(0.0001, max(vLabelUV.z, vLabelUV.w));
 
+      // Drawn BEFORE the glyphs so the band can never paint over the letters.
+      // At rest it only shows over an image (imgBlend) — exactly the pill it
+      // has always been; on hover it shows on every tile.
+      // The band edge is a RULE, not a gradient: feather it by well under a
+      // pixel. The hex's own aa is ~1.5px, which read as a blurry smudge on a
+      // ~19px band — bandAA lands the top and bottom as defined lines.
+      float bandW = u_radiusPx * 0.88;
+      float bandH = rowH * (1.0 + hovered);
+      float bandAA = max(u_radiusPx * 0.02, 0.6);
+      vec2 bandP = abs(local) - vec2(bandW, bandH);
+      float bandD = length(max(bandP, 0.0)) + min(max(bandP.x, bandP.y), 0.0);
+      float bandMask = (1.0 - smoothstep(0.0, bandAA, bandD)) * max(labelPresent, hovered);
+      // Hover sits DARKER than the resting pill — the icons ride this, so it
+      // has to hold them against any picture. At rest the pill is untouched.
+      color.rgb = mix(color.rgb, vec3(0.0), bandMask * mix(imgBlend * 0.55, 0.72, hovered) * u_labelMix);
+
+      // Hairline ruler on the seam between the two rows — hover only, since at
+      // rest there is one row and nothing to divide. Inset from both ends and
+      // faded out there, so it reads as a rule sitting inside the band rather
+      // than a full-width divider cutting it in half. A sub-pixel core with a
+      // sub-pixel feather: it must read as a drawn LINE, not a soft gradient.
+      // Local units are px, so the core holds at any hex radius.
+      float rulerHalfW = bandW * 0.80;
+      float rulerCore = 1.0 - smoothstep(0.27, 0.54, abs(local.y));
+      float rulerSpan = 1.0 - smoothstep(rulerHalfW - 4.0, rulerHalfW, abs(local.x));
+      color.rgb = mix(color.rgb, vec3(1.0), rulerCore * rulerSpan * bandMask * hovered * 0.30 * u_labelMix);
+
+      // The glyph body is now FULLY opaque white (was 0.92 / 0.88). At 0.88 a
+      // letter was 12% transparent, so the noise of whatever sat behind it —
+      // usually a generated substrate — showed THROUGH the ink. On a Light
+      // weight, stems are only a couple of px wide, so that leak was a large
+      // fraction of the visible letter and read as GRAIN. Opaque confines the
+      // picture's influence to the antialiased edge, where it belongs. This is
+      // the glyph FILL only: no stroke, no halo, no rim, no shadow.
       if (imgBlend < 0.001) {
         // no image: bright white label
-        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
+        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * u_labelMix);
 
         // ambient presence — identity color at rest, shifts to warm amber with heat
         float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);
@@ -540,20 +520,11 @@ export class HexSdfTextureShader {
         float heatAlpha = mix(0.07, 0.68, vHeat);
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
       } else if (imgBlend > 0.999) {
-        // fully visible image: translucent rounded-rect pill behind label text
-        float pillW = u_radiusPx * 0.88;
-        float pillH = u_radiusPx * 0.15;
-        float pillR = 0.0;
-        vec2 pillP = abs(local) - vec2(pillW - pillR, pillH - pillR);
-        float pillD = length(max(pillP, 0.0)) + min(max(pillP.x, pillP.y), 0.0) - pillR;
-        float pillMask = (1.0 - smoothstep(0.0, aa * 1.5, pillD)) * labelPresent;
-        color.rgb = mix(color.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
-
-        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
+        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * u_labelMix);
       } else {
         // fading in: crossfade label styles
         // empty-style label
-        vec4 emptyLabel = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
+        vec4 emptyLabel = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * u_labelMix);
         float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);
         vec3 warmColor = vec3(1.0, 0.62, 0.12);
         vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
@@ -561,15 +532,7 @@ export class HexSdfTextureShader {
         emptyLabel.rgb = mix(emptyLabel.rgb, heatTint, heatRing * heatAlpha);
 
         // image-style label
-        vec4 imgLabel = color;
-        float pillW = u_radiusPx * 0.88;
-        float pillH = u_radiusPx * 0.15;
-        float pillR = 0.0;
-        vec2 pillP = abs(local) - vec2(pillW - pillR, pillH - pillR);
-        float pillD = length(max(pillP, 0.0)) + min(max(pillP.x, pillP.y), 0.0) - pillR;
-        float pillMask = (1.0 - smoothstep(0.0, aa * 1.5, pillD)) * labelPresent;
-        imgLabel.rgb = mix(imgLabel.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
-        imgLabel = mix(imgLabel, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
+        vec4 imgLabel = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * u_labelMix);
 
         color = mix(emptyLabel, imgLabel, imgBlend);
       }

@@ -404,8 +404,8 @@ export class MixedGroupBag {
     //    so the parallel latestMarkerSigFor below would race it and link the EMPTY
     //    00000000 marker — the tile (and its shape) would not render until a later
     //    reconcile/reload. The owning group's silhouette travels in the payload so
-    //    show-cell renders each tile in its OWN group's shape (websites → flower-pot,
-    //    games → space-invader); the decorations:changed emit warms the kind-index /
+    //    show-cell renders each tile in its OWN group's shape (games →
+    //    space-invader); the decorations:changed emit warms the kind-index /
     //    shape-index synchronously. (NOT a website page, so the website scan never
     //    re-discovers it as a site.) Each child's bag is its own private
     //    lineage (no contention), so these child commits stay direct; the
@@ -426,9 +426,14 @@ export class MixedGroupBag {
         const shape = this.#groupByLabel.get(name)?.shape ?? ''
         const role = m?.role === 'header' ? 'header' : ''
         const group = m?.group ?? ''
+        // The group SIGNATURE travels with every tile it applies to, so the set
+        // is addressable as a unit long after the code that made it has gone
+        // (see GroupMember.groupSig / core/group-signature.ts). It is identity,
+        // not layout — `group` above still orders the islands.
+        const groupSig = m?.groupSig ?? ''
         const childSegs = [...segs, name]
         try {
-          const record = { kind: LAUNCH_KIND, appliesTo: [], payload: { segments: m?.segments ?? [], icon: m?.icon ?? '', label: name, shape, key: m?.key ?? '', ...(role ? { role } : {}), ...(group ? { group } : {}) } }
+          const record = { kind: LAUNCH_KIND, appliesTo: [], payload: { segments: m?.segments ?? [], icon: m?.icon ?? '', label: name, shape, key: m?.key ?? '', ...(role ? { role } : {}), ...(group ? { group } : {}), ...(groupSig ? { groupSig } : {}) } }
           const decoSig = await store.putResource(new Blob([JSON.stringify(record)], { type: 'application/json' }))
           const childLocSig = await history.sign({ domain, explorerSegments: () => childSegs })
           // Only clustered rewrites can hit an existing cell; read its prior head

@@ -474,6 +474,8 @@
   "view.home.description": "Uma renderização acolhedora desta área de blocos — os filhos viram widgets e portais.",
   "view.slides": "Slides",
   "view.slides.description": "Uma apresentação dos blocos de diagrama desta área, uma tela por vez.",
+  "view.tree": "Árvore",
+  "view.tree.description": "Este ramo desenhado como um mapa mental horizontal — tronco à esquerda, uma coluna por anel.",
   "home.title.root": "sua colmeia",
   "home.subtitle": "Este é o seu lugar. Os blocos aqui são peças do design — dê a eles comportamentos e eles viram widgets, portais, galerias. Tudo para o que você tiver um comportamento.",
   "home.exit": "voltar à colmeia",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Jogo Arkanoid — ativar/desativar",
   "command-line.pinned": "Fixado — solte para deslocar ou ampliar",
   "pinned.aggregate-hint": "{label} — Ctrl+clique: {group}",
+
+  "pinned.return": "Voltar de {group}",
   "swarm.consent.title": "Solicitação de inscrição",
   "swarm.consent.message": "{requester} quer se inscrever na sua colmeia",
   "swarm.consent.accept": "Aceitar",

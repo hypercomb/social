@@ -474,6 +474,8 @@
   "view.home.description": "Un rendering accogliente come home di quest'area di tessere — i figli diventano widget e porte.",
   "view.slides": "Presentazione",
   "view.slides.description": "Una presentazione delle tessere diagramma di quest'area, una schermata alla volta.",
+  "view.tree": "Albero",
+  "view.tree.description": "Questo ramo disegnato come mappa mentale orizzontale — tronco a sinistra, una colonna per anello.",
   "home.title.root": "il tuo alveare",
   "home.subtitle": "Questo è il tuo posto. Le tessere qui sono pezzi del design — dai loro comportamenti e diventano widget, porte, gallerie. Tutto ciò per cui hai un comportamento.",
   "home.exit": "torna all'alveare",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Gioco Arkanoid — attiva/disattiva",
   "command-line.pinned": "Fissato — sblocca per panoramica o zoom",
   "pinned.aggregate-hint": "{label} — Ctrl+clic: {group}",
+
+  "pinned.return": "Torna da {group}",
   "swarm.consent.title": "Richiesta di iscrizione",
   "swarm.consent.message": "{requester} vuole iscriversi al tuo alveare",
   "swarm.consent.accept": "Accetta",

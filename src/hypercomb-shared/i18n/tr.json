@@ -474,6 +474,8 @@
   "view.home.description": "Bu döşeme alanının sıcak bir ana sayfa görünümü — alt öğeler widget'lara ve kapılara dönüşür.",
   "view.slides": "Slaytlar",
   "view.slides.description": "Bu alanın diyagram döşemelerinin her seferinde tek ekranlık slayt gösterisi.",
+  "view.tree": "Ağaç",
+  "view.tree.description": "Bu dal yatay bir zihin haritası olarak — gövde solda, her halka için bir sütun.",
   "home.title.root": "kovanınız",
   "home.subtitle": "Burası sizin yeriniz. Buradaki döşemeler tasarımın parçaları — onlara özellikler verin; widget, kapı, galeri olsunlar. Özelliğini edindiğiniz her şey olabilirler.",
   "home.exit": "kovana dön",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Arkanoid oyunu — aç/kapat",
   "command-line.pinned": "Sabitlendi — kaydırmak veya yakınlaştırmak için sabitlemeyi kaldırın",
   "pinned.aggregate-hint": "{label} — Ctrl+tıklama: {group}",
+
+  "pinned.return": "{group} sayfasından dön",
   "swarm.consent.title": "Abone olma isteği",
   "swarm.consent.message": "{requester} kovanınıza abone olmak istiyor",
   "swarm.consent.accept": "Kabul et",

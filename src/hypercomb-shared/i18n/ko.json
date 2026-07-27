@@ -474,6 +474,8 @@
   "view.home.description": "이 타일 영역의 따뜻한 홈 렌더링 — 하위 항목이 위젯과 통로가 됩니다.",
   "view.slides": "슬라이드",
   "view.slides.description": "이 영역의 다이어그램 타일을 한 화면씩 보여주는 슬라이드쇼.",
+  "view.tree": "트리",
+  "view.tree.description": "이 가지를 가로형 마인드맵으로 그립니다 — 왼쪽이 줄기, 링마다 한 열.",
   "home.title.root": "내 하이브",
   "home.subtitle": "이곳은 당신의 공간입니다. 여기의 타일은 디자인의 조각입니다 — 동작을 부여하면 위젯, 통로, 갤러리가 됩니다. 동작이 있다면 무엇이든 될 수 있습니다.",
   "home.exit": "하이브로 돌아가기",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Arkanoid 게임 — 켜기/끄기",
   "command-line.pinned": "고정됨 — 고정 해제하여 이동 또는 확대",
   "pinned.aggregate-hint": "{label} — Ctrl+클릭: {group}",
+
+  "pinned.return": "{group}에서 돌아가기",
   "swarm.consent.title": "구독 요청",
   "swarm.consent.message": "{requester}님이 하이브를 구독하려 합니다",
   "swarm.consent.accept": "수락",

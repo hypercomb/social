@@ -185,6 +185,10 @@ async function main(){
   // verify a sample read-back
   const la = await rpc({op:'layer-at',segments:[ROOT]})
   console.log('verify: ai-inside decorations slot length =', la.ok&&la.data.decorations?la.data.decorations.length:la.error)
+
+  // one build revision for the whole pass (documentation/build-revisions.md)
+  const rev = await rpc({op:'build-record', segments:[ROOT], label:'ai-inside site build'})
+  console.log('build revision:', rev.ok ? `${rev.data.label} seal=${rev.data.seal.slice(0,12)}${rev.data.unchanged?' (unchanged)':''}` : `FAILED: ${rev.error}`)
   ws.close(); process.exit(0)
 }
 main().catch(e=>{console.error(e);process.exit(1)})

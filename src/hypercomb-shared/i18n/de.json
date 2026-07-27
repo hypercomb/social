@@ -474,6 +474,8 @@
   "view.home.description": "Eine warme Zuhause-Darstellung dieses Kachelbereichs — Kinder werden zu Widgets und Türen.",
   "view.slides": "Folien",
   "view.slides.description": "Eine Diashow der Diagramm-Kacheln dieses Bereichs, Bildschirm für Bildschirm.",
+  "view.tree": "Baum",
+  "view.tree.description": "Dieser Zweig als seitliche Mindmap — Stamm links, eine Spalte je Ring.",
   "home.title.root": "dein Bienenstock",
   "home.subtitle": "Das ist dein Ort. Die Kacheln hier sind Teile des Entwurfs — gib ihnen Verhalten, und sie werden zu Widgets, Türen, Galerien. Alles, wofür du ein Verhalten hast.",
   "home.exit": "zurück zum Bienenstock",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "Arkanoid Spiel — ein-/ausschalten",
   "command-line.pinned": "Fixiert — lösen zum Schwenken oder Zoomen",
   "pinned.aggregate-hint": "{label} — Strg+Klick: {group}",
+
+  "pinned.return": "Zurück von {group}",
   "swarm.consent.title": "Abonnementanfrage",
   "swarm.consent.message": "{requester} möchte Ihren Bienenstock abonnieren",
   "swarm.consent.accept": "Akzeptieren",

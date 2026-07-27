@@ -16,10 +16,24 @@
 // no font outlines, no prebuilt atlas, so it stays compatible with dynamic,
 // multilingual tile names.
 
-// Supersample factor for the raster before the EDT. 2 (256px working raster)
-// keeps the edge clean — a distance field is smooth by construction — while
-// keeping the per-label EDT + getImageData cost low (cold labels bake
-// synchronously on the geometry path).
+// Supersample factor for the raster before the EDT. At SS 2 the working raster
+// (256) equalled the output cell (256), so the field was transformed straight
+// off an 18×2 = 36px rasterisation with NO box-downsample — and a distance
+// field is only ever as good as the raster it is measured from. At that size a
+// Light-weight stem is ~2px wide, so the EDT's edge wandered by a fraction of a
+// texel row to row and the glyph read GRAINY under the ~2× magnification the
+// label is displayed at. SS 4 measures the field off a 72px rasterisation and
+// box-downsamples 2×2 back into the SAME 256 cell (step = W / cellDevice = 2
+// below): identical GPU memory, atlas, UVs and shader — only the field gets
+// more accurate.
+//
+// HELD AT 2 until the bake has somewhere to live. Nothing persists these cells:
+// buildSdfCell runs synchronously on the geometry path and the result goes
+// straight into a GPU slot, so every reload re-bakes every visible label and
+// every atlas eviction re-bakes on re-entry. The EDT is O(W·H) two-pass over
+// two grids, so SS 4 costs ~4× — per label, forever, on every cold path. Raise
+// this to 4 once the cells are cached in a derived pool keyed by the bake
+// inputs; then the cost is paid once and the field quality is free.
 const SS = 2
 const INF = 1e20
 

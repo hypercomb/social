@@ -474,6 +474,8 @@
   "view.home.description": "عرض منزلي دافئ لهذه المنطقة من البلاطات — يصبح الأبناء ودجات وبوابات.",
   "view.slides": "شرائح",
   "view.slides.description": "عرض شرائح لبلاطات المخططات في هذه المنطقة، شاشة واحدة في كل مرة.",
+  "view.tree": "شجرة",
+  "view.tree.description": "هذا الفرع مرسومًا كخريطة ذهنية أفقية — الجذع على اليسار، وعمود لكل حلقة.",
   "home.title.root": "خليتك",
   "home.subtitle": "هذا مكانك. البلاطات هنا قطع من التصميم — امنحها ميزات فتصبح ودجات وبوابات ومعارض. كل ما لديك ميزة له.",
   "home.exit": "العودة إلى الخلية",
@@ -633,6 +635,8 @@
   "command-line.arkanoid": "لعبة Arkanoid — تشغيل/إيقاف",
   "command-line.pinned": "مثبّت — ألغِ التثبيت للتحريك أو التكبير",
   "pinned.aggregate-hint": "{label} — ‏Ctrl+نقر: {group}",
+
+  "pinned.return": "العودة من {group}",
   "swarm.consent.title": "طلب اشتراك",
   "swarm.consent.message": "{requester} يريد الاشتراك في خليتك",
   "swarm.consent.accept": "قبول",

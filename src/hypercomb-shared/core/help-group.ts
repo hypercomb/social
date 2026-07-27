@@ -25,7 +25,7 @@
 // imported). A curated key whose behavior hasn't registered yet simply
 // doesn't get a tile; whenReady re-renders once the keymap arrives.
 
-import { EffectBus, type KeyBinding } from '@hypercomb/core'
+import { EffectBus, groupSignature, type KeyBinding } from '@hypercomb/core'
 import { groupRegistry, type GroupMember } from './group-registry'
 import { LaunchGroupBase } from './launch-group-base'
 
@@ -83,6 +83,42 @@ const CLI_LABELS: Record<string, string> = {
  *  (labels travel through path-shaped code), so the fullwidth solidus U+FF0F
  *  stands in — renders as the slash the participant actually types. */
 const SLASH_PREFIX = '／'
+
+/** The GUIDED TOURS island — the courses the beeing flies for you, ahead of
+ *  the reading material. Levels come from the tutorial's own lesson registry
+ *  (a build without the tutorial module simply has no island), and a click
+ *  RUNS the course: a tutorial tile's operation IS starting the tour, the same
+ *  exception the Reference tile gets. */
+const TOUR_LABELS: Record<string, string> = {
+  starter: 'Take the Tour',
+  beginner: 'Beginner',
+  intermediate: 'Intermediate',
+  expert: 'Expert',
+}
+const TOUR_ORDER: readonly string[] = ['starter', 'beginner', 'intermediate', 'expert']
+
+type LessonRegistryLike = { levels?: () => string[] }
+
+const tourLevels = (): string[] => {
+  const registry = get<LessonRegistryLike>('@diamondcoreprocessor.com/TutorialLessonRegistry')
+  const levels = registry?.levels?.()
+  if (!levels?.length) return []
+  return TOUR_ORDER.filter(l => levels.includes(l))
+}
+
+/** GROUP SIGNATURES for the islands — `sign('group:<meaning>')`, derived once
+ *  at module load. Every tile of an island carries its island's signature into
+ *  its `launch:target` decoration, so the island is a real GROUP: addressable,
+ *  countable, and removable as one unit rather than as "whatever tiles happen
+ *  to sit near each other". Sync map because members() is sync; the launcher
+ *  re-renders when the derivations land. */
+const groupSigs = new Map<string, string>()
+const deriveGroupSigs = (meanings: readonly string[]): void => {
+  void Promise.all(meanings.map(async meaning => {
+    if (groupSigs.has(meaning)) return
+    groupSigs.set(meaning, await groupSignature(meaning))
+  })).then(() => groupRegistry.notifyChanged())
+}
 
 /** The course. One island per tier, revealed in order; tier 0 always shows.
  *  Keys resolve by shape: `gesture:<id>` (static basics), `slash:<name>`,
@@ -157,8 +193,11 @@ class HelpGroup extends LaunchGroupBase {
     // Actions live in the keymap (an essentials service) and may register
     // after this shell module — re-render the launcher when they arrive.
     // Anything already up is covered by members() enumerating at call time.
-    ;(window as unknown as { ioc?: IocLike }).ioc
-      ?.whenReady?.('@diamondcoreprocessor.com/KeyMapService', () => groupRegistry.notifyChanged())
+    const ioc = (window as unknown as { ioc?: IocLike }).ioc
+    ioc?.whenReady?.('@diamondcoreprocessor.com/KeyMapService', () => groupRegistry.notifyChanged())
+    // Same for the tutorial's lesson roster — the Guided Tours island exists
+    // only once some module has registered lessons.
+    ioc?.whenReady?.('@diamondcoreprocessor.com/TutorialLessonRegistry', () => groupRegistry.notifyChanged())
   }
 
   /** The Reference tile + one island per REACHED tier + the Show More tile
@@ -197,21 +236,53 @@ class HelpGroup extends LaunchGroupBase {
     // tiles, so show-cell gathers the island by IDENTITY — not by render order,
     // which a slot system re-sorts. The trailing number orders the islands.
     // Reference leads as its own headerless island; Show More trails as one.
-    let gid = 0
-    const nextGroup = (): string => `g${gid++}`
-    const out: GroupMember[] = [{ ...SHEET_MEMBER, group: nextGroup() }]
     const reached = readTier()
+    const levels = tourLevels()
+
+    // Every island is a GROUP, named by a meaning and identified by its
+    // signature. Derive the whole set once per projection (a hit after the
+    // first call) so the members can carry their signatures.
+    deriveGroupSigs([
+      'help:island:reference',
+      ...(levels.length ? ['help:island:tours'] : []),
+      ...TIERS.map(t => `help:tier:${t.header.toLowerCase()}`),
+      'help:island:more',
+    ])
+
+    let gid = 0
+    /** One island: its layout ordinal and its group signature. */
+    const island = (meaning: string): { group: string; groupSig?: string } => ({
+      group: `g${gid++}`,
+      groupSig: groupSigs.get(meaning),
+    })
+
+    const out: GroupMember[] = [{ ...SHEET_MEMBER, ...island('help:island:reference') }]
+
+    // The tours lead the course — everything here can be READ, but the bee can
+    // also fly it for you.
+    if (levels.length > 0) {
+      const g = island('help:island:tours')
+      out.push({ key: 'header:Guided Tours', label: 'Guided Tours', segments: [], role: 'header', ...g })
+      out.push(...levels.map(level => ({
+        key: `tutorial:${level}`,
+        label: TOUR_LABELS[level] ?? level,
+        segments: [],
+        icon: 'flight_takeoff',
+        ...g,
+      })))
+    }
+
     for (let t = 0; t <= reached && t < TIERS.length; t++) {
       const tier = TIERS[t]
       const members = tier.keys
         .map(resolve)
         .filter((m): m is GroupMember => m !== null)
       if (members.length === 0) continue
-      const g = nextGroup()
-      out.push({ key: `header:${tier.header}`, label: tier.header, segments: [], role: 'header', group: g })
-      out.push(...members.map(m => ({ ...m, group: g })))
+      const g = island(`help:tier:${tier.header.toLowerCase()}`)
+      out.push({ key: `header:${tier.header}`, label: tier.header, segments: [], role: 'header', ...g })
+      out.push(...members.map(m => ({ ...m, ...g })))
     }
-    if (reached < TIERS.length - 1) out.push({ ...MORE_MEMBER, group: nextGroup() })
+    if (reached < TIERS.length - 1) out.push({ ...MORE_MEMBER, ...island('help:island:more') })
     return out
   }
 
@@ -223,6 +294,11 @@ class HelpGroup extends LaunchGroupBase {
   protected override activate(m: GroupMember): void {
     // Header tiles title an island; they open nothing.
     if (m.role === 'header') return
+    // A tour tile's operation IS the tour — clicking it sends the beeing up.
+    if (m.key.startsWith('tutorial:')) {
+      EffectBus.emit('tutorial:start', { level: m.key.slice('tutorial:'.length) })
+      return
+    }
     if (m.key === 'ui.shortcutSheet') {
       EffectBus.emit('keymap:invoke', { cmd: m.key, binding: null, event: null })
       return

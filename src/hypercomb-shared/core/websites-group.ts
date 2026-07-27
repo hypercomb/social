@@ -49,7 +49,8 @@ class WebsitesGroup extends LaunchGroupBase {
   override readonly id = 'websites'
   override readonly icon = 'language'
   override readonly label = 'Websites'
-  readonly shape = 'flower-pot'
+  // No `shape` — websites members render as plain picture hexagons (the cloud
+  // silhouette is retired). Other groups keep their own shapes.
   /** Membership IS the ['websites'] layer — no reconcile, no cursor snap. */
   readonly curated = true
 

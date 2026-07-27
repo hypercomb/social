@@ -82,69 +82,58 @@
       </div>
     }
 
-    <!-- Search, and the + that turns the SAME field into the name of a new
-         member. One place to type, whether you are looking for something or
-         making it. Shown whenever there is either something to search or
-         something to create — an empty index still needs its first row. -->
+    <!-- ONE field. Typing narrows the list AND names a new member — there is no
+         mode to enter, because not finding something and deciding to make it is
+         the same gesture (see `creatable` on the component). The + is live only
+         while what you typed is a name nothing already answers to; it stays live
+         while the list is showing matches, so a name that reads like part of
+         another name can still be made. Shown whenever there is something to
+         search or something to create — an empty index still needs its first
+         row. -->
     @if (items().length > 0 || canCreate()) {
       <div class="ai-filter">
         <form class="ai-filter-row" (submit)="$event.preventDefault(); submitCreate()">
-          <div class="ai-filter-field" [class.is-creating]="creating()">
-            <span class="mat-sym ai-filter-icon" aria-hidden="true">{{ creating() ? 'add' : 'search' }}</span>
+          <div class="ai-filter-field" [class.is-creating]="creatable()">
+            <span class="mat-sym ai-filter-icon" aria-hidden="true">search</span>
             <!-- Enter is bound explicitly: the shell's key handling eats a
                  form's implicit submission, so relying on it alone loses the
                  keystroke people actually press. -->
             <input class="ai-filter-input" type="text" autocomplete="off"
-                   [value]="creating() ? draft() : query()"
-                   (input)="onFieldInput($any($event.target).value)"
+                   [value]="query()"
+                   (input)="onQuery($any($event.target).value)"
                    (keydown.enter)="$event.preventDefault(); submitCreate()"
-                   [placeholder]="(creating() ? 'aggregate.create-placeholder' : 'aggregate.filter') | t"
-                   [attr.aria-label]="(creating() ? 'aggregate.create-placeholder' : 'aggregate.filter') | t" />
-            @if (creating() ? draft().length > 0 : hasFilter()) {
+                   [placeholder]="'aggregate.filter' | t"
+                   [attr.aria-label]="'aggregate.filter' | t" />
+            @if (hasFilter()) {
               <button class="ai-filter-clear mat-sym" type="button"
-                      (click)="creating() ? cancelCreate() : clearFilter()"
-                      [attr.aria-label]="(creating() ? 'aggregate.cancel-create' : 'aggregate.filter-clear') | t"
-                      [title]="(creating() ? 'aggregate.cancel-create' : 'aggregate.filter-clear') | t">close</button>
+                      (click)="clearFilter()"
+                      [attr.aria-label]="'aggregate.filter-clear' | t"
+                      [title]="'aggregate.filter-clear' | t">close</button>
             }
           </div>
           @if (canCreate()) {
-            <button class="ai-filter-add mat-sym" type="button" [class.is-active]="creating()"
-                    (click)="onPlus()"
-                    [attr.aria-label]="(source()?.createKey ?? 'aggregate.new') | t"
-                    [title]="(source()?.createKey ?? 'aggregate.new') | t">{{ creating() ? 'check' : 'add' }}</button>
+            <button class="ai-filter-add mat-sym" type="button"
+                    [class.is-active]="creatable()"
+                    [disabled]="!creatable()"
+                    (click)="submitCreate()"
+                    [attr.aria-label]="creatable()
+                      ? ('aggregate.create-named' | t: { name: draft() })
+                      : ((source()?.createKey ?? 'aggregate.new') | t)"
+                    [title]="creatable()
+                      ? ('aggregate.create-named' | t: { name: draft() })
+                      : ((source()?.createKey ?? 'aggregate.new') | t)">add</button>
           }
         </form>
-        @if (allTags().length > 0) {
-          <div class="ai-tags" role="group" [attr.aria-label]="'aggregate.filter-tags' | t">
-            @for (tag of allTags(); track tag) {
-              <button class="ai-tag" type="button"
-                      [class.is-active]="isTagActive(tag)"
-                      [attr.aria-pressed]="isTagActive(tag)"
-                      (click)="toggleTag(tag)">{{ tag }}</button>
-            }
-          </div>
-        }
-
-        <!-- What a reference dropped from here will DEMAND. Distinct from the
-             filter row above: that one narrows what you are looking at, this one
-             is written into the reference at birth and cannot be switched off
-             afterwards. -->
-        @if (vocabulary().length > 0) {
-          <div class="ai-demands" role="group" [attr.aria-label]="'aggregate.demands' | t">
-            <span class="ai-demands-label">{{ 'aggregate.demands' | t }}</span>
-            @for (mark of vocabulary(); track mark) {
-              <button class="ai-demand" type="button"
-                      [class.is-armed]="isArmed(mark)"
-                      [attr.aria-pressed]="isArmed(mark)"
-                      (click)="toggleArmed(mark)">{{ mark }}</button>
-            }
-            @if (armedMarks().size > 0) {
-              <button class="ai-demands-clear mat-sym" type="button" (click)="clearArmed()"
-                      [attr.aria-label]="'aggregate.demands-clear' | t"
-                      [title]="'aggregate.demands-clear' | t">close</button>
-            }
-          </div>
-        }
+        <!-- NO pheromone surface here — neither a palette that SETS marks nor a
+             cloud that filters by them. There is ONE place pheromones live: the
+             pheromone panel, standing on the thing you are marking. You give a
+             reference its marks by GOING TO IT and painting them on; those marks
+             are then what filters the page it opens. An index that grows its own
+             tag cloud makes the same idea mean something slightly different in a
+             third window, and it filters a LIST when the thing you actually want
+             filtered is the PAGE the reference leads to.
+             (The reference payload still carries `requiredMarks` — what is gone
+             is this window's private way of reading and writing them.) -->
       </div>
     }
 

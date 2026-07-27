@@ -239,7 +239,7 @@ async function handleSiteResourceRequest(request) {
     || await tryReadLegacyDirFile('__resources__', sig)
   if (file) {
     const headers = new Headers()
-    headers.set('content-type', guessResourceContentType(rest, file, request))
+    headers.set('content-type', await guessResourceContentType(rest, file, request))
     headers.set('cache-control', 'public, max-age=31536000, immutable')
     const response = new Response(file, { status: 200, headers })
 
@@ -261,10 +261,10 @@ async function handleSiteResourceRequest(request) {
   // for <link rel="stylesheet"> (and images), so an octet-stream chrome.css
   // is REFUSED — a fresh adopter's page renders UNSTYLED until the resource
   // is warm in OPFS (where the OPFS branch's URL-tail guess sets text/css).
-  // The URL tail (`/chrome.css`) is the authoritative type here, so prefer it
-  // over the host's generic type; fall back to the host type only when the
-  // tail/sniff/destination can't pin a specific one.
-  const guessed = guessResourceContentType(rest, new Blob([fetched.buf]), request)
+  // So prefer OUR ladder — which now leads with the bytes' own header — over
+  // the host's generic type, and fall back to the host type only when nothing
+  // local can pin a specific one.
+  const guessed = await guessResourceContentType(rest, new Blob([fetched.buf]), request)
   headers.set('content-type', guessed !== 'application/octet-stream' ? guessed : (fetched.contentType || guessed))
   headers.set('cache-control', 'public, max-age=31536000, immutable')
   const response = new Response(fetched.buf, { status: 200, headers })
@@ -272,12 +272,33 @@ async function handleSiteResourceRequest(request) {
   return toHeadIfNeeded(request, response.clone())
 }
 
-function guessResourceContentType(tail, file, request) {
-  // Prefer explicit extension in the URL tail; then WHAT THE PAGE IS ASKING
-  // FOR (request.destination — a rewritten ref is usually a bare
-  // /@resource/<sig> with no extension, but a <link rel="stylesheet"> still
-  // says destination 'style', and browsers REFUSE non-text/css stylesheets);
-  // then the Blob's sniffed type; last resort octet-stream.
+async function guessResourceContentType(tail, file, request) {
+  // Ladder, most authoritative first:
+  //
+  //   1. THE BYTES, where they carry a magic number. A resource is
+  //      content-addressed — the type is a property of the bytes, not of how
+  //      someone spelled the reference — so a header that identifies itself
+  //      outranks every guess below. This is also the only step that answers
+  //      for a bare `/@resource/<sig>` with no tail whose destination pins
+  //      nothing: `file.type` is EMPTY for files read out of OPFS (sig-named,
+  //      no extension), so without it the ladder fell straight to
+  //      octet-stream and binary resources were served untyped.
+  //   2. An explicit extension in the URL tail — the referrer's assertion.
+  //      Kept ABOVE the text sniff on purpose: markdown may legitimately open
+  //      with raw `<html>`, and a `.md` tail must not lose to that.
+  //   3. WHAT THE PAGE IS ASKING FOR (request.destination — a rewritten ref is
+  //      usually a bare /@resource/<sig> with no extension, but a
+  //      <link rel="stylesheet"> still says destination 'style', and browsers
+  //      REFUSE non-text/css stylesheets).
+  //   4. Text shapes that identify themselves (svg, html) — better than
+  //      octet-stream once nothing above has pinned a type.
+  //   5. The Blob's own type; last resort octet-stream.
+  //
+  // CSS, JS, JSON and markdown are deliberately NOT sniffed: they are all
+  // "text" to a header check, and guessing between them would be worse than
+  // the tail and destination that already answer for them.
+  const sniffed = await sniffBinaryContentType(file)
+  if (sniffed) return sniffed
   const ext = (tail.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
   const map = {
     html: 'text/html; charset=utf-8',
@@ -306,8 +327,65 @@ function guessResourceContentType(tail, file, request) {
   if (ext && map[ext]) return map[ext]
   const destType = destinationContentType(request)
   if (destType) return destType
+  const textType = await sniffTextContentType(file)
+  if (textType) return textType
   if (file.type) return file.type
   return 'application/octet-stream'
+}
+
+/** The type a resource's own header declares, or '' when the bytes carry no
+ *  recognisable magic number.
+ *
+ *  Only formats that IDENTIFY THEMSELVES are listed. A sniffer that guessed
+ *  would be worse than the tail it outranks, so this returns '' rather than a
+ *  best effort, and the ladder carries on. Reading 32 bytes off a Blob is a
+ *  slice — no decode, no full read. */
+async function sniffBinaryContentType(file) {
+  let head
+  try { head = new Uint8Array(await file.slice(0, 32).arrayBuffer()) }
+  catch { return '' }
+  if (head.length < 4) return ''
+
+  const at = (offset, ascii) => {
+    for (let i = 0; i < ascii.length; i++) {
+      if (head[offset + i] !== ascii.charCodeAt(i)) return false
+    }
+    return true
+  }
+  const b = (...bytes) => bytes.every((v, i) => head[i] === v)
+
+  if (b(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png'
+  if (b(0xff, 0xd8, 0xff)) return 'image/jpeg'
+  if (at(0, 'GIF87a') || at(0, 'GIF89a')) return 'image/gif'
+  if (at(0, 'RIFF') && at(8, 'WEBP')) return 'image/webp'
+  if (at(0, 'RIFF') && at(8, 'WAVE')) return 'audio/wav'
+  if (at(4, 'ftypavif') || at(4, 'ftypavis')) return 'image/avif'
+  // Any other ISO-BMFF brand — mp4, m4v, and the fragmented variants sites
+  // actually ship. m4a (audio-only) declares `ftypM4A `.
+  if (at(4, 'ftypM4A')) return 'audio/mp4'
+  if (at(4, 'ftyp')) return 'video/mp4'
+  if (b(0x1a, 0x45, 0xdf, 0xa3)) return 'video/webm'
+  if (at(0, 'OggS')) return 'audio/ogg'
+  if (at(0, 'ID3') || b(0xff, 0xfb) || b(0xff, 0xf3) || b(0xff, 0xf2)) return 'audio/mpeg'
+  if (at(0, 'wOFF')) return 'font/woff'
+  if (at(0, 'wOF2')) return 'font/woff2'
+  if (at(0, '%PDF-')) return 'application/pdf'
+  if (at(0, 'BM')) return 'image/bmp'
+  if (b(0x00, 0x00, 0x01, 0x00)) return 'image/x-icon'
+  return ''
+}
+
+/** Text formats whose opening identifies them. Consulted only after the tail
+ *  and the destination have both declined, so a `.md` that opens with raw
+ *  markup keeps its tail's answer. */
+async function sniffTextContentType(file) {
+  let head
+  try { head = await file.slice(0, 256).text() }
+  catch { return '' }
+  const start = head.replace(/^﻿/, '').trimStart().toLowerCase()
+  if (start.startsWith('<svg') || (start.startsWith('<?xml') && start.includes('<svg'))) return 'image/svg+xml'
+  if (start.startsWith('<!doctype html') || start.startsWith('<html')) return 'text/html; charset=utf-8'
+  return ''
 }
 
 // Content-type implied by the requesting context. Only destinations where the
