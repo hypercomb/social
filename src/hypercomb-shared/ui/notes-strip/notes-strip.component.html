@@ -11,13 +11,18 @@
        data-consumes-wheel
        hcDockInset="right"
        [hcDockInsetActive]="dockSide() === 'right'"
+       hcDockedPanel="notes-strip" dockSide="right" [ownsSize]="false"
+       [minWidth]="256" [maxWidth]="900"
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
        [style.transform]="panelTransformActive()"
        (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
 
-    <!-- Toolwindow header — title left, actions right (no grip: a full-height
-         dock is resized from its left edge, not dragged). -->
-    <div class="cv2-dragbar">
+    <!-- Toolwindow header — title left, actions right. Also the drag handle:
+         pull it off the right rail to float the strip, drop it back within
+         the edge snap zone to re-anchor. Double-click recentres a float. -->
+    <div class="cv2-dragbar"
+         (pointerdown)="onDragStart($event)"
+         (dblclick)="resetPanelOffset($event)">
       <span class="cv2-dragbar-title">
         <span class="hex-mark" aria-hidden="true"></span>
         <span>{{ cell() || ('notes.strip.title' | t) }}</span>
@@ -45,11 +50,13 @@
     @if (cell()) {
       <!-- ── Mark rail ────────────────────────────────────────────
            The participant's own icons, each carrying the meaning THEY gave
-           it. Clicking one marks the note being written; the meaning's
-           ROLE (heading / list) decides how every row carrying that icon
-           renders, so re-roling an icon restyles the whole tree. "+" opens
-           the shared Material chooser; "tune" flips to the palette editor
-           where each mark gets a name, a role and a remove. -->
+           it. Clicking one marks the note being written; DRAGGING one onto a
+           note row marks that note (drop the icon it already carries to
+           clear it). The meaning's ROLE (heading / list) decides how every
+           row carrying that icon renders, so re-roling an icon restyles the
+           whole tree. "+" opens the shared Material chooser; "tune" flips to
+           the palette editor where each mark gets a name, a role and a
+           remove. -->
       <div class="cv2-rail" [class.is-editing]="paletteEditing()">
         @if (!paletteEditing()) {
           <div class="cv2-rail-marks" role="group" [attr.aria-label]="'notes.markRail' | t">
@@ -57,9 +64,11 @@
               <button type="button" class="cv2-rail-mark"
                       [class.is-active]="draftMark() === m.icon"
                       [class.is-heading]="m.role === 'heading'"
+                      [class.is-dragging]="markDragIcon() === m.icon"
+                      (pointerdown)="onMarkPointerDown(m.icon, $event)"
                       (click)="pickMark(m.icon)"
                       [attr.aria-pressed]="draftMark() === m.icon"
-                      [title]="markLabel(m.icon)">
+                      [title]="markLabel(m.icon) + ' — ' + ('notes.markDragHint' | t)">
                 <span class="mat-sym">{{ m.icon }}</span>
               </button>
             }
@@ -200,6 +209,7 @@
                  [class.is-drop-into]="noteDropTargetId() === note.id && noteDropMode() === 'into'"
                  [class.is-drop-before]="noteDropTargetId() === note.id && noteDropMode() === 'before'"
                  [class.is-drop-after]="noteDropTargetId() === note.id && noteDropMode() === 'after'"
+                 [class.is-mark-target]="markDropTargetId() === note.id"
                  [class.hc-shape-circle]="note.shape === 'circle'"
                  [class.hc-shape-square]="note.shape === 'square'"
                  [class.hc-shape-triangle]="note.shape === 'triangle'"
@@ -346,6 +356,14 @@
       <footer class="cv2-foot">
         <span>{{ 'notes.footerCount' | t: { count: notes().length } }} <code>{{ cell() }}</code></span>
       </footer>
+
+      <!-- Mark drag ghost — the icon riding the pointer between the rail and
+           the row it will land on. Fixed to the viewport, pointer-events
+           none, so it never becomes its own hit target. -->
+      @if (markDragIcon(); as icon) {
+        <span class="cv2-mark-ghost mat-sym" aria-hidden="true"
+              [style.left.px]="markGhostX()" [style.top.px]="markGhostY()">{{ icon }}</span>
+      }
     } @else {
       <!-- No active tile — prompt the user to find one in the tile list. -->
       <div class="cv2-empty-hint">{{ 'notes.pickTile' | t }}</div>

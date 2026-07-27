@@ -195,7 +195,7 @@ export class ActionCardDrone extends Drone {
     const segs = ioc<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
     if (segs.length !== 1) return null
     const seg = String(segs[0])
-    // openDirectly groups (the dashboard) have no page — treat like a normal location.
+    // openDirectly groups have no page — treat like a normal location.
     const grp = ioc<{ get?: (id: string) => { openDirectly?: boolean } | undefined }>('@hypercomb.social/GroupLauncher')?.get?.(seg)
     if (!seg.startsWith('agg-') && (!grp || grp.openDirectly)) return null
     let key = launchKeyForLabel(label)

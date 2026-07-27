@@ -447,7 +447,13 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
 
 // ── Position computation ──────────────────────────────────────────
 
-const ICON_Y = 10
+// Icon row sits BELOW the tile's label band, which is centred on the hex.
+// Nudged down 2 from the original 10 so the row stops crowding the name —
+// 10 was tried and sat far too low. HINT_Y_OFFSET and POOL_Y_OFFSET in
+// tile-overlay.drone.ts are absolute and must be moved by the same amount;
+// the tray and the arrange hit-test derive from this constant and follow on
+// their own.
+const ICON_Y = 12
 const ICON_SPACING = 10       // tighter to match 75 % icon scale
 const ICON_SIZE = 7           // matches DEFAULT_ICON_SIZE in tile-overlay
 const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound

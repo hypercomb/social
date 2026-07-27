@@ -32,8 +32,8 @@
 // NEXT gen pass to pick up. That marker is build-intent, not a render
 // surface — it never flips ViewMode and is not what lights this toggle.
 //
-// Mirrors DashboardBee's shape: registry-owned, lineage-driven, emits over
-// EffectBus (`view-toggles:changed`), handles clicks via `view:toggle`.
+// Registry-owned, lineage-driven, emits over EffectBus
+// (`view-toggles:changed`), handles clicks via `view:toggle`.
 
 import { Worker, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
@@ -71,7 +71,7 @@ type HistoryCursorLike = { currentLayerSig?: string; state?: { locationSig?: str
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 type RegistryLike = Pick<VisualBeeRegistry, 'all' | 'get'>
 
-/** A `behavior: 'navigation'` view's controller (e.g. DashboardBee).
+/** A `behavior: 'navigation'` view's controller.
  *  ViewBee resolves it via the descriptor's `controllerKey` and delegates
  *  the toggle's availability, active-state, and click action — instead of
  *  the global-ViewMode flip used for `render` behaviors. */
@@ -115,10 +115,6 @@ export class ViewBee extends Worker {
     // the toggle appear without a navigation.)
     EffectBus.on('render:cell-count', () => this.#schedule())
     EffectBus.on('decorations:changed', () => this.#schedule())
-
-    // A navigation behavior (the dashboard) was minted / opened / closed —
-    // its toggle's availability or active-state may have changed.
-    EffectBus.on('dashboard:state', () => this.#schedule())
 
     // The cursor rebinding to a new location (or the user rewinding) changes
     // which layer "here" resolves to. Without this, a navigation whose
@@ -188,7 +184,7 @@ export class ViewBee extends Worker {
       // command still routes through `view:toggle` above.
       if (v.commandLineToggle === false) continue
 
-      // Navigation behaviors (e.g. the dashboard) are not render surfaces —
+      // Navigation behaviors are not render surfaces —
       // availability and active-state come from a controller bee, and the
       // toggle navigates rather than switching ViewMode. Delegate and skip
       // the decoration/ViewMode machinery entirely.

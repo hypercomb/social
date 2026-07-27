@@ -13,7 +13,7 @@
 //
 // Shell-level: never imports essentials; resolves games purely by enumerating
 // window.ioc and routes a launch back as `<gameId>:toggle` (the uniform toggle
-// the game drones already listen for). Mirrors websites-group / dashboard-group.
+// the game drones already listen for). Mirrors websites-group.
 
 import { EffectBus } from '@hypercomb/core'
 import { groupRegistry, type GroupMember } from './group-registry'

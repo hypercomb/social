@@ -20,6 +20,7 @@ import {
   writeDecoration,
   removeDecoration,
   listDecorations,
+  registerDecorationsSlot,
   type DecorationRecord,
 } from './decoration-manifest.js'
 import { TAG_DECORATION_KIND, tagSigFor, TITLE_DECORATION_KIND, titleForSegments } from './decoration-kind-index.js'
@@ -244,5 +245,14 @@ export class DecorationService {
 }
 
 // ── registration ────────────────────────────────────────
+//
+// The `decorations` SLOT is registered from here, not only from
+// decoration-manifest.ts: this module is in the side-effects barrel and that
+// one is not, so its own module-scope call was never reached. Without the
+// slot, LayerCommitter has no `decorations:changed` subscription and every
+// decoration write in the app silently vanishes. See the long note in
+// decoration-manifest.ts. Idempotent.
+registerDecorationsSlot()
+
 const _decorationService = new DecorationService()
 window.ioc.register('@diamondcoreprocessor.com/DecorationService', _decorationService)

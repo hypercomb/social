@@ -118,6 +118,11 @@ async function tick() {
       // NEVER note-add. Absent mode = classic note-bound ask.
       mode: it.payload?.mode ?? '',
       convoId: it.payload?.convoId ?? '',
+      // 'hive' = asked from the root with no tile chosen: a hive-wide ask with
+      // no single tile to own the answer. The responder reports on the
+      // DASHBOARD instead of forcing a note somewhere arbitrary (see the
+      // bridge-listen skill). Without this field the responder can't tell.
+      scope: it.payload?.scope ?? '',
       prompt: it.payload?.prompt ?? '',
       transcript: it.payload?.transcript ?? [],
       model: it.payload?.model ?? '',

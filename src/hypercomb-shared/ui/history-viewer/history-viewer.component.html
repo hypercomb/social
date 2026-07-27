@@ -1,6 +1,8 @@
 @if (visible()) {
   <aside class="history-viewer"
          hcDockInset="left"
+         hcDockedPanel="history-viewer" dockSide="left"
+         [ownsSize]="false" [sizeOwner]="this" [minWidth]="240" [maxWidth]="1200"
          [attr.data-consumes-wheel]="''"
          [style.width.px]="customWidth()"
          [style.--hc-panel-scale]="contentScale()"

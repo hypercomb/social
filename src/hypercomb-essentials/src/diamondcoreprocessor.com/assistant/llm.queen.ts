@@ -30,7 +30,7 @@ export class LlmQueenBee extends QueenBee {
   override genotype = 'assistant'
   readonly command = 'opus'
   override readonly aliases = []
-  override description = 'Ask a live Claude Code (via the bridge) about the selected tiles'
+  override description = 'Ask a live Claude Code (via the bridge) about the selected tiles — /opus, /sonnet, /haiku, /fable'
   override options = ['<question>']
   override examples = [
     { input: '/opus what links these tiles?', result: 'Queues the ask; answer lands as a tile note' },
@@ -99,18 +99,13 @@ export class LlmQueenBee extends QueenBee {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
 
-    // An ask must have somewhere for the answer to LAND: the responder
-    // delivers via note-add, and a note lives ON a tile. At the hive root
-    // with no chosen tiles there is no tile — the ask would be minted
-    // unanswerable and sit pending forever. Refuse with the fix instead.
-    if (targets.length === 0 && segments.length === 0) {
-      EffectBus.emit('toast:show', {
-        type: 'warning',
-        message: 'Pick a tile first — the answer arrives as a note on it.',
-      })
-      console.warn('[ask] refused: no targets and at the hive root — nowhere for the answer note to land')
-      return false
-    }
+    // HIVE SCOPE — no tile chosen and standing at the root. This is not an
+    // error: "go through the hive and …" is a legitimate ask with no single
+    // tile to own the answer. It is marked `scope:'hive'` so the responder
+    // knows not to force a note onto an arbitrary tile — hive-wide findings
+    // belong in the feedback window (the ask-gate), or on the one tile the work
+    // actually concerns, named explicitly.
+    const hiveScope = targets.length === 0 && segments.length === 0
 
     const store = get<StoreLike>('@hypercomb.social/Store')
     if (!store?.putOptimization) {
@@ -125,9 +120,10 @@ export class LlmQueenBee extends QueenBee {
       appliesTo: targets.length ? targets : segments,
       payload: {
         prompt,
-        model: this.activeModel,   // responder hint (opus / sonnet / haiku)
+        model: this.activeModel,   // responder hint (opus / sonnet / haiku / fable)
         targets,                   // selected tile labels
         segments,                  // lineage of the current level
+        ...(hiveScope ? { scope: 'hive' } : {}),
         status: 'pending',
         askedAt: Date.now(),
       },
@@ -138,10 +134,11 @@ export class LlmQueenBee extends QueenBee {
     // Surface it: the command line raises a pending pill off ask:queued (and
     // drops it on ask:answered); the toast tells the user where to look.
     EffectBus.emit('ask:queued', { sig, prompt, targets, model: this.activeModel })
-    const where = targets.length ? targets.join(', ') : `this page`
     EffectBus.emit('toast:show', {
       type: 'tip',
-      message: `Asked — the answer will arrive as a note on ${where}.`,
+      message: hiveScope
+        ? 'Asked about the whole hive — the answer arrives in the feedback window.'
+        : `Asked — the answer will arrive as a note on ${targets.length ? targets.join(', ') : 'this page'}.`,
     })
     console.log(
       `[ask] queued for the Claude bridge (${this.activeModel}): "${prompt}" `
@@ -156,10 +153,15 @@ export class LlmQueenBee extends QueenBee {
 class LlmProvider implements SlashBehaviourProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
+  // The model name is a HINT carried in the ask record — the responder
+  // decides what to honour it with (a parked session answers as whatever it
+  // already is; the scheduled drain maps the hint to a real model id, see
+  // scripts/bridge/drain-tick.cjs). Keep these names aligned with that map.
   readonly behaviours: SlashBehaviour[] = [
     { name: 'opus', description: 'Ask Claude Opus (via the bridge) about the selection', descriptionKey: 'slash.opus' },
     { name: 'sonnet', description: 'Ask Claude Sonnet (via the bridge) about the selection', descriptionKey: 'slash.sonnet' },
     { name: 'haiku', description: 'Ask Claude Haiku (via the bridge) about the selection', descriptionKey: 'slash.haiku' },
+    { name: 'fable', description: 'Ask Claude Fable (via the bridge) about the selection', descriptionKey: 'slash.fable' },
   ]
 
   async execute(behaviourName: string, args: string): Promise<void> {

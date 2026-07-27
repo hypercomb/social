@@ -2,18 +2,21 @@
 //
 // Regression guard for the notes feature's "no HTML output" stance.
 // Notes are stored and rendered as plain text — Angular's `{{ }}`
-// interpolation escapes user input, no `innerHTML` is used anywhere,
-// and per-note categorisation is a single CSS-drawn shape glyph
-// keyed off a literal `.hc-shape-X` class toggled via `[class.X]`
-// bindings (never a string-concat into `class="…"`).
+// interpolation escapes user input, and no `innerHTML` is used
+// anywhere. Per-note categorisation is a MARK: a Material Symbols
+// ligature name from the participant's palette, rendered as escaped
+// interpolation inside a `.mat-sym` span — the same pattern every
+// shell surface uses for picked icons (controls-bar, command-shell,
+// aggregate-index, …). Ligature names can only select a glyph; they
+// cannot smuggle markup past Angular's escaping.
 //
 // This test reads every notes-related source file and asserts the
 // ABSENCE of patterns that could re-introduce an HTML rendering
 // surface: `innerHTML`, `bypassSecurityTrust`, `execCommand`,
-// `contenteditable="true"`, dynamic icon interpolation, dynamic
-// class / style attribute construction, and so on. If anyone adds
-// one of these back, this test fails with a precise file:line
-// pointer and the offending substring.
+// `contenteditable="true"`, dynamic class / style attribute
+// construction, and so on. If anyone adds one of these back, this
+// test fails with a precise file:line pointer and the offending
+// substring.
 //
 // To extend: add to FORBIDDEN_PATTERNS, NOT to file-by-file allow lists.
 // The list of files scanned is the closure — anything new in notes-* is
@@ -94,11 +97,6 @@ const FORBIDDEN_PATTERNS: readonly { name: string; re: RegExp; why: string }[] =
     name: 'attr-style-binding',
     re: /\[attr\.style\]\s*=/,
     why: '[attr.style] is the same hole as [style].',
-  },
-  {
-    name: 'dynamic-icon-name-interpolation',
-    re: /\{\{\s*[^}]*\.icon[^}]*\}\}/,
-    why: 'Dynamic icon name interpolation re-introduces a font-glyph data path. Icons must come from a literal CSS class.',
   },
   {
     name: 'material-symbols-in-typescript',

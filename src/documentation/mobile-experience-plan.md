@@ -666,7 +666,7 @@ activatable in mobile mode — not deleted.
 | DCP iframe installer | **Absent** (2; revisit 4) | Desktop-heavy tree; mobile gets the minimal sheet; uninspectable code defers to desktop. |
 | Pheromone painter / tags panel | **Absent** (1) → creator-only (3) | Viewer never tags; creator paints on desktop first; sweep covers mobile. |
 | Command shell / palette, slash input | **Absent** (1) | Viewers type nothing. Revisit for creators in 4. |
-| Header icon rail, docked panels, file explorer, notes, clipboard, history UI, dashboard/Q&A, feedback viewer, collections landing | **Absent** (1) | Desktop working surfaces; none serve a viewer. Each may re-argue entry in Phase 4 with evidence. |
+| Header icon rail, docked panels, file explorer, notes, clipboard, history UI, feedback viewer (inbox + Q&A), collections landing | **Absent** (1) | Desktop working surfaces; none serve a viewer. Each may re-argue entry in Phase 4 with evidence. |
 | Move/reorder, editor | **Absent** (1) → minimal (3+) | Creation tier; snapshot-create ships first, editing later. |
 | Tutor, wave view (Alt+hover) | **Absent** | Interaction models are keyboard/hover-native; they earn `mobile:friendly` only after redesign. |
 | Meetings / WebRTC | **Absent** | Out of scope. |

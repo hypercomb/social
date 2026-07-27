@@ -6,7 +6,7 @@ Status: v1 (relay-backed) building 2026-06-24. Hardening (HTTP byte rest) docume
 
 The self-feeding feedback loop (`.claude/skills/feedback-loop`, see
 `project_feedback_loop`) reads `kind:'feedback'` items, mints `kind:'qa'`
-dashboard questions, drains `kind:'qa-answer'` into notes, and re-feeds.
+questions, drains `kind:'qa-answer'` into notes, and re-feeds.
 Every one of those records lives in the **optimization substrate** — the
 `sign('optimization')` pool of meaning (`Store.putOptimization`; the legacy
 `__optimization__` folder is absorbed and deleted on boot).
@@ -23,8 +23,8 @@ both sync paths:
 
 Consequence: feedback submitted in browser A is invisible to a feedback-loop
 routine running in any other OPFS (a headless Playwright renderer, a second
-device, the cloud). The routine reads an empty inbox and writes dashboard
-cards into a profile the user never opens. **This is why the dashboard stays
+device, the cloud). The routine reads an empty inbox and writes questions
+into a profile the user never opens. **This is why the feedback window stays
 empty.** There was no transport for the loop's own records.
 
 The feedback channel is that transport: a durable, store-and-forward,
@@ -39,7 +39,7 @@ Only the records that must reach the *other* side are replicated:
 | kind | direction | why |
 |------|-----------|-----|
 | `feedback` | submitter → routine | the routine turns it into questions |
-| `qa` | routine → submitter | the dashboard card the user answers |
+| `qa` | routine → submitter | the question the user answers in the feedback window |
 | `qa-answer` | submitter → routine | the answer the routine drains to notes |
 
 Routine-local bookkeeping stays put — it is meaningless to the other side:
@@ -206,12 +206,12 @@ owns the whole concern. It has **two roles**, keyed off one flag
   `feedback`/`qa`/`qa-answer` record is actually written, so a dev hot-reload sends
   nothing. Owner vs visitor is read from `SwarmDrone.subscribedTo()` (the host
   pubkey we're a visitor of; null on our own hive).
-- **HOST** (subscribe + ingest + render the aggregated dashboard) — OFF unless
+- **HOST** (subscribe + ingest + aggregate in the feedback window) — OFF unless
   `…enabled='true'` (you + the routine; `/feedback-host on` sets it). So a
   participant PUBLISHES their feedback but never INGESTS anyone else's — only the
-  host and its routine aggregate. `DashboardProducerDrone` reads the same host gate
-  (renders only for the host) and lazily mints the dashboard bag on the first
-  arriving question.
+  host and its routine aggregate. Everything ingested surfaces in the feedback
+  window (`FeedbackViewerComponent`), which live-refreshes on
+  `feedback:channel-ingested`.
 
 When in a role it:
 
@@ -245,27 +245,78 @@ essentials installer and the content broker (pointing it at jwize.com has
 historically 404'd the installer — see `project_jwize_content_not_essentials_routing`).
 The feedback channel keeps its own isolated host config.
 
-## Rendering the dashboard from synced data (the remaining half)
+## Where synced records SURFACE — the feedback window
 
-The channel syncs the **data** (the qa optimization records). The dashboard
-**page** — the Material card HTML — is built by `renderDashboard()` in
-`scripts/bridge/_dashboard-refresh.cjs`, a pure function of the *local* qa
-optimizations, written back as a `put-resource` HTML blob + an `update` of the
-`/dashboard` layer's `context` slot. The `/dashboard` bag is **participant-local**
-(`DashboardBee` mints a hidden `dash-<locSig>-<salt>` bag pinned in
-localStorage), so the routine's `/dashboard` layer cannot simply be layer-synced
-onto the user's — each side must render its OWN dashboard from its OWN (now
-channel-synced) qa records.
+**The dashboard is gone (2026-07-26).** It was a hidden `dash-<locSig>-<salt>`
+lineage bag pinned in localStorage, rendered as hex question tiles by a
+producer drone, answered through a separate modal — three moving parts and a
+place nobody found. Every one of them is deleted: `DashboardBee`,
+`DashboardQueenBee` (`/dashboard`), `DashboardProducerDrone`,
+`DashboardQOpenWorker`, `QaModalView`, the `dashboard-island` decoration kind
+and its show-cell layout branch, and the `dashboard` launch group.
 
-This is now closed by **`DashboardProducerDrone`**
-(`diamondcoreprocessor.com/dashboard/dashboard-producer.drone.ts`, shipped): it runs
-the `renderDashboard` logic client-side on `feedback:channel-ingested` (and on boot),
-rebuilding the participant-local `/dashboard` bag from local `qa` with no node runner,
-and **lazily mints the bag on the first arriving question** so a user who never ran
-`/dashboard` still sees cards. It reads the same owner-default-on gate as the channel.
-One residual polish item remains: an **auto-remount** of the `/dashboard` view when
-its layer changes, so a user already staring at the dashboard sees a new card without
-a nav-away/back or reload (until then, re-open the toggle to refresh).
+Synced records now surface in the **feedback window** — the right-docked panel
+on the command line's `forum` toggle (`FeedbackViewerComponent`, shell UI). It
+lists both kinds from the local `sign('optimization')` pool:
+
+- `feedback` — what a participant shared, whether written locally, ingested
+  from a granted visitor over the swarm handshake, or arriving over this
+  channel. Reach-scoped against the current location (this page / this page
+  and below / the whole hive) like the pheromone filter. Per-item **Resolve**
+  retires it.
+- `qa` — an open question, listed first and **never reach-scoped out**:
+  feedback is about a place, but a question is a task addressed to *you*, and
+  one minted on a tile three levels down must not be invisible from wherever
+  you happen to stand. **Answer** opens an inline box; submitting writes the
+  `qa-answer` record (with the answerer's identity) and removes the open `qa` —
+  byte-for-byte what `QaModalView` committed, minus the modal.
+
+No rendering pass, no bag to mint, no auto-remount problem: the panel
+live-refreshes on `feedback:channel-ingested` and `feedback:submitted` while
+open, so a question that lands mid-session appears without a reload.
+
+**Every record carries WHO it came from.** The compose form requires a name
+before it will send, persisted to `hc:user-label` — the same identity the mesh
+modal and the swarm handshake already use — and stamps `by` (the name) plus
+`from` (the nostr pubkey) onto `feedback` and `qa-answer` payloads. The visitor
+post path carries `by` through the swarm and the host's ingest preserves it, so
+an aggregating host sees a name on every incoming item instead of an anonymous
+pile. The pubkey stays authoritative (it is the signed event's author); the
+name is what the list reads.
+
+## The return channel — replying to a sender (2026-07-27)
+
+When the host resolves an issue, the answer travels BACK to whoever sent the
+feedback. The addressing problem ("each instance needs a code") is already
+solved by the identity above: every instance mints a nostr keypair, and every
+feedback item carries the sender's pubkey in `payload.from`. **The pubkey is
+the code**; the name is display-only on top, so two participants with the same
+name can never receive each other's replies.
+
+- **Channel derivation** (`FeedbackReplyDrone`, kind **30214** — in
+  `SwarmDrone.configureKinds`, same silent-miss rule as the rest of the
+  family): `sha256("hc:feedback-reply\0" + recipientPubkey)`. Both sides
+  compute it — no exchange, no registry. Unscoped (no room/secret), same
+  relay transport as the community channel.
+- **Every instance listens on its OWN channel** automatically (7-day replay
+  window on subscribe), the mirror of contribute-by-default.
+- **Sending**: a feedback row that carries a `from` pubkey shows **Reply** in
+  the host's feedback window. The reply record
+  (`kind:'feedback-reply'`, payload `reId` + a short `re` quote + `text` +
+  the host's `by`/`from`) is published on the sender's channel with a unique
+  d-tag + NIP-40 expiration; delivery is content-addressed (sha256 of the
+  exact JSON) so relay replay is idempotent. Rows without a pubkey (legacy /
+  anonymous) have no address — no Reply button.
+- **Receiving**: the drone verifies the hash, ingests into the local
+  `sign('optimization')` pool with `emit:false` (a reply must never ride back
+  out over the community channel), toasts, and emits
+  `feedback:reply-ingested`. The feedback window lists it as a `reply` row —
+  quoting the original item — in its own band between questions and feedback,
+  exempt from reach-scoping like questions (it is addressed to you, not to a
+  place). **Resolve** retires it.
+- **Durability v1**: the 7-day relay window (unique d-tag + expiration,
+  idempotent replay) — the same story as visitor posts. If replies need to
+  outlive that, graft the channel drone's pending-map + read-back confirm.
 
 ## Operator + test checklist
 
@@ -284,7 +335,7 @@ a nav-away/back or reload (until then, re-open the toggle to refresh).
 4. Submit a feedback item in the owner browser → confirm a kind-30213 ITEM event
    lands on the relay (a raw `REQ {"#x":[channelId],"kinds":[30213]}` on
    `wss://jwize.com`) → run one feedback-loop cycle in the routine → confirm a `qa`
-   ITEM comes back and the dashboard shows the card.
+   ITEM comes back and the feedback window lists the question.
 5. Down-test: stop the relay, submit feedback, confirm its sig rests in
    `localStorage['hc:feedback-channel:pending']`; restart the relay, confirm it
    auto-posts and the routine picks it up next cycle.

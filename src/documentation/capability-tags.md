@@ -80,6 +80,6 @@ These are **co-operating**, not competing — they must stay untagged so every m
 - **`movement` (4)** — move + layout.queen + move-preview + input handlers (complementary).
 - **`assistant` orchestration (7)** beyond the single `assistant:bridge` slot — conversation, atomize, structure-drop, ai-key, llm.queen, etc.
 - **`meeting` (5)** — signaling, video, controls, hive WebRTC state (complementary).
-- **`history` (6), `selection`, `format`, slash-command queens (~25), `notes`, `settings`, `dashboard`, `recording`, `computation`** — single-owner / additive, no competing alternative.
+- **`history` (6), `selection`, `format`, slash-command queens (~25), `notes`, `settings`, `recording`, `computation`** — single-owner / additive, no competing alternative.
 
 If a second implementation of any of these ever genuinely contends for one slot, introduce a fine-grained `capability` tag for *that specific slot only* — never tag the whole cohort.

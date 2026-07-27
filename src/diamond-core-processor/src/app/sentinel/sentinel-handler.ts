@@ -11,6 +11,7 @@ import { DcpInstallerService } from '../core/dcp-installer.service'
 import { DcpStore } from '../core/dcp-store'
 import { PatchStore } from '../core/patch-store'
 import { ToggleStateService } from '../core/toggle-state.service'
+import { TreeResolverService } from '../core/tree-resolver.service'
 
 const DOMAINS_KEY = 'dcp.domains'
 const TOGGLE_KEY = 'dcp.toggleState'
@@ -39,6 +40,12 @@ export type SentinelRequest =
   // signature, get back the domain(s) that can serve it. The hive then
   // interprets the location (`<domain>/<sig>`) and does the fetch itself.
   | { type: 'domains-for'; rid: string; signature?: string }
+  // The deploy chains, so a hive can OFFER version choice without holding any
+  // of what makes the choice safe. Read (`revisions`) and pick (`use-revision`)
+  // are separate verbs because they are separate authorities: anything may ask
+  // what exists; changing what runs is re-validated here before it lands.
+  | { type: 'revisions'; rid: string; domain?: string }
+  | { type: 'use-revision'; rid: string; domain: string; rootSig: string }
 
 export type SentinelResponse =
   | { type: 'result'; rid: string; ok: true; data: ArrayBuffer | string | object }
@@ -50,6 +57,20 @@ export type SentinelResponse =
   | { type: 'intake-ack'; rid: string; ok: boolean; error?: string }
   | { type: 'save-branch-result'; rid: string; ok: boolean; rootSig?: string | null; error?: string }
   | { type: 'domains-result'; rid: string; ok: boolean; domains: string[]; error?: string }
+  | { type: 'revisions-result'; rid: string; ok: boolean; groups: RevisionGroup[]; error?: string }
+  | { type: 'use-revision-result'; rid: string; ok: boolean; error?: string }
+
+/** One host's published chain — every deployed root in its manifest, plus the
+ *  one currently in effect for this participant. */
+export type RevisionGroup = {
+  domain: string
+  activeRootSig: string
+  revisions: { rootSig: string; label: string; deployedAt?: string }[]
+}
+
+/** Participant-local rename of a deployed version, same key the installer's own
+ *  version-name editor writes (home.component). */
+const LABEL_KEY_PREFIX = 'dcp:label:'
 
 // Overlap ratio at or above which a later domain's package is judged to be
 // the SAME logical package as one already collected (another deploy
@@ -66,6 +87,7 @@ export class SentinelHandler {
   #patchStore = inject(PatchStore)
   #toggleState = inject(ToggleStateService)
   #domainStorage = inject(DcpDomainStorage)
+  #resolver = inject(TreeResolverService)
 
   async handle(msg: SentinelRequest, port: MessagePort): Promise<void> {
     switch (msg.type) {
@@ -75,7 +97,99 @@ export class SentinelHandler {
       case 'intake': return this.#handleIntake(msg, port)
       case 'save-branch': return this.#handleSaveBranch(msg, port)
       case 'domains-for': return this.#handleDomainsFor(msg, port)
+      case 'revisions': return this.#handleRevisions(msg, port)
+      case 'use-revision': return this.#handleUseRevision(msg, port)
     }
+  }
+
+  /**
+   * Report the deploy chain per trusted host: every package root the host's
+   * manifest publishes, plus the revision active for this participant.
+   *
+   * Read-only, and that is the point of it living here. The hive gets to DRAW a
+   * version list without holding the trusted-domain list, without fetching a
+   * manifest on its own origin, and without any way to invent a root that was
+   * never deployed — the answer is assembled from what DCP already trusts.
+   */
+  async #handleRevisions(msg: SentinelRequest & { type: 'revisions' }, port: MessagePort): Promise<void> {
+    try {
+      const wanted = String(msg.domain ?? '').trim().toLowerCase()
+      const groups: RevisionGroup[] = []
+
+      for (const base of this.#loadDomains()) {
+        let host: string
+        try { host = new URL(base).hostname } catch { continue }
+        if (wanted && host.toLowerCase() !== wanted) continue
+
+        const packages = await this.#resolver.fetchPackages(base)
+        if (!packages.length) continue
+
+        // Newest first — the manifest's deploy timestamp is the only ordering
+        // that means anything to a reader; sig order means nothing.
+        const revisions = packages
+          .map(pkg => ({
+            rootSig: pkg.sig,
+            label: this.#versionLabel(pkg.sig, pkg.label),
+            deployedAt: pkg.at,
+          }))
+          .sort((a, b) => (b.deployedAt ?? '').localeCompare(a.deployedAt ?? ''))
+
+        // '' ⇒ no explicit pick, and the sync path then takes the manifest's
+        // default. Report the SAME sig that would actually be honoured rather
+        // than leaving the list with nothing marked.
+        const picked = (await this.#patchStore.activeRoot(host) ?? '').trim().toLowerCase()
+        const activeRootSig = revisions.some(r => r.rootSig === picked) ? picked : (packages[0]?.sig ?? '')
+
+        groups.push({ domain: host, activeRootSig, revisions })
+      }
+
+      port.postMessage({ type: 'revisions-result', rid: msg.rid, ok: true, groups })
+    } catch (e) {
+      port.postMessage({ type: 'revisions-result', rid: msg.rid, ok: false, groups: [], error: String((e as { message?: string })?.message ?? e) })
+    }
+  }
+
+  /**
+   * Make a published revision the active one for a host.
+   *
+   * RE-VALIDATED HERE, never trusted from the caller: the sig must be well
+   * formed AND must be a root the host's own manifest actually publishes. A
+   * caller that could name any sig would be able to point the sync path at
+   * arbitrary content through an origin the participant trusts — which is the
+   * whole reason the pick lives on this side of the port.
+   */
+  async #handleUseRevision(msg: SentinelRequest & { type: 'use-revision' }, port: MessagePort): Promise<void> {
+    const fail = (error: string) => port.postMessage({ type: 'use-revision-result', rid: msg.rid, ok: false, error })
+    try {
+      const host = String(msg.domain ?? '').trim().toLowerCase()
+      const rootSig = String(msg.rootSig ?? '').trim().toLowerCase()
+      if (!host) return fail('missing domain')
+      if (!/^[a-f0-9]{64}$/.test(rootSig)) return fail('invalid signature format')
+
+      const base = this.#loadDomains().find(d => {
+        try { return new URL(d).hostname.toLowerCase() === host } catch { return false }
+      })
+      if (!base) return fail(`not a trusted domain: ${host}`)
+
+      const packages = await this.#resolver.fetchPackages(base)
+      if (!packages.some(p => p.sig === rootSig)) return fail('signature is not a published root of that domain')
+
+      await this.#patchStore.setActiveRoot(host, rootSig)
+      port.postMessage({ type: 'use-revision-result', rid: msg.rid, ok: true })
+    } catch (e) {
+      fail(String((e as { message?: string })?.message ?? e))
+    }
+  }
+
+  /** Deploy label for a version: the participant's local rename first (the same
+   *  override the installer's editor writes), then the deploy-time name, then a
+   *  short sig — never nothing. */
+  #versionLabel(sig: string, deployLabel?: string): string {
+    try {
+      const local = localStorage.getItem(`${LABEL_KEY_PREFIX}${sig}`)
+      if (local && local.trim()) return local.trim()
+    } catch { /* storage unavailable — fall through */ }
+    return (deployLabel ?? '').trim() || sig.slice(0, 8)
   }
 
   /**

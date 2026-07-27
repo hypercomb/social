@@ -31,6 +31,10 @@ export type TreeNode = {
   readonly childCount: number
   /** False when the walk stopped here with children still declared. */
   readonly walked: boolean
+  /** The tile's properties resource sig, captured while the layer was
+   *  already in hand. The icon loader starts from this, so showing pictures
+   *  costs no extra layer reads — only the picture itself. */
+  readonly propsSig?: string
 }
 
 export type PlacedNode = TreeNode & {
@@ -73,6 +77,10 @@ export type TreeLayout = {
 export const RING_GAP = 300
 /** Vertical rhythm — one drawn leaf per row. */
 export const ROW_GAP = 30
+/** Rhythm when nodes are drawn as hex tiles rather than markers: a 22px
+ *  point-top hex stands ~25px tall, so the plain gap would have them
+ *  touching. */
+export const ROW_GAP_ICONS = 36
 export const PAD_X = 96
 export const PAD_Y = 64
 
@@ -110,6 +118,7 @@ function markerRadius(leaves: number, depth: number): number {
 export function layoutTree(
   nodes: readonly TreeNode[],
   collapsed: ReadonlySet<number> = new Set(),
+  rowGap: number = ROW_GAP,
 ): TreeLayout {
   if (nodes.length === 0) return { nodes: [], ribbons: [], rings: [], width: 0, height: 0 }
 
@@ -158,7 +167,7 @@ export function layoutTree(
         continue
       }
       // Leaf — claim a row.
-      y[frame.id] = row * ROW_GAP
+      y[frame.id] = row * rowGap
       leaves[frame.id] = 1
       row++
       stack.pop()

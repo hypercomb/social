@@ -37,11 +37,11 @@ import type { I18nProvider } from '@hypercomb/core'
 window.ioc.whenReady(I18N_IOC_KEY, (i18n: I18nProvider) => {
   i18n.registerTranslations('my-module.com', 'en', {
     'cell.my-feature': 'My Feature',
-    'cell.dashboard': 'Dashboard',
+    'cell.feedback': 'Feedback',
   })
   i18n.registerTranslations('my-module.com', 'ja', {
     'cell.my-feature': 'マイ機能',
-    'cell.dashboard': 'ダッシュボード',
+    'cell.feedback': 'フィードバック',
   })
 })
 ```

@@ -32,6 +32,9 @@ import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+// Settings-only: the gear + group chrome every tool window carries. The panel
+// keeps its own grip and width signal — `ownsSize` false, `sizeOwner` this.
+import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
 import { onSelection } from '../../core/selection-context'
 
 interface ClipboardItem {
@@ -75,11 +78,11 @@ type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
 @Component({
   selector: 'hc-clipboard-panel',
   standalone: true,
-  imports: [TranslatePipe, DockInsetDirective],
+  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './clipboard-panel.component.html',
   styleUrls: ['./clipboard-panel.component.scss'],
 })
-export class ClipboardPanelComponent implements OnDestroy {
+export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
 
   readonly visible = signal(false)
   readonly items = signal<ClipboardItem[]>([])
@@ -388,6 +391,16 @@ export class ClipboardPanelComponent implements OnDestroy {
 
   #persistWidth(): void {
     try { localStorage.setItem(WIDTH_KEY, String(this.width())) } catch { /* ignore */ }
+  }
+
+  // ── PanelSizeOwner ─────────────────────────────────────────────────
+  // What the window-group chrome reads and writes. Same clamp, same store as a
+  // drag of the grip — a width arriving from a group mate is not a different
+  // kind of width.
+  panelWidth(): number { return this.width() }
+  setPanelWidth(width: number): void {
+    this.width.set(this.#clampWidth(width))
+    this.#persistWidth()
   }
 
   /** Drop everything from the clipboard. */

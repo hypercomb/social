@@ -10,6 +10,10 @@ import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+// Settings-only: the gear + group chrome every tool window carries. The strip
+// keeps its own edge handles and width store (`ownsSize` false) — see the
+// directive's header.
+import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { fromRuntime } from '../../core/from-runtime'
 import { NOTE_MARKS_IOC_KEY, isMarkIcon, type MarkRole, type NoteMarksStore } from '../../core/note-marks.store'
@@ -41,6 +45,11 @@ const NOTES_STRIP_DOCK_KEY = 'hc:notes-strip-dock'
 // cursor pulls back past SNAP_EXIT, so the dock doesn't flicker on/off.
 const SNAP_ZONE = 72
 const SNAP_EXIT = 120
+
+// Travel (px) a dragbar press must cover before it counts as a drag. Below it
+// the press is still a click: a docked panel must not tear off its rail because
+// the pointer twitched a pixel while the user reached for the close button.
+const DRAG_THRESHOLD = 6
 
 /** Fixed shape set — six CSS-drawn glyphs. The shape is the only
  *  visual category a note carries. Names map 1:1 to .hc-shape-X
@@ -106,7 +115,7 @@ type InputModeStackLike = {
 @Component({
   selector: 'hc-notes-strip',
   standalone: true,
-  imports: [TranslatePipe, NgTemplateOutlet, DockInsetDirective],
+  imports: [TranslatePipe, NgTemplateOutlet, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './notes-strip.component.html',
   styleUrls: ['./notes-strip.component.scss'],
 })
@@ -243,11 +252,113 @@ export class NotesStripComponent implements OnDestroy {
   togglePaletteEdit(): void { this.paletteEditing.update(v => !v) }
 
   /** Click a rail icon: pick it for the draft, or clear it by picking the
-   *  one already active. */
+   *  one already active. Swallowed when the press was really the start of
+   *  a drag onto a note row (see the mark-drag block below). */
   pickMark(icon: string): void {
+    if (this.#markDragMoved) { this.#markDragMoved = false; return }
     const next = this.draftMark() === icon ? null : icon
     this.draftMark.set(next)
     EffectBus.emit('notes:active-mark', { mark: next })
+  }
+
+  // ── Mark drag — rail icon onto a note row ─────────────────
+  // The rail is the palette; dragging one of its icons onto a row is how an
+  // EXISTING note gets (or loses) its mark, without going through the edit
+  // form. Pointer-based like the row-reorder drag further down, for the same
+  // reason: full control over the ghost and the drop highlight, and no fight
+  // with the dataTransfer mime the palette pin gesture already owns.
+
+  /** Icon currently riding the pointer, or null when no drag is live. */
+  readonly markDragIcon = signal<string | null>(null)
+  /** Row the icon is hovering — highlighted as the drop target. */
+  readonly markDropTargetId = signal<string | null>(null)
+  /** Viewport position of the drag ghost. */
+  readonly markGhostX = signal(0)
+  readonly markGhostY = signal(0)
+
+  #markDragPointerId: number | null = null
+  #markDragOrigin: { x: number; y: number; icon: string } | null = null
+  /** True once a press has travelled far enough to count as a drag, so the
+   *  click that follows pointerup doesn't ALSO toggle the rail pick. Cleared
+   *  by the next press, so a drag that ends without a click can't eat it. */
+  #markDragMoved = false
+
+  onMarkPointerDown(icon: string, event: PointerEvent): void {
+    if (event.button !== 0) return
+    if (this.#dragPointerId !== null || this.#noteDragPointerId !== null) return
+    this.#markDragPointerId = event.pointerId
+    this.#markDragOrigin = { x: event.clientX, y: event.clientY, icon }
+    this.#markDragMoved = false
+    window.addEventListener('pointermove', this.#onMarkDragMove)
+    window.addEventListener('pointerup', this.#onMarkDragEnd)
+    window.addEventListener('pointercancel', this.#onMarkDragEnd)
+  }
+
+  #onMarkDragMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#markDragPointerId) return
+    const origin = this.#markDragOrigin
+    if (!origin) return
+    if (!this.#markDragMoved) {
+      // Below the threshold the press is still a click-to-pick.
+      if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 4) return
+      this.#markDragMoved = true
+      this.markDragIcon.set(origin.icon)
+    }
+    event.preventDefault()
+    this.markGhostX.set(event.clientX)
+    this.markGhostY.set(event.clientY)
+    this.markDropTargetId.set(this.#noteRowIdAt(event.clientX, event.clientY))
+  }
+
+  #onMarkDragEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#markDragPointerId) return
+    const icon = this.#markDragOrigin?.icon ?? null
+    const targetId = this.markDropTargetId()
+    const dragged = this.#markDragMoved
+    const cellLabel = this.cell()
+    this.#markDragPointerId = null
+    this.#markDragOrigin = null
+    this.markDragIcon.set(null)
+    this.markDropTargetId.set(null)
+    window.removeEventListener('pointermove', this.#onMarkDragMove)
+    window.removeEventListener('pointerup', this.#onMarkDragEnd)
+    window.removeEventListener('pointercancel', this.#onMarkDragEnd)
+    if (!dragged || !icon || !targetId || !cellLabel) return
+    // Dropping the icon a note already carries CLEARS it — the same toggle
+    // the rail pick uses, so one gesture both marks and unmarks.
+    const current = this.#findNote(cellLabel, targetId)?.mark ?? null
+    const next = current === icon ? null : icon
+    EffectBus.emit('note:mark', { cellLabel, noteId: targetId, mark: next })
+    this.#paintMarkOptimistic(cellLabel, targetId, next)
+  }
+
+  /** Paint the dropped mark immediately, at any depth, so the row responds
+   *  to the gesture instead of waiting for the resource write + leaf→root
+   *  cascade. The `notes:changed` re-read is the authoritative reconcile
+   *  (and it brings the node's NEW sig, since the bytes changed). */
+  #paintMarkOptimistic(cell: string, noteId: string, mark: string | null): void {
+    const walk = (nodes: readonly Note[]): Note[] =>
+      nodes.map(n => (n.id === noteId ? { ...n, mark } : { ...n, children: walk(n.children) }))
+    this.#notesByCell.update(prev => {
+      const next = new Map(prev)
+      next.set(cell, walk(next.get(cell) ?? []))
+      return next
+    })
+    this.#version.update(v => v + 1)
+  }
+
+  /** Note id of the row under a viewport point, or null. Rows carry
+   *  `data-note-id`; the tree renders them all through one template. */
+  #noteRowIdAt(x: number, y: number): string | null {
+    const rows = Array.from(
+      this.#host.nativeElement.querySelectorAll('article.cv2-note[data-note-id]'),
+    ) as HTMLElement[]
+    for (const row of rows) {
+      const r = row.getBoundingClientRect()
+      if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) continue
+      return row.getAttribute('data-note-id')
+    }
+    return null
   }
 
   /** "+" on the rail — borrow the shared Material icon chooser. `store: false`
@@ -518,6 +629,9 @@ export class NotesStripComponent implements OnDestroy {
   // even when the cursor sweeps far from the grip element.
   #dragPointerId: number | null = null
   #dragStart: { px: number; py: number; ox: number; oy: number } | null = null
+  /** True once a press has travelled past DRAG_THRESHOLD. Until then no dock
+   *  change and no offset write happens, so a click on the header is a click. */
+  #dragMoved = false
 
   // Input mode pushed during the drag — suspends the underlying
   // zoom/pan listeners just like 'notes-hover' does. Empty mount/
@@ -539,8 +653,10 @@ export class NotesStripComponent implements OnDestroy {
     if (tgt && tgt.closest('button, [role="button"]')) return
     // Only primary mouse button or pen/touch primary.
     if (event.button !== 0) return
+    if (this.isFullscreen()) return  // position is forced; no-op
     event.preventDefault()
     this.#dragPointerId = event.pointerId
+    this.#dragMoved = false
     const offset = this.panelOffset()
     this.#dragStart = {
       px: event.clientX,
@@ -562,6 +678,10 @@ export class NotesStripComponent implements OnDestroy {
     if (event.pointerId !== this.#dragPointerId) return
     const start = this.#dragStart
     if (!start) return
+    if (!this.#dragMoved) {
+      if (Math.hypot(event.clientX - start.px, event.clientY - start.py) < DRAG_THRESHOLD) return
+      this.#dragMoved = true
+    }
     const vw = window.innerWidth
     const docked = this.dockSide() === 'right'
 
@@ -613,8 +733,10 @@ export class NotesStripComponent implements OnDestroy {
 
   #onDragEnd = (event: PointerEvent): void => {
     if (event.pointerId !== this.#dragPointerId) return
+    const moved = this.#dragMoved
     this.#dragPointerId = null
     this.#dragStart = null
+    this.#dragMoved = false
     window.removeEventListener('pointermove', this.#onDragMove)
     window.removeEventListener('pointerup', this.#onDragEnd)
     window.removeEventListener('pointercancel', this.#onDragEnd)
@@ -622,6 +744,9 @@ export class NotesStripComponent implements OnDestroy {
       this.#stack()?.pop(this.#notesDragMode.name)
       this.#dragModeActive = false
     }
+    // A press that never crossed the threshold changed nothing — don't rewrite
+    // the stores (and don't let a header click count as a reposition).
+    if (!moved) return
     // Persist final position + dock side. Offset already clamped during drag.
     const off = this.panelOffset()
     try {
@@ -681,8 +806,13 @@ export class NotesStripComponent implements OnDestroy {
     }
   }
 
-  /** Double-click the grip dots → reset position to centered default. */
-  resetPanelOffset(): void {
+  /** Double-click the dragbar → reset a float back to the centered default.
+   *  Ignores double-clicks that land on the bar's buttons (fullscreen/close)
+   *  and does nothing while docked (the rail is CSS-laid-out). */
+  resetPanelOffset(event?: Event): void {
+    const tgt = event?.target as HTMLElement | null
+    if (tgt?.closest('button, [role="button"]')) return
+    if (this.dockSide()) return
     this.panelOffset.set({ x: 0, y: 0 })
     try { localStorage.removeItem(NOTES_STRIP_OFFSET_KEY) } catch { /* ignore */ }
   }

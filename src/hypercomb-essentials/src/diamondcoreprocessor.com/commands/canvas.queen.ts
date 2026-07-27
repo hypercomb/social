@@ -4,8 +4,9 @@
 //
 // Syntax:
 //   /canvas                 — show the current backdrop + available options
-//   /canvas dots            — hex dots (the default)
-//   /canvas honeycomb       — and depth / sheen / mesh / contour
+//   /canvas contour         — concentric rings (the default)
+//   /canvas dots            — hex dots
+//   /canvas honeycomb       — and grid / depth / sheen / mesh
 //   /canvas indigo          — pin a palette (steel, daylight, indigo, teal, ember)
 //   /canvas indigo dots     — palette + archetype together
 //   /canvas auto            — let the palette follow the colour theme

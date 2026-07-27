@@ -3,8 +3,9 @@
 // Durable, store-and-forward, round-trip transport for the feedback LOOP's
 // own records (the optimization substrate) through jwize.com — so feedback a
 // user submits in one OPFS reaches a feedback-loop routine running in another
-// (a headless renderer, a second device, the cloud), and the dashboard
-// questions that routine mints come back. See documentation/feedback-channel.md.
+// (a headless renderer, a second device, the cloud), and the questions that
+// routine mints come back into the feedback window. See
+// documentation/feedback-channel.md.
 //
 // WHY this is needed: the optimization substrate is strictly local. Host-sync's
 // closure walk never references it; the swarm lists it in SYSTEM_DIR_NAMES and
@@ -35,7 +36,8 @@
 //     (a visitor of another hive uses the FeedbackSwarmDrone consent handshake
 //     instead). Publishing only happens when a feedback/qa/qa-answer record is
 //     actually written, so a dev hot-reload sends nothing.
-//   • HOST — subscribe + ingest + render the aggregated dashboard. OFF unless
+//   • HOST — subscribe + ingest + surface every participant's feedback in the
+//     feedback window. OFF unless
 //     localStorage['hc:feedback-channel:enabled'] = 'true' (you + the routine).
 //     `/feedback-host on` sets it. So a participant contributes their feedback
 //     but never ingests anyone else's.
@@ -55,7 +57,7 @@ const STORE_KEY = '@hypercomb.social/Store'
 //  • CONTRIBUTE (publish MY feedback to the host) — default ON for anyone on
 //    their own hive; a visitor of another hive stays OFF (their feedback rides
 //    the FeedbackSwarmDrone consent handshake). Explicit 'false' opts out.
-//  • HOST (subscribe + ingest + render the aggregated dashboard) — OFF unless
+//  • HOST (subscribe + ingest + surface it all in the feedback window) — OFF unless
 //    explicitly enabled. That is YOU (the host) + the loop routine. So a
 //    participant publishes their feedback but never ingests anyone else's.
 const ENABLED_KEY = 'hc:feedback-channel:enabled'   // HOST mode gate (subscribe/ingest/render)
@@ -139,7 +141,7 @@ export class FeedbackChannelDrone extends Drone {
   override genotype = 'sharing'
 
   public override description =
-    'Durable transport for the feedback loop’s records (feedback/qa/qa-answer) over a FIXED community channel through the jwize.com relay. Contributors publish their feedback by default; the host + routine (hc:feedback-channel:enabled) subscribe, ingest, and render the aggregated dashboard — so a participant sends feedback but never ingests anyone else’s.'
+    'Durable transport for the feedback loop’s records (feedback/qa/qa-answer) over a FIXED community channel through the jwize.com relay. Contributors publish their feedback by default; the host + routine (hc:feedback-channel:enabled) subscribe, ingest, and aggregate it in the feedback window — so a participant sends feedback but never ingests anyone else’s.'
 
   protected override listens: string[] = ['optimization:wrote']
   protected override emits: string[] = ['feedback:channel-state', 'feedback:channel-ingested', 'feedback:channel-receipt']
@@ -195,8 +197,8 @@ export class FeedbackChannelDrone extends Drone {
   }
 
   // ── roles ───────────────────────────────────────────────
-  /** HOST mode: subscribe + ingest + render the aggregated dashboard — you and
-   *  the routine. isEnabled() keeps its name for callers (dashboard producer,
+  /** HOST mode: subscribe + ingest + aggregate in the feedback window — you and
+   *  the routine. isEnabled() keeps its name for callers (the feedback viewer,
    *  bridge status): it means "am I a receiving host". */
   public readonly isEnabled = (): boolean => this.#shouldSubscribe()
   public readonly isSubscribing = (): boolean => this.#shouldSubscribe()
@@ -501,7 +503,7 @@ export class FeedbackChannelDrone extends Drone {
     try {
       await store.putOptimization(new Blob([bytes as BlobPart]), { emit: false })
       this.#ingested++
-      // Let the loop / dashboard know a new record arrived (e.g. a qa card to
+      // Let the loop / feedback window know a new record arrived (e.g. a question to
       // surface, or fresh feedback for the routine to process next cycle).
       EffectBus.emit('feedback:channel-ingested', { sig: claimed })
       this.#emitState()

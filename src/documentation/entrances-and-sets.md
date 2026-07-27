@@ -108,7 +108,7 @@ publish any entrance whose closure covers `sets/` (same class of rule as
 The board is just a page — the uniform paradigm, no aggregate machinery:
 
 1. **A "Pools of Meaning" meaning-icon** in the top chrome (peer of websites /
-   games / dashboard / help). Clicking it navigates to the `sets/` entrance.
+   games / help). Clicking it navigates to the `sets/` entrance.
    Aggregate icons are **one-state portals** (2026-07-03): click = bring up
    that aggregate's layer; clicking another replaces it (one at a time);
    clicking the same one again is idempotent. The layer then simply STAYS —

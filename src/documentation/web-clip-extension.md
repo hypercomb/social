@@ -7,7 +7,7 @@ Status: PLAN (not built). Concept evaluation 2026-07-04.
 A Chrome extension (Manifest V3). On any web page the user selects content,
 right-clicks → **"Clip to Hypercomb"**, optionally types an instruction
 ("make this a tile under research/ai", "summarize into a tile"), and the clip
-is queued. It surfaces as a card on the Hypercomb dashboard; answering the
+is queued. It surfaces as an item in the Hypercomb feedback window; answering the
 card has the feedback-loop routine create the tile via the bridge.
 
 ## Why this is nearly free — the pipeline already exists
@@ -16,7 +16,7 @@ The feedback channel (`documentation/feedback-channel.md`, shipped) is a
 durable, store-and-forward, content-addressed transport into the host's
 optimization substrate (`Store.putOptimization` — folder-free once the
 signature-pool migration lands; clips ride the Store API, so they move with
-it), and the feedback loop already turns substrate records into dashboard
+it), and the feedback loop already turns substrate records into feedback-window
 questions and EXECUTES creation tasks on answer.
 The extension is nothing more than a **second contributor client** on that
 same channel:
@@ -50,7 +50,7 @@ What already works with **zero app changes**:
   answers via the bridge.
 
 The genuinely new code is (a) one small MV3 extension and (b) one new record
-kind handled by the feedback-loop skill (plus optionally the dashboard
+kind handled by the feedback-loop skill (plus optionally the feedback-window
 producer). Nothing touches core, shared, or the web shell.
 
 ## The clip record
@@ -130,12 +130,12 @@ monorepo conventions (ESM, `#field`, minimalism).
    feedback items retire today.
 2. **DashboardProducerDrone (optional, recommended)** — render pending
    `kind:'clip'` records as cards directly on `feedback:channel-ingested`, so
-   a clip is *visible* on the dashboard seconds after capture instead of after
+   a clip is *visible* in the feedback window seconds after capture instead of after
    the next routine cycle. The routine still does the creation; this only
    closes the latency gap on visibility.
 
 **Consent discipline: v1 never auto-creates.** The channel is
-public-by-derivation, so a clip is a *request*, and the dashboard answer is
+public-by-derivation, so a clip is a *request*, and the answer is
 the consent gate — the same human-in-the-loop shape the loop already enforces
 for feedback. A trusted direct-create mode (clip from the host's own paired
 extension skips the question) is a Phase 3 opt-in, gated on sender pubkey
@@ -153,7 +153,7 @@ work — if this feels wrong in practice, stop here having spent nothing.
 **Phase 1 — extension MVP.** Context menu + popup + publish + outbox/alarms
 retry + options page. Text/HTML selections only, size-capped.
 
-**Phase 2 — loop + dashboard integration.** `fb.cjs clips`, the qa-minting
+**Phase 2 — loop + feedback-window integration.** `fb.cjs clips`, the qa-minting
 step, the drain→create execution, optional direct clip cards in
 `DashboardProducerDrone`. i18n keys for the card strings.
 
@@ -161,10 +161,10 @@ step, the drain→create execution, optional direct clip cards in
 - Screenshots/images via HTTP byte rest (`contentSig` references) once
   writer-auth is configured.
 - Per-participant clip channels + extension↔hive pairing (multi-user; today's
-  fixed community channel means every clip lands on THE host's dashboard,
+  fixed community channel means every clip lands in THE host's feedback window,
   which is correct for the current single-host reality).
 - Trusted direct-create for allow-listed sender pubkeys.
-- A dedicated clips review panel (the feedback-viewer pattern) if dashboard
+- A dedicated clips review panel (the feedback-viewer pattern) if feedback-window
   cards prove too coarse.
 
 ## Risks / honest caveats
@@ -173,12 +173,12 @@ step, the drain→create execution, optional direct clip cards in
   selection must be truncated in v1. Real articles usually survive a 64 KB
   text cap; rich media does not (Phase 3).
 - **Latency.** Clip → *tile* requires a routine cycle (or answering the card
-  and running the drain). Clip → *visible on dashboard* is seconds only if
+  and running the drain). Clip → *visible in the feedback window* is seconds only if
   the optional DashboardProducer rendering is done; otherwise it also waits
   for the routine. Set expectations: this is a queue, not an instant clipper.
 - **Spam surface.** Anyone who derives the channel can publish clips. Same
   exposure as feedback today, mitigated by the same two facts: only the host
-  ingests, and nothing executes without the host's dashboard answer.
+  ingests, and nothing executes without the host's answer.
 - **MV3 lifetime.** Service workers die mid-flight; the outbox-first +
   alarms-drain discipline exists precisely for this — no fire-and-forget.
 - **Chrome Web Store.** Publishing publicly means store review + a privacy
@@ -187,7 +187,7 @@ step, the drain→create execution, optional direct clip cards in
 
 ## Verdict inputs
 
-For: extreme reuse (transport, ingest, dedup, dashboard, execution all
+For: extreme reuse (transport, ingest, dedup, surfacing, execution all
 shipped and tested this cycle); small new surface (one sandboxed extension +
 one skill step); fits the loop philosophy — clips are just another inbox kind
 feeding the same self-improving cycle; Phase 0 costs ~nothing and proves the

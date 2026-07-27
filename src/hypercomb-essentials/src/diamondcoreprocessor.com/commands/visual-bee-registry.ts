@@ -119,8 +119,8 @@ export type VisualBeeDescriptor = {
    *   - `'render'` (default when absent): an alternate RENDER of the same
    *     branch (e.g. website). Availability comes from a decoration/page on
    *     the node; toggling drives `ViewModeService` (hexagons ⇄ view).
-   *   - `'navigation'`: not a render surface but a place you go (e.g. the
-   *     dashboard bag). Availability, active-state, and the toggle action are
+   *   - `'navigation'`: not a render surface but a place you go (a lineage
+   *     bag). Availability, active-state, and the toggle action are
    *     delegated to a controller bee (see `controllerKey`); toggling
    *     navigates into / back out of a lineage instead of switching render mode.
    */

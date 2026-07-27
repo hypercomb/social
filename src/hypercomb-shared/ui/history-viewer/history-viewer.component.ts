@@ -14,6 +14,9 @@ import { EffectBus, IconRef, type IconRef as IconRefType } from '@hypercomb/core
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { IconComponent } from '../icon/icon.component'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+// Settings-only: the gear + group chrome every tool window carries. The viewer
+// keeps its own resizer and width signal — `ownsSize` false, `sizeOwner` this.
+import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
 
 type CursorState = {
   locationSig: string
@@ -200,11 +203,11 @@ function saveCustomWidth(width: number | null): void {
 @Component({
   selector: 'hc-history-viewer',
   standalone: true,
-  imports: [TranslatePipe, IconComponent, DockInsetDirective],
+  imports: [TranslatePipe, IconComponent, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './history-viewer.component.html',
   styleUrls: ['./history-viewer.component.scss'],
 })
-export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit {
+export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit, PanelSizeOwner {
 
   #entries = signal<readonly LayerEntry[]>([])
   #contents = signal<ReadonlyMap<string, Content>>(new Map())
@@ -858,6 +861,17 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     target.addEventListener('pointermove', onMove)
     target.addEventListener('pointerup', onUp)
     target.addEventListener('pointercancel', onUp)
+  }
+
+  // ── PanelSizeOwner ───────────────────────────────────────────────────
+  // What the window-group chrome reads and writes. Same clamp and same store
+  // as a drag of the resizer. Zero when the viewer is still at its CSS width —
+  // the chrome measures the element in that case rather than publishing it.
+  panelWidth(): number { return this.#customWidth() ?? 0 }
+  setPanelWidth(width: number): void {
+    const max = Math.max(HISTORY_COLUMN_MIN, window.innerWidth - 60)
+    this.#customWidth.set(Math.max(HISTORY_COLUMN_MIN, Math.min(max, Math.round(width))))
+    saveCustomWidth(this.#customWidth())
   }
 
   /**

@@ -28,16 +28,17 @@
 // imports essentials.
 
 import { ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import {
   aggregateSources, getAggregateSource, sourceForLocation,
-  type AggregateItem, type AggregateSource,
+  type AddedRows, type AggregateItem, type AggregateSource, type AggregateVersion, type StagedEntry,
 } from './aggregate-source'
 import { dropReferenceTile, dropTagsOnTile, safeCellName } from './aggregate-drop'
+import { onSelection, withSelectionService } from '../../core/selection-context'
 
 /** Movement before a press counts as a drag rather than a click — small enough
  *  to feel immediate, large enough that a click that jitters still opens. */
@@ -52,6 +53,13 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 const sameSegments = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((v, i) => v === b[i])
 
+/** Joins segments into a comparable location key. NUL is the one character a
+ *  tile name can never carry, so the join is unambiguous — a space would
+ *  collide with any name containing one. Same separator and same reasoning as
+ *  the decoration index's own location keys, and an ESCAPE SEQUENCE rather than
+ *  a literal control byte (doctrine ratchet). */
+const KEY_SEP = '\u0000'
+
 @Component({
   selector: 'hc-aggregate-index',
   standalone: true,
@@ -63,8 +71,19 @@ export class AggregateIndexComponent implements OnDestroy {
   readonly open = signal(false)
   readonly items = signal<readonly AggregateItem[]>([])
   readonly query = signal('')
+  /** Create mode. The ONE field at the top of the panel is the search box until
+   *  this flips, then it names the new member — the + hands that field over
+   *  instead of opening a second input further down. */
   readonly creating = signal(false)
+  /** What is typed in that field while creating. Held apart from `query` so the
+   *  list doesn't narrow to nothing while you name something new, and so
+   *  cancelling gives back the search you already had. */
+  readonly draft = signal('')
   readonly renaming = signal<string | null>(null)
+  /** The row whose version chain is showing, by key — at most one. */
+  readonly versionsFor = signal<string | null>(null)
+  readonly versions = signal<readonly AggregateVersion[]>([])
+  readonly versionsLoading = signal(false)
   /** The item currently being dragged, and where the ghost sits. */
   readonly dragging = signal<AggregateItem | null>(null)
   readonly dragPos = signal<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -107,8 +126,106 @@ export class AggregateIndexComponent implements OnDestroy {
     return [...seen].sort((a, b) => a.localeCompare(b))
   })
 
+  // ── armed demand ────────────────────────────────────────────────────────────
+  //
+  // Dropping an Organizer item onto the hive says "here is a reference". This is
+  // the moment to say what it is FOR — the same tile filed under two purposes is
+  // two references demanding different things, and a reference's demand is fixed
+  // once written (it lives in the payload, never as a chip that could be
+  // switched off).
+  //
+  // ARMED rather than asked: a drag interrupted by a dialog is a worse gesture
+  // than no gesture at all. You pick the marks once, and every reference you
+  // drop carries them until you clear them — which is also what makes "arm
+  // family, drop; arm work, drop elsewhere" a two-step act instead of two
+  // dialogs.
+
+  /** Marks every reference dropped from here will demand. Empty = demand
+   *  nothing, which is exactly what dropping did before this existed. */
+  readonly armedMarks = signal<ReadonlySet<string>>(new Set())
+
+  /** The hive's declared pheromone vocabulary — NOT `allTags()`, which is only
+   *  the keywords the listed collections happen to carry. A demand is about the
+   *  target's contents, so it draws on everything the hive knows. Never minted
+   *  here: a typo'd demand matches nothing and reads as "this is empty". */
+  readonly vocabulary = signal<readonly string[]>([])
+
+  isArmed(mark: string): boolean { return this.armedMarks().has(mark) }
+
+  toggleArmed(mark: string): void {
+    const next = new Set(this.armedMarks())
+    next.has(mark) ? next.delete(mark) : next.add(mark)
+    this.armedMarks.set(next)
+  }
+
+  clearArmed(): void { this.armedMarks.set(new Set()) }
+
+  /** Read the vocabulary when the panel opens. Cheap and idempotent; the
+   *  registry caches, so a cold read costs one load and later ones nothing. */
+  async #loadVocabulary(): Promise<void> {
+    const registry = ioc()?.get('@hypercomb.social/TagRegistry') as
+      { names: string[]; ensureLoaded(): Promise<void> } | undefined
+    if (!registry) return
+    try {
+      await registry.ensureLoaded()
+      this.vocabulary.set([...(registry.names ?? [])].sort((a, b) => a.localeCompare(b)))
+      this.#cdr.markForCheck()
+    } catch { /* cold registry — the row simply doesn't appear */ }
+  }
+
   readonly hasFilter = computed(() => this.#activeTags().size > 0 || this.query().trim().length > 0)
   readonly canCreate = computed(() => !!this.source()?.create)
+
+  /** Labels currently selected on the canvas, with the location they were
+   *  selected AT. Captured rather than derived on read: a selection outlives
+   *  navigation, and resolving `here + label` later would name whatever tile
+   *  happens to share the name on the page you have since walked to. */
+  readonly selection = signal<readonly StagedEntry[]>([])
+
+  /** The collection we are STANDING IN, if the current location is one of our
+   *  rows. This is what makes "drill into a collection and add tiles" work: the
+   *  destination is simply where you are, so there is no target to pick and no
+   *  mode to leave. Selection is captured with its own segments, so tiles chosen
+   *  on one page are still addable after walking into the collection. */
+  readonly destination = computed<AggregateItem | null>(() => {
+    const here = this.here().join(KEY_SEP)
+    if (!here) return null
+    return this.items().find(i => i.segments.join(KEY_SEP) === here) ?? null
+  })
+
+  /** The selection, minus what would be a no-op.
+   *
+   *  Adding to the INDEX skips anything already indexed — a second reference to
+   *  the same place would be a duplicate row. Adding INTO a collection only
+   *  skips the collection itself; a tile can legitimately be a member of many
+   *  collections, and that is the whole point. Empty unless the active source
+   *  actually supports adding. */
+  readonly staged = computed<readonly StagedEntry[]>(() => {
+    if (!this.source()?.add) return []
+    const into = this.destination()
+    if (into) {
+      const self = into.segments.join(KEY_SEP)
+      return this.selection().filter(e => e.segments.join(KEY_SEP) !== self)
+    }
+    const known = new Set(this.items().map(i => i.key))
+    return this.selection().filter(e => !known.has(e.label))
+  })
+
+  /** Can the page we are standing on be saved into the index? The canvas route
+   *  cannot reach it — you would have to stand on its PARENT and select it —
+   *  so a page can only add itself from in here. Hidden at the hive root (not a
+   *  collection) and once it is already a member. */
+  readonly canAddHere = computed<boolean>(() => {
+    const src = this.source()
+    if (!src?.add || this.here().length === 0) return false
+    return !this.destination()
+  })
+
+  /** The current page's own name, for the "add this page" affordance. */
+  readonly hereLabel = computed<string>(() => {
+    const segs = this.here()
+    return segs.length ? segs[segs.length - 1] : ''
+  })
 
   readonly #cdr = inject(ChangeDetectorRef)
   readonly #activeTags = signal<ReadonlySet<string>>(new Set())
@@ -118,10 +235,25 @@ export class AggregateIndexComponent implements OnDestroy {
   #atSource = false
   #cleanups: Array<() => void> = []
   #sourceChanged = (): void => { void this.reload() }
+  /** The in-flight row read, and whether anything asked for another while it ran.
+   *  See `reload` — re-reading the index is expensive and every trigger used to
+   *  start its own pass. */
+  #reloading: Promise<void> | null = null
+  #reloadAgain = false
+  /** The source whose `changed` we are subscribed to, so switching aggregates
+   *  doesn't leave us listening to the old one. */
+  #boundSource: AggregateSource | null = null
   #pending: { item: AggregateItem; x: number; y: number } | null = null
   #swallowClick = false
 
   constructor() {
+    // Selection is last-value replayed, so opening the panel after selecting
+    // still stages what is already picked.
+    this.#cleanups.push(onSelection(({ selected }) => {
+      const here = this.#segments()
+      this.selection.set(selected.map(label => ({ label, segments: [...here, label] })))
+      this.#cdr.detectChanges()
+    }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-open', (p) => this.openPanel(p?.id)))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-toggle', (p) => this.togglePanel(p?.id)))
     this.#cleanups.push(EffectBus.on('aggregate:view-close', () => this.close()))
@@ -146,6 +278,7 @@ export class AggregateIndexComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const off of this.#cleanups) off()
     aggregateSources.removeEventListener('change', this.#sourceChanged)
+    this.#boundSource?.changed?.removeEventListener('change', this.#sourceChanged)
     window.removeEventListener('synchronize', this.#sourceChanged)
     window.removeEventListener('navigate', this.#onLineage)
     window.removeEventListener('keydown', this.#onKey, true)
@@ -162,6 +295,9 @@ export class AggregateIndexComponent implements OnDestroy {
    *  return target out from under you. */
   openPanel(id?: string): void {
     const next = id ? getAggregateSource(id) : this.source()
+    // A chain belongs to the row it was opened from — switching aggregates
+    // leaves it pointing at a key this index has never heard of.
+    if (next && next !== this.source()) this.#closeVersions()
     if (next) this.source.set(next)
     if (!this.source()) return
     if (!this.open()) this.origin.set(this.#segments())
@@ -203,15 +339,58 @@ export class AggregateIndexComponent implements OnDestroy {
   close(): void {
     if (!this.open()) return
     this.open.set(false)
-    this.creating.set(false)
+    this.cancelCreate()
     this.renaming.set(null)
+    this.#closeVersions()
   }
 
+  /** Re-read the rows — SINGLE-FLIGHT.
+   *
+   *  A full read is expensive (a layer plus a reference decoration per row), and
+   *  it has many triggers: the awaited call after a write, the `synchronize` the
+   *  same write's pulse dispatches, a navigation, the source announcing a late
+   *  picture. Each used to start its OWN pass, so one Add ran the whole rebuild
+   *  about three times over, all racing for the same OPFS files and the last one
+   *  to finish deciding what you saw.
+   *
+   *  So a caller arriving mid-read JOINS it instead, and its request is honoured
+   *  as ONE trailing pass afterwards — never dropped, because a trigger that
+   *  landed during the read may be reporting a commit that read just missed. */
   async reload(): Promise<void> {
+    if (this.#reloading) {
+      this.#reloadAgain = true
+      return this.#reloading
+    }
+    const run = async (): Promise<void> => {
+      do {
+        this.#reloadAgain = false
+        await this.#readRows()
+      } while (this.#reloadAgain)
+    }
+    this.#reloading = run().finally(() => { this.#reloading = null })
+    return this.#reloading
+  }
+
+  async #readRows(): Promise<void> {
     const src = this.source()
     if (!src || !this.open()) return
+    this.#bindSourceChanges(src)
     try { this.items.set(await src.items()) } catch { /* keep the last good list */ }
+    // Independent of the rows and allowed to fail quietly — a cold registry
+    // just means the demands row doesn't appear, never a broken panel.
+    void this.#loadVocabulary()
     this.#cdr.markForCheck()
+  }
+
+  /** Listen to the ACTIVE source's own change signal — how it reports pictures,
+   *  keywords and titles that resolved after `items()` had already answered. One
+   *  subscription at a time: a source we have switched away from has no business
+   *  making this panel re-read. */
+  #bindSourceChanges(src: AggregateSource): void {
+    if (this.#boundSource === src) return
+    this.#boundSource?.changed?.removeEventListener('change', this.#sourceChanged)
+    this.#boundSource = src
+    src.changed?.addEventListener('change', this.#sourceChanged)
   }
 
   // ── filtering ───────────────────────────────────────────────────────────────
@@ -269,22 +448,114 @@ export class AggregateIndexComponent implements OnDestroy {
 
   canRename(item: AggregateItem): boolean { return !!this.source()?.rename }
 
+  // ── versions ────────────────────────────────────────────────────────────────
+  //
+  // One row at a time. The list is a chain, and two of them open at once reads
+  // as one long list of versions belonging to nothing in particular.
+
+  canPickVersion(): boolean { return !!this.source()?.versions }
+
+  /** Open (or put away) the chain behind a row. Loading is signalled rather than
+   *  awaited silently — a site with a long lineage takes a moment, and an empty
+   *  panel that later fills in reads as "no versions". */
+  async toggleVersions(item: AggregateItem, ev?: Event): Promise<void> {
+    ev?.stopPropagation()
+    if (this.versionsFor() === item.key) { this.#closeVersions(); return }
+
+    const src = this.source()
+    if (!src?.versions) return
+    this.versionsFor.set(item.key)
+    this.versions.set([])
+    this.versionsLoading.set(true)
+    this.#cdr.markForCheck()
+
+    let rows: readonly AggregateVersion[] = []
+    try { rows = await src.versions(item) } catch { /* an unreadable chain is an empty one */ }
+    // The row may have been closed (or another opened) while we read.
+    if (this.versionsFor() !== item.key) return
+    this.versions.set(rows)
+    this.versionsLoading.set(false)
+    this.#cdr.markForCheck()
+  }
+
+  /** The rows of ONE chain, in the order the source gave them. Split rather than
+   *  concatenated so the two never read as a single timeline. */
+  versionsOf(origin: AggregateVersion['origin']): readonly AggregateVersion[] {
+    return this.versions().filter(v => v.origin === origin)
+  }
+
+  /** "2026-07-26 14:03", or nothing when the chain doesn't know. */
+  versionTime(at?: number): string {
+    if (!at) return ''
+    const d = new Date(at)
+    if (Number.isNaN(d.getTime())) return ''
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  /** Choose a version. The chain is re-read afterwards rather than patched in
+   *  place: what "active" now means is the source's answer, not ours — a
+   *  published pick can be refused by the installer and the list must say so. */
+  async chooseVersion(item: AggregateItem, version: AggregateVersion): Promise<void> {
+    const src = this.source()
+    if (!src?.useVersion || version.active) return
+    this.versionsLoading.set(true)
+    this.#cdr.markForCheck()
+    try { await src.useVersion(item, version) } catch { /* fall through — the re-read tells the truth */ }
+    if (this.versionsFor() !== item.key) return
+    try { this.versions.set(await src.versions?.(item) ?? []) } catch { /* keep the last good list */ }
+    this.versionsLoading.set(false)
+    await this.reload()
+  }
+
+  #closeVersions(): void {
+    this.versionsFor.set(null)
+    this.versions.set([])
+    this.versionsLoading.set(false)
+  }
+
   // ── manage ──────────────────────────────────────────────────────────────────
 
+  /** Hand the search field over to naming a new member (or hand it back). */
   toggleCreate(): void {
     const next = !this.creating()
     this.creating.set(next)
-    if (next) this.#focusSoon('.ai-create-input')
+    this.draft.set('')
+    if (next) this.#focusSoon('.ai-filter-input')
   }
 
-  async create(input: HTMLInputElement): Promise<void> {
-    const src = this.source()
-    const name = safeCellName(input.value)
-    if (!src?.create || !name) { input.focus(); return }
-    try { await src.create(name) } catch { return }
-    input.value = ''
+  /** The + beside the search field. Idle, it opens create mode ON that field;
+   *  already creating, it commits what is typed (same as Enter) — and with an
+   *  empty field it simply steps back out. */
+  onPlus(): void {
+    if (!this.creating()) { this.toggleCreate(); return }
+    if (!this.draft().trim()) { this.cancelCreate(); return }
+    void this.submitCreate()
+  }
+
+  /** One field, two jobs — route the keystrokes to whichever is live. */
+  onFieldInput(value: string): void {
+    if (this.creating()) this.draft.set(value ?? '')
+    else this.query.set(value ?? '')
+  }
+
+  cancelCreate(): void {
+    if (!this.creating()) return
     this.creating.set(false)
-    await this.reload()
+    this.draft.set('')
+  }
+
+  async submitCreate(): Promise<void> {
+    if (!this.creating()) return   // Enter and the form's submit can both land
+    const src = this.source()
+    const name = safeCellName(this.draft())
+    // A failed or empty name leaves the field as it is, so the typing survives.
+    if (!src?.create || !name) { this.#focusSoon('.ai-filter-input'); return }
+    let added: AddedRows
+    try { added = await src.create(name) } catch { return }
+    this.draft.set('')
+    this.creating.set(false)
+    this.#showAdded(added)
   }
 
   startRename(item: AggregateItem, ev?: Event): void {
@@ -302,6 +573,56 @@ export class AggregateIndexComponent implements OnDestroy {
     try { await src.rename(item, next) } catch { /* fall through — close the field */ }
     this.renaming.set(null)
     await this.reload()
+  }
+
+  /** Commit the staged selection as members. The canvas selection is cleared
+   *  afterwards: the staged rows have become real ones, and leaving them
+   *  selected would offer to add what was just added. */
+  async addStaged(): Promise<void> {
+    const src = this.source()
+    const entries = this.staged()
+    if (!src?.add || entries.length === 0) return
+    // Destination is the page we are standing on when that page is one of our
+    // collections; otherwise the index itself.
+    let added: AddedRows = undefined
+    try { added = await src.add(entries, this.destination() ?? undefined) }
+    catch { /* fall through — the re-read shows the truth */ }
+    withSelectionService(s => s.clear())
+    this.selection.set([])
+    this.#showAdded(added)
+  }
+
+  /** Save the page we are standing on into the index. */
+  async addHere(): Promise<void> {
+    const src = this.source()
+    const segments = this.here()
+    if (!src?.add || !this.canAddHere()) return
+    let added: AddedRows = undefined
+    try { added = await src.add([{ label: this.hereLabel(), segments }]) }
+    catch { /* fall through — the re-read shows the truth */ }
+    this.#showAdded(added)
+  }
+
+  /** Put what a gesture just wrote on screen NOW, then re-read in the background.
+   *
+   *  The write is a few milliseconds of local OPFS; re-deriving every row is not.
+   *  Awaiting the re-read before showing anything is what made the Organizer feel
+   *  slow — the row you asked for existed almost immediately but stayed invisible
+   *  until every OTHER row had been re-resolved too.
+   *
+   *  Rows are shown only AFTER the write resolved, never before: an optimistic row
+   *  for a commit that failed is a lie the panel would have no way to take back.
+   *  The re-read is deliberately not awaited — it only adds pictures and keywords
+   *  to rows that are already correct. */
+  #showAdded(added: AddedRows): void {
+    const rows = added ?? []
+    if (rows.length) {
+      const known = new Set(this.items().map(i => i.key))
+      const fresh = rows.filter(r => !known.has(r.key))
+      if (fresh.length) this.items.update(list => [...list, ...fresh])
+    }
+    this.#cdr.markForCheck()
+    void this.reload()
   }
 
   async remove(item: AggregateItem, ev?: Event): Promise<void> {
@@ -404,9 +725,18 @@ export class AggregateIndexComponent implements OnDestroy {
       EffectBus.emit('tags:changed', { segments: [...here, label] })
       return
     }
-    // Dropped on empty hive → a reference to the item, here.
-    await dropReferenceTile(item, here)
-    await this.reload()
+    // Dropped on empty hive → a reference to the item, here, demanding whatever
+    // is armed. The demand is written INTO the reference at birth: it is part of
+    // what this reference IS, not a setting on it, which is why the same item
+    // dropped twice with different marks armed gives two distinct references to
+    // one place rather than one reference that changed its mind.
+    //
+    // The pulse is HERE rather than inside the write: one gesture, one repaint
+    // (see dropReferenceTile). The re-read isn't awaited — the tile is on the
+    // hive already, and this list only changes if the drop landed in the index.
+    await dropReferenceTile(item, here, [...this.armedMarks()])
+    await new hypercomb().act()
+    void this.reload()
   }
 
   // ── activation ──────────────────────────────────────────────────────────────
@@ -448,7 +778,7 @@ export class AggregateIndexComponent implements OnDestroy {
       this.open.set(true)
     }
     if (this.open()) void this.reload()
-    else { this.creating.set(false); this.renaming.set(null) }
+    else { this.cancelCreate(); this.renaming.set(null) }
   }
 
   #focusSoon(selector: string): void {
@@ -466,7 +796,7 @@ export class AggregateIndexComponent implements OnDestroy {
   #onKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || !this.open()) return
     if (this.renaming()) { e.preventDefault(); this.renaming.set(null); return }
-    if (this.creating()) { e.preventDefault(); this.creating.set(false); return }
+    if (this.creating()) { e.preventDefault(); this.cancelCreate(); return }
     const target = e.target as Node | null
     const panel = document.querySelector('hc-aggregate-index .ai-panel')
     if (!panel || !target || !panel.contains(target)) return

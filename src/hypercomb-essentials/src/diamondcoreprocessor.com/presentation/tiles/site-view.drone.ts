@@ -270,7 +270,7 @@ export class SiteViewDrone extends Drone {
    *     content. The way out is the `/website` toggle, not right-
    *     click.
    *   • Outside the site (sibling or unrelated cell, e.g. an
-   *     `<a href="/dashboard">` link navigated to a route not under
+   *     `<a href="/elsewhere">` link navigated to a route not under
    *     the site root) → jump back to the entry. Without this the
    *     user gets stranded on a blank route with no page mounted.
    *

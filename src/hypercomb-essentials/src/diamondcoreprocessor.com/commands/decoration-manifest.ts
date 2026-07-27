@@ -164,6 +164,33 @@ export function removeDecoration(opts: {
 }
 
 /**
+ * Write a decoration that REPLACES every prior record of the same kind on
+ * the cell — the in-app equivalent of the bridge's `replaceKind: true`.
+ *
+ * Use it for records that describe a cell's CURRENT state rather than
+ * accumulating (a step's kind, an `ai:request`'s status, a build meta):
+ * without it, re-typing a step leaves a pile of records and the reader has
+ * to guess which one is live.
+ *
+ * The superseded JSONs stay at the content root. They are content-addressed
+ * and the cell's history markers still reach them, which is what keeps
+ * "what did this used to say?" answerable.
+ */
+export async function replaceDecoration<TPayload>(opts: {
+  kind: string
+  appliesTo: readonly string[]
+  payload: TPayload
+  segments: readonly string[]
+  mark?: 'persistent'
+}): Promise<string> {
+  const priors = await listDecorations<unknown>({ kind: opts.kind, segments: opts.segments })
+  for (const prior of priors) {
+    removeDecoration({ sig: prior.sig, segments: opts.segments })
+  }
+  return writeDecoration(opts)
+}
+
+/**
  * Read decoration records referenced from a cell's `decorations` slot
  * and filter by `kind`. Returns each matching record paired with its
  * sig.
@@ -218,13 +245,48 @@ export async function listDecorations<TPayload>(opts: {
 // Module-load-order independent via `whenReady`. The active trigger
 // `decorations:changed` makes the slot self-cascading: visual bees emit
 // the event, LayerCommitter picks it up and writes the manifest.
+//
+// ── Why this is a FUNCTION, called from the service ───────────────────
+//
+// This module is not in the side-effects barrel (prepare.ts lists modules
+// that call `window.ioc.register`, and this one does not) — it is pulled in
+// only for its exported functions. Its bare module-scope registration was
+// therefore not running, and because `ioc.whenReady` swallows callback
+// exceptions and the call site is optional-chained, it failed SILENTLY: the
+// slot was absent, so LayerCommitter had no `decorations:changed`
+// subscription, so every decoration write in the app — pheromone tags,
+// website pages, tutor decks, workflow steps — minted its resource and then
+// vanished, with no error anywhere.
+//
+// So the registration is an exported function, invoked from
+// `decoration.service.ts`, which IS in the barrel and self-registers in IoC.
+// Idempotent (the registry no-ops an identical re-registration), so calling
+// it from both places is safe.
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({
-      slot: DECORATIONS_SLOT,
-      triggers: [DECORATIONS_TRIGGER],
-    })
-  },
-)
+export function registerDecorationsSlot(): void {
+  const ioc = (window as {
+    ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void }
+  }).ioc
+  if (!ioc?.whenReady) {
+    console.warn('[decoration-manifest] ioc.whenReady unavailable — decorations slot NOT registered')
+    return
+  }
+  ioc.whenReady<LayerSlotRegistry>(
+    '@diamondcoreprocessor.com/LayerSlotRegistry',
+    (slotRegistry) => {
+      // Registration failures must be LOUD: whenReady swallows what a
+      // callback throws, and a silently missing slot is exactly the failure
+      // this file already paid for once.
+      try {
+        slotRegistry.register({
+          slot: DECORATIONS_SLOT,
+          triggers: [DECORATIONS_TRIGGER],
+        })
+      } catch (error) {
+        console.error('[decoration-manifest] decorations slot registration FAILED', error)
+      }
+    },
+  )
+}
+
+registerDecorationsSlot()

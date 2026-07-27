@@ -6,6 +6,15 @@ Minimalism. Small surface area. No unnecessary abstractions. Signatures (SHA-256
 
 **Externalize everything.** All features and functionality must be externally loadable as drone modules. Code may live in Angular/shared projects during early development, but the strategy is to migrate anything that can live outside the web shell into interchangeable, signature-addressed modules. The community can fork, improve, and share modules via the merkle tree sharing pattern — signatures ensure integrity and deduplication across the network.
 
+**Mirror every creation into the hive (PERMANENT, all forward development).** Building a behaviour is only half the work. The other half is building its **mirror structure in the hive**: tiles for the parts, a collection that gathers them, pheromones marking what each part *is* (so render and behaviour resolve from the mark, not from code), and notes explaining what it does. We are constantly building a prototype out of hexagons, notes, and pheromones — the hive is the living specification of the code.
+
+- **Tiles** — one per meaningful part of the creation, **1:1 with source resources**: a multi-file creation spreads its implementation files across child cells (marked `part`) instead of hiding internal dependencies behind one tile.
+- **Collections** — every creation gets a collection gathering its tiles, so it can be navigated, shared, and adopted as a unit.
+- **Pheromones** — mark each tile for what it belongs to and what it is. Rendering and behaviour read the mark; nothing is hardcoded per-feature. Never mint keywords on the fly — use the declared vocabulary.
+- **Notes** — the explanation lives on the tile, not only in a markdown file.
+
+Consequence: features are **data-driven from pools of meaning and pheromones**. If a change would require editing code to change how something is classified, grouped, or rendered, that classification belongs on a tile as a pheromone instead. The mirror is not documentation-after-the-fact — it is created alongside the behaviour, in the same pass, so the hive is built as the code is built. Full doctrine: `src/documentation/mirror-paradigm.md`; first instance: `scripts/mirror-behaviors.ts` (the `behaviors` root mirror).
+
 ## Project Roles
 
 There are five project tiers with distinct roles:

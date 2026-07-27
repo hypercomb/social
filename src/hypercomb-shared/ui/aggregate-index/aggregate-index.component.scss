@@ -113,7 +113,17 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   border-bottom: 1px solid rgba($steel, 0.16);
 }
 
+// Field and its + on one line: search on the left, create on the right, so the
+// row reads as one control — type here, add there.
+.ai-filter-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35em;
+}
+
 .ai-filter-field {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.35em;
@@ -121,9 +131,32 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   border: 1px solid rgba($steel, 0.28);
   border-radius: 7px;
   background: rgba(12, 17, 24, 0.6);
-  transition: border-color 150ms ease;
+  transition: border-color 150ms ease, background 150ms ease;
 
   &:focus-within { border-color: rgba($steel, 0.7); }
+
+  // Naming a new member — the same box, marked as no longer a search.
+  &.is-creating { border-color: rgba($steel, 0.7); background: rgba($steel, 0.07); }
+}
+
+.ai-filter-add {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85em;
+  padding: 0;
+  border: 1px solid rgba($steel, 0.28);
+  border-radius: 7px;
+  background: rgba(12, 17, 24, 0.6);
+  color: rgba(207, 226, 238, 0.7);
+  cursor: pointer;
+  font-size: 1em;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+
+  &:hover { background: rgba($steel, 0.16); border-color: rgba($steel, 0.6); color: #f4fafd; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+  &.is-active { background: rgba($steel, 0.22); border-color: rgba($steel, 0.75); color: #f4fafd; }
 }
 
 .ai-filter-icon { font-size: 1em; color: rgba($steel, 0.7); flex: 0 0 auto; }
@@ -189,6 +222,62 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   }
 }
 
+// What a dropped reference will DEMAND. Reads as a sibling of the filter chips
+// (same pill vocabulary) but squarer and quieter when idle, because it is not a
+// lens: an armed mark is written into the next reference you drop.
+.ai-demands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25em;
+  margin-top: 0.35em;
+}
+
+.ai-demands-label {
+  color: rgba(207, 226, 238, 0.45);
+  font-size: 0.62em;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+.ai-demand {
+  max-width: 100%;
+  padding: 0.08em 0.45em;
+  border: 1px dashed rgba($steel, 0.32);
+  border-radius: 4px;
+  background: none;
+  color: rgba(207, 226, 238, 0.6);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.66em;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &:hover { border-color: rgba($steel, 0.6); color: #eaf3f9; }
+  // Armed reads SOLID against the dashed idle state — this one is going to be
+  // written, unlike its neighbours.
+  &.is-armed {
+    border-style: solid;
+    background: rgba($steel, 0.22);
+    border-color: rgba($steel, 0.9);
+    color: #f4fafd;
+  }
+}
+
+.ai-demands-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgba(207, 226, 238, 0.5);
+  cursor: pointer;
+  font-size: 0.9em;
+  line-height: 1;
+
+  &:hover { color: #eaf3f9; }
+}
+
 // ── scroll surface ───────────────────────────────────────────────────────────
 //
 // The bar is HIDDEN, not the scrolling — same treatment as the controls rail
@@ -206,63 +295,8 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   box-sizing: border-box;
 }
 
-// ── create ───────────────────────────────────────────────────────────────────
-
-.ai-create { margin-bottom: 0.7em; }
-
-.ai-create-open {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35em;
-  width: 100%;
-  padding: 0.45em 0.7em;
-  border: 1px dashed rgba($steel, 0.4);
-  border-radius: 8px;
-  background: rgba($steel, 0.05);
-  color: #d8ebf6;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.82em;
-  font-weight: 500;
-
-  .mat-sym { font-size: 1.05em; color: $steel; }
-  &:hover { background: rgba($steel, 0.13); border-color: rgba($steel, 0.68); }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 2px; }
-}
-
-.ai-create-row { display: flex; gap: 0.35em; width: 100%; }
-
-.ai-create-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.45em 0.6em;
-  border: 1px solid rgba($steel, 0.3);
-  border-radius: 7px;
-  background: rgba(12, 17, 24, 0.6);
-  color: #eaf3f9;
-  font: inherit;
-  font-size: 0.82em;
-  outline: none;
-
-  &::placeholder { color: rgba(207, 226, 238, 0.4); }
-  &:focus { border-color: rgba($steel, 0.7); }
-}
-
-.ai-create-submit {
-  flex: 0 0 auto;
-  padding: 0.45em 0.75em;
-  border: 0;
-  border-radius: 7px;
-  background: $steel;
-  color: $ink;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.82em;
-  font-weight: 600;
-
-  &:hover { filter: brightness(1.08); }
-}
+// Create has no chrome of its own any more — it borrows the search field and
+// the + beside it (see .ai-filter-row).
 
 // ── empty states ─────────────────────────────────────────────────────────────
 
@@ -300,6 +334,10 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   position: relative;
   display: flex;
   align-items: center;
+  // The version chain drops onto its own line UNDER the row it belongs to —
+  // it is part of that row, not a sibling of it, so a wrap rather than a
+  // separate list keeps the two visually attached.
+  flex-wrap: wrap;
   border-radius: 7px;
   transition: background 140ms ease;
 
@@ -451,6 +489,93 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   white-space: nowrap;
 }
 
+// ── save the current page ────────────────────────────────────────────────────
+
+.ai-add-here {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  width: 100%;
+  padding: 0.45em 0.75em;
+  border: 0;
+  border-bottom: 1px solid rgba($steel, 0.16);
+  background: rgba($steel, 0.07);
+  color: rgba(207, 226, 238, 0.8);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78em;
+  text-align: left;
+  transition: background 140ms ease, color 140ms ease;
+
+  .mat-sym { font-size: 1.05em; color: $steel; }
+
+  &:hover { background: rgba($steel, 0.14); color: #f4fafd; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: -1px; }
+}
+
+.ai-add-here-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ── staged selection — candidates, not members ───────────────────────────────
+//
+// Deliberately reads as PENDING rather than as part of the list: same steel
+// family, but dashed and unsaturated, so a glance never mistakes a candidate
+// for something already in the index.
+
+.ai-staged {
+  flex: 0 0 auto;
+  padding: 0.4em 0.55em 0.5em;
+  border-bottom: 1px solid rgba($steel, 0.16);
+  background: rgba($steel, 0.05);
+}
+
+.ai-staged-list {
+  margin: 0 0 0.4em;
+  padding: 0;
+  list-style: none;
+  max-height: 7.5em;
+  overflow-y: auto;
+}
+
+.ai-staged-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.18em 0.2em;
+  color: rgba(207, 226, 238, 0.72);
+  font-size: 0.78em;
+
+  .ai-staged-icon { font-size: 1em; color: rgba($steel, 0.75); }
+}
+
+.ai-staged-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-staged-add {
+  width: 100%;
+  padding: 0.4em 0.6em;
+  border: 1px dashed rgba($steel, 0.5);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(207, 226, 238, 0.88);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78em;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  &:hover { background: rgba($steel, 0.14); border-color: rgba($steel, 0.8); color: #f4fafd; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+}
+
 // ── manage actions — revealed on hover ───────────────────────────────────────
 
 // STANDING, never hover-only. These were `opacity: 0` until `.ai-row:hover`,
@@ -490,6 +615,88 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   .mat-sym { font-size: 0.72em; }
   &:hover { background: rgba($steel, 0.2); border-color: rgba($steel, 0.75); color: #f4fafd; }
   &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+}
+
+.ai-action.is-active {
+  background: rgba($steel, 0.24);
+  border-color: rgba($steel, 0.8);
+  color: #f4fafd;
+}
+
+// ── version chain ────────────────────────────────────────────────────────────
+//
+// Two groups under one row, headed rather than merged: a page this hive has
+// been is not the same thing as a revision the installer holds deployed, and a
+// single unlabelled list would invite reading across that line.
+.ai-versions {
+  flex: 0 0 100%;
+  padding: 0.1em 0.4em 0.45em 2.4em;   // indented under the row's hex
+}
+
+.ai-versions-note,
+.ai-versions-head {
+  margin: 0.35em 0 0.2em;
+  font-size: 0.62em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(207, 226, 238, 0.55);
+}
+
+.ai-version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12em;
+}
+
+.ai-version {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.22em 0.45em;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  color: #cfe2ee;
+  font: inherit;
+  font-size: 0.74em;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled) { background: rgba($steel, 0.14); border-color: rgba($steel, 0.4); }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+
+  // The one in effect is not a target — it is the state you are already in.
+  &.is-active {
+    background: rgba($steel, 0.16);
+    border-color: rgba($steel, 0.55);
+    color: #f4fafd;
+    cursor: default;
+  }
+
+  &:disabled:not(.is-active) { opacity: 0.5; cursor: default; }
+}
+
+.ai-version-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ai-version-time {
+  flex: 0 0 auto;
+  font-family: var(--hc-mono, system-ui);
+  font-size: 0.85em;
+  color: rgba(207, 226, 238, 0.5);
+}
+
+.ai-version-flag {
+  flex: 0 0 auto;
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent, #{$steel});
 }
 
 .ai-action-danger:hover {

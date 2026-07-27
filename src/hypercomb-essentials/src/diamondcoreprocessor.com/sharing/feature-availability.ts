@@ -2,7 +2,7 @@
 //
 // The READ side of the feature-verification gate (essentials).
 //
-// A heavy visual-bee feature (a website, a game, a dashboard) that did NOT
+// A heavy visual-bee feature (a website, a game) that did NOT
 // originate with this participant must not ACTIVATE — render, run its scripts,
 // pull its resources — until it is VERIFIED. Verification is one of:
 //   • published by a TRUSTED domain (community-vetted, or your own self host),

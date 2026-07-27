@@ -1,14 +1,14 @@
-// diamondcoreprocessor.com/commands/branch.queen.ts
+// diamondcoreprocessor.com/commands/hive.queen.ts
 //
 // Named references to lineage paths or raw signatures.
 //
 // The registry lives in hypercomb-shared (NameRegistry). This queen is
 // just the authoring surface:
 //
-//   /branch <name>              — label CURRENT cell's lineage as <name>
-//   /branch <name> <64-hex>     — label a raw signature as <name>
-//   /branch <name> clear        — remove the label
-//   /branch list                — dump all labels to console
+//   /hive <name>              — label CURRENT cell's lineage as <name>
+//   /hive <name> <64-hex>     — label a raw signature as <name>
+//   /hive <name> clear        — remove the label
+//   /hive list                — dump all labels to console
 //
 // Other slash queens (/website, future /marker-based commands) read the
 // same registry to resolve names → targets, and use NameRegistry.matching
@@ -23,17 +23,17 @@ const toast = (type: 'info' | 'success' | 'warning' | 'tip', title: string, mess
 
 const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 
-export class BranchQueenBee extends QueenBee {
+export class HiveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
-  readonly command = 'branch'
-  override readonly aliases = ['mark', 'label']
+  readonly command = 'hive'
+  override readonly aliases = ['branch', 'mark', 'label']
   override description =
     'Give a lineage path or signature a named handle that other slash commands autocomplete against.'
-  override descriptionKey = 'slash.branch'
+  override descriptionKey = 'slash.hive'
   override options = ['<name>', '<name> <64-hex signature>', '<name> clear', 'list']
   override examples = [
-    { input: '/branch docs', result: 'Labels the current cell\'s lineage as "docs"' },
-    { input: '/branch list', result: 'Dumps all saved labels to the console' },
+    { input: '/hive docs', result: 'Labels the current cell\'s lineage as "docs"' },
+    { input: '/hive list', result: 'Dumps all saved labels to the console' },
   ]
 
   override slashComplete(args: string): readonly string[] {
@@ -63,7 +63,7 @@ export class BranchQueenBee extends QueenBee {
   protected execute(args: string): void {
     const trimmed = args.trim()
     if (!trimmed) {
-      console.warn('[/branch] usage: /branch <name> [signature | clear]  |  /branch list')
+      console.warn('[/branch] usage: /hive <name> [signature | clear]  |  /hive list')
       return
     }
 
@@ -136,5 +136,5 @@ export class BranchQueenBee extends QueenBee {
   }
 }
 
-const _branch = new BranchQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/BranchQueenBee', _branch)
+const _hive = new HiveQueenBee()
+window.ioc.register('@diamondcoreprocessor.com/HiveQueenBee', _hive)

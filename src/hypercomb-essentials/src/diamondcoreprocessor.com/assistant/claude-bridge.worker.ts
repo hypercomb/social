@@ -300,7 +300,7 @@ export class ClaudeBridgeWorker extends Worker {
   // pool API (putOptimization/listOptimizations/removeOptimization).
   // Each entry is a content-addressed JSON file (Q&A, comm, future kinds).
   // Layer-untouched: this directory is structurally separate from any
-  // cell's layer slots. The dashboard reader and state-machine wrappers
+  // cell's layer slots. The feedback window and state-machine wrappers
   // around base objects pull from here at access/render time.
 
   async #optimizationAdd(req: BridgeRequest): Promise<BridgeResponse> {
@@ -490,7 +490,7 @@ export class ClaudeBridgeWorker extends Worker {
   // ─── diag-open ─────────────────────────────────────────────────────
   //
   // Emit the default `open` tile action for `label` exactly as a body
-  // click on a leaf tile would — driving DashboardQOpenWorker (and any
+  // click on a leaf tile would — driving any
   // other tile:action consumer) from the bridge. Diagnosis: when this
   // opens the QA card but a real click does not, the break is in the
   // click gesture/guards, not the open pipeline.
@@ -803,7 +803,7 @@ export class ClaudeBridgeWorker extends Worker {
   // Raw layer read — returns slot values with their underlying sig
   // arrays preserved, NOT recursively resolved into their content.
   // Use when the caller needs the canonical sig of a slot entry
-  // (e.g. dashboard refresh needs the qa-slot resource sig so the
+  // (e.g. a Q&A pass needs the qa-slot resource sig so the
   // in-page answer composer can `bag-remove` the right entry on
   // submit). `inflate` resolves sigs into their JSON which drops
   // the addressing — this op keeps the addressing intact.
@@ -1039,7 +1039,7 @@ export class ClaudeBridgeWorker extends Worker {
     }
 
     // Raw layer writes can author a page directly into the `website`/`context`
-    // slots (e.g. a dashboard refresh writing context:[htmlSig,...] alongside
+    // slots (e.g. a page refresh writing context:[htmlSig,...] alongside
     // children, which bag-set can't do). Record those page sigs so the gate
     // treats them as the participant's own — the generic-update coverage the
     // decoration / bag-set paths would otherwise miss.

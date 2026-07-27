@@ -46,7 +46,7 @@ export interface LaunchGroup {
   /** Launcher-tile silhouette for THIS group's members in the aggregator —
    *  a string the renderer maps to a shape (e.g. 'flower-pot', 'space-invader').
    *  Each group owns its own look; groups never share a visual type. Omit for
-   *  the plain hexagon (dashboard, help). Written into each member's
+   *  the plain hexagon (help). Written into each member's
    *  `launch:target` decoration so show-cell can pick the shape PER TILE. */
   shape?: string
   /** When true, the aggregator lays this group's members out as CLUSTERED
@@ -66,7 +66,7 @@ export interface LaunchGroup {
   readonly curated?: boolean
 
   /** When true, this group has NO browsable aggregator page: it is a single
-   *  toggle surfaced only as a rail icon (the dashboard). Clicking the icon
+   *  toggle surfaced only as a rail icon. Clicking the icon
    *  opens its member DIRECTLY via open() — the registry never navigates to
    *  /<id>, so MixedGroupBag never reconciles a self-referential launcher tile
    *  there, and /<id> is not treated as a launcher page (isLauncherLocation
@@ -75,13 +75,13 @@ export interface LaunchGroup {
   openDirectly?: boolean
   members(): GroupMember[]
   /** Activate a single member — its routing is owned by the group (websites →
-   *  website mode, games → overlay toggle, dashboard → toggleBehavior). The
+   *  website mode, games → overlay toggle). The
    *  MixedGroupBag calls this when a launcher tile is clicked. */
   open(m: GroupMember): void
   /** Optional live "is this group's surface open" check for the rail highlight.
    *  A page-backed group derives its highlight from the location (currentId);
-   *  an openDirectly group (dashboard) has no page, so it reports its own active
-   *  state here (its bag being open). Absent → highlight is location-only. */
+   *  an openDirectly group has no page, so it reports its own active
+   *  state here (its surface being open). Absent → highlight is location-only. */
   isActive?(): boolean
 }
 
@@ -119,7 +119,7 @@ export class GroupRegistry extends EventTarget {
   show(id: string): void {
     const group = this.#groups.get(id)
     if (!group) return
-    // An `openDirectly` group (the dashboard) has NO browsable page: open its
+    // An `openDirectly` group has NO browsable page: open its
     // single member immediately instead of navigating to /<id> and reconciling
     // a self-referential launcher tile there. The rail-icon click routes here.
     if (group.openDirectly) {

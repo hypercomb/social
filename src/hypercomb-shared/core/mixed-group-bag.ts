@@ -1,7 +1,7 @@
 // hypercomb-shared/core/mixed-group-bag.ts
 //
 // MixedGroupBag — each launch group's page lives at its OWN single-segment
-// ROOT location named by the group id: /games, /websites, /dashboard, /help.
+// ROOT location named by the group id: /games, /websites, /help.
 // The old opaque `agg-mix` union page is gone (2026-07-03): the route's first
 // segment is a VARIABLE root — whatever tree is active at that name — so every
 // group page is directly ADDRESSABLE (type /games and land on it) and each is
@@ -19,8 +19,8 @@
 // pages are participant-local chrome on their own roots, so going public
 // lands back on the participant's real page and THAT is what the swarm sees.
 //
-// Mirrors DashboardBee: a real lineage bag you NAVIGATE INTO, so "current
-// lineage location = where edits commit" makes arrangement persist per group.
+// A real lineage bag you NAVIGATE INTO, so "current lineage location = where
+// edits commit" makes arrangement persist per group.
 //
 // Cross-module contract: essentials (show-cell, tile-overlay, action-card)
 // detect a launcher page by resolving the single segment against the
@@ -52,7 +52,6 @@ type HistoryLike = {
 }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void; replaceRaw?: (segments: readonly string[]) => void }
 type ViewModeLike = EventTarget & { mode?: string }
-type DashboardLike = { isActive?: () => boolean }
 type StoreLike = { putResource(blob: Blob): Promise<string> }
 type CommitterLike = { commitSlotSet(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void> }
 type IocLike = { whenReady?: (key: string, cb: (v: unknown) => void) => void }
@@ -130,7 +129,7 @@ export class MixedGroupBag {
     const segs = this.#currentSegments()
     if (segs.length !== 1) return null
     const g = this.#registry.get(segs[0])
-    // An openDirectly group (the dashboard) has no page, so standing at its id
+    // An openDirectly group has no page, so standing at its id
     // segment is NOT standing in a launcher page — it renders as a normal
     // location (and the fix ensures we never navigate there in the first place).
     return g && !g.openDirectly ? segs[0] : null
@@ -150,8 +149,8 @@ export class MixedGroupBag {
       await this.#reconcileAndRepaint(id)
       return
     }
-    // Elsewhere (hive, another group's page, a website surface, the
-    // dashboard): leave any open member surface and navigate to the page.
+    // Elsewhere (hive, another group's page, a website surface): leave any
+    // open member surface and navigate to the page.
     // Tap games → land on /games.
     this.#dismissActiveSurface()
     await this.enter(true)
@@ -235,8 +234,8 @@ export class MixedGroupBag {
   }
 
   /** Leave a ViewMode render surface (website/tutor) so the mixed page is
-   *  visible. The dashboard bag is hexagons-mode and is left by enter()'s
-   *  goRaw, so only a ViewMode flip back to hexagons is needed here. */
+   *  visible. A hexagons-mode bag is left by enter()'s goRaw, so only a
+   *  ViewMode flip back to hexagons is needed here. */
   #dismissActiveSurface(): void {
     const vm = get<ViewModeLike & { setMode?: (m: string) => void }>('@hypercomb.social/ViewMode')
     if (vm?.mode && vm.mode !== 'hexagons') vm.setMode?.('hexagons')
@@ -269,12 +268,12 @@ export class MixedGroupBag {
     const segs = this.#segsFor(id)
     this.#lastOpenedSegments = null   // fresh session — nothing opened from the list yet
 
-    // Don't capture a launcher/dashboard segment as the return target — return
+    // Don't capture a launcher segment as the return target — return
     // to the last REAL page so leaving a group page lands somewhere meaningful.
     const captureReturn = (): void => {
       const cur = this.#currentSegments()
       const onChrome = (cur.length === 1 && !!this.#registry.get(cur[0]))
-        || cur[0]?.startsWith('agg-') || cur[0]?.startsWith('dash-')
+        || cur[0]?.startsWith('agg-')
       if (!onChrome) this.#returnSegments = cur
     }
 
@@ -312,16 +311,13 @@ export class MixedGroupBag {
   }
 
   /** Whether it's safe to NAVIGATE into a group page right now. False when
-   *  another member surface owns the screen (a render view like website, or
-   *  the dashboard bag) — a background refresh must update in place, never
-   *  eject the participant onto a launcher page. Games/help overlays keep the
-   *  lineage on the group page, so they read as active (the
-   *  reconcile-in-place branch), not here. */
+   *  another member surface owns the screen (a render view like website) — a
+   *  background refresh must update in place, never eject the participant onto
+   *  a launcher page. Games/help overlays keep the lineage on the group page,
+   *  so they read as active (the reconcile-in-place branch), not here. */
   #canEnter(): boolean {
     const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
     if (vm?.mode && vm.mode !== 'hexagons') return false
-    const dash = get<DashboardLike>('@diamondcoreprocessor.com/DashboardBee')
-    if (dash?.isActive?.()) return false
     return true
   }
 

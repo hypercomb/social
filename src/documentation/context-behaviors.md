@@ -1,8 +1,16 @@
 # Context Behaviors — managing the tile you're standing IN
 
-**Status: DESIGN (Jaime, 2026-07-20). First slice — the `/dashboard`
-toggle — BUILT.** Companions: `meaning-loop.md` (passive behaviors +
-pheromone discovery), `shell-surfaces.md`, `pheromones.md`.
+**Status: DESIGN (Jaime, 2026-07-20).** Companions: `meaning-loop.md`
+(passive behaviors + pheromone discovery), `shell-surfaces.md`,
+`pheromones.md`.
+
+> **The `/dashboard` first slice is RETIRED (2026-07-26).** It was built as
+> the worked example of the toggle semantics below and is cited that way
+> throughout this doc — but the dashboard itself (bag, producer, answer modal,
+> launch group, slash command) is deleted; open questions now live in the
+> **feedback window** (`feedback-channel.md`). Read every `/dashboard`
+> reference here as an illustration of the RULE, not as a live surface. The
+> rule stands and applies to the next behavior that needs it.
 
 ## The gap, verbatim
 
@@ -79,12 +87,13 @@ the questions — not that anything starts happening.
 
 ## Rollout
 
-1. **DONE** — `/dashboard` toggle semantics (dashboard/dashboard.queen.ts;
-   dev shell live, web needs the next essentials deploy).
+1. **RETIRED** — `/dashboard` toggle semantics shipped and were then removed
+   with the dashboard itself (2026-07-26). The semantics are the keeper; the
+   next behavior that manages the current context inherits them.
 2. Manage-context entry (shortcut + icon) + the feature-tile flatten
    (read-time projection from the context's decorations).
 3. Beehaviors panel reach selector: this tile / this context / whole
    hive — reusing the pheromone panel's reach vocabulary.
-4. Migrate website + dashboard availability onto root/context-scope
+4. Migrate website availability onto root/context-scope
    deposits (meaning-loop Phase 2 — the features toggle becomes a pure
    pheromone deposit).

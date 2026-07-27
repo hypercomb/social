@@ -36,6 +36,14 @@ export type SentinelInstallResult = {
   files: SentinelFile[]
 }
 
+/** One host's deploy chain, as DCP reports it. `revisions` is every published
+ *  version of that host's package; `activeRootSig` names the one in effect. */
+export type SentinelRevisionGroup = {
+  domain: string
+  activeRootSig: string
+  revisions: { rootSig: string; label: string; deployedAt?: string }[]
+}
+
 export type SentinelSyncResult = {
   syncSig: string
   enabledBees: string[]
@@ -187,6 +195,54 @@ export class SentinelBridge {
   }
 
   /**
+   * The deploy chains DCP holds — every published revision per host, plus which
+   * one is active. Read-only: this side renders a list it has no way to forge,
+   * because the manifests, the trusted-domain list and the active pick all live
+   * on DCP's origin. Optionally narrowed to one host.
+   *
+   * Resolves to an empty list when DCP has nothing (or is unreachable), so a
+   * caller can always treat "no installer" and "no revisions" the same way.
+   */
+  async revisions(domain?: string): Promise<SentinelRevisionGroup[]> {
+    const rid = this.#nextRid()
+    return new Promise((resolve) => {
+      this.#pending.set(rid, {
+        resolve: (v: SentinelRevisionGroup[]) => resolve(Array.isArray(v) ? v : []),
+        reject: () => resolve([]),
+      })
+      try {
+        this.#port.postMessage({ type: 'revisions', rid, domain })
+      } catch {
+        this.#pending.delete(rid)
+        resolve([])
+      }
+    })
+  }
+
+  /**
+   * Ask DCP to make a published revision the active one for a host. This origin
+   * never writes that pick — it cannot: `active.json` and the sync path that
+   * honours it are DCP's, and DCP re-checks that the sig really is one of that
+   * host's deployed roots before honouring the request. Resolves true when the
+   * switch landed.
+   */
+  async useRevision(domain: string, rootSig: string): Promise<boolean> {
+    const rid = this.#nextRid()
+    return new Promise((resolve) => {
+      this.#pending.set(rid, {
+        resolve: (v: boolean) => resolve(v === true),
+        reject: () => resolve(false),
+      })
+      try {
+        this.#port.postMessage({ type: 'use-revision', rid, domain, rootSig })
+      } catch {
+        this.#pending.delete(rid)
+        resolve(false)
+      }
+    })
+  }
+
+  /**
    * Adopt-by-signature: ask DCP which domain(s) can serve a signature. The
    * installer is only the messenger — it returns the trusted domain source-
    * order; THIS origin then interprets the location (`<domain>/<sig>`) and
@@ -297,6 +353,20 @@ export class SentinelBridge {
         const pending = this.#pending.get(rid)
         this.#pending.delete(rid)
         pending?.resolve(msg.ok === true ? (msg.rootSig ?? null) : null)
+        break
+      }
+
+      case 'revisions-result': {
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        pending?.resolve(msg.ok === true ? (msg.groups ?? []) : [])
+        break
+      }
+
+      case 'use-revision-result': {
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        pending?.resolve(msg.ok === true)
         break
       }
 

@@ -180,6 +180,45 @@ $steel: rgb(126, 182, 214);
 
   // bug reports read in a warmer "needs attention" tone
   .fv-row.issue & { color: rgba(240, 176, 92, 0.9); }
+  // an open question is waiting on the participant — full steel, no dimming
+  .fv-row.question & { color: rgba($steel, 1); }
+}
+
+// A question is the one row that asks something OF you: a left rule marks it
+// out of the stream without turning it into a different widget.
+.fv-row.question {
+  border-left: 2px solid rgba($steel, 0.65);
+  background: rgba($steel, 0.05);
+}
+
+// A reply is news FOR you — same addressed-to-you left rule, softer wash.
+.fv-row.reply {
+  border-left: 2px solid rgba($steel, 0.4);
+  background: rgba($steel, 0.03);
+
+  .fv-icon { color: rgba($steel, 0.9); }
+}
+
+// The quoted original above a reply's text — which of your items it answers.
+.fv-quote {
+  margin: 0 0 0.15rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: rgba(206, 224, 240, 0.5);
+  border-left: 2px solid rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Reply + Resolve stack on rows that carry both.
+.fv-row-actions {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 
 .fv-body {
@@ -208,12 +247,67 @@ $steel: rgb(126, 182, 214);
   color: rgba(226, 235, 244, 0.4);
 }
 
+// Who the item is from. Leads the meta row — the panel's whole point is that
+// you can tell at a glance.
+.fv-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(206, 224, 240, 0.72);
+
+  .mat-sym { font-family: 'Material Symbols Outlined'; font-size: 0.8rem; line-height: 1; }
+  &.anon { font-style: italic; color: rgba(226, 235, 244, 0.32); }
+}
+
+// The route doubles as a jump to the tile the item is about.
 .fv-route {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 12rem;
   color: rgba($steel, 0.7);
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 150ms ease;
+
+  &:hover { color: rgba($steel, 1); text-decoration: underline; }
+}
+
+// ── inline answer (what the QA modal used to be) ──
+.fv-answer-text {
+  margin-top: 0.35rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #eef3f8;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  padding: 0.5rem 0.6rem;
+  resize: vertical;
+  min-height: 3.2rem;
+  outline: none;
+  transition: border-color 150ms ease, background 150ms ease;
+
+  &::placeholder { color: rgba(226, 235, 244, 0.35); }
+  &:focus {
+    border-color: rgba($steel, 0.6);
+    background: rgba($steel, 0.06);
+  }
+}
+
+.fv-answer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.35rem;
 }
 
 .fv-resolve {
@@ -257,6 +351,42 @@ $steel: rgb(126, 182, 214);
   background: rgba($steel, 0.1);
   border: 1px solid rgba($steel, 0.28);
   border-radius: 7px;
+}
+
+// ── identity (required before anything is sent) ──
+.fv-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fv-name-label {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  color: rgba(206, 224, 240, 0.55);
+}
+
+.fv-name-input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 0.8rem;
+  color: #eef3f8;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  outline: none;
+  transition: border-color 150ms ease, background 150ms ease;
+
+  &::placeholder { color: rgba(226, 235, 244, 0.35); }
+  &:focus {
+    border-color: rgba($steel, 0.6);
+    background: rgba($steel, 0.05);
+  }
+  // A refused send lights the field rather than throwing a dialog.
+  &.missing { border-color: rgba(240, 140, 140, 0.75); }
 }
 
 .fv-segmented {

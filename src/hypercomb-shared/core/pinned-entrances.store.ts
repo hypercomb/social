@@ -16,7 +16,7 @@
 // copied onto the pin, never inferred by walking the tree (scope is declared,
 // see documentation and the application-scope rules). Today the declared
 // cascading capability is the typed file dropbox; visual bees (website,
-// dashboard, …) are node-local, so their pins are strictly per-page.
+// …) are node-local, so their pins are strictly per-page.
 //
 // A pin is a
 // personal navigation arrangement, not content: like the hide list and the

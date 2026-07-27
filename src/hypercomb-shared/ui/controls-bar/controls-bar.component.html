@@ -212,7 +212,8 @@
              flips an item's enabled state instead of running its action. -->
         <div class="controls-rows" [class.editing]="editMode()">
           <!-- SCROLLABLE icon list — EVERY control except the two footer
-               actions, in one continuous run. Pin and home lead it on the left
+               actions, in one continuous run. The tour bee, pin and home lead
+               it on the left
                rail (they used to be pinned above it, which split the rail into
                two stacks and left the scrollbar as a stub in the middle); now
                the whole upper rail is one list and one scroll region, with only
@@ -226,6 +227,17 @@
                [class.drag-scrolling]="dragScrolling()"
                (pointerdown)="onListDragStart($event)">
             @if (dockSide() === 'left') {
+              <!-- BEE leads the rail — the way in for someone who has just
+                   arrived: it starts the guided beeing tour (the same tour
+                   /tutorial runs). It sits above pin because "how does this
+                   work?" comes before any control. -->
+              <button class="ctl-btn rail-tutorial"
+                      (click)="startTutorial()"
+                      [attr.aria-label]="'controls.tutorial' | t"
+                      [title]="'controls.tutorial' | t"
+                      data-ctrl-id="tutorial">
+                <span class="mat-sym">emoji_nature</span>
+              </button>
               <!-- PIN leads the list so the view-lock toggle is the first thing
                    reachable. Its active (view-locked) cue is pure CSS — accent
                    colour + a solid chip — because macOS/Safari does not reliably

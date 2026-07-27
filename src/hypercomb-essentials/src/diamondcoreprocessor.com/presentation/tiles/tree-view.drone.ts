@@ -23,14 +23,18 @@
 
 import { Drone, EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import {
-  layoutTree, limbColor, clipLabel, RING_GAP,
+  layoutTree, limbColor, clipLabel, RING_GAP, ROW_GAP, ROW_GAP_ICONS,
   type TreeLayout, type TreeNode, type PlacedNode,
 } from './tree-layout.js'
+import {
+  TreeIconCache, HEX_CLIP_POINTS, LEAF_CLIP_PATH,
+  hexOutline, leafOutline, leafMidrib, iconSize, nodeHeight, type IconStore,
+} from './tree-icons.js'
 import { walkTree, expandNodes, type TreeRoot, type WalkHistory, type WalkStore } from './tree-walk.js'
 import {
-  loadStencils, saveStencil, deleteStencil, newStencil, withCall, withoutCall, isValidStencilName,
-  type Stencil, type StencilCatalog, type StencilStore,
-} from './tree-stencil.js'
+  loadInsights, saveInsight, deleteInsight, newInsight, withCall, withoutCall, isValidInsightName,
+  type Insight, type InsightCatalog, type InsightStore,
+} from './tree-insight.js'
 
 export const TREE_VIEW = 'tree'
 
@@ -92,13 +96,17 @@ type Mount = {
   notice: HTMLDivElement
   rail: HTMLDivElement
   filterInput: HTMLInputElement
-  stencilChip: HTMLDivElement
-  stencilMenu: HTMLDivElement
+  insightChip: HTMLDivElement
+  insightMenu: HTMLDivElement
   ringsLabel: HTMLSpanElement
   zoomLabel: HTMLSpanElement
   crumb: HTMLDivElement
   nodeEls: Map<number, SVGGElement>
   ribbonEls: Map<number, SVGPathElement>
+  /** Flat hex fills, hidden once a node's picture lands on top. */
+  hexFills: Map<number, SVGPathElement>
+  iconEls: Map<number, SVGImageElement>
+  iconsButton: HTMLButtonElement
 }
 
 const svgEl = <K extends keyof SVGElementTagNameMap>(
@@ -159,9 +167,16 @@ export class TreeViewDrone extends Drone {
   #ceilingHit = false
   #noticeDismissed = false
   /** The named fragment being built, and every fragment on file. */
-  #stencil: Stencil | null = null
-  #stencils: StencilCatalog = {}
-  #stencilsLoaded = false
+  #insight: Insight | null = null
+  #insights: InsightCatalog = {}
+  #insightsLoaded = false
+  /** Draw nodes as hex tiles carrying their picture. Off falls back to plain
+   *  markers, which costs nothing at all — the escape hatch for a huge
+   *  branch or a slow machine. */
+  #icons = true
+  #iconCache = new TreeIconCache()
+  #iconTimer: ReturnType<typeof setTimeout> | null = null
+  #iconsLoading = false
 
   protected override deps = {
     lineage: '@hypercomb.social/Lineage',
@@ -215,6 +230,10 @@ export class TreeViewDrone extends Drone {
     if (this.#contextMenuBound) window.removeEventListener('contextmenu', this.#onContextMenu, true)
     if (this.#keyBound) window.removeEventListener('keydown', this.#onKeyDown, true)
     this.#teardown()
+    // Object URLs outlive the DOM that referenced them — revoke on dispose,
+    // not on teardown: the cache survives close/reopen, and that is the
+    // point of it.
+    this.#iconCache.dispose()
   }
 
   // ── public surface (the queen drives this) ─────────────────
@@ -248,84 +267,84 @@ export class TreeViewDrone extends Drone {
     this.#setRings(rings)
   }
 
-  // ── stencils — named cut-outs of the tree ──────────────────
+  // ── insights — named cut-outs of the tree ──────────────────
 
   /** Every fragment on file, for the queen's autocomplete and listing. */
-  async stencils(): Promise<StencilCatalog> {
-    await this.#loadStencils()
-    return this.#stencils
+  async insights(): Promise<InsightCatalog> {
+    await this.#loadInsights()
+    return this.#insights
   }
 
-  /** Re-open a named fragment: its root becomes the trunk and its called
+  /** Re-open a named insight: its root becomes the trunk and its called
    *  branches come back marked. */
-  async openStencil(name: string): Promise<boolean> {
-    await this.#loadStencils()
-    const stencil = this.#stencils[name]
-    if (!stencil) return false
-    // The stencil's name belongs on the chip, NOT on the trunk — stamping it
+  async openInsight(name: string): Promise<boolean> {
+    await this.#loadInsights()
+    const insight = this.#insights[name]
+    if (!insight) return false
+    // The insight's name belongs on the chip, NOT on the trunk — stamping it
     // over the root tile's own name would read as a rename, and the name is
     // the address.
     this.setRoot({
-      sig: stencil.root.sig,
-      segments: stencil.root.segments ? [...stencil.root.segments] : undefined,
-      label: stencil.root.label,
+      sig: insight.root.sig,
+      segments: insight.root.segments ? [...insight.root.segments] : undefined,
+      label: insight.root.label,
     })
-    this.#stencil = stencil
-    this.#paintStencilChip()
+    this.#insight = insight
+    this.#paintInsightChip()
     return true
   }
 
   /** Start a fragment at the current root. The name IS the starting point —
    *  you name it, then keep calling branches into it. */
-  async beginStencil(name: string): Promise<boolean> {
+  async beginInsight(name: string): Promise<boolean> {
     const clean = String(name ?? '').trim()
-    if (!isValidStencilName(clean)) return false
-    await this.#loadStencils()
-    const existing = this.#stencils[clean]
-    if (existing) { await this.openStencil(clean); return true }
-    const stencil = newStencil(clean, {
+    if (!isValidInsightName(clean)) return false
+    await this.#loadInsights()
+    const existing = this.#insights[clean]
+    if (existing) { await this.openInsight(clean); return true }
+    const insight = newInsight(clean, {
       sig: this.#root.sig,
       segments: this.#root.segments ? [...this.#root.segments] : undefined,
       label: this.#root.label,
     }, Date.now())
-    this.#stencil = stencil
-    this.#stencils = await saveStencil(this.#store() as StencilStore, stencil)
-    this.#paintStencilChip()
+    this.#insight = insight
+    this.#insights = await saveInsight(this.#store() as InsightStore, insight)
+    this.#paintInsightChip()
     this.#draw()
     EffectBus.emit('activity:log', {
-      message: this.#t('tree.stencil.began', 'Stencil “{name}” started — call branches into it', { name: clean }),
+      message: this.#t('tree.insight.began', 'Insight “{name}” started — call branches into it', { name: clean }),
       icon: '🌿',
     })
     return true
   }
 
-  #store(): (WalkStore & Partial<StencilStore>) | undefined {
-    return this.resolve<WalkStore & Partial<StencilStore>>('store')
+  #store(): (WalkStore & Partial<InsightStore>) | undefined {
+    return this.resolve<WalkStore & Partial<InsightStore>>('store')
   }
 
-  async #loadStencils(): Promise<void> {
-    if (this.#stencilsLoaded) return
+  async #loadInsights(): Promise<void> {
+    if (this.#insightsLoaded) return
     const store = this.#store()
     if (!store?.getPool) return
-    this.#stencils = await loadStencils(store as StencilStore)
-    this.#stencilsLoaded = true
+    this.#insights = await loadInsights(store as InsightStore)
+    this.#insightsLoaded = true
   }
 
   /** Call a branch into the current fragment (or drop it back out). */
   async #toggleCall(sig: string): Promise<void> {
-    if (!this.#stencil) { this.#promptStencilName(); return }
+    if (!this.#insight) { this.#promptInsightName(); return }
     const at = Date.now()
-    const next = this.#stencil.calls.includes(sig)
-      ? withoutCall(this.#stencil, sig, at)
-      : withCall(this.#stencil, sig, at)
-    this.#stencil = next
-    this.#stencils = await saveStencil(this.#store() as StencilStore, next)
-    this.#paintStencilChip()
+    const next = this.#insight.calls.includes(sig)
+      ? withoutCall(this.#insight, sig, at)
+      : withCall(this.#insight, sig, at)
+    this.#insight = next
+    this.#insights = await saveInsight(this.#store() as InsightStore, next)
+    this.#paintInsightChip()
     this.#draw()
   }
 
   #isCalled(sig: string): boolean {
-    return this.#stencil ? this.#stencil.calls.includes(sig) : false
+    return this.#insight ? this.#insight.calls.includes(sig) : false
   }
 
   #currentSegments(): string[] {
@@ -464,7 +483,7 @@ export class TreeViewDrone extends Drone {
     if (seq !== this.#walkSeq || this.#vm()?.mode !== TREE_VIEW) return
     this.#status(null)
     this.#draw()
-    // First paint of a fresh branch lands framed rather than at 1:1.
+    // First paint of a fresh branch lands insightd rather than at 1:1.
     if (this.#layout) this.#fit()
     this.#scheduleDeepen(80)
   }
@@ -481,7 +500,13 @@ export class TreeViewDrone extends Drone {
     this.#deepenTimer = setTimeout(() => { this.#deepenTimer = null; void this.#deepen() }, delay)
   }
 
-  readonly #onScroll = (): void => { this.#scheduleDeepen() }
+  /** Moving the view is the request for BOTH: more levels, and the pictures
+   *  of whatever just came into insight. Icons get the shorter delay — a tile
+   *  arriving blank and filling in a beat later is the thing you notice. */
+  readonly #onScroll = (): void => {
+    this.#scheduleDeepen()
+    if (this.#icons) this.#scheduleIcons(60)
+  }
 
   /** Unresolved nodes inside (or just outside) the viewport. Reads the LAID
    *  OUT nodes, so a folded-away subtree is never resolved — folding is also
@@ -603,9 +628,10 @@ export class TreeViewDrone extends Drone {
     stage.appendChild(svg)
     host.appendChild(stage)
 
-    const { toolbar, filterInput, stencilChip, stencilMenu, ringsLabel, zoomLabel, crumb } = this.#buildToolbar()
+    const { toolbar, filterInput, insightChip, insightMenu, ringsLabel, zoomLabel, crumb, iconsButton } =
+      this.#buildToolbar()
     host.appendChild(toolbar)
-    host.appendChild(stencilMenu)
+    host.appendChild(insightMenu)
 
     // z-index 3: above the sticky ring bar (2), below the toolbar (4) — the
     // ring bar spans the whole canvas width and would otherwise paint over
@@ -638,17 +664,19 @@ export class TreeViewDrone extends Drone {
 
     this.#mount = {
       host, stage, ringbar, svg, status, notice, rail, filterInput,
-      stencilChip, stencilMenu, ringsLabel, zoomLabel, crumb,
-      nodeEls: new Map(), ribbonEls: new Map(),
+      insightChip, insightMenu, ringsLabel, zoomLabel, crumb, iconsButton,
+      nodeEls: new Map(), ribbonEls: new Map(), hexFills: new Map(), iconEls: new Map(),
     }
     this.#setViewActive(true)
-    void this.#loadStencils().then(() => this.#paintStencilChip())
+    this.#paintIconsButton()
+    void this.#loadInsights().then(() => this.#paintInsightChip())
   }
 
   #buildToolbar(): {
     toolbar: HTMLDivElement; filterInput: HTMLInputElement
-    stencilChip: HTMLDivElement; stencilMenu: HTMLDivElement
+    insightChip: HTMLDivElement; insightMenu: HTMLDivElement
     ringsLabel: HTMLSpanElement; zoomLabel: HTMLSpanElement; crumb: HTMLDivElement
+    iconsButton: HTMLButtonElement
   } {
     const toolbar = div(
       `position:fixed;top:0;left:0;right:0;height:${TOOLBAR_H}px;z-index:4;box-sizing:border-box;` +
@@ -673,25 +701,38 @@ export class TreeViewDrone extends Drone {
     const zoomLabel = document.createElement('span')
     zoomLabel.style.cssText = `font-size:12px;color:${DIM};min-width:44px;text-align:center;`
 
-    // The stencil chip: the name of the fragment being cut, and the way to
+    // Pictures off is a real escape hatch, not a preference: a branch of
+    // thousands with a cold thumbnail pool is the one case where drawing
+    // tiles costs more than it tells you.
+    const iconsButton = this.#button('⬡', this.#t('tree.icons.toggle', 'Tile pictures'), () => {
+      this.#icons = !this.#icons
+      this.#paintIconsButton()
+      this.#draw()
+    })
+    // #button's hover handlers reset to the idle colours on leave; re-assert
+    // the on/off state afterwards so the toggle doesn't lose its lit look.
+    iconsButton.addEventListener('mouseleave', () => this.#paintIconsButton())
+
+    // The insight chip: the name of the fragment being cut, and the way to
     // start one. Sits ahead of the view controls because naming comes first.
-    const stencilChip = div(
+    const insightChip = div(
       'display:flex;align-items:center;gap:8px;flex:none;padding:5px 10px;border-radius:7px;' +
       `border:1px solid ${BORDER};background:${PANEL};cursor:pointer;max-width:260px;`,
     )
-    const stencilMenu = div(
+    const insightMenu = div(
       `position:fixed;top:${TOOLBAR_H + 4}px;z-index:6;display:none;min-width:220px;max-height:60vh;` +
       `overflow:auto;padding:6px;border-radius:9px;background:rgba(11,15,20,0.97);` +
       `border:1px solid ${BORDER_LIT};box-shadow:0 10px 30px rgba(0,0,0,0.55);`,
     )
 
     toolbar.append(
-      title, crumb, stencilChip, filterInput,
+      title, crumb, insightChip, filterInput,
       this.#group([
         this.#button('−', this.#t('tree.rings.fewer', 'Fewer rings'), () => this.#setRings(this.#rings - 1)),
         ringsLabel,
         this.#button('+', this.#t('tree.rings.more', 'More rings'), () => this.#setRings(this.#rings + 1)),
       ]),
+      this.#group([iconsButton]),
       this.#group([
         this.#button('－', this.#t('tree.zoom.out', 'Zoom out'), () => this.#setZoom(this.#zoom / 1.25)),
         zoomLabel,
@@ -701,7 +742,14 @@ export class TreeViewDrone extends Drone {
       this.#button('⬡ ' + this.#t('tree.exit', 'back to the hive'),
         this.#t('tree.exit', 'back to the hive'), () => this.#vm()?.setMode('hexagons'), true),
     )
-    return { toolbar, filterInput, stencilChip, stencilMenu, ringsLabel, zoomLabel, crumb }
+    return { toolbar, filterInput, insightChip, insightMenu, ringsLabel, zoomLabel, crumb, iconsButton }
+  }
+
+  #paintIconsButton(): void {
+    const button = this.#mount?.iconsButton
+    if (!button) return
+    button.style.color = this.#icons ? STEEL : DIM
+    button.style.background = this.#icons ? 'rgba(126,182,214,0.12)' : 'transparent'
   }
 
   #group(children: HTMLElement[]): HTMLDivElement {
@@ -756,12 +804,114 @@ export class TreeViewDrone extends Drone {
     }
     this.#status(null)
 
-    const layout = layoutTree(this.#nodes, this.#collapsed)
+    const layout = layoutTree(this.#nodes, this.#collapsed, this.#icons ? ROW_GAP_ICONS : ROW_GAP)
     this.#layout = layout
     this.#paintRingBar(layout)
     this.#paintCanvas(layout)
     this.#applyEmphasis()
     this.#paintRail()
+    if (this.#icons) this.#scheduleIcons()
+  }
+
+  // ── tile pictures ──────────────────────────────────────────
+  //
+  // Same discipline as the deepening: only what is on screen is fetched, and
+  // everything is cached by signature so a shared picture is read once for
+  // the whole tree. A node without a picture keeps its limb-coloured hex, so
+  // nothing moves when one arrives — pictures fade in, the layout does not
+  // reflow.
+
+  #scheduleIcons(delay = 90): void {
+    if (this.#iconTimer) clearTimeout(this.#iconTimer)
+    this.#iconTimer = setTimeout(() => { this.#iconTimer = null; void this.#loadIcons() }, delay)
+  }
+
+  async #loadIcons(): Promise<void> {
+    if (!this.#icons || this.#iconsLoading) return
+    const mount = this.#mount
+    const layout = this.#layout
+    if (!mount || !layout) return
+    const store = this.resolve<IconStore>('store')
+    if (!store?.getResource) return
+
+    // Paint from cache FIRST, every pass. Fetching and painting are separate
+    // concerns: a node whose picture some other tile already fetched has
+    // nothing to load but everything to show, and a repaint clears the icon
+    // elements while the cache keeps the pictures. Driving paint off "did
+    // this load return new bytes" left both cases blank.
+    this.#applyCachedIcons()
+
+    const wanted = this.#iconsInView(layout, mount).slice(0, this.#iconCache.capacity)
+    if (wanted.length === 0) return
+
+    this.#iconsLoading = true
+    try {
+      await Promise.all(
+        wanted.map(node => this.#iconCache.load(node.propsSig as string, store).catch(() => false)),
+      )
+    } finally {
+      this.#iconsLoading = false
+    }
+    if (this.#vm()?.mode !== TREE_VIEW || !this.#mount) return
+    this.#applyCachedIcons()
+    this.#scheduleIcons(40)
+  }
+
+  /** Give every drawn node whose picture is in hand an image element. Cheap
+   *  and idempotent — nodes that already have one are skipped. */
+  #applyCachedIcons(): void {
+    const mount = this.#mount
+    const layout = this.#layout
+    if (!mount || !layout) return
+    for (const node of layout.nodes) {
+      if (!node.propsSig || mount.iconEls.has(node.id)) continue
+      if (this.#iconCache.iconFor(node.propsSig)) this.#applyIcon(node)
+    }
+  }
+
+  #iconsInView(layout: TreeLayout, mount: Mount): PlacedNode[] {
+    const z = this.#zoom
+    const left = mount.host.scrollLeft - 200
+    const right = mount.host.scrollLeft + mount.host.clientWidth + 200
+    const top = mount.host.scrollTop - 200
+    const bottom = mount.host.scrollTop + mount.host.clientHeight + 200
+
+    const out: PlacedNode[] = []
+    for (const node of layout.nodes) {
+      if (!node.propsSig || this.#iconCache.settled(node.propsSig)) continue
+      const x = node.x * z
+      const y = node.y * z + TOP_OFFSET + this.#topSlack
+      if (x < left || x > right || y < top || y > bottom) continue
+      out.push(node)
+    }
+    return out
+  }
+
+  /** Swap a resolved picture into an already-drawn node. */
+  #applyIcon(node: PlacedNode): void {
+    const mount = this.#mount
+    if (!mount) return
+    const url = this.#iconCache.iconFor(node.propsSig)
+    if (!url) return
+    const group = mount.nodeEls.get(node.id)
+    const fill = mount.hexFills.get(node.id)
+    if (!group || !fill) return
+
+    const isLeaf = node.childCount === 0
+    const size = iconSize(node.depth, isLeaf)
+    const height = nodeHeight(size, isLeaf)
+    const image = svgEl('image', {
+      x: node.x - size / 2, y: node.y - height / 2,
+      width: size, height,
+      preserveAspectRatio: 'xMidYMid slice',
+      'clip-path': isLeaf ? 'url(#hc-tree-leaf)' : 'url(#hc-tree-hex)',
+    })
+    image.setAttribute('href', url)
+    image.style.pointerEvents = 'none'
+    // Behind the outline, in front of the flat fill it replaces.
+    fill.style.opacity = '0'
+    group.insertBefore(image, fill.nextSibling)
+    mount.iconEls.set(node.id, image)
   }
 
   #paintRingBar(layout: TreeLayout): void {
@@ -807,6 +957,19 @@ export class TreeViewDrone extends Drone {
     svg.replaceChildren()
     mount.nodeEls.clear()
     mount.ribbonEls.clear()
+    mount.hexFills.clear()
+    mount.iconEls.clear()
+
+    // The tile silhouette, declared once and referenced by every picture.
+    const defs = svgEl('defs')
+    const hexClip = svgEl('clipPath', { id: 'hc-tree-hex', clipPathUnits: 'objectBoundingBox' })
+    hexClip.appendChild(svgEl('polygon', { points: HEX_CLIP_POINTS }))
+    defs.appendChild(hexClip)
+    const leafClip = svgEl('clipPath', { id: 'hc-tree-leaf', clipPathUnits: 'objectBoundingBox' })
+    leafClip.appendChild(svgEl('path', { d: LEAF_CLIP_PATH }))
+    defs.appendChild(leafClip)
+    svg.appendChild(defs)
+
     svg.setAttribute('viewBox', `0 0 ${layout.width} ${layout.height}`)
     svg.setAttribute('width', String(layout.width * z))
     svg.setAttribute('height', String(layout.height * z))
@@ -860,12 +1023,21 @@ export class TreeViewDrone extends Drone {
     const color = limbColor(node.hue, node.depth)
     const hasChildren = node.childCount > 0
     const called = this.#isCalled(node.sig)
+    // Half-width of whatever stands at the node — hex tile or plain marker.
+    // Every ring, dot, label and hit box is measured from this, so the two
+    // modes stay in proportion without a second set of numbers.
+    // A childless node is the tip of the branch — it wears a leaf, not a
+    // hexagon. The hex says "there is structure inside me"; a leaf is
+    // exactly the node for which that is not true.
+    const isLeaf = node.childCount === 0
+    const size = this.#icons ? iconSize(node.depth, isLeaf) : node.radius * 2
+    const markerExtent = size / 2
 
     // A branch called into the fragment wears a dashed steel ring — dashed so
     // it never reads as the solid selection halo it may sit inside.
     if (called) {
       group.appendChild(svgEl('circle', {
-        cx: node.x, cy: node.y, r: node.radius + 3.5,
+        cx: node.x, cy: node.y, r: markerExtent + 4.5,
         fill: 'none', stroke: STEEL, 'stroke-width': 1.5,
         'stroke-dasharray': '2 3', opacity: 0.95,
       }))
@@ -874,32 +1046,59 @@ export class TreeViewDrone extends Drone {
     // Selection halo, drawn first so it reads as a glow behind the marker.
     if (this.#selected === node.id) {
       group.appendChild(svgEl('circle', {
-        cx: node.x, cy: node.y, r: node.radius + 6,
+        cx: node.x, cy: node.y, r: markerExtent + 7,
         fill: 'none', stroke: STEEL, 'stroke-width': 1.5, opacity: 0.9,
       }))
     }
 
-    // Marker: a filled bud on a limb, hollow when the subtree is folded away.
-    const marker = svgEl('circle', {
-      cx: node.x, cy: node.y, r: node.radius,
-      fill: node.collapsed ? INK : color,
-      stroke: color,
-      'stroke-width': node.collapsed ? 2 : 0,
-    })
-    group.appendChild(marker)
+    // Marker. With icons on, every node is a hex TILE — the same shape it is
+    // on the canvas — filled with its limb colour until its picture arrives.
+    // Reserving the tile whether or not a picture exists is what keeps the
+    // layout still: an icon landing later never shifts a label.
+    if (this.#icons) {
+      const silhouette = isLeaf
+        ? leafOutline(node.x, node.y, size)
+        : hexOutline(node.x, node.y, size)
+      const fill = svgEl('path', {
+        d: silhouette,
+        fill: node.collapsed ? INK : color,
+        opacity: node.collapsed ? 1 : 0.9,
+      })
+      group.appendChild(fill)
+      mount.hexFills.set(node.id, fill)
+      // Outline last so it sits over whichever of fill/picture is showing.
+      group.appendChild(svgEl('path', {
+        d: silhouette,
+        fill: 'none', stroke: color, 'stroke-width': node.collapsed ? 2 : 1.25,
+        'stroke-linejoin': 'round',
+      }))
+      if (isLeaf) {
+        group.appendChild(svgEl('path', {
+          d: leafMidrib(node.x, node.y, size),
+          stroke: INK, 'stroke-width': 1, opacity: 0.45, fill: 'none', 'stroke-linecap': 'round',
+        }))
+      }
+    } else {
+      group.appendChild(svgEl('circle', {
+        cx: node.x, cy: node.y, r: node.radius,
+        fill: node.collapsed ? INK : color,
+        stroke: color,
+        'stroke-width': node.collapsed ? 2 : 0,
+      }))
+    }
 
     // A node the walk stopped at still has hidden depth — mark it honestly.
     if (!node.walked && !node.collapsed) {
       group.appendChild(svgEl('circle', {
-        cx: node.x + node.radius + 7, cy: node.y, r: 1.6, fill: color, opacity: 0.8,
+        cx: node.x + markerExtent + 7, cy: node.y, r: 1.6, fill: color, opacity: 0.8,
       }))
       group.appendChild(svgEl('circle', {
-        cx: node.x + node.radius + 12, cy: node.y, r: 1.6, fill: color, opacity: 0.5,
+        cx: node.x + markerExtent + 12, cy: node.y, r: 1.6, fill: color, opacity: 0.5,
       }))
     }
 
     const label = svgEl('text', {
-      x: node.x + node.radius + (node.walked ? 9 : 18) + (called ? 4 : 0),
+      x: node.x + markerExtent + (node.walked ? 9 : 18) + (called ? 4 : 0),
       y: node.y + 4,
       fill: called ? STEEL : (node.depth === 0 ? TEXT : color),
       'font-size': node.depth === 0 ? 15 : 13,
@@ -918,7 +1117,7 @@ export class TreeViewDrone extends Drone {
     // the incoming limb and the previous column's label already are.
     if (node.collapsed) {
       const count = svgEl('text', {
-        x: node.x - node.radius - 6, y: node.y + 3.5,
+        x: node.x - markerExtent - 6, y: node.y + 3.5,
         fill: color, 'font-size': 10, 'font-weight': 600, 'text-anchor': 'end',
         'paint-order': 'stroke', stroke: INK, 'stroke-width': 3, 'stroke-linejoin': 'round',
       })
@@ -928,9 +1127,10 @@ export class TreeViewDrone extends Drone {
     }
 
     // Generous invisible hit area — the markers are small by design.
+    const hitHeight = Math.max(26, nodeHeight(size, isLeaf) + 4)
     const hit = svgEl('rect', {
-      x: node.x - node.radius - 26, y: node.y - 13,
-      width: node.radius + 26 + 190, height: 26,
+      x: node.x - markerExtent - 10, y: node.y - hitHeight / 2,
+      width: markerExtent + 10 + 190, height: hitHeight,
       fill: 'transparent',
     })
     group.appendChild(hit)
@@ -1053,7 +1253,7 @@ export class TreeViewDrone extends Drone {
   }
 
   /**
-   * Frame the branch ACROSS: every ring on screen at once, scrolling for
+   * Fit the branch ACROSS: every ring on screen at once, scrolling for
    * depth. Fitting both axes is the obvious move and the wrong one — a real
    * hive is far taller than it is wide, so height-fitting collapses the whole
    * tree to an illegible smear. The canvas is meant to be bigger than the
@@ -1100,11 +1300,11 @@ export class TreeViewDrone extends Drone {
     const mount = this.#mount
     if (!mount) return
     const target = e.target as Element | null
-    // Any press outside the stencil menu closes it, including one that goes
+    // Any press outside the insight menu closes it, including one that goes
     // on to pan the canvas.
-    if (mount.stencilMenu.style.display === 'block' &&
-        !mount.stencilMenu.contains(target) && !mount.stencilChip.contains(target)) {
-      mount.stencilMenu.style.display = 'none'
+    if (mount.insightMenu.style.display === 'block' &&
+        !mount.insightMenu.contains(target) && !mount.insightChip.contains(target)) {
+      mount.insightMenu.style.display = 'none'
     }
     const onCanvas = target === mount.svg || target === mount.stage || target === mount.host
     if (!onCanvas && e.button !== 1) return
@@ -1190,19 +1390,19 @@ export class TreeViewDrone extends Drone {
 
     // Calling comes first — it is the point of having a node selected while a
     // fragment is open.
-    if (this.#stencil) {
+    if (this.#insight) {
       const called = this.#isCalled(node.sig)
       actions.appendChild(this.#railButton(
         called
-          ? this.#t('tree.action.uncall', 'Remove from “{name}”', { name: this.#stencil.name })
-          : this.#t('tree.action.call', 'Call into “{name}”', { name: this.#stencil.name }),
+          ? this.#t('tree.action.uncall', 'Remove from “{name}”', { name: this.#insight.name })
+          : this.#t('tree.action.call', 'Call into “{name}”', { name: this.#insight.name }),
         () => void this.#toggleCall(node.sig),
         !called,
       ))
     } else {
       actions.appendChild(this.#railButton(
         this.#t('tree.action.nameFragment', 'Name a fragment to call this into'),
-        () => this.#promptStencilName(),
+        () => this.#promptInsightName(),
       ))
     }
 
@@ -1313,117 +1513,117 @@ export class TreeViewDrone extends Drone {
 
   // ── odds and ends ──────────────────────────────────────────
 
-  // ── stencil chrome ─────────────────────────────────────────
+  // ── insight chrome ─────────────────────────────────────────
 
-  #paintStencilChip(): void {
+  #paintInsightChip(): void {
     const mount = this.#mount
     if (!mount) return
-    const chip = mount.stencilChip
+    const chip = mount.insightChip
     chip.replaceChildren()
     chip.onclick = null
 
-    const saved = Object.keys(this.#stencils).length
+    const saved = Object.keys(this.#insights).length
 
-    if (!this.#stencil) {
+    if (!this.#insight) {
       const label = div(`font-size:12px;color:${DIM};white-space:nowrap;`)
-      label.textContent = '✦ ' + this.#t('tree.stencil.start', 'name this view')
+      label.textContent = '✦ ' + this.#t('tree.insight.start', 'name this view')
       chip.appendChild(label)
       chip.style.borderColor = BORDER
-      chip.onclick = () => this.#promptStencilName()
+      chip.onclick = () => this.#promptInsightName()
     } else {
       const dot = div(`width:7px;height:7px;border-radius:50%;flex:none;background:${STEEL};`)
       const label = div(
         `font-size:12px;font-weight:600;color:${TEXT};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`,
       )
-      label.textContent = this.#stencil.name
+      label.textContent = this.#insight.name
       const count = div(`font-size:11px;color:${DIM};flex:none;`)
       count.textContent = this.#plural(
-        'tree.stencil.calls', this.#stencil.calls.length, '{n} branch', '{n} branches')
+        'tree.insight.calls', this.#insight.calls.length, '{n} branch', '{n} branches')
       chip.append(dot, label, count)
       chip.style.borderColor = BORDER_LIT
-      chip.onclick = () => this.#toggleStencilMenu()
+      chip.onclick = () => this.#toggleInsightMenu()
     }
 
-    if (saved > 0 && !this.#stencil) {
+    if (saved > 0 && !this.#insight) {
       const open = div(`font-size:11px;color:${FAINT};flex:none;border-left:1px solid ${BORDER};padding-left:8px;`)
       open.textContent = String(saved)
-      open.title = this.#t('tree.stencil.saved', 'Saved stencils')
+      open.title = this.#t('tree.insight.saved', 'Saved insights')
       chip.appendChild(open)
-      chip.onclick = () => this.#toggleStencilMenu()
+      chip.onclick = () => this.#toggleInsightMenu()
     }
   }
 
   /** Naming is the first move, so the chip becomes the field in place —
    *  no dialog, no mode, type and press enter. */
-  #promptStencilName(): void {
+  #promptInsightName(): void {
     const mount = this.#mount
     if (!mount) return
-    const chip = mount.stencilChip
+    const chip = mount.insightChip
     chip.replaceChildren()
     chip.onclick = null
     chip.style.borderColor = BORDER_LIT
 
     const input = document.createElement('input')
     input.type = 'text'
-    input.placeholder = this.#t('tree.stencil.placeholder', 'name this fragment…')
+    input.placeholder = this.#t('tree.insight.placeholder', 'name this insight…')
     input.style.cssText = `all:unset;width:180px;font-size:12px;color:${TEXT};`
     const commit = (): void => {
       const value = input.value.trim()
-      if (!value) { this.#paintStencilChip(); return }
-      if (!isValidStencilName(value)) {
+      if (!value) { this.#paintInsightChip(); return }
+      if (!isValidInsightName(value)) {
         EffectBus.emit('activity:log', {
-          message: this.#t('tree.stencil.badName', 'Stencil names are letters, numbers, spaces, . _ -'),
+          message: this.#t('tree.insight.badName', 'Insight names are letters, numbers, spaces, . _ -'),
           icon: '✦',
         })
         return
       }
-      void this.beginStencil(value)
+      void this.beginInsight(value)
     }
     input.addEventListener('keydown', (e) => {
       e.stopPropagation()
       if (e.key === 'Enter') { e.preventDefault(); commit() }
-      else if (e.key === 'Escape') { e.preventDefault(); this.#paintStencilChip() }
+      else if (e.key === 'Escape') { e.preventDefault(); this.#paintInsightChip() }
     })
-    input.addEventListener('blur', () => { if (!this.#stencil) this.#paintStencilChip() })
+    input.addEventListener('blur', () => { if (!this.#insight) this.#paintInsightChip() })
     chip.appendChild(input)
     input.focus()
   }
 
-  #toggleStencilMenu(): void {
+  #toggleInsightMenu(): void {
     const mount = this.#mount
     if (!mount) return
-    const menu = mount.stencilMenu
+    const menu = mount.insightMenu
     if (menu.style.display === 'block') { menu.style.display = 'none'; return }
 
     menu.replaceChildren()
-    const names = Object.keys(this.#stencils).sort()
+    const names = Object.keys(this.#insights).sort()
 
     const header = div(`font-size:10px;letter-spacing:0.14em;color:${FAINT};padding:6px 8px;`)
-    header.textContent = this.#t('tree.stencil.header', 'STENCILS')
+    header.textContent = this.#t('tree.insight.header', 'INSIGHTS')
     menu.appendChild(header)
 
     if (names.length === 0) {
       menu.appendChild(div(`font-size:12px;color:${DIM};padding:6px 8px;`,
-        this.#t('tree.stencil.none', 'No fragments yet.')))
+        this.#t('tree.insight.none', 'No insights yet.')))
     }
 
     for (const name of names) {
-      const stencil = this.#stencils[name]
-      const active = this.#stencil?.name === name
+      const insight = this.#insights[name]
+      const active = this.#insight?.name === name
       const row = div(
         `display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:5px;cursor:pointer;` +
         `font-size:12px;color:${active ? TEXT : DIM};` + (active ? 'background:rgba(126,182,214,0.12);' : ''),
       )
       const label = div('flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', name)
-      const count = div(`font-size:11px;color:${FAINT};flex:none;`, String(stencil.calls.length))
+      const count = div(`font-size:11px;color:${FAINT};flex:none;`, String(insight.calls.length))
       const remove = document.createElement('button')
       remove.type = 'button'
       remove.textContent = '×'
-      remove.title = this.#t('tree.stencil.delete', 'Forget this stencil')
+      remove.title = this.#t('tree.insight.delete', 'Forget this insight')
       remove.style.cssText = `all:unset;cursor:pointer;flex:none;color:${FAINT};padding:0 4px;`
       remove.addEventListener('click', (e) => {
         e.stopPropagation()
-        void this.#forgetStencil(name)
+        void this.#forgetInsight(name)
       })
       row.append(label, count, remove)
       row.addEventListener('mouseenter', () => { row.style.background = 'rgba(126,182,214,0.12)' })
@@ -1432,7 +1632,7 @@ export class TreeViewDrone extends Drone {
       })
       row.addEventListener('click', () => {
         menu.style.display = 'none'
-        void this.openStencil(name)
+        void this.openInsight(name)
       })
       menu.appendChild(row)
     }
@@ -1440,25 +1640,25 @@ export class TreeViewDrone extends Drone {
     const fresh = div(
       `font-size:12px;color:${STEEL};padding:7px 8px;border-top:1px solid ${BORDER};` +
       'margin-top:4px;cursor:pointer;',
-      '✦ ' + this.#t('tree.stencil.new', 'Start a new fragment'),
+      '✦ ' + this.#t('tree.insight.new', 'Start a new insight'),
     )
     fresh.addEventListener('click', () => {
       menu.style.display = 'none'
-      this.#stencil = null
-      this.#promptStencilName()
+      this.#insight = null
+      this.#promptInsightName()
     })
     menu.appendChild(fresh)
 
-    const box = mount.stencilChip.getBoundingClientRect()
+    const box = mount.insightChip.getBoundingClientRect()
     menu.style.left = `${Math.round(box.left)}px`
     menu.style.display = 'block'
   }
 
-  async #forgetStencil(name: string): Promise<void> {
-    this.#stencils = await deleteStencil(this.#store() as StencilStore, name)
-    if (this.#stencil?.name === name) this.#stencil = null
-    this.#paintStencilChip()
-    if (this.#mount) this.#mount.stencilMenu.style.display = 'none'
+  async #forgetInsight(name: string): Promise<void> {
+    this.#insights = await deleteInsight(this.#store() as InsightStore, name)
+    if (this.#insight?.name === name) this.#insight = null
+    this.#paintInsightChip()
+    if (this.#mount) this.#mount.insightMenu.style.display = 'none'
     this.#draw()
   }
 
@@ -1536,6 +1736,7 @@ export class TreeViewDrone extends Drone {
   #teardown(): void {
     if (this.#refreshTimer) { clearTimeout(this.#refreshTimer); this.#refreshTimer = null }
     if (this.#deepenTimer) { clearTimeout(this.#deepenTimer); this.#deepenTimer = null }
+    if (this.#iconTimer) { clearTimeout(this.#iconTimer); this.#iconTimer = null }
     if (this.#mount) {
       this.#mount.host.removeEventListener('wheel', this.#onWheel)
       this.#mount.host.removeEventListener('pointerdown', this.#onPointerDown)

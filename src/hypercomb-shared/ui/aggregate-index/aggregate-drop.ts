@@ -108,6 +108,16 @@ export interface ReferencePayload {
  * want, since the marks are part of what the reference IS. `People(family)` and
  * `People(work)` are genuinely distinct references to one place.
  *
+ * ── The CALLER pulses ────────────────────────────────────────────────────────
+ *
+ * This writes and returns; it does NOT call `hypercomb.act()`. A pulse awaits
+ * every registered bee in turn and then dispatches `synchronize`, which repaints
+ * the whole hive — so it is priced per GESTURE, not per write. Pulsing in here
+ * made adding N selected tiles cost N+1 pulses and N+1 full repaints before the
+ * panel could even start refreshing, which is what made the Organizer's Add feel
+ * slow for work that is only a few milliseconds of OPFS. Every call site pulses
+ * once when its batch is done.
+ *
  * Returns the created tile name, or null if the write could not be made.
  */
 export const dropReferenceTile = async (
@@ -124,7 +134,16 @@ export const dropReferenceTile = async (
   if (!name) return null
 
   const payload: ReferencePayload = { targetSegments: [...item.segments] }
-  if (requiredMarks && requiredMarks.length) payload.requiredMarks = [...requiredMarks]
+  // Sorted, deduped, blanks dropped, and OMITTED when empty. This is a contract,
+  // not formatting: the record is content-addressed, so two references demanding
+  // the same things in a different order would otherwise mint different sigs and
+  // stop deduplicating, and an emptied demand has to be byte-identical to a
+  // reference that never carried one. `buildReferencePayload` in
+  // requires.queen.ts is the same rule; it cannot be imported here because it
+  // lives in essentials and shared may never import essentials — folding the two
+  // together needs it promoted to core.
+  const marks = [...new Set((requiredMarks ?? []).map(m => String(m ?? '').trim()).filter(Boolean))].sort()
+  if (marks.length) payload.requiredMarks = marks
 
   try {
     // The target's LINEAGE signature — its bag address, resolved the same way
@@ -142,7 +161,6 @@ export const dropReferenceTile = async (
     EffectBus.emit('decorations:changed', { segments: childSegments, op: 'append', sig: decorationSig })
 
     await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
-    await new hypercomb().act()
     return name
   } catch {
     return null

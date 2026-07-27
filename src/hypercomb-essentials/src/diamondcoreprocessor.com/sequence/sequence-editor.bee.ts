@@ -3,7 +3,7 @@
 // SequenceEditorBee — the interactive drop-target sequence CREATOR.
 //
 // `/sequence <name>` navigates the canvas into a hidden, blank layer (the
-// dashboard pattern: a content-addressed bag at a one-off `seq-<salt>`
+// hidden-bag pattern: a content-addressed bag at a one-off `seq-<salt>`
 // segment that no layer's `children` references, so it never appears as a
 // tile). On that clean grid:
 //

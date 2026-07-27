@@ -456,15 +456,18 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 }
 
 // ── header (shared toolwindow band) ──────────────────────
-// Same header geometry as every other docked tool window (tw.header). The old
-// grab-cursor + grip dots are gone: a full-height dock isn't dragged, it's
-// resized from its left edge like the pheromone panel.
+// Same header geometry as every other docked tool window (tw.header), and the
+// strip's drag handle: pull it off the right rail to float the panel, drop it
+// back within the edge snap zone to re-anchor.
 .cv2-dragbar {
   @include tw.header;
   background: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid rgba($steel, 0.25);
   border-radius: 0;
   user-select: none;
+  cursor: grab;
+  touch-action: none;
+  &:active { cursor: grabbing; }
 }
 
 .cv2-dragbar-title {
@@ -535,9 +538,10 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 
 // ── Mark rail ─────────────────────────────────────────────
 // The participant's icon palette, sitting above the note form. Compact
-// mode is a row of icon buttons (the pick applies to the note being
-// written); the "tune" button flips it into the palette editor where each
-// mark gets a MEANING (its name) and a ROLE (heading / list).
+// mode is a row of icon buttons (a click picks the mark for the note being
+// written, a drag drops it onto an existing row); the "tune" button flips
+// it into the palette editor where each mark gets a MEANING (its name) and
+// a ROLE (heading / list).
 .cv2-rail {
   display: flex;
   align-items: center;
@@ -583,6 +587,33 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
     color: var(--md-on-surface);
   }
   &:focus-visible { outline: 1px solid var(--md-secondary); outline-offset: 1px; }
+}
+
+// Rail icons are also drag sources (drop one on a row to mark that note),
+// so the pointer gesture must not be eaten by touch scrolling.
+.cv2-rail-mark {
+  touch-action: none;
+  cursor: grab;
+
+  &:active { cursor: grabbing; }
+}
+// The icon currently riding the pointer — dimmed in place so the ghost
+// reads as the thing being moved.
+.cv2-rail-mark.is-dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+
+// The drag ghost — a copy of the icon under the pointer. Centred on the
+// cursor and inert, so hit-testing sees the row underneath.
+.cv2-mark-ghost {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  font-size: 20px;
+  color: var(--md-on-surface-strong, var(--md-on-surface));
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 
 // The picked mark — what the next commit writes onto the note.
@@ -1042,6 +1073,7 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 // The mark glyph a row paints when the note carries an icon (the legacy
 // .hc-shape-glyph is the fallback for notes written before marks existed).
 .cv2-note-mark {
+  grid-column: 1;      // the glyph column, beside the text — never above it
   font-size: 15px;
   line-height: 21px;   // match the text's first line box
   color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
@@ -1088,12 +1120,22 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   opacity: 0.4;
 }
 
+// The row's body is a two-column grid: the mark glyph in a leading column,
+// the text beside it. It used to be a plain block, which put the glyph's
+// span on its own line above the `<p>` — the icon read as a row of its own
+// instead of a bullet for the text it marks.
 .cv2-note-body {
   min-width: 0;
   cursor: pointer;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
 }
 
 .cv2-note-kind {
+  // The question / answer chip is a caption for the whole row, so it spans
+  // both columns and keeps the glyph aligned with the text under it.
+  grid-column: 1 / -1;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1108,6 +1150,11 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 }
 
 .cv2-note-text {
+  // Column 2 explicitly: with the kind chip spanning the row above, auto
+  // placement would otherwise drop the text into whichever cell came free.
+  // An unmarked note leaves column 1 at zero width (the legacy shape glyph
+  // is display:none), so its text still starts flush at the row's edge.
+  grid-column: 2;
   margin: 0;
   font-family: var(--md-font-display);
   font-size: 14px;
@@ -1219,6 +1266,15 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 }
 .cv2-note.is-drop-after {
   box-shadow: inset 0 -2px 0 0 color-mix(in srgb, var(--md-secondary) 75%, transparent);
+}
+
+// Mark-drop target: the row a rail icon is hovering. Distinct from the
+// nest indicators above — a left edge accent pointing back at the rail the
+// icon came from, so the two drags never read as the same gesture.
+.cv2-note.is-mark-target {
+  background: color-mix(in srgb, var(--md-secondary) 10%, transparent);
+  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--md-secondary) 80%, transparent);
+  border-radius: 4px;
 }
 
 // Root-drop affordance: when the user drags a nested note to the empty
@@ -1355,6 +1411,7 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 // All shape paint rules come from hypercomb-shared/styles/_notes-shapes
 // (imported above).
 .cv2-note-shape {
+  grid-column: 1;      // same glyph column the mark uses
   margin-right: 6px;
   align-self: flex-start;
   margin-top: 5px;

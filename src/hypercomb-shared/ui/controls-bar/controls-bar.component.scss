@@ -541,8 +541,8 @@ $actions-corner: 12rem;
     > .ctl-btn { flex-shrink: 0; }
   }
 
-  // Pin leads the list, home follows (see the order rules at the bottom of
-  // this file) — both scroll with the rest of the icons.
+  // Bee (tour), then pin, then home lead the list (see the order rules at the
+  // bottom of this file) — all three scroll with the rest of the icons.
   // The active (view-locked) state must read on EVERY platform: macOS/Safari
   // does not reliably repaint the Material Symbols FILL axis when .filled is
   // toggled, so the locked cue here never relies on the variable-font fill
@@ -566,6 +566,15 @@ $actions-corner: 12rem;
         text-shadow: 0 0 8px rgba(0, 229, 160, 0.45);
       }
     }
+  }
+
+  // The bee sits above pin — the tour opener leads the rail. Same box and gap
+  // as every other icon; only the amber tint marks it as the "start here".
+  .rail-tutorial {
+    flex-shrink: 0;
+    padding: 0.5rem 0 0.55rem;
+    color: color-mix(in srgb, #ffc65c 72%, var(--md-on-surface));
+    &:hover { color: #ffc65c; }
   }
 
   // Home sits directly under pin. No divider under it — the rail is one
@@ -697,14 +706,15 @@ $actions-corner: 12rem;
   .controls-row { flex-direction: column; }
 }
 
-// Explicit rail icon order (top → bottom). Pin and home lead the list (they
-// are the two navigation constants), then registry order — except the two
+// Explicit rail icon order (top → bottom). The bee (guided tour) leads, then
+// pin and home (the two navigation constants), then registry order — except the two
 // magnifiers, flipped so the +(zoom-in) stays ABOVE the −(zoom-out). Any
 // enabled extra (default order 50) falls below the named set. The edit-mode
 // chevron and back live in the pinned footer (a separate zone), so they're
 // not ordered here.
 .pill-stage.dock-left .controls-row {
   .ctl-btn                             { order: 50; }
+  .rail-tutorial                       { order: -3; }
   .rail-pin                            { order: -2; }
   .rail-home                           { order: -1; }
   .ctl-btn[data-ctrl-id='dcp']         { order: 1; }

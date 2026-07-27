@@ -15,7 +15,7 @@
 // cropping margins, no seams, and no banding. Choosing one is purely cosmetic
 // and per-participant; see the /canvas queen.
 //
-// Default: carbon grid (steel on dark, daylight on light).
+// Default: contour (steel on dark, daylight on light).
 
 import { EffectBus } from '@hypercomb/core'
 
@@ -39,7 +39,7 @@ const ARCH_ALIASES: Record<string, Archetype> = {
   grid: 'grid', carbon: 'grid', carbongrid: 'grid', 'carbon-grid': 'grid',
 }
 
-const DEFAULT_ARCHETYPE: Archetype = 'grid'
+const DEFAULT_ARCHETYPE: Archetype = 'contour'
 
 // Per-palette colours for the CSS backdrops. `accent`/`accent2`/`deep` are
 // "r,g,b" triples so alpha can be tuned inline. Everything is rendered with CSS

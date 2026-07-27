@@ -113,6 +113,15 @@ async function resolveRoot(
   return { layer, sig: locationSig, isLocation: true }
 }
 
+/** The tile-properties resource sig from a layer's `properties` slot. The
+ *  slot is an array holding at most one sig (see editor/tile-properties). */
+export function propsSigOf(layer: PlacementLayer): string | undefined {
+  const slot = (layer as Record<string, unknown>)['properties']
+  if (!Array.isArray(slot) || slot.length === 0) return undefined
+  const sig = String(slot[0])
+  return SIG.test(sig) ? sig : undefined
+}
+
 function childSigsInline(layer: PlacementLayer): string[] {
   for (const slot of CHILD_SLOTS) {
     const value = (layer as Record<string, unknown>)[slot]
@@ -190,6 +199,7 @@ export async function expandNodes(
         depth: node.depth + 1,
         segments: node.segments ? [...node.segments, name] : null,
         childCount: grandChildren.length,
+        propsSig: propsSigOf(childLayer),
         // A child with children of its own is the next frontier — it resolves
         // when the viewport reaches it.
         walked: grandChildren.length === 0,
@@ -244,6 +254,7 @@ export async function walkTree(
   nodes.push({
     id: 0, parent: -1, sig: resolved.sig, name: rootName, depth: 0,
     segments: rootSegments, childCount: rootChildren.length,
+    propsSig: propsSigOf(resolved.layer),
     walked: rootChildren.length === 0,
   })
 
@@ -284,6 +295,7 @@ export async function walkTree(
         nodes.push({
           id, parent: parent.id, sig, name, depth, segments,
           childCount: childSigs.length,
+          propsSig: propsSigOf(layer),
           walked: childSigs.length === 0,
         })
         // Queue for the next ring only while there IS a next ring. Past the

@@ -282,7 +282,7 @@ Bundled sig-named resource blobs (shipped via `putResource`) referenced from a b
 - **desktop** — full `input:*` / `editor:*` / `clipboard:*` / `move:*` / `keyboard:*`.
 - **mobile** — pin `input:*` to touch providers, enable pinch-zoom, drop hover-only tags, disable heavy `visual:*` decorators.
 - **embedded** — read-only: enable `render:*` / `visual:*`, disable all `editor:*` / `clipboard:*` / `sharing:*`.
-- **artistic** — enable `substrate:*` / `visual:*` / avatar / screensaver; disable dashboard / website build.
+- **artistic** — enable `substrate:*` / `visual:*` / avatar / screensaver; disable website build.
 
 ### 5.5 Authoring and sharing
 

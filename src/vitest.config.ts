@@ -22,6 +22,9 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     include: ['**/*.spec.ts'],
-    exclude: ['node_modules', 'dist', '**/node_modules/**'],
+    // `.claude/**` keeps agent worktrees (full repo copies under
+    // .claude/worktrees/) out of collection — their stale spec copies
+    // re-run against old code and fail the suite from the main tree.
+    exclude: ['node_modules', 'dist', '**/node_modules/**', '**/.claude/**'],
   },
 })

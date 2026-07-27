@@ -98,6 +98,15 @@ const referenceSig = (targetSegments: string[], targetSig?: string) =>
     payload: targetSig ? { targetSegments, targetSig } : { targetSegments },
   })
 
+/** A reference that demands something of what it shows. Written RAW (unsorted,
+ *  duplicated, padded) on purpose — the index must not trust the writer. */
+const requiringSig = (targetSegments: string[], requiredMarks: unknown[]) =>
+  putResource({
+    kind: 'reference',
+    appliesTo: [],
+    payload: { targetSegments, requiredMarks },
+  })
+
 const titleSig = (text: Record<string, string>) =>
   putResource({ kind: 'title', appliesTo: [], payload: { text } })
 
@@ -301,5 +310,72 @@ describe('decoration index — location is the identity', () => {
     expect(index.referenceFaceForLabel('shed')).toBe('')
     await vi.waitFor(() => expect(index.referenceTargetForLabel('faceless')).toEqual(['nowhere']))
     expect(index.referenceFaceForLabel('faceless')).toBe('')
+  })
+})
+
+// A reference's required marks are the filter it imposes on what it shows.
+// They live in the PAYLOAD, never as tag decorations — see
+// `referenceMarksForLabel` for why that placement is load-bearing rather than
+// incidental. These cases pin the two properties the placement buys: the marks
+// never reach the tag surface, and two references to one target keep their own
+// demands.
+describe('decoration index — a reference’s required marks', () => {
+  it('keeps required marks off the tag surface entirely', async () => {
+    // The whole point of storing them in the payload: they cannot be listed as
+    // chips, so they cannot be toggled off, so the reference cannot be edited
+    // by relaxing a lens. If this ever fails, the lock is gone.
+    await decorate(['circle', 'people'], requiringSig(['people'], ['family']))
+
+    goTo('circle')
+    await vi.waitFor(() =>
+      expect(index.referenceMarksForLabel('people')).toEqual(['family']))
+    expect(index.tagsForLabel('people')).toEqual([])
+  })
+
+  it('lets two references to ONE target demand different things', async () => {
+    // `People(family)` and `People(work)` are genuinely distinct references to
+    // one place — the reason the marks are part of the reference's identity.
+    await decorate(['home', 'people'], requiringSig(['people'], ['family']))
+    await decorate(['office', 'people'], requiringSig(['people'], ['work']))
+
+    goTo('home')
+    await vi.waitFor(() =>
+      expect(index.referenceMarksForLabel('people')).toEqual(['family']))
+    expect(index.referenceTargetForLabel('people')).toEqual(['people'])
+
+    goTo('office')
+    expect(index.referenceMarksForLabel('people')).toEqual(['work'])
+    expect(index.referenceTargetForLabel('people')).toEqual(['people'])
+  })
+
+  it('normalizes what it reads and collapses an empty demand to none', async () => {
+    // The writer normalizes so identical requirements dedup to one sig, but a
+    // payload can arrive from a peer that normalized differently or not at all.
+    // An emptied requirement must be indistinguishable from never having had
+    // one, or it would never dedup with a plain reference to the same place.
+    await decorate(['messy', 'crew'], requiringSig(['crew'], ['  work ', 'family', 'work', '']))
+    await decorate(['empty', 'crew'], requiringSig(['crew'], []))
+    await decorate(['junk', 'crew'], requiringSig(['crew'], [null, 3, {}]))
+    await decorate(['plain', 'crew'], referenceSig(['crew']))
+
+    goTo('messy')
+    await vi.waitFor(() =>
+      expect(index.referenceMarksForLabel('crew')).toEqual(['family', 'work']))
+
+    for (const where of ['empty', 'junk', 'plain']) {
+      goTo(where)
+      expect(index.referenceMarksForLabel('crew')).toEqual([])
+      // Still a reference — an absent demand narrows nothing, it does not
+      // stop the cell being a pointer.
+      expect(index.referenceTargetForLabel('crew')).toEqual(['crew'])
+    }
+  })
+
+  it('answers nothing for a cell that is not a reference', async () => {
+    await decorate(['plainly', 'notes'], tagSig('idea'))
+
+    goTo('plainly')
+    await vi.waitFor(() => expect(index.tagsForLabel('notes')).toEqual(['idea']))
+    expect(index.referenceMarksForLabel('notes')).toEqual([])
   })
 })

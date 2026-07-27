@@ -505,7 +505,7 @@ export class NostrMeshDrone extends Drone {
     // Sig tag is always present. Expiration is opt-in: if the caller
     // didn't supply one in extraTags, the event lives until the relay
     // purges it (or never, on in-memory / friendly relays). Share
-    // events are state-driven — host's dashboard or source-node
+    // events are state-driven — host's inbox or source-node
     // toggle revokes them — so a time-based default would lie.
     const tags: string[][] = [['x', s]]
 

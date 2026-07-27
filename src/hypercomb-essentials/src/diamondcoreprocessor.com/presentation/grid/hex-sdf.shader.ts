@@ -521,6 +521,14 @@ export class HexSdfTextureShader {
       vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, clamp((vUV - 0.5) * LABEL_BAND + 0.5, 0.0, 1.0));
       float la = labelFill(luv);   // vector-sharp glyph fill — plain white, nothing else
 
+      // Is there a label at all? Hidden text collapses aLabelUV to the
+      // degenerate rect [0,0,0,0] (show-cell's hideText path / hover
+      // re-hide), so the glyphs sample a transparent corner. The pill is
+      // the label's BACKGROUND — with no text it is a bare dark bar, so
+      // gate it on the same signal. A real atlas rect always has a
+      // non-zero far corner, so this only ever fires on the hidden state.
+      float labelPresent = step(0.0001, max(vLabelUV.z, vLabelUV.w));
+
       if (imgBlend < 0.001) {
         // no image: bright white label
         color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
@@ -538,7 +546,7 @@ export class HexSdfTextureShader {
         float pillR = 0.0;
         vec2 pillP = abs(local) - vec2(pillW - pillR, pillH - pillR);
         float pillD = length(max(pillP, 0.0)) + min(max(pillP.x, pillP.y), 0.0) - pillR;
-        float pillMask = 1.0 - smoothstep(0.0, aa * 1.5, pillD);
+        float pillMask = (1.0 - smoothstep(0.0, aa * 1.5, pillD)) * labelPresent;
         color.rgb = mix(color.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
 
         color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
@@ -559,7 +567,7 @@ export class HexSdfTextureShader {
         float pillR = 0.0;
         vec2 pillP = abs(local) - vec2(pillW - pillR, pillH - pillR);
         float pillD = length(max(pillP, 0.0)) + min(max(pillP.x, pillP.y), 0.0) - pillR;
-        float pillMask = 1.0 - smoothstep(0.0, aa * 1.5, pillD);
+        float pillMask = (1.0 - smoothstep(0.0, aa * 1.5, pillD)) * labelPresent;
         imgLabel.rgb = mix(imgLabel.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
         imgLabel = mix(imgLabel, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
 

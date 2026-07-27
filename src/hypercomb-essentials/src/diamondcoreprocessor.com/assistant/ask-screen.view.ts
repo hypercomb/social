@@ -134,7 +134,10 @@ export class AskScreenView extends EventTarget {
     hint.className = 'hc-ask-hint'
     const refreshHint = (): void => {
       if (this.#chosen.size > 0) hint.textContent = this.#t('ask.hint-chosen', 'The note lands on:') + ' ' + [...this.#chosen].join(', ')
-      else if (atRoot) hint.textContent = this.#t('ask.hint-root', 'Pick at least one tile — at the top level there is no page to receive the note.')
+      // At the root with nothing picked the ask is HIVE-WIDE — a legitimate
+      // shape ("go through the hive and …"), not an error. It has no single
+      // tile to own the answer, so the answer arrives in the feedback window.
+      else if (atRoot) hint.textContent = this.#t('ask.hint-hive', 'Nothing picked — this asks about the whole hive; the answer arrives in the feedback window.')
       else hint.textContent = this.#t('ask.hint-page', 'No tiles picked — the note lands on this page.')
     }
     for (const label of labels) {
@@ -266,13 +269,24 @@ export class AskScreenView extends EventTarget {
   async #sendAsNote(button: HTMLButtonElement, atRoot: boolean): Promise<void> {
     const text = (this.#draft?.value ?? '').trim()
     if (!text) { this.#draft?.focus(); this.#draft?.classList.add('miss'); setTimeout(() => this.#draft?.classList.remove('miss'), 600); return }
+
+    // HIVE-WIDE: no tile to write a note on, so the refined request is minted
+    // as an ASK instead — the responder does the hive work and reports into the
+    // feedback window. Same button, honest destination.
     if (atRoot && this.#chosen.size === 0) {
-      EffectBus.emit('toast:show', {
-        type: 'warning',
-        message: this.#t('ask.hint-root', 'Pick at least one tile — at the top level there is no page to receive the note.'),
-      })
+      const queen = ioc<QueenLike & { submitAsk?: (p: string, t: string[]) => Promise<boolean> }>('@diamondcoreprocessor.com/LlmQueenBee')
+      if (!queen?.submitAsk) {
+        EffectBus.emit('toast:show', { type: 'warning', message: 'Ask service unavailable — try again in a moment.' })
+        return
+      }
+      button.disabled = true
+      queen.activeModel = this.#model
+      const ok = await queen.submitAsk(text, [])
+      if (ok) this.close()
+      else button.disabled = false
       return
     }
+
     const notes = ioc<NotesLike>('@diamondcoreprocessor.com/NotesService')
     if (!notes?.addAtSegments) {
       EffectBus.emit('toast:show', { type: 'warning', message: 'Notes service unavailable — try again in a moment.' })

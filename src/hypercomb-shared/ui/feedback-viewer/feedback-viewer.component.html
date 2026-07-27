@@ -46,18 +46,85 @@
     } @else {
       <ul class="fv-list">
         @for (item of scoped(); track trackBySig($index, item)) {
-          <li class="fv-row" [class.issue]="item.category === 'issue'">
-            <span class="fv-icon mat-sym">{{ icon(item.category) }}</span>
+          <li class="fv-row" [class.issue]="item.category === 'issue'" [class.question]="item.kind === 'qa'" [class.reply]="item.kind === 'reply'">
+            <span class="fv-icon mat-sym">{{ icon(item) }}</span>
             <div class="fv-body">
+              <!-- A reply quotes the feedback it answers, so the sender knows
+                   which of their items this is about. -->
+              @if (item.kind === 'reply' && item.re) {
+                <p class="fv-quote" [title]="item.re">{{ item.re }}</p>
+              }
               <p class="fv-text">{{ item.text }}</p>
               <div class="fv-meta">
-                @if (item.route) { <span class="fv-route">{{ item.route }}</span> }
+                <!-- Who it came from. Always first: an item with no author is
+                     the thing this panel exists to stop happening. -->
+                @if (author(item)) {
+                  <span class="fv-author"><span class="mat-sym">person</span>{{ author(item) }}</span>
+                } @else {
+                  <span class="fv-author anon">{{ 'feedback.viewer.anonymous' | t }}</span>
+                }
+                @if (item.route) {
+                  <button
+                    class="fv-route"
+                    type="button"
+                    [title]="item.route"
+                    (click)="goToQuestion(item)"
+                  >{{ item.route }}</button>
+                }
                 <span class="fv-time">{{ relativeTime(item.at) }}</span>
               </div>
+
+              <!-- A question takes an answer right here — this is what the
+                   retired dashboard modal did, without leaving the panel. -->
+              @if (item.kind === 'qa' && answering() === item.sig) {
+                <textarea
+                  class="fv-answer-text"
+                  rows="3"
+                  [(ngModel)]="answer"
+                  [placeholder]="'feedback.answer.placeholder' | t"
+                  (keydown)="onAnswerKey($event, item)"
+                ></textarea>
+                <div class="fv-answer-actions">
+                  <button class="fv-btn primary" type="button" (click)="submitAnswer(item)" [disabled]="!canAnswer">
+                    {{ 'feedback.answer.send' | t }}
+                  </button>
+                </div>
+              }
+
+              <!-- The return channel: reply to the sender over their
+                   pubkey-derived channel; it lands in THEIR feedback window. -->
+              @if (canReply(item) && replyingTo() === item.sig) {
+                <textarea
+                  class="fv-answer-text"
+                  rows="3"
+                  [(ngModel)]="reply"
+                  [placeholder]="'feedback.reply.placeholder' | t"
+                  (keydown)="onReplyKey($event, item)"
+                ></textarea>
+                <div class="fv-answer-actions">
+                  <button class="fv-btn primary" type="button" (click)="submitReply(item)" [disabled]="!canSendReply">
+                    {{ 'feedback.reply.send' | t }}
+                  </button>
+                </div>
+              }
             </div>
-            <button class="fv-resolve" type="button" (click)="resolve(item)" [attr.aria-label]="'feedback.viewer.resolve' | t">
-              {{ 'feedback.viewer.resolve' | t }}
-            </button>
+
+            @if (item.kind === 'qa') {
+              <button class="fv-resolve" type="button" (click)="toggleAnswer(item)">
+                {{ (answering() === item.sig ? 'feedback.viewer.close' : 'feedback.viewer.answer') | t }}
+              </button>
+            } @else {
+              <div class="fv-row-actions">
+                @if (canReply(item)) {
+                  <button class="fv-resolve" type="button" (click)="toggleReply(item)">
+                    {{ (replyingTo() === item.sig ? 'feedback.viewer.close' : 'feedback.viewer.reply') | t }}
+                  </button>
+                }
+                <button class="fv-resolve" type="button" (click)="resolve(item)" [attr.aria-label]="'feedback.viewer.resolve' | t">
+                  {{ 'feedback.viewer.resolve' | t }}
+                </button>
+              </div>
+            }
           </li>
         }
       </ul>
@@ -68,6 +135,21 @@
       @if (needsPermission) {
         <p class="fv-permission-hint">{{ 'feedback.permission.hint' | t }}</p>
       }
+
+      <!-- Identity — who this is from. Required: an item that reaches a host
+           without a name is exactly what the list can't show. -->
+      <label class="fv-name">
+        <span class="fv-name-label">{{ 'feedback.identity.label' | t }}</span>
+        <input
+          class="fv-name-input"
+          type="text"
+          maxlength="64"
+          [class.missing]="nameMissing()"
+          [(ngModel)]="name"
+          (input)="onNameInput()"
+          [placeholder]="'feedback.identity.placeholder' | t"
+        />
+      </label>
       <div class="fv-segmented" role="tablist" [attr.aria-label]="'feedback.category.label' | t">
         <button
           type="button"

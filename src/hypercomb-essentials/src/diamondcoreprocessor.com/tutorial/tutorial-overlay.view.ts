@@ -490,8 +490,12 @@ export class BeeTutorialOverlayElement extends HTMLElement {
 
   /** Demonstration cursor: glides from the bee to (x, y) and presses. The
    *  press is pure theatre — the caller performs the real action when the
-   *  returned promise resolves. */
-  async ghostClick(x: number, y: number, opts: { shift?: boolean } = {}): Promise<void> {
+   *  returned promise resolves.
+   *
+   *  `hold` (ms) shows a HELD press instead of a tap: the cursor stays
+   *  compressed for that long before releasing, which is what the gesture it
+   *  demonstrates (hold-to-enter) actually asks of the participant. */
+  async ghostClick(x: number, y: number, opts: { shift?: boolean; hold?: number } = {}): Promise<void> {
     const c = this.#cursor
     const from = { x: this.#pos.x + 20, y: this.#pos.y + 26 }
 
@@ -520,6 +524,32 @@ export class BeeTutorialOverlayElement extends HTMLElement {
     )
     await settled(glide, dur + 350)
     c.style.transform = `translate3d(${x}px, ${y}px, 0)`
+
+    // held press: stay down for the hold, then release. Same theatre as the
+    // tap below, stretched — no extra chrome.
+    if (opts.hold && !this.#reduced) {
+      const down = c.animate(
+        [{ transform: `translate3d(${x}px, ${y}px, 0) scale(1)` },
+         { transform: `translate3d(${x}px, ${y}px, 0) scale(0.86)` }],
+        { duration: 140, easing: 'ease-out', fill: 'forwards' },
+      )
+      await settled(down, 400)
+      await new Promise(r => setTimeout(r, opts.hold))
+      const up = c.animate(
+        [{ transform: `translate3d(${x}px, ${y}px, 0) scale(0.86)` },
+         { transform: `translate3d(${x}px, ${y}px, 0) scale(1)` }],
+        { duration: 160, easing: 'ease-out', fill: 'forwards' },
+      )
+      const held = document.createElement('div')
+      held.className = 'ripple'
+      held.style.left = `${x}px`
+      held.style.top = `${y}px`
+      this.shadowRoot?.appendChild(held)
+      setTimeout(() => held.remove(), 650)
+      await settled(up, 400)
+      setTimeout(() => { c.style.opacity = '0'; keycap?.remove() }, 420)
+      return
+    }
 
     // press
     const press = c.animate(

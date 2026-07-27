@@ -27,6 +27,16 @@ type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; bran
 // level was still on screen so a 2nd click ran up a phantom address.)
 const NAV_GUARD_BACKSTOP_MS = 6000
 
+// HOLD-TO-ENTER. A tile that already has children enters on pointerdown
+// (instant). A tile with NO children had no pointer path into its layer at
+// all — the only way in was typing `/name` at the command line. Holding the
+// press still on such a tile for this long opens its (empty) layer through
+// the same #navigateInto choke point every other entry gesture uses.
+// Mouse/pen only: on TOUCH a 300ms hold is already drag-to-move
+// (move/touch-move.input.ts), so arming here would fight it.
+const TILE_ENTER_HOLD_MS = 450
+const TILE_ENTER_HOLD_JITTER_PX = 8
+
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
  *  addressable directly. Resolved LIVE against the shell's GroupLauncher
@@ -37,9 +47,9 @@ const NAV_GUARD_BACKSTOP_MS = 6000
  *
  *  `openDirectly` groups are EXCLUDED per the LaunchGroup contract
  *  (group-registry.ts): they have no browsable aggregator page, so /<id> is a
- *  REAL cell page (the dashboard's question tiles live at /dashboard). Without
- *  this exclusion every press there was consumed into a silent `group:open`
- *  and the trailing click died — "clicking a dashboard tile does nothing". */
+ *  REAL cell page. Without this exclusion every press there was consumed into
+ *  a silent `group:open` and the trailing click died — a tile on such a page
+ *  would do nothing. */
 function isLauncherLocation(segs: readonly unknown[]): boolean {
   if (segs.length !== 1 || typeof segs[0] !== 'string') return false
   if (segs[0].startsWith('agg-')) return true
@@ -153,7 +163,9 @@ const FEATURE_ICON_SPACING = 14
 
 // ── Arrange mode constants ────────────────────────────────────────
 
-const POOL_Y_OFFSET = 16
+// Moved down 2 with ICON_Y (tile-actions.drone.ts) so the arrange pool keeps
+// its spacing under the action row. Absolute, so it does NOT follow on its own.
+const POOL_Y_OFFSET = 18
 const POOL_ICON_SIZE = 5        // pool icons scaled proportionally
 const POOL_SPACING = 8         // tighter to match smaller pool icons
 const POOL_BG_PADDING = 2
@@ -171,7 +183,7 @@ const DROP_HIGHLIGHT_TINT = 0x88ffff
 // ── Action hint constants ────────────────────────────────────────
 const HINT_DELAY_MS = 110       // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
 const HINT_EXPAND_DELAY_MS = 1100 // sustained hover after the label appears → expanded description; clicks always fire the action
-const HINT_Y_OFFSET = 22        // below the icon row
+const HINT_Y_OFFSET = 24        // below the icon row — moved down 2 with ICON_Y (absolute, does not follow on its own)
 const HINT_FONT_SIZE = 6
 const HINT_COLOR = 0xeaf0ff     // near-white — reads crisp against the dark hint pill
 const HINT_EXPANDED_FONT_SIZE = 5.5
@@ -282,6 +294,18 @@ export class TileOverlayDrone extends Drone {
   #pressCapture: { generation: number; axial: Axial; label: string } | null = null
   /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
   #consumedPointerId: number | null = null
+  /** An armed HOLD-TO-ENTER press on a childless tile: it opens that tile's
+   *  empty layer if the pointer stays down and still for TILE_ENTER_HOLD_MS.
+   *  `generation` pins the axial map the press was taken against — a render
+   *  underneath the pointer invalidates the hold rather than entering a tile
+   *  the user is no longer pressing. */
+  #enterHold: {
+    label: string
+    pointerId: number
+    origin: { x: number; y: number }
+    generation: number
+    timer: ReturnType<typeof setTimeout>
+  } | null = null
   #meshPublic = false
   // World mode (toggled on the control bar): when on, the overlay shows ONLY
   // the two share-toggle icons (make-public / make-branch-public) — none of
@@ -375,7 +399,7 @@ export class TileOverlayDrone extends Drone {
     'icon:edit-mode', 'icon:override-changed',
     'tags:removal-pending', 'tags:apply-pending',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
 
   #dropDragging = false
 
@@ -1708,6 +1732,12 @@ export class TileOverlayDrone extends Drone {
     document.addEventListener('click', this.#onClick)
     document.addEventListener('pointerup', this.#onPointerUp)
     document.addEventListener('contextmenu', this.#onContextMenu)
+    // A hold must never survive the gesture it belongs to: a cancelled pointer
+    // (browser gesture takeover, pen leaving range) or a window that loses
+    // focus mid-press would otherwise navigate under a participant who is no
+    // longer holding anything.
+    document.addEventListener('pointercancel', () => this.#cancelEnterHold())
+    window.addEventListener('blur', () => this.#cancelEnterHold())
     // CAPTURE-phase witness: records every raw click before any handler can
     // stopPropagation it. Read remotely via the bridge's `effect-last` —
     // `diag:click-capture` fired while `diag:click` stayed silent = something
@@ -1767,6 +1797,9 @@ export class TileOverlayDrone extends Drone {
     // Record the raw position unconditionally (before any guard) so #recoverHover
     // always has the freshest cursor to re-derive from after a settle.
     this.#lastPointerClient = { x: e.clientX, y: e.clientY }
+    // Before any guard: travel past the jitter box means this press is a drag,
+    // not a hold-to-enter.
+    this.#trackEnterHold(e)
     if (this.#arrangeMode) return // arrange mode uses its own pointer handling
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
@@ -2141,11 +2174,64 @@ export class TileOverlayDrone extends Drone {
       this.emitEffect('group:open', { label: entry.label })
       return
     }
-    if (!this.#branchLabels.has(entry.label)) return
+    // A CHILDLESS tile has nothing to enter on a press — but holding it opens
+    // its empty layer (see #beginEnterHold). Nothing is consumed while the
+    // hold is merely armed: a short press still falls through to #onClick, so
+    // click-to-open and the overlay actions behave exactly as before.
+    if (!this.#branchLabels.has(entry.label)) {
+      this.#beginEnterHold(e, entry.label)
+      return
+    }
 
+    this.#cancelEnterHold()
     this.#consumedPointerId = e.pointerId
     consumePointerGesture(e.pointerId)
     this.#navigateInto(entry.label)
+  }
+
+  // ── Hold-to-enter (childless tiles) ────────────────────────────────
+  // Arms the hold for THIS press. Cancelled by any pointer travel past the
+  // jitter box, by the release, by a pointercancel, or by the window losing
+  // focus — so it only ever fires on a deliberate still hold.
+  #beginEnterHold(e: PointerEvent, label: string): void {
+    this.#cancelEnterHold()
+    // Touch holds belong to drag-to-move; pen and mouse are free.
+    if (e.pointerType === 'touch') return
+    const pointerId = e.pointerId
+    const generation = this.#mapGeneration
+    const timer = setTimeout(() => {
+      this.#enterHold = null
+      // Re-check every gate that could have flipped during the hold — the
+      // press is old news by now, and entering against a rebuilt map would
+      // mint a phantom segment.
+      if (generation !== this.#mapGeneration) return
+      if (this.#arrangeMode || this.#navigationBlocked) return
+      if (this.#editing || this.#editCooldown) return
+      if (this.#hasSelection || this.#touchDragging) return
+      if (this.#tagRemovalArmed || this.#tagApplyArmed) return
+      if (this.#shadedLabels.has(label)) return
+      this.#consumedPointerId = pointerId
+      consumePointerGesture(pointerId)
+      this.#pressCapture = null
+      this.emitEffect('tile:enter-hold', { label })
+      this.#navigateInto(label)
+    }, TILE_ENTER_HOLD_MS)
+    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer }
+  }
+
+  #cancelEnterHold(): void {
+    if (!this.#enterHold) return
+    clearTimeout(this.#enterHold.timer)
+    this.#enterHold = null
+  }
+
+  /** Drop the hold once the pointer has travelled out of its jitter box — a
+   *  drag (pan, brush, pin) is not a hold. */
+  #trackEnterHold(e: PointerEvent): void {
+    const hold = this.#enterHold
+    if (!hold || e.pointerId !== hold.pointerId) return
+    if (Math.abs(e.clientX - hold.origin.x) > TILE_ENTER_HOLD_JITTER_PX
+      || Math.abs(e.clientY - hold.origin.y) > TILE_ENTER_HOLD_JITTER_PX) this.#cancelEnterHold()
   }
 
   #onClick = (e: MouseEvent): void => {
@@ -2361,6 +2447,9 @@ export class TileOverlayDrone extends Drone {
 
   // Cancel editor on right-click release (mirrors Escape cascade priority 1)
   #onPointerUp = (e: PointerEvent): void => {
+    // A release ends any armed hold — a hold that already fired cleared itself
+    // and consumed this pointer, so this is a no-op on that path.
+    this.#cancelEnterHold()
     // End a paint stroke on release — the staged set persists (Done commits it),
     // only the stroke does. Left button, before the nav-gesture guards below.
     if (e.button === 0 && this.#applyStroke) {
@@ -2534,6 +2623,10 @@ export class TileOverlayDrone extends Drone {
     const refTarget = referenceTargetForLabel(label)
     if (refTarget !== null) {
       this.#clearSelectionOnNavigate()
+      // Announce the portal BEFORE travelling. A reference may demand marks of
+      // what it shows, and only the reference cell knows them — once we have
+      // landed it is behind us and no longer resolvable from where we stand.
+      this.emitEffect('tile:navigate-reference', { label })
       const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
       nav?.goRaw?.([...refTarget])
       this.#releaseGuardIfNoMove(before)

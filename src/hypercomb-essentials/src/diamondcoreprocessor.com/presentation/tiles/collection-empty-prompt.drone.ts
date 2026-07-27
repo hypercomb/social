@@ -1,14 +1,34 @@
 // diamondcoreprocessor.com/presentation/tiles/collection-empty-prompt.drone.ts
 //
-// Empty-state prompt for a collection's own root page. The /sets landing lets
-// participants create and open collections; once they enter a brand-new
-// collection, the hex surface is legitimately empty. This prompt gives that
-// empty page a first action without changing the renderer or collection model.
+// Empty-state prompt for any layer that legitimately has nothing in it yet.
+//
+// Two cases, one panel:
+//  • a collection's own root page — the /sets landing lets participants create
+//    and open collections, and a brand-new one is empty by construction;
+//  • ANY tile's layer that has no tiles inside. Holding a childless tile now
+//    opens its layer (tile-overlay.drone.ts, hold-to-enter), so participants
+//    land on empty layers deliberately and need to be told where they are
+//    instead of facing a blank hex field.
+//
+// Named for the first case it served; it owns the empty-layer message now.
 
 import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
 
 const SETS = 'sets'
+
+type ViewModeLike = EventTarget & { mode?: string }
+
+/** Launch-group pages (/games, /websites, …) are aggregator surfaces with
+ *  their own empty behaviour — "add a tile here" is the wrong instruction on
+ *  one. Resolved live over IoC; modules must not import shared. */
+function isLauncherLocation(segments: readonly string[]): boolean {
+  if (segments.length !== 1) return false
+  if (segments[0]!.startsWith('agg-')) return true
+  const registry = ioc()?.get<{ get?: (id: string) => { openDirectly?: boolean } | undefined }>('@hypercomb.social/GroupLauncher')
+  const group = registry?.get?.(segments[0]!)
+  return !!group && group.openDirectly !== true
+}
 
 type CellCountPayload = { count: number; settled?: boolean }
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
@@ -27,6 +47,7 @@ class CollectionEmptyPromptDrone {
   #host: HTMLDivElement | null = null
   #lineage: LineageLike | null = null
   #lineageBound = false
+  #viewModeBound = false
   #lastSettledEmpty = false
   #checkSeq = 0
 
@@ -42,6 +63,7 @@ class CollectionEmptyPromptDrone {
     EffectBus.on('cell:removed', () => { void this.#reconcile() })
     window.addEventListener('synchronize', () => { void this.#reconcile() })
     this.#ensureLineage()
+    this.#ensureViewMode()
     void this.#reconcile()
   }
 
@@ -56,6 +78,18 @@ class CollectionEmptyPromptDrone {
       void this.#reconcile()
     })
     this.#lineageBound = true
+  }
+
+  /** A takeover view mounts over the hex surface: the notice must leave with
+   *  it and come back when the hexagons do. Bound lazily — ViewMode may not be
+   *  registered yet when this module loads. */
+  #ensureViewMode(): ViewModeLike | undefined {
+    const viewMode = ioc()?.get<ViewModeLike>('@hypercomb.social/ViewMode')
+    if (viewMode?.addEventListener && !this.#viewModeBound) {
+      viewMode.addEventListener('change', () => { void this.#reconcile() })
+      this.#viewModeBound = true
+    }
+    return viewMode
   }
 
   #segments(): string[] {
@@ -74,19 +108,26 @@ class CollectionEmptyPromptDrone {
   async #reconcile(): Promise<void> {
     const seq = ++this.#checkSeq
     const segments = this.#segments()
-    if (!this.#lastSettledEmpty || segments.length !== 1 || segments[0] === SETS) {
+    // The hive root is never "empty" in the sense worth announcing (a fresh
+    // participant gets the onboarding path), /sets has its own landing, and a
+    // takeover view (website, home, slides, tree) hides the hex surface
+    // entirely — the emptiness on screen is not the layer's.
+    const mode = this.#ensureViewMode()?.mode ?? 'hexagons'
+    if (!this.#lastSettledEmpty
+      || segments.length === 0
+      || (segments.length === 1 && segments[0] === SETS)
+      || mode !== 'hexagons'
+      || isLauncherLocation(segments)) {
       this.#hide()
       return
     }
 
-    const name = segments[0]
-    const isCollection = await this.#isCollectionRoot(name)
+    const name = segments[segments.length - 1]!
+    // A collection's own root gets the collection wording; every other empty
+    // layer gets the plain "nothing in here yet" notice.
+    const isCollection = segments.length === 1 && await this.#isCollectionRoot(name)
     if (seq !== this.#checkSeq) return
-    if (!isCollection) {
-      this.#hide()
-      return
-    }
-    this.#show(name)
+    this.#show(name, isCollection)
   }
 
   async #isCollectionRoot(name: string): Promise<boolean> {
@@ -102,13 +143,30 @@ class CollectionEmptyPromptDrone {
     }
   }
 
-  #show(collectionName: string): void {
+  #show(name: string, isCollection: boolean): void {
+    const titleText = isCollection
+      ? this.#t('collections.empty.title', 'Add your first tile')
+      : this.#t('layer.empty.title', 'No tiles yet')
+    const bodyText = isCollection
+      ? this.#t(
+        'collections.empty.body',
+        'Start this collection by naming a tile, dropping a file, or pasting something here.',
+        { collection: name },
+      )
+      : this.#t(
+        'layer.empty.body',
+        `You are inside "${name}" and nothing has been added here yet. Name a tile, drop a file, or paste something to start it — or go back the way you came.`,
+        { cell: name },
+      )
+    const actionText = this.#t(isCollection ? 'collections.empty.action' : 'layer.empty.action', 'Add a tile')
+
     if (this.#host) {
       const title = this.#host.querySelector('[data-role="title"]')
-      if (title) title.textContent = this.#t(
-        'collections.empty.title',
-        'Add your first tile'
-      )
+      if (title) title.textContent = titleText
+      const body = this.#host.querySelector('[data-role="body"]')
+      if (body) body.textContent = bodyText
+      const action = this.#host.querySelector('[data-role="action"]')
+      if (action) action.textContent = actionText
       return
     }
 
@@ -127,22 +185,20 @@ class CollectionEmptyPromptDrone {
     const title = document.createElement('div')
     title.dataset['role'] = 'title'
     title.style.cssText = 'font-size:20px;font-weight:700;color:#d8e6ee;margin-bottom:8px;'
-    title.textContent = this.#t('collections.empty.title', 'Add your first tile')
+    title.textContent = titleText
 
     const body = document.createElement('div')
+    body.dataset['role'] = 'body'
     body.style.cssText = 'font-size:14px;line-height:1.55;color:rgba(216,230,238,0.66);margin-bottom:18px;'
-    body.textContent = this.#t(
-      'collections.empty.body',
-      'Start this collection by naming a tile, dropping a file, or pasting something here.',
-      { collection: collectionName },
-    )
+    body.textContent = bodyText
 
     const button = document.createElement('button')
     button.type = 'button'
+    button.dataset['role'] = 'action'
     button.style.cssText =
       'border:0;border-radius:7px;padding:10px 16px;font:inherit;font-size:14px;font-weight:700;' +
       'color:#0c1118;background:rgb(126,182,214);cursor:pointer;'
-    button.textContent = this.#t('collections.empty.action', 'Add a tile')
+    button.textContent = actionText
     const requestFocus = (event: Event): void => this.#focusCommandLine(event)
     button.addEventListener('pointerdown', requestFocus, true)
     button.addEventListener('mousedown', requestFocus, true)

@@ -242,6 +242,32 @@ export function referenceSigForLabel(label: string): string {
   return referenceSigByKey.get(keyForLabel(label)) ?? ''
 }
 
+/** Map<locationKey, requiredMarks> — the pheromones a reference FILTERS its
+ *  target by. Only ever holds non-empty arrays: an empty requirement is stored
+ *  as absence, so it dedups with a plain reference to the same place. */
+const referenceMarksByKey = new Map<string, readonly string[]>()
+
+/** The marks a reference requires of what it shows, or `[]` when the cell is
+ *  not a reference / carries no requirement.
+ *
+ *  These are DELIBERATELY not tag decorations. Two reasons, both load-bearing:
+ *  the pheromone painter writes tags, so a requirement stored there would be
+ *  silently rewritten the next time anyone painted the tile; and the tag panel
+ *  lists what a cell carries, so a requirement would appear as a chip the
+ *  participant could switch OFF — which is not "relaxing a filter" but editing
+ *  the reference itself. The decoration is `appliesTo: []`, so its payload IS
+ *  its identity: `People(family)` and `People(work)` are different sigs, which
+ *  is exactly what lets many references point at one target and each demand
+ *  something different of it. Living in the payload keeps them off the panel by
+ *  construction rather than by a rule someone has to remember. */
+export function referenceMarksForLabel(label: string): readonly string[] {
+  return referenceMarksByKey.get(keyForLabel(label)) ?? EMPTY_MARKS
+}
+
+/** Shared empty result — `referenceMarksForLabel` is called per visible cell,
+ *  and the miss is the common case. */
+const EMPTY_MARKS: readonly string[] = Object.freeze([])
+
 // ── Reference FACE (resolve-through) ──────────────────────────────────
 //
 // A reference cell's layer is `{name, decorations:[sig]}` — a pointer, with no
@@ -411,36 +437,6 @@ export function launchGroupForLabel(label: string): string {
   return launchGroupByKey.get(keyForLabel(label)) ?? ''
 }
 
-// ── Dashboard-island sub-index ────────────────────────────────────────
-//
-// Dashboard question tiles carry a `dashboard-island` decoration whose payload
-// holds the island `group` id and a `role` ('header' for a category-title
-// tile). show-cell reads these PER CELL to lay the dashboard bag out as
-// clustered islands — the SAME layout the /help page uses — but WITHOUT a
-// `launch:target` decoration (which would hijack the click into `group:open`
-// instead of opening the Q&A modal). Hydrates through the same
-// decorations:changed / render:cell-count paths as every other decoration.
-
-/** Decoration kind that groups a dashboard question tile into an island. */
-export const DASHBOARD_ISLAND_KIND = 'dashboard-island'
-
-/** Map<locationKey, islandId> — the dashboard island a tile belongs to. Every
- *  tile of one island shares it. Absent = ungrouped. */
-const islandGroupByKey = new Map<string, string>()
-/** Map<locationKey, role> — 'header' for a category-title tile, else a question. */
-const islandRoleByKey = new Map<string, string>()
-
-/** The dashboard island id for a cell ('' if none). Synchronous and O(1) —
- *  show-cell gathers each island by this id, independent of render order. */
-export function dashboardIslandGroupForLabel(label: string): string {
-  return islandGroupByKey.get(keyForLabel(label)) ?? ''
-}
-
-/** The dashboard island role for a cell ('' / 'header'). Synchronous, O(1). */
-export function dashboardIslandRoleForLabel(label: string): string {
-  return islandRoleByKey.get(keyForLabel(label)) ?? ''
-}
-
 // ── Overlap metric (the one popularity signal) ────────────────────────
 //
 // "Popularity" = how many cells SHARE an entity — the overlap count. The
@@ -570,6 +566,31 @@ function targetSigOf(record: DecorationShape): string {
   return typeof raw === 'string' && /^[0-9a-f]{64}$/.test(raw) ? raw : ''
 }
 
+/** Pull the required marks out of a `reference` payload's `{ requiredMarks }`.
+ *
+ *  Returns null for absent, malformed, or empty — all three mean "this
+ *  reference demands nothing", and collapsing them here is what keeps an
+ *  emptied requirement indistinguishable from a reference that never had one.
+ *  Order and duplicates are normalized by the WRITER (so that two identical
+ *  requirements written in different orders dedup to one sig); reading defends
+ *  anyway, because a payload can arrive from a peer that normalized
+ *  differently or not at all. */
+function requiredMarksOf(record: DecorationShape): readonly string[] | null {
+  const payload = record.payload
+  const raw = payload && typeof payload === 'object'
+    ? (payload as { requiredMarks?: unknown }).requiredMarks
+    : undefined
+  if (!Array.isArray(raw)) return null
+  // Entries must BE strings, never be coerced into one: `String(3)` is a
+  // perfectly good-looking mark named "3" that matches nothing, so a peer
+  // sending a number would silently narrow the page to empty rather than fail
+  // loudly or be ignored.
+  const marks = [...new Set(
+    raw.filter((m): m is string => typeof m === 'string').map(m => m.trim()).filter(Boolean),
+  )].sort()
+  return marks.length > 0 ? marks : null
+}
+
 /** Pull the per-locale titles out of a `title` payload's `{ text }` map.
  *  Blank or whitespace-only entries are dropped rather than stored, so a
  *  cleared title falls back to the raw label — a tile must never draw as an
@@ -635,14 +656,6 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
     if (group) launchGroupByKey.set(key, group)
     else launchGroupByKey.delete(key)
   }
-  if (kind === DASHBOARD_ISLAND_KIND) {
-    const group = groupOf(record)
-    if (group) islandGroupByKey.set(key, group)
-    else islandGroupByKey.delete(key)
-    const role = roleOf(record)
-    if (role) islandRoleByKey.set(key, role)
-    else islandRoleByKey.delete(key)
-  }
   if (kind === REFERENCE_DECORATION_KIND) {
     const target = targetSegmentsOf(record)
     if (target) referenceTargetByKey.set(key, target)
@@ -650,6 +663,9 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
     const sig = targetSigOf(record)
     if (sig) referenceSigByKey.set(key, sig)
     else referenceSigByKey.delete(key)
+    const marks = requiredMarksOf(record)
+    if (marks) referenceMarksByKey.set(key, marks)
+    else referenceMarksByKey.delete(key)
   }
   if (kind === TITLE_DECORATION_KIND) {
     const text = textOf(record)
@@ -699,8 +715,6 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     const priorShape = launchShapeByKey.get(key)
     const priorRole = launchRoleByKey.get(key)
     const priorGroup = launchGroupByKey.get(key)
-    const priorIslandGroup = islandGroupByKey.get(key)
-    const priorIslandRole = islandRoleByKey.get(key)
     // Stringified: the map is rebuilt on every index, so a reference compare
     // would report a change on every pass and repaint the hive needlessly.
     const priorTitle = JSON.stringify(titleByKey.get(key) ?? null)
@@ -724,15 +738,6 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
         && (launchShapeByKey.get(key) !== priorShape
           || launchRoleByKey.get(key) !== priorRole
           || launchGroupByKey.get(key) !== priorGroup)) {
-      EffectBus.emit('launch:indexed', { label })
-    }
-    // Same first-paint race for dashboard-island tiles: the island id lands
-    // after the bag first rendered (as a plain spiral). Reuse the launch:indexed
-    // nudge — show-cell rebuilds geometry on it regardless of kind — so the
-    // clustered islands appear without waiting for an unrelated render.
-    if (record.kind === DASHBOARD_ISLAND_KIND
-        && (islandGroupByKey.get(key) !== priorIslandGroup
-          || islandRoleByKey.get(key) !== priorIslandRole)) {
       EffectBus.emit('launch:indexed', { label })
     }
     // A retitle must repaint the tile it renamed. The atlas caches baked glyphs
@@ -768,13 +773,10 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       launchRoleByKey.delete(key)
       launchGroupByKey.delete(key)
     }
-    if (kind === DASHBOARD_ISLAND_KIND) {
-      islandGroupByKey.delete(key)
-      islandRoleByKey.delete(key)
-    }
     if (kind === REFERENCE_DECORATION_KIND) {
       referenceTargetByKey.delete(key)
       referenceSigByKey.delete(key)
+      referenceMarksByKey.delete(key)
     }
     if (kind === TITLE_DECORATION_KIND) {
       titleByKey.delete(key)
@@ -857,14 +859,14 @@ async function hydrateLabel(
     }
     // A launcher tile discovered on this walk: nudge show-cell to rebuild its
     // geometry so the tile's silhouette — or its clustered ISLAND (help
-    // group/role, dashboard islands) — appears (the walk runs after first
+    // group/role) — appears (the walk runs after first
     // paint). Without the launchGroup term a boot whose pre-paint warm came
     // up cold (big profile, layers not cached yet) painted /help as a plain
     // spiral of substrate tiles and nothing ever re-clustered it. The
     // pre-paint hydration path (ensureDecorationsIndexed) passes nudge=false —
     // nothing is painted yet, so a rebuild request would only queue a
     // redundant second render.
-    if (nudge && (launchShapeByKey.has(pathKey) || launchGroupByKey.has(pathKey) || islandGroupByKey.has(pathKey))) EffectBus.emit('launch:indexed', { label })
+    if (nudge && (launchShapeByKey.has(pathKey) || launchGroupByKey.has(pathKey))) EffectBus.emit('launch:indexed', { label })
     // Same post-paint race for a title found on this walk: the tile has already
     // painted under its raw label, so flush and repaint it under the title.
     if (nudge && titleByKey.has(pathKey)) EffectBus.emit('title:indexed', { label })

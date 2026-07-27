@@ -241,8 +241,12 @@ export class FeedbackSwarmDrone extends Drone {
     const store = ioc()?.get<StoreLike>(STORE_KEY)
     if (!store?.putOptimization) return
     // Same record shape the local feedback button writes, tagged with the
-    // sender so the host can see who it came from. Deterministic id/at ⇒
-    // content-addressed idempotence across sessions.
+    // sender so the host can see who it came from. `by` is the sender's own
+    // chosen NAME (the feedback window requires one before sending) and `from`
+    // is their pubkey — the pubkey is authoritative (it is the signed event's
+    // author), the name is what the host's list actually reads. Deterministic
+    // id/at ⇒ content-addressed idempotence across sessions.
+    const by = String(p['by'] ?? '').trim().slice(0, 64)
     const record = {
       kind: 'feedback',
       appliesTo: Array.isArray(p['appliesTo']) ? p['appliesTo'] : [],
@@ -252,6 +256,7 @@ export class FeedbackSwarmDrone extends Drone {
         text: String(p['text'] ?? '').slice(0, 4000),
         route: typeof p['route'] === 'string' ? p['route'] : '',
         at: typeof p['at'] === 'number' ? p['at'] : 0,
+        ...(by ? { by } : {}),
         from,
         remote: true,
       },

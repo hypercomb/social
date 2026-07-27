@@ -2,6 +2,8 @@
   <aside
     class="clipboard-panel"
     hcDockInset="right"
+    hcDockedPanel="clipboard-panel" dockSide="right"
+    [ownsSize]="false" [sizeOwner]="this" [minWidth]="260" [maxWidth]="760"
     [class.resizing]="resizing()"
     [style.width.px]="width()"
     [style.--hc-panel-scale]="contentScale()"

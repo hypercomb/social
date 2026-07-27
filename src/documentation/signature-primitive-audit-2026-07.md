@@ -32,7 +32,7 @@ Plus a cleanup tier: dead legacy code that contradicts the model and misleads re
 | Decorations / tags / view behaviours | **CONFORMS** | hidden pool interim-parked in `sign('optimization')`; reference privacy unenforced |
 | Clipboard / move / editor / selection | **PARTIAL** | `__layout__` write bypassing committer; name-rebuild sig drops; `__meta__` file |
 | Sharing / swarm / install / DCP | **CONFORMS** | no inbound Nostr verify; path-keyed trust; install roots cached in localStorage |
-| Preferences / commands / assistant | **CONFORMS** | dashboard pin registry localStorage-only; dead `0000` writers in accent.queen |
+| Preferences / commands / assistant | **CONFORMS** | dead `0000` writers in accent.queen (the dashboard pin registry this row also flagged is moot — the dashboard was deleted 2026-07-26) |
 | revolucionstyle.com (community template) | **PARTIAL** | collection indexes in localStorage; taxonomy compiled-in; no i18n |
 | Cross-cutting sweeps | **CLEAN** | no hardcoded pool hex, no `__x__` writes, no inline-content records, no in-place mutation |
 
@@ -89,7 +89,7 @@ sentinels) were censused and are correct — the items here are the exceptions.
 | Key / store | File | What it should be |
 |---|---|---|
 | `hc:tile-props-index` | `editor/tile-properties.ts:121`; render truth in show-cell/substrate; seeded by adopt (`swarm-adopt.drone.ts:903-946`) | Canonical `properties` slot is truth; index becomes a rebuildable cache. Fixes adopt blank-tile fragility. |
-| Dashboard pin registry `hc:…DashboardBee:bags` | `dashboard/dashboard.bee.ts:50,302-364` (`#publishToSwarm` is a TODO) | Pool/mesh record so pins travel; localStorage as cache. |
+| ~~Dashboard pin registry `hc:…DashboardBee:bags`~~ | ~~`dashboard/dashboard.bee.ts`~~ | **MOOT (2026-07-26)** — the dashboard bee and its localStorage pin registry are deleted; open questions live in the feedback window. |
 | Icon overrides | `hypercomb-shared/core/icon-override.store.ts:69` | Pool doc (cf. `sign('overrides')` pattern). |
 | `hc:tag-colors` | `tag-registry.ts:134` + 2 more writers | Pool doc alongside the `sign('registry')` tags-master. |
 | Saved locations | `hypercomb-shared/core/saved-locations-store.ts:49` | Pool doc (borderline — decide shareability first). |
@@ -204,7 +204,7 @@ pin-registry, icon-overrides, tag-colors.
 2. **Next (model hygiene)**: delete tier E; A3 clipboard pool-doc; B boot-kick
    `act()` routing.
 3. **Then (pool adoption — "up the quality")**: C migrations in this order:
-   tile-props-index (fixes adopt fragility) → dashboard pins → icon overrides +
+   tile-props-index (fixes adopt fragility) → icon overrides +
    tag colors → install roots from lineage HEAD. Copy the i18n-override pattern.
 4. **Then (trust/pheromones)**: D1 inbound verify, D2 authored-sig gate, D3 reference
    sanitizer, D4 write the pheromone-discovery spec.

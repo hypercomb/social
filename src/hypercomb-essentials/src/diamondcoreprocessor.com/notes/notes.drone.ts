@@ -259,6 +259,20 @@ export class NotesService {
         void this.#moveNote(payload.cellLabel, payload.sourceId, null)
       },
     )
+
+    // Drop a mark from the strip's icon rail onto an existing note. Only
+    // the mark changes: the tree is read, the node found at ANY depth, its
+    // mark replaced, and the tree re-materialized from leaves up — so a
+    // marked parent keeps its children and its position. (The `note:commit`
+    // edit path can't express this: it writes a childless layer into the
+    // TOP-LEVEL slot.) A null mark clears it.
+    EffectBus.on<{ cellLabel: string; noteId: string; mark?: unknown }>(
+      'note:mark',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.noteId) return
+        void this.#markNote(payload.cellLabel, payload.noteId, normalizeMark(payload.mark))
+      },
+    )
   }
 
   /** Move the sig identified by `sourceId` to `targetIndex` within the
@@ -414,6 +428,26 @@ export class NotesService {
     await this.#moveNoteAtSegments(segments, sourceId, null)
   }
 
+  /**
+   * Set (or clear, with `null`) the MARK of `noteId` at an explicit cell
+   * location. Works at any depth and preserves the note's text, children
+   * and position. Headless equivalent of the `note:mark` handler.
+   */
+  public async markAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteId: string,
+    mark: string | null,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedSig = String(noteId ?? '').trim()
+    if (!cleanedLabel || !cleanedSig) return
+    await this.#markNoteAtSegments([...cleanedParents, cleanedLabel], cleanedSig, normalizeMark(mark))
+  }
+
   // ── Internal: commit + delete + tree-move flows ──────────────────
 
   async #commit(cellLabel: string, text: string, shape: ShapeId | null, mark: string | null, editId?: string): Promise<void> {
@@ -509,6 +543,34 @@ export class NotesService {
     // 4. Re-materialize the surviving tree from leaves up. The Store
     //    dedups by content sig, so unchanged subtrees produce identical
     //    sigs and don't write new bytes.
+    const rootSigs: string[] = []
+    for (const node of nextTree) {
+      rootSigs.push(await this.#materializeNote(node))
+    }
+    await this.#commitCellNotes(segments, () => rootSigs)
+  }
+
+  async #markNote(cellLabel: string, noteId: string, mark: string | null): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#markNoteAtSegments(resolved.segments, noteId, mark)
+  }
+
+  /**
+   * Re-mark one node in the cell's tree. Everything else about the note —
+   * text, legacy shape, children, position — travels unchanged, and the
+   * re-materialization dedups every untouched subtree back to its existing
+   * sig, so only the marked node's branch mints new bytes.
+   */
+  async #markNoteAtSegments(
+    segments: readonly string[],
+    noteId: string,
+    mark: string | null,
+  ): Promise<void> {
+    const locSig = await this.#locSig(segments)
+    const tree = await this.#readAtLocation(locSig)
+    const { tree: nextTree, changed } = setMarkInTree(tree, noteId, mark)
+    if (!changed) return  // node not in this cell, or already carries that mark
     const rootSigs: string[] = []
     for (const node of nextTree) {
       rootSigs.push(await this.#materializeNote(node))
@@ -809,6 +871,49 @@ function insertAsChild(
   }
   const nextTree = walk(tree)
   return { tree: nextTree, placed }
+}
+
+/**
+ * Return a new tree with the first occurrence of `noteId` carrying
+ * `mark` (null clears it). `changed` is false when the node isn't in the
+ * tree or already carries exactly that mark — the caller skips the commit
+ * so a no-op drag doesn't mint a history entry. Immutable.
+ */
+function setMarkInTree(
+  tree: readonly Note[],
+  noteId: string,
+  mark: string | null,
+): { tree: readonly Note[]; changed: boolean } {
+  let changed = false
+  let found = false
+  const walk = (nodes: readonly Note[]): readonly Note[] => {
+    const next: Note[] = []
+    for (const n of nodes) {
+      if (found) {
+        next.push(n)
+        continue
+      }
+      if (n.id === noteId) {
+        found = true
+        if (n.mark === mark) {
+          next.push(n)
+        } else {
+          changed = true
+          next.push({ ...n, mark })
+        }
+        continue
+      }
+      const newChildren = walk(n.children)
+      if (newChildren !== n.children) {
+        next.push({ ...n, children: newChildren as Note[] })
+      } else {
+        next.push(n)
+      }
+    }
+    return next
+  }
+  const nextTree = walk(tree)
+  return { tree: nextTree, changed }
 }
 
 /**

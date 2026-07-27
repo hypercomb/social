@@ -111,14 +111,14 @@ describe('sync-health pill', () => {
   it('evicts sync pills persisted by a previous session at boot', async () => {
     localStorage.setItem('hc:indicators', JSON.stringify([
       { key: 'sync:jwize.com', icon: 'cloud_sync', label: 'stale', dismissable: true },
-      { key: 'dashboard', icon: 'dashboard', label: 'not ours', dismissable: true },
+      { key: 'notes', icon: 'sticky_note_2', label: 'not ours', dismissable: true },
     ]))
     const evicted: string[] = []
     EffectBus.on<{ key: string }>('indicator:clear', p => evicted.push(p.key))
     const fresh = new SyncHealthDrone()
     await (fresh as unknown as { pulse: (g: string) => Promise<void> }).pulse('test')
     expect(evicted).toContain('sync:jwize.com')
-    expect(evicted).not.toContain('dashboard')
+    expect(evicted).not.toContain('notes')
     fresh.markDisposed()
   })
 })

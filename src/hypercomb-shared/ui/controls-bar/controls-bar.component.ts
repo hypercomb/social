@@ -1436,6 +1436,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.navigateTo([])
   }
 
+  /** Start the guided beeing tour — the same entry point /tutorial uses, so
+   *  the rail's bee and the slash behaviour run one identical tour. The drone
+   *  ignores a second start while one is already running. */
+  readonly startTutorial = (): void => {
+    EffectBus.emit('tutorial:start', {})
+  }
+
   // ── view actions ──────────────────────────────────────
 
   readonly openDcp = (): void => {

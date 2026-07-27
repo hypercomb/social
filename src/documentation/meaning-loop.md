@@ -36,7 +36,7 @@ to look; they must never be the only place *what was decided* lives.
  DISCOVER   pheromone sweep finds AI-work intent (jwize.com:website, …)
         │    and pending ai:request records
         ▼
- ASK        mint a dashboard question — never generate unasked
+ ASK        mint a question in the feedback window — never generate unasked
         ▼
  GENERATE   on an approving answer: hand off to a fresh session scoped
         │    to that node; results land as sig-addressed artifacts
@@ -165,7 +165,7 @@ A bounded walk (the routine caps depth/cells per cycle) that collects,
 per scope cell: recognized intent pheromones + pending `ai:request`s.
 For each finding:
 
-- **Never generate.** Mint ONE dashboard question via the existing qa
+- **Never generate.** Mint ONE feedback-window question via the existing qa
   system: *"`revolucion` carries `jwize.com:website` — N child branches
   look like site items. Build/refresh pages here?"* Mark the request
   `asked` (with `askedQId`) so the sweep never re-asks.
@@ -273,7 +273,7 @@ transcript inbox ingestion (plan-up with ask-gates), the pheromone
 discovery sweep (bounded, question-minting), and the meta write at the
 end of any pass that changed a branch. The loop's existing safeguards
 apply unchanged: untrusted-text scrub, execution authority = the host's
-dashboard answers ONLY, creation-scoped bridge activity, bounded per
+feedback-window answers ONLY, creation-scoped bridge activity, bounded per
 cycle, read-back never eyeballs.
 
 ## Safeguards
@@ -292,7 +292,7 @@ cycle, read-back never eyeballs.
 
 - **Phase 1 (DONE 2026-07-20, dev hive):** record shapes in use — first
   `ai:meta` chain on `revolucion/journal`, first `ai:request`
-  (my-lounge 3D generation) with its ask-gate question on the dashboard,
+  (my-lounge 3D generation) with its ask-gate question in the feedback window,
   `jwize.com:website` deposited on verified site roots. SKILL.md updated.
 - **Phase 2:** features-window toggle → pheromone deposit (essentials
   code: Beehaviors writes the tag instead of flipping active behavior
@@ -307,5 +307,5 @@ cycle, read-back never eyeballs.
 
 Read-backs only: `layer-at` the scope cell → decorations slot → resolve
 sigs → assert the tag/meta/request payloads; `note-list` for notes;
-walk `prevMetaSig` one hop. The dashboard question is asserted via the
+walk `prevMetaSig` one hop. The feedback-window question is asserted via the
 qa read (`fb.cjs open-qa`), never by eyeballing the rendered page.

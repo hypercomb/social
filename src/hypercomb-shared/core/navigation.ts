@@ -95,7 +95,7 @@ export class Navigation extends hypercomb {
   // ----------------------------------
 
   /** True iff the current URL path carries a `[...]` selection segment.
-   *  Lets URL-driven consumers (auto-open popup on dashboard click)
+   *  Lets URL-driven consumers (auto-open popup on a tile click)
    *  distinguish "user navigated here with a selection intent" from
    *  "user is just here and might have prior hash-form selection." */
   public readonly hasBracketSelection = (): boolean => {

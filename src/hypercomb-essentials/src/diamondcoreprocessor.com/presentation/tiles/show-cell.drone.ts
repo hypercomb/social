@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { MOBILE_FRIENDLY } from '../../preferences/mobile-pheromones.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
@@ -52,7 +52,7 @@ type Cell = { q: number; r: number; label: string; external: boolean; imageSig?:
  *
  *  `openDirectly` groups are EXCLUDED per the LaunchGroup contract
  *  (group-registry.ts): they have no browsable aggregator page, so /<id> is a
- *  REAL cell page (the dashboard's question tiles live at /dashboard). */
+ *  REAL cell page. */
 function isLauncherLocation(segs: readonly unknown[]): boolean {
   if (segs.length !== 1 || typeof segs[0] !== 'string') return false
   if (segs[0].startsWith('agg-')) return true
@@ -472,7 +472,7 @@ export class ShowCellDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -504,6 +504,13 @@ export class ShowCellDrone extends Drone {
    *  are inert to clicks; read locally to suppress the hover ring.
    *  Bright means "preloaded — a click lands instantly". */
   readonly #shadedLabels = new Set<string>()
+
+  /** The hideText tile currently under the pointer, if any. A tile that
+   *  hides its name gets it back for as long as it is hovered — nothing
+   *  else about the tile changes, and no other tile is touched. The reveal
+   *  is purely a label-UV flip (see #setHoverReveal), so the text returns
+   *  in its normal place with its normal backing band. */
+  #hoverRevealLabel: string | null = null
 
   /** Last resolved TileSourceRegistry entries per location key — the
    *  fallback a render pass uses when source resolution exceeds its
@@ -584,6 +591,25 @@ export class ShowCellDrone extends Drone {
   readonly #childWarmQueued = new Set<string>()
   #childWarmActive = 0
   static readonly #CHILD_WARM_CONCURRENCY = 4
+  // Click-target pre-bake: after a view settles, the visible branches' CHILD
+  // images (what a click would paint) are decoded into the atlas during idle
+  // — first visit ≈ revisit. Pure opportunism over local bytes: no network,
+  // no user-visible state, a dropped bake just means the click decodes as it
+  // does today. The queue is superseded (gen) by every fresh walk; the
+  // cooldown bounds re-walks while the warm sweep is still landing bytes.
+  readonly #prebakeQueue: string[] = []
+  readonly #prebakeQueued = new Set<string>()
+  readonly #prebakeAttemptAt = new Map<string, number>()
+  #prebakeGen = 0
+  #prebakeInFlight = false
+  #prebakePumping = false
+  static readonly #PREBAKE_COOLDOWN_MS = 4_000
+  static readonly #PREBAKE_MAX_PER_LOCATION = 128
+  static readonly #PREBAKE_PER_SLICE = 2
+  // Below this, a raw source decodes in ~a millisecond anyway — deriving a
+  // cell-sized copy would spend the optimize phase on images with nothing
+  // to gain. Byte size is a heuristic for pixel count, deliberately loose.
+  static readonly #VISUAL_DEMAND_MIN_BYTES = 24_576
   #readinessRepaintTimer: ReturnType<typeof setTimeout> | null = null
   // Bumped on every `navigate`: an in-flight compute for the location the
   // user just LEFT is stale — it must stop (it holds the in-flight guard)
@@ -854,6 +880,16 @@ export class ShowCellDrone extends Drone {
 
   private filterKeyword = ''
   private filterTags = new Set<string>()
+  /** Marks a REFERENCE demands of what it shows, in force while the participant
+   *  stands inside what that reference points at (see
+   *  reference-requirement.drone). A SECOND source, deliberately not merged into
+   *  `filterTags`: the participant's lens is OR-semantics (a cell matching ANY
+   *  active mark shows), so folding a requirement in would BROADEN the page
+   *  instead of narrowing it — the exact opposite of what a requirement means.
+   *  The two sets are ANDed instead: satisfy the lens (if any) AND the
+   *  requirement (if any). Never listed, never toggleable — a requirement is
+   *  part of the reference's identity, not lens state. */
+  #requiredTags = new Set<string>()
   /** How wide a tag filter reaches: 'local' = current page only, 'children' =
    *  the current subtree, 'global' = the whole hive. Defaults to 'local'. */
   #filterScope: 'local' | 'children' | 'global' = 'local'
@@ -2379,7 +2415,7 @@ export class ShowCellDrone extends Drone {
     // The filter FOLLOWS you: entering a match re-roots the walk at wherever
     // you landed, so the flatten narrows as you drill in rather than redrawing
     // the same set at every level. A moved location means the scan is stale.
-    if (this.filterTags.size > 0) {
+    if (this.#narrowing()) {
       const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
       if ([...segs].join('/') !== this.#filterScanKey) await this.#scanTagsAcrossPages()
     }
@@ -2405,9 +2441,9 @@ export class ShowCellDrone extends Drone {
     // a silent fall-through to the unfiltered page. We deliberately skip
     // #emitRenderTags here so the last tag list (with the active filter pill)
     // stays on screen, leaving a way to clear the filter.
-    if (this.filterTags.size > 0 && this.#tagFlattenResults && this.#tagFlattenResults.length === 0) {
+    if (this.#narrowing() && this.#tagFlattenResults && this.#tagFlattenResults.length === 0) {
       this.clearMesh('tag-filter: no matches in scope')
-      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + [...this.filterTags].sort().join(',')
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + this.#narrowKey()
       this.renderedLocationKey = locationKey
       this.renderedCells.clear()
       this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: true })
@@ -2451,7 +2487,7 @@ export class ShowCellDrone extends Drone {
       this.cachedBranchSet = flatBranchSet
       // The scan root is part of the identity of a flatten now — without it a
       // drill-down into a match would reuse the parent level's geometry.
-      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + [...this.filterTags].sort().join(',')
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + this.#narrowKey()
       this.renderedLocationKey = locationKey
 
       this.renderedCells.clear()
@@ -3473,7 +3509,7 @@ export class ShowCellDrone extends Drone {
 
   /** Pre-paint launcher-decoration hydration. On a launch-group aggregator
    *  page the silhouette is a per-vertex geometry attribute (aShapeMode) and
-   *  the clustered-island layout (help's group/role, dashboard islands) keys
+   *  the clustered-island layout (help's group/role) keys
    *  the coordinate override, so BOTH must be indexed BEFORE the paint — a
    *  rebuild after the async decoration walk visibly shrinks full-size
    *  picture hexagons into their silhouettes, and a cold group index paints
@@ -3484,9 +3520,7 @@ export class ShowCellDrone extends Drone {
   #ensureLaunchShapes = async (cells: readonly Cell[]): Promise<void> => {
     if (cells.length === 0) return
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    const launcher = isLauncherLocation(segs)
-    const dashboard = !launcher && this.#inDashboardBag()
-    if (!launcher && !dashboard) return
+    if (!isLauncherLocation(segs)) return
     await ensureDecorationsIndexed(cells.map(c => c.label), segs).catch(() => { /* best effort */ })
   }
 
@@ -4144,6 +4178,20 @@ export class ShowCellDrone extends Drone {
     this.emitEffect('render:tags', { tags })
   }
 
+  /** Is anything narrowing the page — the participant's lens, a reference's
+   *  requirement, or both? Every flatten guard asks this rather than
+   *  `filterTags.size`, so a requirement alone (entered through a reference
+   *  with no lens set) still flattens. */
+  #narrowing(): boolean {
+    return this.filterTags.size > 0 || this.#requiredTags.size > 0
+  }
+
+  /** Identity of the current narrowing, for the render key. Both sources, kept
+   *  apart: `a|b` and `b|a` are different renders. */
+  #narrowKey(): string {
+    return [...this.filterTags].sort().join(',') + '|' + [...this.#requiredTags].sort().join(',')
+  }
+
   /** Walk the whole layer tree from the hive root and collect every cell whose
    *  tag set intersects the active `filterTags`, populating `#tagFlattenResults`
    *  for the flatten render override. Tags are read per cell from BOTH the `tag`
@@ -4153,7 +4201,8 @@ export class ShowCellDrone extends Drone {
    *  read its layer, recurse its `children`. One-shot on filter activation. */
   async #scanTagsAcrossPages(): Promise<void> {
     const active = this.filterTags
-    if (active.size === 0) { this.#tagFlattenResults = null; return }
+    const required = this.#requiredTags
+    if (active.size === 0 && required.size === 0) { this.#tagFlattenResults = null; return }
 
     const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
       sign: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
@@ -4252,7 +4301,14 @@ export class ShowCellDrone extends Drone {
       if (relDepth >= 1) {
         const label = path[path.length - 1]
         const names = await tagNamesOf(layer)
-        for (const t of active) if (names.has(t)) { selfMatched = true; break }
+        // Two sources, ANDed. Within each, ANY mark matching is enough — the
+        // rule the participant's lens already uses, applied unchanged to the
+        // requirement rather than inventing a second one. An empty source
+        // demands nothing, so a lens alone behaves exactly as it did before
+        // requirements existed.
+        const meetsLens = active.size === 0 || [...active].some(t => names.has(t))
+        const meetsRequirement = required.size === 0 || [...required].some(t => names.has(t))
+        selfMatched = meetsLens && meetsRequirement
         // Rows are recorded only down to recordDepth — anything past that is
         // walked purely to answer "is there a match in here?".
         if (selfMatched && relDepth <= recordDepth && !seen.has(label)) {
@@ -4853,6 +4909,30 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // tags:required effect — the marks a REFERENCE demands of what it shows,
+    // in force while the participant stands inside what it points at. ANDed
+    // with the lens below; never merged into it, never listed as chips, and it
+    // deliberately does NOT touch #preFilterSegments — walking out of a
+    // requirement is an ordinary navigation, not a filter being cleared, so
+    // there is nowhere to restore anyone to.
+    this.onEffect<{ marks?: string[] }>('tags:required', ({ marks }) => {
+      const next = new Set((marks ?? []).map(m => String(m ?? '').trim()).filter(Boolean))
+      if (next.size === this.#requiredTags.size && [...next].every(m => this.#requiredTags.has(m))) return
+      this.#requiredTags = next
+      // The previous walk answered a different question.
+      this.#filterScanKey = null
+      if (!this.#narrowing()) {
+        this.#tagFlattenResults = null
+        this.#flatPathByLabel.clear()
+        this.#filterBlockedLabels.clear()
+      }
+      void (async () => {
+        if (this.#narrowing()) await this.#scanTagsAcrossPages()
+        this.renderedCellsKey = ''
+        this.requestRender()
+      })()
+    })
+
     // tags:filter effect — tag flatten, scoped to page / children / global
     this.onEffect<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', ({ active, scope }) => {
       const wasFiltering = this.filterTags.size > 0
@@ -4876,7 +4956,20 @@ export class ShowCellDrone extends Drone {
         // flatten geometry rebuilds rather than reusing the prior page.
         void (async () => {
           await this.#scanTagsAcrossPages()
-          if (this.filterTags.size === 0) return // filter cleared mid-scan
+          if (!this.#narrowing()) return // narrowing dropped mid-scan
+          this.renderedCellsKey = ''
+          this.requestRender()
+        })()
+      } else if (this.#requiredTags.size > 0) {
+        // The lens cleared but a reference's requirement still stands — the
+        // page stays narrowed to what that reference demands rather than
+        // falling back to the unfiltered layer. Re-scan, because the walk that
+        // just ran answered "lens AND requirement" and this one answers
+        // "requirement alone".
+        this.#filterAnchorKey = null
+        this.#preFilterSegments = null
+        void (async () => {
+          await this.#scanTagsAcrossPages()
           this.renderedCellsKey = ''
           this.requestRender()
         })()
@@ -5408,6 +5501,11 @@ export class ShowCellDrone extends Drone {
       const hoverShaded = hoverLabel !== null && this.#shadedLabels.has(hoverLabel)
       this.shader.setHoveredIndex(hoverShaded ? -1 : (idx ?? -1))
 
+      // A tile that hides its name shows it again while hovered — and only
+      // while hovered. Runs on the resolved label (not the index) so the
+      // "pointer left the grid" broadcast, which carries no hex, clears it.
+      this.#setHoverReveal(hoverLabel)
+
       // Drive the shimmer clock only while a reference/portal tile is hovered,
       // so u_time (and the magical hover animation) idles the rest of the time.
       this.#setPortalShimmer(hoverLabel !== null && referenceTargetForLabel(hoverLabel) !== null)
@@ -5711,6 +5809,9 @@ export class ShowCellDrone extends Drone {
     // the saved meshOffset and recentered → tiles + overlay misaligned.
     this.#pendingRecenter = false
     this.#pendingMeshOffsetRestore = null
+    // The pointer is not on any tile of a mesh that no longer exists. Left
+    // set, a same-named tile on the NEXT layer would bake in revealed.
+    this.#hoverRevealLabel = null
     this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: settledEmpty })
   }
 
@@ -5862,10 +5963,10 @@ export class ShowCellDrone extends Drone {
       // an unrelated tile that merely shares a name with a past match.
       // A match can live anywhere, so entering it travels to its absolute path;
       // appending the label to wherever you're standing mints a phantom segment.
-      flatPaths: this.filterTags.size > 0 ? Object.fromEntries(this.#flatPathByLabel) : {},
+      flatPaths: this.#narrowing() ? Object.fromEntries(this.#flatPathByLabel) : {},
       // Matches with children but nothing tagged inside: entering would land on
       // a blank filtered mesh, so tile-overlay refuses and says why.
-      filterBlocked: this.filterTags.size > 0 ? [...this.#filterBlockedLabels] : [],
+      filterBlocked: this.#narrowing() ? [...this.#filterBlockedLabels] : [],
     }
   }
 
@@ -6418,31 +6519,18 @@ export class ShowCellDrone extends Drone {
     } catch { /* swarm not ready — no glow */ }
   }
 
-  /** True when the participant is standing inside the dashboard bag (the
-   *  hidden `dash-*` lineage the toggle opens). Resolved through IoC — the
-   *  dashboard is essentials, but a load-order-safe read (never an import). */
-  #inDashboardBag = (): boolean => {
-    const bee = (window as any).ioc?.get?.('@diamondcoreprocessor.com/DashboardBee') as { isActive?: () => boolean } | undefined
-    return bee?.isActive?.() === true
-  }
-
-  /** Cluster-island coordinates for an ORDERED launcher page (help) OR the
-   *  dashboard bag (questions grouped by category), or null to fall through to
-   *  the normal spiral. Engages only once at least one cell carries the `header`
-   *  role — so /games, /websites and every hive page keep the spiral untouched.
-   *  Keyed by LABEL (islands are placed by identity, not index). Also returns
-   *  the header labels for the title-tile border tint. */
+  /** Cluster-island coordinates for an ORDERED launcher page (help), or null to
+   *  fall through to the normal spiral. Engages only once at least one cell
+   *  carries the `header` role — so /games, /websites and every hive page keep
+   *  the spiral untouched. Keyed by LABEL (islands are placed by identity, not
+   *  index). Also returns the header labels for the title-tile border tint. */
   #launcherClusterCoords = (names: string[]): { coords: Map<string, { q: number; r: number }>; headers: Set<string> } | null => {
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    const launcher = isLauncherLocation(segs)
-    const dashboard = !launcher && this.#inDashboardBag()
-    if (!launcher && !dashboard) return null
+    if (!isLauncherLocation(segs)) return null
 
-    // The island id + header role live on each tile's decoration — `launch:target`
-    // for launcher pages, `dashboard-island` for the dashboard bag. Same layout
-    // engine, different metadata source.
-    const groupOf = dashboard ? dashboardIslandGroupForLabel : launchGroupForLabel
-    const roleOf = dashboard ? dashboardIslandRoleForLabel : launchRoleForLabel
+    // The island id + header role live on each tile's `launch:target` decoration.
+    const groupOf = launchGroupForLabel
+    const roleOf = launchRoleForLabel
 
     // Gather each island by its GROUP id (carried per tile in the decoration),
     // NOT by render order — a slot system re-sorts `names`, so a position-delimited
@@ -6713,7 +6801,9 @@ export class ShowCellDrone extends Drone {
         try {
           // LOCAL only — a miss never stalls the batch; the detached fill
           // pulls the bytes and a follow-up render atlas-loads them.
-          const blob = await store.getResourceLocal(sig)
+          // Cell-sized optimized visual first: same pixels the atlas would
+          // bake from the raw, pre-downscaled so the decode is milliseconds.
+          const blob = await this.#localDecodeBlob(sig)
           if (!blob) { fillFromHost(sig); return }
           await imageAtlas.loadImage(sig, blob)
         } catch { /* per-cell warnings removed — fired on every nav */ }
@@ -6963,6 +7053,12 @@ export class ShowCellDrone extends Drone {
     // warms any missing child images and forces one repaint when a readiness
     // bit flips (buildCellsKey folds the shade bit → rebake).
     void this.#computeChildrenReadiness(cells, renderSegments)
+
+    // Pre-bake the click targets: decode the visible branches' CHILD images
+    // into the atlas during idle, so clicking into a warm branch paints from
+    // already-baked slots — first visit ≈ revisit. Fire-and-forget, local
+    // bytes only, no user-visible state.
+    void this.#prebakeClickTargets(cells, renderSegments)
   }
 
   /** Swap children-readiness state to this LOCATION (segments key — known
@@ -7267,6 +7363,196 @@ export class ShowCellDrone extends Drone {
     }
   }
 
+  /** The cheapest LOCAL bytes for an image sig: the cell-sized optimized
+   *  visual when minted, else the raw resource. Never network. A raw
+   *  fallback heavy enough to matter demands the optimized form for next
+   *  time — minted in the optimize phase (visual-optimizer.drone). */
+  #localDecodeBlob = async (sig: string): Promise<Blob | null> => {
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+      getResourceLocal: (s: string) => Promise<Blob | null>
+      getOptimizedVisual?: (s: string) => Promise<Blob | null>
+    } | undefined
+    if (!store) return null
+    const optimized = (await store.getOptimizedVisual?.(sig)) ?? null
+    if (optimized) return optimized
+    const raw = await store.getResourceLocal(sig)
+    if (raw && raw.size >= ShowCellDrone.#VISUAL_DEMAND_MIN_BYTES) {
+      this.emitEffect('visual:wanted', { sig })
+    }
+    return raw
+  }
+
+  /** Resolve the images a click on this view would paint — each visible
+   *  branch's direct children's images — and queue them for idle atlas
+   *  bakes, most-used branch first. Best-effort and LOCAL throughout:
+   *  props not yet local are skipped (the warm sweep is fetching them; its
+   *  forced repaints re-enter here through loadCellImages, and the
+   *  cooldown keeps those re-walks bounded). */
+  #prebakeClickTargets = async (cells: Cell[], parentSegments: readonly string[]): Promise<void> => {
+    const imageAtlas = this.imageAtlas
+    if (!imageAtlas || this.#prebakeInFlight) return
+    this.#prebakeInFlight = true
+    try {
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+        getResourceLocal: (sig: string) => Promise<Blob | null>
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
+      } | undefined
+      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+        getLayerBySig: (sig: string) => Promise<{ name?: string; children?: string[] } | null>
+        latestMarkerSigFor?: (locSig: string, label: string) => Promise<string | undefined>
+      } | undefined
+      const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as {
+        currentSig?: () => Promise<string>; explorerLabel?: () => string
+      } | undefined
+      if (!store || !history?.latestMarkerSigFor || !history.getLayerBySig) return
+      const locSig = (await lineage?.currentSig?.()) ?? ''
+      if (!locSig) return
+      const parentLayerSig = (await history.latestMarkerSigFor(locSig, String(lineage?.explorerLabel?.() ?? '/'))) ?? ''
+      if (!parentLayerSig) return
+      // COHERENCE GATE (same rule as the readiness compute): mid-navigation
+      // segments and currentSig can straddle two locations — baking for a
+      // mismatched pair only wastes slots, so skip; a later pass re-enters.
+      if (parentSegments.length) {
+        const locFromSegments = await cellLocationSig(
+          parentSegments.slice(0, -1),
+          parentSegments[parentSegments.length - 1],
+        )
+        if (locFromSegments !== locSig) return
+      }
+      const last = this.#prebakeAttemptAt.get(parentLayerSig) ?? 0
+      const now = Date.now()
+      if (now - last < ShowCellDrone.#PREBAKE_COOLDOWN_MS) return
+      this.#prebakeAttemptAt.set(parentLayerSig, now)
+      if (this.#prebakeAttemptAt.size > 64) {
+        const oldest = this.#prebakeAttemptAt.keys().next().value
+        if (oldest !== undefined) this.#prebakeAttemptAt.delete(oldest)
+      }
+
+      // A fresh walk owns the queue — supersede whatever a previous
+      // location (or a previous pass here) still had pending.
+      const gen = ++this.#prebakeGen
+      this.#prebakeQueue.length = 0
+      this.#prebakeQueued.clear()
+
+      // Structure: child label → that child's children (grandchild layer
+      // sigs) — one manifest read, else the per-child fallback walk.
+      const grandkidsByLabel = new Map<string, string[]>()
+      try {
+        const manifest = store.readChildrenManifest ? await store.readChildrenManifest(parentLayerSig).catch(() => null) : null
+        if (manifest) {
+          for (const e of manifest) {
+            const n = String(e.layer?.name ?? '')
+            if (n) grandkidsByLabel.set(n, Array.isArray(e.layer?.children) ? e.layer.children.map(String) : [])
+          }
+        } else {
+          const parent = await history.getLayerBySig(parentLayerSig)
+          for (const cs of (Array.isArray(parent?.children) ? parent!.children : [])) {
+            const cl = await history.getLayerBySig(String(cs))
+            const n = String(cl?.name ?? '')
+            if (cl && n) grandkidsByLabel.set(n, Array.isArray(cl.children) ? cl.children.map(String) : [])
+          }
+        }
+      } catch { /* unknown structure — nothing to pre-bake */ }
+      if (grandkidsByLabel.size === 0) return
+
+      // Most-used first over the VISIBLE branches — same order the
+      // readiness compute releases in, so the branch the participant will
+      // actually open bakes first.
+      const visible = new Set(cells.filter(c => !c.plain).map(c => c.label))
+      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
+      const labels = [...grandkidsByLabel.keys()].filter(l => visible.has(l))
+      const weighted = await Promise.all(labels.map(async label => ({
+        label,
+        w: ranker ? ranker.weight(await cellLocationSig(parentSegments, label)) : 0,
+      })))
+      weighted.sort((a, b) => b.w - a.w)
+
+      const livePropsIndex: Record<string, string> = (() => {
+        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
+      })()
+
+      for (const { label } of weighted) {
+        if (gen !== this.#prebakeGen) return
+        if (this.#prebakeQueued.size >= ShowCellDrone.#PREBAKE_MAX_PER_LOCATION) break
+        // Reuse the readiness compute's structure cache when it has a
+        // COMPLETE list for this label; otherwise build locally WITHOUT
+        // caching — the shared cache feeds readiness decisions, and a list
+        // built while props were still cold would freeze incomplete.
+        const cached = this.#childImageSigsByParent.get(parentLayerSig)?.get(label)
+        let sigs: string[]
+        if (cached) {
+          sigs = cached
+        } else {
+          sigs = []
+          const childSegments = [...parentSegments, label]
+          for (const gSig of grandkidsByLabel.get(label) ?? []) {
+            if (gen !== this.#prebakeGen) return
+            const gl = await history.getLayerBySig(gSig)
+            const gName = String(gl?.name ?? '')
+            if (!gName) continue
+            const key = await cellLocationSig(childSegments, gName)
+            const propsSig = livePropsIndex[key] ?? livePropsIndex[gName]
+            if (!propsSig || !isSignature(propsSig)) continue
+            const pblob = await store.getResourceLocal(propsSig)
+            if (!pblob) continue
+            try {
+              const props = JSON.parse(await pblob.text())
+              const img = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+              if (typeof img === 'string' && isSignature(img)) sigs.push(img)
+            } catch { /* malformed props — skip */ }
+          }
+        }
+        for (const sig of sigs) {
+          if (this.#prebakeQueued.size >= ShowCellDrone.#PREBAKE_MAX_PER_LOCATION) break
+          if (this.#prebakeQueued.has(sig)) continue
+          if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) continue
+          this.#prebakeQueued.add(sig)
+          this.#prebakeQueue.push(sig)
+        }
+      }
+      this.#pumpPrebake()
+    } catch { /* opportunistic — a failed walk changes nothing */ }
+    finally { this.#prebakeInFlight = false }
+  }
+
+  /** Idle-sliced atlas bakes for the pre-bake queue. A couple per slice —
+   *  each is a small decode once the cell-sized visual is minted — so the
+   *  loop never competes with an interaction. Pinned on-screen slots are
+   *  untouchable by the ring allocator, and evicting other stale entries
+   *  is exactly what the ring does on any load. */
+  #pumpPrebake = (): void => {
+    if (this.#prebakePumping || this.#prebakeQueue.length === 0) return
+    this.#prebakePumping = true
+    const gen = this.#prebakeGen
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+    const schedule = typeof ric === 'function'
+      ? (cb: () => void) => ric(cb, { timeout: 2_000 })
+      : (cb: () => void) => setTimeout(cb, 250)
+    schedule(() => {
+      void (async () => {
+        try {
+          const imageAtlas = this.imageAtlas
+          if (!imageAtlas) return
+          for (let n = 0; n < ShowCellDrone.#PREBAKE_PER_SLICE && this.#prebakeQueue.length > 0; n++) {
+            // Superseded — the fresh walk owns the queue and re-pumps.
+            if (gen !== this.#prebakeGen) return
+            const sig = this.#prebakeQueue.shift()!
+            this.#prebakeQueued.delete(sig)
+            if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) continue
+            const blob = await this.#localDecodeBlob(sig)
+            // Not local yet — the warm sweep lands it; a later walk retries.
+            if (!blob) continue
+            await imageAtlas.loadImage(sig, blob)
+          }
+        } catch { /* opportunistic — drop the slice */ }
+        finally {
+          this.#prebakePumping = false
+          this.#pumpPrebake()
+        }
+      })()
+    })
+  }
+
   /** Coalesced repaint for readiness transitions. Tile releases and warm
    *  completions request ONE repaint per short window instead of forcing a
    *  full render pass EACH — per-event forcing at scale stacked dozens of
@@ -7381,8 +7667,12 @@ export class ShowCellDrone extends Drone {
       const imgUV = c.plain ? null : (c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null)
 
       // label UV: collapse to [0,0,0,0] when hideText + image present so the
-      // shader samples a transparent corner and the label is effectively hidden.
-      const ruv = (c.hideText && imgUV) ? { u0: 0, v0: 0, u1: 0, v1: 0 } : this.atlas!.getLabelUV(c.label)
+      // shader samples a transparent corner and the label is effectively
+      // hidden. The hovered tile is exempt — it reveals its name — so a
+      // rebuild mid-hover does not blink the text back off.
+      const ruv = (c.hideText && imgUV && c.label !== this.#hoverRevealLabel)
+        ? { u0: 0, v0: 0, u1: 0, v1: 0 }
+        : this.atlas!.getLabelUV(c.label)
       for (let i = 0; i < 4; i++) {
         labelUV.set([ruv.u0, ruv.v0, ruv.u1, ruv.v1], luvp)
         luvp += 4
@@ -7554,6 +7844,57 @@ export class ShowCellDrone extends Drone {
    * Returns true on success; false if the caller should fall back to the
    * incremental render path.
    */
+  /** Would this cell's name be hidden right now? True only for a hideText
+   *  tile whose image is actually in the atlas (an image that has not
+   *  landed yet never hid anything) — and never for the hovered tile,
+   *  which is the whole point of the reveal. */
+  #labelIsHidden(label: string): boolean {
+    if (label === this.#hoverRevealLabel) return false
+    const cell = this.renderedCells.get(label)
+    if (!cell?.hideText || cell.plain || !cell.imageSig) return false
+    return !!this.imageAtlas?.getImageUV(cell.imageSig)
+  }
+
+  /** Point the hover reveal at `next` and repaint just the tiles whose
+   *  hidden-ness actually flipped. Touches one attribute for at most two
+   *  cells, so it is cheap enough to run on every hover change; tiles that
+   *  never hide their text cost nothing but a map lookup. */
+  #setHoverReveal(next: string | null): void {
+    const prev = this.#hoverRevealLabel
+    if (prev === next) return
+
+    // Only a tile that HIDES its text can change appearance here. Resolve
+    // that against the pre-flip state for `prev` and the post-flip state
+    // for `next`, so each is judged as the reveal actually leaves it.
+    const wasHiding = (l: string | null): boolean => {
+      if (!l) return false
+      const cell = this.renderedCells.get(l)
+      if (!cell?.hideText || cell.plain || !cell.imageSig) return false
+      return !!this.imageAtlas?.getImageUV(cell.imageSig)
+    }
+    const prevFlips = wasHiding(prev)   // prev was revealed → re-hide it
+    const nextFlips = wasHiding(next)   // next was hidden → reveal it
+
+    this.#hoverRevealLabel = next
+    if (!prevFlips && !nextFlips) return
+
+    const labelUV = this.#buf.labelUV
+    if (!labelUV || !this.atlas || !this.geom) return
+
+    for (const l of [prevFlips ? prev : null, nextFlips ? next : null]) {
+      if (!l) continue
+      const i = this.#labelToIndex.get(l)
+      if (i === undefined) continue
+      if (this.#labelIsHidden(l)) {
+        this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
+      } else {
+        const r = this.atlas.getLabelUV(l)
+        this.#writeCellVec4(labelUV, i, r.u0, r.v0, r.u1, r.v1)
+      }
+    }
+    this.#pushBuffer('aLabelUV')
+  }
+
   readonly #tryInPlaceCellUpdate = async (
     label: string,
     _ctx: { dir: FileSystemDirectoryHandle | null },
@@ -7587,9 +7928,10 @@ export class ShowCellDrone extends Drone {
     const [bcr, bcg, bcb] = this.cellBorderColorCache.get(label) ?? [0.784, 0.592, 0.353]
     this.#writeCellRgb(borderColor, i, bcr, bcg, bcb)
 
-    // labelUV: collapse to origin when hideText + image so the label is hidden
+    // labelUV: collapse to origin when hideText + image so the label is
+    // hidden — unless this is the hovered tile, which is revealing its name.
     const ht = this.cellHideTextCache.get(label) ?? false
-    if (ht && imgUV) {
+    if (ht && imgUV && label !== this.#hoverRevealLabel) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const ruv = this.atlas.getLabelUV(label)

@@ -19,7 +19,7 @@
 //
 //   1. VISUAL BEES — a decoration kind OWNED by a registered visual bee
 //      (VisualBeeRegistry.byDecorationKind). A visual bee IS the render-
-//      feature a tile carries (website, dashboard, …). These are node-local
+//      feature a tile carries (website, game, …). These are node-local
 //      by default: a website page on a parent does NOT make the child a
 //      website. (A community bee may opt into cascade via `cascades: true`.)
 //

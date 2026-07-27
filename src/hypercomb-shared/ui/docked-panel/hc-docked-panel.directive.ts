@@ -18,11 +18,16 @@
 //     panel's SCSS consumes the var — see clipboard-panel for the pattern). A
 //     calc-multiplier, NOT `zoom`, to avoid softening glyphs under a panel's
 //     backdrop-filter (documentation/zoomable-widgets.md),
-//   • injects a SETTINGS gear into the panel's header, opening a small popover
-//     of per-window settings. The one setting today is the window's GROUP: a
-//     plain text field. Windows whose group text MATCHES share attributes (the
-//     width, for now); a blank one is on its own. Nothing to create, name or
-//     delete — the text is the whole model.
+//   • injects a SETTINGS gear into the panel's header — always visible, a hair
+//     left of the close button — opening a small popover of per-window
+//     settings. The one setting today is the window's GROUP: a plain text
+//     field. Windows whose group text MATCHES share attributes (the width, for
+//     now); a blank one is on its own. Nothing to create, name or delete — the
+//     text is the whole model.
+//
+// A window that already sizes itself stamps it with `[ownsSize]="false"` and
+// gets the settings half only — same gear, same group, its own size. That is
+// how the notes strip joins a group without surrendering its edge handles.
 //
 // Pairs with hcDockInset, whose ResizeObserver re-reports the reserved canvas
 // inset as the width changes — so resizing keeps every on-screen tile beside
@@ -49,34 +54,45 @@ const t = (key: string, fallback: string, params?: Record<string, unknown>): str
  *  repaint gears and popovers when grouping changes anywhere. */
 const live = new Set<HcDockedPanelDirective>()
 
-/** The gear's reveal + resting/hover colour. Bare glyph — no circle, no plate —
- *  and ABSENT until you hover the band it lives in.
+/** A self-sizing window that holds its width in a SIGNAL rather than in the
+ *  element's inline style. Such a window must be told, not written to — an
+ *  inline width would be clobbered by the next change detection, and the
+ *  window's own store would go on disagreeing with what is on screen. The
+ *  component implements this and passes itself as `sizeOwner`. */
+export interface PanelSizeOwner {
+  /** Current width in px. */
+  panelWidth(): number
+  /** Take a width from the group — clamp and persist it as the window would
+   *  for its own drag. */
+  setPanelWidth(width: number): void
+}
+
+/** The gear's resting/hover colour. Bare glyph — no circle, no plate — standing
+ *  ALWAYS, in every tool window's header, just left of its close button.
  *
  *  A real stylesheet, not inline style: `:hover` cannot be expressed inline, and
  *  the gear is created imperatively so a component's (emulated-encapsulation)
  *  SCSS never reaches it. The RESTING colour is per-window state (a grouped
  *  window's gear is steel, an ungrouped one dim), so the directive sets only the
  *  `--hc-gear` custom property inline and the sheet reads it — an inline
- *  `color` would outrank the `:hover` rule and kill the effect. It also brightens
- *  while focused (keyboard reach) and while its popover is open.
+ *  `color` would outrank the `:hover` rule and kill the effect. It brightens on
+ *  hover, while focused (keyboard reach) and while its popover is open.
  *
- *  HOVER-ONLY, deliberately (do not make it stand at all times): window grouping
- *  is a rare act, and permanent chrome in every panel's title bar competes with
- *  the panel's own controls. `*:hover >` matches the gear's own parent — the
- *  header band, or the panel root for a headerless panel. At rest it is also
- *  non-interactive, so it can never swallow a click aimed at the header
- *  underneath. It stays up while focused and while its popover is open — a gear
- *  that vanished as the pointer travelled into the popover it just opened would
- *  read as the panel snatching the settings away. */
+ *  It used to be hover-only. It is not any more: a control that is invisible
+ *  until you happen to sweep the right band is a control nobody finds, and
+ *  grouping is the one setting a window has. Dim-at-rest is the whole restraint
+ *  — it sits below the close button's weight without disappearing. */
 const GEAR_CSS = `
-[data-hc-panel-settings] { color: var(--hc-gear, #6e8290); opacity: 0; pointer-events: none; }
-*:hover > [data-hc-panel-settings],
-[data-hc-panel-settings]:focus-visible,
-[data-hc-panel-settings][aria-expanded='true'] { opacity: 1; pointer-events: auto; }
+[data-hc-panel-settings] { color: var(--hc-gear, #6e8290); opacity: 1; pointer-events: auto; }
 [data-hc-panel-settings]:hover,
 [data-hc-panel-settings]:focus-visible,
 [data-hc-panel-settings][aria-expanded='true'] { color: #cfe3ef; }
 `
+
+/** The slot reserved for the gear immediately before a header's close button:
+ *  the 22px glyph plus a hair of air on each side, so it reads as its own
+ *  control rather than a second glyph stuck to the close button. */
+const GEAR_SLOT = 30
 
 let gearCssInstalled = false
 
@@ -106,6 +122,23 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
    *  ballooning its content. */
   @Input() minScale = 0.82
   @Input() maxScale = 1.4
+  /** Does this directive OWN the window's size? True for the panels that have
+   *  no sizing of their own — it injects the grip, restores/persists the width
+   *  and pins the panel beside the control bar.
+   *
+   *  False for a window that already sizes itself (the notes strip: its own
+   *  edge handles, its own store, and a float mode this directive knows
+   *  nothing about). Then the directive carries only the SETTINGS — the gear
+   *  and the group — and touches the width solely to hand over what the group
+   *  shares, leaving the window's own machinery to persist it. Without this a
+   *  self-sizing window could not have a gear at all, and "all windows" would
+   *  quietly mean "all windows except the one you write in". */
+  @Input() ownsSize = true
+  /** With `ownsSize` false: where the group's width is handed to, when the
+   *  window keeps its width in a signal. Absent → the directive writes the
+   *  element's inline width and leaves the window to persist it (the notes
+   *  strip, which already observes its own box). */
+  @Input() sizeOwner: PanelSizeOwner | null = null
 
   readonly #el: HTMLElement = inject(ElementRef).nativeElement
   #grip: HTMLElement | null = null
@@ -117,10 +150,19 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   #startX = 0
   #startWidth = 0
   #dragging = false
+  /** Only when `ownsSize` is false: watches the window's self-driven resize so
+   *  its group mates track it, exactly as the grip does for owned panels. */
+  #sizeWatch: ResizeObserver | null = null
 
   /** GroupMember — what this window contributes to, and takes from, its group. */
   get group(): string { return this.#group }
-  attrs(): GroupAttrs { return { width: this.#width } }
+  /** The live width. A settings-only window may not have been measured yet when
+   *  it joins a group, so ask its owner (or the element) rather than publishing
+   *  0 and collapsing every mate. */
+  attrs(): GroupAttrs {
+    if (this.ownsSize) return { width: this.#width }
+    return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth }
+  }
 
   ngOnInit(): void {
     live.add(this)
@@ -130,6 +172,26 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     // one — that is what "shares attributes" has to mean for a window that
     // wasn't mounted when the group's width last changed.
     const shared = this.#group ? readGroupAttrs(this.#group).width : undefined
+
+    if (!this.ownsSize) {
+      // Settings-only: the window keeps its own size and store. Take the
+      // group's width if the group has one, then track what the window does
+      // with its own edges so the mates follow.
+      this.#installSettings()
+      if (shared === undefined) { this.#watchSize(); return }
+      // The window restores its OWN width as it first renders, so take the
+      // group's over it a tick later — and stay unwatched until then, or that
+      // restore would publish itself as the group's new width on the way past.
+      // A timeout, not a frame: a window opened in a backgrounded tab must
+      // still land on its group's width.
+      setTimeout(() => {
+        if (!live.has(this)) return          // closed before the tick
+        this.adopt({ width: shared })
+        this.#watchSize()
+      })
+      return
+    }
+
     this.#width = (shared !== undefined) ? this.#clamp(shared) : this.#restoreWidth()
     this.#apply()
     this.#installGrip()
@@ -143,8 +205,32 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     members.delete(this)
     this.#stopListeners()
     this.#closePopover()
+    this.#sizeWatch?.disconnect()
+    this.#sizeWatch = null
     this.#grip?.removeEventListener('pointerdown', this.#onDown)
     this.#gearBtn?.removeEventListener('click', this.#onGearClick)
+  }
+
+  /** Self-sizing windows only: the window's own resize becomes the group's,
+   *  exactly as the grip's drag does for a panel this directive sizes.
+   *
+   *  It reports the width the way it was GIVEN — the owner's number, or the
+   *  element's border box when we wrote the inline style — never the observer's
+   *  `contentRect`. A window whose measured box differs from its set width by
+   *  so much as a border would otherwise publish that difference back, its
+   *  mates would adopt it, measure their own, and the group would creep a
+   *  couple of pixels wider on every hop. */
+  #watchSize(): void {
+    if (typeof ResizeObserver === 'undefined') return
+    this.#sizeWatch = new ResizeObserver(() => {
+      const w = this.sizeOwner ? this.sizeOwner.panelWidth() : this.#el.offsetWidth
+      if (w <= 0 || w === this.#width) return
+      this.#width = w
+      // First measurement of an ungrouped window is just bookkeeping — there
+      // is nobody to tell. A grouped one defines/updates the shared width.
+      if (this.#group) publishAttrs(this)
+    })
+    this.#sizeWatch.observe(this.#el)
   }
 
   #key(): string { return `hc:docked-width:${this.id}` }
@@ -213,22 +299,26 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   }
 
   // ── settings gear ──────────────────────────────────────────────────
-  /** The settings affordance: a gear in the header band, LAST before the close
-   *  button — after the window's title and its own controls, never leading them.
-   *  It is chrome the directive adds, so it sits at the trailing end rather than
-   *  pushing a panel's identity (icon + title) off the head of its own header.
+  /** The settings affordance: a gear in the header band, immediately left of
+   *  the close button — after the window's title and its own controls, never
+   *  leading them. Close stays hard-right, where every window on the desktop
+   *  keeps it; the directive's chrome tucks in beside it rather than pushing a
+   *  panel's identity (icon + title) off the head of its own header, or
+   *  displacing controls the window built itself.
    *
-   *  It goes IN the header's flex flow rather than floating over a corner — an
-   *  overlay is how the old bottom-corner lock silently ate the feedback panel's
-   *  Send button, and a shared directive must not inflict that on panels that
-   *  know nothing about it. In flow it can never overlap, in this panel or any
-   *  future one, with no per-panel styling; and the header band is already a
-   *  fixed shared height (_toolwindow.scss), so the gear lands at the same spot
-   *  in every tool window. Panels whose root has no header get the gear pinned
-   *  to the top corner opposite their close button instead.
+   *  It is pinned in a strip the directive RESERVES at the end of the header
+   *  (see below) rather than dropped into the flex flow — a third flex child
+   *  rearranges headers that distribute their own free space. Reserving the
+   *  strip keeps it from overlapping anything, in this panel or any future one,
+   *  with no per-panel styling: the old bottom-corner lock overlaid the
+   *  feedback panel's Send button, and a shared directive must not inflict that
+   *  on panels that know nothing about it. The header band is already a fixed
+   *  shared height (_toolwindow.scss), so the gear lands at the same spot in
+   *  every tool window. Panels whose root has no header get the gear pinned to
+   *  the top corner opposite their close button instead.
    *
-   *  Just the glyph — no circle, no plate — and it appears only while the header
-   *  band is hovered (see `GEAR_CSS`). */
+   *  Just the glyph — no circle, no plate — and it STANDS, always (see
+   *  `GEAR_CSS`), a hair to the left of the close button. */
   #installSettings(): void {
     installGearCss()
     const btn = document.createElement('button')
@@ -237,10 +327,10 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     btn.setAttribute('aria-haspopup', 'dialog')
     btn.setAttribute('aria-expanded', 'false')
     Object.assign(btn.style, {
-      flex: '0 0 auto', width: '22px', height: '22px', padding: '0',
+      width: '22px', height: '22px', padding: '0',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'transparent', border: 'none', borderRadius: '0',
-      cursor: 'pointer', zIndex: '7', transition: 'opacity 0.12s ease, color 0.12s ease',
+      cursor: 'pointer', zIndex: '7', transition: 'color 0.12s ease',
     } as Partial<CSSStyleDeclaration>)
 
     const glyph = document.createElement('span')
@@ -251,12 +341,39 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     btn.appendChild(glyph)
     btn.addEventListener('click', this.#onGearClick)
 
-    const header = this.#el.querySelector(':scope > header')
+    // The header band, whichever element a window builds it from: most tool
+    // windows use a real `<header>`, the notes strip a `.cv2-dragbar` div.
+    // Both take the shared `tw.header` geometry, so the gear lands identically.
+    const header = this.#el.querySelector(':scope > header, :scope > .cv2-dragbar') as HTMLElement | null
     if (header) {
-      // Before the close button (the last element in every tool window's
-      // header), so the gear trails the title and the panel's own controls and
-      // close stays hard-right where it always is.
-      header.insertBefore(btn, header.lastElementChild)
+      // Immediately LEFT of the close button, which stays hard-right where
+      // every window on this desktop puts it.
+      //
+      // Out of the flex flow, which matters more than it looks: headers lay
+      // their controls out in ways the directive cannot know, and several use
+      // `justify-content: space-between`, where adding a child re-splits the
+      // free space into one more gap and strands the close button mid-band. So
+      // the gear takes no part in the flow — it is pinned, and its space is
+      // reserved as a margin on the close button itself, which changes no
+      // child count and moves the close button not at all (the margin only
+      // eats free space the header was distributing anyway).
+      //
+      // The close button is the last thing every tool window's header renders,
+      // so the last element child is the anchor. Its width is read once here;
+      // the slot carries enough slack that a pixel of font drift is invisible.
+      const style = getComputedStyle(header)
+      if (style.position === 'static') header.style.position = 'relative'
+      const pad = parseFloat(style.paddingRight) || 0
+      const close = header.lastElementChild as HTMLElement | null
+      let inset = pad
+      if (close) {
+        inset = pad + (close.offsetWidth || 22) + (GEAR_SLOT - 22) / 2
+        close.style.marginLeft = `${GEAR_SLOT}px`
+      }
+      Object.assign(btn.style, {
+        position: 'absolute', right: `${inset}px`, top: '50%', transform: 'translateY(-50%)',
+      } as Partial<CSSStyleDeclaration>)
+      header.appendChild(btn)
     } else {
       // No header to ride in: sit in the top corner on the panel's INNER edge,
       // which is the corner a close button never occupies.
@@ -273,7 +390,7 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   /** Human label for this window in the group's membership line. The id is the
    *  only name the directive has — panels never tell it their title. */
   #label(): string {
-    const base = this.id.replace(/-(viewer|panel|landing)$/, '').replace(/-/g, ' ')
+    const base = this.id.replace(/-(viewer|panel|landing|strip)$/, '').replace(/-/g, ' ')
     return base ? base.charAt(0).toUpperCase() + base.slice(1) : this.id
   }
 
@@ -426,6 +543,22 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     const next = this.#clamp(attrs.width)
     if (next === this.#width) return
     this.#width = next
+    if (!this.ownsSize) {
+      // Hand the width over and let the window's own machinery persist it —
+      // writing our key too would leave two stores disagreeing about one
+      // window. Then record what the window ACTUALLY became, so the resize we
+      // just caused arrives at `#watchSize` as a width it already knows and is
+      // not republished. (A flag cleared on a timer would not do: in a
+      // backgrounded tab the timer never runs and the window stops sharing.)
+      if (this.sizeOwner) {
+        this.sizeOwner.setPanelWidth(next)
+        this.#width = this.sizeOwner.panelWidth()
+      } else {
+        this.#el.style.width = `${next}px`
+        this.#width = this.#el.offsetWidth || next
+      }
+      return
+    }
     this.#apply()
     try { localStorage.setItem(this.#key(), String(next)) } catch { /* ignore */ }
   }

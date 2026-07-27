@@ -709,11 +709,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     )
 
     // Restore sticky indicators from localStorage. Producer-owned pills
-    // (dismissable === false — e.g. the dashboard ◆) are deliberately NOT
+    // (dismissable === false) are deliberately NOT
     // restored: the drone that owns them re-emits the live, current pill on
     // boot via indicator:set. Rehydrating a persisted copy only risks
     // resurrecting an orphan whose key/label scheme has since changed —
-    // that was the "three stale dashboards" pile-up. Only genuinely sticky,
+    // that was the stale-pill pile-up. Only genuinely sticky,
     // user-dismissable pills survive a reload. We immediately rewrite storage
     // with the cleaned set so any pre-existing orphans are evicted on first load.
     const saved = localStorage.getItem('hc:indicators')

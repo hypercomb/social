@@ -41,6 +41,60 @@ export interface AggregateItem {
   image?: string
 }
 
+/** One selectable VERSION of a row.
+ *
+ *  A version is a SIGNATURE, never a version number — the sig IS the revision
+ *  handle (each commit already mints one), so a row's history needs no parallel
+ *  bookkeeping. `label` is only for reading; `sig` is what gets chosen.
+ *
+ *  Two chains can feed one row and they are NOT the same thing, so `origin`
+ *  keeps them apart rather than merging them into one misleading timeline:
+ *    • `local`     — a state this hive itself has been in. Choosing one is an
+ *                    ordinary commit here, undoable like any other.
+ *    • `published` — a deployed revision held by the INSTALLER on its own
+ *                    origin. Choosing one is a message across the sentinel
+ *                    port; this origin never writes the pick itself. */
+export interface AggregateVersion {
+  /** The signature this version IS — a page resource sig for `local`, a package
+   *  root sig for `published`. Also the @for track key. */
+  sig: string
+  /** Display handle. Never load-bearing. */
+  label: string
+  /** When this version came to be, epoch ms, when the chain knows. */
+  at?: number
+  /** The version currently in effect. Exactly one row per chain, at most. */
+  active?: boolean
+  /** Which chain this belongs to — see above. */
+  origin: 'local' | 'published'
+  /** For `published` rows: the host whose package this revision belongs to.
+   *  Carried on the row so choosing it needs no second lookup. */
+  domain?: string
+}
+
+/** A tile the participant has SELECTED on the canvas, offered to the panel as a
+ *  candidate member. `segments` is its absolute location, because a selection
+ *  survives navigation and the label alone would name the wrong tile once the
+ *  hive has moved on. */
+export interface StagedEntry {
+  label: string
+  segments: readonly string[]
+}
+
+/** What a create/add gesture put INTO THE INDEX, so the panel can show it
+ *  without waiting to re-read.
+ *
+ *  A write is a handful of local OPFS operations; re-deriving every row costs a
+ *  layer read, a decoration read and a picture per row, sequentially. Returning
+ *  the rows it just wrote lets the source answer the only question the panel
+ *  actually has at that moment — "what did I just add?" — and the authoritative
+ *  re-read then catches up in the background with pictures and keywords.
+ *
+ *  Rows the gesture wrote SOMEWHERE ELSE are not index rows: adding tiles INTO
+ *  a collection changes that collection's contents, not this list, so that case
+ *  reports nothing. `void` is allowed so a source that has nothing useful to say
+ *  early simply stays as it was and relies on the re-read. */
+export type AddedRows = readonly AggregateItem[] | void
+
 /** An aggregate that can be rendered by the shared index panel. */
 export interface AggregateSource {
   /** Stable id — also the panel's persisted-width key and its i18n prefix. */
@@ -64,7 +118,13 @@ export interface AggregateSource {
    *  "open". The panel never navigates on a source's behalf. */
   open(item: AggregateItem): void
 
-  /** Fires when membership changes, so the panel re-reads. */
+  /** Fires when the rows have changed BEHIND the panel's back, so it re-reads.
+   *
+   *  This is what a source uses to report work it finished after `items()`
+   *  already answered — a picture, a keyword or a title that resolved late. The
+   *  panel coalesces these, so a source may dispatch one per resolution without
+   *  costing a rebuild each; it must dispatch ONLY on a real change, or the
+   *  re-read it triggers will resolve again and never settle. */
   readonly changed?: EventTarget
 
   // ── optional management gestures ───────────────────────────────────────────
@@ -72,7 +132,27 @@ export interface AggregateSource {
 
   /** i18n key + handler for creating a new member inline. */
   readonly createKey?: string
-  create?(name: string): Promise<void>
+  create?(name: string): Promise<AddedRows>
+
+  /** i18n key + handler for adding the participant's CURRENT SELECTION.
+   *
+   *  Selecting tiles on the canvas and pressing one button beats dragging them
+   *  in one at a time, and it is the only gesture that handles several at once.
+   *  A source that has no meaning for "add these existing tiles" simply omits
+   *  it and the panel never offers the affordance. */
+  readonly addKey?: string
+  /** `into` picks the DESTINATION. Absent, the entries become members of the
+   *  index itself — they BECOME collections. Given a row, they are added INTO
+   *  that collection instead. Same act at two grains: promote, or gather. */
+  add?(entries: readonly StagedEntry[], into?: AggregateItem): Promise<AddedRows>
+
+  /** The chain of versions behind a row, newest first. A source that has no
+   *  meaning for "what has this been before" omits it and the panel never
+   *  offers the affordance — same rule as every other gesture here. */
+  versions?(item: AggregateItem): Promise<readonly AggregateVersion[]>
+  /** Put a version in effect. What that MEANS belongs to the source (a commit
+   *  here, a message to the installer); the panel only reports the choice. */
+  useVersion?(item: AggregateItem, version: AggregateVersion): Promise<void>
 
   rename?(item: AggregateItem, next: string): Promise<void>
   /** Remove from the INDEX (never a content delete). */

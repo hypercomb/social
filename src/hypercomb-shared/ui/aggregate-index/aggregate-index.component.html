@@ -36,21 +36,84 @@
       </button>
     }
 
-    @if (items().length > 0) {
-      <div class="ai-filter">
-        <div class="ai-filter-field">
-          <span class="mat-sym ai-filter-icon" aria-hidden="true">search</span>
-          <input class="ai-filter-input" type="text" autocomplete="off"
-                 [value]="query()"
-                 (input)="onQuery($any($event.target).value)"
-                 [placeholder]="'aggregate.filter' | t"
-                 [attr.aria-label]="'aggregate.filter' | t" />
-          @if (hasFilter()) {
-            <button class="ai-filter-clear mat-sym" type="button" (click)="clearFilter()"
-                    [attr.aria-label]="'aggregate.filter-clear' | t"
-                    [title]="'aggregate.filter-clear' | t">close</button>
+    <!-- Tiles selected out on the canvas, offered as candidates. Temporary and
+         never persisted: these rows exist only while the selection does, and
+         pressing Add is what turns them into real members. -->
+    <!-- Save the page we are standing on. The canvas route cannot select the
+         page you are ON — only its parent can — so this is the only way in. -->
+    @if (canAddHere()) {
+      <button class="ai-add-here" type="button" (click)="addHere()"
+              [attr.aria-label]="'collections-landing.add-here' | t: { name: hereLabel() }"
+              [title]="'collections-landing.add-here' | t: { name: hereLabel() }">
+        <span class="mat-sym" aria-hidden="true">bookmark_add</span>
+        <span class="ai-add-here-label">
+          {{ 'collections-landing.add-here' | t: { name: hereLabel() } }}
+        </span>
+      </button>
+    }
+
+    @if (staged().length > 0 && src.addKey; as addKey) {
+      <div class="ai-staged" role="group"
+           [attr.aria-label]="addKey | t: { count: staged().length }">
+        <ul class="ai-staged-list">
+          @for (entry of staged(); track entry.label) {
+            <li class="ai-staged-row">
+              <span class="mat-sym ai-staged-icon" aria-hidden="true">add_circle</span>
+              <span class="ai-staged-name">{{ entry.label }}</span>
+            </li>
           }
-        </div>
+        </ul>
+        <!-- The label names the destination rather than leaving it implicit:
+             standing inside a collection sends the selection THERE, standing
+             anywhere else turns them into collections. -->
+        @if (destination(); as into) {
+          <button class="ai-staged-add" type="button" (click)="addStaged()"
+                  [attr.aria-label]="'collections-landing.add-to' | t: { count: staged().length, name: into.label }"
+                  [title]="'collections-landing.add-to' | t: { count: staged().length, name: into.label }">
+            {{ 'collections-landing.add-to' | t: { count: staged().length, name: into.label } }}
+          </button>
+        } @else {
+          <button class="ai-staged-add" type="button" (click)="addStaged()"
+                  [attr.aria-label]="addKey | t: { count: staged().length }"
+                  [title]="addKey | t: { count: staged().length }">
+            {{ addKey | t: { count: staged().length } }}
+          </button>
+        }
+      </div>
+    }
+
+    <!-- Search, and the + that turns the SAME field into the name of a new
+         member. One place to type, whether you are looking for something or
+         making it. Shown whenever there is either something to search or
+         something to create — an empty index still needs its first row. -->
+    @if (items().length > 0 || canCreate()) {
+      <div class="ai-filter">
+        <form class="ai-filter-row" (submit)="$event.preventDefault(); submitCreate()">
+          <div class="ai-filter-field" [class.is-creating]="creating()">
+            <span class="mat-sym ai-filter-icon" aria-hidden="true">{{ creating() ? 'add' : 'search' }}</span>
+            <!-- Enter is bound explicitly: the shell's key handling eats a
+                 form's implicit submission, so relying on it alone loses the
+                 keystroke people actually press. -->
+            <input class="ai-filter-input" type="text" autocomplete="off"
+                   [value]="creating() ? draft() : query()"
+                   (input)="onFieldInput($any($event.target).value)"
+                   (keydown.enter)="$event.preventDefault(); submitCreate()"
+                   [placeholder]="(creating() ? 'aggregate.create-placeholder' : 'aggregate.filter') | t"
+                   [attr.aria-label]="(creating() ? 'aggregate.create-placeholder' : 'aggregate.filter') | t" />
+            @if (creating() ? draft().length > 0 : hasFilter()) {
+              <button class="ai-filter-clear mat-sym" type="button"
+                      (click)="creating() ? cancelCreate() : clearFilter()"
+                      [attr.aria-label]="(creating() ? 'aggregate.cancel-create' : 'aggregate.filter-clear') | t"
+                      [title]="(creating() ? 'aggregate.cancel-create' : 'aggregate.filter-clear') | t">close</button>
+            }
+          </div>
+          @if (canCreate()) {
+            <button class="ai-filter-add mat-sym" type="button" [class.is-active]="creating()"
+                    (click)="onPlus()"
+                    [attr.aria-label]="(source()?.createKey ?? 'aggregate.new') | t"
+                    [title]="(source()?.createKey ?? 'aggregate.new') | t">{{ creating() ? 'check' : 'add' }}</button>
+          }
+        </form>
         @if (allTags().length > 0) {
           <div class="ai-tags" role="group" [attr.aria-label]="'aggregate.filter-tags' | t">
             @for (tag of allTags(); track tag) {
@@ -61,28 +124,31 @@
             }
           </div>
         }
+
+        <!-- What a reference dropped from here will DEMAND. Distinct from the
+             filter row above: that one narrows what you are looking at, this one
+             is written into the reference at birth and cannot be switched off
+             afterwards. -->
+        @if (vocabulary().length > 0) {
+          <div class="ai-demands" role="group" [attr.aria-label]="'aggregate.demands' | t">
+            <span class="ai-demands-label">{{ 'aggregate.demands' | t }}</span>
+            @for (mark of vocabulary(); track mark) {
+              <button class="ai-demand" type="button"
+                      [class.is-armed]="isArmed(mark)"
+                      [attr.aria-pressed]="isArmed(mark)"
+                      (click)="toggleArmed(mark)">{{ mark }}</button>
+            }
+            @if (armedMarks().size > 0) {
+              <button class="ai-demands-clear mat-sym" type="button" (click)="clearArmed()"
+                      [attr.aria-label]="'aggregate.demands-clear' | t"
+                      [title]="'aggregate.demands-clear' | t">close</button>
+            }
+          </div>
+        }
       </div>
     }
 
     <div class="ai-scroll">
-      @if (canCreate()) {
-        <div class="ai-create">
-          @if (creating()) {
-            <form class="ai-create-row" (submit)="$event.preventDefault(); create(nameField)">
-              <input #nameField class="ai-create-input" type="text" autocomplete="off"
-                     [placeholder]="'aggregate.create-placeholder' | t"
-                     [attr.aria-label]="'aggregate.create-placeholder' | t" />
-              <button class="ai-create-submit" type="submit">{{ 'aggregate.create' | t }}</button>
-            </form>
-          } @else {
-            <button class="ai-create-open" type="button" (click)="toggleCreate()">
-              <span class="mat-sym">add</span>
-              <span>{{ (src.createKey ?? 'aggregate.new') | t }}</span>
-            </button>
-          }
-        </div>
-      }
-
       @if (items().length === 0) {
         <div class="ai-welcome">
           @if (src.ledeKey) { <p class="ai-lede">{{ src.ledeKey | t }}</p> }
@@ -125,6 +191,15 @@
                 </form>
               } @else {
                 <div class="ai-actions">
+                  @if (canPickVersion()) {
+                    <button class="ai-action" type="button"
+                            [class.is-active]="versionsFor() === item.key"
+                            (click)="toggleVersions(item, $event)"
+                            [attr.aria-expanded]="versionsFor() === item.key"
+                            [attr.aria-label]="'aggregate.versions' | t" [title]="'aggregate.versions' | t">
+                      <span class="mat-sym">history</span>
+                    </button>
+                  }
                   @if (canRename(item)) {
                     <button class="ai-action" type="button" (click)="startRename(item, $event)"
                             [attr.aria-label]="'aggregate.rename' | t" [title]="'aggregate.rename' | t">
@@ -136,6 +211,44 @@
                             [attr.aria-label]="'aggregate.remove' | t" [title]="'aggregate.remove' | t">
                       <span class="mat-sym">delete</span>
                     </button>
+                  }
+                </div>
+              }
+
+              <!-- The chain behind this row. Two groups, never merged: what this
+                   hive has been, and what the installer holds deployed. -->
+              @if (versionsFor() === item.key) {
+                <div class="ai-versions" role="group" [attr.aria-label]="'aggregate.versions' | t">
+                  @if (versionsLoading()) {
+                    <p class="ai-versions-note">{{ 'aggregate.versions-loading' | t }}</p>
+                  } @else if (versions().length === 0) {
+                    <p class="ai-versions-note">{{ 'aggregate.versions-empty' | t }}</p>
+                  }
+                  @for (group of ['local', 'published']; track group) {
+                    @if (versionsOf($any(group)).length > 0) {
+                      <p class="ai-versions-head">
+                        {{ (group === 'local' ? 'aggregate.versions-local' : 'aggregate.versions-published') | t }}
+                      </p>
+                      <ul class="ai-version-list" role="list">
+                        @for (v of versionsOf($any(group)); track v.sig) {
+                          <li>
+                            <button class="ai-version" type="button"
+                                    [class.is-active]="v.active"
+                                    [disabled]="v.active || versionsLoading()"
+                                    [title]="v.sig"
+                                    (click)="chooseVersion(item, v)">
+                              <span class="ai-version-label">{{ v.label }}</span>
+                              @if (versionTime(v.at); as when) {
+                                <span class="ai-version-time">{{ when }}</span>
+                              }
+                              @if (v.active) {
+                                <span class="ai-version-flag">{{ 'aggregate.version-active' | t }}</span>
+                              }
+                            </button>
+                          </li>
+                        }
+                      </ul>
+                    }
                   }
                 </div>
               }

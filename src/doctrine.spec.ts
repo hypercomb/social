@@ -269,7 +269,15 @@ describe('doctrine ratchets', () => {
       let files: string[]
       try { files = walk(join(ROOT, dir)) } catch { continue }
       for (const file of files) {
-        const code = stripComments(readFileSync(file, 'utf8'))
+        const raw = readFileSync(file, 'utf8')
+        // Skip auto-generated facades. `essentials-keys.ts` mirrors EVERY
+        // exported symbol name to its module path, so any export named
+        // `*_MEANING` reappears there as `MEANING = '@domain/path/module'` —
+        // a module path, colon-less, and not a declaration at all. Scanning
+        // it reports a false bare-word meaning for a pool whose real
+        // spelling is perfectly fine. The frozen list is untouched.
+        if (/^\/\/\s*auto-generated/.test(raw)) continue
+        const code = stripComments(raw)
         for (const m of code.matchAll(decl)) {
           const meaning = m[1]
           if (meaning.includes(':')) continue           // collision-proof
