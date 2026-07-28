@@ -985,7 +985,7 @@ export class HistoryService {
     // re-reading the bag.
     this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
     this.#parsedLayerCache.set(layerSig, canonical)
-    this.#latestSigByLineage.set(locationSig, layerSig)
+    this.#setHead(locationSig, layerSig)
     this.#noteHeadDerived(locationSig, markerName)
     this.#scheduleHeadPersist()
 
@@ -1160,7 +1160,7 @@ export class HistoryService {
       this.#preloaderCache.set(layerSig, bytes)
       this.#opportunisticMigrateMarker(layerSig, bytes, handle)
     }
-    this.#latestSigByLineage.set(lineageSig, layerSig)
+    this.#setHead(lineageSig, layerSig)
     this.#noteHeadDerived(lineageSig, latestName)
     // Husk-only bag (max marker IS the genesis marker and it reads
     // bare): pre-seeding-era renders minted these for never-visited
@@ -1597,6 +1597,49 @@ export class HistoryService {
    *  which then validate by full re-derivation. */
   readonly #headStamp = new Map<string, string>()
 
+  /**
+   * TREE EPOCH — a monotonic counter bumped whenever any lineage's head
+   * CHANGES (a commit, an adoption, a sync, a drop). It is the O(1)
+   * answer to "could a tree-wide derivation have gone stale since I last
+   * ran it?", and it exists because the answer was previously "recompute
+   * and see": the swarm publish walk re-ran `sealSubtree` on EVERY
+   * navigation, and a seal at the root re-walked the WHOLE hive — measured
+   * 2,188 `getLayerBySig` resolutions plus a bag listing per node, on a
+   * navigation that changed nothing. Navigation must never fund a
+   * whole-hive walk.
+   *
+   * Derivations memoise `{ epoch, value }` and return the value untouched
+   * while the epoch holds. Conservative by construction — any head change
+   * anywhere invalidates every memo — which is correct, cheap, and
+   * self-healing: the next derivation re-runs once and settles again.
+   * Heads DISCOVERED by a warm (a lineage seen for the first time) bump it
+   * too; that is a handful of bumps while the warm drains, not a per-
+   * navigation walk.
+   */
+  #treeEpoch = 0
+  public readonly treeEpoch = (): number => this.#treeEpoch
+
+  /** Set a lineage head, bumping {@link treeEpoch} when the value actually
+   *  moves. EVERY head write goes through here — a raw `.set` would leave
+   *  seal/derivation memos trusting a stale tree. */
+  readonly #setHead = (lineageSig: string, layerSig: string): void => {
+    // LEARNING a head is not the tree CHANGING. Most writes here are pure
+    // discovery — a warm or a bag read teaching us a head that was already on
+    // disk — and treating those as changes made the epoch bump continuously
+    // while any warm drained, invalidating every derivation it was meant to
+    // protect (measured: the seal memo still re-walked 1,235 nodes on a return
+    // to the root, because the warm had bumped the epoch underneath it). Only
+    // a head that MOVES from a value we already knew is a change.
+    const prev = this.#latestSigByLineage.get(lineageSig)
+    if (prev !== undefined && prev !== layerSig) this.#treeEpoch++
+    this.#latestSigByLineage.set(lineageSig, layerSig)
+  }
+
+  /** Drop a lineage head, bumping {@link treeEpoch} when one was present. */
+  readonly #dropHead = (lineageSig: string): void => {
+    if (this.#latestSigByLineage.delete(lineageSig)) this.#treeEpoch++
+  }
+
   /** This session now owns the lineage's head (derived / committed). */
   readonly #noteHeadDerived = (lineageSig: string, markerName?: string): void => {
     this.#headOwned.add(lineageSig)
@@ -1855,7 +1898,7 @@ export class HistoryService {
       const parsed = parseHeadIndex(localStorage.getItem(HistoryService.#HEAD_INDEX_KEY))
       let n = 0
       for (const [lineageSig, entry] of Object.entries(parsed)) {
-        this.#latestSigByLineage.set(lineageSig, entry.s)
+        this.#setHead(lineageSig, entry.s)
         if (entry.m) this.#headStamp.set(lineageSig, entry.m)
         this.#headUnvalidated.add(lineageSig)
         n++
@@ -2107,7 +2150,7 @@ export class HistoryService {
       }
       // Stale head (cross-session drift, or its bytes aren't in the pool):
       // drop it and re-derive from disk rather than returning a wrong null.
-      this.#latestSigByLineage.delete(locationSig)
+      this.#dropHead(locationSig)
       this.#seededHeadByLineage.delete(locationSig)
       this.#noteHeadDropped(locationSig)
       this.#scheduleHeadPersist()
@@ -2164,6 +2207,14 @@ export class HistoryService {
   // below a node invalidates exactly that node's entry.
   readonly #sealCache = new Map<string, { key: string; sealedSig: string }>()
 
+  /** Seal results by location, stamped with the {@link treeEpoch} they were
+   *  derived at. A seal is a pure function of the subtree's heads, so while
+   *  the epoch holds the answer cannot have changed and the ENTIRE recursion
+   *  is skipped — the difference between a navigation that costs O(1) and one
+   *  that re-walks every descendant. `#sealCache` above still guards the
+   *  re-hash/re-write of an individual node; this guards the walk itself. */
+  readonly #sealByEpoch = new Map<string, { epoch: number; sealedSig: string | null }>()
+
   /**
    * Seal a tile's subtree into a merkle-correct root sig for SHARING, WITHOUT
    * touching history. Under leaf-only commit (per-page history — the cascade is
@@ -2198,6 +2249,24 @@ export class HistoryService {
     const locSig = await this.sign({ explorerSegments: () => [...segments] })
     if (!locSig || visited.has(locSig)) return null
     visited.add(locSig)
+
+    // EPOCH SHORT-CIRCUIT. A seal is a pure function of the subtree's live
+    // heads, so while no head has moved the previous answer is still the
+    // answer — return it WITHOUT the recursion. The publish walk re-seals on
+    // every navigation; without this, walking back into a tile you just left
+    // re-derived its whole subtree (and at the root, the whole hive) for a
+    // result that could not have changed.
+    const epochAtEntry = this.#treeEpoch
+    const byEpoch = this.#sealByEpoch.get(locSig)
+    if (byEpoch && byEpoch.epoch === epochAtEntry) return byEpoch.sealedSig
+    /** Stamp the derived answer — but only if the tree held still while we
+     *  walked. A head that moved mid-walk means this result may already
+     *  describe a superseded tree; leave it unmemoised so the next call
+     *  re-derives. */
+    const remember = (sealedSig: string | null): string | null => {
+      if (this.#treeEpoch === epochAtEntry) this.#sealByEpoch.set(locSig, { epoch: epochAtEntry, sealedSig })
+      return sealedSig
+    }
 
     const head = await this.currentLayerAt(locSig)
     if (!head) return null
@@ -2246,20 +2315,20 @@ export class HistoryService {
     // canonicalizeLayer (a round-trip invariant), so re-signing reproduces the
     // SAME sig — reuse the head sig when known, else materialise it.
     if (sealedChildren.length === 0) {
-      if (headSig) return headSig
+      if (headSig) return remember(headSig)
       const leaf = await HistoryService.#signLayer(head)
       await HistoryService.#poolWriteLayer(leaf.sig, leaf.bytes)
-      return leaf.sig
+      return remember(leaf.sig)
     }
 
     // Internal node: rebuild with children → sealed sigs; memoise on the fold.
     const key = `${headSig ?? ''}|${sealedChildren.join(',')}`
     const memo = this.#sealCache.get(locSig)
-    if (memo && memo.key === key) return memo.sealedSig
+    if (memo && memo.key === key) return remember(memo.sealedSig)
     const { sig, bytes } = await HistoryService.#signLayer({ ...head, children: sealedChildren })
     await HistoryService.#poolWriteLayer(sig, bytes)
     this.#sealCache.set(locSig, { key, sealedSig: sig })
-    return sig
+    return remember(sig)
   }
 
   /** Canonicalize → encode → sha256 a layer, exactly as commitLayer does, but
@@ -2445,7 +2514,7 @@ export class HistoryService {
       const bytes = await (await fileHandle.getFile()).arrayBuffer()
       const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
       if (!isPointer) this.#preloaderCache.set(layerSig, bytes)
-      this.#latestSigByLineage.set(lineageSig, layerSig)
+      this.#setHead(lineageSig, layerSig)
       this.#noteHeadDerived(lineageSig, latest.name)
       this.#scheduleHeadPersist()
     } catch { /* unreadable head — stay cold; the passive preload may resolve it */ }
@@ -2495,7 +2564,7 @@ export class HistoryService {
       // No marker anywhere: the restored entry is a phantom on this
       // device (bag archived/removed). Drop it — the parent-carried
       // fallback owns pathless reads.
-      this.#latestSigByLineage.delete(lineageSig)
+      this.#dropHead(lineageSig)
       this.#noteHeadDropped(lineageSig)
       return
     }
@@ -2510,7 +2579,7 @@ export class HistoryService {
     }
     // Stale (a newer marker landed after the last flush) or unstamped
     // legacy entry — never trust it. Re-derive from the max marker.
-    this.#latestSigByLineage.delete(lineageSig)
+    this.#dropHead(lineageSig)
     this.#headUnvalidated.delete(lineageSig)
     await this.#warmLineageHead(lineageSig)
   }
@@ -2709,7 +2778,7 @@ export class HistoryService {
             this.#preloaderCache.set(layerSig, bytes)
             this.#opportunisticMigrateMarker(layerSig, bytes, fileHandle)
           }
-          this.#latestSigByLineage.set(lineageSig, layerSig)
+          this.#setHead(lineageSig, layerSig)
           this.#noteHeadDerived(lineageSig, latestName)
           cachedCount++
           if (previewSigs.length < 10) previewSigs.push(layerSig.slice(0, 12))
@@ -2903,7 +2972,17 @@ export class HistoryService {
           // the #stageToHost rate limiter keeps read-triggered staging to a
           // trickle (the earlier flood was staging's per-sig durable-queue
           // writes, not the reads themselves).
-          if (node.depth <= 2) this.#warmTileContent(layer, store, gen)
+          if (node.depth <= 2 && this.#warmedTiles.get(node.sig) !== this.#treeEpoch) {
+            // ONCE PER TILE PER TREE STATE. Neighbourhood warms overlap heavily
+            // (every navigation warms a subtree that shares most of its nodes
+            // with the last one), and re-warming an already-warm tile is pure
+            // duplicate work: measured 89% of all resource reads were repeats,
+            // 24,631 reads for 2,805 distinct sigs. The layer sig is content-
+            // addressed and the epoch covers everything else, so a hit here is
+            // proof the bytes are already resident.
+            this.#warmedTiles.set(node.sig, this.#treeEpoch)
+            this.#warmTileContent(layer, store, gen)
+          }
           // PREPARE THE VIEW as well as the bytes. Warming content makes the
           // tiles able to appear; resolving this layer's child membership is
           // what makes opening it INSTANT (measured: ~160-190ms cold vs 4ms
@@ -2917,7 +2996,15 @@ export class HistoryService {
           const ownSegments = node.depth === 0
             ? []
             : [...node.parentSegments, String(layer.name ?? '')].filter(Boolean)
-          if (node.depth <= 2) {
+          if (node.depth <= 2 && this.#preparedViews.get(node.sig) !== this.#treeEpoch) {
+            // ONCE PER VIEW PER TREE STATE, and the guard sits OUTSIDE the
+            // resolution: prepareView itself is a no-op when the memo holds,
+            // but reaching it cost a sign() plus a latestMarkerSigFor() — a bag
+            // read — for EVERY node of EVERY overlapping warm (measured 187
+            // prepares and 208 marker lookups on a single return to the root).
+            // Paying that to be told "already prepared" is the definition of
+            // work that shouldn't happen twice.
+            this.#preparedViews.set(node.sig, this.#treeEpoch)
             const renderer = get<{ prepareView?: (sig: string, segments: readonly string[]) => Promise<boolean> }>('@diamondcoreprocessor.com/ShowCellDrone')
             if (renderer?.prepareView) {
               // Under this location's OWN HEAD sig — the key the render pass
@@ -3026,10 +3113,30 @@ export class HistoryService {
   // fs-churn 'change' events at one location don't re-walk. Driven from
   // runtime-initializer on boot + every lineage 'change' (debounced + idle
   // there). Non-fatal: a cold render is correct, just slower.
-  #lastWarmedHead = ''
+  /**
+   * Head sigs already warmed this session. A SET, not a single slot: dedup on
+   * "the last head warmed" only caught back-to-back churn at ONE location, so
+   * the commonest movement there is — into a tile and straight back out —
+   * re-walked the parent's whole subtree every time, warming what was warm
+   * seconds ago. A head sig is content-addressed, so membership here can never
+   * be wrong: change the location's content and its head is a DIFFERENT sig
+   * that simply isn't in the set. Nothing to invalidate, ever.
+   */
+  readonly #warmedHeads = new Set<string>()
+  /** Layer sigs whose OWN content (slots + nested image) has been warmed, and
+   *  the tree epoch it was warmed at. See the guard in preloadFromRoot. */
+  readonly #warmedTiles = new Map<string, number>()
+  /** Layer sigs whose VIEW preparation has been scheduled, and the tree epoch
+   *  it was scheduled at. See the guard in preloadFromRoot. */
+  readonly #preparedViews = new Map<string, number>()
   // Bumped on every `navigate` (constructor listener). Walks capture it at
   // start and abandon as soon as it moves — a superseded warm is dead weight.
   #preloadGeneration = 0
+  /** The generation a warm must still match to be worth finishing. Callers
+   *  that drive a SEQUENCE of warms (the proximity sweep) read this so they
+   *  abandon the rest of the sequence the moment the participant moves —
+   *  preloading is never allowed to outrank live navigation. */
+  public readonly preloadGeneration = (): number => this.#preloadGeneration
   public readonly preloadNeighbourhood = async (
     locationSig: string,
     maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,
@@ -3042,8 +3149,8 @@ export class HistoryService {
       try { await this.#warmLineageHead(locationSig) } catch { return }
       headSig = this.#latestSigByLineage.get(locationSig)
     }
-    if (!headSig || headSig === this.#lastWarmedHead) return
-    this.#lastWarmedHead = headSig
+    if (!headSig || this.#warmedHeads.has(headSig)) return
+    this.#warmedHeads.add(headSig)
     await this.preloadFromRoot(headSig, maxDepth)
   }
 
@@ -3054,7 +3161,7 @@ export class HistoryService {
    * mergeEntries, but exposed for callers that mutate a bag directly).
    */
   public readonly refreshLineageCache = async (lineageSig: string): Promise<void> => {
-    this.#latestSigByLineage.delete(lineageSig)
+    this.#dropHead(lineageSig)
     this.#seededHeadByLineage.delete(lineageSig)
     this.#huskUnseedable.delete(lineageSig)
     this.#noteHeadDropped(lineageSig)
@@ -3081,7 +3188,7 @@ export class HistoryService {
       } catch { /* skip */ }
     }
     if (latestSig) {
-      this.#latestSigByLineage.set(lineageSig, latestSig)
+      this.#setHead(lineageSig, latestSig)
       this.#noteHeadDerived(lineageSig, latestName)
       this.#scheduleHeadPersist()
     }
@@ -3282,7 +3389,7 @@ export class HistoryService {
     // the cached entry; next read repopulates from the bag's actual
     // last NNNNNNNN.
     if (removed > 0) {
-      this.#latestSigByLineage.delete(locationSig)
+      this.#dropHead(locationSig)
       this.#seededHeadByLineage.delete(locationSig)
       this.#huskUnseedable.delete(locationSig)
       this.#noteHeadDropped(locationSig)
@@ -3345,7 +3452,7 @@ export class HistoryService {
       } catch { /* already gone or unreadable — skip */ }
     }
     if (archived > 0) {
-      this.#latestSigByLineage.delete(locationSig)
+      this.#dropHead(locationSig)
       this.#seededHeadByLineage.delete(locationSig)
       this.#huskUnseedable.delete(locationSig)
       this.#noteHeadDropped(locationSig)

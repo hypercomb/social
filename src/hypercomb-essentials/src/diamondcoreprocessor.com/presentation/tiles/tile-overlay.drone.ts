@@ -2747,13 +2747,15 @@ export class TileOverlayDrone extends Drone {
   }
 
   #navigateInto(label: string): void {
-    // A successful entry must never move preload work onto the click path.
-    // Keep a cold branch visible as progress, but refuse entry until its next
-    // view is fully resident and pre-baked.
-    if (this.#branchLabels.has(label) && this.#shadedLabels.has(label)) {
-      this.emitEffect('diag:click', { stage: 'tile-preloading', label })
-      return
-    }
+    // NOTHING GETS IN THE WAY OF NAVIGATION. This used to refuse entry into a
+    // branch whose readiness shade hadn't released — "don't move preload work
+    // onto the click path" — which made preloading a GATE on navigation: the
+    // participant clicked a tile and nothing happened, with no feedback, for as
+    // long as the warm took to prove itself (and proof is derived from caches
+    // that clear and re-warm constantly, so sometimes forever). A click is an
+    // instruction, not a request. Enter immediately and let the destination
+    // paint as its content lands — a slower render is correct, a swallowed
+    // click never is. (The shade itself is off now; see show-cell TILE_SHADE.)
 
     // Backstop latch: input was force-released after NAV_GUARD_BACKSTOP_MS
     // but the axial map still describes the LEAVING level — entering a tile

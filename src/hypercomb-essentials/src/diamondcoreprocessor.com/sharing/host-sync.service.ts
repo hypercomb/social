@@ -1072,6 +1072,17 @@ export class HostSyncService extends EventTarget {
     return ok
   }
 
+  /** Per-NODE closure verdicts, so a re-walk reuses the subtrees it already
+   *  proved. `isClosureAvailable` memoizes only the ROOT it was asked about;
+   *  every miss therefore re-walked the entire closure from scratch, reading
+   *  the bytes of every node again (measured: 1,144 local reads on a single
+   *  navigation, each one an ArrayBuffer copy — the garbage the participant
+   *  can feel). Positive verdicts are permanent, exactly like the root memo:
+   *  receipts and bytes only accrue. Negatives are epoch-stamped so a new
+   *  receipt re-opens them. */
+  readonly #nodeAvailable = new Set<string>()
+  readonly #nodeUnavailableAtEpoch = new Map<string, number>()
+
   readonly #closureReceipted = async (
     sig: string,
     kind: HostSyncKind,
@@ -1080,6 +1091,21 @@ export class HostSyncService extends EventTarget {
   ): Promise<boolean> => {
     if (visited.has(sig)) return true
     visited.add(sig)
+    const nodeKey = `${sig}:${kind}:${closure ? 'c' : 't'}`
+    if (this.#nodeAvailable.has(nodeKey)) return true
+    if (this.#nodeUnavailableAtEpoch.get(nodeKey) === this.#receiptEpoch) return false
+    const verdict = await this.#closureReceiptedUncached(sig, kind, closure, visited)
+    if (verdict) this.#nodeAvailable.add(nodeKey)
+    else this.#nodeUnavailableAtEpoch.set(nodeKey, this.#receiptEpoch)
+    return verdict
+  }
+
+  readonly #closureReceiptedUncached = async (
+    sig: string,
+    kind: HostSyncKind,
+    closure: boolean,
+    visited: Set<string>,
+  ): Promise<boolean> => {
     if (!(await this.#anyTargetReceipted(sig))) return false
     let bytes: ArrayBuffer | null = null
     try { bytes = await this.#readLocalBytes(sig, kind) } catch { bytes = null }

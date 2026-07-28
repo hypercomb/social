@@ -249,6 +249,7 @@ const _runInitializeRuntime = async (
     preloadAllBags?: () => Promise<void>
     preloadFromRoot?: (rootSig: string) => Promise<void>
     preloadNeighbourhood?: (locationSig: string, maxDepth?: number) => Promise<void>
+    preloadGeneration?: () => number
     sign?: (l: { explorerSegments: () => readonly string[] }) => Promise<string>
     latestMarkerSigFor?: (lineageSig: string, name: string) => Promise<string>
   } | undefined
@@ -349,8 +350,20 @@ const _runInitializeRuntime = async (
           const declared = await collectProximity()
           const ranker = get(USAGE_IOC_KEY) as UsageRanker | undefined
           const proximate = ranker ? ranker.rank(declared) : declared
+          // ABANDON ON NAVIGATION. Each warm below bails internally when the
+          // participant moves, but the SEQUENCE did not: the loop marched on to
+          // the next declared destination, so a stale sweep kept queuing OPFS
+          // reads in front of the render of the location the participant had
+          // just entered. Capture the generation and stop the whole sweep the
+          // moment it moves — the new location's own warm re-declares what is
+          // still worth warming.
+          const gen = historyService.preloadGeneration?.() ?? 0
           let warmed = 0
           for (const psig of proximate) {
+            if ((historyService.preloadGeneration?.() ?? gen) !== gen) {
+              console.log('[preload] proximity sweep abandoned — navigation superseded it')
+              break
+            }
             if (warmedProximity.has(psig)) continue
             if (warmed >= PROXIMITY_WARM_CAP) {
               console.log(

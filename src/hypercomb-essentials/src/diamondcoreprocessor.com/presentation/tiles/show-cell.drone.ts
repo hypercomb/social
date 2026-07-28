@@ -43,6 +43,22 @@ const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } cat
 // for debugging the plain own-image shade: localStorage 'hc:child-shade' = '0'.
 const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade') !== '0' } catch { return true } })()
 
+// READINESS SHADE — OFF. Tiles show at full opacity, always, like they did
+// before readiness had a look at all.
+//
+// The shade promised "bright means the click lands instantly" and could not
+// keep it: proof is derived from caches that are cleared, evicted and re-warmed
+// constantly, so tiles painted bright that were not ready and dim that were —
+// and a dim tile then met a navigation gate that REFUSED entry (removed; see
+// tile-overlay #navigateInto). The result was the exact opposite of the intent:
+// a tile that looks ready, a click that does nothing. Loading state does not
+// belong in a tile's opacity; navigation is never blocked, never delayed, and
+// never dressed up as unavailable.
+//
+// The machinery below is retained and inert (#shadedLabels simply stays empty).
+// Opt back IN for debugging with localStorage 'hc:tile-shade' = '1'.
+const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-shade') === '1' } catch { return false } })()
+
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
@@ -567,6 +583,47 @@ export class ShowCellDrone extends Drone {
   // changes" pattern — safe only because we gate on completeness before
   // writing here.
   readonly #completeChildNamesByParentSig = new Map<string, { names: string[]; branches: string[] }>()
+
+  /** How many prepared views to keep. Was 256 — smaller than the number of
+   *  locations a single neighbourhood warm prepares (512 nodes), so the memo
+   *  evicted views WHILE the preloader was still filling it and the same
+   *  resolutions were paid again on the next visit. An entry is a short array
+   *  of names keyed by an immutable content sig; keeping thousands costs a
+   *  rounding error of memory and is the difference between "preloaded once"
+   *  and "preloaded forever". */
+  static readonly #PREPARED_VIEW_CAP = 4096
+
+  /** Prepared-view sig → the location segments it was prepared for, joined.
+   *  Exists so an add/remove can invalidate the ANCESTOR entries it actually
+   *  affects instead of dropping every prepared view in the session (which is
+   *  what "click a tile, come back, and it's slow again" was made of). */
+  readonly #preparedViewPath = new Map<string, string>()
+
+  /** Drop prepared views whose location is an ancestor of (or equal to) the
+   *  segments where a child was just added or removed — those are the only
+   *  entries whose branch-status can have flipped. Everything else keeps its
+   *  preparation. Unknown segments fall back to the old blanket clear, which
+   *  is correct, just wasteful (legacy emitters that don't carry an address). */
+  #invalidatePreparedViewsFor(segments: readonly string[] | undefined): void {
+    if (!segments || segments.length === 0) {
+      this.#completeChildNamesByParentSig.clear()
+      this.#preparedViewPath.clear()
+      return
+    }
+    const path = segments.join('/')
+    for (const [sig, prepared] of [...this.#preparedViewPath]) {
+      // Ancestor-or-self: '' (root) is an ancestor of everything.
+      if (prepared === '' || path === prepared || path.startsWith(prepared + '/')) {
+        this.#completeChildNamesByParentSig.delete(sig)
+        this.#preparedViewPath.delete(sig)
+      }
+    }
+    // Entries with no recorded path predate the index — drop those, they are
+    // the only ones we cannot reason about.
+    for (const sig of this.#completeChildNamesByParentSig.keys()) {
+      if (!this.#preparedViewPath.has(sig)) this.#completeChildNamesByParentSig.delete(sig)
+    }
+  }
   // Children-readiness shade. A branch tile stays shaded until the tiles INSIDE
   // it (its direct children) all have their images present locally — an
   // un-shaded branch means "click me, the inside is already loaded and bright".
@@ -2861,11 +2918,12 @@ export class ShowCellDrone extends Drone {
               // Bound: evict oldest (Map keeps insertion order) past a cap so
               // a long session of distinct layer sigs can't grow this without
               // limit. Each entry is keyed by an immutable content sig.
-              if (this.#completeChildNamesByParentSig.size > 256) {
+              if (this.#completeChildNamesByParentSig.size > ShowCellDrone.#PREPARED_VIEW_CAP) {
                 const oldest = this.#completeChildNamesByParentSig.keys().next().value
                 if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
               }
               this.#completeChildNamesByParentSig.set(parentLayerSig, { names, branches: [...branchSetFromResolve] })
+              this.#preparedViewPath.set(parentLayerSig, (this.#passSegments ?? []).join('/'))
             }
             if (parentLayerSig) {
               if (branchComplete) {
@@ -4656,7 +4714,10 @@ export class ShowCellDrone extends Drone {
       // current-location guard below so an add at ANY location invalidates a
       // possibly-ancestor entry. branchByHeadSig is intentionally NOT cleared —
       // it is keyed by the immutable head sig, so a changed head is just a miss.
-      this.#completeChildNamesByParentSig.clear()
+      // TARGETED: only the ancestors of the add can have a stale branch dot.
+      // Dropping EVERY prepared view (what this used to do) threw away the
+      // entire session's preloading on a single tile creation — anywhere.
+      this.#invalidatePreparedViewsFor(payload.segments)
       // The memo clear above only heals the SLOW render path. Back-nav restores
       // a parent location SYNCHRONOUSLY from #layerCellsCache — a SEPARATE cache
       // the fast path paints VERBATIM, cell-by-cell hasBranch flags included,
@@ -4711,7 +4772,9 @@ export class ShowCellDrone extends Drone {
       // a leaf, and the parent is not re-committed, so its cached branch-set is
       // stale. Invalidate the parent-branch memo so the (now stale) branch dot
       // is re-derived on the next render. See the cell:added note above.
-      this.#completeChildNamesByParentSig.clear()
+      // TARGETED, same as cell:added — a removal invalidates its ancestors,
+      // not every prepared view in the session.
+      this.#invalidatePreparedViewsFor((payload as { segments?: readonly string[] }).segments)
       // Same back-nav fast-path staleness as cell:added: a child losing its LAST
       // grandchild flips branch→leaf, but the parent's #layerCellsCache entry
       // still marks it a branch (a stale dot + a click that drills into a now-
@@ -6647,6 +6710,8 @@ export class ShowCellDrone extends Drone {
   }
 
   #cellIsShaded(c: Cell): boolean {
+    // Shade off (default) — every tile paints bright. See TILE_SHADE.
+    if (!TILE_SHADE) return false
     if (!this.imageAtlas || c.plain) return false
     // Under the pointer, a tile is always shown at full opacity — the shade is
     // information, not a barrier. Deliberately BEFORE the bookkeeping below so
@@ -7939,11 +8004,12 @@ export class ShowCellDrone extends Drone {
       if (!complete || branchStats.cold) return false
       const names: string[] = []
       for (const n of resolved) if (typeof n === 'string' && n.length > 0) names.push(n)
-      if (this.#completeChildNamesByParentSig.size > 256) {
+      if (this.#completeChildNamesByParentSig.size > ShowCellDrone.#PREPARED_VIEW_CAP) {
         const oldest = this.#completeChildNamesByParentSig.keys().next().value
         if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
       }
       this.#completeChildNamesByParentSig.set(layerSig, { names, branches: [...branches] })
+      this.#preparedViewPath.set(layerSig, segments.join('/'))
       if (DIAG) console.info(`[diag:readiness] view prepared ${layerSig.slice(0, 8)} names=${names.length} branches=${branches.size}`)
       return true
     } catch { return false }
