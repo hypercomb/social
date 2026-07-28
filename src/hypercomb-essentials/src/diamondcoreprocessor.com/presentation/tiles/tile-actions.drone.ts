@@ -434,14 +434,16 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
 
 // ── Position computation ──────────────────────────────────────────
 
-// Icons sit INSIDE the tile's label band, which doubles in height on hover
-// (hex-sdf.shader.ts) while the name steps aside — so BOTH of its rows are
-// icons. ICON_Y is the CENTRE of that block: the overlay centres one row on it
-// and straddles it with two (ICON_ROW_PITCH in tile-overlay.drone.ts), which
-// lands them on the band's two rows. The band is centred on the hex, so this
-// is 0. HINT_Y_OFFSET and POOL_Y_OFFSET there are absolute and do not follow;
-// the arrange hit-test derives from this constant and does.
-const ICON_Y = 0
+// Icons sit INSIDE the tile's label band, which grows on hover
+// (hex-sdf.shader.ts) to hold the NAME in its top row and the icons under it.
+// ICON_Y is the CENTRE of the icon block: the overlay centres one row on it and
+// straddles it with two (ICON_ROW_PITCH in tile-overlay.drone.ts). The band is
+// centred on the hex and the name takes exactly the top row, so the icon block
+// always centres one half-row BELOW the hex centre — half of ICON_ROW_PITCH,
+// whether the icons take one row or two. HINT_Y_OFFSET and POOL_Y_OFFSET there
+// are absolute and do not follow; the arrange hit-test derives from this
+// constant and does.
+const ICON_Y = 5
 const ICON_SPACING = 10       // tighter to match 75 % icon scale
 const ICON_SIZE = 7           // matches DEFAULT_ICON_SIZE in tile-overlay
 const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound

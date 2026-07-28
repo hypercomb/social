@@ -5,7 +5,9 @@ import { SignatureService } from '@hypercomb/core'
 import { AuditorService } from './auditor.service'
 import { DcpInstallerService, type InstallProgress } from './dcp-installer.service'
 import { DcpStore } from './dcp-store'
-import type { AuditResult, BeeDocEntry, LayerDocs, TreeNode, TreeNodeKind } from './tree-node'
+import { collapseRevisions, identityKey, type RevisionCandidate } from './revision-identity'
+import { SigInfoCache } from './sig-info-cache'
+import { isCodeKind, type AuditResult, type BeeDocEntry, type LayerDocs, type TreeNode, type TreeNodeKind } from './tree-node'
 
 /** A package entry from a host's manifest.json, with its sidecar branch
  *  metadata. `label`/`at`/`previous` are optional — older manifests and the
@@ -51,6 +53,10 @@ export class TreeResolverService {
   #cache = new Map<string, LayerJson>()
   // depSig → namespace lineage (e.g. "diamondcoreprocessor.com/core/axial")
   #depLineage = new Map<string, string>()
+  // Derived cache: what a SIGNATURE is, keyed by that signature. Pure
+  // derivation of immutable bytes, so it can never go stale — and never
+  // load-bearing, so every path below still works with it empty.
+  #sigInfo = new SigInfoCache()
   #auditor = inject(AuditorService)
   #installer = inject(DcpInstallerService)
   #store = inject(DcpStore)
@@ -98,6 +104,10 @@ export class TreeResolverService {
     // populate all children recursively
     await this.#expandAll(root, base, rootSig, domain)
 
+    // one revision per identity — before auditing, so we never spend audit
+    // round-trips on sigs that will never render or run
+    this.#collapseTreeRevisions(root)
+
     // audit all known signatures
     const allSigs = this.#collectSignatures(root)
     if (allSigs.length > 0 && this.#auditor.endpoints.length > 0) {
@@ -131,6 +141,7 @@ export class TreeResolverService {
 
     const root = this.#buildNode(rootLayer, sig, '', undefined, 0)
     await this.#expandAll(root, base, sig, domain)
+    this.#collapseTreeRevisions(root)
 
     const allSigs = this.#collectSignatures(root)
     if (allSigs.length > 0 && this.#auditor.endpoints.length > 0) {
@@ -160,6 +171,7 @@ export class TreeResolverService {
 
     // populate all children recursively (local only)
     await this.#expandAllLocal(root, domain)
+    this.#collapseTreeRevisions(root)
 
     // audit
     const allSigs = this.#collectSignatures(root)
@@ -177,6 +189,9 @@ export class TreeResolverService {
     if (!base) return
 
     await this.#expandChildren(node, base, rootSig, domain)
+    // Lazy expansion adds code nodes after the resolve-time pass ran, so apply
+    // the same rule to the freshly-loaded subtree.
+    this.#collapseTreeRevisions(node)
     node.loaded = true
 
     // audit newly loaded sigs
@@ -226,6 +241,12 @@ export class TreeResolverService {
         loaded: true,
         depth: parent.depth + 1,
         doc,
+        // The node id stays the BARE SIG on purpose: activation is keyed by
+        // signature (one sig = one instance = one switch), and the sentinel
+        // reads the very same toggle store by sig. Identity is carried
+        // alongside it, never in place of it.
+        className: className ?? undefined,
+        identity: identityKey(parent.lineage, className) ?? undefined,
       }
       parent.children.push(beeNode)
     }
@@ -245,6 +266,8 @@ export class TreeResolverService {
           loaded: true,
           depth: parent.depth + 1,
           doc,
+          className: doc.className,
+          identity: identityKey(parent.lineage, doc.className) ?? undefined,
         }
         parent.children.push(queenNode)
       }
@@ -260,6 +283,8 @@ export class TreeResolverService {
           name: depName ? humanize(depName) : depSig.slice(0, 12) + '...',
           kind: 'dependency',
           signature: depSig,
+          className: depName ?? undefined,
+          identity: identityKey(parentLineage, depName) ?? undefined,
           lineage: parentLineage,
           parentId: parent.id,
           children: [],
@@ -304,7 +329,17 @@ export class TreeResolverService {
     }
   }
 
+  /** Bee class + kind from the compiled bundle. Reading and decoding a whole
+   *  bundle to recover a name it can only ever have one of is exactly what the
+   *  derived cache exists for — a hit here skips the OPFS read entirely. A
+   *  miss derives and records; a failed derivation is NOT recorded, so a bee
+   *  whose bytes haven't arrived yet is retried rather than remembered as
+   *  nameless. */
   async #detectBeeInfo(sig: string): Promise<{ kind: TreeNodeKind, className: string | null }> {
+    const cached = this.#sigInfo.get(sig)
+    if (cached?.kind && cached.className !== undefined) {
+      return { kind: cached.kind, className: cached.className }
+    }
     try {
       const bytes = await this.#store.readFile(this.#store.bees, `${sig}.js`)
       if (bytes) {
@@ -314,8 +349,10 @@ export class TreeResolverService {
         const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
         if (m) {
           const className = m[1] || m[2]
-          const kind = m[3].toLowerCase() as TreeNodeKind
-          return { kind: kind === 'bee' ? 'bee' : kind, className }
+          const rawKind = m[3].toLowerCase() as TreeNodeKind
+          const kind = rawKind === 'bee' ? 'bee' : rawKind
+          this.#sigInfo.set(sig, { kind, className })
+          return { kind, className }
         }
       }
     } catch { /* fallback */ }
@@ -323,12 +360,18 @@ export class TreeResolverService {
   }
 
   async #detectDepClassName(sig: string): Promise<string | null> {
+    const cached = this.#sigInfo.get(sig)
+    if (cached?.className !== undefined) return cached.className
     try {
       const bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
       if (bytes) {
         const text = new TextDecoder().decode(bytes)
         const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
-        if (m) return m[1] || m[2]
+        if (m) {
+          const className = m[1] || m[2]
+          this.#sigInfo.set(sig, { className })
+          return className
+        }
       }
     } catch { /* fallback */ }
     return null
@@ -427,6 +470,64 @@ export class TreeResolverService {
       }
     }
     return null
+  }
+
+  /**
+   * Collapse REVISIONS inside one resolved tree: when the same identity
+   * (`<lineage>/<ClassName>`) appears under more than one signature, exactly
+   * one node survives and the rest are pruned, their sigs recorded on the
+   * survivor's `supersedes`.
+   *
+   * This is the SINGLE collapse point for everything the resolver produces —
+   * domain sections, adopted branches, post-patch local trees — so every
+   * downstream consumer (render, toggle map, active-sig set, sync manifest)
+   * inherits it without repeating the rule. Cross-SECTION collapse (two
+   * sections of one domain, or two domains) is a different altitude and is
+   * ranked by the view; this pass only knows one tree.
+   *
+   * Winner = shallowest, ties broken by document order. Both revisions are
+   * equally "in" a tree resolved from one root, so there is no recency signal
+   * here to rank on; depth-then-order is deterministic and biased toward the
+   * canonical location rather than a stray deep reference.
+   *
+   * The SAME sig appearing twice is not a conflict (one artifact, two
+   * references) — collapseRevisions folds those without declaring a loser, so
+   * a legitimately shared bee keeps both of its rows.
+   */
+  #collapseTreeRevisions(root: TreeNode): void {
+    const candidates: RevisionCandidate<{ parent: TreeNode, node: TreeNode }>[] = []
+    let order = 0
+    const gather = (parent: TreeNode, nodes: TreeNode[]): void => {
+      for (const node of nodes) {
+        if (isCodeKind(node.kind)) {
+          candidates.push({
+            // Queens carry no signature of their own; their id is stable and
+            // unique, which is all the collapse needs as a revision key.
+            sig: node.signature ?? node.id,
+            identity: node.identity ?? null,
+            rank: node.depth,
+            order: order++,
+            item: { parent, node },
+          })
+        }
+        gather(node, node.children)
+      }
+    }
+    gather(root, root.children)
+
+    const { superseded, losers } = collapseRevisions(candidates)
+    if (losers.size === 0) return
+
+    for (const c of candidates) {
+      const list = superseded.get(c.sig)
+      if (list?.length) c.item.node.supersedes = [...list]
+    }
+
+    const prune = (node: TreeNode): void => {
+      node.children = node.children.filter(child => !(isCodeKind(child.kind) && losers.has(child.signature ?? child.id)))
+      for (const child of node.children) prune(child)
+    }
+    prune(root)
   }
 
   #collectSignatures(node: TreeNode): string[] {
@@ -546,6 +647,8 @@ export class TreeResolverService {
         loaded: true,
         depth: parent.depth + 1,
         doc,
+        className: className ?? undefined,
+        identity: identityKey(parent.lineage, className) ?? undefined,
       }
       parent.children.push(beeNode)
     }
@@ -564,6 +667,8 @@ export class TreeResolverService {
           loaded: true,
           depth: parent.depth + 1,
           doc,
+          className: doc.className,
+          identity: identityKey(parent.lineage, doc.className) ?? undefined,
         }
         parent.children.push(queenNode)
       }
@@ -578,6 +683,8 @@ export class TreeResolverService {
           name: depName ? humanize(depName) : depSig.slice(0, 12) + '...',
           kind: 'dependency',
           signature: depSig,
+          className: depName ?? undefined,
+          identity: identityKey(parentLineage, depName) ?? undefined,
           lineage: parentLineage,
           parentId: parent.id,
           children: [],

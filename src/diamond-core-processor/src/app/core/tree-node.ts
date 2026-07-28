@@ -91,6 +91,31 @@ export interface TreeNode {
   layerDocs?: LayerDocs
 
   /**
+   * The artifact's CLASS NAME as built (PascalCase, pre-humanize) — the raw
+   * input to {@link identityKey}. Present on code nodes whose class resolved
+   * (from layer docs, else detected from the bundle); absent when it didn't.
+   */
+  className?: string
+
+  /**
+   * IDENTITY — what this node IS, independent of which build generation its
+   * signature names (`<lineage>/<ClassName>`). Two nodes sharing an identity
+   * are revisions of one artifact; exactly one of them may render, activate,
+   * and ship. Absent when no class name resolved: an unnameable node can never
+   * be proven a duplicate, so it is never collapsed away. See
+   * `revision-identity.ts` for the doctrine.
+   */
+  identity?: string
+
+  /**
+   * Signatures of OTHER revisions of this same identity that this row stands
+   * for — the build generations this one won against, recorded rather than
+   * discarded so the row can say "3 revisions" and the older bytes stay
+   * reachable. Never activated: only this node's own `signature` runs.
+   */
+  supersedes?: string[]
+
+  /**
    * True when this node is a placeholder for content still being fetched
    * (the typical case: adoption just kicked off; the host is materializing
    * bytes; the row is visible as a muted "...resolving" placeholder until

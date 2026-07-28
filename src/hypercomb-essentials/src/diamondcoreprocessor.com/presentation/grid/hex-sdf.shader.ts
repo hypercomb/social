@@ -18,10 +18,11 @@ export class HexSdfTextureShader {
       u_flat: { value: 0, type: 'f32' },
       u_pivot: { value: 0, type: 'f32' },
       u_hoveredIndex: { value: -1, type: 'f32' },
-      // Rows the HOVERED tile's label band must hold — 1 while its icons fit
-      // one row, 2 once they wrap. The band grows only when it has to, so a
-      // tile with few icons keeps the text's own height. Owned by the overlay
-      // (it does the wrapping) and pushed through `overlay:band-rows`.
+      // Rows the HOVERED tile's label band must hold — the NAME's row plus one
+      // per icon row (2 while the icons fit one row, 3 once they wrap). The
+      // band grows only when it has to, so a tile with no icons keeps the
+      // text's own height. Owned by the overlay (it does the wrapping) and
+      // pushed through `overlay:band-rows`.
       u_bandRows: { value: 1, type: 'f32' },
       u_labelMix: { value: 1.0, type: 'f32' },
       u_imageMix: { value: 1.0, type: 'f32' },
@@ -77,7 +78,7 @@ export class HexSdfTextureShader {
     this.#ug.update()
   }
 
-  /** Rows the hovered tile's label band must hold (1 or 2). */
+  /** Rows the hovered tile's label band must hold (name row + icon rows). */
   public setBandRows = (rows: number): void => {
     this.#ug.uniforms.u_bandRows = rows
     this.#ug.update()
@@ -470,16 +471,16 @@ export class HexSdfTextureShader {
 
       vec4 color = base;
 
-      // ── label band: the icons' home, sized to what it holds ──────
+      // ── label band: the name and the icons, sized to what it holds ──────
       // The band is the label's BACKGROUND. At rest it is the single-row strip
-      // behind the name on an imaged tile. On HOVER the name gives way to the
-      // icons and the band takes the height of exactly the rows they need:
-      // u_bandRows is 1 while the icons fit one row (so the band keeps the
-      // text's own height and nothing grows), 2 once they wrap. It grows
-      // CENTRED — the added height balanced equally above and below — so the
-      // rows straddle the hex centre. That band IS the icons' backing; the
-      // overlay draws no tray of its own. Row count comes from the overlay,
-      // which does the wrapping (tile-overlay.drone.ts, overlay:band-rows).
+      // behind the name on an imaged tile. On HOVER it takes the height of the
+      // rows it must hold — the NAME keeps the top row and the icons take the
+      // row(s) under it, so u_bandRows is 2 while the icons fit one row and 3
+      // once they wrap. It grows CENTRED — the added height balanced equally
+      // above and below — so the rows straddle the hex centre. That band IS the
+      // icons' backing; the overlay draws no tray of its own. Row count comes
+      // from the overlay, which does the wrapping (tile-overlay.drone.ts,
+      // overlay:band-rows).
       float hovered = (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) ? 1.0 : 0.0;
       float rowH = u_radiusPx * 0.15;   // half-height of ONE row
 
@@ -488,13 +489,17 @@ export class HexSdfTextureShader {
       // bake but with 3× the texels → crisp. Clamp keeps out-of-band UVs on
       // this cell's transparent border, never a neighbour.
       //
-      // HOVER HIDES THE NAME. Both rows of the doubled band are icons now, so
-      // the name would have nowhere to sit — hovering swaps the tile from
-      // "what it is called" to "what you can do to it". A tile that already
-      // hides its name is unaffected and gets the identical doubled band, so
-      // the two kinds of tile behave the same under the pointer.
-      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, clamp((vUV - 0.5) * LABEL_BAND + 0.5, 0.0, 1.0));
-      float la = labelFill(luv) * (1.0 - hovered);   // plain white fill, nothing else
+      // HOVER KEEPS THE NAME — it moves up into the band's TOP row and the
+      // icons take the row(s) below it, so the tile says what it is called AND
+      // what you can do to it at the same time. The band grows centred, so the
+      // top row's centre sits (u_bandRows - 1) * rowH above the hex centre:
+      // sample the label that far DOWN the quad and the glyphs land there.
+      // Nothing shifts at rest (u_bandRows is 1 unhovered) or on a tile with
+      // no icons.
+      float nameShift = (u_bandRows - 1.0) * rowH * hovered;
+      vec2 nameUV = vec2(vUV.x, vUV.y + nameShift / max(u_quadSize.y, 1.0));
+      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, clamp((nameUV - 0.5) * LABEL_BAND + 0.5, 0.0, 1.0));
+      float la = labelFill(luv);   // plain white fill, nothing else
 
       // Is there a label at all? Hidden text collapses aLabelUV to the
       // degenerate rect [0,0,0,0] (show-cell's hideText path / hover
@@ -528,8 +533,12 @@ export class HexSdfTextureShader {
       // has to hold them against any picture. At rest the pill is untouched.
       color.rgb = mix(color.rgb, vec3(0.0), bandMask * mix(imgBlend * 0.55, 0.72, hovered) * u_labelMix);
 
-      // Hairline ruler on the seam between the two rows — only when there ARE
-      // two (hovered AND wrapped); a single-row band has nothing to divide.
+      // Hairline ruler on the seam UNDER THE NAME — it divides what the tile is
+      // called from what you can do to it, so it sits at the bottom of the top
+      // row wherever that lands: (2 - u_bandRows) * rowH. Only when the band
+      // actually holds more than the name; a single-row band has nothing to
+      // divide. A wrapped icon block gets no second rule — the icons are one
+      // block, and only the name/actions seam is a boundary.
       // Inset from both ends and faded out there, so it reads as a rule
       // sitting inside the band rather than a full-width divider cutting it in
       // half. A sub-pixel core with a sub-pixel feather: it must read as a
@@ -537,7 +546,8 @@ export class HexSdfTextureShader {
       // at any hex radius. Keeps its own inset now that the band runs edge to
       // edge — the rule is not meant to reach the border.
       float rulerHalfW = u_radiusPx * 0.70;
-      float rulerCore = 1.0 - smoothstep(0.27, 0.54, abs(local.y));
+      float seamY = (2.0 - u_bandRows) * rowH;
+      float rulerCore = 1.0 - smoothstep(0.27, 0.54, abs(local.y - seamY));
       float rulerSpan = 1.0 - smoothstep(rulerHalfW - 4.0, rulerHalfW, abs(local.x));
       float rulerOn = hovered * step(1.5, u_bandRows);
       color.rgb = mix(color.rgb, vec3(1.0), rulerCore * rulerSpan * bandMask * rulerOn * 0.30 * u_labelMix);

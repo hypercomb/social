@@ -778,6 +778,16 @@ export class ShowCellDrone extends Drone {
   #pivot = false
   #textOnly = false
   #labelsVisible = true
+
+  /** Does a tile's `hideText` mark actually hide its name right now?
+   *  Only ever when the image it hides BEHIND is on screen: an image that
+   *  never landed hid nothing, and TEXT-ONLY mode draws no images at all —
+   *  there the mark has nothing to hide behind, so every tile shows its
+   *  name back, per-tile setting or not. The single answer for every
+   *  labelUV write site (bake, in-place update, hover reveal). */
+  #hidesName(hideText: boolean | undefined, imagePresent: boolean): boolean {
+    return !!hideText && imagePresent && !this.#textOnly
+  }
   /** Rows the hovered tile's label band must hold (overlay:band-rows). Held as
    *  drone state, not just pushed at the shader, because a render pass can
    *  REBUILD the shader — and the overlay only re-lays-out when the hovered hex
@@ -1764,7 +1774,7 @@ export class ShowCellDrone extends Drone {
       }
     }
     for (const c of this.renderedCells.values()) {
-      if (c.hideText && c.imageSig && this.imageAtlas?.hasImage(c.imageSig)) continue
+      if (this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))) continue
       if (!atlas.hasLabel(c.label)) {
         if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
           console.warn('[show-cell] label-atlas eviction repaint bound reached — more on-screen labels than atlas slots')
@@ -5184,6 +5194,12 @@ export class ShowCellDrone extends Drone {
         this.shader?.setImageMix(payload.textOnly ? 0.0 : 1.0)
         cancelAnimationFrame(this.#substrateFadeRaf)
         this.#substrateFadeStart = null
+        // The mode decides whether a hideText tile hides anything (#hidesName),
+        // so every labelUV has to be re-derived — the cells themselves are
+        // unchanged, so clear the key the way the pivot toggle does or the
+        // render short-circuits and hidden names stay hidden with no image
+        // behind them.
+        this.renderedCellsKey = ''
         this.requestRender()
       }
     })
@@ -8096,8 +8112,10 @@ export class ShowCellDrone extends Drone {
       // label UV: collapse to [0,0,0,0] when hideText + image present so the
       // shader samples a transparent corner and the label is effectively
       // hidden. The hovered tile is exempt — it reveals its name — so a
-      // rebuild mid-hover does not blink the text back off.
-      const ruv = (c.hideText && imgUV && c.label !== this.#hoverRevealLabel)
+      // rebuild mid-hover does not blink the text back off, and TEXT-ONLY mode
+      // exempts every tile (#hidesName): with no image drawn there is nothing
+      // to hide behind, so a hidden name comes back for as long as the mode is on.
+      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== this.#hoverRevealLabel)
         ? { u0: 0, v0: 0, u1: 0, v1: 0 }
         : this.atlas!.getLabelUV(c.label)
       for (let i = 0; i < 4; i++) {
@@ -8278,7 +8296,7 @@ export class ShowCellDrone extends Drone {
     if (label === this.#hoverRevealLabel) return false
     const cell = this.renderedCells.get(label)
     if (!cell?.hideText || cell.plain || !cell.imageSig) return false
-    return !!this.imageAtlas?.getImageUV(cell.imageSig)
+    return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
   }
 
   /** Point the hover reveal at `next` and repaint just the tiles whose
@@ -8296,7 +8314,7 @@ export class ShowCellDrone extends Drone {
       if (!l) return false
       const cell = this.renderedCells.get(l)
       if (!cell?.hideText || cell.plain || !cell.imageSig) return false
-      return !!this.imageAtlas?.getImageUV(cell.imageSig)
+      return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
     }
     const prevFlips = wasHiding(prev)   // prev was revealed → re-hide it
     const nextFlips = wasHiding(next)   // next was hidden → reveal it
@@ -8355,9 +8373,10 @@ export class ShowCellDrone extends Drone {
     this.#writeCellRgb(borderColor, i, bcr, bcg, bcb)
 
     // labelUV: collapse to origin when hideText + image so the label is
-    // hidden — unless this is the hovered tile, which is revealing its name.
+    // hidden — unless this is the hovered tile, which is revealing its name,
+    // or text-only mode is on, where no tile hides its name (#hidesName).
     const ht = this.cellHideTextCache.get(label) ?? false
-    if (ht && imgUV && label !== this.#hoverRevealLabel) {
+    if (this.#hidesName(ht, !!imgUV) && label !== this.#hoverRevealLabel) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const ruv = this.atlas.getLabelUV(label)

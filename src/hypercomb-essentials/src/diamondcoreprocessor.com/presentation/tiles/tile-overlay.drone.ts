@@ -160,16 +160,17 @@ const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
 // wraps through the same two rows, so a second size would only make the block
 // ragged — one size throughout.
 
-// ── Two icon rows, wrapping ──────────────────────────────────────
-// The hovered tile's band is two rows tall and the name steps aside
-// (hex-sdf.shader.ts), so BOTH rows are icons: fill a row, wrap at
-// MAX_ROW_ICONS, done. No toggle, no reveal, no set to choose — everything the
-// tile offers is on screen at once.
+// ── Two icon rows, wrapping, UNDER the name ──────────────────────
+// The hovered tile's band keeps the NAME in its top row (hex-sdf.shader.ts) and
+// the icons take the row(s) below it: fill a row, wrap at MAX_ROW_ICONS, done.
+// No toggle, no reveal, no set to choose — the tile says what it is called and
+// everything it offers, at once. The band grows a row per icon row, so a full
+// wrap makes it three rows tall.
 //
 // Order is main → feature → danger, so `remove` lands last (bottom-right, the
 // furthest point from where the pointer enters the band).
 const MAX_ROW_ICONS = 5
-/** Rows the band can hold. Its height is fixed at two rows. */
+/** Icon rows the band can hold under the name. */
 const MAX_ICON_ROWS = 2
 /** Centre-to-centre between the two rows — one band row each (0.15 × 32 ≈ 4.8,
  *  doubled). The block is centred on ICON_Y, so a single row sits dead centre
@@ -178,9 +179,11 @@ const ICON_ROW_PITCH = 10
 
 // ── Arrange mode constants ────────────────────────────────────────
 
-// Moved up 7 with ICON_Y (tile-actions.drone.ts) so the arrange pool keeps
-// its spacing under the action row. Absolute, so it does NOT follow on its own.
-const POOL_Y_OFFSET = 11
+// Follows ICON_Y (tile-actions.drone.ts) by hand so the arrange pool keeps its
+// spacing under the action rows — the name taking the band's top row pushed the
+// icon block down one half-row, and a wrapped second row now ends at +10.
+// Absolute, so it does NOT follow on its own.
+const POOL_Y_OFFSET = 16
 const POOL_ICON_SIZE = 5        // pool icons scaled proportionally
 const POOL_SPACING = 8         // tighter to match smaller pool icons
 const POOL_BG_PADDING = 2
@@ -1111,8 +1114,9 @@ export class TileOverlayDrone extends Drone {
   // `base` = icons that passed their per-tile visibleWhen (set upstream by
   // #updatePerTileVisibility). Ordered main → feature → danger so `remove`
   // lands last, then chunked at MAX_ROW_ICONS. The rows are centred as a BLOCK
-  // on ICON_Y, so one row sits dead centre of the doubled band and two rows
-  // straddle it — one per band row. Horizontally every row shares the first
+  // on ICON_Y — one half-row below the hex centre, because the name owns the
+  // band's top row — so one icon row lands on the band's second row and two
+  // straddle ICON_Y, one per band row. Horizontally every row shares the first
   // row's left edge (see below), so a wrap reads as one left-aligned block.
 
   #layoutIconRow(): void {
@@ -1141,10 +1145,11 @@ export class TileOverlayDrone extends Drone {
     const inSeq = new Set(rows.flat())
     for (const a of this.#actions) a.button.visible = inSeq.has(a)
 
-    // Tell the renderer how tall to draw this tile's band. One row of icons
-    // keeps the text's own height — the band grows only when the icons
-    // actually wrap. Emitted every layout so it tracks per-tile visibility.
-    this.emitEffect('overlay:band-rows', { rows: Math.max(1, rows.length) })
+    // Tell the renderer how tall to draw this tile's band: the NAME's own row
+    // plus one per icon row. A tile with no icons keeps the text's height and
+    // does not grow at all. Emitted every layout so it tracks per-tile
+    // visibility.
+    this.emitEffect('overlay:band-rows', { rows: 1 + rows.length })
 
     if (rows.length === 0) return
 

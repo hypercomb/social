@@ -10,6 +10,7 @@ import { DcpDomainStorage } from '../core/dcp-domain-storage.service'
 import { DcpInstallerService } from '../core/dcp-installer.service'
 import { DcpStore } from '../core/dcp-store'
 import { PatchStore } from '../core/patch-store'
+import { collapseRevisions, identityKey } from '../core/revision-identity'
 import { ToggleStateService } from '../core/toggle-state.service'
 import { TreeResolverService } from '../core/tree-resolver.service'
 
@@ -453,7 +454,15 @@ export class SentinelHandler {
     const domains = this.#loadDomains()
     const toggles = this.#loadToggles()
 
-    for (const domain of domains) {
+    // sig → identity for every bee collected, plus the order/rank needed to
+    // pick a winner when one identity arrives under two signatures. Rank is
+    // the domain's index in #loadDomains() — the canonical origin first, the
+    // same precedence the overlap guard below relies on.
+    const beeIdentity = new Map<string, string>()
+    const beeRank = new Map<string, { rank: number, order: number }>()
+    let beeOrder = 0
+
+    for (const [domainIndex, domain] of domains.entries()) {
       const domainName = new URL(domain).hostname
       if (toggles[domain] === false || toggles[domainName] === false) continue
 
@@ -490,6 +499,7 @@ export class SentinelHandler {
         domainLayers,
         domainBeeDeps,
         visited,
+        beeIdentity,
       )
 
       // First-source-wins across domains for the SAME logical package.
@@ -521,10 +531,45 @@ export class SentinelHandler {
         }
       }
 
-      for (const sig of domainBees) enabledBees.add(sig)
+      for (const sig of domainBees) {
+        enabledBees.add(sig)
+        if (!beeRank.has(sig)) beeRank.set(sig, { rank: domainIndex, order: beeOrder++ })
+      }
       for (const sig of domainDeps) enabledDeps.add(sig)
       for (const sig of domainLayers) enabledLayers.add(sig)
       Object.assign(allBeeDeps, domainBeeDeps)
+    }
+
+    // ONE REVISION PER DRONE. The overlap guard above is a whole-domain
+    // heuristic — it catches a wholesale generation skew between two sources
+    // and nothing else. This is the exact rule underneath it: when the same
+    // artifact (`<lineage>/<ClassName>`) is enabled under two signatures —
+    // from two sections of one domain, a partial overlap the heuristic let
+    // through, or a stale sig left enabled by the opt-OUT toggle default —
+    // only one may ship. Both bundles reaching the shell is the failure this
+    // exists to prevent: the preloader loads both, and the duplicate instances
+    // fight over the IoC key and the canvas.
+    //
+    // BEES ONLY. Dependencies are module aliases, not instantiated drones, so
+    // a duplicate costs an import-map entry rather than a second live drone —
+    // and pruning one that a surviving bee still imports would break loading.
+    // Layers are inert refs, same reasoning.
+    const { losers: staleBees } = collapseRevisions(
+      [...enabledBees].map(sig => ({
+        sig,
+        identity: beeIdentity.get(sig) ?? null,
+        rank: beeRank.get(sig)?.rank ?? Number.MAX_SAFE_INTEGER,
+        order: beeRank.get(sig)?.order ?? Number.MAX_SAFE_INTEGER,
+        item: sig,
+      })),
+    )
+    for (const sig of staleBees) {
+      enabledBees.delete(sig)
+      delete allBeeDeps[sig]
+    }
+    if (staleBees.size) {
+      console.log(`[sentinel] sync: dropped ${staleBees.size} superseded bee revision(s) — `
+        + `a newer generation of each is already in this manifest`)
     }
 
     const beesList = [...enabledBees].sort()
@@ -554,6 +599,8 @@ export class SentinelHandler {
     enabledLayers: string[],
     allBeeDeps: Record<string, string[]>,
     visited: Set<string>,
+    beeIdentity: Map<string, string>,
+    parentLineage = '',
   ): Promise<void> {
     if (visited.has(layerSig)) return
     visited.add(layerSig)
@@ -565,9 +612,18 @@ export class SentinelHandler {
 
     enabledLayers.push(layerSig)
 
+    // Lineage for IDENTITY only. Built from layer names exactly as the
+    // installer's resolver builds it, but the two are never compared with each
+    // other — identity is only ever compared inside a single collapse pass, so
+    // an off-by-one root segment between the two services is harmless.
+    const lineage = parentLineage ? `${parentLineage}/${layer.name ?? ''}` : (layer.name ?? '')
+
     for (const raw of (layer.bees ?? [])) {
       const sig = raw.replace(/\.js$/i, '')
       if (toggles[sig] === false) continue
+      const className = layer.docs?.bees?.[sig]?.className
+      const identity = identityKey(lineage, className)
+      if (identity) beeIdentity.set(sig, identity)
       enabledBees.push(sig)
       const deps = beeDeps[sig] ?? []
       for (const dep of deps) {
@@ -597,6 +653,8 @@ export class SentinelHandler {
         enabledLayers,
         allBeeDeps,
         visited,
+        beeIdentity,
+        lineage,
       )
     }
   }
@@ -615,7 +673,15 @@ export class SentinelHandler {
     domain: string,
     domainName: string,
     layerSig: string,
-  ): Promise<{ bees?: string[]; dependencies?: string[]; cells?: string[]; layers?: string[]; children?: string[] } | null> {
+  ): Promise<{
+    name?: string
+    docs?: { bees?: Record<string, { className?: string }> }
+    bees?: string[]
+    dependencies?: string[]
+    cells?: string[]
+    layers?: string[]
+    children?: string[]
+  } | null> {
     try {
       const dir = await this.#store.domainLayersDir(domainName)
       let bytes =
@@ -872,7 +938,8 @@ export class SentinelHandler {
       const content = await res.json()
       const clean = (s: string) => s?.replace(/\uFEFF/g, '').trim().toLowerCase()
       const valid = (s: string | null | undefined): s is string => !!s && /^[a-f0-9]{64}$/i.test(s)
-      const sigs = Object.keys(content?.packages ?? {}).map(clean).filter(valid)
+      const packages = (content?.packages ?? {}) as Record<string, { at?: string }>
+      const sigs = Object.keys(packages).map(clean).filter(valid)
       if (!sigs.length) return null
 
       // Honor the chosen revision: when active.json names a DEPLOYED package
@@ -884,7 +951,20 @@ export class SentinelHandler {
       const active = clean(await this.#patchStore.activeRoot(new URL(base).hostname) ?? '')
       if (valid(active) && sigs.includes(active)) return active
 
-      return sigs[0]
+      // No explicit pick: the NEWEST deploy, the same fallback the installer's
+      // revision pick uses. These two must agree — when they don't, the
+      // installer displays one revision while the hive runs another. `at` is
+      // ISO so it sorts chronologically; entries without it keep manifest key
+      // order, which is the pre-`at` behaviour (build-module writes a
+      // single-package manifest; the deploy merge puts the new package first).
+      const deployedAt = new Map<string, string>()
+      for (const [key, entry] of Object.entries(packages)) {
+        const sig = clean(key)
+        if (valid(sig)) deployedAt.set(sig, typeof entry?.at === 'string' ? entry.at : '')
+      }
+      // Stable sort: entries with no `at` tie at '' and keep manifest key order.
+      const newest = [...sigs].sort((a, b) => (deployedAt.get(b) ?? '').localeCompare(deployedAt.get(a) ?? ''))
+      return newest[0]
     } catch {
       return null
     }

@@ -21,6 +21,7 @@ import { EffectBus } from '@hypercomb/core'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import { isCodeKind, defaultEnabled } from '../core/tree-node'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
+import { collapseRevisions, type RevisionCandidate } from '../core/revision-identity'
 
 const DOMAINS_KEY = 'dcp.domains'
 
@@ -89,6 +90,26 @@ export interface DomainSection {
   /** Root sig of the version this one supersedes (the walkback chain link). */
   previous?: string | null
 }
+
+/** Deploy versions of one package, newest-first. ISO `at` sorts
+ *  chronologically; ties / missing `at` fall back to the richest tree (most
+ *  items) so a resolved version beats an empty import-source marker.
+ *  Manifest-sourced versions carry `deployedAt`; local promote-garbage does
+ *  not, so it naturally sinks to the bottom of the chain. */
+const byRecency = (a: DomainSection, b: DomainSection): number => {
+  const at = (b.deployedAt ?? '').localeCompare(a.deployedAt ?? '')
+  if (at !== 0) return at
+  return (b.items?.length || 0) - (a.items?.length || 0)
+}
+
+/** Section precedence for the cross-section revision collapse — LOWEST WINS.
+ *  The active package revision is the deployed truth, so it outranks
+ *  everything; adopted content comes next (it is what the participant chose to
+ *  bring in); a package version that is NOT the active revision is by
+ *  definition an older generation and always loses. */
+const RANK_ACTIVE_PACKAGE = 0
+const RANK_CONTENT = 1
+const RANK_STALE_PACKAGE = 2
 
 export interface DomainGroup {
   domain: string
@@ -317,6 +338,11 @@ export class HomeComponent implements OnDestroy {
    */
   readonly activeSigSet = computed<Set<string>>(() => {
     const map = this.toggleMap()
+    // A superseded revision does not run, however its switch reads: the newer
+    // generation of the same artifact is what activates. Excluding it here
+    // keeps the "already active elsewhere" marker honest and keeps the stale
+    // sig out of everything downstream that asks what is running.
+    const losers = this.#revisionLosers()
     const set = new Set<string>()
     const walk = (nodes: TreeNode[], parentEnabled: boolean) => {
       for (const n of nodes) {
@@ -324,7 +350,7 @@ export class HomeComponent implements OnDestroy {
         // its entry is authoritative — same source of truth as #enabledSubtree.
         const selfOn = map.get(n.id) ?? defaultEnabled(n.kind)
         const eff = parentEnabled && selfOn
-        if (eff && isCodeKind(n.kind) && n.signature) set.add(n.signature.toLowerCase())
+        if (eff && isCodeKind(n.kind) && n.signature && !losers.has(n.signature)) set.add(n.signature.toLowerCase())
         walk(n.children ?? [], eff)
       }
     }
@@ -332,6 +358,95 @@ export class HomeComponent implements OnDestroy {
     return set
   })
 
+
+  /**
+   * The rootSig of the ACTIVE package revision per DISPLAY domain: the
+   * active.json pick when it names one of the resolved versions, else the
+   * newest deploy.
+   *
+   * Computed from the UNFILTERED sections so a search term can never change
+   * which revision is active, and shared by BOTH the render pick
+   * (domainGrouped) and the revision collapse (#revisionLosers) so the two can
+   * never disagree about which generation is current.
+   */
+  readonly #activePackageByDomain = computed<Map<string, string>>(() => {
+    const activeByDomain = this.#activeRootByDomain()
+    const byDisplay = new Map<string, DomainSection[]>()
+    for (const s of this.sections()) {
+      if (s.kind !== 'package') continue
+      const list = byDisplay.get(s.displayDomain) ?? []
+      list.push(s)
+      byDisplay.set(s.displayDomain, list)
+    }
+    const out = new Map<string, string>()
+    for (const [display, list] of byDisplay) {
+      const sorted = [...list].sort(byRecency)
+      const pick = activeByDomain.get(sorted[0].domainName) || ''
+      out.set(display, (sorted.find(s => s.rootSig === pick) ?? sorted[0]).rootSig)
+    }
+    return out
+  })
+
+  /**
+   * CROSS-SECTION revision collapse: signatures that are an OLDER GENERATION
+   * of an artifact another section already provides. They must not render, must
+   * not count as active, and must not ship to the hive.
+   *
+   * The resolver already collapses revisions WITHIN one tree; this is the
+   * altitude it can't see — the same drone arriving from a stale package
+   * version and from adopted content, or from two sources of one package.
+   * Ranked by section precedence (active package → content → stale package),
+   * ties by document order, so the pick is deterministic.
+   *
+   * Note what is deliberately NOT a loser: the same SIGNATURE appearing in two
+   * places. That is one artifact referenced twice — activation is keyed by
+   * signature and happens once, so it is one instance and one switch, and both
+   * of its rows are honest.
+   */
+  readonly #revisionLosers = computed<Set<string>>(() => {
+    const activePkg = this.#activePackageByDomain()
+    const candidates: RevisionCandidate<TreeNode>[] = []
+    let order = 0
+    const walk = (nodes: TreeNode[], rank: number): void => {
+      for (const n of nodes) {
+        if (isCodeKind(n.kind)) {
+          candidates.push({
+            sig: n.signature ?? n.id,
+            identity: n.identity ?? null,
+            rank,
+            order: order++,
+            item: n,
+          })
+        }
+        walk(n.children ?? [], rank)
+      }
+    }
+    for (const s of this.sections()) {
+      const rank = s.kind !== 'package' ? RANK_CONTENT
+        : (activePkg.get(s.displayDomain) ?? s.rootSig) === s.rootSig ? RANK_ACTIVE_PACKAGE
+        : RANK_STALE_PACKAGE
+      walk(s.items, rank)
+    }
+    return collapseRevisions(candidates).losers
+  })
+
+  /** Drop superseded revisions from a tree, keeping its shape. Returns the
+   *  ORIGINAL array (and original nodes) when nothing was dropped, so the
+   *  common case costs nothing and node identity — which carries the live
+   *  expand state — survives untouched. */
+  #withoutStaleRevisions(nodes: TreeNode[], losers: Set<string>): TreeNode[] {
+    if (losers.size === 0) return nodes
+    let changed = false
+    const result: TreeNode[] = []
+    for (const node of nodes) {
+      if (isCodeKind(node.kind) && losers.has(node.signature ?? node.id)) { changed = true; continue }
+      const children = node.children ?? []
+      const kept = this.#withoutStaleRevisions(children, losers)
+      if (kept === children) { result.push(node) }
+      else { changed = true; result.push({ ...node, children: kept }) }
+    }
+    return changed ? result : nodes
+  }
 
   readonly domainGrouped = computed<DomainGroup[]>(() => {
     const groups = new Map<string, DomainGroup>()
@@ -344,17 +459,7 @@ export class HomeComponent implements OnDestroy {
       }
       group.sections.push(s)
     }
-    const activeByDomain = this.#activeRootByDomain()
-    // Versions are ordered newest-first by deploy timestamp (ISO sorts
-    // chronologically); ties / missing `at` fall back to the richest tree
-    // (most items) so a resolved version beats an empty import-source marker.
-    // Manifest-sourced versions carry `deployedAt`; local promote-garbage does
-    // not, so it naturally sinks to the bottom of the chain.
-    const byRecency = (a: DomainSection, b: DomainSection): number => {
-      const at = (b.deployedAt ?? '').localeCompare(a.deployedAt ?? '')
-      if (at !== 0) return at
-      return (b.items?.length || 0) - (a.items?.length || 0)
-    }
+    const activePkg = this.#activePackageByDomain()
     for (const group of groups.values()) {
       // PACKAGE sections under one domain are deploy versions of the same
       // install; exactly ONE renders (the active revision) and the chain is
@@ -365,8 +470,10 @@ export class HomeComponent implements OnDestroy {
       const content = group.sections.filter(s => s.kind !== 'package')
       if (packages.length) {
         // Active revision: the active.json pick if it names one of these
-        // versions, else the newest. Only the active one renders.
-        const activeSig = activeByDomain.get(packages[0].domainName) || ''
+        // versions, else the newest. Only the active one renders. Resolved by
+        // #activePackageByDomain so the render pick and the revision collapse
+        // read the same answer.
+        const activeSig = activePkg.get(group.domainName) || ''
         const active = packages.find(s => s.rootSig === activeSig) ?? packages[0]
         group.revisions = packages.map(s => ({ rootSig: s.rootSig, label: this.displayLabel(s), deployedAt: s.deployedAt }))
         group.activeRootSig = active.rootSig
@@ -430,7 +537,8 @@ export class HomeComponent implements OnDestroy {
     // hive's logical-config source applies to snapshot branches). The import
     // marker + unresolved adopt eggs contribute [] naturally.
     const sources = this.sections().filter(s => s.domain !== '@logical' && s.kind !== 'package')
-    const enabled = sources.map(s => this.#enabledSubtree(s.items, true))
+    const losers = this.#revisionLosers()
+    const enabled = sources.map(s => this.#enabledSubtree(this.#withoutStaleRevisions(s.items, losers), true))
     return this.#mergeTrees(enabled)
   })
 
@@ -527,6 +635,18 @@ export class HomeComponent implements OnDestroy {
     const active = this.kindFilters()
     const scope = this.filterScope()
     let sections = this.sections()
+
+    // ONE REVISION PER ARTIFACT, before any other shaping: a superseded
+    // generation never renders, in any scope. Applied here rather than in each
+    // view so search, the tiles/features scopes, the domain groups and the
+    // logical merge all inherit it from one place.
+    const losers = this.#revisionLosers()
+    if (losers.size) {
+      sections = sections.map(s => {
+        const items = this.#withoutStaleRevisions(s.items, losers)
+        return items === s.items ? s : { ...s, items }
+      })
+    }
 
     if (term) {
       sections = sections
@@ -2835,12 +2955,22 @@ export class HomeComponent implements OnDestroy {
     return result
   }
 
+  /** Flatten to a scan list of code nodes, ONE ROW PER SIGNATURE. Superseded
+   *  revisions are already gone (filteredSections drops them before any scope
+   *  shaping); what this dedupes is the other duplicate shape — one artifact
+   *  referenced from two layers. In the tree those two rows are meaningful
+   *  (they say where it is used); flattened, they are the same switch twice. */
   #flattenByKind(nodes: TreeNode[], kinds: Set<TreeNodeKind>): TreeNode[] {
     const result: TreeNode[] = []
+    const seen = new Set<string>()
     const walk = (items: TreeNode[]) => {
       for (const node of items) {
         if (kinds.has(node.kind)) {
-          result.push({ ...node, depth: 0, children: [], expanded: false })
+          const key = node.signature ?? node.id
+          if (!seen.has(key)) {
+            seen.add(key)
+            result.push({ ...node, depth: 0, children: [], expanded: false })
+          }
         }
         walk(node.children)
       }
