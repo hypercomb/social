@@ -418,11 +418,46 @@ $accent: #c8b8ff;
   .features-panel { top: max(calc(3.85rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
 }
 
-// On phones (≤599px) the header bar is hidden by default (see
-// `_header-bar.scss`), so there's no header to clear — let the panel run the
-// full height instead of leaving a gap where the bar would have been.
-@include phone-only {
-  .features-panel { top: 0; }
+// ── phone: a BOTTOM SHEET, not a right-docked slab ────────────────
+// The docked panel is 280–680px wide, so on a 375px phone the clamp lands it
+// at ~351px — 94% of the screen, full height, with the hive squeezed into the
+// ~24px strip beside it and the resize grip sitting on top of that strip. It
+// is the same failure the tags viewer had before its rescue, and this is the
+// same rescue: full-width sheet along the bottom, capped height, safe-area
+// padding, and the inline width from `hcDockedPanel` beaten with `!important`.
+// Landscape phones (wide but SHORT) are covered too — the `phone-only` mixin
+// is width-only and would miss them, which is why the query is spelled out.
+// Turning a feature on or off is the ONE thing this panel does on a phone, and
+// a row tap already toggles; everything else here is making that tap possible.
+@media (max-width: 599px), (max-height: 449px) {
+  .features-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+    max-height: min(62vh, 30rem);
+    border-left: none;
+    border-top: 1px solid rgba($accent, 0.5);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($accent, 0.06) inset;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  // The panel scales its own text DOWN as it narrows (`--hc-panel-scale`,
+  // min 0.82), which on a phone shrinks controls that are already 8–11px.
+  // Full width means it never needs to.
+  .features-panel { font-size: 1rem; }
+
+  .features-panel button,
+  .features-panel .features-row { min-height: 2.5em; }
+
+  // Multi-select rides ctrl/shift-click, so the bulk bar it feeds cannot be
+  // reached by a finger at all. Hide the controls that only serve it rather
+  // than leave dead 11px buttons on the sheet.
+  .features-panel .bulk-bar { display: none; }
 }
 
 // ── selectable rows ───────────────────────────────────────────────

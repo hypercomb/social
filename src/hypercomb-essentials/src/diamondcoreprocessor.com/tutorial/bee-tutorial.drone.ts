@@ -777,8 +777,27 @@ export class BeeTutorialDrone extends Drone {
   // speech
   // -----------------------------------------------
 
+  /** Is the tour running on a touch device? Read from the single source of
+   *  truth so `/mobile on` rehearses the phone narration on a desktop. */
+  #touch(): boolean {
+    try {
+      const mm = window.ioc?.get?.('@diamondcoreprocessor.com/MobileMode') as { active?: boolean } | undefined
+      return mm?.active === true
+    } catch { return false }
+  }
+
+  /** Every bubble in every lesson resolves through here, so a `<key>.touch`
+   *  variant retunes the whole tour for a phone without touching one lesson:
+   *  "left-click it" becomes "tap it", "Shift+click to come back out" becomes
+   *  the Back button, "hold the Space bar and drag" becomes one finger. A key
+   *  with no `.touch` twin falls through to the desktop wording unchanged. */
   #t(key: string, fallback: string, params?: Record<string, string | number>): string {
     const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    if (this.#touch()) {
+      const touchKey = `${key}.touch`
+      const touched = i18n?.t(touchKey, params)
+      if (touched && touched !== touchKey) return touched
+    }
     const resolved = i18n?.t(key, params)
     if (resolved && resolved !== key) return resolved
     return fallback.replace(/\{(\w+)\}/g, (_, token) => String(params?.[token] ?? `{${token}}`))

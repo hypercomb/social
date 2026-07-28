@@ -228,7 +228,7 @@ export class SwarmAdoptDrone extends Drone {
               .map(s => ({ label: String(s?.label ?? '').trim(), pubkey: String(s?.pubkey ?? '').trim().toLowerCase() }))
               .filter(s => s.label.length > 0)
           : []
-        void (async () => { for (const s of selections) await this.#adoptInline(s.label, s.pubkey || undefined) })()
+        void (async () => { await this.#adoptMany(selections) })()
         return
       }
 
@@ -241,7 +241,7 @@ export class SwarmAdoptDrone extends Drone {
         ? payload.labels.map(s => String(s ?? '').trim()).filter(Boolean)
         : []
       if (labels.length > 0) {
-        void (async () => { for (const label of labels) await this.#adoptInline(label) })()
+        void (async () => { await this.#adoptMany(labels.map(label => ({ label }))) })()
         return
       }
 
@@ -413,13 +413,40 @@ export class SwarmAdoptDrone extends Drone {
     EffectBus.emit('features:outcome', { cell, kind: kind ?? '', ok, message })
   }
 
-  #adoptInline = async (label: string, pubkey?: string): Promise<void> => {
+  /** Fold a SET of peer tiles — the verb behind "select several, keep them".
+   *  Sequential so commits land in pick order rather than racing the committer
+   *  queue, and every fold is SILENT so the Beehaviors panel opens exactly
+   *  once, at the end, on the first tile that actually landed. Without this
+   *  each adopt re-targeted the panel and wiped the one before it, so a
+   *  five-tile adopt flashed five times and left you on whichever finished
+   *  last. Nothing lands ⇒ no panel, and the per-tile failure messages
+   *  already said why. */
+  #adoptMany = async (picks: readonly { label: string; pubkey?: string }[]): Promise<void> => {
+    let first: string | null = null
+    for (const pick of picks) {
+      const ok = await this.#adoptInline(pick.label, pick.pubkey || undefined, { silent: true })
+      if (ok && !first) first = pick.label
+    }
+    if (!first) return
+    const branch = this.#resolvePeerBranch(first)
+    // The tile is ours now, so the peer entry may already be gone from the
+    // cache — fall back to the location we are standing in.
+    const at = branch?.at ?? [...(this.#ioc()?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.explorerSegments?.() ?? []]
+    EffectBus.emit('features:outcome', { cell: first, kind: '', ok: true, message: '' })
+    EffectBus.emit('tile:action', { action: 'features', label: first, segments: [...at, first] })
+  }
+
+  /** Fold one peer tile. `silent` suppresses this tile's own Beehaviors
+   *  landing so a BULK adopt can open the panel ONCE at the end instead of
+   *  re-targeting it N times (the panel replaces its subject, so N adopts
+   *  meant N wipes and last-one-wins). Resolves true when the tile is in. */
+  #adoptInline = async (label: string, pubkey?: string, opts?: { silent?: boolean }): Promise<boolean> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) {
       // The peer cache expired / navigation changed since the click — say so
       // instead of doing nothing (the silent dead-end reads as "adopt broken").
       this.#rowOutcome(label, undefined, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
-      return
+      return false
     }
     // ADDITIVE when already held. A tile you hold that a peer diverged on is
     // adopted by ADDING the children they publish that you don't have — never
@@ -429,9 +456,10 @@ export class SwarmAdoptDrone extends Drone {
     // overwrites — a shared tile stays one tile.)
     if (await this.#isHeldHere(branch.at, branch.label)) {
       await this.#additiveAdoptHeld(branch)
-      return
+      return true
     }
-    await this.adoptResolvedBranch(branch)
+    const res = await this.adoptResolvedBranch(branch, opts)
+    return res === 'committed' || res === 'exists'
   }
 
   /** Is `label` a live child of the layer at `at` right now? Routes adopt to

@@ -119,11 +119,68 @@ boundary) that can never hide the bar — hiding on mic release + visibility re-
 soft-keyboard viewport blips were the "command line flashes and disappears" bug; GO
 submits and collapses only in landscape; syncs never steal focus (`focus:false` on the
 effect) and never collapse a focused input; the quick-menu centre slot now opens the
-bar before focusing; `controls.keyboard` in all 14 catalogs. Still open from the
-Phase 2 list: editor reachable by touch (tap-reveal action band), hold-timer
-arbitration, visualViewport keyboard inset. NOT device-verified: live rotation and
+bar before focusing; `controls.keyboard` in all 14 catalogs. **Per-tile actions reachable on touch — BUILT 2026-07-28 as a FULLSCREEN TILE
+VIEW, not the tap-reveal band originally planned** (Jaime: "would it be a good
+idea to have the first half open it up to full screen?" — yes, and better: the
+hover band's icons are cursor-scale, a fullscreen surface gives real thumb
+targets, the tile's picture, its name and its notes). `tile-view.drone.ts`
+mounts a `position:fixed` host with an action row (make-this-yours / edit /
+share), takes an owner-counted turn in `view:active`, and holds NO ViewMode
+mode — deliberately, so no hand-kept TRANSIENT_MODES edit can strand a boot and
+a finishing adopt cannot tear the view down mid-action. Exits: button, backdrop,
+Escape, right-click, and the BACK button (the one a phone reaches for first and
+no other takeover answers). Wired at the leaf terminus in `tile-overlay.drone.ts`
+— which now consults the takeover rank FIRST, so a childless tile carrying a
+deck or gallery opens its own view, a gap that predated this work. Mouse
+behaviour is unchanged (gated on a recorded touch press or MobileMode).
+Still open from the Phase 2 list: hold-timer arbitration, visualViewport
+keyboard inset, and selection on touch (`SelectionInputDrone` still hard-returns
+for touch, so multi-tile operations remain desktop-only). NOT device-verified: live rotation and
 real iOS keyboard (the Browser pane dispatches no MediaQueryList change events under
 emulated resize).
+
+**D2b — The tutorial is reachable and speaks to a finger. BUILT 2026-07-28.**
+The tour's only starter button sits on the desktop left rail, doubly gated off
+phones — so `/tutorial` was the sole way in, i.e. you had to already know how to
+type to learn how to type. The empty HIVE ROOT (previously skipped in favour of
+"the onboarding path", which was never built) is now that path:
+`collection-empty-prompt.drone.ts` gained a root variant — what a tile is, plus
+*Add a tile* / *Show me how*. Narration adapts through the tutorial's single
+`#t` funnel, which prefers a `<key>.touch` variant when MobileMode is active:
+"left-click it" → "tap it", "Shift+click to come back out" → the Back button,
+"hold the Space bar and drag" → one finger. Zero lessons edited. Starter-course
+wordings shipped (en+ja); the beginner course's keyboard lessons (Ctrl+C,
+Delete, Ctrl+Z) keep their desktop wording because those gestures genuinely have
+no touch equivalent yet — they should be gated by `requires()` rather than
+reworded, which is not yet done.
+
+**D2c — SELECTION IS THE SUBSTRATE; verbs act on it. BUILT 2026-07-28.**
+The elegant answer to "select tiles in a swarm, then adopt" is not a bespoke
+adopt gesture — it is giving touch the selection it never had, and letting
+every verb read it. A pointer says "pick this too" by holding ctrl; a finger
+has no modifiers, so sampling mode says it with an explicit `toggle` intent on
+`tile:click` (without it a plain tap REPLACES the set — the reason picks could
+never accumulate). Picks land in the ordinary `SelectionService`, so they ring
+with the selection visuals that already exist and every selection-reading verb
+sees the same set:
+
+- **Keep** (`sample-swarm.drone.ts`) — a pill that appears only where there are
+  peer tiles, so it costs no permanent chrome. Arm, tap what you want, keep it.
+  Routes to the existing `adopt-selected`; a name offered by two publishers
+  hands off to the disambiguation panel, which is the surface built to ask.
+- **Mark** (`tags-viewer.onRowClick` → `applyToSelection`) — with tiles picked,
+  tapping a pheromone puts it on all of them, in one transaction. Drag-to-paint
+  stays off: on touch a drag IS the scroll gesture, and select-then-tap
+  sidesteps that conflict instead of reopening it.
+- **After adopt, features** — a bulk adopt used to re-target the Beehaviors
+  panel once per tile and wipe the one before it; it now folds silently and
+  lands once. The panel itself was a ~351px right-docked slab on a 375px phone
+  (94% of the screen, the hive squeezed into the strip beside it); it is now a
+  bottom sheet with real toggle rows.
+
+Not built: picking ACROSS pages. Navigation clears the selection by design, and
+peer tiles are branches, so a multi-level pick needs its own staged set (the
+pheromone brush's `#staged` is the precedent).
 
 **D3 — iOS is a supported floor, verified on device.** Minimum: iOS Safari 16.4+ boots
 to a visible hive; 15.2–18.3 gets an HONEST unsupported/degraded card, never a silent

@@ -36,7 +36,18 @@
       <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'tags.close' | t">×</button>
     </header>
 
-    <p class="tags-intro">{{ 'tags.intro' | t }}</p>
+    <!-- With tiles picked, the list stops being a filter and becomes a set of
+         verbs: tap a pheromone to put it on all of them. Say so, because the
+         same row does two different things depending on whether anything is
+         picked, and the painter that would otherwise explain it is hidden on
+         phones (a brush-drag is the scroll gesture there). -->
+    @if (canvasSelectionCount() > 0 && !painting()) {
+      <p class="tags-intro tags-selection-hint">
+        {{ 'tags.apply-to-selection' | t: { count: canvasSelectionCount() } }}
+      </p>
+    } @else {
+      <p class="tags-intro">{{ 'tags.intro' | t }}</p>
+    }
 
     <!-- Armed removal: the review surface. The hive is filtered to this
          keyword; every tile you click joins the list below and paints

@@ -311,6 +311,8 @@ export class TileOverlayDrone extends Drone {
   #editCooldown = false
   #editCooldownTimer: ReturnType<typeof setTimeout> | null = null
   #hasSelection = false
+  /** Sampling mode — every tap picks instead of entering. See `sample:mode`. */
+  #sampling = false
   /** A pheromone removal is armed (TagRemovalDrone): tile clicks stage and
    *  unstage tiles instead of entering or opening them, and the icon overlay
    *  stays out of the way. Cleared when the removal commits or is cancelled. */
@@ -830,6 +832,19 @@ export class TileOverlayDrone extends Drone {
         this.#hasSelection = (payload?.selected?.length ?? 0) > 0
         this.#updateVisibility()
         this.#updatePerTileVisibility()
+      })
+
+      // SAMPLING — picking tiles with a finger. A pointer says "pick this too"
+      // by holding ctrl; a finger has no modifiers, so this mode says it
+      // instead: while armed, a press does not navigate and the tap becomes a
+      // toggle. It is the same takeover the selection and the staged-removal
+      // already perform, so the gesture is one the participant knows. The mode
+      // only has to survive until the FIRST pick — after that `#hasSelection`
+      // suppresses navigation on its own — but it stays armed so unpicking the
+      // last tile doesn't silently hand navigation back mid-gesture.
+      this.onEffect<{ active: boolean }>('sample:mode', (payload) => {
+        this.#sampling = !!payload?.active
+        this.#updateVisibility()
       })
 
       // A staged pheromone removal takes over tile clicks: while it is armed,
@@ -2086,6 +2101,10 @@ export class TileOverlayDrone extends Drone {
     if (this.#navigationBlocked) return
     if (this.#editing || this.#editCooldown) return
     if (this.#hasSelection) return
+    // Sampling: the press must not navigate — a peer tile is a BRANCH, so
+    // without this the first pick would walk into the publisher's tree instead
+    // of picking it. The trailing click toggles it (see #onClick).
+    if (this.#sampling) return
     // Armed removal: the press must not navigate — the trailing click stages
     // the tile instead (see #onClick).
     if (this.#tagRemovalArmed) return
@@ -2402,7 +2421,7 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    if (this.#hasSelection) {
+    if (this.#hasSelection || this.#sampling) {
       this.emitEffect('tile:click', {
         q: this.#currentAxial!.q,
         r: this.#currentAxial!.r,
@@ -2410,6 +2429,10 @@ export class TileOverlayDrone extends Drone {
         index: this.#currentIndex!,
         ctrlKey: false,
         metaKey: false,
+        // While sampling, say the ADD-TO-SET intent explicitly. A plain click
+        // REPLACES the selection, so without this every pick would drop the
+        // one before it and the set could never grow past one.
+        toggle: this.#sampling,
       })
       return
     }

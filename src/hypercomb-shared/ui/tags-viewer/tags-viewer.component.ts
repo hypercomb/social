@@ -382,7 +382,26 @@ export class TagsViewerComponent implements OnDestroy {
     // The click that ends a drag must not also act on the row.
     if (this.#swallowClick) { this.#swallowClick = false; return }
     if (this.#painterOpen()) { this.togglePheromone(name); return }
+    // SELECTION IS THE TARGET. With tiles picked on the canvas, tapping a
+    // pheromone puts it on all of them — the touch answer to "pick a brush,
+    // then drag across the hive", which a finger cannot perform because on
+    // touch a drag IS the scroll gesture. Filtering by the mark would be the
+    // wrong read of the tap here: you picked tiles in order to DO something
+    // to them. Unpicked, the tap still filters exactly as before.
+    if (this.canvasSelectionCount() > 0) { this.applyToSelection(name); return }
     this.#toggleFilter(name)
+  }
+
+  /** Put one pheromone on every canvas-selected tile, in one transaction.
+   *  Fires the drone's arm → stage → commit triple synchronously (EffectBus
+   *  dispatches inline), so the hive is never left sitting in paint-takeover
+   *  mode waiting for a Done that a phone has no way to press. */
+  applyToSelection(name: string): void {
+    const labels = [...this.#canvasSelection()]
+    if (labels.length === 0) return
+    EffectBus.emit('tags:apply-begin', { tags: [name] })
+    for (const label of labels) EffectBus.emit('tags:apply-paint', { label, add: true })
+    EffectBus.emit('tags:apply-commit', {})
   }
 
   /** Toggle a tag in the active filter set and broadcast it — same effect the

@@ -8,7 +8,12 @@ import type { InputGate } from '../navigation/input-gate.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
-type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean }
+/** `toggle` carries the ADD-TO-SET intent that ctrl/meta expresses on a
+ *  pointer. A finger has no modifier keys, so sampling mode sets it instead —
+ *  the intent is the same ("pick this one too"), only the way of saying it
+ *  differs. Without it a tap would REPLACE the set and picking a second tile
+ *  would drop the first. */
+type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean; toggle?: boolean }
 
 class SelectionInputDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -94,7 +99,7 @@ class SelectionInputDrone extends Drone {
       const selection = this.#selection()
       if (!selection) return
 
-      if (payload.ctrlKey || payload.metaKey) {
+      if (payload.ctrlKey || payload.metaKey || payload.toggle) {
         selection.toggle(payload.label)
       } else if (selection.isSelected(payload.label)) {
         selection.setActive(payload.label)
