@@ -32,7 +32,10 @@ const BUILTIN_SLASH: { behaviour: { name: string; description: string; descripti
 ]
 
 /** Threshold between a tap and a long-press on the mobile mic button (ms). */
-const MIC_LONG_PRESS_MS = 300
+// Tap-vs-hold boundary for the mobile mic. Generous on purpose: a relaxed
+// thumb tap routinely exceeds 300ms, and misreading a tap as a hold turns
+// toggle-listening into an instant start/stop that discards the dictation.
+const MIC_LONG_PRESS_MS = 450
 
 /** How long the lock indicator stays lit after a pan/zoom-while-locked attempt. */
 const LOCKED_FLASH_MS = 1100
@@ -1352,6 +1355,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Prefill the cell name (the grammar) followed by a trailing `/` so the
       // caret lands ready to continue the path/command. `#setShellValue` calls
       // placeCaretAtEnd(), so the cursor sits right after the slash.
+      // A collapsed mobile bar (landscape) must open first — focusing an
+      // input inside a display:none header was the quick-menu centre-slot
+      // dead end on phones.
+      if (this.mobileHidden()) {
+        EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
+      }
       this.#setShellValue(cell ? `${cell}/` : cell, false)
       this.#focusShellSoon()
     })
@@ -1399,14 +1408,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.viewActive.set(active)
     })
 
-    // Mobile input visibility — controls-bar emits this; on mobile the
-    // command line is collapsed by default and only expanded when the
-    // user taps the toggle icon. On desktop, visible is always true.
-    this.#mobileVisibilityUnsub = EffectBus.on<{ visible: boolean; mobile: boolean }>(
+    // Mobile input visibility — on desktop and PORTRAIT phones the command
+    // line is always visible (portrait pins it as the top prompt surface);
+    // only LANDSCAPE phones collapse it, revealed by the sidebar keyboard
+    // toggle / mic / long-press. `focus: false` marks sync-driven
+    // emissions (media-query changes, boot) that must not steal focus or
+    // pop the soft keyboard; user-gesture emitters omit it and get focus.
+    this.#mobileVisibilityUnsub = EffectBus.on<{ visible: boolean; mobile: boolean; focus?: boolean }>(
       'mobile:input-visible',
-      ({ visible, mobile }) => {
+      ({ visible, mobile, focus }) => {
         this.mobileHidden.set(mobile && !visible)
-        if (mobile && visible) {
+        if (mobile && visible && focus !== false) {
           // give focus to the shell so the keyboard pops up immediately
           this.#focusShellSoon()
         }
@@ -1622,84 +1634,74 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.voiceService?.stop()
   }
 
-  /** Mobile "done" / "GO" button: submit if text, otherwise collapse. */
+  /** Mobile "GO" button: submit the text. Portrait pins the command line
+   * so GO never collapses it there (the bar stays ready for the next
+   * command); landscape collapses back to the sidebar's keyboard toggle. */
   readonly closeMobileInput = (): void => {
     const v = this.value().trim()
     if (v) {
       void this.#preprocessTagsThenExecute(this.value())
     }
-    EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+    // Landscape phones are WIDE but SHORT. Width-based detection on
+    // purpose: the soft keyboard shrinks only the HEIGHT, so a portrait
+    // phone mid-typing can pseudo-flip orientation queries but never
+    // exceeds 599px width — this predicate cannot misread it.
+    const landscapePhone = window.innerWidth > 599 && window.innerHeight <= 449
+    if (landscapePhone) {
+      EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+    }
   }
 
   // ── mobile mic state machine ──────────────────────────────
-  // Long-press (>300ms hold): record-and-release — stop emits voice:submit
-  //   which creates the tile and closes the command line.
-  // Tap on closed command line: open it + start listening + focus input.
-  // Tap on open command line while listening with no text: stop listening,
-  //   keep command line open with keyboard focus for typing.
-  // Tap on open command line with text (listening or typing): submit & close.
+  // The mic is a VOICE control only — it NEVER hides the command line.
+  // (Hiding on release was the "tap the mic and the command line flashes
+  // away" bug: a relaxed tap crossed the hold threshold and the release
+  // handler collapsed the bar it had just opened. Portrait now pins the
+  // bar permanently; landscape collapses only via GO / the keyboard
+  // toggle.)
+  //   Tap while idle:      start listening (toggle on).
+  //   Tap while listening: stop — VoiceInputService emits voice:submit,
+  //                        which executes the dictated text.
+  //   Hold:                push-to-talk — listen while held, submit on
+  //                        release.
+  // If the bar is collapsed (landscape), the first press reveals it.
   #micHoldTimer: ReturnType<typeof setTimeout> | null = null
   #micLongPressFired = false
-  #micPressWhileOpen = false
+  #micWasListening = false
   #micPressUnsub?: () => void
   #micReleaseUnsub?: () => void
 
   #onMobileMicPress = (): void => {
     this.#micLongPressFired = false
-    this.#micPressWhileOpen = !this.mobileHidden()
+    this.#micWasListening = this.voiceActive()
 
-    if (!this.#micPressWhileOpen) {
-      // First tap on a closed command line: open, focus, start listening
+    if (this.mobileHidden()) {
       EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
       queueMicrotask(() => this.shell?.focus())
-      this.voiceService?.start()
     }
-    // Press while already open: wait — release handler decides tap vs long-press.
-    // Long-press starts a fresh dictation (see timer below).
+    if (!this.#micWasListening) this.voiceService?.start()
 
     this.#micHoldTimer = setTimeout(() => {
       this.#micLongPressFired = true
       this.#micHoldTimer = null
-      // Long-press while command line was already open (and voice idle) —
-      // user is initiating a new dictation. Start voice now.
-      if (this.#micPressWhileOpen && !this.voiceActive()) {
-        this.voiceService?.start()
-      }
     }, MIC_LONG_PRESS_MS)
   }
 
   #onMobileMicRelease = (): void => {
-    const wasLongPress = this.#micLongPressFired
-    const wasPressWhileOpen = this.#micPressWhileOpen
     if (this.#micHoldTimer) {
       clearTimeout(this.#micHoldTimer)
       this.#micHoldTimer = null
     }
+    const wasHold = this.#micLongPressFired
     this.#micLongPressFired = false
 
-    if (wasLongPress) {
+    // Hold = push-to-talk: release ends the dictation (voice:submit fires
+    // with the text and executes it). Tap = toggle: releasing the press
+    // that STARTED the dictation keeps it listening; a tap while it was
+    // already listening stops it.
+    if (wasHold || this.#micWasListening) {
       this.voiceService?.stop()
-      EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
-      return
     }
-
-    if (!wasPressWhileOpen) return
-
-    const isListening = this.voiceActive()
-    const hasText = this.value().trim().length > 0
-
-    if (isListening && !hasText) {
-      this.voiceService?.stop()
-      queueMicrotask(() => this.shell?.focus())
-      return
-    }
-
-    if (isListening) {
-      this.voiceService?.stop()
-    } else {
-      void this.#preprocessTagsThenExecute(this.value())
-    }
-    EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
   }
 
   public ngOnDestroy(): void {

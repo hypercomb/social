@@ -152,6 +152,8 @@
   "controls.text-only": "только текст (скрыть изображения)",
   "controls.voice": "голосовой ввод",
   "controls.voice-hold": "удерживайте для речи (или удерживайте B)",
+
+  "controls.keyboard": "ввести команду",
   "controls.microphone": "микрофон",
   "controls.atomize": "атомизировать",
   "controls.atomize-shatter": "разбить на шестиугольники",

@@ -251,36 +251,28 @@
 }
 
 // ── phone (≤599px) ────────────────────────────────────────
-// Only actual smartphones (≤599px wide) hide the top header bar by
-// default — the mobile shell uses just the floating icons at the bottom
-// (controls-bar) for input. Anything larger than a smartphone — including
-// phones rotated to landscape (≥600px wide) — keeps the command line
-// docked at the top of the screen.
-//
-// Long-pressing an empty area of the canvas adds .input-open to the
-// header-bar (driven by the App component listening for the
-// `mobile:input-visible` effect), which un-hides it so the user can
-// type a tile name. The "done" button inside the command-line emits the
-// reverse effect to hide it again.
+// PORTRAIT PHONES PIN THE COMMAND LINE (Jaime, 2026-07-28: "In portrait
+// view the command line should be visible always"). The header is
+// permanently the slim prompt surface — ~11% of the viewport, clamped —
+// with everything except the text box + GO suppressed. No reveal dance:
+// the old hidden-until-long-press model made typing undiscoverable and
+// let visibility syncs yank the input away mid-use (the mic-tap flash).
+// Landscape phones (wide but short) still collapse it — see the
+// max-height block below, which wins the cascade in the overlap.
 @include phone-only {
 
-  .header-bar { display: none; }
-
-  // When the command line is revealed on mobile the header acts as a
-  // prominent prompt surface — size it to ~11% of the portrait viewport
-  // (clamped for small/large phones) and suppress every other item so
-  // only the text box + GO button remain.
+  .header-bar,
   .header-bar.input-open {
     display: flex;
     height: clamp(3.5rem, 11vh, 5.5rem);
   }
 
-  .header-bar.input-open .mesh-header,
-  .header-bar.input-open hc-mesh-header,
+  .header-bar .mesh-header,
+  .header-bar hc-mesh-header,
   // sync cell too — the mobile prompt surface is ≤599px wide and the
   // cell refuses to shrink (min-width). Host-element selector because
   // emulated encapsulation hides the inner .sync-cell from this sheet.
-  .header-bar.input-open hc-sync-indicator {
+  .header-bar hc-sync-indicator {
     display: none;
   }
 

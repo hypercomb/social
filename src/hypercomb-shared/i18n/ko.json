@@ -152,6 +152,8 @@
   "controls.text-only": "텍스트만 (이미지 숨기기)",
   "controls.voice": "음성 입력",
   "controls.voice-hold": "길게 눌러 말하기 (또는 B 길게 누르기)",
+
+  "controls.keyboard": "명령 입력",
   "controls.microphone": "마이크",
   "controls.atomize": "원자화",
   "controls.atomize-shatter": "육각형으로 분쇄",

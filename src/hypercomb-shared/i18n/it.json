@@ -152,6 +152,8 @@
   "controls.text-only": "solo testo (nascondi immagini)",
   "controls.voice": "input vocale",
   "controls.voice-hold": "tieni premuto per parlare (o tieni B)",
+
+  "controls.keyboard": "digita un comando",
   "controls.microphone": "microfono",
   "controls.atomize": "atomizza",
   "controls.atomize-shatter": "frantuma in esagoni",

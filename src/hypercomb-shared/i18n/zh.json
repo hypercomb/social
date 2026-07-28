@@ -152,6 +152,8 @@
   "controls.text-only": "仅文本（隐藏图片）",
   "controls.voice": "语音输入",
   "controls.voice-hold": "按住说话（或按住B）",
+
+  "controls.keyboard": "输入命令",
   "controls.microphone": "麦克风",
   "controls.atomize": "原子化",
   "controls.atomize-shatter": "碎裂为六边形",

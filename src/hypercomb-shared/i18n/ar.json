@@ -152,6 +152,8 @@
   "controls.text-only": "نص فقط (إخفاء الصور)",
   "controls.voice": "إدخال صوتي",
   "controls.voice-hold": "اضغط مع الاستمرار للتحدث (أو اضغط B)",
+
+  "controls.keyboard": "اكتب أمرًا",
   "controls.microphone": "ميكروفون",
   "controls.atomize": "تذرير",
   "controls.atomize-shatter": "تفتيت إلى سداسيات",

@@ -152,6 +152,8 @@
   "controls.text-only": "nur Text (Bilder ausblenden)",
   "controls.voice": "Spracheingabe",
   "controls.voice-hold": "Gedrückt halten zum Sprechen (oder B halten)",
+
+  "controls.keyboard": "Befehl eingeben",
   "controls.microphone": "Mikrofon",
   "controls.atomize": "atomisieren",
   "controls.atomize-shatter": "in Hexagone zersplittern",

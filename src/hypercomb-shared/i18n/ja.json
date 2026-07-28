@@ -167,6 +167,8 @@
   "controls.text-only": "テキストのみ（画像を非表示）",
   "controls.voice": "音声入力",
   "controls.voice-hold": "長押しで話す（またはBを長押し）",
+
+  "controls.keyboard": "コマンドを入力",
   "controls.microphone": "マイク",
   "controls.atomize": "アトマイズ",
   "controls.atomize-shatter": "ヘックスに分裂",

@@ -259,26 +259,40 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#syncInputVisibility()
   }
   #syncInputVisibility = (): void => {
-    // On mobile, the command-line input is hidden by default and only
-    // revealed via the toggle icon. On desktop it is always visible.
-    if (!this.isMobile()) {
-      this.inputVisible.set(true)
-      EffectBus.emit('mobile:input-visible', { visible: true, mobile: false })
-    } else {
+    // Desktop AND portrait phones always show the command line — portrait
+    // pins it as the top prompt surface. Only landscape phones collapse
+    // it; the sidebar's keyboard button reveals it on demand.
+    // `focus: false` — a sync must never steal focus or pop the keyboard.
+    if (this.isMobile() && this.isLandscape()) {
+      // Never collapse an input the user is actively typing in. The soft
+      // keyboard's viewport resize can flip the (orientation)/(max-height)
+      // queries mid-type — collapsing on that flip yanked the command line
+      // away the moment it was used (the mic-tap "flash"). A rotation
+      // while typing keeps the input up for the same reason; GO or the
+      // keyboard toggle collapses it once the user is done.
+      const el = document.activeElement as HTMLElement | null
+      const editing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      if (editing && this.inputVisible()) return
       this.inputVisible.set(false)
-      EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+      EffectBus.emit('mobile:input-visible', { visible: false, mobile: true, focus: false })
+    } else {
+      this.inputVisible.set(true)
+      EffectBus.emit('mobile:input-visible', { visible: true, mobile: this.isMobile(), focus: false })
     }
   }
+  /** Landscape sidebar keyboard button: reveal ⇄ collapse the command
+   * line. Revealing omits `focus` so the shell focuses and the native
+   * keyboard rises inside the user gesture. */
   readonly toggleInput = (): void => {
     const next = !this.inputVisible()
     this.inputVisible.set(next)
     EffectBus.emit('mobile:input-visible', { visible: next, mobile: this.isMobile() })
   }
-  readonly hideInput = (): void => {
-    if (!this.isMobile() || !this.inputVisible()) return
-    this.inputVisible.set(false)
-    EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
-  }
+  // The bar is not the only emitter — GO, the mic reveal, the tutorial and
+  // the empty-hex long-press all move visibility on the same effect. Mirror
+  // every emission into the signal so the keyboard button's lit state stays
+  // truthful. Set-only (no re-emit), so this cannot loop.
+  #inputVisibleMirrorUnsub?: () => void
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'atomize'>('browsing')
@@ -1012,6 +1026,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // portrait, a right-edge sidebar in landscape. Tablets/laptops/desktops
     // exceed both thresholds and keep the full desktop shell. (A very short
     // desktop window also reads as mobile — an acceptable edge.)
+    this.#inputVisibleMirrorUnsub = EffectBus.on<{ visible: boolean; mobile: boolean }>(
+      'mobile:input-visible',
+      ({ visible, mobile }) => this.inputVisible.set(mobile ? visible : true),
+    )
+
     this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
     this.isMobile.set(this.#mobileQuery.matches)
     this.#mobileQuery.addEventListener('change', this.#mobileHandler)
@@ -1307,6 +1326,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // unreleasable (the only button that releases it went away with us).
     this.gate?.removeEventListener?.('change', this.#onGateChange)
     if (this.gate?.lockedBy?.(PIN_OWNER)) this.gate.unlock(PIN_OWNER)
+    this.#inputVisibleMirrorUnsub?.()
     this.#mobileQuery?.removeEventListener('change', this.#mobileHandler)
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()

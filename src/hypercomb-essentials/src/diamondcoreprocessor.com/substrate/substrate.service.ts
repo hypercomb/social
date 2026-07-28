@@ -868,17 +868,29 @@ export class SubstrateService extends EventTarget {
    *  NOT blank — rolling a random pick over it would change an image that is
    *  already there. Returns true when the canonical slot already carries a
    *  small.image / flat.small.image. Cheap because callers only reach it on
-   *  the rare index-miss path. */
+   *  the rare index-miss path.
+   *
+   *  A COLD read counts as "has an image" — i.e. DON'T assign. A transient
+   *  miss (services still registering, layer head not warmed, props bytes not
+   *  pooled yet) is indistinguishable from a genuine blank by value alone,
+   *  and getting it wrong is not symmetric: skipping leaves the tile blank for
+   *  one more render pass (the next `render:cell-count` retries), while
+   *  assigning writes a default into the local index that then OUTRANKS the
+   *  tile's real image on every future render — the renderer resolves props
+   *  through the index, so the default sticks until the user re-saves the tile
+   *  through the editor. Wait for a resolved read instead of guessing. */
   async #hasCanonicalImage(label: string, segments?: readonly string[]): Promise<boolean> {
     const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+    const stats: { cold?: boolean } = {}
     try {
       // `any` (not Record<string,…>) so the chained property access is allowed
       // under the Angular build's noPropertyAccessFromIndexSignature — same
       // shape as reconcileCanonicalImageStamps' imageOf helper.
-      const props = await readTilePropertiesAt([...segs], label) as any
+      const props = await readTilePropertiesAt([...segs], label, stats) as any
+      if (stats.cold) return true          // unresolved — never overwrite blind
       const img = props?.small?.image ?? props?.flat?.small?.image
       return typeof img === 'string' && /^[0-9a-f]{64}$/.test(img)
-    } catch { return false }
+    } catch { return true }                // read threw — same reasoning
   }
 
   async applyToCell(label: string, segments?: readonly string[]): Promise<boolean> {
@@ -1026,7 +1038,11 @@ export class SubstrateService extends EventTarget {
       const fingerprintOf = (): string => {
         const hist = get('@diamondcoreprocessor.com/HistoryService') as { headIndexCount?: () => number } | undefined
         const idxRaw = localStorage.getItem('hc:tile-props-index') ?? '{}'
-        return `${hist?.headIndexCount?.() ?? 0}:${idxRaw.length}:${hashStr(idxRaw)}`
+        // `v2` — the pass gained the default-entry heal (an index entry may now
+        // be CORRECTED, not just filled). Hives that completed a v1 pass carry a
+        // matching fingerprint and would skip forever, never healing the entries
+        // v1 couldn't see; the prefix change buys exactly one re-walk each.
+        return `v2:${hist?.headIndexCount?.() ?? 0}:${idxRaw.length}:${hashStr(idxRaw)}`
       }
       if (localStorage.getItem('hc:substrate-reconciled') === fingerprintOf()) {
         console.info('[substrate] stamp pass: skipped — hive unchanged since last reconcile')
@@ -1068,6 +1084,26 @@ export class SubstrateService extends EventTarget {
         return (typeof img === 'string' && /^[0-9a-f]{64}$/.test(img)) ? img : undefined
       }
 
+      // Is this props resource a DEFAULT pick (substrate: true)? Memoised by
+      // sig: tiles share pool props heavily, so the whole tree usually costs a
+      // handful of reads. Current-pool membership answers most calls without
+      // any read at all; picks made by an older pool fall through to the blob.
+      // Unreadable ⇒ false (never treat an unknown as a default we may replace).
+      const poolSigs = new Set(this.#propsPool.map(e => e.propsSig))
+      const defaultPropsMemo = new Map<string, boolean>()
+      const isDefaultProps = async (propsSig: string): Promise<boolean> => {
+        if (poolSigs.has(propsSig)) return true
+        const memo = defaultPropsMemo.get(propsSig)
+        if (memo !== undefined) return memo
+        let result = false
+        try {
+          const blob = await store.getResource(propsSig)
+          if (blob) result = (JSON.parse(await blob.text()) as any)?.substrate === true
+        } catch { result = false }
+        defaultPropsMemo.set(propsSig, result)
+        return result
+      }
+
       const stampIfNeeded = async (segments: string[], name: string): Promise<void> => {
         walked++
         try {
@@ -1076,17 +1112,33 @@ export class SubstrateService extends EventTarget {
           const canonicalIsDefault = canonical?.substrate === true
 
           // CANONICAL -> INDEX heal — the index must NEVER be missing for an
-          // imaged tile. If the layer already holds an image but this device's
-          // local index has no entry, seed it from the canonical propSig.
-          // Covers cross-device / adopted / synced tiles and any entry a delete
-          // cleared. Runs BEFORE the priority-rule early-return below, which
-          // would otherwise skip exactly the tiles that need it (an untouchable
-          // intentional canonical image with no local index entry).
+          // imaged tile, and must never point at a DEFAULT while the tile owns
+          // a real image. The renderer resolves props through the index alone,
+          // so either divergence shows the wrong picture on the hex while the
+          // editor (canonical-first) shows the right one — the "the default
+          // overrode my image and I had to re-save to get it back" bug.
+          //
+          //   • no entry        → seed from canonical (adopted / synced /
+          //                       cross-device tiles, or an entry a delete cleared)
+          //   • default entry   → REPLACE with canonical when canonical is
+          //                       intentional. Same priority rule the stamp pass
+          //                       below applies to the canonical slot: intentional
+          //                       beats default. An intentional index entry is
+          //                       left alone — it legitimately differs from the
+          //                       canonical sig (the editor writes pretty-printed
+          //                       JSON, the canonical write sorts keys), so a
+          //                       sig mismatch alone means nothing.
+          //
+          // Runs BEFORE the priority-rule early-return below, which would
+          // otherwise skip exactly the tiles that need it.
           if (canonicalImg) {
             const healKey = await cellLocationSig(segments, name)
-            if (healKey && !index[healKey] && !seeds.has(healKey)) {
+            const current = healKey ? index[healKey] : undefined
+            if (healKey && !seeds.has(healKey) && (!current || await isDefaultProps(current))) {
               const propSig = await readTilePropsSigAt(segments, name)
-              if (propSig) seeds.set(healKey, propSig)
+              // Only overwrite an existing (default) entry when canonical is
+              // itself intentional — a default replacing a default is churn.
+              if (propSig && (!current || !canonicalIsDefault)) seeds.set(healKey, propSig)
             }
           }
 
@@ -1201,7 +1253,18 @@ export class SubstrateService extends EventTarget {
       let healed = 0
       if (seeds.size > 0) {
         const fresh = readTilePropsIndex()
-        for (const [k, v] of seeds) { if (!fresh[k]) { fresh[k] = v; healed++ } }
+        for (const [k, v] of seeds) {
+          // Fill a missing entry, or replace one still holding the DEFAULT the
+          // walk saw. Anything else written during the async walk is a newer,
+          // deliberate assignment (an editor save, an attach) and is never
+          // clobbered — hence the re-check against the CURRENT value rather
+          // than a blind write.
+          if (fresh[k] === v) continue
+          if (!fresh[k] || (fresh[k] === index[k] && await isDefaultProps(fresh[k]))) {
+            fresh[k] = v
+            healed++
+          }
+        }
         if (healed > 0) writeTilePropsIndex(fresh)
       }
       console.info(`[substrate] stamp pass: index=${indexSize} walked=${walked} matched=${matched} stamped=${stamped} index-healed=${healed}`)

@@ -184,7 +184,7 @@
              never needs to scroll. -->
         <div class="controls-section mobile-nav">
           <div class="mobile-side left" data-consumes-wheel>
-            <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
+            <button class="ctl-btn back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
                     (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
                     [attr.aria-label]="'controls.go-back' | t">
               <span class="mat-sym">arrow_back</span>
@@ -194,6 +194,17 @@
                 (pointerdown)="mobileMicDown($event)" (pointerup)="mobileMicUp()" (pointercancel)="mobileMicUp()" (pointerleave)="mobileMicUp()"
                 [attr.aria-label]="'controls.voice-hold' | t">
                 <span class="mat-sym" [class.filled]="voiceActive()">mic</span>
+              </button>
+            }
+            <!-- LANDSCAPE ONLY: portrait pins the command line permanently,
+                 so a reveal toggle would be dead weight there. In landscape
+                 the bar is collapsed to preserve the short viewport; this
+                 button opens it with focus so the native keyboard rises. -->
+            @if (isLandscape()) {
+              <button class="ctl-btn keyboard-btn" [class.active]="inputVisible()"
+                      (click)="toggleInput()"
+                      [attr.aria-label]="'controls.keyboard' | t">
+                <span class="mat-sym" [class.filled]="inputVisible()">keyboard</span>
               </button>
             }
           </div>

@@ -2,6 +2,13 @@
 
 **Status: IN PROGRESS — Phase 0 + the Phase 1 load gate landed. 2026-07-24.**
 
+> **2026-07-28 — POSTURE SUPERSEDED.** The viewer-first premises of this plan (opt-in
+> visibility gate with no fallback; "viewers type nothing") are revoked by
+> `mobile-usable-first-plan.md`, written from a full code audit after the gate proved to
+> blank unmarked hives on every phone. The machinery this doc built (mode service,
+> pheromones, prompts, bar, sheets, §8 adoption design) carries forward unchanged; read
+> the new plan first.
+
 This document is self-contained: it names every primitive it borrows with file paths,
 states the doctrine constraints inline, and phases the work with acceptance criteria.
 The implementing session should read this top to bottom before touching code.

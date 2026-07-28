@@ -152,6 +152,8 @@
   "controls.text-only": "hanya teks (sembunyikan gambar)",
   "controls.voice": "input suara",
   "controls.voice-hold": "tahan untuk bicara (atau tahan B)",
+
+  "controls.keyboard": "ketik perintah",
   "controls.microphone": "mikrofon",
   "controls.atomize": "atomisasi",
   "controls.atomize-shatter": "pecahkan ke heksagon",

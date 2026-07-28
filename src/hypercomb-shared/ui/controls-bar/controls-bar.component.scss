@@ -1385,6 +1385,14 @@ $actions-corner: 12rem;
   .badge { top: -4px; right: -4px; }
 }
 
+// Landscape keyboard toggle — lit while the command line is revealed,
+// same cold accent language as the mesh button's active state.
+.pill-stage.mobile .keyboard-btn.active {
+  color: #00e5a0;
+  background: rgba(0, 229, 160, 0.12);
+  border-color: rgba(0, 229, 160, 0.45);
+}
+
 // Mic button push-to-talk visual (recording state)
 .pill-stage.mobile .mic-btn {
   user-select: none;
@@ -1430,19 +1438,18 @@ $actions-corner: 12rem;
   // threshold as `isMobile`), which anchors the strip to the right edge.
 }
 
-// ── phone landscape ───────────────────────────────────────
-// In landscape the floating icons stay along the bottom of the screen,
-// but the icons themselves rotate 90° so they remain readable / tappable
-// in the orientation the user is holding the device.
-// ── phone landscape → vertical sidebar ───────────────────
-// Rotating to landscape moves the bar off the (now-scarce) bottom and onto the
-// right edge as a vertical strip, so the controls stay in a consistent,
-// thumb-reachable place across the rotation instead of eating vertical space.
-// Same three-zone model — top group / fixed centre / bottom group — stacked;
-// icons stay UPRIGHT (no rotation).
+// ── phone landscape → vertical sidebar (LEFT edge) ───────
+// Rotating to landscape moves the bar off the (now-scarce) bottom and onto
+// the LEFT edge as a vertical strip (Jaime 2026-07-28: "On landscape the
+// buttons go to the left and the back button has to be at the bottom
+// facing to the left"). Same three-zone model stacked, but the zones are
+// REMAPPED top→bottom as pheromones/mesh · fit (fixed centre) · mic/
+// keyboard/back — so BACK sits in the bottom-left thumb corner, its
+// arrow pointing left off the edge it exits through. Icons stay UPRIGHT
+// (no rotation).
 .pill-stage.mobile.landscape {
-  left: auto;
-  right: calc(0.9rem + env(safe-area-inset-right, 0px));
+  left: calc(0.9rem + env(safe-area-inset-left, 0px));
+  right: auto;
   top: 0;
   bottom: 0;
   transform: none;
@@ -1467,6 +1474,15 @@ $actions-corner: 12rem;
     min-width: 0;
     min-height: 0;
   }
+
+  // Zone remap: DOM order is [left group, centre, right group] (portrait's
+  // back·mic·keyboard | fit | pheromones·mesh); place them bottom, middle,
+  // top respectively, and float back to the END of its group so it is the
+  // bottom-most control.
+  .mobile-side.left  { grid-row: 3; grid-column: 1; }
+  .ctl-btn.mobile-center { grid-row: 2; grid-column: 1; }
+  .mobile-side.right { grid-row: 1; grid-column: 1; }
+  .mobile-side.left .back-btn { order: 9; }
 
   // Icons upright — the previous 90° rotation is gone now that the strip
   // itself is vertical.

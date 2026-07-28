@@ -152,6 +152,8 @@
   "controls.text-only": "केवल पाठ (छवियाँ छिपाएँ)",
   "controls.voice": "ध्वनि इनपुट",
   "controls.voice-hold": "बोलने के लिए दबाए रखें (या B दबाए रखें)",
+
+  "controls.keyboard": "कमांड लिखें",
   "controls.microphone": "माइक्रोफ़ोन",
   "controls.atomize": "ऐटमाइज़",
   "controls.atomize-shatter": "षट्भुज में तोड़ें",

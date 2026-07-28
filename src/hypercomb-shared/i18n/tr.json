@@ -152,6 +152,8 @@
   "controls.text-only": "yalnızca metin (resimleri gizle)",
   "controls.voice": "sesli giriş",
   "controls.voice-hold": "konuşmak için basılı tutun (veya B'ye basılı tutun)",
+
+  "controls.keyboard": "komut yaz",
   "controls.microphone": "mikrofon",
   "controls.atomize": "atomize et",
   "controls.atomize-shatter": "altıgenlere parçala",

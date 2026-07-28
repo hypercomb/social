@@ -2116,6 +2116,9 @@ export class TileOverlayDrone extends Drone {
     // re-resolves by label and swallows the click when the tile is gone —
     // "the click hits what the user saw" is an invariant.
     this.#pressCapture = { generation: this.#mapGeneration, axial, label: entry.label }
+    // The synthesized click carries no pointerType — record the real input kind
+    // here so the leaf branch can tell a tap from a mouse click.
+    this.#pressWasTouch = e.pointerType === 'touch'
 
     // If the press is over a VISIBLE overlay action button (edit, note, …), let
     // the click handler run that action — never treat it as a tile-body press.
@@ -2416,6 +2419,36 @@ export class TileOverlayDrone extends Drone {
       // target). #navigateInto routes references to their pointer.
       this.#navigateInto(entry.label)
     } else {
+      // ── LEAF TILE ───────────────────────────────────────────
+      // A leaf never reaches #navigateInto, so the takeover picker has never
+      // been consulted for one. Consult it HERE too: a childless tile carrying
+      // a deck or gallery decoration should open ITS view, exactly as a branch
+      // with the same decoration does.
+      const takeover = this.#viewTakeoverFor(entry.label)
+      if (takeover) {
+        const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+        this.emitEffect('view:open-for-tile', {
+          view: takeover,
+          segments: [...segs, entry.label],
+        })
+        return
+      }
+
+      // No decorated view claims it. On TOUCH the per-tile action band is
+      // unreachable (it is hover-derived), which left a plain leaf tile a dead
+      // end — `tile:action open` is consumed only by link and contact tiles, so
+      // tapping anything else did nothing at all. Open the default fullscreen
+      // tile view instead: picture, name, notes and thumb-sized actions.
+      // Mouse/pen keep the old behaviour — on desktop the hover band already
+      // carries every action and a fullscreen takeover would be in the way.
+      if (this.#pressWasTouch || this.#mobileMode()) {
+        this.emitEffect('tile:view-open', {
+          label: entry.label,
+          segments: this.resolve<any>('lineage')?.explorerSegments?.() ?? [],
+        })
+        return
+      }
+
       // Non-branch tile with no action button hit → default "open" action
       this.emitEffect('tile:action', {
         action: 'open',
@@ -2425,6 +2458,21 @@ export class TileOverlayDrone extends Drone {
         label: entry.label,
       })
     }
+  }
+
+  /** Was the press that produced this click a TOUCH? Captured on pointerdown —
+   *  a synthesized click carries `pointerType: ''`, so the press is the only
+   *  place the real input kind is knowable. */
+  #pressWasTouch = false
+
+  /** Mobile mode per the single source of truth (pointer:coarse + phone-sized,
+   *  or the `/mobile on` override) — so a touch laptop keeps desktop behaviour
+   *  while a phone gets the fullscreen view even from a stylus. */
+  #mobileMode(): boolean {
+    try {
+      const mm = window.ioc?.get?.('@diamondcoreprocessor.com/MobileMode') as { active?: boolean } | undefined
+      return mm?.active === true
+    } catch { return false }
   }
 
   // Cancel editor on right-click release (mirrors Escape cascade priority 1)

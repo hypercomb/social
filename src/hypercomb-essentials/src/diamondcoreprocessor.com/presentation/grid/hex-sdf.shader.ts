@@ -245,6 +245,27 @@ export class HexSdfTextureShader {
     // originally tuned for). Keep in lockstep with the atlas fontSize.
     const float LABEL_BAND = 2.0;
 
+    // ── image fit: COVER the target shape, never stretch ─────────
+    // The atlas issues each image's UV rect at the IMAGE's own aspect
+    // (hex-image.atlas.ts contain-fits into a square cell, then bounds the
+    // content). Sampling that rect straight across a differently-shaped box
+    // squashes the picture: only images pre-baked to the exact hex box came
+    // out right (tile-editor save, substrate pool), so an attached file, an
+    // adopted tile, a thumbnail, or a point-top bake shown in flat-top
+    // rendered distorted until the user re-saved it through the editor.
+    // Scale the sampling window to the image's aspect and centre it — the
+    // picture fills the shape and the overflow is cropped, the same rule as
+    // the CSS object-fit cover mode. A no-op (crop == 1) when the aspects
+    // match, so hex-baked images sample exactly as before.
+    vec2 coverUV(vec2 boxUV, vec4 imgRect, float boxAspect) {
+      vec2 span = abs(imgRect.zw - imgRect.xy) * vec2(textureSize(u_cellImages, 0));
+      float imgAspect = span.x / max(span.y, 1e-6);
+      vec2 crop = imgAspect > boxAspect
+        ? vec2(boxAspect / imgAspect, 1.0)
+        : vec2(1.0, imgAspect / boxAspect);
+      return mix(imgRect.xy, imgRect.zw, (boxUV - 0.5) * crop + 0.5);
+    }
+
     // ── label decode: SDF fill ONLY ─────────────────────────────
     // The atlas stores a signed distance field in .r (0.5 == the glyph edge,
     // >0.5 inside, 0 far outside; see sdf-glyph.ts). Screen-space derivatives
@@ -340,7 +361,7 @@ export class HexSdfTextureShader {
         vec2 invMax = vec2( 0.72 * r,  0.52 * r);
         vec2 iuv = clamp((local - invMin) / (invMax - invMin), 0.0, 1.0);
         vec3 img = (vHasImage > 0.5 && u_imageMix > 0.001)
-          ? texture(u_cellImages, mix(vImageUV.xy, vImageUV.zw, iuv)).rgb
+          ? texture(u_cellImages, coverUV(iuv, vImageUV, (0.72 / 0.52))).rgb
           : mix(vec3(0.30, 1.0, 0.42), u_accentColor, 0.25);   // green when imageless
 
         // per-square twinkle — gentle brightness wobble keyed on square id + time
@@ -413,12 +434,15 @@ export class HexSdfTextureShader {
         float hexH = u_flat > 0.5 ? 2.0 * u_radiusPx : 2.0 * u_radiusPx / 0.8660254;
         vec2 hexScale = vec2(hexW / u_quadSize.x, hexH / u_quadSize.y);
         vec2 hexUV = clamp((vUV - 0.5) / hexScale + 0.5, 0.0, 1.0);
+        // Aspect the image must cover. The pivot rotates the sampling frame
+        // 90°, so the shape the image fills is the hex box on its side.
+        float boxAspect = hexW / hexH;
         // pivot mode: rotate snapshot 90° CW inside the hex
         if (u_pivot > 0.5) {
           hexUV = vec2(hexUV.y, 1.0 - hexUV.x);
+          boxAspect = hexH / hexW;
         }
-        vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
-        vec4 imgBase = texture(u_cellImages, imgUV);
+        vec4 imgBase = texture(u_cellImages, coverUV(hexUV, vImageUV, boxAspect));
 
         // vignette: darken image edges so snapshots blend into border
         float vignette = smoothstep(0.5, 1.0, dist);

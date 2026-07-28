@@ -123,7 +123,9 @@
   }
 }
 
-@media (max-width: 599px) {
+// Both phone dimensions: portrait (narrow) AND landscape (wide but
+// short) — the landscape reveal previously had no GO button at all.
+@media (max-width: 599px), (max-height: 449px) {
   .mobile-go-btn { display: flex; align-items: center; }
 }
 

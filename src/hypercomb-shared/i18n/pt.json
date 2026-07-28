@@ -152,6 +152,8 @@
   "controls.text-only": "apenas texto (ocultar imagens)",
   "controls.voice": "entrada de voz",
   "controls.voice-hold": "segure para falar (ou segure B)",
+
+  "controls.keyboard": "digitar um comando",
   "controls.microphone": "microfone",
   "controls.atomize": "atomizar",
   "controls.atomize-shatter": "fragmentar em hexágonos",
