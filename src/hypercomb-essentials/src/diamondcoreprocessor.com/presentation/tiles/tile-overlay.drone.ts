@@ -275,6 +275,11 @@ export class TileOverlayDrone extends Drone {
    *  portal) is dropped; pan/zoom/selection stay live. Cleared by the first
    *  render:cell-count (the maps then describe the current location). */
   #tileEnterRefused = false
+  // A tile entry / launcher open pressed while #tileEnterRefused was latched:
+  // honored on the next render:cell-count if its label survives into the
+  // fresh maps.
+  #pendingEnter: string | null = null
+  #pendingGroupOpen: string | null = null
   /** Monotonic axial-map generation — bumped on every #rebuildOccupiedMap.
    *  A press captures it so the trailing click can detect that the map was
    *  rebuilt underneath the pointer and re-bind by LABEL instead of position. */
@@ -639,6 +644,23 @@ export class TileOverlayDrone extends Drone {
         // the latch waits on (the backstop released input early; tile entry
         // stayed refused until this render landed).
         this.#tileEnterRefused = false
+        // A click that arrived while the latch was up was QUEUED, not eaten.
+        // The maps are fresh now: if the tile the participant pressed is still
+        // on screen, honor the press — their click lands late instead of
+        // never. Absent label = the level genuinely changed under the click —
+        // drop it (entering would mint a phantom segment).
+        if (this.#pendingEnter) {
+          const label = this.#pendingEnter
+          this.#pendingEnter = null
+          if (this.#cellLabels.includes(label)) this.#navigateInto(label)
+          else console.warn('[tile-overlay] deferred tile-enter dropped — level changed before render landed:', label)
+        }
+        if (this.#pendingGroupOpen) {
+          const label = this.#pendingGroupOpen
+          this.#pendingGroupOpen = null
+          if (this.#cellLabels.includes(label)) { this.#clearSelectionOnNavigate(); this.emitEffect('group:open', { label }) }
+          else console.warn('[tile-overlay] deferred launcher open dropped — level changed before render landed:', label)
+        }
         // A navigation transition is "done" the instant these maps describe the
         // level we moved to — which is exactly this emit: the renderer rebuilds
         // occupancy/branch data for the new level at render completion, right
@@ -2139,7 +2161,10 @@ export class TileOverlayDrone extends Drone {
       // launcher target now would navigate off a phantom tile. Drop the whole
       // gesture (pointer already consumed, so the trailing click dies too).
       if (this.#tileEnterRefused) {
-        console.warn('[tile-overlay] tile-enter refused — new layer render not landed yet; dropped launcher open for', entry.label)
+        // Same queue-not-drop treatment as plain tile entry below: the open
+        // fires when fresh maps land and still show this launcher.
+        this.#pendingGroupOpen = entry.label
+        console.warn('[tile-overlay] launcher open deferred — render not landed yet:', entry.label)
         return
       }
       this.#clearSelectionOnNavigate()
@@ -2536,7 +2561,16 @@ export class TileOverlayDrone extends Drone {
     // entry before ANY side effect (no guard arm, no selection change); the
     // latch clears on the first render:cell-count for the current location.
     if (this.#tileEnterRefused) {
-      console.warn('[tile-overlay] tile-enter refused — new layer render not landed yet; dropped navigation into', label)
+      // DON'T EAT THE CLICK. The latch exists because the maps may describe a
+      // level being left — entering against them could mint a phantom segment.
+      // But silently dropping the press was the "I clicked and I wait" bug:
+      // the participant saw nothing happen and blamed the tile. Queue the
+      // intent instead; the moment render:cell-count lands, if the fresh maps
+      // still contain this label the entry fires — the click lands LATE, never
+      // never. A label absent from the fresh maps (the level really changed
+      // underneath) is dropped there, with the warn.
+      this.#pendingEnter = label
+      console.warn('[tile-overlay] tile-enter deferred — render not landed yet; will enter', label, 'when maps are fresh')
       return
     }
 

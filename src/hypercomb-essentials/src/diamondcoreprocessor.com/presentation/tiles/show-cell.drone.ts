@@ -576,6 +576,11 @@ export class ShowCellDrone extends Drone {
   // that child's grandchild image sigs (structure is stable per parent sig, so
   // it is resolved once and only byte-PRESENCE is re-checked each pass).
   readonly #childrenReadyByLabel = new Map<string, boolean>()
+  // Branch label → the HEAD sig its view was prepared under (this location).
+  // Lets the label-atlas eviction handler find which released branch a
+  // displaced child name belongs to, so its rasterisation can be repaired
+  // during idle instead of at click time.
+  readonly #preparedHeadByLabel = new Map<string, string>()
   readonly #childImageSigsByParent = new Map<string, Map<string, string[]>>()
   #childReadinessInFlight = false
   // Layer sigs whose view preparation is running right now (see prepareView).
@@ -1693,9 +1698,35 @@ export class ShowCellDrone extends Drone {
    *  interleave), so its rebuilt geometry is stale the moment it bakes.
    *  requestRender during a pass queues a follow-up pass — bounded by
    *  #EVICT_REPAINT_MAX so self-evicting oversized layers can't loop. */
-  readonly #onAtlasEvicted = (): void => {
+  readonly #onAtlasEvicted = (e?: Event): void => {
     const atlas = this.imageAtlas
     if (!atlas) return
+    // PROMISE REPAIR. A branch that brightened made a promise — "the inside is
+    // decoded, the click is instant" — and an eviction can quietly break it:
+    // brightness is monotonic per visit, so the tile stays lit while its
+    // pixels are gone, and the click pays the decode all over again (the
+    // "latency on tiles that have lighted up" bug, reproduced live: 0/12
+    // images resident under a still-lit tile). When the victim sig belongs to
+    // a PROVEN click target of the current location, re-queue it for an idle
+    // re-bake — bytes are local, so the promise is restored off the click
+    // path. Bounded by the prebake queue's own budget; a hive whose working
+    // set truly exceeds the atlas just converges to most-recently-proven.
+    const victim = (e as CustomEvent<{ sig?: string }> | undefined)?.detail?.sig
+    if (victim && this.#childrenReadyByLabel.size > 0) {
+      const perLabel = this.#childImageSigsByParent.get(this.#passParentSig)
+      if (perLabel) {
+        for (const [label, sigs] of perLabel) {
+          if (this.#childrenReadyByLabel.get(label) !== true) continue
+          if (!sigs.includes(victim)) continue
+          if (!this.#prebakeQueued.has(victim)) {
+            this.#prebakeQueued.add(victim)
+            this.#prebakeQueue.push(victim)
+            this.#pumpPrebake()
+          }
+          break
+        }
+      }
+    }
     for (const c of this.renderedCells.values()) {
       if (c.imageSig && !atlas.hasImage(c.imageSig) && !atlas.hasFailed(c.imageSig)) {
         if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
@@ -1719,9 +1750,25 @@ export class ShowCellDrone extends Drone {
    *  handler — a converged paint resets both. Cells rendering
    *  hideText-with-image are skipped: their labelUV is intentionally
    *  zeroed, so a displaced label cannot show. */
-  readonly #onLabelAtlasEvicted = (): void => {
+  readonly #onLabelAtlasEvicted = (e?: Event): void => {
     const atlas = this.atlas
     if (!atlas) return
+    // Same promise repair as the image twin: a proven branch's child NAME
+    // displaced from the label atlas would make the next click rasterise it
+    // again (~13ms each — the single biggest click cost measured). Re-seed it
+    // during idle instead.
+    const victim = (e as CustomEvent<{ label?: string }> | undefined)?.detail?.label
+    if (victim && this.#childrenReadyByLabel.size > 0) {
+      outer: for (const [branch, headSig] of this.#preparedHeadByLabel) {
+        if (this.#childrenReadyByLabel.get(branch) !== true) continue
+        const names = this.#completeChildNamesByParentSig.get(headSig)?.names ?? []
+        if (!names.includes(victim)) continue
+        const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+        const schedule = typeof ric === 'function' ? (cb: () => void) => ric(cb, { timeout: 500 }) : (cb: () => void) => setTimeout(cb, 32)
+        schedule(() => { try { this.atlas?.seed([victim]) } catch { /* best-effort */ } })
+        break outer
+      }
+    }
     for (const c of this.renderedCells.values()) {
       if (c.hideText && c.imageSig && this.imageAtlas?.hasImage(c.imageSig)) continue
       if (!atlas.hasLabel(c.label)) {
@@ -7169,6 +7216,7 @@ export class ShowCellDrone extends Drone {
     if (key === this.#readinessLocationKey) return
     this.#readinessLocationKey = key
     this.#childrenReadyByLabel.clear()
+    this.#preparedHeadByLabel.clear()
     this.#brightLabels.clear()
     // The queue belongs to the location being left. What it actually BAKED
     // lives in the atlases, which are global and untouched — coming back asks
@@ -7448,6 +7496,7 @@ export class ShowCellDrone extends Drone {
           const childHeadSig = childLocSig
             ? (await history.latestMarkerSigFor(childLocSig, c.label)) ?? childLayerSigByLabel.get(c.label) ?? ''
             : childLayerSigByLabel.get(c.label) ?? ''
+          if (childHeadSig) this.#preparedHeadByLabel.set(c.label, childHeadSig)
           if (childHeadSig && !(await this.prepareView(childHeadSig, [...parentSegments, c.label]))) {
             allReady = false
             this.#queueComputeRetry()
@@ -7825,10 +7874,12 @@ export class ShowCellDrone extends Drone {
     if (next === this.#hoverOpaqueLabel) return
     const previous = this.#hoverOpaqueLabel
     this.#hoverOpaqueLabel = next
-    let wrote = false
-    wrote = this.#writeShadeFor(previous) || wrote   // back to its honest state
-    wrote = this.#writeShadeFor(next) || wrote       // lifted under the pointer
-    if (wrote) this.emitEffect('render:cell-count', this.#buildCellCountPayload([...this.renderedCells.values()]))
+    // Attribute writes only — never a render:cell-count emit. That payload
+    // doubles as the overlay's "maps are fresh, release the navigation guard"
+    // signal, and a hover must never be able to say that (see
+    // #repaintReadinessInPlace for the mid-navigation failure it caused).
+    this.#writeShadeFor(previous)   // back to its honest state
+    this.#writeShadeFor(next)       // lifted under the pointer
   }
 
   /** Write one cell's current shade value into the geometry and push it. */
@@ -8032,9 +8083,15 @@ export class ShowCellDrone extends Drone {
     }
     if (flipped.length === 0) return false
     if (!this.#pushBuffer('aShaded')) return false
-    const snapshot = [...this.renderedCells.values()]
-    this.renderedCellsKey = this.buildCellsKey(snapshot)
-    this.emitEffect('render:cell-count', this.#buildCellCountPayload(snapshot))
+    // NO render:cell-count from here. That payload means "the maps describe
+    // the level on screen — release the navigation guard", and an in-place
+    // shade flip is not that: fired from a retry timer it can land MID-
+    // NAVIGATION with a partial renderedCells snapshot, rebuilding the
+    // overlay's occupancy maps from garbage and releasing the guard early
+    // (observed live: a 1-cell payload while a 12-child page was still
+    // rendering). The shade is informational-only now — nothing consumes it
+    // for gating, so nothing needs the emit.
+    this.renderedCellsKey = this.buildCellsKey([...this.renderedCells.values()])
     if (DIAG) console.info(`[diag:readiness] brightened in place: ${flipped.join(',')}`)
     return true
   }
