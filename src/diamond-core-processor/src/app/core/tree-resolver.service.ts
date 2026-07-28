@@ -743,48 +743,58 @@ export class TreeResolverService {
     }
   }
 
+  /** Same derivation as #detectBeeInfo, but searching the patched and received
+   *  pools first. A cache hit short-circuits ALL of them: the answer is keyed
+   *  by signature, and a patched bundle is its own signature, so which pool the
+   *  bytes came from can never change what those bytes say. */
   async #detectBeeInfoLocal(sig: string, domain: string): Promise<{ kind: TreeNodeKind, className: string | null }> {
+    const cached = this.#sigInfo.get(sig)
+    if (cached?.kind && cached.className !== undefined) {
+      return { kind: cached.kind, className: cached.className }
+    }
+    const scan = (bytes: ArrayBuffer): { kind: TreeNodeKind, className: string } | null => {
+      const text = new TextDecoder().decode(bytes)
+      const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
+      if (!m) return null
+      const raw = m[3].toLowerCase()
+      return { kind: (raw === 'bee' ? 'bee' : raw) as TreeNodeKind, className: m[1] || m[2] }
+    }
     // check patched bees first
     try {
       const patchedDir = await this.#store.patchedBeesDir(domain)
       const bytes = await this.#store.readFile(patchedDir, `${sig}.js`)
-      if (bytes) {
-        const text = new TextDecoder().decode(bytes)
-        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
-        if (m) return { kind: (m[3].toLowerCase() === 'bee' ? 'bee' : m[3].toLowerCase()) as TreeNodeKind, className: m[1] || m[2] }
-      }
+      const found = bytes ? scan(bytes) : null
+      if (found) { this.#sigInfo.set(sig, found); return found }
     } catch { /* fallback */ }
     // check received bees
     try {
       const fromHcDir = await this.#store.fromHypercombKindDir('bee')
       const bytes = await this.#store.readFile(fromHcDir, `${sig}.js`)
-      if (bytes) {
-        const text = new TextDecoder().decode(bytes)
-        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
-        if (m) return { kind: (m[3].toLowerCase() === 'bee' ? 'bee' : m[3].toLowerCase()) as TreeNodeKind, className: m[1] || m[2] }
-      }
+      const found = bytes ? scan(bytes) : null
+      if (found) { this.#sigInfo.set(sig, found); return found }
     } catch { /* fallback */ }
     return this.#detectBeeInfo(sig)
   }
 
   async #detectDepClassNameLocal(sig: string, domain: string): Promise<string | null> {
+    const cached = this.#sigInfo.get(sig)
+    if (cached?.className !== undefined) return cached.className
+    const scan = (bytes: ArrayBuffer): string | null => {
+      const text = new TextDecoder().decode(bytes)
+      const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
+      return m ? (m[1] || m[2]) : null
+    }
     try {
       const patchedDir = await this.#store.patchedDepsDir(domain)
       const bytes = await this.#store.readFile(patchedDir, `${sig}.js`)
-      if (bytes) {
-        const text = new TextDecoder().decode(bytes)
-        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
-        if (m) return m[1] || m[2]
-      }
+      const found = bytes ? scan(bytes) : null
+      if (found) { this.#sigInfo.set(sig, { className: found }); return found }
     } catch { /* fallback */ }
     try {
       const fromHcDir = await this.#store.fromHypercombKindDir('dependency')
       const bytes = await this.#store.readFile(fromHcDir, `${sig}.js`)
-      if (bytes) {
-        const text = new TextDecoder().decode(bytes)
-        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
-        if (m) return m[1] || m[2]
-      }
+      const found = bytes ? scan(bytes) : null
+      if (found) { this.#sigInfo.set(sig, { className: found }); return found }
     } catch { /* fallback */ }
     return this.#detectDepClassName(sig)
   }
