@@ -315,6 +315,8 @@ export class TreeResolverService {
   async #resolveDepLineages(depSigs: string[]): Promise<void> {
     for (const raw of depSigs) {
       const sig = raw.replace(/\.js$/i, '')
+      const known = this.#sigInfo.get(sig)?.namespace
+      if (known) { this.#depLineage.set(sig, known); continue }
       const bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
       if (!bytes) continue
 
@@ -324,7 +326,9 @@ export class TreeResolverService {
       const firstLine = text.split('\n')[0]
       const match = firstLine.match(/^\/\/\s*@(.+)/)
       if (match) {
-        this.#depLineage.set(sig, match[1].trim())
+        const namespace = match[1].trim()
+        this.#depLineage.set(sig, namespace)
+        this.#sigInfo.set(sig, { namespace })
       }
     }
   }
@@ -721,13 +725,19 @@ export class TreeResolverService {
           if (!name.endsWith('.js')) continue
           const sig = name.replace(/\.js$/i, '')
           if (this.#depLineage.has(sig)) continue
+          const known = this.#sigInfo.get(sig)?.namespace
+          if (known) { this.#depLineage.set(sig, known); continue }
           const bytes = await this.#store.readFile(dir, name)
           if (!bytes) continue
           const slice = bytes.byteLength > 512 ? bytes.slice(0, 512) : bytes
           const text = new TextDecoder().decode(slice)
           const firstLine = text.split('\n')[0]
           const match = firstLine.match(/^\/\/\s*@(.+)/)
-          if (match) this.#depLineage.set(sig, match[1].trim())
+          if (match) {
+            const namespace = match[1].trim()
+            this.#depLineage.set(sig, namespace)
+            this.#sigInfo.set(sig, { namespace })
+          }
         }
       } catch { /* directory might not exist yet */ }
     }
