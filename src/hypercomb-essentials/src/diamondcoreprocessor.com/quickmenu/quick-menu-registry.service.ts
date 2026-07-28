@@ -143,12 +143,38 @@ const SLIDES: QuickMenuDefinition = {
   ],
 }
 
+// A picked set of tiles is a SURFACE too — it just isn't a ViewMode, so it
+// claims no context and is opened by name (by SelectModeDrone's pill, by
+// `/select options`, or by `/menu selection`). Every slot here acts on the
+// set rather than on the tile under the pointer, which is the whole reason
+// picking exists on a device with no ctrl key: the verbs a finger could not
+// reach are all one flick away once the set is built.
+//
+// Centre is DONE, following the chrome-less rings above: in a mode the only
+// verb you are guaranteed to want is the way out, and the centre is the one
+// slot that costs no travel.
+const SELECTION: QuickMenuDefinition = {
+  name: 'selection',
+  title: 'Selection',
+  titleKey: 'quickmenu.selection',
+  contexts: [],
+  slots: [
+    { direction: 'centre', label: 'done', labelKey: 'quickmenu.done', action: { kind: 'effect', effect: 'select:done', payload: {} } },
+    { direction: 'east', label: 'marks', labelKey: 'quickmenu.marks', action: { kind: 'command', command: 'tags' } },
+    { direction: 'southeast', label: 'copy', labelKey: 'quickmenu.copy', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.copy' } } },
+    { direction: 'southwest', label: 'cut', labelKey: 'quickmenu.cut', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.cut' } } },
+    { direction: 'west', label: 'remove', labelKey: 'quickmenu.remove', action: { kind: 'command', command: 'remove' } },
+    { direction: 'northwest', label: 'paste', labelKey: 'quickmenu.paste', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.paste' } } },
+    { direction: 'northeast', label: 'all', labelKey: 'quickmenu.all', action: { kind: 'effect', effect: 'select:all', payload: {} } },
+  ],
+}
+
 export class QuickMenuRegistry extends EventTarget {
   #definitions = new Map<string, QuickMenuDefinition>()
 
   constructor() {
     super()
-    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES]) {
+    for (const definition of [ROOT, ROOT_VIEW, WORKFLOW, WEBSITE, SLIDES, SELECTION]) {
       this.#definitions.set(definition.name, definition)
     }
   }

@@ -195,9 +195,50 @@ export class App implements AfterViewInit {
     console.log('[app] initialized')
   }
 
+  /**
+   * `?upgrade=1` — the one upgrade door that works on a PHONE.
+   *
+   * Every other route to an upgrade is unreachable on a touch device with an
+   * existing install: `window.upgradeHypercomb()` needs a console, the
+   * "Upgrade Hypercomb" button only renders in the install-NEEDED prompt (so
+   * never once you are installed), and the header indicator is suppressed
+   * outright for DCP-sourced installs by checkForUpdate's provenance gate.
+   * The net effect was that a deployed build could not reach a phone at all.
+   * An address bar is the one input every device has.
+   *
+   * This lives in the SHELL on purpose. The upgrade path can never be shipped
+   * as a bee, because bees are the thing being upgraded — a fix delivered as a
+   * drone only exists after the upgrade it was meant to trigger. The shell is
+   * served fresh on every load, so this door opens the moment the web app is
+   * deployed, with no install involved.
+   *
+   * The param is consumed BEFORE the upgrade runs: a successful upgrade
+   * reloads, and a param left in the URL would re-upgrade on every load for
+   * ever.
+   */
+  #consumeUpgradeParam(): boolean {
+    try {
+      const url = new URL(location.href)
+      if (!url.searchParams.has('upgrade')) return false
+      url.searchParams.delete('upgrade')
+      history.replaceState(history.state, '', url.toString())
+      return true
+    } catch {
+      return false
+    }
+  }
+
   public ngAfterViewInit(): void {
     void this.runtimeReady.then(() => {
       void this.startRegisteredBees()
+
+      // Asked for explicitly — take the bundled build now and skip the
+      // detection gate entirely. `upgradeFromBundledClicked` reloads on
+      // success, so nothing below runs on that path.
+      if (this.#consumeUpgradeParam()) {
+        void this.upgradeFromBundledClicked()
+        return
+      }
       // Post-boot update check — OFF the boot critical path (push-only boot
       // still reads OPFS only). Compares the cached install against the
       // shell's bundled package; if newer, emits `update:available` so the

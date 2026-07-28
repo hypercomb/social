@@ -336,6 +336,15 @@ export class TileOverlayDrone extends Drone {
   #hasSelection = false
   /** Sampling mode — every tap picks instead of entering. See `sample:mode`. */
   #sampling = false
+  /** General select mode (SelectModeDrone) — the same takeover as sampling,
+   *  with the swarm taken out of it. Kept as its OWN flag rather than folded
+   *  into `#sampling`: the two arm from different surfaces and disarm on
+   *  different events, and one flag would let either one's teardown hand
+   *  navigation back while the other is still picking. */
+  #selectMode = false
+  /** Either picking mode is armed: a press must not navigate and the trailing
+   *  tap is an ADD-TO-SET toggle. The one thing both modes mean. */
+  get #picking(): boolean { return this.#sampling || this.#selectMode }
   /** A pheromone removal is armed (TagRemovalDrone): tile clicks stage and
    *  unstage tiles instead of entering or opening them, and the icon overlay
    *  stays out of the way. Cleared when the removal commits or is cancelled. */
@@ -421,6 +430,7 @@ export class TileOverlayDrone extends Drone {
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
     'tags:removal-pending', 'tags:apply-pending',
+    'sample:mode', 'select:mode',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
 
@@ -874,6 +884,17 @@ export class TileOverlayDrone extends Drone {
       // last tile doesn't silently hand navigation back mid-gesture.
       this.onEffect<{ active: boolean }>('sample:mode', (payload) => {
         this.#sampling = !!payload?.active
+        this.#updateVisibility()
+      })
+
+      // SELECT MODE — the same takeover, armed from the general picker
+      // (SelectModeDrone) instead of the swarm's. On touch a press on a
+      // branch tile navigates on POINTERDOWN and consumes the pointer, which
+      // kills every hold timer watching it — so no long-press gesture could
+      // ever build a selection on a phone. This mode is the way a finger says
+      // what ctrl says on a pointer.
+      this.onEffect<{ active: boolean }>('select:mode', (payload) => {
+        this.#selectMode = !!payload?.active
         this.#updateVisibility()
       })
 
@@ -2133,10 +2154,10 @@ export class TileOverlayDrone extends Drone {
     if (this.#navigationBlocked) return
     if (this.#editing || this.#editCooldown) return
     if (this.#hasSelection) return
-    // Sampling: the press must not navigate — a peer tile is a BRANCH, so
-    // without this the first pick would walk into the publisher's tree instead
-    // of picking it. The trailing click toggles it (see #onClick).
-    if (this.#sampling) return
+    // Picking: the press must not navigate — a tile being picked is usually a
+    // BRANCH, so without this the first pick would walk into it instead of
+    // picking it. The trailing click toggles it (see #onClick).
+    if (this.#picking) return
     // Armed removal: the press must not navigate — the trailing click stages
     // the tile instead (see #onClick).
     if (this.#tagRemovalArmed) return
@@ -2492,7 +2513,7 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    if (this.#hasSelection || this.#sampling) {
+    if (this.#hasSelection || this.#picking) {
       this.emitEffect('tile:click', {
         q: this.#currentAxial!.q,
         r: this.#currentAxial!.r,
@@ -2500,10 +2521,10 @@ export class TileOverlayDrone extends Drone {
         index: this.#currentIndex!,
         ctrlKey: false,
         metaKey: false,
-        // While sampling, say the ADD-TO-SET intent explicitly. A plain click
+        // While picking, say the ADD-TO-SET intent explicitly. A plain click
         // REPLACES the selection, so without this every pick would drop the
         // one before it and the set could never grow past one.
-        toggle: this.#sampling,
+        toggle: this.#picking,
       })
       return
     }
