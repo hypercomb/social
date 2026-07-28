@@ -48,10 +48,27 @@ const TILE_ENTER_HOLD_JITTER_PX = 8
 //
 // Shorter than TILE_ENTER_HOLD_MS on purpose: it must beat the quick menu's
 // 380ms touch summon, so the hand gets the tile's own actions rather than the
-// hive-wide ring. Dragging a peer tile is refused upstream (move.drone.ts), so
-// nothing else is competing for this hold.
-const PEER_ACTION_HOLD_MS = 340
-const PEER_ACTION_HOLD_JITTER_PX = 12
+// hive-wide ring.
+//
+// ── The touch grammar this establishes ────────────────────────────────
+//
+//   tap        enter the tile — ON THE RELEASE, never the press
+//   hold still open the tile's own screen (picture, name, notes, actions)
+//   hold+drag  move the tile (touch-move.input.ts)
+//
+// Entry MUST move to the release. A press that navigates on pointerdown
+// consumes the pointer, and every hold watching it — drag-to-move, the
+// quick-menu ring, this one — dies with the consume before it can mature.
+// That is why a long-press on a phone did nothing at all: the view had
+// already changed under the finger. Nothing is lost by waiting for the
+// release; a tap still walks in, one gesture later than it used to.
+//
+// This began as a peer-tile-only hold, safe because move.drone.ts refuses
+// to drag a peer. On your OWN tiles drag-to-move is live at 300ms, so the
+// two are arbitrated by TRAVEL rather than by these timings alone — see
+// the `#armed` note in touch-move.input.ts.
+const TILE_ACTION_HOLD_MS = 340
+const TILE_ACTION_HOLD_JITTER_PX = 12
 
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
@@ -2255,11 +2272,12 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // A PEER tile under a finger: hold it for its actions instead of entering.
+    // ANY tile under a finger: hold it for its own screen instead of entering.
     // Entry is not lost — it moves to the release (#onClick's branch path), so
-    // a tap still walks in. See PEER_ACTION_HOLD_MS.
-    if (e.pointerType === 'touch' && this.#externalLabels.has(entry.label)) {
-      this.#beginPeerActionHold(e, entry.label)
+    // a tap still walks in. Nothing is consumed while the hold is merely
+    // armed. See TILE_ACTION_HOLD_MS for why the release, not the press.
+    if (e.pointerType === 'touch') {
+      this.#beginActionHold(e, entry.label)
       return
     }
 
@@ -2298,10 +2316,10 @@ export class TileOverlayDrone extends Drone {
     this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: TILE_ENTER_HOLD_JITTER_PX }
   }
 
-  /** Arms the hold that opens a PEER tile's actions. Rides the same #enterHold
+  /** Arms the hold that opens a tile's own screen. Rides the same #enterHold
    *  slot as hold-to-enter — one hold at a time, one cancel path, and the
    *  travel/release/cancel wiring already written for it applies unchanged. */
-  #beginPeerActionHold(e: PointerEvent, label: string): void {
+  #beginActionHold(e: PointerEvent, label: string): void {
     this.#cancelEnterHold()
     const pointerId = e.pointerId
     const generation = this.#mapGeneration
@@ -2312,11 +2330,14 @@ export class TileOverlayDrone extends Drone {
       if (generation !== this.#mapGeneration) return
       if (this.#arrangeMode || this.#navigationBlocked) return
       if (this.#editing || this.#editCooldown) return
-      if (this.#hasSelection || this.#touchDragging) return
+      if (this.#hasSelection || this.#picking || this.#touchDragging) return
       if (this.#tagRemovalArmed || this.#tagApplyArmed) return
-      if (!this.#externalLabels.has(label)) return
+      // The tile must still be here. The map is re-checked by generation
+      // above, but a tile can also leave without a rebuild — resolving the
+      // label is what proves the thing under the finger still exists.
+      if (!this.#labelOnScreen(label)) return
       // Take the gesture: the trailing click must not also navigate into the
-      // publisher's tree underneath the view that is about to open.
+      // tree underneath the view that is about to open.
       this.#consumedPointerId = pointerId
       consumePointerGesture(pointerId)
       this.#pressCapture = null
@@ -2325,8 +2346,16 @@ export class TileOverlayDrone extends Drone {
         label,
         segments: this.resolve<any>('lineage')?.explorerSegments?.() ?? [],
       })
-    }, PEER_ACTION_HOLD_MS)
-    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: PEER_ACTION_HOLD_JITTER_PX }
+    }, TILE_ACTION_HOLD_MS)
+    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: TILE_ACTION_HOLD_JITTER_PX }
+  }
+
+  /** Does this label still resolve to a tile in the current map? */
+  #labelOnScreen(label: string): boolean {
+    for (const occupant of this.#occupiedByAxial.values()) {
+      if (occupant.label === label) return true
+    }
+    return false
   }
 
   #cancelEnterHold(): void {

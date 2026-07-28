@@ -361,10 +361,22 @@ export class QuickMenuInput {
   }
 
   #onLockChange = (): void => {
+    const held = this.#locked
     this.#locked = document.pointerLockElement === document.body
-    // The browser dropped the lock (Escape, tab switch, focus theft) while a
-    // ring was up. The cursor is already back, so the ring must go too.
-    if (!this.#locked && (this.#armed || this.#sticky)) this.#end()
+    // Losing a lock we HELD (Escape, tab switch, focus theft) is the end of
+    // the gesture — the cursor is already back, so the ring must go too.
+    //
+    // A REFUSED request is not. `pointerlockerror` routes here as well, and
+    // treating it as a loss closed the ring in the same frame it was painted
+    // — on any surface where the lock is unavailable. That is every TOUCH
+    // device (mobile browsers do not grant pointer lock), which made the
+    // whole marking menu impossible to open on a phone: `open()` returned
+    // true, the overlay painted, and the error event tore it straight back
+    // down. #requestLock's own contract already says refusal is normal and
+    // must degrade silently — #advance falls back to absolute positions, and
+    // the CSS rule still hides the cursor. Only a lock that existed can be
+    // lost.
+    if (!this.#locked && held && (this.#armed || this.#sticky)) this.#end()
   }
 
   #paint(): void {

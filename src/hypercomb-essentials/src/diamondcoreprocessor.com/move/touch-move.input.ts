@@ -30,6 +30,19 @@ export class TouchMoveInput {
   #downPos: { x: number; y: number } | null = null
   #downAxial: Axial | null = null
   #activePointerId: number | null = null
+  /**
+   * The hold has matured, but the finger has not travelled yet — so this
+   * gesture is not yet a move, and might never become one.
+   *
+   * TRAVEL DECIDES. A still finger at this point belongs to the tile's own
+   * long-press (which opens its actions), and only movement makes it a drag.
+   * Committing the move the instant the timer fired is what made the two
+   * mutually exclusive: `beginMove` raises `touch:dragging`, and the tile's
+   * hold refuses to fire while a drag is live — so on any own tile the
+   * long-press could never open anything. One hold, and what the hand does
+   * next picks which gesture it was.
+   */
+  #armed = false
   /** Fingers currently down, by id. A COUNT was the bug: tapping a branch tile
    *  navigates on the press and consumes the pointer, so its pointerup dies at
    *  window capture and the decrement never runs. The count stayed at 1, every
@@ -105,32 +118,39 @@ export class TouchMoveInput {
     this.#downPos = { x: e.clientX, y: e.clientY }
     this.#downAxial = axial
 
-    // start long-press timer
+    // start long-press timer — this ARMS the move; the first travel commits it
     this.#holdTimer = setTimeout(() => {
       this.#holdTimer = null
       if (!this.#downAxial || !this.#drone) return
 
       // if the touch gesture coordinator already claimed the gate (e.g., pan started),
-      // don't start a move — the gate owner has priority
+      // don't arm a move — the gate owner has priority
       if (this.#gate?.active) {
         this.#resetDrag()
         return
       }
 
-      const ok = this.#drone.beginMove(this.#downAxial, this.#source)
-      if (!ok) {
-        this.#resetDrag()
-        return
-      }
-
-      this.#dragging = true
-
-      // haptic feedback
-      try { navigator.vibrate?.(50) } catch { /* ignore */ }
-
-      e.preventDefault()
-      e.stopPropagation()
+      this.#armed = true
     }, this.#holdMs)
+  }
+
+  /** The armed hold has travelled — THIS is the move. Everything the timer
+   *  used to do (gate re-check, beginMove, haptic) happens here instead, at
+   *  the moment the gesture actually declares itself. */
+  #startDrag(e: PointerEvent): boolean {
+    if (this.#gate?.active) { this.#resetDrag(); return false }
+    if (!this.#downAxial || !this.#drone) { this.#resetDrag(); return false }
+    if (!this.#drone.beginMove(this.#downAxial, this.#source)) { this.#resetDrag(); return false }
+
+    this.#armed = false
+    this.#dragging = true
+
+    // haptic feedback — on the pick-up, which is now the first travel
+    try { navigator.vibrate?.(50) } catch { /* ignore */ }
+
+    e.preventDefault()
+    e.stopPropagation()
+    return true
   }
 
   #onPointerMove = (e: PointerEvent): void => {
@@ -147,6 +167,17 @@ export class TouchMoveInput {
         this.#resetDrag()
         return
       }
+    }
+
+    // Held long enough and now travelling: the gesture has declared itself a
+    // move. A finger that never gets here stayed still, and the tile's own
+    // long-press takes it instead — that hold consumes the pointer, which
+    // reaches us as POINTER_GESTURE_END and disarms this.
+    if (this.#armed && !this.#dragging && this.#downPos) {
+      const dx = e.clientX - this.#downPos.x
+      const dy = e.clientY - this.#downPos.y
+      if (Math.abs(dx) <= this.#jitterPx && Math.abs(dy) <= this.#jitterPx) return
+      if (!this.#startDrag(e)) return
     }
 
     if (!this.#dragging || !this.#drone) return
@@ -207,6 +238,7 @@ export class TouchMoveInput {
     this.#downAxial = null
     this.#activePointerId = null
     this.#dragging = false
+    this.#armed = false
   }
 
   #clientToAxial(cx: number, cy: number): Axial | null {

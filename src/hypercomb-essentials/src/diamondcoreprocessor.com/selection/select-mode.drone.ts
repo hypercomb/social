@@ -249,7 +249,10 @@ export class SelectModeDrone extends Drone {
     btn.type = 'button'
     btn.style.cssText =
       `min-height:${TAP};padding:0 0.95rem;border-radius:2rem;cursor:pointer;` +
-      'display:inline-flex;align-items:center;gap:0.45rem;font:inherit;font-size:0.92rem;font-weight:600;' +
+      // Without nowrap the longest label ("Tap the tiles you want") wraps at
+      // phone width and the pill grows to nearly double height — a fat slab
+      // over the canvas instead of a thin bar above the controls.
+      'display:inline-flex;align-items:center;gap:0.45rem;white-space:nowrap;font:inherit;font-size:0.92rem;font-weight:600;' +
       `background:${accent ? STEEL : 'transparent'};color:${accent ? '#04121b' : 'rgba(232,240,246,0.9)'};` +
       `border:1px solid ${accent ? 'transparent' : 'rgba(255,255,255,0.14)'};` +
       `opacity:${inert ? 0.55 : 1};`
