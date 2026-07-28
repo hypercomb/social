@@ -34,6 +34,36 @@ export type ResolvedImports = Record<string, string>
  * (`installFromBundled` runs without `dependenciesBag` set). New installs
  * always populate the bag, so the fallback eventually goes idle.
  */
+/**
+ * Where the resolved map is cached for index.html's pre-module script.
+ *
+ * An import map only counts if it is live BEFORE the browser triggers any
+ * module script load — and the shell's own `main.js` is a module script, so
+ * the map appended during bootstrap is always late. Chrome/Edge 133+ merge
+ * late maps; Safari and older Chrome discard them and every bare specifier
+ * (`@domain.com/namespace`, `@hypercomb/core`, `pixi.js`) fails to resolve.
+ * Since the map can only be derived asynchronously from OPFS, the cache is
+ * the bridge: written here, replayed synchronously by index.html on the next
+ * boot. It is a HINT, never truth — every boot still re-derives from OPFS and
+ * corrects the cache (main.ts reloads once when the two disagree).
+ */
+export const IMPORT_MAP_STORAGE_KEY = 'hc:importmap'
+
+/**
+ * Re-derive the import map and cache it for the next boot's pre-module
+ * script. Call before any deliberate `location.reload()` that follows an
+ * install/resync, so the reload lands with the newly written dependencies
+ * already resolvable.
+ */
+export const cacheImportMap = async (): Promise<void> => {
+  try {
+    const imports = await resolveImportMap()
+    localStorage.setItem(IMPORT_MAP_STORAGE_KEY, JSON.stringify({ imports }))
+  } catch (err) {
+    console.warn('[resolveImportMap] could not cache import map', err)
+  }
+}
+
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()

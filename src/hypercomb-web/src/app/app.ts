@@ -1,6 +1,7 @@
 import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
+import { cacheImportMap } from '../setup/resolve-import-map'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -72,7 +73,9 @@ export class App implements AfterViewInit {
     this.upgrading.set(true)
     try {
       const ok = await upgradeFromBundled()
-      if (ok) location.reload()
+      // Cache the map the upgrade just made resolvable so the reload boots
+      // with it live before the module graph (see setup/resolve-import-map).
+      if (ok) { await cacheImportMap(); location.reload() }
       else this.upgrading.set(false)
     } catch (err) {
       console.error('[app] upgradeFromBundled failed', err)
