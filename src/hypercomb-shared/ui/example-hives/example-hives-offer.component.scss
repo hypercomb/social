@@ -1,0 +1,178 @@
+// hypercomb-shared/ui/example-hives/example-hives-offer.component.scss
+//
+// Centered frosted card over a quiet dim — same cold chrome family as the
+// preview banner. No motion, no glow: the covers carry the warmth. The
+// backdrop deliberately takes NO click handler — only the explicit buttons
+// act (a passive close is not consent, and a stray click must not discard
+// the offer).
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  pointer-events: none;
+  display: block;
+}
+
+.offer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 8, 10, 0.55);
+  backdrop-filter: blur(2px);
+  pointer-events: auto;
+}
+
+.offer-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: min(80vh, 42rem);
+  overflow-y: auto;
+  padding: 1.4rem 1.5rem 1.1rem;
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 92%, transparent);
+  border: 1px solid rgba(245, 245, 245, 0.1);
+  backdrop-filter: blur(10px);
+  color: rgba(245, 245, 245, 0.88);
+  pointer-events: auto;
+
+  h2 {
+    margin: 0 0 0.3rem;
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+}
+
+.subtitle {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: rgba(245, 245, 245, 0.55);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid rgba(245, 245, 245, 0.08);
+  border-radius: 0.7rem;
+  background: rgba(245, 245, 245, 0.03);
+
+  &.is-added {
+    border-color: rgba(111, 211, 154, 0.35);
+  }
+}
+
+.cover {
+  width: 3.4rem;
+  height: 3.4rem;
+  flex: none;
+  border-radius: 0.55rem;
+  object-fit: cover;
+  border: 1px solid rgba(245, 245, 245, 0.1);
+  background: rgba(245, 245, 245, 0.05);
+}
+
+.cover-blank {
+  display: inline-block;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+}
+
+.name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-transform: capitalize;
+}
+
+.description {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: rgba(245, 245, 245, 0.55);
+}
+
+.meta {
+  font-size: 0.7rem;
+  color: rgba(245, 245, 245, 0.38);
+}
+
+button {
+  border: 1px solid rgba(245, 245, 245, 0.14);
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  background: transparent;
+  color: rgba(245, 245, 245, 0.85);
+  transition: background 120ms ease, border-color 120ms ease;
+  flex: none;
+
+  &:hover { background: rgba(245, 245, 245, 0.08); }
+}
+
+.add {
+  border-color: rgba(111, 211, 154, 0.5);
+  color: #6fd39a;
+
+  &:hover { background: rgba(111, 211, 154, 0.12); }
+}
+
+.adding,
+.added {
+  flex: none;
+  font-size: 0.74rem;
+  color: rgba(245, 245, 245, 0.55);
+  white-space: nowrap;
+}
+
+.added {
+  color: #6fd39a;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.dismiss {
+  color: rgba(245, 245, 245, 0.6);
+}
+
+// Phones: full-width bottom sheet posture, big touch targets.
+@media (max-width: 599px), (max-height: 599px) and (pointer: coarse) {
+  .offer-card {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    transform: none;
+    width: 100vw;
+    max-height: 78vh;
+    border-radius: 0.9rem 0.9rem 0 0;
+    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  button {
+    padding: 0.45rem 1.05rem;
+    font-size: 0.85rem;
+  }
+}

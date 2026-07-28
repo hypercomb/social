@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "domains": ["content.jwize.com", "jwize.com"],
+  "examples": [
+    {
+      "name": "honey-garden",
+      "head": "71f5613c1c0bec74961947d4e8eb82d025cdeb098a03b6518ab2bdef55586c6c",
+      "tiles": 7,
+      "coverSig": "b7a09544043e235c222f3a8f0446b1dac53470019bffe22bc370068a011369c8",
+      "description": {
+        "en": "A small garden of image tiles — wander, zoom, and look closer.",
+        "ja": "画像タイルの小さな庭 — 散策して、ズームして、近くで眺めてみてください。"
+      }
+    },
+    {
+      "name": "bee-facts",
+      "head": "b855533eec50b34783b48e559f4145c7bd4310d9144af213f1fcaadd6dd9e5e2",
+      "tiles": 6,
+      "coverSig": "a4531a2217245deeedc7886281f3bf275a4122a99b88ad0db28f67b3969e126c",
+      "description": {
+        "en": "One true thing about bees per tile — the simplest shape a hive can take.",
+        "ja": "タイルごとにミツバチの真実をひとつ — ハイブのいちばんシンプルなかたち。"
+      }
+    },
+    {
+      "name": "postcards",
+      "head": "eb1c19e1afcec8ace70cf71893c70f76ba5c4db2f8e08bff3d9f5479849aaf6d",
+      "tiles": 10,
+      "coverSig": "f552dd993aa42e1dbe39d80b60be6cf9d8e53da83e08661596e90f152b9d563f",
+      "description": {
+        "en": "Three places, each with postcards inside — a hive with depth to descend into.",
+        "ja": "3つの場所、それぞれの中にポストカード — 奥行きのあるハイブへ潜ってみてください。"
+      }
+    }
+  ]
+}

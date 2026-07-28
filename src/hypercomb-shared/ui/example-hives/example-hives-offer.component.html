@@ -1,0 +1,48 @@
+<!-- First-boot example hives offer: adopt rides the ordinary machinery,
+     nothing folds without a click, closing writes nothing. -->
+@if (visible()) {
+  <div class="offer-backdrop" aria-hidden="true"></div>
+  <div class="offer-card" role="dialog" aria-modal="true" aria-labelledby="example-hives-title">
+    <h2 id="example-hives-title">{{ 'examples.offer.title' | t }}</h2>
+    <p class="subtitle">{{ 'examples.offer.subtitle' | t }}</p>
+
+    <ul class="rows">
+      @for (e of examples(); track e.name) {
+        <li class="row" [class.is-added]="status(e.name) === 'added'">
+          @if (coverUrl(e) && !coverHidden(e.name)) {
+            <img class="cover" [src]="coverUrl(e)" [alt]="displayName(e)" loading="lazy" (error)="onCoverError(e.name)" />
+          } @else {
+            <span class="cover cover-blank" aria-hidden="true"></span>
+          }
+          <div class="text">
+            <span class="name">{{ displayName(e) }}</span>
+            <span class="description">{{ description(e) }}</span>
+            @if (e.tiles) {
+              <span class="meta">{{ 'examples.offer.tiles' | t: { count: e.tiles } }}</span>
+            }
+          </div>
+          @switch (status(e.name)) {
+            @case ('added') {
+              <span class="added">{{ 'examples.offer.added' | t }}</span>
+            }
+            @case ('adopting') {
+              <span class="adding">{{ 'examples.offer.adding' | t: { count: progressCount() } }}</span>
+            }
+            @case ('unavailable') {
+              <button type="button" class="add" (click)="onAdopt(e)">{{ 'examples.offer.retry' | t }}</button>
+            }
+            @default {
+              <button type="button" class="add" (click)="onAdopt(e)">{{ 'examples.offer.add' | t }}</button>
+            }
+          }
+        </li>
+      }
+    </ul>
+
+    <div class="actions">
+      <button type="button" class="dismiss" (click)="onDismiss()">
+        {{ (anyAdded() ? 'examples.offer.done' : 'examples.offer.dismiss') | t }}
+      </button>
+    </div>
+  </div>
+}
