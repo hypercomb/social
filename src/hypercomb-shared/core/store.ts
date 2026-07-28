@@ -1696,6 +1696,14 @@ export class Store extends EventTarget {
         // non-sig file (.crswap temp, stray artifacts): not ours to move,
         // and their presence defers the pool's GC.
         if (handle.kind !== 'file' || !isSignature(name)) { unrelocatable++; continue }
+        // THE EMPTY-HASH COLLISION. sha256('') names both "empty content" and
+        // the ROOT lineage's sigbag, and at the root that name is a DIRECTORY.
+        // Relocating a legacy file under it can never succeed — getFileHandle
+        // throws TypeMismatchError — so every boot re-tried it and warned. It
+        // is an empty file either way: nothing to preserve, nothing to move.
+        // Count it unrelocatable (which keeps the pool's GC gate honest) and
+        // move on, silently.
+        if (name === EMPTY_CONTENT_SIG) { unrelocatable++; continue }
         sigTotal++
         try {
           const sourceFile = await (handle as FileSystemFileHandle).getFile()

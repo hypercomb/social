@@ -10,15 +10,22 @@ const STORAGE_KEY = 'dcp.sigInfo'
  *  losing an entry costs one re-derivation, nothing more. */
 const MAX_ENTRIES = 4000
 
-/** What a signature IS, derived from its bytes. `kind`/`className` for a bee,
- *  `namespace` for a dependency's first-line alias comment. */
+/** What a signature IS, derived from its bytes. `kind`/`className` for a bee;
+ *  `namespace` (the first-line alias) and `depName` (the display name derived
+ *  from it) for a dependency.
+ *
+ *  `depName` is deliberately its own field rather than a reuse of `className`:
+ *  a record persisted by an earlier build holds the first class the regex hit,
+ *  which is NOT what a dep is named by now. A new field means those entries
+ *  simply lack it and re-derive once — no migration, no stale label. */
 export interface SigInfo {
   kind?: TreeNodeKind
   className?: string | null
   namespace?: string
+  depName?: string
 }
 
-type Stored = Record<string, { k?: string, c?: string | null, n?: string }>
+type Stored = Record<string, { k?: string, c?: string | null, n?: string, d?: string }>
 
 /**
  * DERIVED CACHE for signature-addressed facts.
@@ -78,6 +85,7 @@ export class SigInfoCache {
           kind: v?.k as TreeNodeKind | undefined,
           className: v?.c ?? undefined,
           namespace: v?.n ?? undefined,
+          depName: v?.d ?? undefined,
         })
       }
     } catch {
@@ -111,6 +119,7 @@ export class SigInfoCache {
         if (info.kind) entry.k = info.kind
         if (info.className !== undefined) entry.c = info.className
         if (info.namespace) entry.n = info.namespace
+        if (info.depName) entry.d = info.depName
         out[sig] = entry
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(out))

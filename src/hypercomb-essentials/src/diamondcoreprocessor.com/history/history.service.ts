@@ -2981,7 +2981,7 @@ export class HistoryService {
             // addressed and the epoch covers everything else, so a hit here is
             // proof the bytes are already resident.
             this.#warmedTiles.set(node.sig, this.#treeEpoch)
-            this.#warmTileContent(layer, store, gen)
+            this.#warmLayerPack(node.sig, layer, store, gen)
           }
           // PREPARE THE VIEW as well as the bytes. Warming content makes the
           // tiles able to appear; resolving this layer's child membership is
@@ -3057,6 +3057,60 @@ export class HistoryService {
       `(best-first): ${walked} tiles warmed from ${rootSig.slice(0, 12)} ` +
       `(${cacheHits} already cached) in ${elapsed}ms. depths: ${depthSummary}`
     )
+  }
+
+  /**
+   * WARM A LAYER THE WAY IT PAINTS: read its pack. The layer's manifest is one
+   * file holding the full array of what its tiles need to bind their visuals,
+   * so warming a layer is TWO reads — the layer (already in hand here) and
+   * this — regardless of how many tiles it holds. Reading it also hands every
+   * inlined visual straight to the renderer's pack, so the images are resident
+   * without a single per-image read.
+   *
+   * Only when there is no pack yet (a layer committed before the optimize
+   * phase reached it) does this fall back to the old per-slot walk — the
+   * exception that the pack exists to retire, and it self-heals: the render's
+   * backfill and the optimize phase both mint one.
+   */
+  readonly #warmLayerPack = (
+    layerSig: string,
+    layer: LayerContent,
+    store: StoreContentWarm | undefined,
+    gen: number,
+  ): void => {
+    const readPack = (store as unknown as {
+      readChildrenManifest?: (sig: string) => Promise<Array<Record<string, unknown>> | null>
+    } | undefined)?.readChildrenManifest
+    if (!readPack) { this.#warmTileContent(layer, store, gen); return }
+    void (async () => {
+      try {
+        if (this.#preloadGeneration !== gen) return
+        const pack = await readPack(layerSig)
+        if (!pack || pack.length === 0) { this.#warmTileContent(layer, store, gen); return }
+        const adopt = get<{ adoptPackedVisual?: (e: unknown) => void }>('@diamondcoreprocessor.com/ShowCellDrone')
+        const adoptStatic = (adopt?.constructor as { adoptPackedVisual?: (e: unknown) => void } | undefined)
+        for (const entry of pack) {
+          if (this.#preloadGeneration !== gen) return
+          adoptStatic?.adoptPackedVisual?.(entry)
+        }
+        // HEAL THE ANTI-PATTERN EVERYWHERE, not just where someone walks. A
+        // names-only pack means this layer still pays a read per tile every
+        // time it paints; the warm is already holding everything needed to
+        // mint the full array, so it asks the optimizer to write one. Layers
+        // nobody visits heal too, in the background, once each.
+        const optimizer = get<{
+          enrichPack?: (parentSig: string, childSigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
+          constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
+        }>('@diamondcoreprocessor.com/ManifestOptimizerDrone')
+        const needs = (optimizer?.constructor as { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean } | undefined)?.packNeedsVisuals
+        if (optimizer?.enrichPack && needs?.(pack) && this.#preloadGeneration === gen) {
+          const childSigs = Array.isArray(layer.children) ? layer.children : []
+          const layers = pack.map(e => (e as { layer?: { name?: string } }).layer ?? {})
+          const rich = await optimizer.enrichPack(layerSig, childSigs, layers)
+          for (const entry of rich ?? []) adoptStatic?.adoptPackedVisual?.(entry)
+        }
+      } catch { this.#warmTileContent(layer, store, gen) }
+    })()
   }
 
   /** Warm a tile's OWN content signatures — every slot plus the image nested

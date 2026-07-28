@@ -277,7 +277,7 @@ export class TreeResolverService {
     const parentLineage = parent.lineage || layer.rel || ''
     for (const [depSig, depNs] of this.#depLineage) {
       if (depNs === parentLineage) {
-        const depName = await this.#detectDepClassName(depSig)
+        const depName = await this.#detectDepName(depSig, depNs)
         const depNode: TreeNode = {
           id: `${parent.id}:${depSig}`,
           name: depName ? humanize(depName) : depSig.slice(0, 12) + '...',
@@ -363,18 +363,45 @@ export class TreeResolverService {
     return { kind: 'bee', className: null }
   }
 
-  async #detectDepClassName(sig: string): Promise<string | null> {
+  /**
+   * Display name for a DEPENDENCY, from its bytes and its alias.
+   *
+   * A dep file is a NAMESPACE BUNDLE, not a module: the assistant bundle alone
+   * declares AgentPanelView, AgentRegistry, ConversationQueenBee, HostAiService
+   * and more. Naming it after the first class the regex happens to hit is
+   * arbitrary, and it labels bundles by whatever they IMPORT rather than what
+   * they ARE — the assistant bundle and the avatars bundle both opened on
+   * AgentAvatarRegistry, so both rows read "agent avatar registry" while
+   * neither of them is that.
+   *
+   * What a dep IS is its ALIAS: the first-line `// @scope/name` comment the
+   * import map resolves. No two deps can share one (the import map would
+   * collide), so the alias's last segment is both honest and unique. The one
+   * exception is a bundle that declares exactly ONE class — there the class IS
+   * the module, and its name is the more specific truth.
+   */
+  #depNameFrom(text: string, namespace: string): string | null {
+    const classes = new Set(
+      [...text.matchAll(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/g)].map(m => m[1] || m[2]),
+    )
+    if (classes.size === 1) return [...classes][0]
+    const segment = (namespace ?? '').split('/').filter(Boolean).pop()
+    if (segment) return segment
+    // No alias to fall back on (a dep whose first line isn't the comment):
+    // the first class is still better than a bare signature.
+    return classes.size ? [...classes][0] : null
+  }
+
+  async #detectDepName(sig: string, namespace: string): Promise<string | null> {
     const cached = this.#sigInfo.get(sig)
-    if (cached?.className !== undefined) return cached.className
+    if (cached?.depName) return cached.depName
     try {
       const bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
       if (bytes) {
-        const text = new TextDecoder().decode(bytes)
-        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
-        if (m) {
-          const className = m[1] || m[2]
-          this.#sigInfo.set(sig, { className })
-          return className
+        const depName = this.#depNameFrom(new TextDecoder().decode(bytes), namespace)
+        if (depName) {
+          this.#sigInfo.set(sig, { depName })
+          return depName
         }
       }
     } catch { /* fallback */ }
@@ -681,7 +708,7 @@ export class TreeResolverService {
     const parentLineage = parent.lineage || layer.rel || ''
     for (const [depSig, depNs] of this.#depLineage) {
       if (depNs === parentLineage) {
-        const depName = await this.#detectDepClassNameLocal(depSig, domain)
+        const depName = await this.#detectDepNameLocal(depSig, depNs, domain)
         const depNode: TreeNode = {
           id: `${parent.id}:${depSig}`,
           name: depName ? humanize(depName) : depSig.slice(0, 12) + '...',
@@ -776,26 +803,23 @@ export class TreeResolverService {
     return this.#detectBeeInfo(sig)
   }
 
-  async #detectDepClassNameLocal(sig: string, domain: string): Promise<string | null> {
+  async #detectDepNameLocal(sig: string, namespace: string, domain: string): Promise<string | null> {
     const cached = this.#sigInfo.get(sig)
-    if (cached?.className !== undefined) return cached.className
-    const scan = (bytes: ArrayBuffer): string | null => {
-      const text = new TextDecoder().decode(bytes)
-      const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
-      return m ? (m[1] || m[2]) : null
-    }
+    if (cached?.depName) return cached.depName
+    const scan = (bytes: ArrayBuffer): string | null =>
+      this.#depNameFrom(new TextDecoder().decode(bytes), namespace)
     try {
       const patchedDir = await this.#store.patchedDepsDir(domain)
       const bytes = await this.#store.readFile(patchedDir, `${sig}.js`)
       const found = bytes ? scan(bytes) : null
-      if (found) { this.#sigInfo.set(sig, { className: found }); return found }
+      if (found) { this.#sigInfo.set(sig, { depName: found }); return found }
     } catch { /* fallback */ }
     try {
       const fromHcDir = await this.#store.fromHypercombKindDir('dependency')
       const bytes = await this.#store.readFile(fromHcDir, `${sig}.js`)
       const found = bytes ? scan(bytes) : null
-      if (found) { this.#sigInfo.set(sig, { className: found }); return found }
+      if (found) { this.#sigInfo.set(sig, { depName: found }); return found }
     } catch { /* fallback */ }
-    return this.#detectDepClassName(sig)
+    return this.#detectDepName(sig, namespace)
   }
 }

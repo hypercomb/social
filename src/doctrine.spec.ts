@@ -34,11 +34,22 @@ const SCAN_DIRS = [
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.angular', '.claude'])
 
+/** SOURCE only. `.d.ts` files are EMITTED ARTIFACTS — a declaration file is a
+ *  shadow of the source beside it, so scanning one double-counts a file that
+ *  is already scanned (and, being gitignored, it may or may not exist on any
+ *  given checkout — a ratchet whose result depends on whether someone has run
+ *  `tsc` lately is not a ratchet). Same category as skipping `dist`. */
+const isSource = (name: string): boolean =>
+  name.endsWith('.ts')
+  && !name.endsWith('.d.ts')
+  && !name.endsWith('.spec.ts')
+  && !name.endsWith('.test.ts')
+
 const walk = (dir: string, out: string[] = []): string[] => {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
       if (!SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name), out)
-    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') && !entry.name.endsWith('.test.ts')) {
+    } else if (isSource(entry.name)) {
       out.push(join(dir, entry.name))
     }
   }

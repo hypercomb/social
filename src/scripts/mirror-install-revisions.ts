@@ -108,6 +108,15 @@ const PARTS: Part[] = [
     '',
     `source: ${D}/sentinel/sentinel-handler.ts`,
   ].join('\n')],
+  ['dependency-naming', [
+    'What a dependency is NAMED by. A dep file is a namespace bundle, not a module — the assistant bundle alone declares AgentPanelView, AgentRegistry, ConversationQueenBee, HostAiService and more. Naming it after the first class a regex happens to hit labels a bundle by what it IMPORTS rather than what it IS: the assistant bundle and the avatars bundle both opened on a shared AgentAvatarRegistry, so both rows read "agent avatar registry" while neither of them was that.',
+    '',
+    'A dep IS its alias — the first-line `// @scope/name` comment the import map resolves. No two deps can share one, or the import map would collide, so the alias\'s last segment is both honest and unique. The exception is a bundle declaring exactly ONE class: there the class IS the module and its name is the more specific truth, which is why the clipboard dep still reads "clipboard service" while its siblings read "assistant", "commands", "editor".',
+    '',
+    'This was the residual duplicate the revision collapse correctly refused to fold — two different bundles at two namespaces are not a revision of each other. The rows were never redundant; the name was wrong.',
+    '',
+    `source: ${D}/core/tree-resolver.service.ts`,
+  ].join('\n')],
   ['identity-spec', [
     'The three duplicate shapes, held by tests. One signature seen twice is not a conflict; the same class name at two lineages is a fork, not a revision; an identityless artifact is never collapsed away. Plus the ordering guarantees the collapse rests on — lowest rank wins regardless of arrival order, ties break on document order, and winners are emitted in first-appearance order so a collapsed list still reads like its source.',
     '',

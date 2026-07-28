@@ -263,12 +263,23 @@ export async function listDecorations<TPayload>(opts: {
 // Idempotent (the registry no-ops an identical re-registration), so calling
 // it from both places is safe.
 
-export function registerDecorationsSlot(): void {
+export function registerDecorationsSlot(attempt = 0): void {
   const ioc = (window as {
     ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void }
   }).ioc
   if (!ioc?.whenReady) {
-    console.warn('[decoration-manifest] ioc.whenReady unavailable — decorations slot NOT registered')
+    // NOT a failure yet — this file is imported at module-evaluation time,
+    // which can precede the container's own registration. It used to warn
+    // immediately and give up, so every boot printed "decorations slot NOT
+    // registered" while the slot went on to register perfectly well from
+    // decoration.service.ts: an alarm that cried wolf on a healthy boot, in
+    // the one console line that should mean something. Wait for the container
+    // and say nothing; only a container that never arrives is worth a warning.
+    if (attempt < 20) {
+      setTimeout(() => registerDecorationsSlot(attempt + 1), 50)
+      return
+    }
+    console.warn('[decoration-manifest] ioc.whenReady never became available — decorations slot NOT registered')
     return
   }
   ioc.whenReady<LayerSlotRegistry>(

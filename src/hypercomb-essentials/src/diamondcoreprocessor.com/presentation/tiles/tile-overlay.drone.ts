@@ -249,6 +249,10 @@ export class TileOverlayDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'contextual action overlay host — icons registered externally via effects'
 
+  /** Last icon-overflow set reported, so the same overflow isn't warned once
+   *  per rebuild. See #layoutIconRow. */
+  static #lastOverflowReport = ''
+
   #app: Application | null = null
   #renderContainer: Container | null = null
   #canvas: HTMLCanvasElement | null = null
@@ -1045,8 +1049,22 @@ export class TileOverlayDrone extends Drone {
    *  flush on #exitArrangeMode. */
   #requestRebuild(): void {
     if (this.#arrangeMode) { this.#arrangeRebuildPending = true; return }
-    this.#rebuildActiveProfile()
+    // COALESCE. Boot emits a burst of profile-affecting effects — link
+    // actions, meeting controls, meeting state, tile actions, tile images —
+    // and each one used to rebuild the whole button profile SYNCHRONOUSLY:
+    // 14 full teardown-and-recreate passes before the first frame, all
+    // producing the identical result. Fold a burst into one rebuild at the end
+    // of the current task; the profile is still current before anything can
+    // paint or be clicked, because a microtask runs before the next frame.
+    if (this.#rebuildQueued) return
+    this.#rebuildQueued = true
+    queueMicrotask(() => {
+      this.#rebuildQueued = false
+      if (this.#arrangeMode) { this.#arrangeRebuildPending = true; return }
+      this.#rebuildActiveProfile()
+    })
   }
+  #rebuildQueued = false
 
   #updateHexBg(): void {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
@@ -1175,8 +1193,14 @@ export class TileOverlayDrone extends Drone {
     if (rows.length > MAX_ICON_ROWS) {
       const dropped = rows.slice(MAX_ICON_ROWS).flat()
       rows.length = MAX_ICON_ROWS
-      console.warn(`[tile-overlay] ${dropped.length} icon(s) past the ${MAX_ICON_ROWS}-row band, not shown:`,
-        dropped.map(a => a.name).join(', '))
+      // Say it ONCE per distinct set. The same overflow re-reported on every
+      // rebuild buried the console (and each warn captures a stack, which the
+      // devtools then holds), without adding a single new fact.
+      const key = dropped.map(a => a.name).join(', ')
+      if (key !== TileOverlayDrone.#lastOverflowReport) {
+        TileOverlayDrone.#lastOverflowReport = key
+        console.warn(`[tile-overlay] ${dropped.length} icon(s) past the ${MAX_ICON_ROWS}-row band, not shown:`, key)
+      }
     }
 
     // Only what is laid out is shown, so hit-testing matches what is drawn.

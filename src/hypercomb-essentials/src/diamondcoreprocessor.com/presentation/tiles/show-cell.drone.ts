@@ -402,6 +402,11 @@ async function resolveChildNames(
       let resolvedCount = 0
       const manifestUnresolved: string[] = []
       for (const entry of manifest) {
+        // Bind the visuals from the pack itself — this array IS the layer's
+        // optimization, so every image it carries is decoded from here and
+        // never re-read per tile. Keyed by the SOURCE image sig, so the atlas
+        // identity is identical to the file-fed path.
+        ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
         if (entry?.layer?.name) {
           out.add(entry.layer.name)
           resolvedCount++
@@ -413,6 +418,12 @@ async function resolveChildNames(
       // Manifest hit only reaches here when manifest.length === children
       // length, so a fully-named manifest IS the complete set.
       if (stats) { stats.resolved = resolvedCount; stats.unresolvedSigs = manifestUnresolved }
+      // UPGRADE A THIN PACK. Manifests written before the visuals moved in
+      // carry names only, so this layer would keep paying per-tile reads on
+      // every visit forever. Re-mint it once, off the render path — the next
+      // visit paints from the pack. Once per parent sig per session; keyed by
+      // an immutable content sig, so a successful upgrade is permanent.
+      upgradeThinPack(parentLayerSig, manifest, content.children, store)
       await freshenBranches(out)
       return out
     }
@@ -445,6 +456,8 @@ async function resolveChildNames(
     console.info(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} all-resolved=${out.size}`)
   }
 
+  // (see upgradeThinPack, declared below the resolver)
+
   // Backfill the manifest for pre-existing layers committed before the
   // decoration shipped (or after a manifest GC) — but ONLY when EVERY
   // child resolved this pass. A PARTIAL manifest (missing the children
@@ -457,18 +470,71 @@ async function resolveChildNames(
   // Idle-scheduled so the current render path doesn't pay the write.
   const allResolved = children.length === content.children.length && children.every(c => !!c?.name)
   if (parentLayerSig && store?.writeChildrenManifest && allResolved) {
-    const manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
+    const thin: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
     for (let i = 0; i < children.length; i++) {
-      manifest.push({ sig: content.children[i], layer: children[i]! })
+      thin.push({ sig: content.children[i], layer: children[i]! })
     }
     const schedule = typeof (window as any).requestIdleCallback === 'function'
       ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
       : (cb: () => void) => setTimeout(cb, 0)
-    schedule(() => { void store.writeChildrenManifest!(parentLayerSig, manifest) })
+    schedule(() => {
+      void (async () => {
+        // ENRICHED when we can: the pack carries each tile's props and its
+        // optimized visual, so the NEXT visit to this layer paints from two
+        // reads. Falling back to the thin array is still correct (the render
+        // resolves per child, as it always did) — it just doesn't pay off.
+        const optimizer = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
+          buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
+        } | undefined
+        const rich = await optimizer?.buildEntries?.(content.children ?? [], children as Array<{ name?: string }>).catch(() => null)
+        await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin) as typeof thin)
+      })()
+    })
   }
 
   await freshenBranches(out)
   return out
+}
+
+/** Parent sigs whose pack this session already tried to enrich — one attempt
+ *  each, so a layer whose children have no local images doesn't re-mint on
+ *  every visit. */
+const _packUpgradeTried = new Set<string>()
+
+/** Re-mint a names-only manifest as a full pack (props + optimized visual per
+ *  child), off the render path. Silent no-op when the pack is already rich,
+ *  when the optimizer isn't registered, or when the re-mint can't complete —
+ *  the thin pack stays valid, it just keeps costing per-tile reads. */
+function upgradeThinPack(
+  parentLayerSig: string,
+  manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown }; visual?: unknown }>,
+  childSigs: readonly string[],
+  store: { writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>) => Promise<void> } | undefined,
+): void {
+  if (!parentLayerSig || !store?.writeChildrenManifest || _packUpgradeTried.has(parentLayerSig)) return
+  const optimizerCtor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
+    buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
+    constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
+  } | undefined
+  if (!optimizerCtor?.buildEntries) return
+  const needs = (optimizerCtor.constructor as { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean } | undefined)?.packNeedsVisuals
+  if (needs && !needs(manifest)) return
+  _packUpgradeTried.add(parentLayerSig)
+  const schedule = typeof (window as any).requestIdleCallback === 'function'
+    ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 8_000 })
+    : (cb: () => void) => setTimeout(cb, 250)
+  schedule(() => {
+    void (async () => {
+      try {
+        const layers = manifest.map(e => e.layer)
+        const rich = await optimizerCtor.buildEntries!(childSigs, layers as ReadonlyArray<{ name?: string }>)
+        if (!rich || rich.length !== childSigs.length) return
+        await store.writeChildrenManifest!(parentLayerSig, rich as Array<{ sig: string; layer: { name?: string } }>)
+        for (const entry of rich) ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
+        console.log(`[preload] layer pack enriched: ${parentLayerSig.slice(0, 12)} (${rich.length} tiles bind from one file)`)
+      } catch { /* thin pack stays valid */ }
+    })()
+  })
 }
 
 export class ShowCellDrone extends Drone {
@@ -709,7 +775,13 @@ export class ShowCellDrone extends Drone {
   #prebakeInFlight = false
   #prebakePumping = false
   static readonly #PREBAKE_COOLDOWN_MS = 4_000
-  static readonly #PREBAKE_MAX_PER_LOCATION = 128
+  // Click targets baked per location. Was 128 — an 11-tile page queued five
+  // times more atlas work than the page itself needed, for destinations the
+  // participant may never open, and each entry is a main-thread decode + GPU
+  // upload. The layer pack now carries a destination's own visuals in one
+  // read, so entering a cold branch no longer depends on having pre-baked it;
+  // this is a small head start, not the mechanism.
+  static readonly #PREBAKE_MAX_PER_LOCATION = 32
   static readonly #PREBAKE_PER_SLICE = 2
   // Below this, a raw source decodes in ~a millisecond anyway — deriving a
   // cell-sized copy would spend the optimize phase on images with nothing
@@ -7581,6 +7653,13 @@ export class ShowCellDrone extends Drone {
    *  fallback heavy enough to matter demands the optimized form for next
    *  time — minted in the optimize phase (visual-optimizer.drone). */
   #localDecodeBlob = async (sig: string): Promise<Blob | null> => {
+    // PACK FIRST. The layer's manifest is one file carrying the full array of
+    // what its tiles need to bind their visuals — including these bytes — so a
+    // location that has a pack decodes every image WITHOUT a per-image read.
+    // That is the whole point of a per-LAYER optimization: two reads to paint
+    // a page, not two plus one per tile.
+    const packed = ShowCellDrone.#packVisuals.get(sig)
+    if (packed) return packed
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
       getResourceLocal: (s: string) => Promise<Blob | null>
       getOptimizedVisual?: (s: string) => Promise<Blob | null>
@@ -7593,6 +7672,33 @@ export class ShowCellDrone extends Drone {
       this.emitEffect('visual:wanted', { sig })
     }
     return raw
+  }
+
+  /** Visuals carried INSIDE a layer's manifest, by source image sig. Filled
+   *  whenever a manifest is read (render path or preloader) and consulted by
+   *  every decode. Static because the pack for one layer serves any pass that
+   *  paints those tiles, and content-addressed keys make that safe forever —
+   *  a sig is its bytes. Bounded: the entries are ~6KB renditions and the map
+   *  is trimmed oldest-first past the cap. */
+  static readonly #packVisuals = new Map<string, Blob>()
+  static readonly #PACK_VISUAL_CAP = 2048
+
+  /** Take a manifest entry's inlined visual into the pack. No-op for entries
+   *  that carry only a sig (source too big to inline, or not local when the
+   *  pack was minted) — those decode from the file as they always did. */
+  public static adoptPackedVisual(entry: { visual?: { sig?: string; webp?: string; type?: string } } | null): void {
+    const v = entry?.visual
+    if (!v?.sig || !v.webp || ShowCellDrone.#packVisuals.has(v.sig)) return
+    try {
+      const binary = atob(v.webp)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      if (ShowCellDrone.#packVisuals.size >= ShowCellDrone.#PACK_VISUAL_CAP) {
+        const oldest = ShowCellDrone.#packVisuals.keys().next().value
+        if (oldest !== undefined) ShowCellDrone.#packVisuals.delete(oldest)
+      }
+      ShowCellDrone.#packVisuals.set(v.sig, new Blob([bytes], { type: v.type || 'image/webp' }))
+    } catch { /* malformed inline — the file path still works */ }
   }
 
   /** Resolve the images a click on this view would paint — each visible
@@ -7733,8 +7839,25 @@ export class ShowCellDrone extends Drone {
    *  loop never competes with an interaction. Pinned on-screen slots are
    *  untouchable by the ring allocator, and evicting other stale entries
    *  is exactly what the ring does on any load. */
+  /** Does the CURRENT view still have a tile whose image isn't in the atlas?
+   *  While that is true, nothing off-screen may touch the atlas. */
+  #currentViewMissingImages = (atlas: { hasImage: (s: string) => boolean; hasFailed: (s: string) => boolean }): boolean => {
+    for (const cell of this.renderedCells.values()) {
+      const sig = cell.imageSig
+      if (!sig) continue
+      if (!atlas.hasImage(sig) && !atlas.hasFailed(sig)) return true
+    }
+    return false
+  }
+
+  /** Set when a slice yielded to the current view — re-check after this,
+   *  rather than spinning the idle queue. */
+  #prebakeDeferUntil = 0
+
   #pumpPrebake = (): void => {
     if (this.#prebakePumping || this.#prebakeQueue.length === 0) return
+    const wait = this.#prebakeDeferUntil - performance.now()
+    if (wait > 0) { setTimeout(() => this.#pumpPrebake(), wait); this.#prebakeDeferUntil = 0; return }
     this.#prebakePumping = true
     const gen = this.#prebakeGen
     const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
@@ -7746,6 +7869,15 @@ export class ShowCellDrone extends Drone {
         try {
           const imageAtlas = this.imageAtlas
           if (!imageAtlas) return
+          // THE PAGE YOU ARE LOOKING AT COMES FIRST. Every bake here is an
+          // OFF-SCREEN image — a click target — and each one is a decode plus
+          // a GPU upload on the main thread (measured 5-715ms each). Baking
+          // them while the current view is still missing its OWN images meant
+          // an 11-tile page issued 60+ atlas loads and the tiles the
+          // participant was actually waiting on queued behind click targets
+          // they may never use. Wait until this view is whole; re-schedule
+          // otherwise, so the queue drains the moment the page is done.
+          if (this.#currentViewMissingImages(imageAtlas)) { this.#prebakeDeferUntil = performance.now() + 400; return }
           for (let n = 0; n < ShowCellDrone.#PREBAKE_PER_SLICE && this.#prebakeQueue.length > 0; n++) {
             // Superseded — the fresh walk owns the queue and re-pumps.
             if (gen !== this.#prebakeGen) return
