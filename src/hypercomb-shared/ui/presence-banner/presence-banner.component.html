@@ -1,7 +1,8 @@
 @if (visible()) {
   <div class="presence-wrapper">
 
-    <!-- Initials badge strip: you first, then each peer. -->
+    <!-- Initials badge strip: you first, then each peer. Peer badges
+         toggle the participant filter; the caret expands the panel. -->
     <div class="badge-strip" role="group" [attr.aria-label]="'presence.panel-label' | t">
       @for (b of badges(); track b.key) {
         @if (b.isSelf && editingName()) {
@@ -25,18 +26,35 @@
             type="button"
             [class.self]="b.isSelf"
             [class.add-name]="b.unnamed"
+            [class.selected]="b.selected"
             [style.color]="b.color"
             [style.text-shadow]="b.glow"
-            [style.border-color]="b.isSelf ? b.color : null"
-            (click)="b.isSelf ? onSelfBadgeClick() : onPeerBadgeClick()"
-            [attr.aria-label]="(b.isSelf ? 'presence.set-name' : 'presence.expand') | t"
-            [title]="(b.isSelf ? 'presence.set-name' : 'presence.expand') | t">
+            [style.border-color]="b.isSelf || b.selected ? b.color : null"
+            (click)="b.isSelf ? onSelfBadgeClick() : onPeerBadgeClick(b.key)"
+            [attr.aria-pressed]="b.isSelf ? null : b.selected"
+            [attr.aria-label]="(b.isSelf ? 'presence.set-name' : 'presence.filter-toggle') | t"
+            [title]="(b.isSelf ? 'presence.set-name' : 'presence.filter-toggle') | t">
             {{ b.initials }}
           </button>
         }
       }
+      @if (adoptCount() > 0) {
+        <button
+          class="adopt-chip"
+          type="button"
+          (click)="onAdoptSelected()"
+          [title]="'presence.adopt-selected' | t: { count: adoptCount() }">
+          {{ 'presence.adopt-selected' | t: { count: adoptCount() } }}
+        </button>
+      }
       @if (!alone()) {
-        <span class="strip-caret" aria-hidden="true">{{ expanded() ? '▴' : '▾' }}</span>
+        <button
+          class="strip-caret"
+          type="button"
+          (click)="onCaretClick()"
+          [attr.aria-expanded]="expanded()"
+          [attr.aria-label]="'presence.expand' | t"
+          [title]="'presence.expand' | t">{{ expanded() ? '▴' : '▾' }}</button>
       }
     </div>
 
@@ -48,8 +66,13 @@
       <div class="participant-panel" role="dialog" [attr.aria-label]="'presence.panel-label' | t">
         <ul class="participant-list">
           @for (row of rows(); track row.pubkey) {
-            <li class="participant-row">
-              <span class="participant-label">{{ row.label }}</span>
+            <li class="participant-row" [class.selected]="row.selected">
+              <button
+                class="participant-label"
+                type="button"
+                (click)="onPeerBadgeClick(row.pubkey)"
+                [attr.aria-pressed]="row.selected"
+                [title]="'presence.filter-toggle' | t">{{ row.label }}</button>
               <div class="participant-actions">
                 <button
                   class="row-toggle subscribe-toggle"

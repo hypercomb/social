@@ -49,6 +49,18 @@ interface SwarmConsumerApi extends SwarmLabelApi {
   following: () => string
   subscribeTo: (pubkey: string | null) => Promise<void>
   follow: (pubkey: string | null) => Promise<void>
+  peerTilesGroupedAtCurrentSig?: () => readonly {
+    pubkey: string
+    label: string
+    tiles: readonly ({ name: string } & Record<string, unknown>)[]
+  }[]
+}
+
+/** The participant filter (essentials SwarmFilterService), consumed via
+ *  IoC at runtime — shared never imports modules. */
+interface SwarmFilterApi {
+  selected: ReadonlySet<string>
+  toggle: (pubkey: string) => void
 }
 
 /** One participant chip in the top strip. */
@@ -65,9 +77,13 @@ interface Badge {
   /** True on the self badge when no label is set yet — renders the
    *  "add name" affordance instead of letters. */
   unnamed: boolean
+  /** True when this peer is in the participant-filter selection. */
+  selected: boolean
 }
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
+const SIG_RE = /^[a-f0-9]{64}$/
 
 @Component({
   selector: 'hc-presence-banner',
@@ -134,6 +150,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   readonly #subscribedTo = signal('')
   readonly #following = signal('')
 
+  /** Participant-filter selection, mirrored from `swarm:filter`
+   *  (SwarmFilterService owns the truth; empty = everyone shows). */
+  readonly #selected = signal<ReadonlySet<string>>(new Set())
+
   readonly visible = computed(() => this.#seen() && this.#public())
   readonly alone = computed(() => this.#alone())
   readonly peerCount = computed(() => this.#peers().length)
@@ -153,8 +173,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       initials: myLabel ? this.#initials(myLabel) : '+',
       isSelf: true,
       unnamed: !myLabel,
+      selected: false,
     })
 
+    const selected = this.#selected()
     for (const pk of this.#peers()) {
       const label = (swarm?.labelFor?.(pk) ?? '').trim()
       out.push({
@@ -165,20 +187,49 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         initials: label ? this.#initials(label) : pk.slice(0, 2).toUpperCase(),
         isSelf: false,
         unnamed: false,
+        selected: selected.has(pk),
       })
     }
     return out
   })
 
+  /** Participant-grouped adopt picks for the current selection — every
+   *  branch the selected participants offer here (valid layer sig only).
+   *  Fed to the EXISTING `adopt-selected` verb; SwarmAdoptDrone folds
+   *  them sequentially with all its usual gates. */
+  readonly adoptSelections = computed<readonly { label: string; pubkey: string }[]>(() => {
+    this.#peers()          // recompute on peer churn
+    this.#labelVersion()
+    const selected = this.#selected()
+    if (selected.size === 0) return []
+    const groups = this.#swarm()?.peerTilesGroupedAtCurrentSig?.() ?? []
+    const out: { label: string; pubkey: string }[] = []
+    const seen = new Set<string>()
+    for (const g of groups) {
+      if (!selected.has(g.pubkey)) continue
+      for (const t of g.tiles) {
+        if (!SIG_RE.test(String(t['layerSig'] ?? ''))) continue
+        const key = `${g.pubkey}/${t.name}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push({ label: t.name, pubkey: g.pubkey })
+      }
+    }
+    return out
+  })
+
+  readonly adoptCount = computed(() => this.adoptSelections().length)
+
   /** Per-row participant data for the expanded panel. Labels
    *  collide-safe: when two peers share a label, we suffix the
    *  pubkey to disambiguate ("Alice • a1b2"). */
-  readonly rows = computed<readonly { pubkey: string; label: string; subscribed: boolean; following: boolean }[]>(() => {
+  readonly rows = computed<readonly { pubkey: string; label: string; subscribed: boolean; following: boolean; selected: boolean }[]>(() => {
     this.#labelVersion()
     const peers = this.#peers()
     const swarm = this.#swarm()
     const subscribedTo = this.#subscribedTo()
     const following = this.#following()
+    const selected = this.#selected()
     const raw = peers.map(pk => ({
       pubkey: pk,
       label: (swarm?.labelFor?.(pk) ?? '').trim() || `${pk.slice(0, 6)}…`,
@@ -192,6 +243,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         : r.label,
       subscribed: r.pubkey === subscribedTo && !!subscribedTo,
       following: r.pubkey === following && !!following,
+      selected: selected.has(r.pubkey),
     }))
   })
 
@@ -231,13 +283,40 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       EffectBus.on<{ public?: boolean }>('mesh:public-changed', ({ public: pub }) => {
         this.#public.set(!!pub)
       }),
+
+      // Participant-filter selection — mirror so badges/rows relight
+      // (the service reconciles departures on peers-changed itself).
+      EffectBus.on<{ participants?: readonly string[] }>('swarm:filter', (p) => {
+        this.#selected.set(new Set((p?.participants ?? []).map(String)))
+      }),
     )
+
+    // Seed from the live service — the replayed effect covers most
+    // mounts, but a fresh mount before any toggle has no last value.
+    const filter = this.#filter()
+    if (filter) this.#selected.set(new Set(filter.selected))
   }
 
-  /** Click a peer badge → toggle the participant panel. */
-  onPeerBadgeClick(): void {
+  /** Click a peer badge (or their row name) → toggle that participant
+   *  in the canvas filter. No selection = everyone shows. */
+  onPeerBadgeClick(pubkey: string): void {
+    this.#filter()?.toggle(pubkey)
+  }
+
+  /** The caret toggles the expanded participant panel (expansion no
+   *  longer rides badge clicks — those select). */
+  onCaretClick(): void {
     if (this.#alone()) return
     this.expanded.set(!this.expanded())
+  }
+
+  /** One gesture: adopt every branch the selected participants offer
+   *  here, through the EXISTING adopt-selected verb — SwarmAdoptDrone
+   *  folds sequentially with all its gates (code consent included). */
+  onAdoptSelected(): void {
+    const selections = this.adoptSelections()
+    if (selections.length === 0) return
+    EffectBus.emit('tile:action', { action: 'adopt-selected', selections })
   }
 
   /** Click your own badge → open the inline name editor. */
@@ -304,6 +383,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   #swarm(): SwarmConsumerApi | undefined {
     return (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(SWARM_KEY) as SwarmConsumerApi | undefined
+  }
+
+  #filter(): SwarmFilterApi | undefined {
+    return (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(SWARM_FILTER_KEY) as SwarmFilterApi | undefined
   }
 
   /** Two-letter initials from a label. Two+ words → first letter of

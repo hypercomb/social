@@ -37,6 +37,7 @@ import { kindsForLabel } from '../commands/decoration-kind-index.js'
 import { SWARM_INVITE_KIND } from './meeting-invite.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isWithinAdoptedRoot } from './adopted-roots.js'
+import { swarmFilterSelection } from './swarm-filter.service.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -1379,7 +1380,13 @@ export class SwarmDrone extends Drone {
           .map(s => String(s ?? '').trim())
           .filter(Boolean)
           .join('/')
+        // Participant filter — applied HERE, before the tile-source
+        // registry's kind:name dedup, so a name two peers both publish
+        // resolves to a SELECTED publisher's entry (layerSig/image/index
+        // included). Empty selection = no filter, everyone shows.
+        const selectedParticipants = swarmFilterSelection()
         return tiles
+          .filter(({ peerPubkey }) => selectedParticipants.size === 0 || selectedParticipants.has(peerPubkey))
           .filter(({ name }) => !hiddenLineages.has(locKey ? `${locKey}/${name}` : name))
           .map(({ name, peerPubkey, imageSig, index }) => ({
             name,

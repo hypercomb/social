@@ -476,7 +476,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -830,6 +830,14 @@ export class ShowCellDrone extends Drone {
   // this to decide which tiles to glow when a peer is active. Cleared
   // and rebuilt on each renderFromSynchronize pass.
   #peerPubkeyByLabel = new Map<string, string>()
+
+  // Participant filter — selected peer pubkeys mirrored from the
+  // `swarm:filter` effect (SwarmFilterService owns the truth). Empty =
+  // no filter. The AUTHORITATIVE filter runs at the source
+  // (swarm.drone #registerTileSource, pre-registry-dedup); the render
+  // pass re-applies it as belt-and-braces against a stale
+  // #sourceEntriesCache in the frame a toggle lands.
+  #participantFilter = new Set<string>()
 
   // Per-session in-memory slot assignment cache. Once a tile is placed
   // via score-based logic (or any other path), its slot is remembered
@@ -3252,6 +3260,24 @@ export class ShowCellDrone extends Drone {
     // expressed on BEHAVIORS (registry pheromones — a view/bee declares
     // mobile, or mobile+desktop), never on content.
 
+    // ── SWARM PARTICIPANT FILTER (belt-and-braces) ──────────
+    // The authoritative filter runs at the SOURCE (swarm.drone
+    // #registerTileSource, before the registry's kind:name dedup — which is
+    // what keeps a same-name tile resolvable to a SELECTED publisher). This
+    // pass only catches entries served from a stale #sourceEntriesCache in
+    // the same frame a toggle lands. Peers only: a name that is also the
+    // participant's own tile is never filtered.
+    if (this.#participantFilter.size > 0) {
+      for (const name of [...peerCellSet]) {
+        if (localCellSet.has(name)) continue
+        const contributor = this.#peerPubkeyByLabel.get(name)
+        if (contributor && this.#participantFilter.has(contributor)) continue
+        union.delete(name)
+        ephemeralCellSet.delete(name)
+        peerCellSet.delete(name)
+      }
+    }
+
     // Source breakdown for this pass — proves WHERE each tile comes from
     // (layer vs registry vs mesh) so a stray tile (e.g. a phantom "group" in
     // the top layer) can be attributed to the exact non-layer source that
@@ -5208,6 +5234,25 @@ export class ShowCellDrone extends Drone {
       // (not keyed by the often-empty renderedLocationKey) so the next pass
       // takes the full path and re-resolves peers; the emit is debounced
       // ~150ms upstream, so this is one rebuild per burst.
+      this.#layerCellsCache.clear()
+      this.#sourceEntriesCache.clear()
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.requestRender()
+    })
+
+    // Participant filter toggled — the peer tile set changes exactly like
+    // a peers-changed burst, so mirror that handler's FULL invalidation
+    // (slot machine included): anything less and a stale slot snapshot
+    // keeps unselected peers painted, or a re-selected peer never
+    // reappears. The source-side filter (swarm.drone) reads the service
+    // directly, so clearing the caches is all the render needs.
+    this.onEffect<{ participants?: readonly string[] }>('swarm:filter', (payload) => {
+      const next = new Set((payload?.participants ?? []).map(p => String(p)).filter(Boolean))
+      const same = next.size === this.#participantFilter.size
+        && [...next].every(p => this.#participantFilter.has(p))
+      if (same) return
+      this.#participantFilter = next
       this.#layerCellsCache.clear()
       this.#sourceEntriesCache.clear()
       this.renderedCellsKey = ''

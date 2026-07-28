@@ -95,6 +95,34 @@
     font-weight: 400;
     font-size: 0.95rem;
   }
+
+  // Participant-filter selection — the badge wears its own hue as a
+  // solid ring (border-color is bound inline) plus a faint fill, so the
+  // selected set reads at a glance without any new glow.
+  &.selected {
+    background: color-mix(in srgb, currentColor 16%, rgba(0, 0, 0, 0.6));
+    box-shadow: 0 0 0 1px currentColor inset;
+  }
+}
+
+// One-gesture branch adoption for the selected participants — quiet
+// green chip, same accent family as every other adopt affordance.
+.adopt-chip {
+  appearance: none;
+  flex: 0 0 auto;
+  padding: 0.18rem 0.6rem;
+  background: transparent;
+  border: 1px solid rgba(111, 211, 154, 0.5);
+  border-radius: 999px;
+  color: #6fd39a;
+  font-family: var(--hc-font);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms ease;
+
+  &:hover { background: rgba(111, 211, 154, 0.12); }
 }
 
 .name-input {
@@ -117,10 +145,16 @@
 }
 
 .strip-caret {
+  appearance: none;
   flex: 0 0 auto;
-  padding-right: 0.15rem;
+  padding: 0 0.15rem 0 0;
+  background: transparent;
+  border: none;
   color: rgba(245, 245, 245, 0.4);
   font-size: 0.7rem;
+  cursor: pointer;
+
+  &:hover { color: rgba(245, 245, 245, 0.75); }
 }
 
 .presence-caption {
@@ -168,11 +202,23 @@
   &:hover {
     background: rgba(245, 245, 245, 0.04);
   }
+
+  // Row of a filter-selected participant — quiet tint, no motion.
+  &.selected {
+    background: rgba(245, 245, 245, 0.07);
+  }
 }
 
+// The row name is the same filter toggle as the badge — button chrome
+// stripped so it still reads as a label.
 .participant-label {
+  appearance: none;
   flex: 1;
   min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  text-align: left;
   color: rgba(245, 245, 245, 0.85);
   font-family: var(--hc-font);
   font-size: 0.78rem;
@@ -180,6 +226,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+
+  &:hover { color: rgba(245, 245, 245, 1); }
 }
 
 .participant-actions {
