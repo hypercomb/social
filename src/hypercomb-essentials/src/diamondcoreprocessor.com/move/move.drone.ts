@@ -30,7 +30,7 @@ interface CopyStoreLike {
   putResource?: (blob: Blob) => Promise<string>
 }
 
-type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[]; externalLabels?: string[] }
 type MoveRefs = {
   canvas: HTMLCanvasElement
   container: any
@@ -82,6 +82,10 @@ export class MoveDrone extends Drone {
   #cellLabels: string[] = []
   #cellCoords: Axial[] = []
   #cellCount = 0
+  /** Peer tiles on screen. A peer's tile is not in your layer, so there is no
+   *  order of yours to change by dragging it — and on touch the hold that would
+   *  start the drag is the only gesture left to reach its actions with. */
+  #externalLabels = new Set<string>()
 
   // Drag snapshot — captured at beginMove from the live arrays above so
   // any render:cell-count that fires mid-drag does not shift the geometry
@@ -166,6 +170,7 @@ export class MoveDrone extends Drone {
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
       this.#cellCoords = payload.coords ?? []
+      this.#externalLabels = new Set(payload.externalLabels ?? [])
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
@@ -296,6 +301,16 @@ export class MoveDrone extends Drone {
     // anchor must be on an occupied tile
     const anchorLabel = this.#occupancy.get(anchorKey)
     if (!anchorLabel) {
+      this.#dragLabels = []
+      this.#dragCoords = []
+      this.#end(source)
+      return false
+    }
+
+    // A peer's tile is not in your layer: there is no order of yours for a drag
+    // to change. Refusing here also hands the touch hold back to the overlay,
+    // which is what opens a peer tile's actions on a phone.
+    if (this.#externalLabels.has(anchorLabel)) {
       this.#dragLabels = []
       this.#dragCoords = []
       this.#end(source)

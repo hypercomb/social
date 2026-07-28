@@ -903,6 +903,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('tags:view-open', undefined)
   }
 
+  /** Open the full-screen viewfinder (hc-camera-capture). The shutter there
+   *  creates a tile from the frame — the bar only asks for the camera. */
+  readonly openCamera = (): void => {
+    EffectBus.emit('camera:capture-open', undefined)
+  }
+
   /** Pools of Meaning — just SHOW the collections window. Deliberately does NOT
    *  navigate: the panel's first purpose is dragging collection references onto
    *  the page you are already standing on, so sending you to `/sets` would take

@@ -47,6 +47,78 @@ const putResource = async (text) => {
   return (r.data && (r.data.sig || r.data.signature)) || r.sig
 }
 
+// Read a cell's slot sigs. Used instead of `note-list` because note-list needs
+// a non-empty `segments` (the PARENT path), so it cannot address a cell sitting
+// at the hive root — the original guard here called it with `segments: []`,
+// silently got `no segments provided`, treated the error as "no notes", and
+// re-added the root note on every run. The workflow's `notes` slot had the same
+// sig twice as a result. Reading the slot works at any depth.
+const slotOf = async (segments, slot) => {
+  const la = await ask({ op: 'layer-at', segments })
+  const v = la.ok && la.data ? la.data[slot] : undefined
+  return Array.isArray(v) ? v : []
+}
+
+const resourceText = async (sig) => {
+  const r = await ask({ op: 'get-resource', sig })
+  return r.ok && r.data ? String(r.data.text || '') : ''
+}
+
+// ── the marks ───────────────────────────────────────────────────────────────
+//
+// SYNCHRONIZATION, not addition: a mirror is cells + PHEROMONES + notes, and
+// this workflow had been built with only cells and notes. The marks below say
+// what each tile IS, so the collection resolves from the mark instead of from
+// this script's cell list.
+//
+// Both words are already in the DECLARED vocabulary (`TUTORIAL_PHEROMONES` in
+// tutorial-lesson.ts): `meaning` is the topic word for marks/pheromones,
+// `guidance` is the census word for instructional material. Nothing new is
+// minted here on purpose — there is no declared `workflow` or `step` keyword,
+// and inventing one from a build script is exactly what the doctrine forbids.
+// The workflow-ness is already carried structurally, by the `workflow` slot and
+// the per-step `visual:workflow:step` decorations; it does not need a word.
+const COLLECTION_MARKS = ['meaning', 'guidance']
+const STEP_MARKS = ['meaning']
+
+// A tag decoration is `appliesTo: []`, so its payload IS its identity: the same
+// keyword is the same sig on every tile, which is what makes painting it a
+// membership edge. `decoration-add` is append-or-noop on an identical sig, so
+// this converges. NEVER pass `replaceKind` for a tag — kind is `tag` for every
+// keyword, so replacing by kind would silently drop a tile's other marks.
+const paintMark = async (segments, name) => {
+  const r = await ask({
+    op: 'decoration-add', segments, kind: 'tag', appliesTo: [], payload: { name },
+  })
+  // `decoration-add` does not report whether it appended or no-opped, so this
+  // says only that the mark is now on the tile — verified append-or-noop by sig:
+  // two consecutive runs leave exactly one `tag` decoration per keyword.
+  return r.ok ? 'ok' : 'ERR ' + r.error
+}
+
+/** Add a note only if the cell does not already carry it — compared on the
+ *  note text read out of the slot, so it holds for a cell at any depth. */
+const ensureNote = async (cellSegments, addReq, text) => {
+  for (const sig of await slotOf(cellSegments, 'notes')) {
+    try {
+      const have = String(JSON.parse(await resourceText(sig)).note || '')
+      if (have.slice(0, 40) === text.slice(0, 40)) return 'already present'
+    } catch { /* unreadable note — treat as absent */ }
+  }
+  const n = await ask({ ...addReq, text })
+  return n.ok ? 'ok' : 'ERR ' + n.error
+}
+
+/** Collapse repeated sigs in a slot. A duplicate is never meaningful — the same
+ *  sig is the same content — and it renders as two identical notes. */
+const dedupeSlot = async (segments, slot) => {
+  const sigs = await slotOf(segments, slot)
+  const unique = [...new Set(sigs)]
+  if (unique.length === sigs.length) return `clean (${sigs.length})`
+  const r = await ask({ op: 'bag-set', segments, slot, cells: unique })
+  return r.ok ? `deduped ${sigs.length} → ${unique.length}` : 'ERR ' + r.error
+}
+
 // ── the workflow ────────────────────────────────────────────────────────────
 //
 // `note` steps carry prose and leave a trail as the run passes through them;
@@ -125,13 +197,32 @@ const WORKFLOW_NOTE =
 async function main() {
   const log = (...a) => console.log(...a)
 
-  // 1. the workflow cell
-  const addRoot = await ask({ op: 'add', segments: [], cells: [ROOT] })
-  log('add root      ', addRoot.ok ? 'ok' : '(' + (addRoot.error || 'exists') + ')')
+  // 1. the workflow cell — only if absent. `add` is NOT idempotent (it appends
+  //    a child), so re-running this as a SYNC must never re-add: a second
+  //    `8-the-open-piece` would be a second tile, not a noop.
+  const rootLayer = await ask({ op: 'layer-at', segments: [ROOT] })
+  if (rootLayer.ok) {
+    log('root cell      exists')
+  } else {
+    const addRoot = await ask({ op: 'add', segments: [], cells: [ROOT] })
+    log('add root      ', addRoot.ok ? 'ok' : '(' + addRoot.error + ')')
+  }
 
-  // 2. the step cells, in order — the parent's children order IS the step order
-  const addSteps = await ask({ op: 'add', segments: [ROOT], cells: STEPS.map(s => s.cell) })
-  log('add steps     ', addSteps.ok ? 'ok' : '(' + (addSteps.error || 'exists') + ')')
+  // 2. the step cells, in order — the parent's children order IS the step order.
+  //    Existing names are read from the tree, so only genuinely missing steps
+  //    are added and the order of what is already there is left alone.
+  const inf = await ask({ op: 'inflate', segments: [ROOT] })
+  const present = new Set(
+    (inf.ok && inf.data && Array.isArray(inf.data.children) ? inf.data.children : [])
+      .map(c => String((c && c.name) || '')),
+  )
+  const missing = STEPS.map(s => s.cell).filter(c => !present.has(c))
+  if (missing.length === 0) {
+    log(`step cells     all ${STEPS.length} present`)
+  } else {
+    const addSteps = await ask({ op: 'add', segments: [ROOT], cells: missing })
+    log('add steps     ', addSteps.ok ? 'ok ' + missing.join(', ') : '(' + addSteps.error + ')')
+  }
 
   // 3. each step: mint the step resource, point a decoration at it
   for (const s of STEPS) {
@@ -144,14 +235,12 @@ async function main() {
     log('step', s.cell.padEnd(30), dec.ok ? (dec.unchanged ? 'unchanged' : 'ok ' + stepSig.slice(0, 12)) : dec.error)
 
     // mirror: the explanation lives on the tile, not only in a file
-    const have = await ask({ op: 'note-list', segments: [ROOT], cell: s.cell })
-    const notes = (have.ok && Array.isArray(have.data)) ? have.data : []
-    if (notes.some(n => String(n.text || '').slice(0, 40) === s.note.slice(0, 40))) {
-      log('     note     already present')
-    } else {
-      const n = await ask({ op: 'note-add', segments: [ROOT], cell: s.cell, text: s.note })
-      log('     note     ', n.ok ? 'ok' : n.error)
-    }
+    log('     note     ', await ensureNote(segments, { op: 'note-add', segments: [ROOT], cell: s.cell }, s.note))
+
+    // mirror: the mark says what the tile IS, so the collection resolves from
+    // the mark rather than from this script's list of cells
+    for (const name of STEP_MARKS) log(`     mark ${name.padEnd(9)}`, await paintMark(segments, name))
+    log('     notes slot', await dedupeSlot(segments, 'notes'))
   }
 
   // 4. declare the parent a workflow — the `workflow` slot makes it runnable
@@ -165,15 +254,10 @@ async function main() {
   const slot = await ask({ op: 'bag-set', segments: [ROOT], slot: 'workflow', cells: [recordSig] })
   log('declare       ', slot.ok ? 'ok ' + recordSig.slice(0, 12) : slot.error)
 
-  // 5. mirror the workflow itself
-  const rootNotes = await ask({ op: 'note-list', segments: [], cell: ROOT })
-  const rn = (rootNotes.ok && Array.isArray(rootNotes.data)) ? rootNotes.data : []
-  if (rn.some(n => String(n.text || '').startsWith('How a pheromone on a reference'))) {
-    log('root note      already present')
-  } else {
-    const n = await ask({ op: 'note-add', segments: [], cell: ROOT, text: WORKFLOW_NOTE })
-    log('root note     ', n.ok ? 'ok' : n.error)
-  }
+  // 5. mirror the workflow itself — note, marks, and a clean notes slot
+  log('root note     ', await ensureNote([ROOT], { op: 'note-add', segments: [], cell: ROOT, text: WORKFLOW_NOTE }, WORKFLOW_NOTE))
+  for (const name of COLLECTION_MARKS) log(`root mark ${name.padEnd(9)}`, await paintMark([ROOT], name))
+  log('root notes slot', await dedupeSlot([ROOT], 'notes'))
 
   log('\ndone → /' + ROOT)
 }

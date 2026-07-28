@@ -11,7 +11,7 @@
 // component listens too and un-hides the header-bar that contains it.
 
 import { Point } from 'pixi.js'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, POINTER_GESTURE_END } from '@hypercomb/core'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { armFromClipboard } from '../editor/arm-resource.js'
@@ -70,7 +70,17 @@ export class EmptyLongPressInput {
     window.addEventListener('pointermove', this.#onPointerMove, { passive: false })
     window.addEventListener('pointerup', this.#onPointerUp, { passive: false })
     window.addEventListener('pointercancel', this.#onPointerUp, { passive: false })
+    // A gesture that acted on the press (tile navigation) swallows the trailing
+    // pointerup, which would leave #activePointerId set forever — and every
+    // later press reads as "a second finger" and cancels itself. The consumer
+    // re-announces the end so this one still releases.
+    window.addEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
     this.#attached = true
+  }
+
+  #onGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {
+    if (e.detail?.pointerId !== this.#activePointerId) return
+    this.#cancel()
   }
 
   #isMobile(): boolean {
@@ -80,6 +90,10 @@ export class EmptyLongPressInput {
   #onPointerDown = (e: PointerEvent): void => {
     if (e.pointerType !== 'touch') return
     if (!this.#canvas || !this.#isMobile()) return
+
+    // A primary touch opens a new sequence: anything still held is a pointer
+    // whose release was lost, not a finger on the glass.
+    if (e.isPrimary) this.#cancel()
 
     // Only the first finger triggers; multi-touch is for pan/pinch.
     if (this.#activePointerId !== null) {

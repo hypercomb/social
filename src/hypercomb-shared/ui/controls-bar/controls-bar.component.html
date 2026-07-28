@@ -178,10 +178,16 @@
 
       @if (isMobile()) {
         <!-- ═══ MOBILE: balanced bar — two buttons each side, fixed center ═══
-             back · talk │ CENTER (fit) │ fullscreen · solo/swarm.
-             The centre button is the anchor: it stays put while each side
-             scrolls independently if more controls ever appear. With five it
-             never needs to scroll. -->
+             back · talk │ CAMERA │ fit · solo/swarm.
+             The centre button is the anchor, and on a phone the act that
+             belongs under the thumb is CAPTURE: point at something, press,
+             and a tile is created from the photo. Fit took that slot until it
+             was moved out to the fourth — it is a viewport correction, not the
+             reason you opened the app. Pheromones came off the bar entirely;
+             it lives in the header rail (and in the tag strip's own opener).
+             Every button is evenly spaced across the bar, so the extra
+             landscape control never bunches one side. -->
+
         <div class="controls-section mobile-nav">
           <div class="mobile-side left" data-consumes-wheel>
             <button class="ctl-btn back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
@@ -209,36 +215,33 @@
             }
           </div>
 
-          <!-- The centre is the viewport control — it goes away on a pinned
-               layer, same as the desktop rail's fit/zoom set. An inert spacer
-               holds the anchor so the two sides keep their balance. -->
-          @if (pinnedHere()) {
-            <div class="ctl-btn mobile-center pinned-spacer" aria-hidden="true"></div>
-          } @else {
-            <button class="ctl-btn fit-btn mobile-center"
-                    [class.fit-global]="fitButtonState() === 'global'"
-                    [class.fit-page]="fitButtonState() === 'page'"
-                    (click)="fitOrCenter($event)" (dblclick)="lockFit()"
-                    [attr.aria-label]="'controls.fit-content' | t">
-              <span class="mat-sym">center_focus_strong</span>
-            </button>
-          }
+          <!-- CAMERA — the centre act: take a picture, get a tile. Opens the
+               full-screen viewfinder (hc-camera-capture); the frame it captures
+               creates a new cell here and opens the editor on it. Always
+               available — a pinned layer stops the viewport moving, it does not
+               stop you making something. -->
+          <button class="ctl-btn camera-btn mobile-center"
+                  (click)="openCamera()"
+                  [attr.aria-label]="'controls.camera' | t">
+            <span class="mat-sym">photo_camera</span>
+          </button>
 
           <div class="mobile-side right" data-consumes-wheel>
-            <!-- PHEROMONES — first-class on mobile: marking what shows on a
-                 phone is the core authoring act, so the opener sits on the bar
-                 itself rather than only in the tag strip / desktop header rail.
-                 The panel renders as a bottom sheet at phone sizes. The glyph
-                 reads out the current reach (page → children → global). -->
-            <button class="ctl-btn pheromone-mobile-btn"
-                    (click)="openPheromones()"
-                    [attr.aria-label]="'tags.panel.open' | t">
-              <!-- A FIXED identity glyph, not the reach readout: `scopeIcon()`
-                   returns `center_focus_strong` at page reach — the same glyph
-                   the centre fit button uses — so the two read as one repeated
-                   icon. Reach is named and changed inside the sheet. -->
-              <span class="mat-sym">label</span>
-            </button>
+            <!-- FIT — the viewport control, fourth slot now that pheromones is
+                 off the bar. It goes away on a pinned layer, same as the
+                 desktop rail's fit/zoom set; an inert spacer holds the slot so
+                 the row keeps its rhythm. -->
+            @if (pinnedHere()) {
+              <div class="ctl-btn pinned-spacer" aria-hidden="true"></div>
+            } @else {
+              <button class="ctl-btn fit-btn"
+                      [class.fit-global]="fitButtonState() === 'global'"
+                      [class.fit-page]="fitButtonState() === 'page'"
+                      (click)="fitOrCenter($event)" (dblclick)="lockFit()"
+                      [attr.aria-label]="'controls.fit-content' | t">
+                <span class="mat-sym">center_focus_strong</span>
+              </button>
+            }
             <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
               <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
             </button>

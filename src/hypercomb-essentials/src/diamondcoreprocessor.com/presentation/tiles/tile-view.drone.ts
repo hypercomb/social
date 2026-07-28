@@ -271,7 +271,17 @@ export class TileViewDrone extends Drone {
         when: () => external,
         accent: true,
       },
-      { action: 'edit', glyph: 'edit', labelKey: 'action.edit', fallback: 'edit' },
+      // A peer's tile is not yours to rewrite — the desktop band drops `edit`
+      // on the public-external profile for the same reason, and offers `hide`
+      // in its place: dismiss it from view without taking ownership.
+      { action: 'edit', glyph: 'edit', labelKey: 'action.edit', fallback: 'edit', when: () => !external },
+      {
+        action: 'hide',
+        glyph: 'visibility_off',
+        labelKey: 'action.hide',
+        fallback: 'hide',
+        when: () => external,
+      },
       {
         action: 'make-public',
         glyph: 'public',

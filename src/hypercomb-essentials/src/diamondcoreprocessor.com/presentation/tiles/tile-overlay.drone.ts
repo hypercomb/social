@@ -38,6 +38,21 @@ const NAV_GUARD_BACKSTOP_MS = 6000
 const TILE_ENTER_HOLD_MS = 450
 const TILE_ENTER_HOLD_JITTER_PX = 8
 
+// HOLD-A-PEER-TILE. On desktop every per-tile verb lives on the hover band, and
+// on a peer tile that band is where `adopt` lives. A finger produces no hover,
+// and a peer tile is a BRANCH — the press walks straight into the publisher's
+// tree — so on touch the band was structurally unreachable on exactly the tiles
+// whose whole point is being adopted. Holding one opens the touch band (the
+// fullscreen tile view, adopt chip and all); a plain tap still enters, on
+// release instead of on press.
+//
+// Shorter than TILE_ENTER_HOLD_MS on purpose: it must beat the quick menu's
+// 380ms touch summon, so the hand gets the tile's own actions rather than the
+// hive-wide ring. Dragging a peer tile is refused upstream (move.drone.ts), so
+// nothing else is competing for this hold.
+const PEER_ACTION_HOLD_MS = 340
+const PEER_ACTION_HOLD_JITTER_PX = 12
+
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
  *  addressable directly. Resolved LIVE against the shell's GroupLauncher
@@ -248,6 +263,8 @@ export class TileOverlayDrone extends Drone {
 
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
   #branchLabels = new Set<string>()
+  /** Branches whose next view is not fully resident and pre-baked yet. */
+  #shadedLabels = new Set<string>()
   /** Tag-flatten only: label → the match's ABSOLUTE lineage. A flattened tile
    *  can live anywhere, so entering it travels to this path rather than
    *  appending its name to wherever the view happens to be standing. */
@@ -301,6 +318,9 @@ export class TileOverlayDrone extends Drone {
     origin: { x: number; y: number }
     generation: number
     timer: ReturnType<typeof setTimeout>
+    /** Travel that cancels this hold. A finger rolls further than a mouse
+     *  drifts, so the touch hold gets a wider box or it never survives. */
+    jitter: number
   } | null = null
   #meshPublic = false
   // World mode (toggled on the control bar): when on, the overlay shows ONLY
@@ -632,6 +652,7 @@ export class TileOverlayDrone extends Drone {
         this.#cellLabels = payload.labels
         this.#cellCoords = payload.coords
         this.#branchLabels = new Set(payload.branchLabels ?? [])
+        this.#shadedLabels = new Set(payload.shadedLabels ?? [])
         this.#externalLabels = new Set(payload.externalLabels ?? [])
         this.#noImageLabels = new Set(payload.noImageLabels ?? [])
         this.#substrateLabels = new Set(payload.substrateLabels ?? [])
@@ -678,6 +699,12 @@ export class TileOverlayDrone extends Drone {
         // from the last pointer if the cascade cleared it — so overlay- and
         // button-visibility stay in agreement even if the cursor never moved.
         this.#recoverHover()
+      })
+
+      // Shade-only transitions must not masquerade as a completed level
+      // render, so readiness has a narrow update separate from cell-count.
+      this.onEffect<{ shadedLabels?: string[] }>('render:tile-readiness', (payload) => {
+        this.#shadedLabels = new Set(payload.shadedLabels ?? [])
       })
 
       // substrate:applied runs via an in-place buffer path that doesn't re-emit
@@ -2202,6 +2229,14 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
+    // A PEER tile under a finger: hold it for its actions instead of entering.
+    // Entry is not lost — it moves to the release (#onClick's branch path), so
+    // a tap still walks in. See PEER_ACTION_HOLD_MS.
+    if (e.pointerType === 'touch' && this.#externalLabels.has(entry.label)) {
+      this.#beginPeerActionHold(e, entry.label)
+      return
+    }
+
     this.#cancelEnterHold()
     this.#consumedPointerId = e.pointerId
     consumePointerGesture(e.pointerId)
@@ -2234,7 +2269,38 @@ export class TileOverlayDrone extends Drone {
       this.emitEffect('tile:enter-hold', { label })
       this.#navigateInto(label)
     }, TILE_ENTER_HOLD_MS)
-    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer }
+    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: TILE_ENTER_HOLD_JITTER_PX }
+  }
+
+  /** Arms the hold that opens a PEER tile's actions. Rides the same #enterHold
+   *  slot as hold-to-enter — one hold at a time, one cancel path, and the
+   *  travel/release/cancel wiring already written for it applies unchanged. */
+  #beginPeerActionHold(e: PointerEvent, label: string): void {
+    this.#cancelEnterHold()
+    const pointerId = e.pointerId
+    const generation = this.#mapGeneration
+    const timer = setTimeout(() => {
+      this.#enterHold = null
+      // Every gate re-checked, same as hold-to-enter: the press is old news by
+      // the time this runs, and the tile may not be under the finger any more.
+      if (generation !== this.#mapGeneration) return
+      if (this.#arrangeMode || this.#navigationBlocked) return
+      if (this.#editing || this.#editCooldown) return
+      if (this.#hasSelection || this.#touchDragging) return
+      if (this.#tagRemovalArmed || this.#tagApplyArmed) return
+      if (!this.#externalLabels.has(label)) return
+      // Take the gesture: the trailing click must not also navigate into the
+      // publisher's tree underneath the view that is about to open.
+      this.#consumedPointerId = pointerId
+      consumePointerGesture(pointerId)
+      this.#pressCapture = null
+      try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
+      this.emitEffect('tile:view-open', {
+        label,
+        segments: this.resolve<any>('lineage')?.explorerSegments?.() ?? [],
+      })
+    }, PEER_ACTION_HOLD_MS)
+    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: PEER_ACTION_HOLD_JITTER_PX }
   }
 
   #cancelEnterHold(): void {
@@ -2248,8 +2314,8 @@ export class TileOverlayDrone extends Drone {
   #trackEnterHold(e: PointerEvent): void {
     const hold = this.#enterHold
     if (!hold || e.pointerId !== hold.pointerId) return
-    if (Math.abs(e.clientX - hold.origin.x) > TILE_ENTER_HOLD_JITTER_PX
-      || Math.abs(e.clientY - hold.origin.y) > TILE_ENTER_HOLD_JITTER_PX) this.#cancelEnterHold()
+    if (Math.abs(e.clientX - hold.origin.x) > hold.jitter
+      || Math.abs(e.clientY - hold.origin.y) > hold.jitter) this.#cancelEnterHold()
   }
 
   #onClick = (e: MouseEvent): void => {
@@ -2626,6 +2692,14 @@ export class TileOverlayDrone extends Drone {
   }
 
   #navigateInto(label: string): void {
+    // A successful entry must never move preload work onto the click path.
+    // Keep a cold branch visible as progress, but refuse entry until its next
+    // view is fully resident and pre-baked.
+    if (this.#branchLabels.has(label) && this.#shadedLabels.has(label)) {
+      this.emitEffect('diag:click', { stage: 'tile-preloading', label })
+      return
+    }
+
     // Backstop latch: input was force-released after NAV_GUARD_BACKSTOP_MS
     // but the axial map still describes the LEAVING level — entering a tile
     // now would be a phantom-child navigation (bogus URL segment). Drop the

@@ -7981,6 +7981,9 @@ export class ShowCellDrone extends Drone {
     }
     if (flipped.length === 0) return false
     if (!this.#pushBuffer('aShaded')) return false
+    // Update only the readiness gate. Re-emitting render:cell-count here can
+    // release navigation against a partial renderedCells snapshot.
+    this.emitEffect('render:tile-readiness', { shadedLabels: [...this.#shadedLabels] })
     // NO render:cell-count from here. That payload means "the maps describe
     // the level on screen — release the navigation guard", and an in-place
     // shade flip is not that: fired from a retry timer it can land MID-

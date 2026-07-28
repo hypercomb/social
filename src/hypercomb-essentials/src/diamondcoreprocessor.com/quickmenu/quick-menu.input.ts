@@ -34,7 +34,7 @@
 // InputGate locks the ones that haven't migrated yet. Holding both is the
 // only way to guarantee that a flick across the canvas doesn't also pan it.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, POINTER_GESTURE_END, isPointerConsumed } from '@hypercomb/core'
 import type { InputMode } from '../navigation/input-mode-stack.service.js'
 import { QuickMenuOverlay } from './quick-menu.overlay.js'
 import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
@@ -71,7 +71,7 @@ const OWNER = 'quick-menu'
 const REACH = RING_DISTANCE + HEX_RADIUS * 1.1
 
 type SlashLike = { execute(name: string, args: string): unknown }
-type GateLike = { lock(owner: string): void; unlock(owner: string): void }
+type GateLike = { lock(owner: string): void; unlock(owner: string): void; active?: boolean }
 type StackLike = { push(mode: InputMode): void; pop(name: string): void }
 
 type Level = {
@@ -101,6 +101,15 @@ export class QuickMenuInput {
   #heldKey: string | null = null
   /** Where a touch landed, while the long-press is still deciding. */
   #touchDown: { x: number; y: number } | null = null
+  /**
+   * Every finger currently down. A touch device has no Escape key and no
+   * pointer lock, so the two ways this gesture ends on desktop are both
+   * absent — which makes a summon bound to a finger that never reports up an
+   * unrecoverable state: the ring stays armed, the InputGate stays locked,
+   * and nothing pans again. Knowing when the last finger left is what lets
+   * the gesture close itself no matter which pointer it was waiting for.
+   */
+  #touches = new Set<number>()
 
   /**
    * Where the DRAWN pointer is, in screen coordinates. The real cursor is
@@ -124,6 +133,13 @@ export class QuickMenuInput {
     window.addEventListener('pointermove', this.#onPointerMove, { passive: false })
     window.addEventListener('pointerup', this.#onPointerUp, { passive: false })
     window.addEventListener('pointercancel', this.#onPointerCancel)
+    // A tile gesture that acted on the press SWALLOWS the trailing pointerup at
+    // window capture, so the listener above never runs for that finger. Press a
+    // branch tile, let the view change under your thumb, keep holding: the hold
+    // timer fires on a pointer whose release can no longer be heard, the ring
+    // arms, the gate locks, and touch drag is dead for the rest of the session.
+    // The consumer re-announces the end for exactly this reason.
+    window.addEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
     window.addEventListener('keydown', this.#onKeyDown, { capture: true })
     window.addEventListener('keyup', this.#onKeyUp, { capture: true })
 
@@ -224,12 +240,40 @@ export class QuickMenuInput {
     if (this.#armed) return
 
     if (e.pointerType === 'touch') {
+      // A primary touch is by definition the first finger of a new touch
+      // sequence, so any id still in the set is one whose pointerup never
+      // arrived. Self-heal there instead of letting a lost event permanently
+      // convince us that a finger is still down.
+      if (e.isPrimary) this.#touches.clear()
+      const first = this.#touches.size === 0
+      this.#touches.add(e.pointerId)
       if (this.#isChrome(e.target)) return
+
+      // A second finger is a pan or a pinch, never a summon. Drop the pending
+      // press outright — and CLEAR ITS TIMER. Overwriting #holdTimer without
+      // clearing left the first press's timer orphaned but still pending: it
+      // fired 380ms later, long after both fingers were gone, and armed the
+      // ring on a pointer that could never report up. That is the stuck touch
+      // drag — an armed ring holds the gate locked and every pan/pinch claim
+      // is refused from then on.
+      if (!first) {
+        this.#clearTimers()
+        this.#pointerId = null
+        this.#touchDown = null
+        return
+      }
+
+      this.#clearTimers()
       this.#pointerId = e.pointerId
       this.#touchDown = { x: e.clientX, y: e.clientY }
       this.#holdTimer = setTimeout(() => {
         this.#holdTimer = null
         this.#touchDown = null
+        // The finger is gone, or a pan/pinch already took the gesture. Either
+        // way there is nothing left to summon from.
+        if (!this.#touches.has(e.pointerId)) { this.#pointerId = null; return }
+        if (isPointerConsumed(e.pointerId)) { this.#pointerId = null; return }
+        if (get<GateLike>('@diamondcoreprocessor.com/InputGate')?.active) { this.#pointerId = null; return }
         try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
         this.#begin(e.pointerId)
         this.#paint()
@@ -467,6 +511,16 @@ export class QuickMenuInput {
   // ── commit ──────────────────────────────────────────────────────────
 
   #onPointerUp = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch') {
+      this.#touches.delete(e.pointerId)
+      // Last finger up while armed on some OTHER pointer: the gesture has no
+      // way left to end itself. Close it here rather than strand the lock.
+      if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey
+        && e.pointerId !== this.#pointerId) {
+        this.#end()
+        return
+      }
+    }
     if (this.#sticky) return
     // A key is holding this open — lifting a mouse button is not the release.
     if (this.#heldKey) return
@@ -480,7 +534,24 @@ export class QuickMenuInput {
     this.#release()
   }
 
+  /** A consumed gesture ended. Same bookkeeping as a real release — the finger
+   *  is gone whether or not its pointerup survived the swallow. */
+  #onGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {
+    const pointerId = e.detail?.pointerId
+    if (typeof pointerId !== 'number') return
+    this.#touches.delete(pointerId)
+    if (pointerId === this.#pointerId) { this.#clearTimers(); this.#pointerId = null }
+    if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) this.#end()
+  }
+
   #onPointerCancel = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch') {
+      this.#touches.delete(e.pointerId)
+      if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) {
+        this.#end()
+        return
+      }
+    }
     if (e.pointerId !== this.#pointerId) return
     this.#end()
   }

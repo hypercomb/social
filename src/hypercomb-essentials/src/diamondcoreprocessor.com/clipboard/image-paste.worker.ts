@@ -73,6 +73,16 @@ export class ImagePasteWorker extends Worker {
     }
 
     // Path C: nothing selected — auto-create cell, open editor immediately
+    await this.createTileFromImage(blob)
+  }
+
+  /** PUBLIC entry — "here is an image, make it a tile". Always Path C: a NEW
+   *  cell at the current location, editor opened on it with the image loaded.
+   *  Never routes into the selection, because the caller asked for a tile, not
+   *  for a replacement (the mobile bar's camera shutter is the first caller —
+   *  see hypercomb-shared/ui/camera-capture). Resolved through IoC by key, so
+   *  the shell never imports this module. */
+  readonly createTileFromImage = async (blob: Blob): Promise<void> => {
     const cellName = await this.#createImageCell()
     if (!cellName) return
 

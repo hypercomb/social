@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/input/move/touch-move.input.ts
 import { Point } from 'pixi.js'
+import { POINTER_GESTURE_END } from '@hypercomb/core'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'
 import type { InputGate } from '../navigation/input-gate.service.js'
@@ -29,7 +30,12 @@ export class TouchMoveInput {
   #downPos: { x: number; y: number } | null = null
   #downAxial: Axial | null = null
   #activePointerId: number | null = null
-  #pointerCount = 0
+  /** Fingers currently down, by id. A COUNT was the bug: tapping a branch tile
+   *  navigates on the press and consumes the pointer, so its pointerup dies at
+   *  window capture and the decrement never runs. The count stayed at 1, every
+   *  later touch read as "second finger → pinch", and drag-to-move was dead
+   *  for the rest of the session. Ids can be reconciled; a counter cannot. */
+  #pointers = new Set<number>()
   #dragging = false
 
   attach = (drone: MoveDroneApi, refs: MoveRefs): void => {
@@ -46,6 +52,7 @@ export class TouchMoveInput {
     window.addEventListener('pointermove', this.#onPointerMove, { passive: false })
     window.addEventListener('pointerup', this.#onPointerUp, { passive: false })
     window.addEventListener('pointercancel', this.#onPointerUp, { passive: false })
+    window.addEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
 
     this.#enabled = true
   }
@@ -57,7 +64,9 @@ export class TouchMoveInput {
     window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
     window.removeEventListener('pointercancel', this.#onPointerUp)
+    window.removeEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
 
+    this.#pointers.clear()
     this.#cancel()
 
     this.#drone = null
@@ -75,10 +84,13 @@ export class TouchMoveInput {
     if (e.pointerType !== 'touch') return
     if (!this.#canvas) return
 
-    this.#pointerCount++
+    // A primary touch starts a fresh sequence — anything still tracked lost
+    // its release and must not be counted as a live finger.
+    if (e.isPrimary) this.#pointers.clear()
+    this.#pointers.add(e.pointerId)
 
     // second finger → cancel any pending move (pinch-zoom takes over)
-    if (this.#pointerCount > 1) {
+    if (this.#pointers.size > 1) {
       this.#cancel()
       return
     }
@@ -148,7 +160,7 @@ export class TouchMoveInput {
 
   #onPointerUp = (e: PointerEvent): void => {
     if (e.pointerType !== 'touch') return
-    this.#pointerCount = Math.max(0, this.#pointerCount - 1)
+    this.#pointers.delete(e.pointerId)
 
     if (e.pointerId !== this.#activePointerId) return
 
@@ -164,6 +176,15 @@ export class TouchMoveInput {
     }
 
     this.#resetDrag()
+  }
+
+  /** A consumed gesture ended — its pointerup was swallowed before it reached
+   *  us, so release the finger here or it stays "down" forever. */
+  #onGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {
+    const pointerId = e.detail?.pointerId
+    if (typeof pointerId !== 'number') return
+    if (!this.#pointers.delete(pointerId)) return
+    if (pointerId === this.#activePointerId) this.#cancel()
   }
 
   // ── helpers ───────────────────────────────────────────────

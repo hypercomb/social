@@ -27,6 +27,7 @@
     "build:deploy": "tsx ./scripts/build-module.ts && tsx ./scripts/copy-to-dcp.ts",
     "copy-to-dcp": "tsx ./scripts/copy-to-dcp.ts",
     "build:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module.ts",
+    "test:preload-e2e": "node ./scripts/verify-tile-preload.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

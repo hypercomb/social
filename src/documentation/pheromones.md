@@ -101,6 +101,13 @@ and the doctrine ratchet in `doctrine.spec.ts` now rejects any new
 bare-word meaning at build time. Spelled with the colon from day one,
 this pool can never collide and never needs a migration.
 
+**The spelling is RESERVED in code ahead of the build** (2026-07-28):
+`'pheromones:deposits'` is seeded in `SCOPED_POOL_MEANINGS`
+(`hypercomb-core/src/core/pool-registry.ts`), so the address is fixed and
+`pool-bag-collision.spec.ts` proves no location can ever produce it. The
+entry reserves a name only — no pool exists on disk, and nothing below
+this line is built.
+
 ## Mapping onto existing primitives (nothing new invented)
 
 | Pheromone piece | Existing primitive |

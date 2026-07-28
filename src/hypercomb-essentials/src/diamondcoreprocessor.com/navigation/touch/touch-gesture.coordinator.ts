@@ -4,7 +4,7 @@
 // Owns pointer tracking, gesture classification, InputGate claims,
 // and the touch:dragging effect for UI suppression.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, POINTER_GESTURE_END } from '@hypercomb/core'
 import type { InputGate } from '../input-gate.service.js'
 
 type Point = { x: number; y: number }
@@ -117,6 +117,14 @@ export class TouchGestureCoordinator {
     window.addEventListener('pointermove', this.#onPointerMove, { passive: false })
     window.addEventListener('pointerup', this.#onPointerUp, { passive: false })
     window.addEventListener('pointercancel', this.#onPointerUp, { passive: false })
+    // Tapping a branch tile navigates on the PRESS and consumes the pointer,
+    // which kills the trailing pointerup at window capture — this listener
+    // never runs for that finger and its entry is stranded in #pointers
+    // forever. From then on every single-finger pan is counted as a second
+    // finger (PENDING_TWO_FINGER), #pointers never empties, #finishGesture
+    // never runs, and the hive stops panning for the rest of the session. The
+    // consumer re-announces the end so a consumed gesture still releases.
+    window.addEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
 
     this.#enabled = true
   }
@@ -129,6 +137,7 @@ export class TouchGestureCoordinator {
     window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
     window.removeEventListener('pointercancel', this.#onPointerUp)
+    window.removeEventListener(POINTER_GESTURE_END, this.#onGestureEnd as EventListener)
 
     this.#reset()
 
@@ -162,6 +171,11 @@ export class TouchGestureCoordinator {
     // check and the wheel-zoom [data-consumes-wheel] guard: tiles are never
     // affected by content drawn on top of them.
     if (e.target !== this.#canvas) return
+
+    // A primary touch opens a new touch sequence, so anything still tracked is
+    // a pointer whose release was never delivered. Self-heal rather than let
+    // one lost event mis-count every gesture that follows.
+    if (e.isPrimary && this.#pointers.size > 0) this.#reset()
 
     const pt: Point = { x: e.clientX, y: e.clientY }
     this.#pointers.set(e.pointerId, { start: { ...pt }, current: pt, id: e.pointerId })
@@ -252,6 +266,15 @@ export class TouchGestureCoordinator {
         e.stopPropagation()
       }
     }
+  }
+
+  /** A consumed gesture ended — the finger is gone even though its pointerup
+   *  was swallowed. Release it exactly as a real one would. */
+  #onGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {
+    const pointerId = e.detail?.pointerId
+    if (typeof pointerId !== 'number') return
+    if (!this.#pointers.delete(pointerId)) return
+    if (this.#pointers.size === 0) this.#finishGesture()
   }
 
   // ── gesture handlers ────────────────────────────────────────

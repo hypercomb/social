@@ -70,8 +70,15 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
   'visual-optimization',
 ])
 
-/** Collision-proof meanings — a colon can never appear in a lineage key. */
+/** Collision-proof meanings — a colon can never appear in a lineage key.
+ *
+ *  An entry here RESERVES a spelling; it does not assert that the pool has
+ *  members or even exists on disk. `pheromones:deposits` is reserved ahead of
+ *  its build (see `documentation/pheromones.md`) precisely because the spelling
+ *  is the expensive half: `sign()` of a typo mints a different address forever,
+ *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
+  'pheromones:deposits',
   'tutorial:artifacts',
   'usage:dwell',
   'websites:menu',
