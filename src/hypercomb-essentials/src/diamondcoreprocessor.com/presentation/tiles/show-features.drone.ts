@@ -81,11 +81,13 @@ const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const SIG_RE = /^[a-f0-9]{64}$/
 
 /** CAPABILITIES — behaviors that are NOT registered visual bees (they have no
- *  view of their own to enter) but ARE features a tile carries. Two flavours:
+ *  view of their own to enter) but ARE features a tile carries. Three flavours:
  *  cascading ones a container declares for its whole subtree (the typed file
- *  dropbox), and node-local content behaviours whose kind is written by a bee
- *  that renders it somewhere ELSE (an image gallery, which the slides engine
- *  plays as a deck's slides).
+ *  dropbox, contacts), node-local content behaviours whose kind is written by
+ *  a bee that renders it somewhere ELSE (a slide, played by its parent deck's
+ *  slideshow; a widget, rendered by its parent's home view), and build-intent
+ *  markers a queen drops for the next generation pass to consume
+ *  (`/website here`, `/tutor here`).
  *
  *  Every decoration kind essentials itself reads MUST be declared here or in
  *  the VisualBeeRegistry — an in-house kind reaching the panel as "foreign"
@@ -99,8 +101,9 @@ const CAPABILITIES: Readonly<Record<string, {
   /** True when declaring it on a container applies it to the whole subtree. */
   cascades: boolean
   /** True when the panel can attach it mechanically (payload-free decoration).
-   *  False for capabilities whose payload IS content (a gallery's images) —
-   *  those are never offered in "Available to add"; there is nothing to add. */
+   *  False for capabilities whose payload IS content (a gallery's images) and
+   *  for kinds whose attach belongs to their own command (build-intent
+   *  markers, `/contact`) — those are never offered in "Available to add". */
   addable: boolean
 }>> = {
   'files:dropbox': {
@@ -111,6 +114,58 @@ const CAPABILITIES: Readonly<Record<string, {
     fallbackLabel: 'File dropbox',
     cascades: true,
     addable: true,
+  },
+  // Build-intent markers — `/website here` / `/tutor here` queue a cell for
+  // the next generation pass, which replaces the marker with the built page
+  // or deck. Sub-records of the website/tutor views, not views of their own.
+  'visual:website:pending': {
+    view: 'website-pending',
+    slashCommand: '/website here',
+    labelKey: 'features.cap.websitePending',
+    descriptionKey: 'features.cap.websitePending.desc',
+    fallbackLabel: 'Website page (pending)',
+    cascades: false,
+    addable: false,
+  },
+  'visual:tutor:pending': {
+    view: 'tutor-pending',
+    slashCommand: '/tutor here',
+    labelKey: 'features.cap.tutorPending',
+    descriptionKey: 'features.cap.tutorPending.desc',
+    fallbackLabel: 'Study deck (pending)',
+    cascades: false,
+    addable: false,
+  },
+  // Node-local content behaviours rendered elsewhere: a slide plays in its
+  // parent deck's slideshow; a widget renders on its parent's home view.
+  'visual:diagram:slide': {
+    view: 'slide',
+    slashCommand: '/present slide',
+    labelKey: 'features.cap.slide',
+    descriptionKey: 'features.cap.slide.desc',
+    fallbackLabel: 'Slide',
+    cascades: false,
+    addable: false,
+  },
+  'visual:home:widget': {
+    view: 'home-widget',
+    slashCommand: '/home',
+    labelKey: 'features.cap.homeWidget',
+    descriptionKey: 'features.cap.homeWidget.desc',
+    fallbackLabel: 'Home widget',
+    cascades: false,
+    addable: false,
+  },
+  // The dropbox flavour: `/contact` places it on a container and
+  // ContactService resolves it down the whole subtree.
+  'visual:contact:enabled': {
+    view: 'contact',
+    slashCommand: '/contact',
+    labelKey: 'features.cap.contact',
+    descriptionKey: 'features.cap.contact.desc',
+    fallbackLabel: 'Contacts',
+    cascades: true,
+    addable: false,
   },
 }
 
