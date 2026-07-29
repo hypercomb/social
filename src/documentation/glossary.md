@@ -222,7 +222,7 @@ shared room state in `@hypercomb/shared`. manages the current room identity and 
 shared input exclusivity service in `@hypercomb/essentials` (`navigation/input-gate.service.ts`). ensures only one input consumer (e.g., panning, selection, editor) has control at a time. also suppresses the browser context menu when an input source is active. drones call `acquire(source)` / `release(source)` to coordinate.
 
 ### hex orientation
-the grid supports two hex orientations: **pointy-top** (default) and **flat-top**. toggled via a header bar control. the orientation propagates through `Settings` to all input drones (hex detection, panning, selection) and rendering drones (sdf shader, tile overlay). the coordinate math adapts automatically — flat-top swaps the projection axes.
+the grid supports two hex orientations: **pointy-top** (default) and **flat-top**. press `J` to toggle between them. the choice persists in `hc:hex-orientation`. the orientation propagates through `Settings` to all input drones (hex detection, panning, selection) and rendering drones (sdf shader, tile overlay). the coordinate math adapts automatically — flat-top swaps the projection axes.
 
 ### domain namespace
 the organizational unit within `@hypercomb/essentials`. each domain (e.g. `diamondcoreprocessor.com`, `revolucionstyle.com`) groups related bees, services, and resources into namespaces. domains are independent — they share the build pipeline and core primitives but never import from each other at the source level. at runtime, each domain's namespaces are resolved via the import map.
