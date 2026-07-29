@@ -22,3 +22,240 @@
 [0728/135439.665:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x54f402364800] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
 [0728/135439.665:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
 [0728/135439.776:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/202455.216:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 193769392 | Count: 144
+--> Heap index 0: 193769392 | Count: 144
+
+[0728/202455.218:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 37062848 | Count: 19
+--> Heap index 0: 37062848 | Count: 19
+
+[0728/202455.218:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 9830448 | Count: 11
+--> Heap index 0: 9830448 | Count: 11
+
+[0728/202455.218:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/202455.218:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/202455.218:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202455.218:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2b2c0709f800] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202455.219:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2b2c0709f800] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/202455.219:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2b2c0709f800] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/202455.220:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/202455.226:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/202519.007:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 185507504 | Count: 150
+--> Heap index 0: 185507504 | Count: 150
+
+[0728/202519.008:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 53951680 | Count: 29
+--> Heap index 0: 53951680 | Count: 29
+
+[0728/202519.008:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 10354736 | Count: 19
+--> Heap index 0: 10354736 | Count: 19
+
+[0728/202519.008:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/202519.008:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/202519.008:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202519.008:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2af409b9ca00] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202519.008:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2af409b9ca00] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/202519.008:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2af409b9ca00] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/202519.009:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/202519.045:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/202519.362:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.362:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.362:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.376:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.377:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202519.378:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202600.958:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 190098864 | Count: 152
+--> Heap index 0: 190098864 | Count: 152
+
+[0728/202600.959:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 62355648 | Count: 35
+--> Heap index 0: 62355648 | Count: 35
+
+[0728/202600.959:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 10354736 | Count: 19
+--> Heap index 0: 10354736 | Count: 19
+
+[0728/202600.959:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/202600.959:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/202600.959:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202600.960:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5a5c001ade00] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202600.961:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5a5c001ade00] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/202600.961:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5a5c001ade00] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/202600.964:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/202600.968:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/202601.281:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.281:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.295:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.297:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202601.298:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.183:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 165588400 | Count: 129
+--> Heap index 0: 165588400 | Count: 129
+
+[0728/202834.184:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 37189824 | Count: 29
+--> Heap index 0: 37189824 | Count: 29
+
+[0728/202834.184:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 9764912 | Count: 10
+--> Heap index 0: 9764912 | Count: 10
+
+[0728/202834.184:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/202834.184:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/202834.184:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202834.185:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x524c08eb4800] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202834.186:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x524c08eb4800] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/202834.186:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x524c08eb4800] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/202834.188:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/202834.190:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/202834.406:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.407:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.407:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.415:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.415:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.417:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.418:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.418:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.418:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.418:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.418:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.418:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202834.418:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/202922.735:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 154513840 | Count: 122
+--> Heap index 0: 154513840 | Count: 122
+
+[0728/202922.735:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 37066944 | Count: 21
+--> Heap index 0: 37066944 | Count: 21
+
+[0728/202922.735:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 9699376 | Count: 9
+--> Heap index 0: 9699376 | Count: 9
+
+[0728/202922.735:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/202922.735:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/202922.735:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202922.735:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5bac001b7800] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/202922.735:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5bac001b7800] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/202922.735:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5bac001b7800] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/202922.736:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/202922.736:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/203156.784:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 155304368 | Count: 128
+--> Heap index 0: 155304368 | Count: 128
+
+[0728/203156.785:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 37091520 | Count: 25
+--> Heap index 0: 37091520 | Count: 25
+
+[0728/203156.785:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 9699376 | Count: 9
+--> Heap index 0: 9699376 | Count: 9
+
+[0728/203156.785:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/203156.785:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/203156.785:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/203156.785:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5bc02232000] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/203156.785:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5bc02232000] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/203156.785:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x5bc02232000] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/203156.786:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/203156.788:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/203157.227:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/203157.230:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/203157.231:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/203157.232:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/203157.232:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/203229.050:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 158201408 | Count: 127
+--> Heap index 0: 158201408 | Count: 127
+
+[0728/203229.051:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 37075136 | Count: 23
+--> Heap index 0: 37075136 | Count: 23
+
+[0728/203229.051:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 9699376 | Count: 9
+--> Heap index 0: 9699376 | Count: 9
+
+[0728/203229.051:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/203229.051:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/203229.051:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/203229.051:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2364001b6000] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/203229.051:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2364001b6000] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/203229.051:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x2364001b6000] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/203229.051:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/203229.054:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.
+[0728/203229.514:ERROR:gpu\command_buffer\service\shared_image\shared_image_manager.cc:253] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[0728/203324.672:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (TextureImage): 158200384 | Count: 126
+--> Heap index 0: 158200384 | Count: 126
+
+[0728/203324.673:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (RenderBufferStorageImage): 37066944 | Count: 21
+--> Heap index 0: 37066944 | Count: 21
+
+[0728/203324.673:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Currently allocated size for memory allocation type (Buffer): 9699376 | Count: 9
+--> Heap index 0: 9699376 | Count: 9
+
+[0728/203324.673:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Pending allocation size for memory allocation type (RenderBufferStorageImage) for heap index 0 (type index 0): 1073741824
+[0728/203324.673:WARNING:ui\gl\angle_platform_impl.cc:52] MemoryTracking.cpp:54 (rx::(anonymous namespace)::OutputMemoryLogStream): Memory heap info
+
+* Available memory heaps:
+0 | Heap size: 2147483648 | Flags: 0x1
+
+* Available memory types:
+0 | Heap index: 0 | Property flags: 0xf
+
+[0728/203324.673:WARNING:ui\gl\angle_platform_impl.cc:52] Debug.cpp:184 (gl::Debug::insertMessage): GL error: HIGH: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/203324.673:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x7a3408d9a000] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): A device memory allocation has failed.
+[0728/203324.673:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x7a3408d9a000] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[0728/203324.673:ERROR:gpu\command_buffer\service\gl_utils.cc:426] [.WebGL-0x7a3408d9a000] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[0728/203324.673:ERROR:components\viz\service\gl\exit_code.cc:13] Restarting GPU process due to unrecoverable error. Context was lost.
+[0728/203324.676:ERROR:gpu\ipc\client\command_buffer_proxy_impl.cc:488] GPU state invalid after WaitForGetOffsetInRange.

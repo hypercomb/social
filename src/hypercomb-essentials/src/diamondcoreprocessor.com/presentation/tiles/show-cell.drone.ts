@@ -555,7 +555,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1110,6 +1110,11 @@ export class ShowCellDrone extends Drone {
   #divergenceFutureAdds = new Set<string>()
   #divergenceFutureRemoves = new Set<string>()
   #pendingRemoves = new Set<string>()
+  /** Optimistic additions are already on screen while their history commit
+   *  drains. They remain visibly shaded/inert until that commit settles.
+   *  Failure is followed by a compensating cell event from LayerCommitter,
+   *  so the UI never waits to learn whether it was allowed to change. */
+  #pendingCellMutations = new Set<string>()
   /** Tiles staged to lose the keyword being removed (TagRemovalDrone). They
    *  render as a future-remove — struck through, as if the pheromone were
    *  already gone — while the participant builds the list. Nothing is written
@@ -2121,7 +2126,7 @@ export class ShowCellDrone extends Drone {
       cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
       cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
     }
-    const finishIncremental = (): void => {
+    const finishIncremental = (fillAdded = true): void => {
       this.renderedCells.clear()
       for (const cell of cells) this.renderedCells.set(cell.label, cell)
 
@@ -2138,7 +2143,7 @@ export class ShowCellDrone extends Drone {
       // just-created tile has no image YET — substrate assigns one right
       // after — which is different from rendering an image-bearing tile
       // without its image; the hard rule targets the latter.)
-      if (change.added.length > 0) {
+      if (fillAdded && change.added.length > 0) {
         const added = change.added.map(a => a.name)
         const lineage = this.resolve<any>('lineage')
         void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
@@ -2169,23 +2174,21 @@ export class ShowCellDrone extends Drone {
       this.#emitRenderTags(cells)
     }
 
+    // Membership is interaction truth and must paint on the very next frame.
+    // An unrelated atlas eviction must never hold an add/remove hostage while
+    // its image decodes. Paint the changed membership now (missing visuals are
+    // honestly shaded as pending), then repair those visuals in place.
+    finishIncremental()
     if (needReload.length > 0) {
-      // Image-complete paint: a tile must NEVER render without its image
-      // outside text-only mode. Finish the (local) eviction reloads BEFORE
-      // painting — the previous geometry stays visible meanwhile, images
-      // at old positions rather than an imageless flash.
       void (async () => {
         const lineage = this.resolve<any>('lineage')
-        // dir may be null at foreign locations — loadCellImages is
-        // null-tolerant and external tiles don't need a local dir.
         const dir = (await lineage?.explorerDir?.()) ?? null
         await this.loadCellImages(needReload, dir)
-        finishIncremental()
-      })()
-      return
+        // Rebuild only the GPU bindings. Do not start the added-cell fill a
+        // second time; the immediate pass above already owns that work.
+        finishIncremental(false)
+      })().catch(() => { /* the pending shade is the visible failure state */ })
     }
-
-    finishIncremental()
   }
 
   /**
@@ -4782,6 +4785,28 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // The committer announces persistence separately from membership. The
+    // original cell event changes the view immediately; this lifecycle only
+    // controls the honest pending shade. A failed commit is accompanied by a
+    // compensating cell event, so every open surface converges immediately.
+    this.onEffect<{
+      cell?: string
+      segments?: readonly string[]
+      op?: 'add' | 'remove'
+      state?: 'pending' | 'settled' | 'failed'
+    }>('cell:mutation-state', (payload) => {
+      const cell = String(payload?.cell ?? '').trim()
+      if (!cell) return
+      if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) return
+      if (payload.state === 'pending' && payload.op === 'add') {
+        this.#pendingCellMutations.add(cell)
+        this.#brightLabels.delete(cell)
+      } else {
+        this.#pendingCellMutations.delete(cell)
+      }
+      if (this.#slots.seeded) this.#queueIncremental({})
+    })
+
     // cell:added / cell:removed — synchronous incremental path. Zero awaits
     // in the click handler. The slot state machine mutates immediately, the
     // next microtask runs one applyGeometry, and images for new cells are
@@ -4839,6 +4864,22 @@ export class ShowCellDrone extends Drone {
       }
       this.#pendingRemoves.delete(payload.cell)
       this.#startNewCellFade(payload.cell)
+      // Empty → first item has no mesh yet, but the event itself is complete
+      // membership truth. Seed the empty pinned projection synchronously so
+      // the first tile takes the same next-frame path as every later add.
+      // Falling through to requestRender here used to pay the whole history
+      // read and made the very first add take 0.8–1.5s in Playwright.
+      if (!this.#slots.seeded && this.renderedCells.size === 0) {
+        const axial = this.resolve<any>('axial')
+        if (axial?.items) {
+          this.#slots.seed({
+            names: [],
+            localCells: new Set<string>(),
+            branches: new Set<string>(),
+            mode: 'pinned',
+          })
+        }
+      }
       if (this.#slots.seeded) {
         // Capture the address NOW, synchronously with the event — the
         // incremental placement defers via microtask and its index write
@@ -6815,6 +6856,10 @@ export class ShowCellDrone extends Drone {
   #cellIsPreloading(c: Cell): boolean {
     // Plain launcher cells do not navigate into a preloaded child view.
     if (!this.imageAtlas || c.plain) return false
+    // The membership is already real to the participant, but its durable
+    // commit is still draining. Keep the tile visible and plainly pending;
+    // never let an old bright-label proof make it look fully settled.
+    if (this.#pendingCellMutations.has(c.label)) return true
     // This is interaction truth, independent of TILE_SHADE and hover. The
     // presentation may lift opacity under the pointer, but doing so can never
     // release the navigation gate.

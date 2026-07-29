@@ -7,9 +7,17 @@
 .activity-panel {
   position: fixed;
   bottom: 1.6rem;
-  left: 3px;
+  // The control bar is the ANCHOR: it publishes its occupied edge as
+  // `--hc-controls-left` (0px when it is not docked left), so the log
+  // indents beside the rail instead of running underneath it. Same var
+  // the docked toolwindows lay out against — never a second hardcoded
+  // rail width to drift out of step with.
+  left: calc(var(--hc-controls-left, 0px) + 0.5rem);
   z-index: 9;
-  max-width: 22rem;
+  max-width: min(
+    22rem,
+    calc(100vw - var(--hc-controls-left, 0px) - var(--hc-controls-right, 0px) - 1rem)
+  );
   max-height: 50vh;
   overflow-y: auto;
 
@@ -113,8 +121,8 @@
 
   .activity-panel {
     bottom: calc(4rem + var(--hc-safe-bottom, 0px));
-    left: 0.5rem;
-    max-width: calc(100vw - 1rem);
+    left: calc(var(--hc-controls-left, 0px) + 0.5rem);
+    max-width: calc(100vw - var(--hc-controls-left, 0px) - var(--hc-controls-right, 0px) - 1rem);
     font-size: 0.72rem;
   }
 
@@ -141,7 +149,7 @@
 
   .activity-panel {
     bottom: calc(3.5rem + var(--hc-safe-bottom, 0px));
-    left: 0.4rem;
-    max-width: calc(100vw - 1rem);
+    left: calc(var(--hc-controls-left, 0px) + 0.4rem);
+    max-width: calc(100vw - var(--hc-controls-left, 0px) - var(--hc-controls-right, 0px) - 0.8rem);
   }
 }

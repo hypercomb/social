@@ -182,6 +182,37 @@ export class FeaturesViewerComponent implements OnDestroy {
     cell: string; segments: string[]; sig: string; kind: string; label: string; code: string
   } | null>(null)
 
+  /** Phone-shaped viewport (narrow OR short). The review gate is a different
+   *  SHAPE here, not a squeezed version of the desktop one — see the template.
+   *  Same query as every other mobile surface in the shell; they must agree. */
+  readonly isPhone = signal(
+    typeof window !== 'undefined'
+      ? window.matchMedia('(max-width: 599px), (max-height: 449px)').matches
+      : false,
+  )
+  #phoneQuery: MediaQueryList | null = null
+  #phoneHandler = (e: MediaQueryListEvent): void => { this.isPhone.set(e.matches) }
+
+  /** The code is showing. On a phone the review is a DECISION screen and the
+   *  code is a place you go — never both at once (Jaime: "don't show the code
+   *  at the same time on the mobile"). A 6" screen showing a decision and a
+   *  wall of unread source is asking you to pretend you read it. */
+  readonly codeOpen = signal(false)
+
+  /** Read the code — the deliberate act. Accepting from in here is the
+   *  reviewed-and-accepted path (`bypassed: false`); accepting from the
+   *  decision screen without opening this is the honest override. */
+  readonly openCode = (): void => { this.codeOpen.set(true) }
+  readonly closeCode = (): void => { this.codeOpen.set(false) }
+
+  /** Leave it gated and get on with things — the "wait for the community"
+   *  answer. Nothing is written, so the feature stays inert and the gate will
+   *  ask again the next time it matters. */
+  readonly waitForCommunity = (): void => {
+    this.codeOpen.set(false)
+    this.reviewTarget.set(null)
+  }
+
   /** Hidden pool members, loaded from the signature pool. An OFF feature stays
    *  in the applied list rendered with its switch off (turning it off just
    *  means "not active / not adopted" — it never disappears); this set is what
@@ -322,6 +353,10 @@ export class FeaturesViewerComponent implements OnDestroy {
   #lastNavKey = ''
 
   constructor() {
+    this.#phoneQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
+    this.isPhone.set(this.#phoneQuery.matches)
+    this.#phoneQuery.addEventListener('change', this.#phoneHandler)
+
     this.#cleanups.push(onSelection(({ selected }) => {
       this.canvasSelectionCount.set(selected.length)
       this.canvasSelection.set(selected.map(String).filter(Boolean))
@@ -557,6 +592,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   acceptReview(bypassed: boolean): void {
     const t = this.reviewTarget()
     if (!t) return
+    this.codeOpen.set(false)
     markVerified({ sig: t.sig, cell: t.cell, kind: t.kind, label: t.label, bypassed })
     if (t.kind === 'website' && t.segments.length) markAllowedRoot(branchRootFor(t.segments))
     EffectBus.emit('feature:verified', { sig: t.sig })
@@ -564,12 +600,14 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   cancelReview(): void {
+    this.codeOpen.set(false)
     this.reviewTarget.set(null)
   }
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#clearDownloadLeash()
+    this.#phoneQuery?.removeEventListener('change', this.#phoneHandler)
   }
 
   /** Re-target this window at the canvas selection — the verb the retired

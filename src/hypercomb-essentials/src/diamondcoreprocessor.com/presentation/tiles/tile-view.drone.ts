@@ -44,6 +44,11 @@ const STEEL = 'rgba(126,182,214,0.92)'
 const DIM = 'rgba(207,226,238,0.62)'
 /** Thumb-target floor. The desktop band's 3rem circles are a cursor size. */
 const TAP = '3.25rem'
+/** The hive's hexagon, exactly: point-top, √3/2 wide for its height. Same
+ *  numbers the aggregate-index and collections-landing hexes use — a tile in
+ *  close-up must be the same shape as the tile you tapped. */
+const HEX_CLIP = 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)'
+const HEX_RATIO = '0.866'
 
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
@@ -70,6 +75,9 @@ type Chip = {
   backingKey?: string
   when?: () => boolean
   accent?: boolean
+  /** Chips that aren't a plain `tile:action` — going inside, picking the tile
+   *  — carry what they do here instead. Default: emit `tile:action` and close. */
+  run?: () => void
 }
 
 export class TileViewDrone extends Drone {
@@ -79,8 +87,8 @@ export class TileViewDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
     store: '@hypercomb.social/Store',
   }
-  protected override listens = ['tile:view-open']
-  protected override emits = ['tile:action', 'view:active']
+  protected override listens = ['tile:view-open', 'render:cell-count']
+  protected override emits = ['tile:action', 'tile:enter-request', 'view:active']
 
   #registered = false
   #bound = false
@@ -93,8 +101,15 @@ export class TileViewDrone extends Drone {
   #urls: string[] = []
   /** Labels the current render says are external (peer-published, adoptable). */
   #external = new Set<string>()
+  /** Labels the current render says are BRANCHES — the ones "go inside" means
+   *  something for. A long-hold opens this view over a branch too, and without
+   *  the verb the close-up would be a dead end for exactly the tiles that have
+   *  somewhere to go. */
+  #branches = new Set<string>()
   /** True while we hold the synthetic history entry that catches BACK. */
   #historyTrap = false
+  /** Live orientation watch, bound only while the view is up. */
+  #resizeObserver: ResizeObserver | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#registered) {
@@ -114,9 +129,11 @@ export class TileViewDrone extends Drone {
     // Adoptability rides the render pass: `external` means "on screen but not a
     // child of my layer" — the same signal that flips the desktop band to its
     // peer profile. tile:hover carries no such flag, so this is the only source.
-    this.onEffect<{ externalLabels?: unknown }>('render:cell-count', payload => {
+    this.onEffect<{ externalLabels?: unknown; branchLabels?: unknown }>('render:cell-count', payload => {
       const list = Array.isArray(payload?.externalLabels) ? payload.externalLabels : []
       this.#external = new Set(list.map(s => String(s)))
+      const branches = Array.isArray(payload?.branchLabels) ? payload.branchLabels : []
+      this.#branches = new Set(branches.map(s => String(s)))
     })
 
     // The tile stopped existing under us (deleted, or navigated away from).
@@ -161,6 +178,8 @@ export class TileViewDrone extends Drone {
     if (!this.#label) return
     this.#label = null
     this.#segments = []
+    this.#resizeObserver?.disconnect()
+    this.#resizeObserver = null
     if (this.#host) {
       this.#host.remove()
       this.#host = null
@@ -209,7 +228,7 @@ export class TileViewDrone extends Drone {
     host.id = 'hc-tile-view-host'
     host.style.cssText =
       `position:fixed;inset:0;z-index:${TAKEOVER_Z};overflow:hidden;background:#05040f;` +
-      'display:flex;flex-direction:column;font-family:inherit;' +
+      'display:flex;align-items:center;justify-content:center;font-family:inherit;' +
       'padding:max(0.9rem,env(safe-area-inset-top,0px)) max(0.9rem,env(safe-area-inset-right,0px)) ' +
       'max(0.9rem,env(safe-area-inset-bottom,0px)) max(0.9rem,env(safe-area-inset-left,0px));'
     host.setAttribute('data-consumes-wheel', '')
@@ -222,46 +241,172 @@ export class TileViewDrone extends Drone {
     this.#host = host
     this.#setViewActive(true)
 
-    // Picture — a background-image on a definite-size box, NOT an <img>: a
-    // viewBox-only SVG has no intrinsic size and collapses an <img> to 0×0.
-    const picture = document.createElement('div')
-    picture.dataset['role'] = 'picture'
-    picture.style.cssText =
-      'flex:1 1 auto;min-height:0;border-radius:14px;' +
-      'background-repeat:no-repeat;background-position:center;background-size:contain;'
-    host.appendChild(picture)
+    // ── the stage: hexagon, and everything said about it ──
+    // PORTRAIT stacks them — the hexagon full-width with its name, notes and
+    // options underneath. LANDSCAPE is short, so the hexagon sits in the
+    // middle of the screen with the same column beside it. One structure,
+    // two directions; `#applyLayout` is the only thing that differs.
+    const stage = document.createElement('div')
+    stage.dataset['role'] = 'stage'
+    stage.style.cssText =
+      'display:flex;align-items:center;justify-content:center;gap:1.2rem;' +
+      'width:100%;max-width:56rem;max-height:100%;min-height:0;'
+    host.appendChild(stage)
+
+    // THE TILE, AS A TILE. A hexagon — the same point-top shape it has on the
+    // hive — not a rectangle with the picture letterboxed into it. Tapping a
+    // hex and getting a hex back is what makes this read as "that tile, up
+    // close" rather than a separate screen about it. The outer element is the
+    // 2px steel edge: clip-path erases borders, so the frame has to be a
+    // second clipped box behind the first.
+    const hexFrame = document.createElement('div')
+    hexFrame.dataset['role'] = 'hex-frame'
+    hexFrame.style.cssText =
+      // border-box, or the 2px edge is ADDED to the sized box and the ratio
+      // — and with it the hexagon — comes out slightly squashed.
+      `flex:0 0 auto;box-sizing:border-box;aspect-ratio:${HEX_RATIO};padding:2px;background:${STEEL};` +
+      `clip-path:${HEX_CLIP};`
+    const hex = document.createElement('div')
+    hex.dataset['role'] = 'picture'
+    hex.style.cssText =
+      'width:100%;height:100%;display:flex;align-items:center;justify-content:center;' +
+      `clip-path:${HEX_CLIP};background:#0b1018 center/cover no-repeat;`
+    // Until (or unless) a picture lands, the hexagon carries the tile's first
+    // letter rather than sitting there as a black shape.
+    const initial = document.createElement('span')
+    initial.dataset['role'] = 'initial'
+    initial.textContent = [...label][0]?.toUpperCase() ?? ''
+    initial.style.cssText = `font-size:4rem;font-weight:700;color:${DIM};opacity:0.5;`
+    hex.appendChild(initial)
+    hexFrame.appendChild(hex)
+    stage.appendChild(hexFrame)
+
+    // ── the column beside/below it ──
+    const panel = document.createElement('div')
+    panel.dataset['role'] = 'panel'
+    panel.style.cssText =
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'gap:0.55rem;min-width:0;min-height:0;'
+    stage.appendChild(panel)
 
     const name = document.createElement('div')
     name.textContent = label
+    // Alignment is the panel's (centred under the hexagon in portrait, ranged
+    // left beside it in landscape) — `#applyLayout` owns it, so neither of
+    // these may pin its own.
     name.style.cssText =
-      'flex:0 0 auto;margin:0.85rem 0 0;font-size:1.35rem;font-weight:600;' +
-      'color:rgba(245,245,245,0.94);text-align:center;word-break:break-word;'
-    host.appendChild(name)
+      'flex:0 0 auto;font-size:1.35rem;font-weight:600;' +
+      'color:rgba(245,245,245,0.94);word-break:break-word;'
+    panel.appendChild(name)
 
     const notes = this.#notesText(label)
     if (notes) {
       const noteEl = document.createElement('div')
       noteEl.textContent = notes
       noteEl.style.cssText =
-        `flex:0 1 auto;margin:0.5rem 0 0;font-size:0.95rem;line-height:1.45;color:${DIM};` +
-        'text-align:center;overflow-y:auto;max-height:30vh;white-space:pre-wrap;'
-      host.appendChild(noteEl)
+        `flex:0 1 auto;font-size:0.95rem;line-height:1.45;color:${DIM};` +
+        'overflow-y:auto;max-height:26vh;white-space:pre-wrap;'
+      panel.appendChild(noteEl)
     }
 
-    host.appendChild(this.#actionRow(label))
+    panel.appendChild(this.#actionRow(label))
+
+    this.#applyLayout()
+    // A phone in a full-screen view is a phone that will be rotated. Re-lay it
+    // out rather than leave a landscape hexagon running off a portrait screen.
+    // A ResizeObserver on the host, NOT a `resize`/media-query listener. The
+    // host is `inset: 0`, so its box IS the viewport — and an observer reports
+    // the box changing rather than waiting for an event to be dispatched.
+    // Verified: in a non-compositing embedded view the viewport can change
+    // with neither `resize` nor the orientation query firing at all, which
+    // leaves a landscape hexagon stranded on a portrait screen. Measuring
+    // cannot miss what listening can. (`#applyLayout` only touches the host's
+    // CHILDREN, so this can never observe its own writes.)
+    this.#resizeObserver = new ResizeObserver(this.#onOrientation)
+    this.#resizeObserver.observe(host)
   }
 
-  /** The action row — the touch equivalent of the hover band. Only chips that
-   *  can actually do something render: adopt appears solely on a peer tile,
-   *  public/private solely on one of your own. */
+  #onOrientation = (): void => { this.#applyLayout() }
+
+  /** The ONE difference between the two orientations: which way the stage
+   *  runs, and what bounds the hexagon.
+   *
+   *  PORTRAIT — a flex column, width-bound: the hexagon is as wide as the
+   *  screen sensibly allows and everything said about it sits underneath.
+   *
+   *  LANDSCAPE — the screen is short, so the hexagon is sized off the HEIGHT
+   *  and the column moves beside it. It is a 1fr | auto | 1fr GRID, not a
+   *  row: with a plain row the panel takes all the leftover width and shoves
+   *  the hexagon against the left edge. The empty first track is the panel's
+   *  mirror image, which puts the hexagon dead centre of the screen — where a
+   *  tile you are looking at closely belongs. */
+  #applyLayout(): void {
+    const host = this.#host
+    if (!host) return
+    const landscape = window.matchMedia('(orientation: landscape)').matches
+    const stage = host.querySelector('[data-role="stage"]') as HTMLElement | null
+    const frame = host.querySelector('[data-role="hex-frame"]') as HTMLElement | null
+    const panel = host.querySelector('[data-role="panel"]') as HTMLElement | null
+    const row = host.querySelector('[data-role="actions"]') as HTMLElement | null
+    if (!stage || !frame || !panel) return
+
+    if (landscape) {
+      stage.style.display = 'grid'
+      stage.style.gridTemplateColumns = '1fr auto 1fr'
+      frame.style.gridColumn = '2'
+      panel.style.gridColumn = '3'
+      frame.style.height = 'min(72vh, 21rem)'
+      frame.style.width = 'auto'
+      panel.style.flex = ''
+      panel.style.alignItems = 'flex-start'
+      panel.style.textAlign = 'left'
+      if (row) { row.style.justifyContent = 'flex-start'; row.style.marginTop = '0.6rem' }
+    } else {
+      stage.style.display = 'flex'
+      stage.style.gridTemplateColumns = ''
+      frame.style.gridColumn = ''
+      panel.style.gridColumn = ''
+      stage.style.flexDirection = 'column'
+      frame.style.width = 'min(66vw, 19rem)'
+      frame.style.height = 'auto'
+      panel.style.flex = '0 1 auto'
+      panel.style.alignItems = 'center'
+      panel.style.textAlign = 'center'
+      if (row) { row.style.justifyContent = 'center'; row.style.marginTop = '0.4rem' }
+    }
+  }
+
+  /** The action row — the touch equivalent of the hover band, and the answer
+   *  to "what else do I need to do with a tile I just picked out". Only chips
+   *  that can actually do something render: adopt appears solely on a peer
+   *  tile, public/private solely on one of your own, GO INSIDE solely on a
+   *  branch. */
   #actionRow(label: string): HTMLElement {
     const row = document.createElement('div')
+    row.dataset['role'] = 'actions'
     row.style.cssText =
       'flex:0 0 auto;display:flex;align-items:center;justify-content:center;' +
-      'gap:0.75rem;flex-wrap:wrap;margin-top:1rem;'
+      'gap:0.6rem;flex-wrap:wrap;margin-top:0.4rem;'
 
     const external = this.#external.has(label)
     const chips: Chip[] = [
+      // GO INSIDE leads: a branch's whole point is what is under it, and the
+      // close-up is reached by holding one. Emitted as a request rather than
+      // driven from here — every readiness gate, phantom-segment latch and
+      // guard that entering a tile needs already lives in the overlay, and a
+      // second implementation of it would be a second set of those bugs.
+      {
+        action: 'enter',
+        glyph: 'login',
+        labelKey: 'tile-view.enter',
+        fallback: 'go inside',
+        when: () => this.#branches.has(label),
+        accent: true,
+        run: () => {
+          this.emitEffect('tile:enter-request', { label })
+          this.close()
+        },
+      },
       {
         action: 'adopt',
         glyph: 'download',
@@ -288,6 +433,29 @@ export class TileViewDrone extends Drone {
         labelKey: 'action.make-public',
         fallback: 'share',
         when: () => !external,
+      },
+      // What this tile CAN DO — the beehaviors panel, scoped to it. On a phone
+      // this is the only way in: the desktop route is the hover band's puzzle
+      // piece, which a finger never reaches.
+      { action: 'features', glyph: 'extension', labelKey: 'action.features', fallback: 'features' },
+      // PICK IT. The close-up is one tile; the picked set is how you act on
+      // several, and every set verb (marking, removing, the clipboard, the
+      // options ring) reads that one selection. Arming the picker on the way
+      // out means the tile you were just looking at is the first one in.
+      {
+        action: 'select',
+        glyph: 'select_all',
+        labelKey: 'tile-view.select',
+        fallback: 'select',
+        run: () => {
+          const select = window.ioc?.get?.('@diamondcoreprocessor.com/SelectModeDrone') as
+            { arm(): void } | undefined
+          const selection = window.ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
+            { add(label: string): void } | undefined
+          select?.arm()
+          selection?.add(label)
+          this.close()
+        },
       },
     ]
 
@@ -323,6 +491,7 @@ export class TileViewDrone extends Drone {
     btn.appendChild(text)
 
     btn.addEventListener('click', () => {
+      if (chip.run) { chip.run(); return }
       // The exact rendered name: swarm-adopt string-matches the peer entry's
       // `name` and does NOT normalize, so a normalized label would silently
       // match nothing.
@@ -371,12 +540,21 @@ export class TileViewDrone extends Drone {
     const url = await this.#objectUrl(sig)
     if (!url || this.#label !== label || !this.#host) return
     const picture = this.#host.querySelector('[data-role="picture"]') as HTMLElement | null
-    if (picture) picture.style.backgroundImage = `url("${url}")`
+    if (!picture) return
+    picture.style.backgroundImage = `url("${url}")`
+    // The letter was a stand-in for the picture, not a caption for it.
+    const initial = picture.querySelector('[data-role="initial"]') as HTMLElement | null
+    if (initial) initial.style.display = 'none'
   }
 
-  /** The tile's DISPLAY picture signature (`large.image`), read canonical-first
-   *  then through the participant-local props index — the same two stores, in
-   *  the same order, the slides viewer reads (index-only tiles are common). */
+  /** The tile's DISPLAY picture signature, read canonical-first then through
+   *  the participant-local props index — the same two stores, in the same
+   *  order, the slides viewer reads (index-only tiles are common).
+   *
+   *  `small.image` FIRST, not `large.image`: that is the point-top hex
+   *  thumbnail the hive itself renders, already framed for this shape. The
+   *  full-size image is the fallback, cropped to `cover` — right picture,
+   *  slightly different framing from the hex you tapped. */
   async #pictureSig(label: string): Promise<string> {
     const store = this.resolve<StoreShape>('store')
     const history = window.ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryShape | undefined
@@ -387,8 +565,12 @@ export class TileViewDrone extends Drone {
       try {
         const blob = await store.getResourceLocal(sig)
         if (!blob) return ''
-        const props = JSON.parse(await blob.text()) as { large?: { image?: unknown } }
-        const image = props?.large?.image
+        const props = JSON.parse(await blob.text()) as {
+          small?: { image?: unknown }
+          flat?: { small?: { image?: unknown } }
+          large?: { image?: unknown }
+        }
+        const image = props?.small?.image ?? props?.flat?.small?.image ?? props?.large?.image
         return typeof image === 'string' && SIG.test(image) ? image : ''
       } catch { return '' }
     }

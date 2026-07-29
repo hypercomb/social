@@ -54,15 +54,39 @@ export interface SubstrateUrlSource {
   readonly builtin?: boolean
 }
 
+/**
+ * PLACES — the participant's own collection, held as signature references
+ * copied into the `sign('places:references')` pool.
+ *
+ * This source carries no location of its own. Every other source type names
+ * somewhere to go LOOK (a path, a handle, a baseUrl, a layer) and resolves by
+ * walking it. A place is already resolved: the reference IS the image
+ * signature, and the bytes are the sig-named file at the OPFS root. So
+ * "adding a place" is a copy of a reference — no fetch, no handle, no
+ * permission prompt, and the same image referenced from two collections is
+ * stored once.
+ *
+ * Exactly one of these exists (built-in). Its members are the pool's
+ * contents, so the source record itself stays empty — the pool is the list.
+ */
+export interface SubstratePlacesSource {
+  readonly type: 'places'
+  readonly id: string
+  readonly label: string
+  readonly builtin?: boolean
+}
+
 export type SubstrateSource =
   | SubstrateLayerSource
   | SubstrateHiveSource
   | SubstrateFolderSource
   | SubstrateUrlSource
+  | SubstratePlacesSource
 
-/** Registry persisted in the sign('substrate') pool as the `registry`
- *  record (legacy: root OPFS `0000` under `substrate-registry`, a
- *  read-fallback scrubbed once migrated). */
+/** Registry persisted in the sign('places:sources') pool as the `registry`
+ *  record. Read-fallbacks, both drained on first migrate: the retired
+ *  sign('substrate') pool, then root OPFS `0000` under
+ *  `substrate-registry`. */
 export interface SubstrateRegistry {
   readonly sources: readonly SubstrateSource[]
   readonly activeId: string | null

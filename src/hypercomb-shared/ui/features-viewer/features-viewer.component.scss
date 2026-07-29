@@ -418,32 +418,54 @@ $accent: #c8b8ff;
   .features-panel { top: max(calc(3.85rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
 }
 
-// ── phone: a BOTTOM SHEET, not a right-docked slab ────────────────
+// ── phone: THE WHOLE PAGE, not a docked slab or a peeking sheet ────
 // The docked panel is 280–680px wide, so on a 375px phone the clamp lands it
 // at ~351px — 94% of the screen, full height, with the hive squeezed into the
-// ~24px strip beside it and the resize grip sitting on top of that strip. It
-// is the same failure the tags viewer had before its rescue, and this is the
-// same rescue: full-width sheet along the bottom, capped height, safe-area
-// padding, and the inline width from `hcDockedPanel` beaten with `!important`.
-// Landscape phones (wide but SHORT) are covered too — the `phone-only` mixin
-// is width-only and would miss them, which is why the query is spelled out.
-// Turning a feature on or off is the ONE thing this panel does on a phone, and
-// a row tap already toggles; everything else here is making that tap possible.
+// ~24px strip beside it and the resize grip sitting on top of that strip. The
+// first rescue made it a 62vh bottom sheet, which fixed the width and left the
+// content in a letterbox: search, subject, two sections and a review gate all
+// scrolling through a third of the screen.
+//
+// So: the whole page (Jaime: "use the whole page for feature enabled, make
+// sure that it's clear"). Turning features on and off, and deciding whether to
+// allow a foreign one, are decisions — they get the screen while they are
+// being made, and the hive is one tap behind them. Landscape phones (wide but
+// SHORT) are covered too: the `phone-only` mixin is width-only and would miss
+// them, which is why the query is spelled out.
 @media (max-width: 599px), (max-height: 449px) {
   .features-panel {
-    top: auto;
+    top: 0;
     left: 0;
     right: 0;
     bottom: 0;
     width: 100% !important;
     min-width: 0;
     max-width: none;
-    max-height: min(62vh, 30rem);
-    border-left: none;
-    border-top: 1px solid rgba($accent, 0.5);
-    border-radius: 14px 14px 0 0;
-    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($accent, 0.06) inset;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  // The scrolling section list takes whatever the fixed chrome above and below
+  // it leaves — on a full page that is most of the screen, which is the point.
+  .features-scroll { flex: 1 1 auto; min-height: 0; }
+
+  // WHILE THERE IS A DECISION TO MAKE, THE DECISION IS THE PAGE. A search box,
+  // a subject line, two lists of other features and a footer hint around a
+  // "should I allow this?" question is exactly the clutter that makes people
+  // tap the first button. Everything else stands down until it is answered.
+  .features-panel.reviewing {
+    .features-header,
+    .features-tile,
+    .features-selection,
+    .paint-bar,
+    .bulk-bar,
+    .download-status,
+    .features-scroll,
+    .features-foot { display: none; }
   }
 
   // The panel scales its own text DOWN as it narrows (`--hc-panel-scale`,
@@ -870,6 +892,85 @@ $path-fail: #e08a8a;     // failed terminal
   background: transparent;
   border-color: rgba(255, 255, 255, 0.2);
   color: rgba(255, 255, 255, 0.6);
+}
+
+// ── the phone review: a decision screen, then (optionally) the code ──
+// It owns the whole panel rather than sitting as a band above the feature
+// list: while there is a decision to make, the decision IS the screen.
+.feature-review.phone {
+  flex: 1 1 auto;
+  min-height: 0;
+  justify-content: center;
+  gap: 0.9em;
+  padding: 1.2em 1.1em calc(1.2em + env(safe-area-inset-bottom, 0px));
+  border-bottom: none;
+
+  .review-title { font-size: 1.05em; line-height: 1.35; }
+  .review-note { font-size: 0.92em; }
+
+  // The warning. Amber, hairline, no icon shouting, no red: it is a true
+  // thing said once — a feature you allow runs with the reach of everything
+  // else you have. Enough to make you think; not enough to make you flinch.
+  .review-warn {
+    margin: 0;
+    padding: 0.75em 0.85em;
+    background: rgba(255, 180, 120, 0.07);
+    border: 1px solid rgba(255, 180, 120, 0.32);
+    border-radius: 0.5em;
+    font-size: 0.88em;
+    line-height: 1.55;
+    color: rgba(255, 214, 170, 0.92);
+  }
+
+  // Stacked, full-width, thumb-sized — a decision is not a toolbar.
+  .review-actions {
+    flex-direction: column;
+    gap: 0.55em;
+    margin-top: 0.2em;
+  }
+
+  .review-actions button {
+    width: 100%;
+    min-height: 3em;
+    font-size: 1em;
+    font-weight: 600;
+  }
+
+  // `features.allow` is a lowercase chip label everywhere else it appears —
+  // beside a row, mid-sentence. Here it is the answer to a question on its own
+  // screen, so it takes a capital. A no-op in scripts without letter case.
+  .review-accept { text-transform: capitalize; }
+
+  // Reading the code is a third way out, and quieter than either answer —
+  // it decides nothing by itself.
+  .review-readcode {
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.16);
+    color: rgba(255, 255, 255, 0.62);
+    font-weight: 500;
+  }
+
+  // Reading: the source gets the height, the two answers stay pinned under it.
+  &.reading {
+    justify-content: flex-start;
+
+    .review-code {
+      flex: 1 1 auto;
+      max-height: none;
+      min-height: 0;
+      font-size: 0.8em;
+    }
+  }
+
+  .review-back {
+    padding: 0 0.5em 0 0;
+    background: none;
+    border: none;
+    font-size: 1.3em;
+    line-height: 1;
+    color: rgba($accent, 0.9);
+    cursor: pointer;
+  }
 }
 
 // ── mode switch (header) ──────────────────────────────────────────

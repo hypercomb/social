@@ -86,7 +86,7 @@ export class SubstrateQueenBee extends QueenBee {
 
     switch (trimmed) {
       case '':
-        EffectBus.emit('substrate-organizer:open', {})
+        EffectBus.emit('places:open', {})
         return
 
       case 'here': {

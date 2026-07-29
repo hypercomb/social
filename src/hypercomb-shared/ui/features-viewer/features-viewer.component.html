@@ -1,6 +1,7 @@
 @if (visible()) {
   <aside
     class="features-panel"
+    [class.reviewing]="isPhone() && !!reviewTarget()"
     hcDockInset="right"
     hcDockedPanel="features-viewer"
     dockSide="right"
@@ -167,19 +168,60 @@
 
     <!-- ── Review gate: a foreign feature handed here by the website gate ── -->
     @if (reviewTarget(); as rt) {
-      <div class="feature-review">
-        <div class="review-head">
-          <span class="review-title">{{ 'features.review.title' | t: { label: rt.label } }}</span>
-          <span class="review-kind" [title]="rt.sig">{{ rt.kind }}</span>
+      @if (isPhone()) {
+        <!-- ══ PHONE: a DECISION, and the code is somewhere you GO ══
+             The desktop gate shows the source and the buttons together, which
+             on a phone means a wall of unread code above two choices — an
+             invitation to pretend you read it. Here the screen asks the actual
+             question, in words, and reading the code is its own full page. -->
+        <div class="feature-review phone" [class.reading]="codeOpen()">
+          @if (codeOpen()) {
+            <div class="review-head">
+              <button type="button" class="review-back" (click)="closeCode()"
+                      [attr.aria-label]="'features.review.back' | t">←</button>
+              <span class="review-title">{{ rt.label }}</span>
+              <span class="review-kind" [title]="rt.sig">{{ rt.kind }}</span>
+            </div>
+            <pre class="review-code">{{ rt.code }}</pre>
+            <div class="review-actions">
+              <!-- Accepting from IN HERE is the reviewed path — you have had
+                   the code in front of you, so it is not recorded as an
+                   unread override. -->
+              <button type="button" class="review-accept" (click)="acceptReview(false)">{{ 'features.allow' | t }}</button>
+              <button type="button" class="review-cancel" (click)="waitForCommunity()">{{ 'features.review.pending' | t }}</button>
+            </div>
+          } @else {
+            <div class="review-head">
+              <span class="review-title">{{ 'features.review.title' | t: { label: rt.label } }}</span>
+              <span class="review-kind" [title]="rt.sig">{{ rt.kind }}</span>
+            </div>
+            <p class="review-note">{{ 'features.review.note.phone' | t }}</p>
+            <!-- The honest warning, said once and calmly. Not a scare screen:
+                 the risk is real and the sentence is plain, and then it gets
+                 out of the way of the two buttons. -->
+            <p class="review-warn">{{ 'features.review.warn' | t }}</p>
+            <div class="review-actions">
+              <button type="button" class="review-accept" (click)="acceptReview(true)">{{ 'features.allow' | t }}</button>
+              <button type="button" class="review-cancel" (click)="waitForCommunity()">{{ 'features.review.pending' | t }}</button>
+              <button type="button" class="review-readcode" (click)="openCode()">{{ 'features.review.readcode' | t }}</button>
+            </div>
+          }
         </div>
-        <p class="review-note">{{ 'features.review.note' | t }}</p>
-        <pre class="review-code">{{ rt.code }}</pre>
-        <div class="review-actions">
-          <button type="button" class="review-accept" (click)="acceptReview(false)">{{ 'features.review.accept' | t }}</button>
-          <button type="button" class="review-bypass" (click)="acceptReview(true)" [attr.title]="'features.review.bypass.hint' | t">{{ 'features.review.bypass' | t }}</button>
-          <button type="button" class="review-cancel" (click)="cancelReview()">{{ 'features.review.cancel' | t }}</button>
+      } @else {
+        <div class="feature-review">
+          <div class="review-head">
+            <span class="review-title">{{ 'features.review.title' | t: { label: rt.label } }}</span>
+            <span class="review-kind" [title]="rt.sig">{{ rt.kind }}</span>
+          </div>
+          <p class="review-note">{{ 'features.review.note' | t }}</p>
+          <pre class="review-code">{{ rt.code }}</pre>
+          <div class="review-actions">
+            <button type="button" class="review-accept" (click)="acceptReview(false)">{{ 'features.review.accept' | t }}</button>
+            <button type="button" class="review-bypass" (click)="acceptReview(true)" [attr.title]="'features.review.bypass.hint' | t">{{ 'features.review.bypass' | t }}</button>
+            <button type="button" class="review-cancel" (click)="cancelReview()">{{ 'features.review.cancel' | t }}</button>
+          </div>
         </div>
-      </div>
+      }
     }
 
     @if (group(); as group) {
@@ -327,9 +369,13 @@
                            this quiet chip says why nothing mounts, with the
                            allow override right beside it (bulk-allow in the
                            top bar covers many at once). -->
+                      <!-- On a phone the state is said in full — "pending
+                           community verification" — rather than in a shorthand
+                           chip with a number beside it. Two words for the two
+                           states this can be in: allowed, or waiting. -->
                       @if (feat.gated) {
                         <span class="feature-blocked">
-                          <span class="needs-ok-chip">{{ 'features.chip.needsOk' | t }}</span>
+                          <span class="needs-ok-chip">{{ (isPhone() ? 'features.review.pending' : 'features.chip.needsOk') | t }}</span>
                           <button
                             class="allow-btn"
                             type="button"

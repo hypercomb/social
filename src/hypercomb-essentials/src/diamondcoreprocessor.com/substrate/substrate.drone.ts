@@ -25,7 +25,7 @@ export class SubstrateDrone extends Drone {
     'cell:attach-pending',
     'indicator:click',
   ]
-  protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
+  protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'places:open', 'activity:log']
 
   #initialized = false
   #pastePending = false
@@ -141,7 +141,7 @@ export class SubstrateDrone extends Drone {
         return
       }
       if (key === 'substrate') {
-        EffectBus.emit('substrate-organizer:open', {})
+        EffectBus.emit('places:open', {})
       }
     })
 

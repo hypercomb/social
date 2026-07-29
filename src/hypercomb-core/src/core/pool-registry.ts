@@ -62,7 +62,10 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
   'registry',
   'roots',
   'structure',
-  'substrate',
+  // 'substrate' RETIRED — migrated to the colon-scoped `places:*` spellings
+  // below. The old address stays a READ-FALLBACK drain source in
+  // substrate.service.ts (see LEGACY_SUBSTRATE_POOL there); nothing writes
+  // it. Do not re-add: this list may only shrink.
   'temporary',
   'threads',
   'translations',
@@ -79,6 +82,14 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
  *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'pheromones:deposits',
+  // Places — the substrate surface, re-spelled off the bare word. `:sources`
+  // holds the registry record + per-location override records (the retired
+  // sign('substrate') pool's contents, migrated on first read). `:references`
+  // holds one file per copied reference, NAMED BY THE IMAGE SIGNATURE — the
+  // pool listing IS the collection, so copying a reference in is the whole
+  // write and the same image copied twice lands on one filename.
+  'places:references',
+  'places:sources',
   'tutorial:artifacts',
   'usage:dwell',
   'websites:menu',

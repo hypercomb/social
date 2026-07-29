@@ -26,7 +26,16 @@
 // the tile shows one hex but two people are behind it — so that case hands off
 // to the panel, preselected, which is the surface built to ask.
 
+// ON MOBILE THIS PILL STANDS DOWN. SelectModeDrone is the one picker on a
+// phone — it is always up, and "keep" is simply the verb it offers once the
+// picked set contains somebody else's tile, which it asks for here
+// (`keepSelected`). Two pills on a phone claimed there were two selections,
+// and the general picker used to disappear in a swarm — exactly where picking
+// matters most. On a pointer this pill stays: there is no always-up picker
+// there, because ctrl-click already is one.
+
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
@@ -44,13 +53,14 @@ type SelectionShape = {
   selected: ReadonlySet<string>
   clear(): void
 }
+type MobileModeLike = { active?: boolean }
 
 export class SampleSwarmDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Pick several peer tiles while browsing a swarm, then keep them.'
 
   protected override deps = {}
-  protected override listens = ['render:cell-count', 'selection:changed']
+  protected override listens = ['render:cell-count', 'selection:changed', MOBILE_MODE_EFFECT]
   protected override emits = ['sample:mode', 'tile:action', 'swarm:adopt-panel:open']
 
   #registered = false
@@ -60,6 +70,9 @@ export class SampleSwarmDrone extends Drone {
   #external: string[] = []
   #selected: string[] = []
   #armed = false
+  /** On a phone the general picker owns the pill; this one only lends it the
+   *  keep verb. See the note at the top of the file. */
+  #mobile = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#registered) {
@@ -68,6 +81,12 @@ export class SampleSwarmDrone extends Drone {
     }
     if (this.#bound) return
     this.#bound = true
+
+    this.#mobile = !!(window.ioc?.get?.(MOBILE_MODE_IOC_KEY) as MobileModeLike | undefined)?.active
+    this.onEffect<{ active?: boolean }>(MOBILE_MODE_EFFECT, payload => {
+      this.#mobile = !!payload?.active
+      this.#reconcile()
+    })
 
     this.onEffect<{ externalLabels?: unknown }>('render:cell-count', payload => {
       const list = Array.isArray(payload?.externalLabels) ? payload.externalLabels : []
@@ -112,6 +131,13 @@ export class SampleSwarmDrone extends Drone {
   }
 
   #reconcile(): void {
+    // On a phone the general picker is the pill; this drone keeps only its
+    // keep verb (`keepSelected`), reached from that pill.
+    if (this.#mobile) {
+      if (this.#armed) this.#disarm()
+      this.#teardown()
+      return
+    }
     // Nothing to sample here — no pill, and never a mode left armed over a
     // page that has no peer tiles on it.
     if (this.#external.length === 0) {
@@ -192,6 +218,16 @@ export class SampleSwarmDrone extends Drone {
     btn.appendChild(span)
     btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); onTap() })
     return btn
+  }
+
+  /** Keep these peer tiles. The mobile picker's "Keep N" calls this: the
+   *  selection was built there, but resolving a label to the participant who
+   *  published it — and the disambiguation when two people publish the same
+   *  name — is this drone's job and stays here. */
+  public keepSelected(labels: readonly string[]): void {
+    const peers = new Set(this.#external)
+    const keepable = labels.map(l => String(l)).filter(l => peers.has(l))
+    if (keepable.length > 0) this.#keep(keepable)
   }
 
   /** Keep the picked peer tiles. Resolves each label to the publisher offering

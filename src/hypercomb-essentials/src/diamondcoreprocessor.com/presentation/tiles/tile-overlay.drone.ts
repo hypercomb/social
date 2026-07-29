@@ -451,7 +451,7 @@ export class TileOverlayDrone extends Drone {
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
     'tags:removal-pending', 'tags:apply-pending',
-    'sample:mode', 'select:mode',
+    'sample:mode', 'select:mode', 'tile:enter-request',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
 
@@ -917,6 +917,16 @@ export class TileOverlayDrone extends Drone {
       this.onEffect<{ active: boolean }>('select:mode', (payload) => {
         this.#selectMode = !!payload?.active
         this.#updateVisibility()
+      })
+
+      // GO INSIDE, asked for from somewhere that is not a tile press — the
+      // fullscreen tile view's own verb. Entering a tile carries readiness
+      // gates, the phantom-segment latch and the deferred-entry queue, all of
+      // which live in #navigateInto; a second caller re-uses them rather than
+      // growing a second copy that drifts.
+      this.onEffect<{ label?: unknown }>('tile:enter-request', (payload) => {
+        const label = String(payload?.label ?? '')
+        if (label) this.#navigateInto(label)
       })
 
       // A staged pheromone removal takes over tile clicks: while it is armed,

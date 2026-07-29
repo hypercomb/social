@@ -291,11 +291,11 @@ export class LayerCommitter {
     // event normally, which is exactly the reconciliation we want.
     EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean; viaUpdate?: boolean; revive?: boolean }>('cell:added',   p => {
       if (p?.fromCascade || p?.viaUpdate) return
-      this.#queueChildName(p?.segments, 'add', p?.cell, p?.revive)
+      this.#queueOptimisticChild(p?.segments, 'add', p?.cell, p?.revive)
     })
     EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean; viaUpdate?: boolean }>('cell:removed', p => {
       if (p?.fromCascade || p?.viaUpdate) return
-      this.#queueChildName(p?.segments, 'remove', p?.cell)
+      this.#queueOptimisticChild(p?.segments, 'remove', p?.cell)
     })
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:saved',   p => this.#queueBare(p?.segments))
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:hidden',  p => this.#queueBare(p?.segments))
@@ -379,15 +379,55 @@ export class LayerCommitter {
     op: 'add' | 'remove',
     cell?: string,
     revive?: boolean,
-  ): void {
+  ): Promise<void> {
     const trimmed = cell ? String(cell).trim() : ''
     if (!trimmed) {
-      this.#machine.request({ segments: this.#cleanSegments(segments) })
-      return
+      return this.#machine.requestAndWait({ segments: this.#cleanSegments(segments) })
     }
-    this.#machine.request({
+    return this.#machine.requestAndWait({
       segments: this.#cleanSegments(segments),
       delta: { kind: 'name', slot: 'children', op, cell: trimmed, ...(revive ? { revive } : {}) },
+    })
+  }
+
+  /**
+   * Membership is optimistic: every surface consumes cell:added/removed
+   * synchronously, while the durable marker drains through the FIFO. This
+   * lifecycle makes that contract explicit. Success merely clears the pending
+   * shade; failure emits the inverse event immediately, restoring every open
+   * surface without waiting for a later history refresh.
+   */
+  #queueOptimisticChild(
+    segments: string[] | null | undefined,
+    op: 'add' | 'remove',
+    cell?: string,
+    revive?: boolean,
+  ): void {
+    const name = String(cell ?? '').trim()
+    const addressed = this.#cleanSegments(segments)
+    if (!name) { void this.#queueChildName(segments, op, cell, revive); return }
+    EffectBus.emit('cell:mutation-state', {
+      cell: name, segments: addressed ?? undefined, op, state: 'pending',
+    })
+    void this.#queueChildName(segments, op, name, revive).then(() => {
+      EffectBus.emit('cell:mutation-state', {
+        cell: name, segments: addressed ?? undefined, op, state: 'settled',
+      })
+    }).catch(err => {
+      EffectBus.emit('cell:mutation-state', {
+        cell: name, segments: addressed ?? undefined, op, state: 'failed',
+        error: String((err as Error)?.message ?? err),
+      })
+      EffectBus.emit(op === 'add' ? 'cell:removed' : 'cell:added', {
+        cell: name,
+        segments: addressed ?? undefined,
+        fromCascade: true,
+        mutationRollback: true,
+      })
+      EffectBus.emit('toast:show', {
+        type: 'warning',
+        message: `${op === 'add' ? 'Add' : 'Remove'} did not save — the change was restored.`,
+      })
     })
   }
 
