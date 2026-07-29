@@ -36,6 +36,18 @@ try {
       event,
       detail,
     })
+    const longTasks = []
+    const longTaskObserver = typeof PerformanceObserver === 'function'
+      ? new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          longTasks.push({
+            at: Math.round(entry.startTime - epoch),
+            duration: Math.round(entry.duration),
+          })
+        }
+      })
+      : null
+    try { longTaskObserver?.observe({ type: 'longtask', buffered: true }) } catch {}
     const offCells = bus.on('render:cell-count', payload => {
       if (payload?.labels?.includes(cell)) mark('cell-count', 'present')
       else mark('cell-count', 'absent')
@@ -47,6 +59,20 @@ try {
     renderer.applyGeometry = cells => {
       mark('apply-geometry', cells.some(item => item.label === cell) ? 'present' : 'absent')
       return originalApply(cells)
+    }
+    const originalLabelUv = renderer.atlas.getLabelUV.bind(renderer.atlas)
+    renderer.atlas.getLabelUV = label => {
+      const start = performance.now()
+      const value = originalLabelUv(label)
+      mark('label-uv', `${label}:${Math.round(performance.now() - start)}ms`)
+      return value
+    }
+    const originalBuildGeometry = renderer.buildFillQuadGeometry.bind(renderer)
+    renderer.buildFillQuadGeometry = (...args) => {
+      const start = performance.now()
+      const value = originalBuildGeometry(...args)
+      mark('build-geometry', `${Math.round(performance.now() - start)}ms`)
+      return value
     }
 
     const settled = op => new Promise((resolve, reject) => {
@@ -73,6 +99,7 @@ try {
           // Pixi's ticker runs before this callback. The frame therefore
           // includes the geometry produced by the membership event.
           await new Promise(resolve => requestAnimationFrame(resolve))
+          mark('painted-frame', present ? 'present' : 'absent')
           return performance.now() - start
         }
         await new Promise(resolve => setTimeout(resolve, 1))
@@ -99,7 +126,10 @@ try {
     await removeSettled
     offCells()
     offMutation()
+    longTaskObserver?.disconnect()
     renderer.applyGeometry = originalApply
+    renderer.atlas.getLabelUV = originalLabelUv
+    renderer.buildFillQuadGeometry = originalBuildGeometry
 
     return {
       addMs: Math.round(addMs),
@@ -110,6 +140,7 @@ try {
       removePaintMs: Math.round(removePaintMs),
       cell,
       timeline,
+      longTasks,
     }
   })
 

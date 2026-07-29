@@ -3282,6 +3282,16 @@ export class ShowCellDrone extends Drone {
     }
     for (const cell of reconciled) this.#pendingRemoves.delete(cell)
 
+    // The durable head can legitimately lag an optimistic add by a commit
+    // turn. A concurrent full render must project that pending membership too,
+    // or it briefly erases the just-added tile and remounts it when the marker
+    // lands. The lifecycle clears this set on settle/failure; until then the
+    // event is the freshest membership truth the participant has.
+    for (const cell of this.#pendingCellMutations) {
+      union.add(cell)
+      localCellSet.add(cell)
+    }
+
     // filter out blocked external tiles and hidden local tiles before ordering
     const blockedSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? '[]'))
     for (const blocked of blockedSet) {
