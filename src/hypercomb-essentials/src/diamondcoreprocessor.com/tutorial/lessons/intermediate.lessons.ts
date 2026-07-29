@@ -168,7 +168,7 @@ tutorialLessons.register({
       await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
       await stage.wait(900)
       await stage.say('into-organizer', 'Anywhere in the hive',
-        'The Organizer does this across your whole hive. Walk into a collection, pick tiles wherever they are, and it offers both verbs: Add leaves them where they live, Move brings them in. Holding Ctrl while you drag one tile onto another is the same act again, on one page.')
+        'Places does this across your whole hive. Walk into a collection, pick tiles wherever they are, and it offers both verbs: Add leaves them where they live, Move brings them in. Holding Ctrl while you drag one tile onto another is the same act again, on one page.')
       await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
       await stage.wait(400)
       stage.highlight(null)

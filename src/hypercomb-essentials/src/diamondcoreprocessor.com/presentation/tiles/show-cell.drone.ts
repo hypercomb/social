@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/show-cell.drone.ts
 import { Drone, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider, UsageRanker } from '@hypercomb/core'
-import { Application, Container, Geometry, Mesh, RenderTexture, Texture } from 'pixi.js'
+import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
@@ -42,6 +42,9 @@ const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade')
 // Hover may lift opacity as feedback but never weakens the interaction gate.
 // Escape hatch for debugging: localStorage 'hc:tile-shade' = '0'.
 const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-shade') !== '0' } catch { return true } })()
+/** Already-baked label used for the first optimistic frame. The real label's
+ *  SDF is rasterized after the commit settles, never in the input frame. */
+const PENDING_CELL_LABEL = '\u2026'
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
@@ -2086,10 +2089,10 @@ export class ShowCellDrone extends Drone {
 
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
-    if (maxCells <= 0) { this.clearMesh(`incremental: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`); return }
+    if (maxCells <= 0) { this.clearMesh(`incremental: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`, true); return }
 
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
-    if (cells.length === 0) { this.clearMesh("incremental: axial yielded 0 cells"); return }
+    if (cells.length === 0) { this.clearMesh("incremental: axial yielded 0 cells", true); return }
 
     // Populate cells from caches — newly-added cells have no cache entry and
     // will render blank until the async fill completes.
@@ -2414,10 +2417,10 @@ export class ShowCellDrone extends Drone {
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.shader = null
       this.#primeEmptyRenderPipeline()
       this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
-      this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       // 16×16 = 256 slots — MUST be >= the imageAtlas slot count (and >= the
       // realistic on-screen tile count) so hives larger than 64 tiles do NOT
@@ -2431,10 +2434,10 @@ export class ShowCellDrone extends Drone {
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.shader = null
       this.#primeEmptyRenderPipeline()
       this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
-      this.shader = null
     }
 
     // ── back-nav fast path ─────────────────────────────────
@@ -4076,7 +4079,12 @@ export class ShowCellDrone extends Drone {
     const labelTex = this.atlas.getAtlasTexture()
     const cellImageTex = this.imageAtlas.getAtlasTexture()
 
-    for (const cell of cells) this.atlas.getLabelUV(cell.label)
+    for (const cell of cells) {
+      const label = this.#pendingCellMutations.has(cell.label) && !this.atlas.hasLabel(cell.label)
+        ? PENDING_CELL_LABEL
+        : cell.label
+      this.atlas.getLabelUV(label)
+    }
 
     const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
@@ -4154,6 +4162,7 @@ export class ShowCellDrone extends Drone {
       this.hexMesh.geometry = geom
       this.hexMesh.shader = (this.shader as any).shader
     }
+    this.hexMesh.visible = true
 
     // Recenter mesh on its bounds — but ONLY when pendingRecenter is
     // set, which now happens only for the explicit recenter path
@@ -5999,22 +6008,27 @@ export class ShowCellDrone extends Drone {
   // warming) must be ignored so a populated hive never flashes blank before its
   // tiles paint. Default false — an unclassified clear is treated as not-ready.
   private clearMesh = (reason: string, settledEmpty = false): void => {
+    const retainWarmMesh = settledEmpty && !!this.hexMesh && !!this.geom && !!this.layer
     if (this.hexMesh && this.layer) {
       // A live-mesh teardown must NEVER be silent. Every "tiles rendered
       // and then vanished" bug funnels through here, and an unexplained
       // clear is indistinguishable from a legitimate empty-layer render.
       // The reason names the bail site so a vanish in the field is
       // diagnosable straight from the console.
-      console.warn(`[render] clearMesh: tearing down ${this.renderedCount} rendered cell(s) — ${reason}`)
+      console.warn(`[render] clearMesh: clearing ${this.renderedCount} rendered cell(s) — ${reason}`)
       // Capture the centering offset before destroying the mesh so the
       // next mesh (e.g. when redo brings tiles back from empty) can
       // restore it instead of starting at (0,0).
       this.#lastMeshOffset = { x: this.hexMesh.position.x, y: this.hexMesh.position.y }
-      try { this.layer.removeChild(this.hexMesh as any) } catch { /* ignore */ }
-      try { this.hexMesh.destroy?.(true) } catch { /* ignore */ }
+      if (retainWarmMesh) {
+        this.hexMesh.visible = false
+      } else {
+        try { this.layer.removeChild(this.hexMesh as any) } catch { /* ignore */ }
+        try { this.hexMesh.destroy?.(true) } catch { /* ignore */ }
+      }
     }
 
-    if (this.geom) {
+    if (this.geom && !retainWarmMesh) {
       try { this.geom.destroy(true) } catch { /* ignore */ }
     }
 
@@ -6022,8 +6036,10 @@ export class ShowCellDrone extends Drone {
     this.#setDrift(false, 0)
     this.#setPortalShimmer(false)
 
-    this.hexMesh = null
-    this.geom = null
+    if (!retainWarmMesh) {
+      this.hexMesh = null
+      this.geom = null
+    }
     this.renderedCellsKey = ''
     this.renderedCount = 0
     this.renderedCells.clear()
@@ -6075,10 +6091,10 @@ export class ShowCellDrone extends Drone {
   #primeEmptyRenderPipeline = (): void => {
     if (!this.pixiRenderer || !this.atlas || !this.imageAtlas) return
     let geom: Geometry | null = null
-    let target: RenderTexture | null = null
     let mesh: Mesh | null = null
+    let retained = false
     try {
-      const primeLabel = '\u00b7'
+      const primeLabel = PENDING_CELL_LABEL
       this.atlas.seed([primeLabel])
       const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
       const pointReachPx = circumRadiusPx / 0.8660254
@@ -6105,14 +6121,27 @@ export class ShowCellDrone extends Drone {
         shader: (warmShader as any).shader,
         texture: Texture.WHITE as any,
       } as any)
-      target = RenderTexture.create({ width: 4, height: 4, resolution: 1 })
-      this.pixiRenderer.render({ container: mesh as any, target, clear: true })
+      ;(mesh as any).blendMode = 'pre-multiply'
+      // Compile against the application's real framebuffer. An offscreen
+      // target — or geometry clipped outside the viewport — left SwiftShader's
+      // first fragment draw costing 100–240ms. Draw the one-cell prime while
+      // boot chrome still covers the canvas, remove it in the same task, then
+      // clear immediately: no participant-visible frame contains the prime.
+      this.layer?.addChild(mesh as any)
+      if (this.pixiApp) this.pixiRenderer.render({ container: this.pixiApp.stage })
+      mesh.visible = false
+      if (this.pixiApp) this.pixiRenderer.render({ container: this.pixiApp.stage })
+      this.hexMesh = mesh
+      this.geom = geom
+      this.shader = warmShader
+      retained = true
     } catch (err) {
       console.warn('[show-cell] render pipeline prime failed', err)
     } finally {
-      try { (mesh as any)?.destroy?.(true) } catch { /* best effort */ }
-      try { geom?.destroy(true) } catch { /* mesh may already own it */ }
-      try { target?.destroy(true) } catch { /* best effort */ }
+      if (!retained) {
+        try { (mesh as any)?.destroy?.(true) } catch { /* best effort */ }
+        try { geom?.destroy(true) } catch { /* mesh may already own it */ }
+      }
       // buildFillQuadGeometry populates the live update indexes. The priming
       // cell is never part of the visible projection, so discard those refs.
       this.#buf = {}
@@ -8636,9 +8665,12 @@ export class ShowCellDrone extends Drone {
       // rebuild mid-hover does not blink the text back off, and TEXT-ONLY mode
       // exempts every tile (#hidesName): with no image drawn there is nothing
       // to hide behind, so a hidden name comes back for as long as the mode is on.
+      const atlasLabel = this.#pendingCellMutations.has(c.label) && !this.atlas!.hasLabel(c.label)
+        ? PENDING_CELL_LABEL
+        : c.label
       const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== this.#hoverRevealLabel)
         ? { u0: 0, v0: 0, u1: 0, v1: 0 }
-        : this.atlas!.getLabelUV(c.label)
+        : this.atlas!.getLabelUV(atlasLabel)
       for (let i = 0; i < 4; i++) {
         labelUV.set([ruv.u0, ruv.v0, ruv.u1, ruv.v1], luvp)
         luvp += 4
@@ -8900,7 +8932,10 @@ export class ShowCellDrone extends Drone {
     if (this.#hidesName(ht, !!imgUV) && label !== this.#hoverRevealLabel) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
-      const ruv = this.atlas.getLabelUV(label)
+      const atlasLabel = this.#pendingCellMutations.has(label) && !this.atlas.hasLabel(label)
+        ? PENDING_CELL_LABEL
+        : label
+      const ruv = this.atlas.getLabelUV(atlasLabel)
       this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
     }
 

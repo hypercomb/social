@@ -36,12 +36,25 @@ $bp-phone-max: 599px;
   --cmd-fg: color-mix(in srgb, var(--glow-color) 60%, ghostwhite);
 }
 
-.command-bar { position: relative; width: 100%; }
+// The icon rail is a SIBLING of the shell, not a child of it (see the
+// template). This is the box that places the two: a ROW on desktop — text
+// box, then icons at its right end, one line — and a COLUMN on a portrait
+// phone, where the rail becomes its own strip under the box. Either way the
+// rail is never inside the box under the text.
+.command-bar {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
 
 .command-shell {
   display: flex;
   align-items: center;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 100%;
   box-sizing: border-box;
   background: transparent;
@@ -668,22 +681,31 @@ $bp-phone-max: 599px;
 // out rather than reusing `phone-only`: portrait phone = narrow AND NOT short,
 // which is exactly the complement of the landscape rule in `_header-bar.scss`.
 @media (max-width: $bp-phone-max) and (min-height: 450px) {
-  // The bar grows to hold the second row; `height: 100%` of a now-auto parent
-  // would collapse it back.
-  .command-shell,
-  .command-row { height: auto; }
-
-  .command-row {
-    flex-wrap: wrap;
-    align-items: center;
+  // Stack them. The rail is already a sibling of the shell, so this is the
+  // whole move: the strip lands UNDER the text box and OUTSIDE it. It is not
+  // a second row inside the box — that shape grew the prompt and shoved the
+  // typed line to the top of it.
+  .command-bar {
+    flex-direction: column;
+    height: auto;
     row-gap: 0.15rem;
   }
 
-  // Row two. `flex: 1 0 100%` is what breaks it onto its own line; `order`
-  // keeps it last even though the indicators come after it in some states.
+  // The text box keeps a row to ITSELF, so the typed line stays centred in it
+  // at the height it has always had.
+  .command-shell {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 2.75rem;
+  }
+  .command-row {
+    height: 100%;
+    flex-wrap: nowrap;
+  }
+
   .shell-actions {
-    order: 10;
-    flex: 1 0 100%;
+    flex: 0 0 auto;
+    width: 100%;
     margin-left: 0;
     padding: 0.1rem 0.25rem 0.15rem;
     // One line, scrolled — never a second wrapped row. A wrapped rail eats

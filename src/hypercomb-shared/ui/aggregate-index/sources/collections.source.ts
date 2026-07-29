@@ -114,7 +114,7 @@ const store = () => ioc()?.get('@hypercomb.social/Store') as StoreLike | undefin
 
 class CollectionsSource implements AggregateSource {
   readonly id = 'collections'
-  readonly icon = 'workspaces'
+  readonly icon = 'place'
   readonly titleKey = 'collections-landing.title'
   readonly ledeKey = 'collections-landing.lede'
   readonly createKey = 'collections-landing.new'

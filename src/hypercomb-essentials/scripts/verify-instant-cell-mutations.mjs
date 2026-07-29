@@ -17,11 +17,17 @@ try {
     () => {
       const renderer = window.ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone')
       const axial = window.ioc?.get?.('@diamondcoreprocessor.com/AxialService')
-      return !!renderer?.pixiRenderer && !!renderer?.renderedLocationKey && !!axial?.items
+      return !!renderer?.pixiRenderer && !!axial?.items
     },
     undefined,
     { timeout: 60_000 },
   )
+  // The invariant starts once the window has actually presented. IoC/renderer
+  // registration happens earlier than the first compositor frame.
+  await page.evaluate(async () => {
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    await new Promise(resolve => requestAnimationFrame(resolve))
+  })
 
   const result = await page.evaluate(async () => {
     const bus = window.__hypercombEffectBus
@@ -29,51 +35,6 @@ try {
     const lineage = window.ioc.get('@hypercomb.social/Lineage')
     const segments = [...(lineage.explorerSegments?.() ?? [])]
     const cell = `instant-mutation-${Date.now().toString(36)}`
-    const timeline = []
-    const epoch = performance.now()
-    const mark = (event, detail = '') => timeline.push({
-      at: Math.round(performance.now() - epoch),
-      event,
-      detail,
-    })
-    const longTasks = []
-    const longTaskObserver = typeof PerformanceObserver === 'function'
-      ? new PerformanceObserver(list => {
-        for (const entry of list.getEntries()) {
-          longTasks.push({
-            at: Math.round(entry.startTime - epoch),
-            duration: Math.round(entry.duration),
-          })
-        }
-      })
-      : null
-    try { longTaskObserver?.observe({ type: 'longtask', buffered: true }) } catch {}
-    const offCells = bus.on('render:cell-count', payload => {
-      if (payload?.labels?.includes(cell)) mark('cell-count', 'present')
-      else mark('cell-count', 'absent')
-    })
-    const offMutation = bus.on('cell:mutation-state', payload => {
-      if (payload?.cell === cell) mark('mutation', `${payload.op}:${payload.state}`)
-    })
-    const originalApply = renderer.applyGeometry.bind(renderer)
-    renderer.applyGeometry = cells => {
-      mark('apply-geometry', cells.some(item => item.label === cell) ? 'present' : 'absent')
-      return originalApply(cells)
-    }
-    const originalLabelUv = renderer.atlas.getLabelUV.bind(renderer.atlas)
-    renderer.atlas.getLabelUV = label => {
-      const start = performance.now()
-      const value = originalLabelUv(label)
-      mark('label-uv', `${label}:${Math.round(performance.now() - start)}ms`)
-      return value
-    }
-    const originalBuildGeometry = renderer.buildFillQuadGeometry.bind(renderer)
-    renderer.buildFillQuadGeometry = (...args) => {
-      const start = performance.now()
-      const value = originalBuildGeometry(...args)
-      mark('build-geometry', `${Math.round(performance.now() - start)}ms`)
-      return value
-    }
 
     const settled = op => new Promise((resolve, reject) => {
       let off = () => {}
@@ -96,11 +57,16 @@ try {
       while (performance.now() - start < 5_000) {
         const found = renderer.renderedCells.has(cell)
         if (found === present) {
+          const membershipMs = performance.now() - start
           // Pixi's ticker runs before this callback. The frame therefore
           // includes the geometry produced by the membership event.
+          const frameStart = performance.now()
           await new Promise(resolve => requestAnimationFrame(resolve))
-          mark('painted-frame', present ? 'present' : 'absent')
-          return performance.now() - start
+          return {
+            totalMs: performance.now() - start,
+            membershipMs,
+            frameMs: performance.now() - frameStart,
+          }
         }
         await new Promise(resolve => setTimeout(resolve, 1))
       }
@@ -109,38 +75,30 @@ try {
 
     const addSettled = settled('add')
     const addStart = performance.now()
-    mark('emit-add')
     bus.emit('cell:added', { cell, segments })
     const addEmitMs = performance.now() - addStart
-    const addPaintMs = await paintedMembership(true)
-    const addMs = addEmitMs + addPaintMs
+    const addPaint = await paintedMembership(true)
+    const addMs = addEmitMs + addPaint.totalMs
     await addSettled
 
     const removeSettled = settled('remove')
     const removeStart = performance.now()
-    mark('emit-remove')
     bus.emit('cell:removed', { cell, segments })
     const removeEmitMs = performance.now() - removeStart
-    const removePaintMs = await paintedMembership(false)
-    const removeMs = removeEmitMs + removePaintMs
+    const removePaint = await paintedMembership(false)
+    const removeMs = removeEmitMs + removePaint.totalMs
     await removeSettled
-    offCells()
-    offMutation()
-    longTaskObserver?.disconnect()
-    renderer.applyGeometry = originalApply
-    renderer.atlas.getLabelUV = originalLabelUv
-    renderer.buildFillQuadGeometry = originalBuildGeometry
 
     return {
       addMs: Math.round(addMs),
       addEmitMs: Math.round(addEmitMs),
-      addPaintMs: Math.round(addPaintMs),
+      addMembershipMs: Math.round(addPaint.membershipMs),
+      addFrameMs: Math.round(addPaint.frameMs),
       removeMs: Math.round(removeMs),
       removeEmitMs: Math.round(removeEmitMs),
-      removePaintMs: Math.round(removePaintMs),
+      removeMembershipMs: Math.round(removePaint.membershipMs),
+      removeFrameMs: Math.round(removePaint.frameMs),
       cell,
-      timeline,
-      longTasks,
     }
   })
 

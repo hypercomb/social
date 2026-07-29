@@ -238,9 +238,6 @@ export class AggregateIndexComponent implements OnDestroy {
   /** The source whose `changed` we are subscribed to, so switching aggregates
    *  doesn't leave us listening to the old one. */
   #boundSource: AggregateSource | null = null
-  /** The page the staged capture was taken on — how an empty selection update
-   *  from a NAVIGATION is told apart from a real deselect (see the constructor). */
-  #stagedAt: readonly string[] | null = null
   #pending: { item: AggregateItem; x: number; y: number } | null = null
   #swallowClick = false
 
@@ -248,29 +245,17 @@ export class AggregateIndexComponent implements OnDestroy {
     // Selection is last-value replayed, so opening the panel after selecting
     // still stages what is already picked.
     //
-    // THE TRAY IS A CAPTURE, NOT A MIRROR — and this is what makes the whole
-    // destination flow possible. SelectionService is derived from the URL: every
-    // `navigate` reconciles it against what the new address carries, which for a
-    // fresh page is nothing. So walking into a collection to add tiles TO it
-    // arrived here as "selection is now empty", the tray emptied, and both
-    // buttons vanished at the exact moment they were meant to be pressed —
-    // "select tiles, step into the collection, press Add" could never complete
-    // (verified on the dev hive: the staged tray was gone the instant the row
-    // was clicked). Capturing each entry with its own absolute `segments` was
-    // always half of the fix; keeping the capture across the hop is the other.
+    // THE TRAY IS A CAPTURE, NOT A MIRROR — each entry keeps its own absolute
+    // `segments`, so a staged tile names itself rather than "whatever is called
+    // that on the page I am looking at now".
     //
-    // An empty update is only honoured when it arrives AT THE PAGE THE CAPTURE
-    // WAS MADE ON — a real deselect out on the canvas. Verified in a real
-    // browser: Lineage has already moved by the time the clear event fires, so
-    // this comparison distinguishes the two cases with no timing guess. Every
-    // other way the tray empties is deliberate: completing an Add or a Move,
-    // going back to the origin, or closing the window.
+    // It does NOT outlive a hop: `#onLineage` drops it on every navigation (see
+    // the note there for why, and for the one flow that costs). So an empty
+    // update is always honoured — there is no longer a stale capture for it to
+    // be told apart from.
     this.#cleanups.push(onSelection(({ selected }) => {
       const here = this.#segments()
-      if (selected.length === 0 && this.selection().length > 0
-        && this.#stagedAt && !sameSegments(this.#stagedAt, here)) return
       this.selection.set(selected.map(label => ({ label, segments: [...here, label] })))
-      if (selected.length > 0) this.#stagedAt = here
       this.#cdr.detectChanges()
     }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-open', (p) => this.openPanel(p?.id)))
@@ -345,20 +330,20 @@ export class AggregateIndexComponent implements OnDestroy {
   returnToOrigin(): void {
     const o = this.origin()
     if (!o) return
-    // Explicitly, because the tray now SURVIVES navigation: this control's whole
-    // purpose is to drop what is staged and start again, so it must say so
-    // rather than rely on a clear that no longer reaches the tray.
+    // Explicitly, before the hop rather than relying on it: this control's whole
+    // purpose is to drop what is staged and start again, and saying so here
+    // keeps it true no matter what the navigation clear does.
     this.#dropStaged()
     ;(ioc()?.get('@hypercomb.social/Navigation') as { goRaw?(s: readonly string[]): void } | undefined)
       ?.goRaw?.(o)
   }
 
-  /** Empty the tray on purpose — after a completed gesture, or on the way back
-   *  to the origin. The one place `#stagedAt` is forgotten with it. */
+  /** Empty the tray — after a completed gesture, on the way back to the
+   *  origin, or on any navigation. Clears the canvas selection with it, so the
+   *  tray and the highlighted tiles can never disagree. */
   #dropStaged(): void {
     withSelectionService(s => s.clear())
     this.selection.set([])
-    this.#stagedAt = null
   }
 
   /** Whether this row is the collection currently being managed (the hive is
@@ -768,7 +753,21 @@ export class AggregateIndexComponent implements OnDestroy {
     }
   }
 
-  #onLineage = (): void => this.#refresh()
+  /** NAVIGATION DROPS THE CAPTURE (Jaime, 2026-07-28): "save tile to
+   *  organizer or places … has to reset and lose that selection when
+   *  navigation happens." A tray that follows you around the hive keeps
+   *  offering to file tiles you picked on a page you have since left, and the
+   *  offer reads as live because the buttons are still lit.
+   *
+   *  This REVERSES the survive-the-hop behaviour the tray used to have, and
+   *  the cost is one flow: "select tiles → step INTO the collection → press
+   *  Add" can no longer complete, because the step in is now what clears the
+   *  tray. Picking the destination from the panel's own row (Add to <name>)
+   *  does the same job without moving the hive, and still works. */
+  #onLineage = (): void => {
+    this.#dropStaged()
+    this.#refresh()
+  }
 
   /** Arriving at a source's own location opens its index; leaving does NOT close
    *  the panel (a tool window you opened stays open while you walk around).

@@ -87,7 +87,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // documentation/entrances-and-sets.md). Lives HERE on the control bar, not
   // among the header aggregates — it manages referenced hives on different
   // roots; it is not a launch group.
-  { id: 'pools',        label: 'pools.title',           action: 'openPools',          visibleWhen: 'always' },
+  { id: 'pools',        label: 'collections-landing.title', action: 'openPools',        visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
   // (documentation/selection-tool-windows.md); one-shot verbs live here on the
   // registry (user-toggleable like every control) while windowed responses
@@ -556,7 +556,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'pin':          return 'push_pin'
       case 'fullscreen':   return 'fullscreen'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
-      case 'pools':        return 'workspaces'
+      case 'pools':        return 'place'
       case 'promote-to-parent': return 'arrow_upward'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
