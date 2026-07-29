@@ -1061,8 +1061,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         return allTags.sort((a, b) => (metrics?.tagCount(b) ?? 0) - (metrics?.tagCount(a) ?? 0) || a.localeCompare(b))
       }
 
-      // operation phase: suggest operation keywords with / prefix
+      // operation phase: suggest operation keywords with / prefix.
+      // The slash intellisense stays closed until the `/` is actually typed —
+      // a freshly closed bracket (`[a,b]`) is not yet a command, so dumping the
+      // whole operation list there reads as the dropdown opening on its own.
+      // `head` ends with `/` while an op fragment is being typed; a fully typed
+      // op lands in `normalized` with the slash already in `head`/value.
       if (phase === 'operation') {
+        if (!ctx.head.endsWith('/') && !ctx.normalized) return []
         const ops = ['/cut', '/copy', '/move', '/keyword', '/remove', '/delete', '/format', '/accent', '/opus', '/sonnet', '/haiku']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))

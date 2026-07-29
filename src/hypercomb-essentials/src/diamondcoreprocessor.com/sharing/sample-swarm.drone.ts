@@ -163,8 +163,14 @@ export class SampleSwarmDrone extends Drone {
     host.id = 'hc-sample-pill'
     // Above the mobile control bar, clear of the home indicator. Centred so it
     // reads as a statement about the page rather than another bar control.
+    // z 59992 clears the reparented Pixi canvas (#pixi-host sits at <body> with
+    // z-index 59989 and a pointer-events:auto <canvas> inside — see
+    // pixi-host.worker.ts); at the old 1400 the pill painted but "Pick tiles",
+    // "Keep n" and "Done" all had their taps eaten by the canvas. Same value as
+    // the select pill (select-mode.drone.ts PILL_Z) — same slot, mutually
+    // exclusive — and still below all shell chrome.
     host.style.cssText =
-      'position:fixed;left:50%;transform:translateX(-50%);z-index:1400;' +
+      'position:fixed;left:50%;transform:translateX(-50%);z-index:59992;' +
       'bottom:calc(6.2rem + env(safe-area-inset-bottom,0px));' +
       'display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;' +
       'border-radius:2rem;background:rgba(12,17,24,0.92);backdrop-filter:blur(10px);' +

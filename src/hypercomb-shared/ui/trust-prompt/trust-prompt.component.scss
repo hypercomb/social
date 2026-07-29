@@ -1,10 +1,19 @@
 :host { display: contents; }
 
+// #pixi-host reparents itself to <body> at z-index 59989 with a
+// pointer-events:auto <canvas> inside (pixi-host.worker.ts). Anything below
+// that lands UNDER the canvas: the prompt still paints (the canvas is
+// transparent) but every click hits the canvas — and because the caller's
+// promise only settles on a decision, an unclickable trust prompt hangs the
+// adopted-code activation it gates FOREVER. This is a modal, not a
+// full-surface takeover, so it rides the modal tier the other dialogs use
+// (confirm-dialog / mesh-modal: 100000/100001) rather than suppressing the
+// canvas — the hive stays visible behind the translucent backdrop.
 .trust-prompt-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
-  z-index: 1000;
+  z-index: 100000;
   animation: fade-in 0.15s ease;
 }
 
@@ -17,7 +26,7 @@
   background: #fff;
   border-radius: 4px;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
-  z-index: 1001;
+  z-index: 100001;
   animation: panel-in 0.18s ease;
 }
 

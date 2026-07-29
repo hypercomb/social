@@ -82,14 +82,19 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
  *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'pheromones:deposits',
-  // Places — the substrate surface, re-spelled off the bare word. `:sources`
-  // holds the registry record + per-location override records (the retired
-  // sign('substrate') pool's contents, migrated on first read). `:references`
-  // holds one file per copied reference, NAMED BY THE IMAGE SIGNATURE — the
-  // pool listing IS the collection, so copying a reference in is the whole
-  // write and the same image copied twice lands on one filename.
-  'places:references',
-  'places:sources',
+  // 'places:references' / 'places:sources' — SHORT-LIVED, never shipped. The
+  // substrate surface was briefly renamed Places before that name went to the
+  // collections index instead. Both are drain sources in substrate.service.ts
+  // (a dev build did write a registry record to `places:sources`) and neither
+  // may be reserved here again.
+  //
+  // The substrate surface, re-spelled off its bare word. `:sources` holds the
+  // registry record + per-location override records. `:references` holds one
+  // file per copied reference, NAMED BY THE IMAGE SIGNATURE — the pool listing
+  // IS the collection, so copying a reference in is the whole write and the
+  // same image copied twice lands on one filename.
+  'substrate:references',
+  'substrate:sources',
   'tutorial:artifacts',
   'usage:dwell',
   'websites:menu',

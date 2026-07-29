@@ -19,9 +19,9 @@
 //     → none
 //
 // Storage (pools-of-meaning model):
-//   sign('places:sources') pool, `registry` file → SubstrateRegistry JSON
-//   sign('places:sources') pool, `<locationSig>` files → per-hive overrides
-//   sign('places:references') pool, `<imageSig>` files → copied references
+//   sign('substrate:sources') pool, `registry` file → SubstrateRegistry JSON
+//   sign('substrate:sources') pool, `<locationSig>` files → per-hive overrides
+//   sign('substrate:references') pool, `<imageSig>` files → copied references
 //   RETIRED (read-fallback, drained per record then removed):
 //     the sign('substrate') pool
 //     ({ substrate: path | null, 'substrate-inherit': boolean })
@@ -56,9 +56,9 @@ const LEGACY_LS_GLOBAL = 'hc:substrate-global'
 // Pools-of-meaning storage. Addresses are DERIVED — sha256 of the UTF-8
 // bytes of the meaning — never a hardcoded hex and never a typed folder.
 //
-//   places:sources     the registry record + per-location override records
+//   substrate:sources     the registry record + per-location override records
 //                      (keyed by location sig)
-//   places:references  ONE FILE PER COPIED REFERENCE, named by the image
+//   substrate:references  ONE FILE PER COPIED REFERENCE, named by the image
 //                      signature. The listing IS the collection: copying a
 //                      reference in is the whole write, and the same image
 //                      copied twice lands on the same filename.
@@ -67,18 +67,26 @@ const LEGACY_LS_GLOBAL = 'hc:substrate-global'
 // location sig — also 64 hex — so one pool could not tell an override from
 // a reference by name, and the listing that resolves the collection would
 // sweep the overrides in with the images.
-const PLACES_SOURCES_MEANING = 'places:sources'
-const PLACES_REFERENCES_MEANING = 'places:references'
-// RETIRED. The bare word `substrate` hashes to the same directory as a root
+const SOURCES_MEANING = 'substrate:sources'
+const REFERENCES_MEANING = 'substrate:references'
+
+// ── drain sources, newest first. Read-only, every one of them. ───────────
+//
+// `substrate` — RETIRED bare word. It hashes to the same directory as a root
 // tile named `substrate` (sign(meaning) and sign(lineageKey) share the
-// preimage), so it moved to the colon spellings above. This stays a
-// READ-FALLBACK and DRAIN SOURCE only — opened create:false, copied forward
-// on first read, removed once empty. Nothing writes here.
+// preimage), which is why it moved to the colon spellings above.
+//
+// `places:*` — SHORT-LIVED and never shipped: the surface was briefly renamed
+// Places before that name went to the collections index instead. A dev build
+// DID write a registry record there, and the bare-word drain had already
+// removed the record it copied forward — so skipping this link would strand
+// the sources of anyone who ran that build. Chained, not replaced.
 //
 // Deliberately NOT named `*_MEANING`: the doctrine ratchet scans that
-// identifier shape for newly MINTED bare-word meanings, and this one is
-// being drained away rather than minted.
-const LEGACY_SUBSTRATE_POOL = 'substrate'
+// identifier shape for newly MINTED bare-word meanings, and these are being
+// drained away rather than minted.
+const RETIRED_SOURCE_POOLS = ['places:sources', 'substrate'] as const
+const RETIRED_REFERENCE_POOLS = ['places:references'] as const
 const REGISTRY_RECORD = 'registry'
 const SIG_NAME_RE = /^[0-9a-f]{64}$/
 
@@ -96,8 +104,8 @@ const SIG_NAME_RE = /^[0-9a-f]{64}$/
 // only so the one-time v3 migration can move those users back to Photos.
 const DEFAULT_SET_ID = 'builtin:steel'
 const PHOTOS_SET_ID = 'builtin:defaults'
-// The participant's own Places — the one source with no location to walk.
-const PLACES_SET_ID = 'builtin:places'
+// The participant's own references — the one source with no location to walk.
+const REFERENCES_SET_ID = 'builtin:references'
 // One-time migration marker: bumps when the shipped built-in set list changes
 // in a way that should advance an unconfigured (ship-default) active source.
 // v3: the themed sets moved to being CANVAS (screen) backgrounds — tiles default
@@ -115,9 +123,9 @@ const BUILTIN_SETS: SubstrateSource[] = [
   { type: 'url', id: 'builtin:theme-nature',    baseUrl: '/substrate/theme-nature/',     label: 'Nature',    builtin: true },
   // The participant's own collection — resolves from the references pool,
   // no walk. LAST on purpose: `resolve()` falls back to the FIRST builtin,
-  // and a Places that hasn't been copied into yet is empty, which would
+  // and a reference set nothing has been copied into yet is empty, which would
   // leave tiles with no substrate at all.
-  { type: 'places', id: PLACES_SET_ID, label: 'Places', builtin: true },
+  { type: 'references', id: REFERENCES_SET_ID, label: 'References', builtin: true },
 ]
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
@@ -237,7 +245,7 @@ export class SubstrateService extends EventTarget {
     if (!store) return
     let registry: SubstrateRegistry | null = null
     let fromLegacy = false
-    // Canonical: the sign('places:sources') pool `registry` record. Legacy
+    // Canonical: the sign('substrate:sources') pool `registry` record. Legacy
     // read-fallback: the root `0000` props under `substrate-registry`.
     try {
       const rec = await this.#readPoolRecord(store, REGISTRY_RECORD)
@@ -289,6 +297,11 @@ export class SubstrateService extends EventTarget {
     }
 
     this.#registry = registry
+
+    // Detached, off the boot path: absorb anything a short-lived spelling left
+    // behind. Copy-forward only and idempotent, so a partial run finishes on
+    // the next boot and a failure costs nothing.
+    void this.#drainRetiredReferences(store)
   }
 
   /**
@@ -338,7 +351,7 @@ export class SubstrateService extends EventTarget {
     const store = this.#store()
     if (!store) return
     try {
-      // Registry lives in the sign('places:sources') pool `registry` record —
+      // Registry lives in the sign('substrate:sources') pool `registry` record —
       // never the legacy root `0000` (which collides with the root sigbag
       // marker convention). The legacy keys are scrubbed on first migrate.
       await this.#writePoolRecord(store, REGISTRY_RECORD, next as unknown as Record<string, unknown>)
@@ -427,7 +440,7 @@ export class SubstrateService extends EventTarget {
   }
 
   /** Merge-write a per-hive override for the CURRENT location into the
-   *  sign('places:sources') pool, keyed by that location's sig — never a
+   *  sign('substrate:sources') pool, keyed by that location's sig — never a
    *  per-hive dir `0000` (a legacy-tree write the new model forbids). The
    *  existing pool record (and, as a read-fallback, the legacy dir `0000`)
    *  seeds the merge so a partial update never drops the other key.
@@ -475,7 +488,7 @@ export class SubstrateService extends EventTarget {
 
     const segments = [...lineage.explorerSegments()]
     while (segments.length > 0) {
-      // Canonical: the sign('places:sources') pool record keyed by this
+      // Canonical: the sign('substrate:sources') pool record keyed by this
       // ancestor's location sig. Legacy read-fallback: the per-hive dir
       // `0000` (only present in the not-yet-drained content trees).
       let props: Record<string, unknown> | null = null
@@ -511,14 +524,14 @@ export class SubstrateService extends EventTarget {
     return Object.keys(props).length > 0 ? props : null
   }
 
-  // ────────────────────── places references ──────────────────────
+  // ────────────────────── copied references ──────────────────────
   //
   // A place is a SIGNATURE, not a copy. The bytes already sit at the OPFS
   // root under that sig, so copying a reference in writes an empty marker
   // named by the sig and nothing else — the same image referenced from two
   // collections is still stored once, and the pool listing IS the set.
 
-  /** Every reference currently in Places. Unordered — a pool is a set. */
+  /** Every reference currently copied in. Unordered — a pool is a set. */
   async listReferences(): Promise<string[]> {
     const store = this.#store()
     if (!store) return []
@@ -533,7 +546,7 @@ export class SubstrateService extends EventTarget {
     return sigs
   }
 
-  /** Copy a reference into Places. Idempotent — same sig, same filename. */
+  /** Copy a reference in. Idempotent — same sig, same filename. */
   async addReference(signature: string): Promise<boolean> {
     if (!SIG_NAME_RE.test(signature)) return false
     const store = this.#store()
@@ -541,7 +554,7 @@ export class SubstrateService extends EventTarget {
     const pool = await this.#referencesPool(store)
     if (!pool) return false
     try { await pool.getFileHandle(signature, { create: true }) } catch { return false }
-    this.#invalidateResolvedPlaces()
+    this.#invalidateResolvedReferences()
     EffectBus.emit('substrate:changed', { scope: 'references', signature })
     return true
   }
@@ -556,12 +569,12 @@ export class SubstrateService extends EventTarget {
     const pool = await this.#referencesPool(store)
     if (!pool) return false
     try { await pool.removeEntry(signature) } catch { return false }
-    this.#invalidateResolvedPlaces()
+    this.#invalidateResolvedReferences()
     EffectBus.emit('substrate:changed', { scope: 'references', signature })
     return true
   }
 
-  /** Copy a reference into Places for every image on the tiles at `path`.
+  /** Copy a reference in for every image on the tiles at `path`.
    *  This is the "just copy references in there" gesture: it walks the same
    *  tiles a hive source would, but instead of BINDING to that path it
    *  takes the signatures and lets go — the collection keeps working after
@@ -573,10 +586,10 @@ export class SubstrateService extends EventTarget {
     return copied
   }
 
-  /** Force the next warm-up to re-list the pool when Places is what's
+  /** Force the next warm-up to re-list the pool when the reference set is what's
    *  currently resolved. Same drop `setActive` performs on a switch. */
-  #invalidateResolvedPlaces(): void {
-    if (this.#resolved?.source.type !== 'places') return
+  #invalidateResolvedReferences(): void {
+    if (this.#resolved?.source.type !== 'references') return
     this.#resolved = null
     this.#propsPool = []
   }
@@ -589,13 +602,13 @@ export class SubstrateService extends EventTarget {
       case 'url':    return this.#loadUrlImages(source.baseUrl)
       case 'folder': return this.#loadFolderImages(source.handleId)
       case 'layer':  return this.#loadLayerImages(source.signature)
-      case 'places': return this.#loadPlacesImages()
+      case 'references': return this.#loadReferenceImages()
     }
   }
 
-  /** Places resolve with no walk at all — the pool listing IS the image
+  /** References resolve with no walk at all — the pool listing IS the image
    *  set, and every member is already a root-addressed signature. */
-  async #loadPlacesImages(): Promise<string[]> {
+  async #loadReferenceImages(): Promise<string[]> {
     const sigs = await this.listReferences()
     for (const sig of sigs) {
       if (!this.#imageNames.has(sig)) this.#imageNames.set(sig, sig.slice(0, 8))
@@ -1408,23 +1421,22 @@ export class SubstrateService extends EventTarget {
     } catch { return null }
   }
 
-  /** The sign('places:sources') pool — registry + per-location overrides. */
+  /** The sign('substrate:sources') pool — registry + per-location overrides. */
   async #pool(store: StoreHandle): Promise<FileSystemDirectoryHandle | null> {
-    return await this.#poolFor(store, PLACES_SOURCES_MEANING)
+    return await this.#poolFor(store, SOURCES_MEANING)
   }
 
-  /** The sign('places:references') pool — one file per copied reference. */
+  /** The sign('substrate:references') pool — one file per copied reference. */
   async #referencesPool(store: StoreHandle): Promise<FileSystemDirectoryHandle | null> {
-    return await this.#poolFor(store, PLACES_REFERENCES_MEANING)
+    return await this.#poolFor(store, REFERENCES_MEANING)
   }
 
-  /** The RETIRED sign('substrate') pool. `create: false` — a drained pool
-   *  must STAY gone; creating it would resurrect the very collision this
-   *  move was made to escape. */
-  async #legacyPool(store: StoreHandle): Promise<FileSystemDirectoryHandle | null> {
+  /** Open a RETIRED pool. `create: false` throughout — a drained pool must
+   *  STAY gone; creating one would resurrect exactly what the move escaped. */
+  async #retiredPool(store: StoreHandle, meaning: string): Promise<FileSystemDirectoryHandle | null> {
     try {
       const sig = await SignatureService.sign(
-        new TextEncoder().encode(LEGACY_SUBSTRATE_POOL).buffer as ArrayBuffer,
+        new TextEncoder().encode(meaning).buffer as ArrayBuffer,
       )
       return await store.opfsRoot.getDirectoryHandle(sig, { create: false })
     } catch { return null }
@@ -1442,37 +1454,61 @@ export class SubstrateService extends EventTarget {
     } catch { return null }
   }
 
-  /** Read a record, draining the retired pool as it goes: new address
-   *  first, then the legacy one — and a legacy hit is copied forward,
-   *  VERIFIED at the new address, and only then dropped. Per record, never
-   *  a wipe; a failed verify simply leaves the old file in place to be
+  /** Read a record, draining the retired pools as it goes: the live address
+   *  first, then each retired one in order — and a hit is copied forward,
+   *  VERIFIED at the new address, and only then dropped. Per record, never a
+   *  wipe; a failed verify simply leaves the old file where it is to be
    *  retried next boot. */
   async #readPoolRecord(store: StoreHandle, name: string): Promise<Record<string, unknown> | null> {
     const current = await this.#readRecordFrom(await this.#pool(store), name)
     if (current) return current
 
-    const legacy = await this.#legacyPool(store)
-    const stale = await this.#readRecordFrom(legacy, name)
-    if (!stale || !legacy) return null
+    for (const meaning of RETIRED_SOURCE_POOLS) {
+      const retired = await this.#retiredPool(store, meaning)
+      const stale = await this.#readRecordFrom(retired, name)
+      if (!stale || !retired) continue
 
-    await this.#writePoolRecord(store, name, stale)
-    if (await this.#readRecordFrom(await this.#pool(store), name)) {
-      try { await legacy.removeEntry(name) } catch { /* retry next boot */ }
-      void this.#dropLegacyPoolIfEmpty(store)
+      await this.#writePoolRecord(store, name, stale)
+      if (await this.#readRecordFrom(await this.#pool(store), name)) {
+        try { await retired.removeEntry(name) } catch { /* retry next boot */ }
+        void this.#dropRetiredPoolIfEmpty(store, meaning)
+      }
+      return stale
     }
-    return stale
+    return null
   }
 
-  /** Remove the retired pool's directory once nothing is left in it. Gated
-   *  on emptiness — this is the ONLY removal the drain performs beyond the
+  /** Absorb any references left in a retired references pool, then drop it.
+   *  Copy-forward only — `addReference` is idempotent, so a partial run
+   *  simply finishes next boot. */
+  async #drainRetiredReferences(store: StoreHandle): Promise<void> {
+    for (const meaning of RETIRED_REFERENCE_POOLS) {
+      const retired = await this.#retiredPool(store, meaning)
+      if (!retired) continue
+      const pool = await this.#referencesPool(store)
+      if (!pool) return
+      try {
+        for await (const entry of (retired as any).keys()) {
+          const sig = String(entry)
+          if (!SIG_NAME_RE.test(sig)) continue
+          await pool.getFileHandle(sig, { create: true })
+          try { await retired.removeEntry(sig) } catch { /* retry next boot */ }
+        }
+      } catch { continue }
+      void this.#dropRetiredPoolIfEmpty(store, meaning)
+    }
+  }
+
+  /** Remove a retired pool's directory once nothing is left in it. Gated on
+   *  emptiness — this is the ONLY removal the drain performs beyond the
    *  per-record ones above. */
-  async #dropLegacyPoolIfEmpty(store: StoreHandle): Promise<void> {
+  async #dropRetiredPoolIfEmpty(store: StoreHandle, meaning: string): Promise<void> {
     try {
-      const legacy = await this.#legacyPool(store)
-      if (!legacy) return
-      for await (const _ of (legacy as any).keys()) return   // still has members
+      const retired = await this.#retiredPool(store, meaning)
+      if (!retired) return
+      for await (const _ of (retired as any).keys()) return   // still has members
       const sig = await SignatureService.sign(
-        new TextEncoder().encode(LEGACY_SUBSTRATE_POOL).buffer as ArrayBuffer,
+        new TextEncoder().encode(meaning).buffer as ArrayBuffer,
       )
       await store.opfsRoot.removeEntry(sig)
     } catch { /* leave it — a stale empty dir costs nothing */ }

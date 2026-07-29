@@ -164,11 +164,31 @@ export class HistorySliderDrone {
   #buildClock(): void {
     const clock = document.createElement('div')
     clock.id = 'hc-revision-clock'
+    // The clock carries real controls — scope toggle, Restore, Latest, and the
+    // scrubber — and TWO separate things were eating them:
+    //
+    //  1. z-index. #pixi-host reparents itself to <body> at z-index 59989 with
+    //     a pointer-events:auto <canvas> inside (pixi-host.worker.ts), so at
+    //     9000 the clock painted but every click landed on the canvas.
+    //  2. position. `top: 8px` put it INSIDE the header band, underneath the
+    //     command shell's icon rail — so even above the canvas it stayed
+    //     unreachable. The doc comment on this class always said the clock
+    //     "appears UNDER the command line"; the offset below is the SAME term
+    //     the hint bar uses (hint-bar.component.scss) for "clear of the header
+    //     AND of the breadcrumb row underneath it" — `--hc-header-anchor`
+    //     (styles/_header-size.scss) tracks a wrapped icon rail instead of
+    //     assuming a one-row header, and the extra 1.42rem clears
+    //     `.breadcrumb-top`, which is right-aligned in this exact corner at
+    //     z 59999 and would otherwise swallow the scrubber.
+    //
+    // 59991 keeps it below every piece of shell chrome (edit-actions 59995,
+    // controls/hint bars 59999, header bar 60000) — it clears them by POSITION
+    // now, so it never needs to paint over them.
     clock.style.cssText = `
       position: fixed;
-      top: 8px;
+      top: max(calc(4.25rem * var(--hc-header-zoom, 1)), calc(var(--hc-header-anchor) + 1.42rem));
       right: 16px;
-      z-index: 9000;
+      z-index: 59991;
       display: none;
       flex-direction: column;
       gap: 4px;

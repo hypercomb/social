@@ -14,7 +14,11 @@
   top: 0;
   bottom: 0;
   width: calc(260px * var(--s));
-  z-index: 50000;
+  // Above the reparented Pixi canvas (#pixi-host, z 59989, pointer-events:auto
+  // — pixi-host.worker.ts), which was eating every click in the sidebar. Keeps
+  // its old position above the format-painter drawer (59990) and below all
+  // shell chrome (edit-actions 59995, controls/hint bars 59999, header 60000).
+  z-index: 59991;
 
   background: rgba(10, 10, 18, 0.95);
   border-left: 1px solid rgba(255, 255, 255, 0.06);

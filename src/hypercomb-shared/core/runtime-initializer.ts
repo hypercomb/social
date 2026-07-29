@@ -248,7 +248,8 @@ const _runInitializeRuntime = async (
   const historyService = get('@diamondcoreprocessor.com/HistoryService') as {
     preloadAllBags?: () => Promise<void>
     preloadFromRoot?: (rootSig: string) => Promise<void>
-    preloadNeighbourhood?: (locationSig: string, maxDepth?: number) => Promise<void>
+    preloadNeighbourhood?: (locationSig: string, maxDepth?: number, segments?: readonly string[]) => Promise<void>
+    preloadAncestors?: (segments: readonly string[], depth?: number) => Promise<void>
     preloadGeneration?: () => number
     sign?: (l: { explorerSegments: () => readonly string[] }) => Promise<string>
     latestMarkerSigFor?: (lineageSig: string, name: string) => Promise<string>
@@ -341,7 +342,20 @@ const _runInitializeRuntime = async (
         try {
           await awaitSettledPaint()
           const sig = await lineage.currentSig()
-          if (sig) await historyService.preloadNeighbourhood!(sig)
+          // Hand the PATH over, not only its signature: a sig cannot be
+          // un-hashed, so without it the warm can only assume it is standing at
+          // the hive root — and every view it prepares for a deeper location is
+          // prepared under the wrong address.
+          const segs = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+          if (sig) await historyService.preloadNeighbourhood!(sig, undefined, segs)
+          // THE WAY BACK IS PART OF THE NEIGHBOURHOOD. Arrive at a deep
+          // location by a route that skipped the ancestors (a reload, a deep
+          // link, a reference portal, an adopt) and going back finds nothing
+          // loaded — the subtree warm only ever pointed downhill. Warm the
+          // ancestors too, nearest first, one level each (a layer's pack
+          // carries every sibling's visual, so one level IS the whole page
+          // back-navigation paints).
+          if (segs.length) await historyService.preloadAncestors?.(segs)
         } catch { /* non-fatal: a cold render is correct, just slower */ }
         try {
           // Rank declared destinations by local usage so the participant's

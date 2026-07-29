@@ -5,7 +5,11 @@
   bottom: 1rem;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 50000;
+  // Above the reparented Pixi canvas (#pixi-host, z 59989, pointer-events:auto
+  // — pixi-host.worker.ts): below it the peer entries painted but tapping one
+  // to cycle to that peer's location hit the canvas instead. Still under all
+  // shell chrome (edit-actions 59995, controls/hint bars 59999, header 60000).
+  z-index: 59991;
 
   display: flex;
   flex-direction: row;

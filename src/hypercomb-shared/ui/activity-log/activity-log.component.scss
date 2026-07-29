@@ -13,7 +13,13 @@
   // the docked toolwindows lay out against — never a second hardcoded
   // rail width to drift out of step with.
   left: calc(var(--hc-controls-left, 0px) + 0.5rem);
-  z-index: 9;
+  // The panel itself is pointer-events:none, but each ENTRY re-enables them
+  // for its revert and dismiss buttons — and #pixi-host reparents itself to
+  // <body> at z 59989 with a pointer-events:auto <canvas> (pixi-host.worker.ts),
+  // so at z 9 those two buttons were unclickable. Raising costs nothing
+  // visually (the canvas is transparent — the strip was never painted over,
+  // only hit-tested away) and keeps the log under every piece of shell chrome.
+  z-index: 59990;
   max-width: min(
     22rem,
     calc(100vw - var(--hc-controls-left, 0px) - var(--hc-controls-right, 0px) - 1rem)

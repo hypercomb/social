@@ -2781,9 +2781,9 @@ export class TileOverlayDrone extends Drone {
   }
 
   #navigateInto(label: string): void {
-    // Navigation itself never uses a cooldown. The only readiness refusal is
-    // the exact destination-residency gate below; the tile is visibly shaded
-    // until that proof arrives.
+    // Navigation itself never uses a cooldown, and readiness never refuses:
+    // a shaded destination is entered like any other, with the preloader
+    // redirected at it on the way in.
 
     // Backstop latch: input was force-released after NAV_GUARD_BACKSTOP_MS
     // but the axial map still describes the LEAVING level — entering a tile
@@ -2804,14 +2804,14 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // A visible branch is a promise that its destination is already resident.
-    // ShowCellDrone publishes the exact same readiness predicate used by its
-    // shade; hover can change opacity but cannot remove a label from this set.
-    // Keeping cold work off the click path is the purpose of the preloader.
-    if (this.#branchLabels.has(label) && this.#shadedLabels.has(label)) {
-      console.info('[tile-overlay] tile-enter held — destination is still preloading:', label)
-      return
-    }
+    // THE SHADE NEVER REFUSES. A shaded branch says "the inside hasn't arrived
+    // yet — opening this will make you wait", never "you may not open this"
+    // (Jaime 2026-07-28: "just because something is shaded doesn't mean you
+    // can't click it and put it in at the front of the line" / "you don't
+    // necessarily have to wait for the tile to light up to navigate to it").
+    // This used to `return`, and the participant experienced it as a dead
+    // tile. What the press changes now is PRIORITY, not permission — see the
+    // divert immediately before the entry commits below.
 
     // TAG-FILTER dead end. Under a live filter the filter follows you in, so a
     // branch with nothing tagged inside would open onto a blank mesh. Refuse
@@ -2914,11 +2914,36 @@ export class TileOverlayDrone extends Drone {
       if (nav?.goRaw) { nav.goRaw([label]); this.#releaseGuardIfNoMove(before); return }
     }
 
+    // FRONT OF THE LINE. Whatever neighbourhood the preloader was warming, the
+    // tile being entered outranks it — this is the one destination we now know
+    // for certain the participant wants. Fire-and-forget, immediately before
+    // the entry commits: a warm destination makes this a no-op, a cold one gets
+    // the preloader's full attention instead of its eventual attention.
+    this.#divertPreloadTo(label)
+
     lineage.explorerEnter(label)
     // Processor pulse triggered by lineage change. A valid label always appends
     // a segment (explorerEnter guards empty/'.'/'..'), so this is never a no-op
     // on the normal path — the check is belt-and-braces and simply won't fire.
     this.#releaseGuardIfNoMove(before)
+  }
+
+  /** Redirect the preloader at the tile we are entering. The destination is
+   *  this location plus the label — the same path the entry is about to
+   *  commit. Best-effort in every direction: no HistoryService, an older
+   *  contract without `divertPreloadTo`, or an unresolvable lineage all mean
+   *  the warm simply stays where it was, and the navigation proceeds either
+   *  way. Preloading is an optimization; it never gets a vote on navigation. */
+  #divertPreloadTo(label: string): void {
+    try {
+      const history = window.ioc.get<{ divertPreloadTo?: (segments: readonly string[]) => void }>(
+        '@diamondcoreprocessor.com/HistoryService',
+      )
+      if (!history?.divertPreloadTo) return
+      const segs = (this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+        ?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      history.divertPreloadTo([...segs, label])
+    } catch { /* never blocks navigation */ }
   }
 
   /** Record one interaction with the tile at `label` under the current

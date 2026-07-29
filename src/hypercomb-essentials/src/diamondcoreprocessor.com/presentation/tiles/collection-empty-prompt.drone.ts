@@ -224,8 +224,11 @@ class CollectionEmptyPromptDrone {
 
     const host = document.createElement('div')
     host.id = 'hc-collection-empty-prompt'
+    // Above #pixi-host (z 59989, body-reparented, pointer-events:auto <canvas>
+    // inside): anything under it paints fine but has its clicks eaten by the
+    // canvas. Same modal tier the shell dialogs use.
     host.style.cssText =
-      'position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;' +
+      'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;' +
       'pointer-events:none;padding:24px;box-sizing:border-box;font-family:inherit;'
 
     const panel = document.createElement('div')

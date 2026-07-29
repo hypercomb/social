@@ -26,9 +26,11 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 // unconditional — they fire rarely and have earned their keep.
 const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } catch { return false } })()
 
-// Children-readiness gate — ON. A branch tile stays shaded and inert until the
-// exact view inside it is resident, releasing individually (most-used first).
-// Bright means "click me; the destination's first paint is already prepared."
+// Children-readiness shade — ON. A branch tile stays shaded (never inert —
+// clicking it enters and redirects the preloader) until the exact view inside
+// it is resident, releasing individually (most-used first). Bright means "the
+// destination's first paint is already prepared"; dim means "you may go in,
+// you will wait a moment."
 //
 // Its earlier bolt-on integration regressed because readiness derived from
 // lineage reads that STRADDLE navigations (currentSig vs explorerSegments vs
@@ -37,9 +39,11 @@ const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } cat
 // for debugging the plain own-image shade: localStorage 'hc:child-shade' = '0'.
 const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade') !== '0' } catch { return true } })()
 
-// READINESS SHADE — ON. Presentation and navigation consume the same exact
-// predicate, so a branch cannot look available while its click target is cold.
-// Hover may lift opacity as feedback but never weakens the interaction gate.
+// READINESS SHADE — ON, and purely informational. Dim means "the inside hasn't
+// arrived yet, opening this will make you wait"; it has never meant "you may
+// not open this". Navigation consumes the same predicate only to know which
+// destination to push to the FRONT of the preloader's line when it is entered.
+// Hover may lift opacity as feedback without touching the predicate itself.
 // Escape hatch for debugging: localStorage 'hc:tile-shade' = '0'.
 const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-shade') !== '0' } catch { return true } })()
 /** Already-baked label used for the first optimistic frame. The real label's
@@ -6291,11 +6295,12 @@ export class ShowCellDrone extends Drone {
       substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
       linkLabels: cells.filter(c => c.hasLink).map(c => c.label),
       hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
-      // One exact readiness predicate drives both presentation and permission:
-      // a dim branch is still preparing its next view and TileOverlayDrone
-      // refuses entry until this list drops the label. Hover may lift opacity,
-      // but #cellIsPreloading ignores hover, so appearance cannot counterfeit
-      // readiness.
+      // READINESS IS INFORMATION, NOT PERMISSION. A dim branch is still
+      // preparing its next view — entering it is allowed and simply makes the
+      // participant wait (TileOverlayDrone diverts the preloader at the tile
+      // being entered instead of refusing the press). Hover may lift opacity,
+      // but #cellIsPreloading ignores hover, so appearance never counterfeits
+      // the honest answer to "has this arrived yet".
       shadedLabels: cells.filter(c => this.#cellIsPreloading(c)).map(c => c.label),
       // Tag-flatten only — hence the filterTags guard: several render paths
       // reach this helper without passing the flatten block, and a stale entry
@@ -6959,9 +6964,9 @@ export class ShowCellDrone extends Drone {
     // commit is still draining. Keep the tile visible and plainly pending;
     // never let an old bright-label proof make it look fully settled.
     if (this.#pendingCellMutations.has(c.label)) return true
-    // This is interaction truth, independent of TILE_SHADE and hover. The
-    // presentation may lift opacity under the pointer, but doing so can never
-    // release the navigation gate.
+    // This is arrival truth, independent of TILE_SHADE and hover. The
+    // presentation may lift opacity under the pointer; that changes how the
+    // tile LOOKS, never what has actually landed.
     // Monotonic per location-visit: once a label has painted bright it never
     // re-shades this visit — a late-arriving branch dot or props churn must
     // not dim an already-released tile (dim → bright only, never back).
@@ -6991,7 +6996,7 @@ export class ShowCellDrone extends Drone {
 
   #cellIsShaded(c: Cell): boolean {
     // Shade off and hover affect presentation only. Neither can weaken the
-    // independent readiness predicate consumed by the navigation gate.
+    // independent readiness predicate the payload publishes.
     if (!TILE_SHADE || this.#hoverOpaqueLabel === c.label) return false
     return this.#cellIsPreloading(c)
   }
@@ -7708,17 +7713,28 @@ export class ShowCellDrone extends Drone {
             while (i < grandkids.length) {
               if (gen !== this.#readinessGen) return
               const gSig = grandkids[i++]
+              // ORPHAN GUARD: a layer we already CONCLUDED is absent can never
+              // block anything again. Without this the tile below holds the
+              // parent shaded forever on bytes that are never coming — the
+              // same terminal-state rule every other miss here obeys.
+              if (this.#fillMissedSigs.has(gSig)) continue
               const gl = await history.getLayerBySig(gSig)
               const gName = String(gl?.name ?? '')
               if (!gName) {
                 // The child's LAYER itself is not here. Its bytes are what
                 // makes the tile EXIST — without them the click opens onto a
                 // view missing that tile entirely, which is exactly what the
-                // shade promises can't happen. Hold the parent until the layer
-                // arrives; getLayerBySig is retried by the readiness scheduler.
-                // Don't cache a structure built over a missing layer.
+                // shade promises can't happen. Hold the parent — but QUEUE the
+                // layer, the way every other miss in this loop does. This used
+                // to hold with nothing pending: no fetch, no retry, no arrival
+                // to react to, so a branch missing one grandchild layer stayed
+                // shaded for the rest of the session (an ORPHAN — the tile the
+                // participant watches "never comes in"). The warm queue either
+                // lands the bytes or CONCLUDES the sig, and both outcomes force
+                // a readiness repaint that re-runs this pass.
                 allReady = false
                 blocked = true
+                this.#enqueueChildWarm(gSig)
                 continue
               }
               const key = await cellLocationSig(childSegments, gName)
@@ -8352,6 +8368,16 @@ export class ShowCellDrone extends Drone {
               if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) continue
               const blob = await this.#localDecodeBlob(sig)
               if (blob) await imageAtlas.loadImage(sig, blob)
+              // ORPHAN GUARD: the decode is LOCAL-only, so a sig whose bytes
+              // aren't here yet silently produced nothing — and this job had
+              // already shifted it off the list. Residency never arrived, so
+              // the tile stayed shaded while every pass re-queued the same
+              // futile bake. Hand it to the warm queue instead: it lands the
+              // bytes or concludes the sig, and #clickTargetResident accepts
+              // a concluded sig. Reachable for target images the presence
+              // walk never checked (fallback substrate, reference faces) and
+              // for bytes evicted between the check and the bake.
+              else this.#enqueueChildWarm(sig)
               worked = true
               break
             }

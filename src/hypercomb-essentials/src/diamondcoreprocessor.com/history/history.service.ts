@@ -195,7 +195,20 @@ export class HistoryService {
       // Bump the generation; the walk and its content warms check it per node
       // and bail, so a warm never competes for OPFS with the render of the
       // location the user is actually entering.
-      window.addEventListener('navigate', () => { this.#preloadGeneration++ })
+      // ONE EXCEPTION — the navigation a DIVERT just asked for. `divertPreloadTo`
+      // bumps the generation itself (killing the stale neighbourhood) and starts
+      // warming the destination the participant is entering *this instant*; the
+      // `navigate` event that same click fires milliseconds later would otherwise
+      // supersede the warm that exists FOR it. Consume the exemption once, and
+      // only while it is fresh — a divert whose navigation never happened (a
+      // refused entry, a view takeover) must not shield the next real one.
+      window.addEventListener('navigate', () => {
+        if (this.#divertExemptUntil && performance.now() < this.#divertExemptUntil) {
+          this.#divertExemptUntil = 0
+          return
+        }
+        this.#preloadGeneration++
+      })
     } catch { /* non-DOM context */ }
     // SELF-CLEANING: when the legacy `__history__` pool (or a per-bag
     // `__temporary__` archive) still exists, drain it into the signed
@@ -2875,6 +2888,16 @@ export class HistoryService {
   public readonly preloadFromRoot = async (
     rootSig: string,
     maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,
+    // WHERE the walk starts, not just WHAT it starts from. Every node's path is
+    // built by appending names to this, and a prepared view is only valid under
+    // the path it was resolved at (`prepareView` keys its cells/viewport caches
+    // by location and resolves each child's props from it). Defaulting to the
+    // hive root was correct only when the warm started at the hive root — a warm
+    // rooted anywhere else prepared views under the WRONG address, which
+    // resolves incompletely and throws the work away. Callers that know the
+    // path pass it; the sig-only callers (proximity roots) keep the old
+    // behaviour.
+    rootSegments: readonly string[] = [],
   ): Promise<void> => {
     if (!HistoryService.#SIG_RE.test(rootSig)) return
     const startMs = performance.now()
@@ -2937,7 +2960,8 @@ export class HistoryService {
     // and because it is keyed by an immutable content sig it is valid GLOBALLY:
     // preparing a view anywhere prepares it everywhere, permanently.
     type WarmNode = { sig: string; depth: number; score: number; parentSegments: readonly string[] }
-    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, score: scoreOf(rootSig, 0, 0), parentSegments: [] }]
+    const startSegments = rootSegments.map(s => String(s ?? '').trim()).filter(Boolean)
+    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, score: scoreOf(rootSig, 0, 0), parentSegments: startSegments }]
     const CONCURRENCY = 12
 
     while (frontier.length && walked < HistoryService.#PRELOAD_NODE_BUDGET && this.#preloadGeneration === gen) {
@@ -2991,10 +3015,10 @@ export class HistoryService {
           // this layer's content sig, so the most-USED path down the hive gets
           // its views prepared first, and proximity is served by the visible
           // branches doing the same from the render side.
-          // This node's own path: the root is the empty path, every other node
-          // is its parent's path plus its own name.
+          // The root node IS `startSegments` (empty = the hive root, the old
+          // behaviour); every other node is its parent's path plus its name.
           const ownSegments = node.depth === 0
-            ? []
+            ? startSegments
             : [...node.parentSegments, String(layer.name ?? '')].filter(Boolean)
           if (node.depth <= 2 && this.#preparedViews.get(node.sig) !== this.#treeEpoch) {
             // ONCE PER VIEW PER TREE STATE, and the guard sits OUTSIDE the
@@ -3018,8 +3042,14 @@ export class HistoryService {
                   const head = ownSegments.length && name
                     ? await this.latestMarkerSigFor(locSig, name)
                     : node.sig
-                  await renderer.prepareView!(head || node.sig, ownSegments)
-                } catch { /* opportunistic */ }
+                  // A prepare that came back INCOMPLETE (cold membership, a
+                  // child layer still absent) is not a prepared view — and the
+                  // stamp above was written before we could know that. Leaving
+                  // it would orphan this view for the whole epoch: never
+                  // prepared, never retried, permanently slow to open.
+                  const prepared = await renderer.prepareView!(head || node.sig, ownSegments)
+                  if (!prepared) this.#preparedViews.delete(node.sig)
+                } catch { this.#preparedViews.delete(node.sig) }
               })()
             }
           }
@@ -3089,16 +3119,23 @@ export class HistoryService {
       readChildrenManifest?: (sig: string) => Promise<Array<Record<string, unknown>> | null>
     } | undefined)?.readChildrenManifest
     if (!readPack) { this.#warmTileContent(layer, store, gen); return }
+    // ABANDONED WORK IS NOT DONE WORK. The caller stamps `#warmedTiles` BEFORE
+    // dispatching this (so overlapping warms don't pile up on the same tile),
+    // which means a pass cut short by navigation would otherwise leave the tile
+    // recorded as warmed at this epoch and never warmed again — an ORPHAN that
+    // only fills whenever something unrelated happens to touch it. Un-stamp on
+    // every bail so the next pass picks it up.
+    const abandon = (): void => { this.#warmedTiles.delete(layerSig) }
     void (async () => {
       try {
-        if (this.#preloadGeneration !== gen) return
+        if (this.#preloadGeneration !== gen) { abandon(); return }
         const pack = await readPack(layerSig)
         if (!pack || pack.length === 0) { this.#warmTileContent(layer, store, gen); return }
         const adopt = get<{ adoptPackedVisual?: (e: unknown) => void }>('@diamondcoreprocessor.com/ShowCellDrone')
         const adoptStatic = (adopt?.constructor as { adoptPackedVisual?: (e: unknown) => void } | undefined)
         let carriedVisuals = 0
         for (const entry of pack) {
-          if (this.#preloadGeneration !== gen) return
+          if (this.#preloadGeneration !== gen) { abandon(); return }
           adoptStatic?.adoptPackedVisual?.(entry)
           if ((entry as { visual?: unknown } | null)?.visual) carriedVisuals++
         }
@@ -3188,9 +3225,101 @@ export class HistoryService {
    *  abandon the rest of the sequence the moment the participant moves —
    *  preloading is never allowed to outrank live navigation. */
   public readonly preloadGeneration = (): number => this.#preloadGeneration
+  /** Deadline (performance.now) up to which ONE `navigate` event is allowed to
+   *  pass without superseding the warm in flight — see `divertPreloadTo` and
+   *  the constructor's navigate listener. 0 = no exemption pending. */
+  #divertExemptUntil = 0
+  /** How long a divert's exemption stays valid. Long enough for the click's own
+   *  navigation to fire (same tick in practice), short enough that a divert
+   *  whose navigation never happened cannot shield an unrelated one. */
+  static readonly #DIVERT_EXEMPT_MS = 2000
+
+  /**
+   * FRONT OF THE LINE — a click outranks the queue.
+   *
+   * The preloader warms a neighbourhood in the background, and a tile whose
+   * insides have not arrived yet renders shaded. The shade is INFORMATION, not
+   * permission (Jaime 2026-07-28: "just because something is shaded doesn't
+   * mean you can't click it and put it in at the front of the line" / "you
+   * don't have to wait for the tile to light up to navigate to it"). So when
+   * the participant enters a tile, the click does not wait for the warm to
+   * reach it — it REDIRECTS the warm:
+   *
+   *  1. bump the generation, so whatever neighbourhood the walk was warming
+   *     abandons immediately and stops contending for OPFS with the render
+   *     that is about to run;
+   *  2. exempt the click's own `navigate` event from bumping again, so the
+   *     warm started here survives the navigation that caused it;
+   *  3. warm the destination — head first, then its bounded subtree — through
+   *     the same cooperatively-sliced walk everything else uses.
+   *
+   * Fire-and-forget and entirely best-effort: preloading is an optimization,
+   * so nothing here may block, slow, or fail a navigation. Entering an
+   * unwarmed tile is always allowed; this only makes the wait the shortest
+   * one available.
+   */
+  public readonly divertPreloadTo = (segments: readonly string[]): void => {
+    const path = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+    this.#preloadGeneration++
+    this.#divertExemptUntil = performance.now() + HistoryService.#DIVERT_EXEMPT_MS
+    void (async () => {
+      try {
+        const locationSig = await this.sign({ explorerSegments: () => path })
+        if (!locationSig) return
+        await this.preloadNeighbourhood(locationSig, HistoryService.#PRELOAD_MAX_DEPTH, path)
+        // FORWARD FIRST, THEN THE WAY BACK. Where they are going outranks
+        // everything; the moment it is warm, warm the route home too — the
+        // participant is one gesture from taking it.
+        await this.preloadAncestors(path)
+      } catch { /* opportunistic — a cold render is correct, just slower */ }
+    })()
+  }
+
+  /**
+   * WARM BACKWARD AS WELL AS FORWARD (Jaime 2026-07-28: "the preloader has to
+   * preload in reverse to the preload depth as well as the forward vectors,
+   * otherwise moving back nothing will be loaded").
+   *
+   * Every warm so far pointed DOWN: the current location and its descendants.
+   * But half of all navigation is BACK, and the way out is not in the subtree
+   * you are warming — arrive anywhere by a route that skipped the ancestors
+   * (a deep link, a reference portal, an adopt, a reload at a deep path) and
+   * the whole way home is cold. So the neighbourhood is a BALL, not a cone:
+   * `#PRELOAD_MAX_DEPTH` levels down AND the same number up.
+   *
+   * One level per ancestor is exactly right and exactly cheap: a layer's pack
+   * carries every sibling's visual, so warming an ancestor at depth 1 gives
+   * back-navigation the entire page it will paint in two reads — while
+   * descending from that ancestor would re-walk the branch we are already in.
+   * Nearest ancestor first: back goes one step at a time.
+   */
+  public readonly preloadAncestors = async (
+    segments: readonly string[],
+    depth: number = HistoryService.#PRELOAD_MAX_DEPTH,
+  ): Promise<void> => {
+    const path = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+    const gen = this.#preloadGeneration
+    for (let up = 1; up <= depth && path.length - up >= 0; up++) {
+      // The participant moved on — the way back from a location they have
+      // left is no longer the way back. Preloading never outranks live
+      // navigation.
+      if (this.#preloadGeneration !== gen) return
+      const ancestor = path.slice(0, path.length - up)
+      try {
+        const locationSig = await this.sign({ explorerSegments: () => ancestor })
+        if (!locationSig) continue
+        await this.preloadNeighbourhood(locationSig, 1, ancestor)
+      } catch { /* opportunistic — a cold render is correct, just slower */ }
+    }
+  }
+
   public readonly preloadNeighbourhood = async (
     locationSig: string,
     maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,
+    /** The path `locationSig` signs, when the caller knows it — see
+     *  `preloadFromRoot`'s `rootSegments`. A sig cannot be un-hashed, so
+     *  without this the walk can only assume the hive root. */
+    segments: readonly string[] = [],
   ): Promise<void> => {
     if (!HistoryService.#SIG_RE.test(locationSig)) return
     // Resolve (warming if needed) this location's head layer sig the SAME way
@@ -3202,7 +3331,13 @@ export class HistoryService {
     }
     if (!headSig || this.#warmedHeads.has(headSig)) return
     this.#warmedHeads.add(headSig)
-    await this.preloadFromRoot(headSig, maxDepth)
+    const genAtStart = this.#preloadGeneration
+    await this.preloadFromRoot(headSig, maxDepth, segments)
+    // A walk cut short by navigation warmed only PART of this neighbourhood, so
+    // remembering the head as warmed would deny it the retry it needs. Content-
+    // addressed membership can never be wrong about identity, but it can be
+    // wrong about completeness — forget an abandoned pass.
+    if (this.#preloadGeneration !== genAtStart) this.#warmedHeads.delete(headSig)
   }
 
   /**

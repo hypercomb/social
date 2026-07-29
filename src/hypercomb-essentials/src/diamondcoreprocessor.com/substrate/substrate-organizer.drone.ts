@@ -1,18 +1,21 @@
-// diamondcoreprocessor.com/substrate/places.drone.ts
+// diamondcoreprocessor.com/substrate/substrate-organizer.drone.ts
 //
-// PlacesDrone — fixed-overlay modal for the collections a tile can draw its
-// background from. Follows the drone-DOM pattern established by
+// SubstrateOrganizerDrone — fixed-overlay modal for the sets a tile can draw
+// its background from. Follows the drone-DOM pattern established by
 // HistorySliderDrone: plain DOM, inline cssText, appended to document.body,
 // opened/closed via EffectBus events. No Angular dependency.
 //
-// One of the collections is PLACES itself — the participant's own, held as
-// signature references in the sign('places:references') pool. Copying into
-// it copies a reference, never bytes.
+// One of the sets is REFERENCES — the participant's own, held as signature
+// references in the sign('substrate:references') pool. Copying into it copies
+// a reference, never bytes.
+//
+// (Not to be confused with PLACES, which is the collections index — a
+// different surface entirely. This one was briefly called that; it isn't.)
 //
 // Listens:
-//   places:open        → show the modal (rebuild content from registry)
-//   places:close       → hide it
-//   substrate:changed  → if open, refresh content
+//   substrate-organizer:open   → show the modal (rebuild from the registry)
+//   substrate-organizer:close  → hide it
+//   substrate:changed          → if open, refresh content
 // Emits:
 //   activity:log       → toast messages
 //   (service methods also emit substrate:changed which feeds back in)
@@ -29,7 +32,7 @@ function t(key: string, params?: Record<string, string | number>): string {
 
 const MAX_THUMBS = 30
 
-export class PlacesDrone {
+export class SubstrateOrganizerDrone {
   #root: HTMLElement | null = null
   #backdrop: HTMLElement | null = null
   #panel: HTMLElement | null = null
@@ -46,8 +49,8 @@ export class PlacesDrone {
   #dragSuppressClick = false
 
   constructor() {
-    EffectBus.on('places:open', () => { void this.#open() })
-    EffectBus.on('places:close', () => { this.#close() })
+    EffectBus.on('substrate-organizer:open', () => { void this.#open() })
+    EffectBus.on('substrate-organizer:close', () => { this.#close() })
     EffectBus.on('substrate:changed', () => { if (this.#visible) void this.#render() })
   }
 
@@ -57,11 +60,19 @@ export class PlacesDrone {
     if (this.#root) return
 
     const root = document.createElement('div')
-    root.id = 'hc-places'
+    root.id = 'hc-substrate-organizer'
+    // #pixi-host reparents itself to <body> at z-index 59989 with a
+    // pointer-events:auto <canvas> inside (pixi-host.worker.ts), so at the old
+    // 9500 this whole panel painted but nothing in it could be clicked — not
+    // the close button, not a source card, not a remove, not the backdrop's
+    // click-to-dismiss. It is a modal over the hive (translucent, blurred
+    // backdrop — the hive stays visible behind it), so it rides the modal tier
+    // the other dialogs use (confirm-dialog / mesh-modal: 100000) rather than
+    // suppressing the canvas the way a full-surface takeover would.
     root.style.cssText = `
       position: fixed;
       inset: 0;
-      z-index: 9500;
+      z-index: 100000;
       display: none;
       align-items: center;
       justify-content: center;
@@ -102,12 +113,12 @@ export class PlacesDrone {
       border-bottom: 1px solid rgba(140, 170, 220, 0.12);
     `
     const title = document.createElement('div')
-    title.textContent = `⌖ ${t('places.title')}`
+    title.textContent = `◈ ${t('substrate.organizer.title')}`
     title.style.cssText = 'font-size: 13px; font-weight: 600; letter-spacing: 0.5px;'
 
     const closeBtn = document.createElement('button')
     closeBtn.textContent = '×'
-    closeBtn.title = t('places.close-title')
+    closeBtn.title = t('substrate.organizer.close-title')
     closeBtn.style.cssText = `
       background: none; border: none; color: rgba(220, 230, 240, 0.6);
       font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
@@ -137,9 +148,9 @@ export class PlacesDrone {
     `
     // Hide webkit scrollbar
     const styleHide = document.createElement('style')
-    styleHide.textContent = `#hc-places .hc-places-strip::-webkit-scrollbar { display: none; }`
+    styleHide.textContent = `#hc-substrate-organizer .hc-so-strip::-webkit-scrollbar { display: none; }`
     document.head.appendChild(styleHide)
-    listEl.classList.add('hc-places-strip')
+    listEl.classList.add('hc-so-strip')
 
     // Drag-to-pan handlers
     let dragStartX = 0
@@ -322,7 +333,7 @@ export class PlacesDrone {
     }
     if (sources.length === 0) {
       const empty = document.createElement('div')
-      empty.textContent = t('places.empty')
+      empty.textContent = t('substrate.organizer.empty')
       empty.style.cssText = 'padding: 24px; font-size: 11px; color: rgba(180, 200, 220, 0.4);'
       this.#listEl.appendChild(empty)
     }
@@ -332,46 +343,46 @@ export class PlacesDrone {
     // Footer buttons
     this.#footerEl.innerHTML = ''
     if (isFolderAccessSupported()) {
-      this.#footerEl.appendChild(this.#button(t('places.link-folder'), async () => {
+      this.#footerEl.appendChild(this.#button(t('substrate.organizer.link-folder'), async () => {
         const source = await svc.linkLocalFolder()
         if (source) {
-          EffectBus.emit('activity:log', { message: `linked ${source.label}`, icon: '⌖' })
+          EffectBus.emit('activity:log', { message: `linked ${source.label}`, icon: '◈' })
         }
       }))
     }
-    this.#footerEl.appendChild(this.#button(t('places.use-hive'), async () => {
+    this.#footerEl.appendChild(this.#button(t('substrate.organizer.use-hive'), async () => {
       const lineage = get('@hypercomb.social/Lineage') as { explorerSegments: () => readonly string[] } | undefined
       const segments = lineage?.explorerSegments() ?? []
       if (segments.length === 0) {
-        EffectBus.emit('activity:log', { message: t('places.navigate-first'), icon: '⌖' })
+        EffectBus.emit('activity:log', { message: t('substrate.organizer.navigate-first'), icon: '◈' })
         return
       }
       const path = segments.join('/')
       await svc.addHiveSource(path)
     }))
-    this.#footerEl.appendChild(this.#button(`↻ ${t('places.refresh')}`, async () => {
+    this.#footerEl.appendChild(this.#button(`↻ ${t('substrate.organizer.refresh')}`, async () => {
       await svc.warmUp()
       await this.#render()
     }))
-    // Copying INTO Places. Only offered while Places is the selected
+    // Copying INTO the reference set. Only offered while that set is selected
     // collection, so the button never has to say where things will land —
     // it lands in what you are looking at. What gets copied is a REFERENCE
     // per image on this page's tiles; the bytes stay where they already are.
-    if (svc.activeSource?.type === 'places') {
-      this.#footerEl.appendChild(this.#button(t('places.copy-here'), async () => {
+    if (svc.activeSource?.type === 'references') {
+      this.#footerEl.appendChild(this.#button(t('substrate.organizer.copy-here'), async () => {
         const lineage = get('@hypercomb.social/Lineage') as { explorerSegments: () => readonly string[] } | undefined
         const segments = lineage?.explorerSegments() ?? []
         if (segments.length === 0) {
-          EffectBus.emit('activity:log', { message: t('places.navigate-first'), icon: '⌖' })
+          EffectBus.emit('activity:log', { message: t('substrate.organizer.navigate-first'), icon: '◈' })
           return
         }
         const count = await svc.copyReferencesFromHive(segments.join('/'))
-        EffectBus.emit('activity:log', { message: t('places.copied', { count }), icon: '⌖' })
+        EffectBus.emit('activity:log', { message: t('substrate.organizer.copied', { count }), icon: '◈' })
         await svc.warmUp()
         await this.#render()
       }))
     }
-    this.#footerEl.appendChild(this.#button(t('places.turn-off'), async () => {
+    this.#footerEl.appendChild(this.#button(t('substrate.organizer.turn-off'), async () => {
       await svc.setActive(null)
     }))
 
@@ -418,7 +429,7 @@ export class PlacesDrone {
     `
     // Type glyph placeholder (shown until a thumbnail loads)
     const glyphs: Record<SubstrateSource['type'], string> = {
-      folder: '📁', url: '◈', hive: '⬡', layer: '▧', places: '⌖',
+      folder: '📁', url: '◈', hive: '⬡', layer: '▧', references: '⌖',
     }
     thumb.textContent = glyphs[source.type] ?? '◈'
 
@@ -536,11 +547,11 @@ export class PlacesDrone {
     this.#disposeThumbs()
 
     if (!active || !svc) {
-      this.#previewLabel.textContent = t('places.no-active')
+      this.#previewLabel.textContent = t('substrate.organizer.no-active')
       return
     }
 
-    this.#previewLabel.textContent = t('places.preview', { label: active.label })
+    this.#previewLabel.textContent = t('substrate.organizer.preview', { label: active.label })
 
     const store = get('@hypercomb.social/Store') as { getResource: (sig: string) => Promise<Blob | null> } | undefined
     if (!store) return
@@ -567,14 +578,14 @@ export class PlacesDrone {
         background-position: center;
         position: relative;
       `
-      // Places members can be dropped from here — every other source type
+      // Reference members can be dropped from here — every other source type
       // is a view onto somewhere else, so its images aren't ours to remove.
       // This drops the REFERENCE only; the image bytes are content and may
       // still be on a tile or in another collection.
-      if (active.type === 'places') {
+      if (active.type === 'references') {
         const drop = document.createElement('button')
         drop.textContent = '✕'
-        drop.title = t('places.remove-reference')
+        drop.title = t('substrate.organizer.remove-reference')
         drop.style.cssText = `
           position: absolute;
           top: 2px;
@@ -637,5 +648,5 @@ export class PlacesDrone {
   }
 }
 
-const _placesDrone = new PlacesDrone()
-;(window as any).ioc.register('@diamondcoreprocessor.com/PlacesDrone', _placesDrone)
+const _substrateOrganizerDrone = new SubstrateOrganizerDrone()
+;(window as any).ioc.register('@diamondcoreprocessor.com/SubstrateOrganizerDrone', _substrateOrganizerDrone)

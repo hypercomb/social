@@ -9,7 +9,12 @@
   // clears the header at any size: 3.5rem × the active header zoom
   top: max(calc(3.5rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.67rem));
   right: 0.75rem;
-  z-index: 10000;
+  // Above the reparented Pixi canvas (#pixi-host, z 59989, pointer-events:auto
+  // — pixi-host.worker.ts): below it the drawer painted but its close ×, the
+  // per-entry checkboxes and "Apply to selection" all hit the canvas instead.
+  // Stays under the atomizer sidebar (59991) and under every modal (100000+),
+  // exactly as 10000 did.
+  z-index: 59990;
   width: 14rem;
   display: flex;
   flex-direction: column;

@@ -14,7 +14,12 @@
   top: max(calc(2.5rem * var(--hc-header-zoom, 1) + 0.4rem), calc(var(--hc-header-anchor) + 0.07rem));
   left: 50%;
   transform: translateX(-50%);
-  z-index: 55;
+  // Above the reparented Pixi canvas (#pixi-host, z 59989, pointer-events:auto
+  // — see pixi-host.worker.ts): below it the badges and panel rows painted fine
+  // but every click landed on the canvas. Still below all shell chrome
+  // (edit-actions 59995, controls/hint bars 59999, header 60000), and one step
+  // under the preview banner (59991) — the old 55-under-56 order.
+  z-index: 59990;
   pointer-events: none;
   display: block;
   max-width: 70vw;

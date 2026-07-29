@@ -6,10 +6,17 @@
 // act (a passive close is not consent, and a stray click must not discard
 // the offer).
 
+// #pixi-host reparents itself to <body> at z-index 59989 with a
+// pointer-events:auto <canvas> inside (pixi-host.worker.ts). Anything below
+// that lands UNDER the canvas: the card still paints (the canvas is
+// transparent) but every click hits the canvas instead of the button, so the
+// welcome screen looked alive and did nothing. This is a modal card, not a
+// full-surface takeover, so it rides the modal tier the other dialogs use
+// (confirm-dialog / mesh-modal: 100000) rather than suppressing the canvas.
 :host {
   position: fixed;
   inset: 0;
-  z-index: 58;
+  z-index: 100000;
   pointer-events: none;
   display: block;
 }

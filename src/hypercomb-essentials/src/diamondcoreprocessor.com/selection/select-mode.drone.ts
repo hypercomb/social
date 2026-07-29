@@ -68,10 +68,22 @@ export const SELECTION_MENU = 'selection'
 const STEEL = 'rgba(126,182,214,0.92)'
 /** Thumb-target floor — the same one the fullscreen tile view uses. */
 const TAP = '2.9rem'
-/** Above every canvas-level surface, below the fullscreen takeovers (59988).
- *  "It needs to sit above the tiles" — and above anything else the hive
- *  paints over them. */
-const PILL_Z = 59000
+/** Above the reparented Pixi CANVAS, which is the thing that actually has to
+ *  be cleared: #pixi-host moves itself to <body> at z-index 59989 with a
+ *  pointer-events:auto <canvas> inside (pixi-host.worker.ts). The old 59000
+ *  read as "above every canvas-level surface" but was 989 SHORT of the canvas
+ *  itself — the pill painted correctly and every tap on it (including Done)
+ *  landed on the canvas.
+ *
+ *  Going above 59988 is safe even though the fullscreen takeovers sit there:
+ *  they announce themselves with `view:active`, which this drone listens to
+ *  and reconciles the pill away on (#reconcile), and which also hides
+ *  #pixi-host — so nothing here can paint over a takeover.
+ *
+ *  Still below every piece of shell chrome (edit-actions 59995, controls/hint
+ *  bars 59999, header bar 60000). Shared with the sample-swarm pill, which
+ *  occupies the same slot and is mutually exclusive with this one. */
+const PILL_Z = 59992
 
 type SelectionShape = {
   selected: ReadonlySet<string>
