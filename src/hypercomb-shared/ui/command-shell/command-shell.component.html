@@ -169,6 +169,28 @@
             <span class="mat-sym" aria-hidden="true">{{ pheromoneScopeIcon() }}</span>
           </button>
 
+          <!-- MIC — mobile only. Dictation used to be a slot on the mobile
+               control bar; the words it produces land in the text box beside
+               this rail, so it belongs here. Tap toggles listening, hold is
+               push-to-talk — the parent owns that machine, this only reports
+               the press. Pointer events (not click) so a hold is knowable. -->
+          @if (showMic()) {
+            <button
+              class="rail-btn mic-rail-btn"
+              [class.on]="micActive()"
+              type="button"
+              (pointerdown)="onMicDown($event)"
+              (pointerup)="micRelease.emit()"
+              (pointercancel)="micRelease.emit()"
+              (pointerleave)="micRelease.emit()"
+              [attr.aria-label]="micLabel()"
+              [attr.aria-pressed]="micActive()"
+              [title]="micLabel()"
+            >
+              <span class="mat-sym" aria-hidden="true">mic</span>
+            </button>
+          }
+
           <!-- feedback — opens the share-feedback panel (replaces the old
                bottom-right FAB that sat on top of undo/redo) -->
           <button

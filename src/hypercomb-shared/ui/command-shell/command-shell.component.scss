@@ -584,6 +584,27 @@ $bp-phone-max: 599px;
   }
 }
 
+// The mic is the other member with its own colour — live-red while it is
+// listening, because "is this thing recording me" must never be a guess. Box,
+// glyph size and gap stay on the rail; identity comes from colour alone.
+.mic-rail-btn {
+  touch-action: none;
+  user-select: none;
+
+  &:hover {
+    color: rgba(255, 120, 120, 0.9);
+    background: rgba(255, 68, 68, 0.1);
+  }
+
+  &.on {
+    color: rgb(255, 92, 92);
+    background: rgba(255, 68, 68, 0.18);
+    box-shadow: 0 0 6px rgba(255, 68, 68, 0.45);
+
+    .mat-sym { font-variation-settings: 'FILL' 1; }
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // RESPONSIVE — only touch zoom prevention, no layout changes
 // ═══════════════════════════════════════════════════════════
@@ -627,4 +648,64 @@ $bp-phone-max: 599px;
   .prompt-chevron {
     font-size: 1.55em;
   }
+}
+
+// ── PHONE PORTRAIT: the rail drops to its OWN row under the prompt ──
+//
+// On desktop the icon rail rides at the right end of the same line as the
+// text box, because there is width to spare. On a portrait phone there is
+// not: the rail and the input fight over ~375px, the input shrinks to a
+// sliver, and the rail wraps into two and three cramped rows inside the bar.
+//
+// So the rail comes OUT of the line and becomes a row of its own directly
+// under the prompt — full width, one line deep, scrolled horizontally when it
+// carries more icons than fit. Room for more icons, thumb-sized targets, and
+// the text box gets the whole first line back.
+//
+// LANDSCAPE KEEPS THE OLD SHAPE (Jaime: "unless it's in landscape which is OK
+// to be inside the command line") — a landscape phone is wide and short, so
+// the width is there and the height is what is scarce. The query is spelled
+// out rather than reusing `phone-only`: portrait phone = narrow AND NOT short,
+// which is exactly the complement of the landscape rule in `_header-bar.scss`.
+@media (max-width: $bp-phone-max) and (min-height: 450px) {
+  // The bar grows to hold the second row; `height: 100%` of a now-auto parent
+  // would collapse it back.
+  .command-shell,
+  .command-row { height: auto; }
+
+  .command-row {
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 0.15rem;
+  }
+
+  // Row two. `flex: 1 0 100%` is what breaks it onto its own line; `order`
+  // keeps it last even though the indicators come after it in some states.
+  .shell-actions {
+    order: 10;
+    flex: 1 0 100%;
+    margin-left: 0;
+    padding: 0.1rem 0.25rem 0.15rem;
+    // One line, scrolled — never a second wrapped row. A wrapped rail eats
+    // the viewport; a scrolled one holds as many icons as we ever add.
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar { display: none; }
+  }
+
+  // Groups stop wrapping and stop hugging the right edge: on its own row the
+  // rail reads left-to-right like everything else, and the scroll carries the
+  // overflow the wrap used to.
+  .action-group {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  // The whole strip claims the horizontal drag so scrolling the icons never
+  // pans the hive underneath it.
+  .shell-actions { touch-action: pan-x; }
 }

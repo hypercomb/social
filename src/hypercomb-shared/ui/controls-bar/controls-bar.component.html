@@ -178,15 +178,19 @@
 
       @if (isMobile()) {
         <!-- ═══ MOBILE: balanced bar — two buttons each side, fixed center ═══
-             back · talk │ CAMERA │ fit · solo/swarm.
+             back · fit │ CAMERA │ fullscreen · solo/swarm.
              The centre button is the anchor, and on a phone the act that
              belongs under the thumb is CAPTURE: point at something, press,
-             and a tile is created from the photo. Fit took that slot until it
-             was moved out to the fourth — it is a viewport correction, not the
-             reason you opened the app. Pheromones came off the bar entirely;
-             it lives in the header rail (and in the tag strip's own opener).
-             Every button is evenly spaced across the bar, so the extra
-             landscape control never bunches one side. -->
+             and a tile is created from the photo. FIT (centre the screen) took
+             the mic's old slot: the thing you reach for over and over on a
+             phone is "put the hive back where I can see it", and the mic moved
+             into the command line, where the words it dictates end up anyway.
+             FULLSCREEN takes fit's former slot — a phone screen is small
+             enough that reclaiming the browser chrome is worth a permanent
+             control. Pheromones came off the bar entirely; it lives in the
+             header rail (and in the tag strip's own opener). Every button is
+             evenly spaced across the bar, so the extra landscape control never
+             bunches one side. -->
 
         <div class="controls-section mobile-nav">
           <div class="mobile-side left" data-consumes-wheel>
@@ -195,17 +199,26 @@
                     [attr.aria-label]="'controls.go-back' | t">
               <span class="mat-sym">arrow_back</span>
             </button>
-            @if (voiceSupported) {
-              <button class="ctl-btn mic-btn" [class.recording]="voiceActive()"
-                (pointerdown)="mobileMicDown($event)" (pointerup)="mobileMicUp()" (pointercancel)="mobileMicUp()" (pointerleave)="mobileMicUp()"
-                [attr.aria-label]="'controls.voice-hold' | t">
-                <span class="mat-sym" [class.filled]="voiceActive()">mic</span>
+            <!-- FIT — centre the screen. It goes away on a pinned layer, same
+                 as the desktop rail's fit/zoom set; an inert spacer holds the
+                 slot so the row keeps its rhythm. -->
+            @if (pinnedHere()) {
+              <div class="ctl-btn pinned-spacer" aria-hidden="true"></div>
+            } @else {
+              <button class="ctl-btn fit-btn"
+                      [class.fit-global]="fitButtonState() === 'global'"
+                      [class.fit-page]="fitButtonState() === 'page'"
+                      (click)="fitOrCenter($event)" (dblclick)="lockFit()"
+                      [attr.aria-label]="'controls.fit-content' | t">
+                <span class="mat-sym">center_focus_strong</span>
               </button>
             }
             <!-- LANDSCAPE ONLY: portrait pins the command line permanently,
                  so a reveal toggle would be dead weight there. In landscape
                  the bar is collapsed to preserve the short viewport; this
-                 button opens it with focus so the native keyboard rises. -->
+                 button opens it with focus so the native keyboard rises —
+                 and it is also how the mic is reached there, since the mic
+                 now lives inside the command line. -->
             @if (isLandscape()) {
               <button class="ctl-btn keyboard-btn" [class.active]="inputVisible()"
                       (click)="toggleInput()"
@@ -227,21 +240,17 @@
           </button>
 
           <div class="mobile-side right" data-consumes-wheel>
-            <!-- FIT — the viewport control, fourth slot now that pheromones is
-                 off the bar. It goes away on a pinned layer, same as the
-                 desktop rail's fit/zoom set; an inert spacer holds the slot so
-                 the row keeps its rhythm. -->
-            @if (pinnedHere()) {
-              <div class="ctl-btn pinned-spacer" aria-hidden="true"></div>
-            } @else {
-              <button class="ctl-btn fit-btn"
-                      [class.fit-global]="fitButtonState() === 'global'"
-                      [class.fit-page]="fitButtonState() === 'page'"
-                      (click)="fitOrCenter($event)" (dblclick)="lockFit()"
-                      [attr.aria-label]="'controls.fit-content' | t">
-                <span class="mat-sym">center_focus_strong</span>
-              </button>
-            }
+            <!-- FULLSCREEN — the fourth slot, where fit used to be. A phone
+                 gives up a fifth of its screen to browser chrome; this takes
+                 it back. Deliberately a BUTTON and not something the first
+                 touch does for you: entering fullscreen needs a user gesture
+                 anyway, and a screen that silently swallows the address bar
+                 on first contact reads as the page misbehaving. -->
+            <button class="ctl-btn fullscreen-btn" [class.active]="isFullscreen()"
+                    (click)="toggleFullscreen()"
+                    [attr.aria-label]="'controls.fullscreen' | t">
+              <span class="mat-sym">{{ isFullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</span>
+            </button>
             <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
               <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
             </button>

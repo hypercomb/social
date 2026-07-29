@@ -1389,28 +1389,14 @@ $actions-corner: 12rem;
   border-color: rgba(0, 229, 160, 0.45);
 }
 
-// Mic button push-to-talk visual (recording state)
-.pill-stage.mobile .mic-btn {
-  user-select: none;
-  touch-action: none;
-
-  &.recording {
-    color: #ff4444;
-    background: rgba(255, 68, 68, 0.18);
-    border-color: rgba(255, 68, 68, 0.55);
-
-    .mat-sym { animation: mic-pulse 1.2s ease-in-out infinite; }
-
-    &::after {
-      content: '';
-      position: absolute;
-      inset: -3px;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 68, 68, 0.5);
-      animation: mic-glow 1.2s ease-in-out infinite;
-      pointer-events: none;
-    }
-  }
+// Fullscreen toggle — lit while the document is fullscreen, the same cold
+// steel the rest of the mobile chrome uses. (The mic that used to live on
+// this bar is now inside the command line; its recording visual moved with
+// it — see command-line.component.scss.)
+.pill-stage.mobile .fullscreen-btn.active {
+  color: rgba(126, 182, 214, 0.95);
+  background: rgba(126, 182, 214, 0.14);
+  border-color: rgba(126, 182, 214, 0.45);
 }
 
 // Solo / swarm mode indicator on mobile
@@ -1439,7 +1425,7 @@ $actions-corner: 12rem;
 // the LEFT edge as a vertical strip (Jaime 2026-07-28: "On landscape the
 // buttons go to the left and the back button has to be at the bottom
 // facing to the left"). Same single evenly-spaced run, turned on its side and
-// REMAPPED top→bottom as mesh/fit · camera · keyboard/mic/back — so BACK sits
+// REMAPPED top→bottom as mesh/fullscreen · camera · fit/keyboard/back — so BACK sits
 // in the bottom-left thumb corner, its arrow pointing left off the edge it
 // exits through. Ordering is per-BUTTON (the groups are display:contents), so
 // the sixth control landscape adds just takes its place in the same rhythm
@@ -1463,8 +1449,8 @@ $actions-corner: 12rem;
   }
 
   // Zone remap: DOM order is [left group, centre, right group] (portrait's
-  // back·mic·keyboard | camera | fit·mesh); read them bottom, middle, top
-  // instead, with back last of all so it is the bottom-most control.
+  // back·fit·keyboard | camera | fullscreen·mesh); read them bottom, middle,
+  // top instead, with back last of all so it is the bottom-most control.
   .mobile-side.right > * { order: 1; }
   .ctl-btn.mobile-center { order: 2; }
   .mobile-side.left  > * { order: 3; }

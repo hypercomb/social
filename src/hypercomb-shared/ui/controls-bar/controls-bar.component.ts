@@ -247,6 +247,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isLandscape = signal(false)
   /** Whether the command-line input is currently revealed on mobile. */
   readonly inputVisible = signal(false)
+  /** True while the document is in fullscreen. The mobile bar's fullscreen
+   *  button reads it to flip its glyph — a toggle that always shows the same
+   *  icon can't say which way it will go. */
+  readonly isFullscreen = signal(false)
+  #fullscreenHandler = (): void => { this.isFullscreen.set(!!document.fullscreenElement) }
   #mobileQuery: MediaQueryList | null = null
   #landscapeQuery: MediaQueryList | null = null
   #mobileHandler = (e: MediaQueryListEvent) => {
@@ -1047,6 +1052,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#syncInputVisibility()
 
+    this.isFullscreen.set(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', this.#fullscreenHandler)
+
     this.#restorePillPos()
 
     window.addEventListener('resize', this.#onResize)
@@ -1343,6 +1351,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     document.documentElement.style.setProperty('--hc-controls-right', '0px')
     document.documentElement.style.removeProperty('--hc-controls-left-top')
     window.removeEventListener('resize', this.#onResize)
+    document.removeEventListener('fullscreenchange', this.#fullscreenHandler)
     window.removeEventListener('pointermove', this.#onActivity)
     window.removeEventListener('pointerdown', this.#onActivity)
     window.removeEventListener('keydown', this.#onActivity)
@@ -1832,18 +1841,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.voiceService?.stop()
   }
 
-  /** Mobile mic button press — delegates to command-line state machine. */
-  readonly mobileMicDown = (event: PointerEvent): void => {
-    ;(event.target as HTMLElement)?.setPointerCapture?.(event.pointerId)
-    event.preventDefault()
-    // Transient — no replay; press/release are point-in-time events.
-    EffectBus.emitTransient('mobile:mic:press', {})
-  }
-
-  /** Mobile mic button release — delegates to command-line state machine. */
-  readonly mobileMicUp = (): void => {
-    EffectBus.emitTransient('mobile:mic:release', {})
-  }
+  // The mobile mic button moved OFF this bar and into the command line — the
+  // words it dictates land in that text box, so the control belongs beside it,
+  // and the bar slot it freed went to fit ("centre the screen"). The
+  // `mobile:mic:press` / `:release` state machine it drove is unchanged; the
+  // command line now emits it directly. See command-line.component.
 
   // ── utility actions (emit effects for drones) ─────────
 

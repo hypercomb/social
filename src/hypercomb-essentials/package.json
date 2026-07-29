@@ -28,6 +28,8 @@
     "copy-to-dcp": "tsx ./scripts/copy-to-dcp.ts",
     "build:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module.ts",
     "test:preload-e2e": "node ./scripts/verify-tile-preload.mjs",
+    "test:repeat-navigation": "node ./scripts/verify-repeat-navigation.mjs",
+    "test:preload-interactivity": "node ./scripts/verify-preload-interactivity.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

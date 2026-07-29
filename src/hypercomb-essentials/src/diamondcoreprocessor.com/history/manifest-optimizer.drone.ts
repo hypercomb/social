@@ -116,12 +116,16 @@ export class ManifestOptimizerDrone extends Drone {
     const batch = [...this.#pending.entries()]
     this.#pending.clear()
 
+    // Budgeted here too. A batch is however many layers were committed since
+    // the last idle pass, and an unbudgeted pass would re-encode every image
+    // under all of them in one go — the same stall buildEntries budgets away.
+    const budget = { mints: ManifestOptimizerDrone.#MINTS_PER_PASS }
     for (const [parentSig, childSigs] of batch) {
       const manifest: ManifestEntry[] = []
       for (const sig of childSigs) {
         const child = await history.getLayerBySig(sig)
         if (!child) break
-        manifest.push({ sig, layer: child, ...await this.#visualFor(child, store) })
+        manifest.push({ sig, layer: child, ...await this.#visualFor(child, store, budget) })
       }
       if (manifest.length === childSigs.length) {
         await store.writeChildrenManifest(parentSig, manifest)
@@ -163,41 +167,17 @@ export class ManifestOptimizerDrone extends Drone {
   /** Renditions minted per enrich pass — see buildEntries. */
   static readonly #MINTS_PER_PASS = 6
 
-  /**
-   * Heal ONE layer's pack: build the full array and write it. Called by the
-   * preloader when its warm finds a names-only manifest, so the whole hive
-   * heals in the background instead of only the layers someone happens to
-   * visit. The write lives HERE (this drone owns manifest writing) and is
-   * complete-or-absent like every other mint. Returns the entries it wrote so
-   * the caller can adopt their visuals immediately.
-   */
-  public readonly enrichPack = async (
-    parentSig: string,
-    childSigs: readonly string[],
-    childLayers: ReadonlyArray<{ name?: string; [k: string]: unknown }>,
-  ): Promise<ManifestEntry[] | null> => {
-    // A budgeted pass leaves some entries sig-only, so one attempt per layer
-    // would strand them. Allow a few passes — each takes the next few
-    // renditions — and stop there so a layer whose images simply can't be
-    // optimized doesn't re-mint forever.
-    const attempts = (this.#enriched.get(parentSig) ?? 0) + 1
-    if (attempts > ManifestOptimizerDrone.#MAX_ENRICH_PASSES) return null
-    this.#enriched.set(parentSig, attempts)
-    const store = get('@hypercomb.social/Store') as ManifestStore | undefined
-    if (!store?.writeChildrenManifest) return null
-    const entries = await this.buildEntries(childSigs, childLayers)
-    if (!entries) return null
-    await store.writeChildrenManifest(parentSig, entries)
-    return entries
+  /** ONE MINT AT A TIME, PROCESS-WIDE. Every mint is a full-size decode plus a
+   *  webp encode; several in flight together (the neighbourhood warm runs
+   *  12-wide, and a fast navigation stacks passes) peg the main thread and the
+   *  GPU while the participant is waiting for tiles. The budget bounds how
+   *  many a pass may take; this bounds how many happen at once. */
+  static #mintChain: Promise<void> = Promise.resolve()
+  static readonly #mintSerially = (work: () => Promise<void>): Promise<void> => {
+    const next = ManifestOptimizerDrone.#mintChain.then(work, work)
+    ManifestOptimizerDrone.#mintChain = next.catch(() => { /* never break the chain */ })
+    return next
   }
-
-  /** Parent sig → enrich passes spent on it this session. */
-  readonly #enriched = new Map<string, number>()
-
-  /** How many budgeted passes a layer's pack may take before we stop trying —
-   *  enough to finish a normal layer's renditions, few enough that images
-   *  which simply can't be optimized stop costing anything. */
-  static readonly #MAX_ENRICH_PASSES = 4
 
   /** Does this pack still need enriching? True when an entry carries a child
    *  that HAS properties but no resolved visual — i.e. a manifest written
@@ -239,7 +219,7 @@ export class ManifestOptimizerDrone extends Drone {
         const raw = await getLocal(imageSig)
         if (raw) {
           if (budget) budget.mints--
-          await store.optimizeVisual(imageSig, raw)
+          await ManifestOptimizerDrone.#mintSerially(() => store.optimizeVisual!(imageSig, raw))
           optimized = await store.getOptimizedVisual?.(imageSig) ?? null
         }
       }

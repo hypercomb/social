@@ -129,6 +129,30 @@
   .mobile-go-btn { display: flex; align-items: center; }
 }
 
+// ── PHONE PORTRAIT: the shell grows a second row ──────────
+// The icon rail drops below the prompt inside hc-command-shell (see its own
+// matching query), so the shell is two rows tall here. GO keeps stretching
+// full height beside it — a taller thumb target on the edge, no worse than
+// the one-row case it already stretched to. The pinned-entrance strip takes a
+// full-width scrolling row of its own beneath everything, on the same rhythm
+// as the icon rail above it.
+@media (max-width: 599px) and (min-height: 450px) {
+  .command-line-wrapper { flex-wrap: wrap; }
+
+  hc-command-shell { flex: 1 1 10rem; }
+
+  hc-pinned-entrances {
+    order: 12;
+    flex: 1 0 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    touch-action: pan-x;
+    scrollbar-width: none;
+  }
+
+  hc-pinned-entrances::-webkit-scrollbar { display: none; }
+}
+
 // ── Active-view exit toggle (website) — floats bottom-right ─────
 // When a full-viewport render view (website) takes over, the command line
 // is hidden and only this single icon remains: a frosted steel chip in the

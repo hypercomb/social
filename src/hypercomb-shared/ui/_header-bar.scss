@@ -264,7 +264,12 @@
   .header-bar,
   .header-bar.input-open {
     display: flex;
-    height: clamp(3.5rem, 11vh, 5.5rem);
+    // min-height, NOT height: in portrait the icon rail is a second row under
+    // the prompt (command-shell's `.shell-actions`), so the bar has to be able
+    // to grow. Everything below follows automatically — the ResizeObserver
+    // publishes `--hc-header-bottom` and `--hc-header-anchor` takes the max.
+    height: auto;
+    min-height: clamp(3.5rem, 11vh, 5.5rem);
   }
 
   .header-bar .mesh-header,
@@ -279,6 +284,20 @@
   .secured-label,
   .mode-crumb {
     display: none;
+  }
+}
+
+// ── portrait phone rail metrics ───────────────────────────
+// The rail sits on its OWN row under the prompt here (see command-shell's
+// matching query), so it no longer competes with the text box for width — and
+// a row of icons a finger has to hit needs finger-sized boxes. ONE set of
+// numbers for every icon on the rail, exactly as on desktop: the rail never
+// resizes a single button, it resizes all of them or none.
+@media (max-width: $bp-phone-max) and (min-height: 450px) {
+  .header-bar {
+    --hc-rail-btn: 2.6rem;
+    --hc-rail-glyph: 1.6rem;
+    --hc-rail-gap: 0.35rem;
   }
 }
 

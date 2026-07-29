@@ -2771,15 +2771,9 @@ export class TileOverlayDrone extends Drone {
   }
 
   #navigateInto(label: string): void {
-    // NOTHING GETS IN THE WAY OF NAVIGATION. This used to refuse entry into a
-    // branch whose readiness shade hadn't released — "don't move preload work
-    // onto the click path" — which made preloading a GATE on navigation: the
-    // participant clicked a tile and nothing happened, with no feedback, for as
-    // long as the warm took to prove itself (and proof is derived from caches
-    // that clear and re-warm constantly, so sometimes forever). A click is an
-    // instruction, not a request. Enter immediately and let the destination
-    // paint as its content lands — a slower render is correct, a swallowed
-    // click never is. (The shade itself is off now; see show-cell TILE_SHADE.)
+    // Navigation itself never uses a cooldown. The only readiness refusal is
+    // the exact destination-residency gate below; the tile is visibly shaded
+    // until that proof arrives.
 
     // Backstop latch: input was force-released after NAV_GUARD_BACKSTOP_MS
     // but the axial map still describes the LEAVING level — entering a tile
@@ -2797,6 +2791,15 @@ export class TileOverlayDrone extends Drone {
       // underneath) is dropped there, with the warn.
       this.#pendingEnter = label
       console.warn('[tile-overlay] tile-enter deferred — render not landed yet; will enter', label, 'when maps are fresh')
+      return
+    }
+
+    // A visible branch is a promise that its destination is already resident.
+    // ShowCellDrone publishes the exact same readiness predicate used by its
+    // shade; hover can change opacity but cannot remove a label from this set.
+    // Keeping cold work off the click path is the purpose of the preloader.
+    if (this.#branchLabels.has(label) && this.#shadedLabels.has(label)) {
+      console.info('[tile-overlay] tile-enter held — destination is still preloading:', label)
       return
     }
 

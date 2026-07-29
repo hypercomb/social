@@ -219,6 +219,20 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Aria-label / tooltip for the pheromones button. */
   readonly pheromonesLabel = input<string>('pheromones')
 
+  /** Show the MIC on the rail. Mobile only: dictation used to live on the
+   *  mobile control bar, but the words it produces land in this text box, so
+   *  the control belongs on the same rail as the other standing tools — where
+   *  it rides the portrait icon row and stays reachable in landscape whenever
+   *  the command line is open. Desktop keeps push-to-talk on the separate
+   *  flush-right button (command-line's own `.mic-btn`). */
+  readonly showMic = input<boolean>(false)
+
+  /** Whether dictation is running — lights the mic. */
+  readonly micActive = input<boolean>(false)
+
+  /** Aria-label / tooltip for the mic. */
+  readonly micLabel = input<string>('voice')
+
   /**
    * Available view-behavior toggles for the current node (e.g. website).
    * Rendered as stateful on/off Material icons on the right side, sourced
@@ -302,6 +316,12 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  stays presentational. */
   readonly pheromonesToggle = output<void>()
 
+  /** Mic pressed / released. The parent owns the dictation state machine
+   *  (tap = toggle listening, hold = push-to-talk) — the shell only reports
+   *  the press, exactly as it does for every other rail control. */
+  readonly micPress = output<void>()
+  readonly micRelease = output<void>()
+
   /**
    * Emitted when a view toggle is clicked. `view` is the view name (e.g.
    * `'website'`); `disable` is true for a cmd/ctrl-click or long-press —
@@ -316,6 +336,16 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  plain toggle. */
   #viewTogglePressTimer: ReturnType<typeof setTimeout> | null = null
   #viewToggleDisabled = false
+
+  /** Pointer-down on the mic. Capture the pointer so a finger that slides off
+   *  the button still delivers its release — otherwise a hold that drifts
+   *  leaves dictation running with nothing to stop it. `preventDefault` keeps
+   *  the press from stealing focus out of the text box. */
+  onMicDown(e: PointerEvent): void {
+    e.preventDefault()
+    ;(e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
+    this.micPress.emit()
+  }
 
   /** Pointer-down on a view toggle. A cmd/ctrl-click disables immediately; a
    *  plain press starts the long-press timer and defers the toggle to mouseup. */

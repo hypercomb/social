@@ -3067,10 +3067,17 @@ export class HistoryService {
    * inlined visual straight to the renderer's pack, so the images are resident
    * without a single per-image read.
    *
-   * Only when there is no pack yet (a layer committed before the optimize
-   * phase reached it) does this fall back to the old per-slot walk — the
-   * exception that the pack exists to retire, and it self-heals: the render's
-   * backfill and the optimize phase both mint one.
+   * Only when the pack cannot answer — absent, or written before the visuals
+   * moved into it — does this fall back to the old per-slot walk. That
+   * fallback is NOT optional: nothing consumes a pack's `props`, so a layer
+   * whose pack is names-only has its tile content warmed by the walk or not at
+   * all (skipping it left every pre-existing layer in the hive cold).
+   *
+   * A WARM NEVER MINTS. Healing a thin pack means decoding and re-encoding the
+   * source images — and this runs 12-wide over the boot neighbourhood, so
+   * asking it to heal turned "warm the tiles you are about to look at" into a
+   * whole-hive re-encode racing first paint. Minting is the optimize phase's
+   * job (manifest-optimizer.drone), where it is budgeted and off the paint.
    */
   readonly #warmLayerPack = (
     layerSig: string,
@@ -3089,26 +3096,16 @@ export class HistoryService {
         if (!pack || pack.length === 0) { this.#warmTileContent(layer, store, gen); return }
         const adopt = get<{ adoptPackedVisual?: (e: unknown) => void }>('@diamondcoreprocessor.com/ShowCellDrone')
         const adoptStatic = (adopt?.constructor as { adoptPackedVisual?: (e: unknown) => void } | undefined)
+        let carriedVisuals = 0
         for (const entry of pack) {
           if (this.#preloadGeneration !== gen) return
           adoptStatic?.adoptPackedVisual?.(entry)
+          if ((entry as { visual?: unknown } | null)?.visual) carriedVisuals++
         }
-        // HEAL THE ANTI-PATTERN EVERYWHERE, not just where someone walks. A
-        // names-only pack means this layer still pays a read per tile every
-        // time it paints; the warm is already holding everything needed to
-        // mint the full array, so it asks the optimizer to write one. Layers
-        // nobody visits heal too, in the background, once each.
-        const optimizer = get<{
-          enrichPack?: (parentSig: string, childSigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
-          constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
-        }>('@diamondcoreprocessor.com/ManifestOptimizerDrone')
-        const needs = (optimizer?.constructor as { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean } | undefined)?.packNeedsVisuals
-        if (optimizer?.enrichPack && needs?.(pack) && this.#preloadGeneration === gen) {
-          const childSigs = Array.isArray(layer.children) ? layer.children : []
-          const layers = pack.map(e => (e as { layer?: { name?: string } }).layer ?? {})
-          const rich = await optimizer.enrichPack(layerSig, childSigs, layers)
-          for (const entry of rich ?? []) adoptStatic?.adoptPackedVisual?.(entry)
-        }
+        // The pack answered for none of its tiles — it predates the visuals
+        // moving in. It carries `props` too, but nothing reads those, so
+        // without the walk this layer's tiles have no warm content at all.
+        if (carriedVisuals === 0) this.#warmTileContent(layer, store, gen)
       } catch { this.#warmTileContent(layer, store, gen) }
     })()
   }

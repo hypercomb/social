@@ -1342,6 +1342,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     window.addEventListener('navigate', this.#onNavigate)
     window.addEventListener('popstate', this.#onNavigate)
+
+    this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
+    this.isMobile.set(this.#mobileQuery.matches)
+    this.#mobileQuery.addEventListener('change', this.#mobileQueryHandler)
     this.#commandLineToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd !== 'ui.commandLineToggle') return
       this.shell?.focus()
@@ -1591,6 +1595,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #pendingAsks = 0
   readonly voiceSupported = VoiceInputService.supported()
   readonly pushToTalkEnabled = signal(localStorage.getItem('hc:push-to-talk') === 'true')
+
+  /** Phone-shaped viewport (narrow OR short — a phone on its side is wide and
+   *  short). Same query as controls-bar's `isMobile`; the two must agree, or
+   *  the mic shows on one surface and not the other. Drives ONE thing here:
+   *  the mic lives on the shell's icon rail on mobile, where the control bar
+   *  used to carry it. */
+  readonly isMobile = signal(
+    typeof window !== 'undefined'
+      ? window.matchMedia('(max-width: 599px), (max-height: 449px)').matches
+      : false,
+  )
+  #mobileQuery: MediaQueryList | null = null
+  #mobileQueryHandler = (e: MediaQueryListEvent): void => { this.isMobile.set(e.matches) }
+
+  /** Mic pressed on the shell's rail. Same state machine the control bar's
+   *  mic drove before it moved here — tap toggles listening, hold is
+   *  push-to-talk — reached through the same effects so nothing else has to
+   *  know where the button lives. */
+  public onRailMicPress = (): void => { this.#onMobileMicPress() }
+  public onRailMicRelease = (): void => { this.#onMobileMicRelease() }
   #voiceActiveUnsub?: () => void
   #pushToTalkUnsub?: () => void
   #prefillUnsub?: () => void
@@ -1736,6 +1760,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     for (const unsub of this.#indicatorUnsubs) unsub()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
+    this.#mobileQuery?.removeEventListener('change', this.#mobileQueryHandler)
   }
 
   // template helpers removed — now owned by CommandShellComponent

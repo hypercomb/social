@@ -26,6 +26,9 @@
     [pheromonesLabel]="'tags.panel.open' | t"
     [lockedFlash]="lockedFlash()"
     [lockedLabel]="'command-line.pinned' | t"
+    [showMic]="voiceSupported && isMobile()"
+    [micActive]="voiceActive()"
+    [micLabel]="'controls.voice-hold' | t"
     (valueChange)="onShellValueChange($event)"
     (commit)="onShellCommit($event)"
     (completionAccepted)="onShellCompletionAccepted($event)"
@@ -38,6 +41,8 @@
     (notesToggle)="onNotesToggle()"
     (feedbackToggle)="onFeedbackToggle()"
     (pheromonesToggle)="onPheromonesToggle()"
+    (micPress)="onRailMicPress()"
+    (micRelease)="onRailMicRelease()"
   />
 
   <!-- Per-LEVEL pinned quick links — entrances the participant dragged up
@@ -52,7 +57,10 @@
        it lives on the control bar (controls-bar 'pools'). -->
   <hc-pinned-entrances></hc-pinned-entrances>
 
-  @if (voiceSupported && pushToTalkEnabled()) {
+  <!-- Desktop push-to-talk — the opt-in flush-right mic. On mobile the mic is
+       a rail button inside the shell instead (see [showMic] above), so this
+       one stands down there rather than showing a second mic. -->
+  @if (voiceSupported && pushToTalkEnabled() && !isMobile()) {
     <button class="mic-btn" [class.recording]="voiceActive()"
       (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
       [attr.aria-label]="'controls.voice' | t" [title]="'controls.voice-hold' | t">
