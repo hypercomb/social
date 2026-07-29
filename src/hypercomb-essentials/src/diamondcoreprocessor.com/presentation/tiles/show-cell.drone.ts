@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/show-cell.drone.ts
 import { Drone, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider, UsageRanker } from '@hypercomb/core'
-import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
+import { Application, Container, Geometry, Mesh, RenderTexture, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
@@ -2414,6 +2414,7 @@ export class ShowCellDrone extends Drone {
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.#primeEmptyRenderPipeline()
       this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
@@ -2430,6 +2431,7 @@ export class ShowCellDrone extends Drone {
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.#primeEmptyRenderPipeline()
       this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
@@ -6062,12 +6064,70 @@ export class ShowCellDrone extends Drone {
       || (i18n ? i18n.resolveCell(directoryName) : directoryName))
   }
 
+  /**
+   * Pay the one-time SDF raster + WebGL pipeline compilation while the window
+   * is still initializing, never on the participant's first add. Chromium's
+   * first HexLabelAtlas.getLabelUV measured 630–730ms even for one short
+   * label; every later label was <1ms. A one-cell offscreen draw also compiles
+   * the exact tile shader/program so empty → first-item can reach the next
+   * painted frame instead of stalling on driver work.
+   */
+  #primeEmptyRenderPipeline = (): void => {
+    if (!this.pixiRenderer || !this.atlas || !this.imageAtlas) return
+    let geom: Geometry | null = null
+    let target: RenderTexture | null = null
+    let mesh: Mesh | null = null
+    try {
+      const primeLabel = '\u00b7'
+      this.atlas.seed([primeLabel])
+      const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
+      const pointReachPx = circumRadiusPx / 0.8660254
+      const halfW = (this.#flat ? pointReachPx : circumRadiusPx) + padPx
+      const halfH = (this.#flat ? circumRadiusPx : pointReachPx) + padPx
+      geom = this.buildFillQuadGeometry(
+        [{ q: 0, r: 0, label: primeLabel, external: false, plain: true }],
+        circumRadiusPx,
+        gapPx,
+        halfW,
+        halfH,
+      )
+      const warmShader = new HexSdfTextureShader(
+        this.atlas.getAtlasTexture(),
+        this.imageAtlas.getAtlasTexture(),
+        halfW * 2,
+        halfH * 2,
+        circumRadiusPx,
+      )
+      warmShader.setFlat(this.#flat)
+      warmShader.setPivot(this.#pivot)
+      mesh = new Mesh({
+        geometry: geom as any,
+        shader: (warmShader as any).shader,
+        texture: Texture.WHITE as any,
+      } as any)
+      target = RenderTexture.create({ width: 4, height: 4, resolution: 1 })
+      this.pixiRenderer.render({ container: mesh as any, target, clear: true })
+    } catch (err) {
+      console.warn('[show-cell] render pipeline prime failed', err)
+    } finally {
+      try { (mesh as any)?.destroy?.(true) } catch { /* best effort */ }
+      try { geom?.destroy(true) } catch { /* mesh may already own it */ }
+      try { target?.destroy(true) } catch { /* best effort */ }
+      // buildFillQuadGeometry populates the live update indexes. The priming
+      // cell is never part of the visible projection, so discard those refs.
+      this.#buf = {}
+      this.#labelToIndex.clear()
+      this.#shadedLabels.clear()
+    }
+  }
+
   private readonly rebuildRenderResources = (renderer: unknown): void => {
     this.clearMesh("rebuildRenderResources: context restore")
     this.shader = null
     this.atlas = new HexLabelAtlas(renderer, 128, 16, 16) // 256 slots (match imageAtlas) so >64-tile hives don't wrap & thrash the render cache
     this.attachLabelResolver(this.atlas)
     this.imageAtlas = new HexImageAtlas(renderer, 256, 16, 16)
+    this.#primeEmptyRenderPipeline()
     this.cellImageCache.clear()
     this.atlasRenderer = renderer
   }
