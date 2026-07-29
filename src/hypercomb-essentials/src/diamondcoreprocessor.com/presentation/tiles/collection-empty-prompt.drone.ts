@@ -50,12 +50,31 @@ class CollectionEmptyPromptDrone {
   #viewModeBound = false
   #lastSettledEmpty = false
   #checkSeq = 0
+  /** True while the first-boot EXAMPLE HIVES offer owns the screen. It fires on
+   *  exactly our `root` condition (empty hive root, first boot), so the two
+   *  cards used to stack. The offer is the single view now: it carries our
+   *  "Add a tile" / "Show me how" gestures in its own actions row, and the
+   *  `root` variant here is the FALLBACK for when there is no offer (roster
+   *  unavailable, or already dismissed). */
+  #offerActive = false
 
   constructor() {
     EffectBus.on<CellCountPayload>('render:cell-count', payload => {
       this.#lastSettledEmpty = payload.count === 0 && payload.settled === true
       void this.#reconcile()
     })
+    // Last-value replay: a late subscribe still learns the offer is up.
+    EffectBus.on<{ active?: boolean; examples?: unknown[] }>('examples:offer', payload => {
+      this.#offerActive = payload?.active === true && (payload?.examples?.length ?? 0) > 0
+      void this.#reconcile()
+    })
+    EffectBus.on('examples:dismiss', () => {
+      this.#offerActive = false
+      void this.#reconcile()
+    })
+    // The offer's "Add a tile" delegates here — the command-line focus dance
+    // belongs to this module, not to the shell component that renders the card.
+    EffectBus.on('hive:empty:add-tile', () => { this.#focusCommandLine() })
     EffectBus.on('cell:added', () => {
       this.#hide()
       this.#lastSettledEmpty = false
@@ -126,6 +145,10 @@ class CollectionEmptyPromptDrone {
     // collection's own root, and any other empty layer.
     if (segments.length === 0) {
       if (seq !== this.#checkSeq) return
+      // ONE view on first boot: the examples offer already says "your hive is
+      // empty" and now carries both of our gestures. Two cards over the same
+      // empty root is the conflict, not a richer welcome.
+      if (this.#offerActive) { this.#hide(); return }
       this.#show('', 'root')
       return
     }

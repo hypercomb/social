@@ -366,6 +366,10 @@
       // Reveal it NOW so the user can click Start to load the libraries. Holding
       // the splash here is a hard deadlock: no Start → no libraries → no hive.
       bus.on('boot:status', function (s) { if (s && s.kind === 'install-needed') dismiss(); });
+      // Same rule for the first-boot EXAMPLE HIVES offer: its buttons sit behind
+      // the splash, and an empty root may never produce a ready signal the splash
+      // trusts — so it rested on the dot with the offer unreachable underneath.
+      bus.on('examples:offer', function (o) { if (o && o.active && (o.examples || []).length) dismiss(); });
     } else { setTimeout(waitBus, 250); }   // TIMER, not rAF: a hidden tab parks rAF, so an rAF retry never subscribes at all — the splash would go deaf to every ready signal (incl. the last-value replay)
   })();
   // No blind auto-hide timer: the 3-play cap is the terminal fallback — it rests on

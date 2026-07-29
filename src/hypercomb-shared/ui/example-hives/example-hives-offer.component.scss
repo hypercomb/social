@@ -151,7 +151,21 @@ button {
 .actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.add-tile {
+  border-color: rgba(126, 182, 214, 0.5);
+  color: rgb(126, 182, 214);
+
+  &:hover { background: rgba(126, 182, 214, 0.12); }
+}
+
+.tour {
+  color: rgba(245, 245, 245, 0.78);
 }
 
 .dismiss {

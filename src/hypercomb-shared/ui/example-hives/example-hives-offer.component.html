@@ -39,7 +39,12 @@
       }
     </ul>
 
+    <!-- The empty-hive gestures live HERE, not in a second card: this offer and
+         collection-empty-prompt's `root` variant fire on the same condition
+         (empty hive root, first boot) and used to stack. One card now. -->
     <div class="actions">
+      <button type="button" class="add-tile" (click)="onAddTile()">{{ 'hive.empty.action' | t }}</button>
+      <button type="button" class="tour" (click)="onTour()">{{ 'hive.empty.tour' | t }}</button>
       <button type="button" class="dismiss" (click)="onDismiss()">
         {{ (anyAdded() ? 'examples.offer.done' : 'examples.offer.dismiss') | t }}
       </button>

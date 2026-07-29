@@ -115,6 +115,20 @@ export class ExampleHivesOfferComponent implements OnInit, OnDestroy {
     EffectBus.emit('examples:dismiss', {})
   }
 
+  /** "Add a tile" and "Show me how" are the empty-hive gestures folded in from
+   *  collection-empty-prompt's `root` variant. This card stays a PURE RENDERER:
+   *  it closes the offer and emits, and the drone (which owns the command-line
+   *  focus dance) does the work. Shared never reimplements module behaviour. */
+  onAddTile(): void {
+    EffectBus.emit('examples:dismiss', {})
+    EffectBus.emit('hive:empty:add-tile', {})
+  }
+
+  onTour(): void {
+    EffectBus.emit('examples:dismiss', {})
+    EffectBus.emit('tutorial:start', {})
+  }
+
   ngOnDestroy(): void {
     for (const u of this.#unsubs) u()
     this.#unsubs.length = 0
