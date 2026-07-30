@@ -65,7 +65,11 @@
 // or import the class symbol non-type-only — that bundles a second copy
 // into your bee and silently breaks the singleton.
 
-import { BEHAVIOR_PHEROMONES_KEY } from '../preferences/mobile-pheromones.js'
+import {
+  BEHAVIOR_PHEROMONES_KEY,
+  PLATFORM_DESKTOP,
+  PLATFORM_MOBILE,
+} from '../preferences/mobile-pheromones.js'
 import type { AgentAvatarSpec } from '../presentation/avatars/agent-avatar.js'
 
 export type VisualBeeDescriptor = {
@@ -287,7 +291,9 @@ export type VisualBeeDescriptor = {
   /**
    * Capability pheromones this behaviour SHIPS — how a module self-declares
    * what it is good for, so no one has to chase modules down to tag them.
-   * e.g. `['mobile:friendly']` marks a view the mobile shell may activate.
+   * Every behaviour MUST include `platform:mobile`, `platform:desktop`, or
+   * both. Content remains universal; these capability marks are the first-class
+   * boundary controlling which behaviour a shell activates.
    *
    * DECLARED, NEVER SEEDED: this array is re-asserted on every module load
    * and is never written to storage, so a module update that changes it can
@@ -341,6 +347,12 @@ export class VisualBeeRegistry extends EventTarget {
     }
     if (!bee.decorationKind || typeof bee.decorationKind !== 'string') {
       throw new Error(`[VisualBeeRegistry] bee "${bee.view}" must declare a decorationKind`)
+    }
+    const declared = new Set(bee.pheromones ?? [])
+    if (!declared.has(PLATFORM_MOBILE) && !declared.has(PLATFORM_DESKTOP)) {
+      throw new Error(
+        `[VisualBeeRegistry] bee "${bee.view}" must declare platform:mobile, platform:desktop, or both`,
+      )
     }
     const existing = this.#bees.get(bee.view)
     if (existing && existing !== bee) {
@@ -401,6 +413,11 @@ export class VisualBeeRegistry extends EventTarget {
   /** All registered bees whose EFFECTIVE pheromone set contains `name`. */
   withPheromone(name: string): VisualBeeDescriptor[] {
     return this.all().filter(b => this.effectivePheromones(b.view).has(name))
+  }
+
+  /** Behaviours available on a shell after participant-local overrides. */
+  forPlatform(platform: 'mobile' | 'desktop'): VisualBeeDescriptor[] {
+    return this.withPheromone(platform === 'mobile' ? PLATFORM_MOBILE : PLATFORM_DESKTOP)
   }
 
   /** Participant-local behavior-pheromone overrides. Read fresh each call —

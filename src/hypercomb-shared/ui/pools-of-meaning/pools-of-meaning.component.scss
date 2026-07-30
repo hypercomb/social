@@ -77,7 +77,9 @@ $steel: rgb(126, 182, 214);
 }
 
 .pools-body {
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.6rem 0.7rem;
   display: flex;
   flex-direction: column;

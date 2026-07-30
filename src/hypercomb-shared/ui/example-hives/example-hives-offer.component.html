@@ -1,50 +1,80 @@
-<!-- First-boot example hives offer: adopt rides the ordinary machinery,
-     nothing folds without a click, closing writes nothing. -->
+<!-- First boot: a welcome surface with three honest ways forward. -->
 @if (visible()) {
   <div class="offer-backdrop" aria-hidden="true"></div>
   <div class="offer-card" role="dialog" aria-modal="true" aria-labelledby="example-hives-title">
-    <h2 id="example-hives-title">{{ 'examples.offer.title' | t }}</h2>
-    <p class="subtitle">{{ 'examples.offer.subtitle' | t }}</p>
+    <header class="welcome">
+      <span class="eyebrow">{{ 'examples.offer.eyebrow' | t }}</span>
+      <h2 id="example-hives-title">{{ 'examples.offer.title' | t }}</h2>
+      <p class="subtitle">{{ 'examples.offer.subtitle' | t }}</p>
 
-    <ul class="rows">
-      @for (e of examples(); track e.name) {
-        <li class="row" [class.is-added]="status(e.name) === 'added'">
-          @if (coverUrl(e) && !coverHidden(e.name)) {
-            <img class="cover" [src]="coverUrl(e)" [alt]="displayName(e)" loading="lazy" (error)="onCoverError(e.name)" />
-          } @else {
-            <span class="cover cover-blank" aria-hidden="true"></span>
-          }
-          <div class="text">
-            <span class="name">{{ displayName(e) }}</span>
-            <span class="description">{{ description(e) }}</span>
-            @if (e.tiles) {
-              <span class="meta">{{ 'examples.offer.tiles' | t: { count: e.tiles } }}</span>
-            }
-          </div>
-          @switch (status(e.name)) {
-            @case ('added') {
-              <span class="added">{{ 'examples.offer.added' | t }}</span>
-            }
-            @case ('adopting') {
-              <span class="adding">{{ 'examples.offer.adding' | t: { count: progressCount() } }}</span>
-            }
-            @case ('unavailable') {
-              <button type="button" class="add" (click)="onAdopt(e)">{{ 'examples.offer.retry' | t }}</button>
-            }
-            @default {
-              <button type="button" class="add" (click)="onAdopt(e)">{{ 'examples.offer.add' | t }}</button>
-            }
-          }
-        </li>
-      }
-    </ul>
+      <div class="first-actions">
+        <button type="button" (click)="onTour()">
+          <span class="action-mark" aria-hidden="true">∞</span>
+          <span class="action-copy">
+            <strong>{{ 'hive.empty.tour' | t }}</strong>
+            <small>{{ 'hive.empty.tour.detail' | t }}</small>
+          </span>
+          <span class="action-arrow" aria-hidden="true">→</span>
+        </button>
+        <button type="button" (click)="onAddTile()">
+          <span class="action-mark action-mark-add" aria-hidden="true">+</span>
+          <span class="action-copy">
+            <strong>{{ 'hive.empty.action' | t }}</strong>
+            <small>{{ 'hive.empty.action.detail' | t }}</small>
+          </span>
+          <span class="action-arrow" aria-hidden="true">→</span>
+        </button>
+      </div>
+    </header>
 
-    <!-- The empty-hive gestures live HERE, not in a second card: this offer and
-         collection-empty-prompt's `root` variant fire on the same condition
-         (empty hive root, first boot) and used to stack. One card now. -->
+    <section class="examples" aria-labelledby="examples-heading">
+      <div class="section-heading">
+        <div>
+          <span class="section-kicker">{{ 'examples.offer.or' | t }}</span>
+          <h3 id="examples-heading">{{ 'examples.offer.examples-title' | t }}</h3>
+        </div>
+        <span class="section-note">{{ 'examples.offer.examples-note' | t }}</span>
+      </div>
+
+      <ul class="rows">
+        @for (e of examples(); track e.name) {
+          <li class="row" [class.is-added]="status(e.name) === 'added'">
+            <div class="cover-wrap">
+              @if (coverUrl(e) && !coverHidden(e.name)) {
+                <img class="cover" [src]="coverUrl(e)" [alt]="displayName(e)" loading="lazy" (error)="onCoverError(e.name)" />
+              } @else {
+                <span class="cover cover-blank" aria-hidden="true"></span>
+              }
+              @if (e.tiles) {
+                <span class="meta">{{ 'examples.offer.tiles' | t: { count: e.tiles } }}</span>
+              }
+            </div>
+            <div class="text">
+              <span class="name">{{ displayName(e) }}</span>
+              <span class="description">{{ description(e) }}</span>
+            </div>
+            @switch (status(e.name)) {
+              @case ('added') {
+                <span class="added">{{ 'examples.offer.added' | t }}</span>
+              }
+              @case ('adopting') {
+                <span class="adding">{{ 'examples.offer.adding' | t: { count: progressCount() } }}</span>
+              }
+              @case ('unavailable') {
+                <button type="button" class="add" (click)="onAdopt(e)">{{ 'examples.offer.retry' | t }}</button>
+              }
+              @default {
+                <button type="button" class="add" (click)="onAdopt(e)">
+                  {{ 'examples.offer.add' | t }} <span aria-hidden="true">+</span>
+                </button>
+              }
+            }
+          </li>
+        }
+      </ul>
+    </section>
+
     <div class="actions">
-      <button type="button" class="add-tile" (click)="onAddTile()">{{ 'hive.empty.action' | t }}</button>
-      <button type="button" class="tour" (click)="onTour()">{{ 'hive.empty.tour' | t }}</button>
       <button type="button" class="dismiss" (click)="onDismiss()">
         {{ (anyAdded() ? 'examples.offer.done' : 'examples.offer.dismiss') | t }}
       </button>

@@ -36,6 +36,7 @@
 // in its template or SCSS. Shell UI — no essentials import.
 
 import { Directive, ElementRef, Input, inject, type OnDestroy, type OnInit } from '@angular/core'
+import { EffectBus } from '@hypercomb/core'
 
 // The GROUP model — membership text and shared attributes — lives in
 // panel-groups.ts. This file is the chrome that drives it.
@@ -139,6 +140,10 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
    *  element's inline width and leaves the window to persist it (the notes
    *  strip, which already observes its own box). */
   @Input() sizeOwner: PanelSizeOwner | null = null
+  /** Optional controls-rail launcher owned by this window. When supplied, the
+   *  common settings gear offers Add/Remove from controls and persists through
+   *  the controls bar's participant-local preference map. */
+  @Input() launcherControlId = ''
 
   readonly #el: HTMLElement = inject(ElementRef).nativeElement
   #grip: HTMLElement | null = null
@@ -437,6 +442,7 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     pop.addEventListener('pointerdown', (e) => { e.stopPropagation() })
 
     pop.appendChild(this.#groupSection())
+    if (this.launcherControlId) pop.appendChild(this.#launcherSection())
 
     this.#el.appendChild(pop)
     this.#popover = pop
@@ -510,6 +516,55 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     return section
   }
 
+  /** Optional launcher setting. UI placement is window chrome, so every
+   *  slash-first tool window gets the same participant-configurable path. */
+  #launcherSection(): HTMLElement {
+    const section = document.createElement('div')
+    section.setAttribute('data-hc-setting', 'launcher')
+    Object.assign(section.style, {
+      marginTop: '0.7rem', paddingTop: '0.65rem',
+      borderTop: `1px solid rgba(${STEEL}, 0.18)`,
+    } as Partial<CSSStyleDeclaration>)
+
+    const label = document.createElement('div')
+    label.textContent = this.#t('panel.launcher.label', 'Controls shortcut')
+    Object.assign(label.style, {
+      fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase',
+      color: '#7f95a3', marginBottom: '0.4rem',
+    } as Partial<CSSStyleDeclaration>)
+    section.appendChild(label)
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    const enabled = this.#launcherEnabled()
+    button.textContent = enabled
+      ? this.#t('panel.launcher.remove', 'Remove from controls')
+      : this.#t('panel.launcher.add', 'Add to controls')
+    Object.assign(button.style, {
+      width: '100%', minHeight: '28px', padding: '0.25rem 0.5rem',
+      font: 'inherit', color: '#c8d6de', cursor: 'pointer',
+      background: enabled ? `rgba(${STEEL}, 0.16)` : 'rgba(255, 255, 255, 0.04)',
+      border: `1px solid rgba(${STEEL}, 0.3)`, borderRadius: '4px',
+    } as Partial<CSSStyleDeclaration>)
+    button.addEventListener('click', () => {
+      EffectBus.emit('controls:configure', {
+        id: this.launcherControlId,
+        enabled: !this.#launcherEnabled(),
+      })
+      this.#refreshPopover()
+    })
+    section.appendChild(button)
+    return section
+  }
+
+  #launcherEnabled(): boolean {
+    if (!this.launcherControlId) return false
+    try {
+      const map = JSON.parse(localStorage.getItem('hc:controls-enabled-map') ?? '{}') as Record<string, boolean>
+      return map[this.launcherControlId] === true
+    } catch { return false }
+  }
+
   /** Repaint an open popover's group section — membership lines in OTHER
    *  windows' popovers go stale the moment this one changes slot. */
   #refreshPopover(): void {
@@ -517,6 +572,8 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     if (!pop) return
     const old = pop.querySelector('[data-hc-setting="group"]')
     if (old) pop.replaceChild(this.#groupSection(), old)
+    const launcher = pop.querySelector('[data-hc-setting="launcher"]')
+    if (launcher) pop.replaceChild(this.#launcherSection(), launcher)
   }
 
   // ── group membership ───────────────────────────────────────────────

@@ -1,0 +1,45 @@
+@if (visible()) {
+  <aside class="views-panel" hcDockInset="right" hcDockedPanel="views-viewer"
+    dockSide="right" [minWidth]="280" [maxWidth]="620" [defaultWidth]="370"
+    data-consumes-wheel tabindex="-1" role="dialog" [attr.aria-label]="'views.aria' | t">
+    <header class="views-header">
+      <div>
+        <span class="views-title">{{ 'views.title' | t }}</span>
+        @if (attachedCount()) { <span class="views-count">{{ attachedCount() }}</span> }
+      </div>
+      <button class="views-close mat-sym" type="button" (click)="close()" [attr.aria-label]="'views.close' | t">close</button>
+    </header>
+
+    <div class="views-subject">
+      <span class="mat-sym" aria-hidden="true">hexagon</span>
+      <div><small>{{ 'views.subject' | t }}</small><strong>{{ subject() }}</strong></div>
+    </div>
+
+    <div class="views-intro">
+      {{ 'views.intro' | t }}
+    </div>
+
+    <div class="views-list" aria-live="polite">
+      @for (row of rows(); track row.view) {
+        <article class="view-card" [class.is-attached]="row.attached" [class.is-active]="row.active"
+          role="button" tabindex="0" (click)="activate(row)"
+          (keydown.enter)="activate(row)" (keydown.space)="$event.preventDefault(); activate(row)">
+          <span class="view-icon mat-sym" aria-hidden="true">{{ icon(row) }}</span>
+          <div class="view-copy">
+            <div class="view-heading">
+              <strong>{{ name(row) }}</strong>
+              @if (row.attached) { <span class="active-pill">{{ 'views.on' | t }}</span> }
+              @else { <span class="attached-pill">{{ 'views.off' | t }}</span> }
+            </div>
+            <p>{{ description(row) }}</p>
+            @if (!row.attachable || !row.queenKey) {
+              <span class="view-command">{{ 'views.create-with' | t: { command: row.slashCommand } }}</span>
+            }
+          </div>
+        </article>
+      } @empty {
+        <p class="views-empty">{{ loading() ? ('views.loading' | t) : ('views.empty' | t) }}</p>
+      }
+    </div>
+  </aside>
+}

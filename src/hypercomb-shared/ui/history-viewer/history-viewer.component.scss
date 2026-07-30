@@ -168,6 +168,8 @@
   margin: 0;
   overflow-y: scroll;
   flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(180, 190, 210, 0.45) rgba(255, 255, 255, 0.04);
   scrollbar-gutter: stable;

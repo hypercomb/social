@@ -235,6 +235,8 @@ $accent: #ffe14a;
   padding: 1.25rem 1rem;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 .viewer-text {

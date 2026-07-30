@@ -36,6 +36,8 @@
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { sniffImageMime } from '../../link/photo.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
+import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
+import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 
 const SIG = /^[0-9a-f]{64}$/
 /** Shared takeover z across the full-surface view drones (home/site/slides). */
@@ -309,6 +311,8 @@ export class TileViewDrone extends Drone {
       panel.appendChild(noteEl)
     }
 
+    const creations = this.#creationRow(label)
+    if (creations) panel.appendChild(creations)
     panel.appendChild(this.#actionRow(label))
 
     this.#applyLayout()
@@ -324,6 +328,50 @@ export class TileViewDrone extends Drone {
     // CHILDREN, so this can never observe its own writes.)
     this.#resizeObserver = new ResizeObserver(this.#onOrientation)
     this.#resizeObserver.observe(host)
+  }
+
+  /** Creation behaviours belong to the tile they will decorate. On mobile the
+   *  command rail used to offer them as if they described the current page;
+   *  putting them here gives the choice an explicit target and keeps global
+   *  chrome for page-wide tools. */
+  #creationRow(label: string): HTMLElement | null {
+    const registry = window.ioc?.get?.<VisualBeeRegistry>(
+      '@diamondcoreprocessor.com/VisualBeeRegistry',
+    )
+    const bees = (registry?.forPlatform?.('mobile') ?? [])
+      .filter(bee =>
+        bee.adoptable !== false &&
+        bee.behavior !== 'navigation' &&
+        !hasDecorationKind(label, bee.decorationKind),
+      )
+    if (bees.length === 0) return null
+
+    const section = document.createElement('section')
+    section.style.cssText =
+      'display:flex;flex-direction:column;align-items:inherit;gap:0.45rem;margin-top:0.35rem;'
+
+    const title = document.createElement('div')
+    title.textContent = this.#t('tile-view.creations', 'available creations')
+    title.style.cssText =
+      `font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${DIM};`
+    section.appendChild(title)
+
+    const row = document.createElement('div')
+    row.style.cssText =
+      'display:flex;align-items:center;justify-content:inherit;gap:0.5rem;flex-wrap:wrap;'
+    for (const bee of bees) row.appendChild(this.#creationChip(bee, label))
+    section.appendChild(row)
+    return section
+  }
+
+  #creationChip(bee: VisualBeeDescriptor, label: string): HTMLElement {
+    return this.#chip({
+      action: `view:${bee.view}`,
+      glyph: bee.toggleIcon || 'add_box',
+      labelKey: bee.labelKey || '',
+      fallback: bee.view,
+      backingKey: bee.queenKey,
+    }, label)
   }
 
   #onOrientation = (): void => { this.#applyLayout() }

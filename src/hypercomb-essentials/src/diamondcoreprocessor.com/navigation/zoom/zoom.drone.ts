@@ -6,6 +6,7 @@ import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
 import { DEFAULT_HEX_GEOMETRY } from '../../presentation/grid/hex-geometry.js'
 import type { InputGate } from '../input-gate.service.js'
 import { readViewportAt, writeViewportAt } from '../../editor/viewport-store.js'
+import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 
 type Pt = { x: number; y: number }
 
@@ -462,6 +463,7 @@ export class ZoomDrone extends Drone {
   }
 
   public zoomToScale = (scale: number, pivotClient: Pt): void => {
+    if (getLaneScrollAxis()) return
     if (!this.renderContainer || !this.canvas) return
     EffectBus.emitTransient('viewport:manual', {})
     // Wheel snap path — must cancel any in-flight animation before
@@ -476,6 +478,7 @@ export class ZoomDrone extends Drone {
   }
 
   public zoomByFactor = (factor: number, pivotClient: Pt): void => {
+    if (getLaneScrollAxis()) return
     if (!this.renderContainer || !this.canvas) return
 
     EffectBus.emitTransient('viewport:manual', {})
@@ -501,7 +504,11 @@ export class ZoomDrone extends Drone {
    * Zoom-to-fit: calculates the bounding box of all hex cells via the
    * mesh adapter and animates the viewport to center and fit all content.
    */
-  public zoomToFit = (snap = false, source: ViewportSource = 'auto'): void => {
+  public zoomToFit = (
+    snap = false,
+    source: ViewportSource = 'auto',
+    fitAxis: 'both' | 'x' | 'y' = 'both',
+  ): void => {
     if (!this.renderContainer || !this.renderer || !this.app) return
 
     this.#cancelAnim()
@@ -531,12 +538,17 @@ export class ZoomDrone extends Drone {
     // window.innerWidth/Height whenever the two diverged landed the grid
     // shrunk and off-centre (the "a widget resized the tiles" glitch).
     // renderer.screen is the same space the stage is centered in (applyCenter),
-    // so fit and recenter agree by construction. The controls bar FLOATS over
-    // the canvas and is intentionally NOT reserved — content fits the full
-    // canvas below the header; the bar overlays it.
+    // so fit and recenter agree by construction. A side-docked controls bar
+    // occupies part of the viewport; it publishes its measured inner edge as
+    // CSS custom properties. Reserve that space so fitted content is centred
+    // in the visible canvas beside the rail. Floating and mobile controls
+    // publish zero and therefore reserve nothing.
     const screen = this.renderer.screen
     const canvasRect = this.canvas?.getBoundingClientRect() ?? null
     const headerEl = document.querySelector('.header-bar') as HTMLElement | null
+    const rootStyle = getComputedStyle(document.documentElement)
+    const controlsLeft = Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-left')) || 0
+    const controlsRight = Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-right')) || 0
     // Header bottom in canvas-local Y: the header lives in viewport space, the
     // safe area in canvas space, so subtract the canvas's own top offset
     // (0 normally; non-zero only if the host is inset from the viewport top).
@@ -544,8 +556,8 @@ export class ZoomDrone extends Drone {
     const headerBottomLocal = canvasRect ? headerBottom - canvasRect.top : headerBottom
     const safeTop = Math.max(0, headerBottomLocal) + padding
     const safeBottom = screen.height - padding
-    const safeLeft = padding
-    const safeRight = screen.width - padding
+    const safeLeft = controlsLeft + padding
+    const safeRight = screen.width - controlsRight - padding
     const availW = safeRight - safeLeft
     const availH = safeBottom - safeTop
 
@@ -579,7 +591,11 @@ export class ZoomDrone extends Drone {
     // so containerScale = availPx / (bounds * stageScale)
     const scaleX = availW / (bounds.width * stageScale)
     const scaleY = availH / (bounds.height * stageScale)
-    const fitScale = this.clamp(Math.min(scaleX, scaleY))
+    // Strip arrangements fit only their cross-axis. Their long axis remains
+    // scrollable, so adding tiles never makes every tile smaller.
+    const fitScale = this.clamp(
+      fitAxis === 'x' ? scaleX : fitAxis === 'y' ? scaleY : Math.min(scaleX, scaleY),
+    )
 
     // content center in local coords
     const centerX = bounds.x + bounds.width / 2
@@ -593,8 +609,12 @@ export class ZoomDrone extends Drone {
     // screen = stagePos + (containerPos + localPoint * containerScale) * stageScale
     // solve for containerPos:
     //   containerPos = (safeMid - stagePos) / stageScale - center * fitScale
-    const targetPosX = (safeMidX - screenCx) / stageScale - centerX * fitScale
-    const targetPosY = (safeMidY - screenCy) / stageScale - centerY * fitScale
+    const targetPosX = fitAxis === 'y'
+      ? (safeLeft - screenCx) / stageScale - bounds.x * fitScale
+      : (safeMidX - screenCx) / stageScale - centerX * fitScale
+    const targetPosY = fitAxis === 'x'
+      ? (safeTop - screenCy) / stageScale - bounds.y * fitScale
+      : (safeMidY - screenCy) / stageScale - centerY * fitScale
 
     if (snap) {
       target.scale.set(fitScale)
@@ -653,6 +673,7 @@ export class ZoomDrone extends Drone {
   // -------------------------------------------------
 
   public animateToScale = (scale: number, pivotClient: Pt): void => {
+    if (getLaneScrollAxis()) return
     if (!this.renderContainer || !this.canvas || !this.renderer) return
 
     EffectBus.emitTransient('viewport:manual', {})

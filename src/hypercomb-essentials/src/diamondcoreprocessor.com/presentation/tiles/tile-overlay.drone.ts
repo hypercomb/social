@@ -342,6 +342,8 @@ export class TileOverlayDrone extends Drone {
     origin: { x: number; y: number }
     generation: number
     timer: ReturnType<typeof setTimeout>
+    releaseAction?: () => void
+    ready?: boolean
     /** Travel that cancels this hold. A finger rolls further than a mouse
      *  drifts, so the touch hold gets a wider box or it never survives. */
     jitter: number
@@ -456,6 +458,7 @@ export class TileOverlayDrone extends Drone {
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
 
   #dropDragging = false
+  #dropGroupOnly = false
 
   #effectsRegistered = false
   // Handshake state: #requestedRegister makes #initOverlay emit
@@ -515,37 +518,12 @@ export class TileOverlayDrone extends Drone {
         })
       })
 
-      // ── Delete the hovered tile ─────────────────────────────────
-      // The trash icon was pulled off the hover overlay (too easy to click by
-      // accident), so deletion is now an explicit gesture: the vertical
-      // selection menu, OR Delete/Backspace over the tile under the cursor.
-      // `selection.remove` (delete/backspace) is already owned by
-      // RemoveQueenBee for the WHEN-SELECTED case — we handle only the
-      // complementary nothing-selected case here, so the two never both fire.
-      this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-        if (cmd !== 'selection.remove') return
-        if (this.#hasSelection) return            // RemoveQueenBee owns the selection path
-        if (this.#editing || this.#editCooldown) return
-        if (this.#arrangeMode) return
-        if (this.#meshPublic) return              // public mode: delete via select + menu only
-        if (this.#dropDragging) return
-        if (this.#currentTileExternal) return     // can't delete a peer's tile from your layer
-        if (!this.#currentAxial) return
-        const entry = this.#occupiedByAxial.get(
-          TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
-        )
-        if (!entry?.label) return
-        // Same payload + downstream path as the old trash icon's click —
-        // TileActionsDrone handles 'remove' via #removeTile (LayerCommitter,
-        // recorded in history, undoable).
-        this.emitEffect('tile:action', {
-          action: 'remove',
-          q: this.#currentAxial.q,
-          r: this.#currentAxial.r,
-          index: entry.index,
-          label: entry.label,
-        })
-      })
+      // Deletion safety boundary (2026-07-29): while investigating tiles that
+      // disappeared around the empty-page/history work, an accidental direct
+      // Delete/Backspace could not be ruled out. Do NOT service
+      // `selection.remove` from hover state here. RemoveQueenBee owns that
+      // command only for an explicit selection; a single tile is removed only
+      // through its trash icon in this overlay.
 
       // ── External action registration ─────────────────────────────
       this.onEffect<OverlayActionDescriptor | OverlayActionDescriptor[]>('overlay:register-action', (payload) => {
@@ -954,8 +932,9 @@ export class TileOverlayDrone extends Drone {
         this.#updatePerTileVisibility()
       })
 
-      this.onEffect<{ active: boolean }>('drop:dragging', ({ active }) => {
+      this.onEffect<{ active: boolean; groupOnly?: boolean }>('drop:dragging', ({ active, groupOnly }) => {
         this.#dropDragging = active
+        this.#dropGroupOnly = active && groupOnly === true
         // Entering the drag: suppress buttons (overlay is a bare drop target).
         // Leaving it: recover — the drop may have opened the editor or rebuilt
         // the map, clearing #currentAxial; #recoverHover re-derives so the menu
@@ -2358,30 +2337,28 @@ export class TileOverlayDrone extends Drone {
     const pointerId = e.pointerId
     const generation = this.#mapGeneration
     const timer = setTimeout(() => {
-      this.#enterHold = null
-      // Every gate re-checked, same as hold-to-enter: the press is old news by
-      // the time this runs, and the tile may not be under the finger any more.
+      const hold = this.#enterHold
+      if (hold && hold.pointerId === pointerId) hold.ready = true
+    }, TILE_ACTION_HOLD_MS)
+    const releaseAction = (): void => {
       if (generation !== this.#mapGeneration) return
       if (this.#arrangeMode || this.#navigationBlocked) return
       if (this.#editing || this.#editCooldown) return
       if (this.#hasSelection || this.#picking || this.#touchDragging) return
       if (this.#tagRemovalArmed || this.#tagApplyArmed) return
-      // The tile must still be here. The map is re-checked by generation
-      // above, but a tile can also leave without a rebuild — resolving the
-      // label is what proves the thing under the finger still exists.
       if (!this.#labelOnScreen(label)) return
-      // Take the gesture: the trailing click must not also navigate into the
-      // tree underneath the view that is about to open.
       this.#consumedPointerId = pointerId
-      consumePointerGesture(pointerId)
       this.#pressCapture = null
       try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
       this.emitEffect('tile:view-open', {
         label,
         segments: this.resolve<any>('lineage')?.explorerSegments?.() ?? [],
       })
-    }, TILE_ACTION_HOLD_MS)
-    this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: TILE_ACTION_HOLD_JITTER_PX }
+    }
+    this.#enterHold = {
+      label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation,
+      timer, jitter: TILE_ACTION_HOLD_JITTER_PX, releaseAction,
+    }
   }
 
   /** Does this label still resolve to a tile in the current map? */
@@ -2520,6 +2497,37 @@ export class TileOverlayDrone extends Drone {
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
     }
 
+    // Selection mode must resolve every tap from the tap itself. Touch devices
+    // do not reliably send the pointer-move/hover events that maintain
+    // #currentAxial, so reusing that state can make a second tap toggle the
+    // first tile back off instead of adding the tile under the finger.
+    if (this.#hasSelection || this.#picking) {
+      const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+      if (!detector) { diag('selection-no-detector'); return }
+      const tapGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
+      const tapLocal = this.#renderContainer.toLocal(new Point(tapGlobal.x, tapGlobal.y))
+      const tapAxial = detector.pixelToAxial(
+        tapLocal.x - this.#meshOffset.x,
+        tapLocal.y - this.#meshOffset.y,
+        this.#flat,
+      )
+      const tapped = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(tapAxial.q, tapAxial.r))
+      if (!tapped?.label || tapped.index >= this.#cellCount) { diag('selection-empty-hex'); return }
+      this.emitEffect('tile:click', {
+        q: tapAxial.q,
+        r: tapAxial.r,
+        label: tapped.label,
+        index: tapped.index,
+        ctrlKey: false,
+        metaKey: false,
+        // While picking, say the ADD-TO-SET intent explicitly. A plain click
+        // REPLACES the selection, so without this every pick would drop the
+        // one before it and the set could never grow past one.
+        toggle: this.#picking,
+      })
+      return
+    }
+
     if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) { diag('index-out-of-range'); return }
 
     const entry = this.#occupiedByAxial.get(
@@ -2574,22 +2582,6 @@ export class TileOverlayDrone extends Drone {
           return
         }
       }
-    }
-
-    if (this.#hasSelection || this.#picking) {
-      this.emitEffect('tile:click', {
-        q: this.#currentAxial!.q,
-        r: this.#currentAxial!.r,
-        label: entry.label,
-        index: this.#currentIndex!,
-        ctrlKey: false,
-        metaKey: false,
-        // While picking, say the ADD-TO-SET intent explicitly. A plain click
-        // REPLACES the selection, so without this every pick would drop the
-        // one before it and the set could never grow past one.
-        toggle: this.#picking,
-      })
-      return
     }
 
     if (this.#branchLabels.has(entry.label) || referenceTargetForLabel(entry.label) !== null) {
@@ -2655,9 +2647,14 @@ export class TileOverlayDrone extends Drone {
 
   // Cancel editor on right-click release (mirrors Escape cascade priority 1)
   #onPointerUp = (e: PointerEvent): void => {
-    // A release ends any armed hold — a hold that already fired cleared itself
-    // and consumed this pointer, so this is a no-op on that path.
+    const hold = this.#enterHold
+    const releaseAction = hold?.pointerId === e.pointerId && hold.ready
+      ? hold.releaseAction
+      : undefined
+    // A matured touch hold commits here. Travel cancels it before release and
+    // lets the same press become a tile drag instead.
     this.#cancelEnterHold()
+    releaseAction?.()
     // End a paint stroke on release — the staged set persists (Done commits it),
     // only the stroke does. Left button, before the nav-gesture guards below.
     if (e.button === 0 && this.#applyStroke) {
@@ -3044,7 +3041,7 @@ export class TileOverlayDrone extends Drone {
 
     // during image drag-over, show overlay as a drop target / placeholder
     if (this.#dropDragging) {
-      this.#overlay.visible = true
+      this.#overlay.visible = !this.#dropGroupOnly
       return
     }
 
@@ -3104,6 +3101,20 @@ export class TileOverlayDrone extends Drone {
     if (this.#overlay && this.#currentAxial) {
       this.#updateVisibility()
       this.#updatePerTileVisibility()
+      // Navigation rebuilds the shader and clears its hovered index. The
+      // pointer can remain perfectly still over a tile in the arriving level,
+      // so no pointermove follows to restore the shader's dark label/action
+      // band. Re-emit from the fresh occupied map after laying out the actions
+      // (which establishes overlay:band-rows) so their background and label
+      // are painted together on the first frame of the new level.
+      const entry = this.#occupiedByAxial.get(
+        TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
+      )
+      this.emitEffect('tile:hover', {
+        q: this.#currentAxial.q,
+        r: this.#currentAxial.r,
+        label: entry?.label ?? null,
+      })
     }
   }
 

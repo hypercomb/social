@@ -8,9 +8,9 @@
 // the bottom hands the agent MORE CONTEXT while it is still in flight — the
 // thing you think of ten seconds after you asked.
 //
-// A panel, not a takeover: the hive stays visible behind it (you can watch the
-// other bees), so it locks the input gate rather than entering a view mode —
-// typing here must not drive the tiles underneath.
+// A panel, not a takeover: the hive stays visible and navigable behind it.
+// Native form controls own their keyboard events; the panel must not lock the
+// hive's pointer navigation merely because its text box is available.
 //
 // Cold chrome, DOM singleton, no Angular — the same shape as ask-screen.view.
 
@@ -18,11 +18,8 @@ import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { Agent, AgentRegistry } from './agent-registry.service.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/agent-avatar.js'
 
-type GateLike = { lock(owner: string): void; unlock(owner: string): void }
-
 const STYLE_ID = 'hc-agent-panel-styles'
 const STEEL = '126, 182, 214'
-const OWNER = 'agent-panel'
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -130,7 +127,6 @@ export class AgentPanelView extends EventTarget {
     this.#render()
     this.#registry?.addEventListener('change', this.#render)
     document.addEventListener('keydown', this.#onKey, true)
-    ioc<GateLike>('@diamondcoreprocessor.com/InputGate')?.lock(OWNER)
   }
 
   #render = (): void => {
@@ -254,7 +250,6 @@ export class AgentPanelView extends EventTarget {
   close(): void {
     this.#registry?.removeEventListener('change', this.#render)
     document.removeEventListener('keydown', this.#onKey, true)
-    ioc<GateLike>('@diamondcoreprocessor.com/InputGate')?.unlock(OWNER)
     this.#panel?.remove()
     this.#panel = null
     this.#body = null

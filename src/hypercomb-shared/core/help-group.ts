@@ -70,7 +70,7 @@ const ACTION_LABELS: Record<string, string> = {
   'ui.commandLineToggle': 'Command Line',
   'sequence.cycle': 'Arrange',
   'sequence.cyclePrev': 'Arrange Back',
-  'render.togglePivot': 'Orientation',
+  'render.toggleOrientation': 'Orientation',
   'mesh.togglePublic': 'Public Mode',
 }
 
@@ -151,7 +151,7 @@ const TIERS: readonly { header: string; keys: readonly string[] }[] = [
       'ui.commandLineToggle',
       'sequence.cycle',
       'sequence.cyclePrev',
-      'render.togglePivot',
+      'render.toggleOrientation',
       'mesh.togglePublic',
       'slash:language',
       'slash:accent',

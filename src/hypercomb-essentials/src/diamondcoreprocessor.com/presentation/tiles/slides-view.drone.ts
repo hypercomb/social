@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/presentation/tiles/slides-view.drone.ts
 //
 // Full-viewport SLIDES takeover — the presentation sibling of SiteViewDrone /
-// HomeViewDrone / TutorViewDrone. When ViewMode is 'slides', the current cell
+// TutorViewDrone. When ViewMode is 'slides', the current cell
 // (the DECK) renders as a PowerPoint-style, screen-by-screen deck of its
 // children instead of the hex grid. One slide fills the viewport; arrow keys /
 // on-screen chevrons step through; a counter and dot strip track position;
@@ -61,7 +61,7 @@
 // slide (`picturesToo`); a deck stays strict — a slide is something attached or
 // linked, never a tile's incidental picture.
 //
-// Mirrors HomeViewDrone's lifecycle (lineage + ViewMode listeners, re-entrancy
+// Uses lineage + ViewMode listeners, re-entrancy
 // guard, fixed host below the Pixi layer, `view:active` canvas/chrome hiding —
 // zero shell edits) and PhotoView's image fit (object-fit:contain, max vw/vh).
 
@@ -205,7 +205,7 @@ export class SlidesViewDrone extends Drone {
       }
     }
     if (!this.#contextMenuBound) {
-      // Right-click anywhere in slides mode = exit back to hexagons (tutor/home
+      // Right-click anywhere in slides mode = exit back to hexagons (tutor
       // precedent). Capture phase; inert in every other mode.
       window.addEventListener('contextmenu', this.#onContextMenu, true)
       this.#contextMenuBound = true

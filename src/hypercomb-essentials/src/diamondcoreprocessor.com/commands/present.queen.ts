@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/commands/present.queen.ts
 //
 // `/present` — the SLIDES view behaviour, the presentation sibling of
-// `/website`, `/home`, and `/tutor`. Plays the current tile area's child
+// `/website` and `/tutor`. Plays the current tile area's child
 // DIAGRAM tiles as a PowerPoint-style, screen-by-screen slideshow. The render
 // surface is a SINGLE GLOBAL flag (ViewModeService): `/present on` switches to
 // slides wherever the current cell is a deck, `/present off` returns to
@@ -214,8 +214,7 @@ window.ioc.register('@diamondcoreprocessor.com/PresentQueenBee', _present)
       opensOnTileClick: true,
       // Ships mobile-friendly: slides playback is a first-class mobile surface
       // (and the gallery view reuses its engine).
-      // Keep equal to MOBILE_FRIENDLY in preferences/mobile-pheromones.
-      pheromones: ['mobile:friendly'],
+      pheromones: ['platform:mobile', 'platform:desktop'],
     })
   },
 )

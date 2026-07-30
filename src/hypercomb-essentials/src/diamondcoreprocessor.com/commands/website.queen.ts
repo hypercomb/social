@@ -605,8 +605,7 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
       // not just the host cell's slot. See VisualBeeDescriptor.adoptScope.
       adoptScope: 'hierarchy',
       // Ships mobile-friendly: self-authored website pages carry a viewport
-      // meta and render inline. Keep equal to MOBILE_FRIENDLY.
-      pheromones: ['mobile:friendly'],
+      pheromones: ['platform:mobile', 'platform:desktop'],
     })
   },
 )

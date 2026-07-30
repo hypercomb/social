@@ -13,7 +13,7 @@
 // `/sequence` was launched from, so new tiles created in that subtree land at
 // the next free index in the sequence.
 
-import { QueenBee } from '@hypercomb/core'
+import { QueenBee, EffectBus } from '@hypercomb/core'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type EditorLike = { openEditor(name: string, segments: readonly string[]): Promise<void> }
@@ -23,11 +23,11 @@ export class SequenceQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'sequence'
   override readonly aliases = ['seq']
-  override description = 'Create or apply a drop-target sequence for new tiles'
+  override description = 'Open Tile arrangements or edit a named drop-target sequence'
   override descriptionKey = 'slash.sequence'
   override options = ['<set name>']
   override examples = [
-    { input: '/sequence', result: 'Opens the editor for the "default" set' },
+    { input: '/sequence', result: 'Opens the Tile arrangements window' },
     { input: '/sequence normal', result: 'Creates or edits the set named "normal"' },
   ]
 
@@ -39,7 +39,11 @@ export class SequenceQueenBee extends QueenBee {
   }
 
   protected async execute(args: string): Promise<void> {
-    const name = args.trim() || 'default'
+    const name = args.trim()
+    if (!name) {
+      EffectBus.emit('sequence:view-open', {})
+      return
+    }
     const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
     const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     const editor = window.ioc.get<EditorLike>('@diamondcoreprocessor.com/SequenceEditorBee')

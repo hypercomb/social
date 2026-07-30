@@ -1,5 +1,8 @@
 # Hypercomb Documentation
 
+- [View library](view-library.md) — Living Brief, Evidence Atlas, and Knowledge Studio
+- [Tile arrangements](tile-arrangements.md) — named drop and paste target sequences
+
 The complete reference. Every page is also reachable through `/help` in the app — each section below becomes a `/help <section>` drill target, each page a `/help <section> <name>`. Start with [getting-started.md](getting-started.md) if this is your first visit.
 
 ---

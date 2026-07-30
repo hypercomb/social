@@ -1,0 +1,25 @@
+@if (visible()) {
+  <aside class="sequence-panel" hcDockInset="right" hcDockedPanel="sequence-viewer"
+    launcherControlId="sequences"
+    dockSide="right" [minWidth]="280" [maxWidth]="620" [defaultWidth]="370"
+    data-consumes-wheel tabindex="-1" role="dialog" [attr.aria-label]="'sequences.aria' | t">
+    <header class="sequence-header">
+      <div><span class="sequence-title">{{ 'sequences.title' | t }}</span><span class="sequence-count">{{ savedCount() }}</span></div>
+      <button class="close mat-sym" type="button" (click)="close()" [attr.aria-label]="'sequences.close' | t">close</button>
+    </header>
+    <p class="intro">{{ 'sequences.intro' | t }}</p>
+    <div class="list">
+      @for (row of rows(); track row.id) {
+        <article [class.active]="active() === row.id">
+          <span class="mat-sym icon">{{ row.builtIn ? 'auto_awesome_mosaic' : 'schema' }}</span>
+          <div><strong>{{ row.name }}</strong><small>{{ row.detail }}</small></div>
+          <button class="apply" type="button" (click)="select(row)">{{ active() === row.id ? ('sequences.selected' | t) : ('sequences.use' | t) }}</button>
+          @if (!row.builtIn) {
+            <button class="edit mat-sym" type="button" (click)="edit(row)" [attr.aria-label]="'Edit ' + row.name">edit</button>
+          }
+        </article>
+      }
+    </div>
+    <footer><button type="button" (click)="create()"><span class="mat-sym">add</span>{{ 'sequences.new' | t }}</button></footer>
+  </aside>
+}

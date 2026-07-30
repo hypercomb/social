@@ -256,12 +256,12 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   }
 
   readonly dismiss = (): void => {
-    this.#close()
+    this.#close(true)
   }
 
-  #close = (): void => {
+  #close = (cancelled = false): void => {
     this.open.set(false)
-    EffectBus.emit('mesh:modal-open', { open: false })
+    EffectBus.emit('mesh:modal-open', { open: false, cancelled })
     EffectBus.emit('mesh:secret-draft', { secret: null })
   }
 }

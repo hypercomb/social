@@ -59,11 +59,13 @@ class CollectionEmptyPromptDrone {
   #offerActive = false
 
   constructor() {
+    // Retire an instance left in the DOM by an older hot-loaded module before
+    // this root exclusion existed. A full reload has nothing to remove.
+    document.getElementById('hc-collection-empty-prompt')?.remove()
     EffectBus.on<CellCountPayload>('render:cell-count', payload => {
       this.#lastSettledEmpty = payload.count === 0 && payload.settled === true
       void this.#reconcile()
     })
-    // Last-value replay: a late subscribe still learns the offer is up.
     EffectBus.on<{ active?: boolean; examples?: unknown[] }>('examples:offer', payload => {
       this.#offerActive = payload?.active === true && (payload?.examples?.length ?? 0) > 0
       void this.#reconcile()
@@ -72,6 +74,7 @@ class CollectionEmptyPromptDrone {
       this.#offerActive = false
       void this.#reconcile()
     })
+    // Last-value replay: a late subscribe still learns the offer is up.
     // The offer's "Add a tile" delegates here — the command-line focus dance
     // belongs to this module, not to the shell component that renders the card.
     EffectBus.on('hive:empty:add-tile', () => { this.#focusCommandLine() })
@@ -144,12 +147,8 @@ class CollectionEmptyPromptDrone {
     // Three variants: the empty hive ROOT (first run — welcome + the tour), a
     // collection's own root, and any other empty layer.
     if (segments.length === 0) {
-      if (seq !== this.#checkSeq) return
-      // ONE view on first boot: the examples offer already says "your hive is
-      // empty" and now carries both of our gestures. Two cards over the same
-      // empty root is the conflict, not a richer welcome.
       if (this.#offerActive) { this.#hide(); return }
-      this.#show('', 'root')
+      this.#showRootNotice()
       return
     }
 
@@ -172,37 +171,71 @@ class CollectionEmptyPromptDrone {
     }
   }
 
-  #show(name: string, variant: 'root' | 'collection' | 'layer'): void {
-    const titleText = variant === 'root'
-      ? this.#t('hive.empty.title', 'Your hive is empty')
-      : variant === 'collection'
-        ? this.#t('collections.empty.title', 'Add your first tile')
-        : this.#t('layer.empty.title', 'No tiles yet')
-    const bodyText = variant === 'root'
+  #showRootNotice(): void {
+    if (this.#host?.dataset['variant'] === 'root-notice') return
+    this.#hide()
+
+    const host = document.createElement('div')
+    host.id = 'hc-collection-empty-prompt'
+    host.dataset['variant'] = 'root-notice'
+    host.style.cssText =
+      'position:fixed;left:50%;bottom:28px;z-index:100000;transform:translateX(-50%);' +
+      'pointer-events:none;padding:0 16px;box-sizing:border-box;font-family:inherit;'
+
+    const notice = document.createElement('div')
+    notice.style.cssText =
+      'pointer-events:auto;display:flex;align-items:center;gap:14px;max-width:calc(100vw - 32px);' +
+      'padding:10px 11px 10px 16px;border-radius:14px;background:rgba(12,17,24,0.9);' +
+      'border:1px solid rgba(216,230,238,0.13);box-shadow:0 12px 32px rgba(0,0,0,0.24);' +
+      'backdrop-filter:blur(14px);white-space:nowrap;'
+
+    const copy = document.createElement('div')
+    copy.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0;'
+
+    const title = document.createElement('strong')
+    title.style.cssText = 'font-size:13px;font-weight:650;color:#d8e6ee;'
+    title.textContent = this.#t('hive.empty.title', 'Your hive is empty')
+
+    const hint = document.createElement('span')
+    hint.style.cssText = 'font-size:12px;color:rgba(216,230,238,0.5);'
+    hint.textContent = this.#t('hive.empty.notice', 'Add the first thing you want to keep.')
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.style.cssText =
+      'flex:none;border:1px solid rgba(126,182,214,0.35);border-radius:9px;padding:7px 11px;' +
+      'font:inherit;font-size:12px;font-weight:650;color:#a8d0e7;background:rgba(126,182,214,0.09);cursor:pointer;'
+    button.textContent = this.#t('hive.empty.action', 'Add a tile')
+    const requestFocus = (event: Event): void => this.#focusCommandLine(event)
+    button.addEventListener('pointerdown', requestFocus, true)
+    button.addEventListener('click', requestFocus, true)
+
+    copy.append(title, hint)
+    notice.append(copy, button)
+    host.appendChild(notice)
+    document.body.appendChild(host)
+    this.#host = host
+  }
+
+  #show(name: string, variant: 'collection' | 'layer'): void {
+    const titleText = variant === 'collection'
+      ? this.#t('collections.empty.title', 'Add your first tile')
+      : this.#t('layer.empty.title', 'No tiles yet')
+    const bodyText = variant === 'collection'
       ? this.#t(
-        'hive.empty.body',
-        'Everything you keep here lives as a tile — notes, pictures, pages, whole projects. Name your first one, or let the bee show you around.',
+        'collections.empty.body',
+        'Start this collection by naming a tile, dropping a file, or pasting something here.',
+        { collection: name },
       )
-      : variant === 'collection'
-        ? this.#t(
-          'collections.empty.body',
-          'Start this collection by naming a tile, dropping a file, or pasting something here.',
-          { collection: name },
-        )
-        : this.#t(
-          'layer.empty.body',
-          `You are inside "${name}" and nothing has been added here yet. Name a tile, drop a file, or paste something to start it — or go back the way you came.`,
-          { cell: name },
-        )
+      : this.#t(
+        'layer.empty.body',
+        `You are inside "${name}" and nothing has been added here yet. Name a tile, drop a file, or paste something to start it — or go back the way you came.`,
+        { cell: name },
+      )
     const actionText = this.#t(
-      variant === 'collection' ? 'collections.empty.action' : variant === 'root' ? 'hive.empty.action' : 'layer.empty.action',
+      variant === 'collection' ? 'collections.empty.action' : 'layer.empty.action',
       'Add a tile',
     )
-    // The tour is offered on the FIRST-RUN screen only. It is the one moment a
-    // phone user is guaranteed to see it, and the desktop rail's bee button
-    // never renders on a phone — so without this the tutorial could only be
-    // reached by typing `/tutorial`, i.e. by already knowing how to type.
-    const wantsTour = variant === 'root'
 
     if (this.#host) {
       const title = this.#host.querySelector('[data-role="title"]')
@@ -211,14 +244,6 @@ class CollectionEmptyPromptDrone {
       if (body) body.textContent = bodyText
       const action = this.#host.querySelector('[data-role="action"]')
       if (action) action.textContent = actionText
-      // The variant can change under a mounted host (root → layer on the first
-      // navigation), so the tour button must come and go with it.
-      const tour = this.#host.querySelector('[data-role="tour"]') as HTMLElement | null
-      if (tour && !wantsTour) tour.remove()
-      else if (!tour && wantsTour) {
-        const panel = this.#host.querySelector('[data-role="panel"]')
-        panel?.appendChild(this.#tourButton())
-      }
       return
     }
 
@@ -234,26 +259,26 @@ class CollectionEmptyPromptDrone {
     const panel = document.createElement('div')
     panel.dataset['role'] = 'panel'
     panel.style.cssText =
-      'pointer-events:auto;max-width:360px;text-align:center;border-radius:10px;padding:24px 26px 26px;' +
-      'background:rgba(12,17,24,0.78);border:1px solid rgba(126,182,214,0.24);' +
-      'box-shadow:0 18px 44px rgba(0,0,0,0.28);backdrop-filter:blur(10px);cursor:pointer;'
+      'pointer-events:auto;width:min(300px,calc(100vw - 40px));text-align:left;border-radius:14px;padding:18px;' +
+      'background:rgba(12,17,24,0.88);border:1px solid rgba(216,230,238,0.12);' +
+      'box-shadow:0 14px 36px rgba(0,0,0,0.22);backdrop-filter:blur(12px);cursor:pointer;'
 
     const title = document.createElement('div')
     title.dataset['role'] = 'title'
-    title.style.cssText = 'font-size:20px;font-weight:700;color:#d8e6ee;margin-bottom:8px;'
+    title.style.cssText = 'font-size:17px;font-weight:650;color:#d8e6ee;margin-bottom:6px;letter-spacing:-0.01em;'
     title.textContent = titleText
 
     const body = document.createElement('div')
     body.dataset['role'] = 'body'
-    body.style.cssText = 'font-size:14px;line-height:1.55;color:rgba(216,230,238,0.66);margin-bottom:18px;'
+    body.style.cssText = 'font-size:13px;line-height:1.5;color:rgba(216,230,238,0.58);margin-bottom:14px;'
     body.textContent = bodyText
 
     const button = document.createElement('button')
     button.type = 'button'
     button.dataset['role'] = 'action'
     button.style.cssText =
-      'border:0;border-radius:7px;padding:10px 16px;font:inherit;font-size:14px;font-weight:700;' +
-      'color:#0c1118;background:rgb(126,182,214);cursor:pointer;'
+      'border:1px solid rgba(126,182,214,0.38);border-radius:8px;padding:8px 12px;font:inherit;font-size:13px;font-weight:650;' +
+      'color:#a8d0e7;background:rgba(126,182,214,0.08);cursor:pointer;'
     button.textContent = actionText
     const requestFocus = (event: Event): void => this.#focusCommandLine(event)
     button.addEventListener('pointerdown', requestFocus, true)
@@ -266,33 +291,9 @@ class CollectionEmptyPromptDrone {
     panel.appendChild(title)
     panel.appendChild(body)
     panel.appendChild(button)
-    if (wantsTour) panel.appendChild(this.#tourButton())
     host.appendChild(panel)
     document.body.appendChild(host)
     this.#host = host
-  }
-
-  /** "Show me how" — starts the guided tour. The panel's own capture-phase
-   *  listeners open the command line for any press inside it, so this button
-   *  stops the event first (see the tour bail-out in #focusCommandLine). */
-  #tourButton(): HTMLButtonElement {
-    const tour = document.createElement('button')
-    tour.type = 'button'
-    tour.dataset['role'] = 'tour'
-    tour.style.cssText =
-      'display:block;margin:10px auto 0;border:1px solid rgba(126,182,214,0.45);border-radius:7px;' +
-      'padding:10px 16px;font:inherit;font-size:14px;font-weight:600;min-height:44px;' +
-      'color:rgb(126,182,214);background:transparent;cursor:pointer;'
-    tour.textContent = this.#t('hive.empty.tour', 'Show me how')
-    const start = (event: Event): void => {
-      event.preventDefault()
-      event.stopPropagation()
-      this.#hide()
-      EffectBus.emit('tutorial:start', {})
-    }
-    tour.addEventListener('pointerdown', start, true)
-    tour.addEventListener('click', start, true)
-    return tour
   }
 
   #hide(): void {
@@ -301,11 +302,6 @@ class CollectionEmptyPromptDrone {
   }
 
   #focusCommandLine(event?: Event): void {
-    // The panel claims every press inside it, but the tour button owns its own
-    // press — without this bail-out the capture-phase panel listener would fire
-    // first and open the command line instead of starting the tour.
-    const target = event?.target
-    if (target instanceof HTMLElement && target.closest('[data-role="tour"]')) return
     event?.preventDefault()
     event?.stopPropagation()
     if (event?.target instanceof HTMLElement) event.target.blur()

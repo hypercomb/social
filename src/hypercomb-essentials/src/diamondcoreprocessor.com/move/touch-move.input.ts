@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/input/move/touch-move.input.ts
 import { Point } from 'pixi.js'
-import { POINTER_GESTURE_END } from '@hypercomb/core'
+import { EffectBus, POINTER_GESTURE_END } from '@hypercomb/core'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'
 import type { InputGate } from '../navigation/input-gate.service.js'
@@ -123,9 +123,9 @@ export class TouchMoveInput {
       this.#holdTimer = null
       if (!this.#downAxial || !this.#drone) return
 
-      // if the touch gesture coordinator already claimed the gate (e.g., pan started),
-      // don't arm a move — the gate owner has priority
-      if (this.#gate?.active) {
+      // Reserve a matured tile hold before the pan coordinator can claim its
+      // first post-hold movement. A still hold releases this on pointerup.
+      if (this.#gate && !this.#gate.claim(this.#source)) {
         this.#resetDrag()
         return
       }
@@ -138,12 +138,13 @@ export class TouchMoveInput {
    *  used to do (gate re-check, beginMove, haptic) happens here instead, at
    *  the moment the gesture actually declares itself. */
   #startDrag(e: PointerEvent): boolean {
-    if (this.#gate?.active) { this.#resetDrag(); return false }
+    if (this.#gate && this.#gate.owner !== this.#source) { this.#resetDrag(); return false }
     if (!this.#downAxial || !this.#drone) { this.#resetDrag(); return false }
     if (!this.#drone.beginMove(this.#downAxial, this.#source)) { this.#resetDrag(); return false }
 
     this.#armed = false
     this.#dragging = true
+    EffectBus.emit('touch:dragging', { active: true })
 
     // haptic feedback — on the pick-up, which is now the first travel
     try { navigator.vibrate?.(50) } catch { /* ignore */ }
@@ -234,6 +235,8 @@ export class TouchMoveInput {
   }
 
   #resetDrag(): void {
+    if (this.#dragging) EffectBus.emit('touch:dragging', { active: false })
+    this.#gate?.release(this.#source)
     this.#downPos = null
     this.#downAxial = null
     this.#activePointerId = null

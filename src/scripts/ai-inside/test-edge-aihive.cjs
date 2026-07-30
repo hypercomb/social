@@ -48,7 +48,6 @@ async function main(){
   await page.keyboard.press('Escape'); await sleep(2500)
   await page.evaluate(`try{window.ioc.get('@hypercomb.social/ViewMode').setMode('hexagons')}catch(e){}`); await sleep(3000)
   // navigate back to root
-  await bridge({op:'submit', text:'/home'}).catch(()=>{}); await sleep(1500)
   await page.keyboard.press('Escape'); await sleep(2500)
   await dump('BACK at root (does it persist white?)'); await shot('_ai-2-back.png')
 

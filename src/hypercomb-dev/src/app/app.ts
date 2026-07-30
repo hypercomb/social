@@ -1,6 +1,9 @@
 import { AfterViewInit, Component, effect, HostBinding, signal } from '@angular/core';
 import { type Bee, EffectBus, hypercomb } from '@hypercomb/core';
-import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
+import {
+  DEFAULT_HEX_ORIENTATION,
+  type HexOrientation,
+} from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
@@ -46,7 +49,7 @@ export class App implements AfterViewInit {
   public readonly inputOpen = signal(false);
   public readonly viewActive = signal(false);
   public readonly orientation = signal<HexOrientation>(
-    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
+    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || DEFAULT_HEX_ORIENTATION
   );
 
   constructor() {
@@ -82,6 +85,10 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('swarm:empty-layer', ({ active }) => {
       this.swarmEmpty.set(active)
+    })
+
+    EffectBus.on<{ flat: boolean }>('render:set-orientation', ({ flat }) => {
+      this.orientation.set(flat ? 'flat-top' : 'point-top')
     })
 
     // Mobile command-line reveal: long-press on empty canvas (or controls

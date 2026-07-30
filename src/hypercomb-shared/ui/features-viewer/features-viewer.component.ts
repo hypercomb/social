@@ -158,6 +158,11 @@ interface FeaturesOpenPayload {
   available: AvailableRow[]
 }
 
+/** Shell-safe slice of the essentials picker, resolved through IoC so this
+ * shared component does not import a feature module. */
+type SelectModeLike = { arm(): void }
+const SELECT_MODE_KEY = '@diamondcoreprocessor.com/SelectModeDrone'
+
 @Component({
   selector: 'hc-features-viewer',
   standalone: true,
@@ -405,7 +410,10 @@ export class FeaturesViewerComponent implements OnDestroy {
         this.paintNote.set('')
       }
       this.group.set(group)
-      if (!this.visible()) this.visible.set(true)
+      if (!this.visible()) {
+        this.visible.set(true)
+        EffectBus.emit('features:viewer-state', { open: true })
+      }
       // A fresh group replaces its rows — any in-flight ADD for it is settled.
       if (this.pending().size) this.pending.set(new Set())
       // Refresh the hidden pool + websites-menu membership so the rows'
@@ -459,7 +467,10 @@ export class FeaturesViewerComponent implements OnDestroy {
             label: p.label ?? 'Feature',
             code,
           })
-          if (!this.visible()) this.visible.set(true)
+          if (!this.visible()) {
+            this.visible.set(true)
+            EffectBus.emit('features:viewer-state', { open: true })
+          }
         })
       },
     ))
@@ -617,8 +628,19 @@ export class FeaturesViewerComponent implements OnDestroy {
     EffectBus.emit('controls:action', { action: 'features' })
   }
 
+  /** Phone-only door back to the hive in picking mode. Ordinary taps toggle
+   * the standard canvas selection instead of opening a tile. */
+  readonly selectTile = (): void => {
+    if (!this.isPhone()) return
+    const picker = window.ioc?.get?.(SELECT_MODE_KEY) as SelectModeLike | undefined
+    if (!picker?.arm) return
+    this.close()
+    picker.arm()
+  }
+
   close(): void {
     this.visible.set(false)
+    EffectBus.emit('features:viewer-state', { open: false })
     this.group.set(null)
     this.selectedKeys.set(new Set())
     this.pending.set(new Set())
@@ -825,7 +847,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** Can this row be ENTERED as a view? True for on, local view behaviours
-   *  (slides/website/home/tutor). A turned-off or not-yet-adopted row has no
+   *  (slides/website/tutor). A turned-off or not-yet-adopted row has no
    *  live view to open, so the Open affordance stays hidden for it. */
   isOpenable(group: FeatureGroup, feat: FeatureRow): boolean {
     return feat.openable === true && this.isOn(group, feat)
@@ -1128,7 +1150,7 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  needed. Navigates INTO the tile, then flips the global render surface to
    *  the behaviour's view: for slides that hands the viewport to
    *  SlidesViewDrone, which plays the deck's child diagram tiles; for a
-   *  website/home/tutor it renders that cell's page. The row's switch stays
+   *  website/tutor it renders that cell's page. The row's switch stays
    *  the on/off control — this is separate. Activation routes through
    *  `view:toggle` (the same path the command-line view toggle and
    *  `/present on` use, so ViewBee owns the flip), then the panel closes so

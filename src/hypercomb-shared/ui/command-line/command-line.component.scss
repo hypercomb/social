@@ -101,16 +101,15 @@
 .mobile-go-btn {
   display: none;
   flex-shrink: 0;
-  padding: 0 1.1rem;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  padding: 0;
   background: transparent;
   border: none;
   border-left: 1.5px solid color-mix(in srgb, var(--md-primary) 45%, transparent);
   color: var(--md-primary);
-  font-family: var(--hc-mono);
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  font-size: 1.35rem;
   cursor: pointer;
   user-select: none;
 
@@ -126,7 +125,7 @@
 // Both phone dimensions: portrait (narrow) AND landscape (wide but
 // short) — the landscape reveal previously had no GO button at all.
 @media (max-width: 599px), (max-height: 449px) {
-  .mobile-go-btn { display: flex; align-items: center; }
+  .mobile-go-btn { display: flex; }
 }
 
 // ── PHONE PORTRAIT: the shell grows a second row ──────────
@@ -136,10 +135,42 @@
 // the one-row case it already stretched to. The pinned-entrance strip takes a
 // full-width scrolling row of its own beneath everything, on the same rhythm
 // as the icon rail above it.
-@media (max-width: 599px) and (min-height: 450px) {
-  .command-line-wrapper { flex-wrap: wrap; }
+// Keep the portrait rows stable while the soft keyboard changes viewport height.
+@media (max-width: 599px) and (orientation: portrait) {
+  :host {
+    height: auto;
+    overflow: visible;
+  }
 
-  hc-command-shell { flex: 1 1 10rem; }
+  .command-line-wrapper {
+    flex-wrap: wrap;
+    height: auto;
+    overflow: visible;
+    --mobile-go-width: 2.75rem;
+  }
+
+  // Give the rail the full viewport row. GO overlays only the prompt row,
+  // instead of reserving a blank GO-sized column beside the icons.
+  .command-line-wrapper hc-command-shell {
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 100%;
+  }
+
+  // GO belongs to the prompt surface, not to the icon row below it.
+  .mobile-go-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+    width: var(--mobile-go-width);
+    height: 2.75rem;
+    box-sizing: border-box;
+    background: rgba(8, 16, 26, 0.72);
+    border: 1px solid rgba(126, 182, 214, 0.5);
+    border-left-color: color-mix(in srgb, var(--md-primary) 45%, transparent);
+    border-radius: 0;
+  }
 
   hc-pinned-entrances {
     order: 12;

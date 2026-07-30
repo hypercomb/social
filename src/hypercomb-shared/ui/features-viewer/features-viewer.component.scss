@@ -90,6 +90,10 @@ $accent: #c8b8ff;
   white-space: nowrap;
 }
 
+.features-select-tile {
+  display: none;
+}
+
 // ── canvas-selection response ─────────────────────────────────────
 // One-press re-target at the canvas selection; shown only while the selected
 // tiles actually carry features. Quiet accent band, mirror of files-selection.
@@ -154,7 +158,9 @@ $accent: #c8b8ff;
 
 .features-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.25em 0 0.5em;
 }
 
@@ -480,6 +486,25 @@ $accent: #c8b8ff;
   // reached by a finger at all. Hide the controls that only serve it rather
   // than leave dead 11px buttons on the sheet.
   .features-panel .bulk-bar { display: none; }
+
+  .features-select-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    width: calc(100% - 1.5rem);
+    min-height: 2.9rem;
+    margin: 0.55rem 0.75rem 0;
+    border: 1px solid rgba($accent, 0.55);
+    border-radius: 0.65rem;
+    background: rgba($accent, 0.12);
+    color: $accent;
+    font: 600 0.9rem/1 inherit;
+    cursor: pointer;
+
+    &:active { background: rgba($accent, 0.22); }
+    .mat-sym { font-size: 1.15rem; }
+  }
 }
 
 // ── selectable rows ───────────────────────────────────────────────

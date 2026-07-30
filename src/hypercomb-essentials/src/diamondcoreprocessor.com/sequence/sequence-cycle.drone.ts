@@ -44,6 +44,7 @@ import {
   listSequenceTargetHere,
   removeSequenceTarget,
 } from './sequence-target.js'
+import { setLaneScrollAxis, type LaneScrollAxis } from './lane-viewport-mode.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[] }
 
@@ -75,8 +76,11 @@ export class SequenceCycleDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
     sequences: '@diamondcoreprocessor.com/SequenceService',
   }
-  protected override listens = ['render:cell-count', 'keymap:invoke']
-  protected override emits = ['cell:reorder', 'toast:show']
+  protected override listens = [
+    'render:cell-count', 'render:set-orientation',
+    'keymap:invoke', 'sequence:select', 'sequence:edit',
+  ]
+  protected override emits = ['arrange:preview', 'cell:reorder', 'toast:show']
 
   // Live snapshot of the current location's tiles (label ↔ axial coord),
   // tracked off render:cell-count exactly like MoveDrone.
@@ -86,6 +90,10 @@ export class SequenceCycleDrone extends Drone {
   #busy = false
   #effectsRegistered = false
   #fitTimer: ReturnType<typeof setTimeout> | null = null
+  #commitTail: Promise<void> = Promise.resolve()
+  readonly #commitRevision = new Map<string, number>()
+  #threeLaneAxis: LaneScrollAxis | null = null
+  #flat = localStorage.getItem('hc:hex-orientation') === 'flat-top'
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -94,17 +102,39 @@ export class SequenceCycleDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellLabels = payload.labels ?? []
       this.#cellCoords = payload.coords ?? []
+      this.#restoreLaneMode()
+    })
+    this.onEffect<{ flat?: boolean }>('render:set-orientation', ({ flat }) => {
+      this.#flat = !!flat
+      const entry = this.#activeEntry()
+      if (entry?.kind !== 'builtin' || entry.id !== 'three-lanes') return
+      this.#threeLaneAxis = this.#laneAxis()
+      setLaneScrollAxis(this.#threeLaneAxis)
+      void this.#cycle(+1, 'three-lanes')
     })
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
       if (cmd === 'sequence.cycle') void this.#cycle(+1)
       else if (cmd === 'sequence.cyclePrev') void this.#cycle(-1)
+      else if (cmd === 'sequence.threeLanes') void this.#cycle(+1, 'three-lanes')
     })
+    this.onEffect<{ id?: string }>('sequence:select', ({ id }) => {
+      if (id) void this.#cycle(+1, id)
+    })
+    this.onEffect<{ name?: string }>('sequence:edit', ({ name }) => {
+      const lineage = this.resolve<LineageLike>('lineage')
+      const segments = (lineage?.explorerSegments?.() ?? []).map(String).filter(Boolean)
+      const editor = window.ioc.get<{ openEditor(n: string, s: readonly string[]): Promise<void> }>(
+        '@diamondcoreprocessor.com/SequenceEditorBee',
+      )
+      void editor?.openEditor?.((name || 'default').trim() || 'default', segments)
+    })
+
   }
 
   // ── cycle ───────────────────────────────────────────────────────────
 
-  #cycle = async (dir: number): Promise<void> => {
+  #cycle = async (dir: number, requestedId?: string): Promise<void> => {
     if (this.#busy) return
 
     const axialSvc = this.resolve<AxialServiceLike>('axial')
@@ -140,23 +170,47 @@ export class SequenceCycleDrone extends Drone {
 
       const locationKey = segments.join('/')
       const active = this.#readActive(locationKey)
-      const nextIdx = ((active + dir) % cycle.length + cycle.length) % cycle.length
+      const requestedIdx = requestedId
+        ? cycle.findIndex((candidate) => candidate.id === requestedId)
+        : -1
+      const nextIdx = requestedIdx >= 0
+        ? requestedIdx
+        : ((active + dir) % cycle.length + cycle.length) % cycle.length
       const entry = cycle[nextIdx]
+      const threeLanes = entry.kind === 'builtin' && entry.id === 'three-lanes'
+      // Point-top is the default vertical strip. Flat-top remains available
+      // only when the participant explicitly rotates the hive.
+      this.#threeLaneAxis = threeLanes ? this.#laneAxis() : null
+      setLaneScrollAxis(this.#threeLaneAxis)
 
       const indexes = this.#indexesFor(entry, orderedNames.length, coordToIndex)
       if (!indexes || indexes.length === 0) return
 
       const placement = applyToExisting(orderedNames, indexes)
-      await this.#apply(segments, placement)
+      const revision = (this.#commitRevision.get(locationKey) ?? 0) + 1
+      this.#commitRevision.set(locationKey, revision)
 
-      // Bind the chosen arrangement as the drop-target so NEW tiles
-      // created here continue the pattern (next free slot in the same
-      // sequence), keeping existing + future tiles in one organised set.
-      await this.#bind(segments, entry, indexes)
-
+      // Presentation first: move the already-rendered tiles using the
+      // renderer's in-memory geometry path. No layer/resource read or write is
+      // on the activation path. The scoped preview remains authoritative for
+      // this location until the background commit catches up.
       this.#writeActive(locationKey, nextIdx)
+      this.emitEffect('sequence:selected', { id: entry.id, kind: entry.kind, location: locationKey })
+      this.emitEffect('arrange:preview', {
+        location: locationKey,
+        names: this.#sparseNames(placement),
+      })
       this.#toast(entry)
       this.#fitToCenter()
+
+      this.#enqueueCommit({
+        segments: [...segments],
+        locationKey,
+        entry,
+        indexes: [...indexes],
+        placement: new Map(placement),
+        revision,
+      })
     } catch (err) {
       console.warn('[sequence-cycle] apply failed:', err)
     } finally {
@@ -178,10 +232,50 @@ export class SequenceCycleDrone extends Drone {
     this.#fitTimer = setTimeout(() => {
       this.#fitTimer = null
       const zoom = window.ioc.get<{
-        zoomToFit?: (snap?: boolean, source?: 'user' | 'auto') => void
+        zoomToFit?: (
+          snap?: boolean,
+          source?: 'user' | 'auto',
+          fitAxis?: 'both' | 'x' | 'y',
+        ) => void
       }>('@diamondcoreprocessor.com/ZoomDrone')
-      zoom?.zoomToFit?.(false, 'user')
+      const fitAxis = this.#threeLaneAxis === 'y'
+        ? 'x'
+        : this.#threeLaneAxis === 'x' ? 'y' : 'both'
+      zoom?.zoomToFit?.(false, 'user', fitAxis)
     }, 80)
+  }
+
+  /** Restore the constrained scroller after navigation/reload from the
+   * participant-local active arrangement for this location. */
+  #restoreLaneMode = (): void => {
+    const lineage = this.resolve<LineageLike>('lineage')
+    const segments = (lineage?.explorerSegments?.() ?? [])
+      .map((s) => String(s ?? '').trim())
+      .filter(Boolean)
+    const active = this.#readActive(segments.join('/'))
+    const entry = this.#buildCycle()[active]
+    const threeLanes = entry?.kind === 'builtin' && entry.id === 'three-lanes'
+    const axis: LaneScrollAxis | null =
+      threeLanes
+        ? this.#laneAxis()
+        : null
+    const changed = setLaneScrollAxis(axis)
+    this.#threeLaneAxis = axis
+    if (entry) this.emitEffect('sequence:selected', {
+      id: entry.id, kind: entry.kind, location: segments.join('/'),
+    })
+    if (changed && axis) this.#fitToCenter()
+  }
+
+  #laneAxis = (): LaneScrollAxis => this.#flat ? 'x' : 'y'
+
+  #activeEntry = (): CycleEntry | undefined => {
+    const lineage = this.resolve<LineageLike>('lineage')
+    const location = (lineage?.explorerSegments?.() ?? [])
+      .map((s) => String(s ?? '').trim())
+      .filter(Boolean)
+      .join('/')
+    return this.#buildCycle()[this.#readActive(location)]
   }
 
   /** Built-ins first, then every saved set in the palette. */
@@ -224,7 +318,7 @@ export class SequenceCycleDrone extends Drone {
   // coalesces the visual update; cell:reorder invalidates render caches
   // (show-cell must NOT renumber on receipt — it is a cache signal only).
 
-  #apply = async (
+  #persistPlacement = async (
     segments: readonly string[],
     placement: Map<string, number>,
   ): Promise<void> => {
@@ -235,11 +329,54 @@ export class SequenceCycleDrone extends Drone {
         console.warn('[sequence-cycle] persist index failed for', label, err)
       }
     }
-    const dense = [...placement.entries()]
-      .sort((a, b) => a[1] - b[1])
-      .map(([label]) => label)
-    this.emitEffect('cell:reorder', { labels: dense })
-    void new hypercomb().act()
+  }
+
+  #sparseNames = (placement: Map<string, number>): string[] => {
+    let maxIndex = -1
+    for (const index of placement.values()) maxIndex = Math.max(maxIndex, index)
+    const names = new Array(Math.max(0, maxIndex + 1)).fill('')
+    for (const [label, index] of placement) names[index] = label
+    return names
+  }
+
+  #enqueueCommit = (commit: {
+    segments: readonly string[]
+    locationKey: string
+    entry: CycleEntry
+    indexes: readonly number[]
+    placement: Map<string, number>
+    revision: number
+  }): void => {
+    // Preserve write order across rapid arrangement changes. Different tiles
+    // have independent property locks, but their ancestor cascades and the
+    // single sequence-target binding must still land in gesture order.
+    this.#commitTail = this.#commitTail
+      .catch(() => { /* keep the queue live after a failed prior commit */ })
+      .then(async () => {
+        await this.#persistPlacement(commit.segments, commit.placement)
+
+        // Bind the chosen arrangement as the drop-target so NEW tiles created
+        // here continue the same pattern. This is durable bookkeeping only;
+        // it never delays the visible activation.
+        await this.#bind(commit.segments, commit.entry, commit.indexes)
+        void new hypercomb().act()
+
+        // A newer gesture at this location owns the preview. Only the newest
+        // completed commit may release it and ask the renderer to re-read the
+        // now-durable indices.
+        if (this.#commitRevision.get(commit.locationKey) !== commit.revision) return
+        const dense = [...commit.placement.entries()]
+          .sort((a, b) => a[1] - b[1])
+          .map(([label]) => label)
+        this.emitEffect('cell:reorder', { labels: dense })
+        this.emitEffect('arrange:preview', { location: commit.locationKey, names: null })
+      })
+      .catch((err) => {
+        console.warn('[sequence-cycle] background commit failed:', err)
+        if (this.#commitRevision.get(commit.locationKey) === commit.revision) {
+          this.emitEffect('arrange:preview', { location: commit.locationKey, names: null })
+        }
+      })
   }
 
   // ── bind as drop-target (new tiles continue the pattern) ────────────

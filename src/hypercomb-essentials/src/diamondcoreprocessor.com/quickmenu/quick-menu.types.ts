@@ -94,8 +94,10 @@ export const RING_DISTANCE = Math.sqrt(3) * HEX_RADIUS
  *  whether the pointer ever crossed out. */
 export const DEAD_ZONE = 20
 
-/** Travel past this radius on a slot that opens another menu descends into
- *  it, mid-gesture, without releasing. Just past the far edge of the ring. */
+/**
+ * @deprecated Pathways now change focus on arrival; no extra travel threshold
+ * is used. Retained as a source-compatible geometry constant for adopters.
+ */
 export const DESCEND_DISTANCE = RING_DISTANCE + HEX_RADIUS * 0.75
 
 /**
@@ -160,8 +162,8 @@ export type QuickMenuEffectAction = {
   readonly payload?: unknown
 }
 
-/** Open another ring. Crossing the descend radius opens it mid-gesture;
- *  releasing on it opens it sticky, with the pointer free. */
+/** Open another ring. Rolling onto the pathway moves focus to that ring
+ *  immediately; releasing there leaves the newly focused ring sticky. */
 export type QuickMenuMenuAction = {
   readonly kind: 'menu'
   readonly menu: string
@@ -194,6 +196,16 @@ export interface QuickMenuSlot {
   /** i18n key; falls back to `label`. */
   readonly labelKey?: string
   readonly action: QuickMenuAction
+  /**
+   * When the leaf acts. `release` preserves the marking-menu gesture: arrive
+   * to preview, then release/click to confirm. `arrive` completes as soon as
+   * the pointer rolls onto the leaf. Pathway (`menu`) slots always activate
+   * on arrival because their job is to move focus to the next ring.
+   *
+   * This belongs to the slot definition so the behaviour that owns the leaf,
+   * rather than the input system, decides whether arrival is sufficient.
+   */
+  readonly activation?: 'release' | 'arrive'
 }
 
 export interface QuickMenuDefinition {

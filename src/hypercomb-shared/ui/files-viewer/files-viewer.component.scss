@@ -258,6 +258,8 @@ $accent: #a8c8ff;
   padding: 0.5em 0;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 .files-row {

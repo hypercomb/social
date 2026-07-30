@@ -4,6 +4,7 @@ import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker
 import type { ViewportPersistence, ViewportSnapshot } from '../zoom/zoom.drone.js'
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
 import { DEFAULT_HEX_GEOMETRY } from '../../presentation/grid/hex-geometry.js'
+import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 
 type Point = { x: number; y: number }
 
@@ -153,7 +154,10 @@ export class PanningDrone extends Drone {
 
     EffectBus.emitTransient('viewport:manual', {})
 
-    const clamped = this.#clampStageDelta(delta.x, delta.y)
+    const laneAxis = getLaneScrollAxis()
+    const dx = laneAxis === 'y' ? 0 : delta.x
+    const dy = laneAxis === 'x' ? 0 : delta.y
+    const clamped = this.#clampStageDelta(dx, dy)
     this.stage.position.x += clamped.x
     this.stage.position.y += clamped.y
 

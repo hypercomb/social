@@ -6,7 +6,7 @@ Type `/` in the command line to access slash behaviours. These are pluggable com
 
 ---
 
-## Navigation & Layout
+## Navigation & Layout 
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
@@ -14,6 +14,7 @@ Type `/` in the command line to access slash behaviours. These are pluggable com
 | `/move` | | Toggle move mode for drag-reordering tiles |
 | `/layout` | `/lo` | Save, apply, list, or remove layout templates |
 | `/arrange` | | Toggle icon arrangement mode on the tile overlay |
+| `/sequence [name]` | `/seq` | Open Tile arrangements, or edit a named drop/paste target sequence |
 
 ---
 

@@ -88,6 +88,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // among the header aggregates — it manages referenced hives on different
   // roots; it is not a launch group.
   { id: 'pools',        label: 'collections-landing.title', action: 'openPools',        visibleWhen: 'always' },
+  { id: 'sequences',    label: 'sequence.library',          action: 'openSequences',    visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
   // (documentation/selection-tool-windows.md); one-shot verbs live here on the
   // registry (user-toggleable like every control) while windowed responses
@@ -121,6 +122,7 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
   'text-only': false,
   'pools': true,
+  'sequences': false,
   // Selection verbs default ON (they only appear while a selection exists;
   // the retired floating menu was the old primary path).
   'promote-to-parent': true,
@@ -498,6 +500,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleTextOnly: () => this.toggleTextOnly(),
     openPools: () => this.openPools(),
+    openSequences: () => EffectBus.emit('sequence:view-open', {}),
     cut: () => this.cut(),
     copy: () => this.copy(),
     remove: () => this.remove(),
@@ -557,6 +560,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'fullscreen':   return 'fullscreen'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
       case 'pools':        return 'place'
+      case 'sequences':    return 'schema'
       case 'promote-to-parent': return 'arrow_upward'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
@@ -571,6 +575,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   #isControlVisible(ctrl: ControlItem): boolean {
+    // Optional tool-window launchers are slash-first. They do not occupy the
+    // normal rail until enabled from inside their window.
+    if (ctrl.id === 'sequences' && !this.#editMode() && !this.isEnabled(ctrl)) return false
     // In edit mode the user is picking which icons should be active — show
     // candidates that are normally state-gated so they can be toggled even
     // when their state isn't currently met (empty clipboard, no selection).
@@ -671,10 +678,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // (rotation, fullscreen, devtools, mobile address bar collapse).
   #pillFromBottom: number | null = null
 
-  #viewportCenter = (): { x: number; y: number } => ({
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
-  })
+  #viewportCenter = (): { x: number; y: number } => {
+    const rootStyle = getComputedStyle(document.documentElement)
+    const left = Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-left')) || 0
+    const right = Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-right')) || 0
+    return {
+      x: left + (window.innerWidth - left - right) / 2,
+      y: window.innerHeight / 2,
+    }
+  }
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   #moveModeUnsub: (() => void) | null = null
@@ -864,7 +876,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  and glyphs as the pheromone panel — one vocabulary for reach, wherever
    *  you meet it. */
   readonly tagScopeOptions: readonly { id: 'local' | 'children' | 'global'; icon: string }[] = [
-    { id: 'local', icon: 'center_focus_strong' },
+    { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
     { id: 'global', icon: 'public' },
   ]
@@ -875,7 +887,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     switch (this.#tagScope()) {
       case 'children': return 'account_tree'
       case 'global': return 'public'
-      default: return 'center_focus_strong'
+      default: return 'blur_on'
     }
   })
 
@@ -991,6 +1003,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #meshJoinUnsub: (() => void) | null = null
   #lockBumpUnsub: (() => void) | null = null
   #iconEditUnsub: (() => void) | null = null
+  #configureControlUnsub: (() => void) | null = null
   #onIconOverride = (): void => this.iconRev.update(v => v + 1)
 
   ngOnInit(): void {
@@ -1011,6 +1024,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Icon protocol: reflect edit mode (jiggle) + re-resolve glyphs on reskin.
     this.#iconEditUnsub = EffectBus.on<{ on?: boolean }>('icon:edit-mode', ({ on }) => this.iconEditOn.set(!!on))
+    this.#configureControlUnsub = EffectBus.on<{ id?: string; enabled?: boolean }>(
+      'controls:configure',
+      ({ id, enabled }) => {
+        if (!id || typeof enabled !== 'boolean') return
+        this.#enabledMap.update(m => ({ ...m, [id]: enabled }))
+        this.#persistEnabledMap()
+      },
+    )
     iconOverrides.addEventListener('change', this.#onIconOverride)
 
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
@@ -1387,6 +1408,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshJoinUnsub?.()
     this.#lockBumpUnsub?.()
     this.#iconEditUnsub?.()
+    this.#configureControlUnsub?.()
     this.#titleTickUnsub?.()
     this.#localeTickUnsub?.()
     iconOverrides.removeEventListener('change', this.#onIconOverride)
@@ -1559,13 +1581,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const cx = bounds.x + bounds.width * 0.5
     const cy = bounds.y + bounds.height * 0.5
 
-    // offset container so content center sits at stage origin
+    // Offset the container so its content lands at the centre of the usable
+    // viewport. A side-docked controls rail publishes the edge space it owns;
+    // floating/mobile controls publish zero.
     const scale = container.scale?.x ?? 1
-    container.position.set(-cx * scale, -cy * scale)
+    const stageScale = app.stage.scale?.x || 1
+    const usableCenter = this.#viewportCenter()
 
-    // reset stage pan to screen center
+    // Keep the stage at the true screen centre (the persistence model's
+    // zero-pan origin) and express the safe-area shift in container space.
     const s = app.renderer.screen
     app.stage.position.set(s.width * 0.5, s.height * 0.5)
+    container.position.set(
+      (usableCenter.x - s.width * 0.5) / stageScale - cx * scale,
+      (usableCenter.y - s.height * 0.5) / stageScale - cy * scale,
+    )
 
     // persist viewport state
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')

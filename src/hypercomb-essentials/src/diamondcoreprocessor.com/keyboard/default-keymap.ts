@@ -48,10 +48,16 @@ export const globalKeyMap: KeyMapLayer = {
     {
       cmd: 'render.togglePivot',
       sequence: [[{ key: '8', code: 'digit8', primary: true, shift: true }]],
+      description: 'Toggle grid pivot',
+      category: 'View',
+      pierce: true,
+    },
+    {
+      cmd: 'render.toggleOrientation',
+      sequence: [[{ key: 'j' }]],
       description: 'Toggle hex orientation',
       descriptionKey: 'keymap.pivot',
       category: 'View',
-      pierce: true,
     },
     {
       cmd: 'ui.commandLineToggle',

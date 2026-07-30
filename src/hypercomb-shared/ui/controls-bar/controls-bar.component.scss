@@ -1433,10 +1433,14 @@ $actions-corner: 12rem;
 .pill-stage.mobile.landscape {
   left: calc(0.9rem + env(safe-area-inset-left, 0px));
   right: auto;
-  top: 0;
-  bottom: 0;
+  // Android resizes the visual viewport when its text editor opens. Keep the
+  // rail inside the part of that viewport which is actually canvas: below the
+  // command-line header and above the keyboard. Centring against `top: 0`
+  // allowed the fixed-height column to grow through the command line.
+  top: calc(var(--hc-header-anchor) + 0.35rem);
+  bottom: max(0.35rem, var(--hc-safe-bottom, 0px));
   transform: none;
-  align-items: center;             // centre the strip vertically in the stage
+  align-items: center;
 
   &.faded { transform: none; }     // drop the portrait fade-nudge (it re-added translateX)
 
@@ -1444,7 +1448,11 @@ $actions-corner: 12rem;
     flex-direction: column;
     width: auto;
     max-width: none;
-    height: min(84vh, 26rem);
+    // Fill the available header-to-keyboard interval. `space-evenly` now
+    // balances the first and last icons against those two real edges.
+    height: 100%;
+    max-height: 26rem;
+    box-sizing: border-box;
     padding: 0.75rem 0;
   }
 
@@ -1460,6 +1468,26 @@ $actions-corner: 12rem;
   // itself is vertical.
   .ctl-btn .hci,
   .ctl-btn .mat-sym { transform: none; }
+}
+
+// A landscape phone with the Android editor open can leave only ~300px
+// between the command line and keyboard. Preserve every action without
+// overlap by tightening the discs in that short-height state; normal
+// landscape keeps the larger 3.4rem thumb targets above.
+@media (orientation: landscape) and (max-height: 449px) {
+  .pill-stage.mobile.landscape {
+    .mobile-nav {
+      gap: 0.15rem;
+      padding-block: 0.3rem;
+    }
+
+    .ctl-btn {
+      min-width: 2.75rem;
+      min-height: 2.75rem;
+      padding: 0.4rem;
+      --icon-size: 1.25rem;
+    }
+  }
 }
 
 // ── 27" monitor (2560px+) ────────────────────────────────

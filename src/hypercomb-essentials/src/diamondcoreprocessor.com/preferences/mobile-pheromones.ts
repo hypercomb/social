@@ -26,6 +26,12 @@ export const MOBILE_FRIENDLY = 'mobile:friendly'
  */
 export const MOBILE_HOLD = 'mobile:hold'
 
+/** Behaviour capability pheromones. Content tiles are platform-neutral; these
+ * marks divide executable/view behaviour between shells. Every visual-bee
+ * registration declares at least one, and universal behaviour declares both. */
+export const PLATFORM_MOBILE = 'platform:mobile'
+export const PLATFORM_DESKTOP = 'platform:desktop'
+
 /**
  * localStorage key for the manual mobile-mode override written by
  * `/mobile on|off`. Values: `'on'` | `'off'`. Absent = auto-detect.

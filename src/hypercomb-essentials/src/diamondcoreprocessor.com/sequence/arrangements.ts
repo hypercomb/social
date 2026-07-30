@@ -118,6 +118,66 @@ export const flowerIndexes = (
   coordToIndex: Map<string, number>,
 ): number[] => coordsToIndexes(flowerCoords(count), coordToIndex)
 
+// ── Three lanes ─────────────────────────────────────────────────────
+//
+// A readable, scrollable strip rather than a block which gets smaller as it
+// grows. Point-top is the default and uses three columns filled top→bottom.
+// An explicit flat-top preference uses the natural 3-2-3-2-3 packing across
+// the strip: a column of three, then two cells nested in its gaps, then three
+// again.
+
+export const threeLaneCoords = (count: number, flatTop: boolean): AxialLike[] => {
+  const n = Math.max(0, Math.floor(count))
+  if (n === 0) return []
+
+  const coords: AxialLike[] = []
+  if (flatTop) {
+    // Number of alternating columns needed: pairs hold 3 + 2 tiles.
+    const pairs = Math.floor(n / 5)
+    const remainder = n % 5
+    const cols = pairs * 2 + (remainder > 3 ? 2 : remainder > 0 ? 1 : 0)
+    // Begin on an even q so the first column is the full three. Pick the
+    // even origin nearest the centred position; zoom-to-lanes performs the
+    // final exact screen centring.
+    const q0 = Math.round((-Math.max(0, cols - 1) / 2) / 2) * 2
+    let placed = 0
+    for (let col = 0; col < cols && placed < n; col++) {
+      const q = q0 + col
+      const capacity = col % 2 === 0 ? 3 : 2
+      for (let slot = 0; slot < capacity && placed < n; slot++) {
+        // Flat-top screen y is r + q/2. Even/full columns land at
+        // -1,0,1; odd/tucked columns land halfway between at -0.5,0.5.
+        const r = slot - 1 - Math.floor(q / 2)
+        coords.push({ q, r })
+        placed++
+      }
+    }
+  } else {
+    const rows = Math.ceil(n / 3)
+    const r0 = -Math.floor(rows / 2)
+    for (let col = 0; col < 3; col++) {
+      for (let row = 0; row < rows; row++) {
+        const ordinal = col * rows + row
+        if (ordinal >= n) break
+        const r = r0 + row
+        // odd-r offset → axial; three visually straight vertical columns.
+        const q = col - 1 - Math.floor(r / 2)
+        coords.push({ q, r })
+      }
+    }
+  }
+  return coords
+}
+
+export const threeLaneIndexes = (
+  count: number,
+  coordToIndex: Map<string, number>,
+): number[] => {
+  const flatTop = typeof window !== 'undefined'
+    && window.localStorage?.getItem('hc:hex-orientation') === 'flat-top'
+  return coordsToIndexes(threeLaneCoords(count, flatTop), coordToIndex)
+}
+
 // ── Apply to existing tiles ──────────────────────────────────────────
 //
 // `orderedNames` is the current tiles already sorted into their relative
@@ -162,6 +222,7 @@ export interface BuiltinArrangement {
 }
 
 export const BUILTIN_ARRANGEMENTS: readonly BuiltinArrangement[] = [
+  { id: 'three-lanes', label: 'Three lanes', labelKey: 'arrange.threeLanes', generate: threeLaneIndexes },
   { id: 'rectangle', label: 'Rectangle', labelKey: 'arrange.rectangle', generate: rectangleIndexes },
   { id: 'flower', label: 'Flowers', labelKey: 'arrange.flower', generate: flowerIndexes },
 ]

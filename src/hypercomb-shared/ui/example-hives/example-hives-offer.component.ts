@@ -28,6 +28,7 @@ interface ExampleEntry {
 interface OfferPayload { active?: boolean; examples?: ExampleEntry[] }
 interface AdoptedPayload { name?: string; status?: string }
 interface AdoptProgressPayload { layers?: number; leaves?: number; failed?: number }
+interface CellCountPayload { count?: number; settled?: boolean }
 
 type RowStatus = 'idle' | 'adopting' | 'added' | 'unavailable'
 
@@ -46,8 +47,13 @@ export class ExampleHivesOfferComponent implements OnInit, OnDestroy {
   readonly #status = signal<Record<string, RowStatus>>({})
   readonly #progress = signal(0)
   readonly #hiddenCovers = signal<Record<string, boolean>>({})
+  readonly #renderSettledEmpty = signal(false)
 
-  readonly visible = computed(() => this.#offer()?.active === true && (this.#offer()?.examples?.length ?? 0) > 0)
+  readonly visible = computed(() =>
+    this.#renderSettledEmpty()
+    && this.#offer()?.active === true
+    && (this.#offer()?.examples?.length ?? 0) > 0,
+  )
   readonly examples = computed(() => this.#offer()?.examples ?? [])
   readonly anyAdded = computed(() => Object.values(this.#status()).includes('added'))
   readonly progressCount = computed(() => this.#progress())
@@ -56,6 +62,12 @@ export class ExampleHivesOfferComponent implements OnInit, OnDestroy {
     this.#unsubs.push(
       EffectBus.on<OfferPayload>('examples:offer', (p) => {
         this.#offer.set(p ?? null)
+      }),
+      EffectBus.on<CellCountPayload>('render:cell-count', (p) => {
+        // History can report an empty root while its tiles are still hydrating.
+        // Only the renderer's settled-empty result may reveal this surface.
+        // Any tile count hides it immediately, even during another render pass.
+        this.#renderSettledEmpty.set(p?.count === 0 && p?.settled === true)
       }),
       EffectBus.on<AdoptedPayload>('examples:adopted', (p) => {
         const name = String(p?.name ?? '')

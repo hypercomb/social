@@ -202,6 +202,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Aria-label / tooltip for the notes toggle. */
   readonly notesLabel = input<string>('notes')
 
+  readonly showFeaturesToggle = input<boolean>(false)
+  readonly featuresPanelOpen = input<boolean>(false)
+  readonly featuresLabel = input<string>('features')
+
   /** Whether the feedback panel is currently open — lights the feedback toggle. */
   readonly feedbackPanelOpen = input<boolean>(false)
 
@@ -211,7 +215,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Material Symbol readout of the current pheromone reach — page /
    *  children / global. Same vocabulary as the controls-bar tag-scope
    *  button at the bottom; the parent owns the `tags:filter` mirror. */
-  readonly pheromoneScopeIcon = input<string>('center_focus_strong')
+  readonly pheromoneScopeIcon = input<string>('blur_on')
 
   /** Whether the pheromone panel is currently open — lights the pheromones toggle. */
   readonly pheromonePanelOpen = input<boolean>(false)
@@ -306,6 +310,8 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Emitted when the notes toggle is clicked. Parent flips the strip
    *  via the `notes:panel` command channel — the shell stays presentational. */
   readonly notesToggle = output<void>()
+
+  readonly featuresToggle = output<void>()
 
   /** Emitted when the feedback toggle is clicked. Parent flips the
    *  share-feedback panel — the shell stays presentational. */

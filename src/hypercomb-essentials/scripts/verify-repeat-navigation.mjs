@@ -114,6 +114,42 @@ try {
   await page.waitForTimeout(2_000)
   await waitForLabels(['dolphin'])
 
+  // A first-boot offer may have opened while the initially empty root was
+  // settling. The moment a real tile paints, that empty-page surface must
+  // yield the canvas; otherwise the renderer is healthy but every tile is
+  // trapped behind a still-mounted modal.
+  await page.waitForFunction(
+    () => !document.querySelector('hc-example-hives-offer .offer-card'),
+    undefined,
+    { timeout: 5_000 },
+  )
+
+  // Destructive-key regression: Delete/Backspace is selection-only. Merely
+  // hovering a tile must not remove it; the single-tile path is the explicit
+  // trash icon in the tile overlay.
+  const dolphinPoint = await page.evaluate(() => {
+    const renderer = window.ioc.get('@diamondcoreprocessor.com/ShowCellDrone')
+    const selection = window.ioc.get('@diamondcoreprocessor.com/SelectionService')
+    selection?.clear?.()
+    const canvas = document.querySelector('canvas')
+    const cell = renderer?.renderedCells?.get?.('dolphin')
+    const point = renderer?.hexMesh?.toGlobal?.({ x: 0, y: 0 })
+    if (!canvas || !cell || !point) throw new Error('Dolphin hover target unavailable')
+    const rect = canvas.getBoundingClientRect()
+    return {
+      x: rect.left + point.x * (rect.width / canvas.width),
+      y: rect.top + point.y * (rect.height / canvas.height),
+    }
+  })
+  await page.mouse.move(dolphinPoint.x, dolphinPoint.y)
+  await page.keyboard.press('Delete')
+  await page.waitForTimeout(250)
+  await waitForLabels(['dolphin'])
+  // Leave the overlay before the navigation probe below. That probe targets
+  // the tile body; keeping the real pointer over its expanded icon band would
+  // correctly let the overlay capture the synthetic press instead.
+  await page.mouse.move(0, 0)
+
   // Wait for the renderer's real readiness proof, not an arbitrary delay.
   await page.evaluate(async () => {
     const bus = window.__hypercombEffectBus

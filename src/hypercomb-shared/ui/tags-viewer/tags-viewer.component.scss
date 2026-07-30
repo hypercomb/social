@@ -605,6 +605,8 @@ $mint: #6fbf94;
   padding: 0.4em 0;
   overflow-y: auto;
   flex: 1 1 auto;
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 .tags-row {

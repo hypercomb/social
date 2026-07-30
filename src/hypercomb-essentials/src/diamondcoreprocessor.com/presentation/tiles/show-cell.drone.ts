@@ -562,7 +562,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1068,6 +1068,9 @@ export class ShowCellDrone extends Drone {
   #lastTriggeredRepublishAtMs = new Map<string, number>()
 
   private filterKeyword = ''
+  /** null = ordinary canvas; a Set (including empty) = an active named/draft
+   * filter view whose members are the only tiles allowed to render. */
+  #filterViewLabels: Set<string> | null = null
   private filterTags = new Set<string>()
   /** Marks a REFERENCE demands of what it shows, in force while the participant
    *  stands inside what that reference points at (see
@@ -1177,6 +1180,12 @@ export class ShowCellDrone extends Drone {
   private cachedCellNames: string[] | null = null
   private cachedLocalCellSet: Set<string> | null = null
   private cachedBranchSet: Set<string> | null = null
+
+  // Arranging is optimistic: the sequence controller moves the live mesh
+  // first, then persists each tile's index in the background. Keep those
+  // temporary sparse slot maps per location so an in-flight save cannot
+  // rearrange a different page after navigation.
+  readonly #arrangePreviewNames = new Map<string, string[]>()
 
   // State machine for slot ordering — the authoritative source of cellNames
   // during incremental updates. Seeded after every full render; mutated via
@@ -1952,7 +1961,8 @@ export class ShowCellDrone extends Drone {
     const branchSet = this.cachedBranchSet ?? new Set<string>()
 
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
-    const effectiveLen = this.moveNames ? this.moveNames.length : cellNames.length
+    const previewNames = this.#effectivePreviewNames()
+    const effectiveLen = previewNames ? previewNames.length : cellNames.length
     const maxCells = Math.min(effectiveLen, axialMax)
     if (maxCells <= 0) return
 
@@ -2015,6 +2025,17 @@ export class ShowCellDrone extends Drone {
 
     finishPreview()
   }
+
+  #currentLocationKey = (): string => {
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    return (lineage?.explorerSegments?.() ?? [])
+      .map((segment) => String(segment ?? '').trim())
+      .filter(Boolean)
+      .join('/')
+  }
+
+  #effectivePreviewNames = (): string[] | null =>
+    this.moveNames ?? this.#arrangePreviewNames.get(this.#currentLocationKey()) ?? null
 
   /**
    * Incremental render — same-layer tile changes without the full synchronize path.
@@ -2468,7 +2489,10 @@ export class ShowCellDrone extends Drone {
       // the dir-dependent side effects (viewport OPFS read, vp.setDir,
       // image refill) on its presence below.
       const cachedDir = this.#layerDirCache.get(locationKey)
-      if (cached && cached.cells.length > 0) {
+      // An empty page is still a completely cached page. Requiring at least
+      // one cell sent back-navigation through the full async resolver even
+      // though there was nothing to resolve or paint.
+      if (cached) {
         // Capture the OUTGOING layer's live VP state into our cache so
         // a future return to that layer restores where the user actually
         // left it (pan/zoom/meshOffset they applied this session). VP's
@@ -2487,12 +2511,9 @@ export class ShowCellDrone extends Drone {
         // the hide/show happens within one frame — no flicker.
         if (this.layer) this.layer.visible = false
 
-        // Viewport: prefer cached snapshot (sync). If none cached AND
-        // we have a dir to read from, await the OPFS read so the mesh
-        // doesn't render at the previous layer's pan/zoom and snap into
-        // place. For sub-layers with no on-disk dir (layer-primitive
-        // model) we skip the OPFS round-trip entirely — the in-memory
-        // snapshot cache is the source of truth.
+        // Viewport: prefer the cached snapshot (sync). A visited page and a
+        // prepared page both seed this cache. A legacy partial cache may lack
+        // it; that must not turn Back into a storage read.
         let appliedSnap: ViewportSnapshot | null = null
         const vpSnap = this.#layerViewportCache.get(locationKey)
         if (vpSnap) {
@@ -2500,13 +2521,9 @@ export class ShowCellDrone extends Drone {
           // may have rejected components of the cached snapshot.
           appliedSnap = this.#applyViewportFromSnapshot(vpSnap)
         } else {
-          // Viewport is sig-keyed by lineage segments now (no OPFS dir
-          // required), so always read — sub-layers without a dir restore
-          // identically to root.
-          appliedSnap = await this.#applyViewportForLayerReadSnapshot(
-            cachedDir ?? null,
-            lineage.explorerSegments?.() ?? [],
-          )
+          // Keep the restore synchronous. A later slow refresh can populate
+          // viewport state for this legacy/partial cache entry.
+          appliedSnap = null
         }
         // Explicit set — never inherit from prior render. The back-nav
         // fast path's mesh ALREADY exists, so we only need to mark
@@ -2574,19 +2591,8 @@ export class ShowCellDrone extends Drone {
           this.renderedCells.set(label, cell)
         }
 
-        // Image-complete paint: a tile must NEVER render without its
-        // image outside text-only mode. If any restored sig lost its
-        // atlas slot while we were away, refill BEFORE painting — the
-        // loads are local (resource cache / OPFS + decode), so this is
-        // bounded by warm reads, not network. Painting first and healing
-        // after showed a label-only flash, which the display rule forbids.
-        // The refill runs even when cachedDir is null: substrate images
-        // live in __resources__ keyed by signature, so loadCellImages
-        // only needs the dir for tags/link reads (already null-tolerant).
-        if (evictedSigs.length > 0) {
-          try { await this.loadCellImages(cached.cells, cachedDir ?? null) } catch { /* paint best-effort */ }
-        }
-
+        // Atlas slots are opportunistic. A child preload can reuse a parent's
+        // slot while the parent is off-screen; that must not delay Back.
         if (this.layer) this.layer.visible = true
 
         // applyGeometry has no internal awaits; the `async` modifier
@@ -2603,6 +2609,20 @@ export class ShowCellDrone extends Drone {
 
         this.#emitRenderTags(cached.cells)
         this.emitEffect('render:cell-count', this.#buildCellCountPayload(cached.cells))
+
+        // Child preloading can reuse atlas slots that belonged to this parent.
+        // Repair those slots after the cached paint, never between the Back
+        // gesture and that paint. Repaint only if the parent is still visible.
+        if (evictedSigs.length > 0) {
+          void (async () => {
+            try {
+              await this.loadCellImages(cached.cells, cachedDir ?? null)
+              if (this.renderedLocationKey === locationKey) {
+                await this.applyGeometry(cached.cells, true)
+              }
+            } catch { /* cached text paint remains usable */ }
+          })()
+        }
 
         // background: refresh cursor for undo/redo readiness. Renderer
         // doesn't need it to draw — cells are already filtered.
@@ -5099,6 +5119,16 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    this.onEffect<{ active?: boolean; labels?: readonly string[] }>('filter:view', ({ active, labels }) => {
+      this.#filterViewLabels = active === false
+        ? null
+        : new Set((labels ?? []).map(label => String(label).trim()).filter(Boolean))
+      this.renderedCellsKey = ''
+      this.#layerCellsCache.clear()
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
     // tags:removal-pending — TagRemovalDrone's staged set for the keyword being
     // removed. Purely visual: the staged tiles paint as future-removes so the
     // pending change is legible on the hive itself, not only in the panel's
@@ -5697,6 +5727,20 @@ export class ShowCellDrone extends Drone {
       void this.#handleReorder(payload.labels)
     })
 
+    // Arrangement activation is presentation-first. Apply its sparse slot map
+    // through the same zero-I/O mesh path as drag preview while the sequence
+    // controller writes canonical indices in the background.
+    this.onEffect<{ location: string; names: string[] | null }>('arrange:preview', (payload) => {
+      if (!payload || typeof payload.location !== 'string') return
+      if (payload.names) this.#arrangePreviewNames.set(payload.location, payload.names)
+      else this.#arrangePreviewNames.delete(payload.location)
+      if (payload.location !== this.#currentLocationKey()) return
+
+      this.renderedCellsKey = ''
+      if (payload.names && this.cachedCellNames) this.renderMovePreview()
+      else this.requestRender()
+    })
+
     // layout:mode and layout:swirl are legacy — the renderer now
     // operates only in pinned mode. Any incoming event is a no-op so
     // historical layers that still carry `mode: 'dense'` or a stray
@@ -5720,19 +5764,33 @@ export class ShowCellDrone extends Drone {
       this.shader?.setBandRows(this.#bandRows)
     })
 
-    // q/r are absent on the "nothing hovered" broadcast (pointer over
-    // chrome) — the key lookup then misses and the ring clears, which is
-    // exactly the wanted read: chrome is not the hive.
-    this.onEffect<{ q?: number; r?: number }>('tile:hover', (payload) => {
-      if (!this.shader) return
-      const idx = this.#axialToIndex.get(`${payload.q},${payload.r}`)
+    // q/r and label are absent on the "nothing hovered" broadcast (pointer
+    // over chrome), which clears the ring and reveal: chrome is not the hive.
+    this.onEffect<{ q?: number; r?: number; label?: string | null }>('tile:hover', (payload) => {
+      // The overlay already resolved the occupied tile. Prefer its
+      // authoritative label: while geometry and occupancy are being replaced,
+      // deriving it again from q/r can briefly miss and leave a hideText tile
+      // visibly hovered with its name still hidden.
+      const payloadLabel = typeof payload.label === 'string' ? payload.label : null
+      let hoverLabel = payloadLabel && this.renderedCells.has(payloadLabel)
+        ? payloadLabel
+        : null
 
-      // Resolve the hovered label once — feeds the shade gate, the tag
-      // highlight and the portal shimmer clock.
-      let hoverLabel: string | null = null
-      for (const [label, cell] of this.renderedCells) {
-        if (cell.q === payload.q && cell.r === payload.r) { hoverLabel = label; break }
+      // Compatibility for older emitters that only carry axial coordinates.
+      if (!hoverLabel && payload.q !== undefined && payload.r !== undefined) {
+        for (const [label, cell] of this.renderedCells) {
+          if (cell.q === payload.q && cell.r === payload.r) { hoverLabel = label; break }
+        }
       }
+
+      // Keep reveal state current while the shader is between rebuilds. The
+      // next geometry bake will then write the visible label UV immediately.
+      this.#setHoverReveal(hoverLabel)
+
+      if (!this.shader) return
+      const idx = hoverLabel !== null
+        ? this.#labelToIndex.get(hoverLabel)
+        : this.#axialToIndex.get(`${payload.q},${payload.r}`)
 
       // A shaded tile is NOT out of reach. Hovering it lifts the shade — the
       // tile comes back to full opacity under the pointer and lights its ring
@@ -5741,11 +5799,6 @@ export class ShowCellDrone extends Drone {
       // wait, but the choice stays yours.
       this.shader.setHoveredIndex(idx ?? -1)
       this.#setHoverOpaque(hoverLabel)
-
-      // A tile that hides its name shows it again while hovered — and only
-      // while hovered. Runs on the resolved label (not the index) so the
-      // "pointer left the grid" broadcast, which carries no hex, clears it.
-      this.#setHoverReveal(hoverLabel)
 
       // Drive the shimmer clock only while a reference/portal tile is hovered,
       // so u_time (and the magical hover animation) idles the rest of the time.
@@ -6796,6 +6849,10 @@ export class ShowCellDrone extends Drone {
         || this.#tagsFor(s).some(t => t.toLowerCase().includes(kw))
       cellNames = cellNames.map(s => s && matches(s) ? s : '')
     }
+    if (this.#filterViewLabels !== null) {
+      const allowed = this.#filterViewLabels
+      cellNames = cellNames.map(name => name && allowed.has(name) ? name : '')
+    }
     return cellNames
   }
 
@@ -7010,7 +7067,7 @@ export class ShowCellDrone extends Drone {
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
     const out: Cell[] = []
     // during move drag, use reordered names so labels map to correct indices
-    const effectiveNames = this.moveNames ?? names
+    const effectiveNames = this.#effectivePreviewNames() ?? names
     // Clustered-island layout for the ordered help page — placed by label, so
     // grouping reads the committed `names` order (a transient move-drag never
     // rescrambles the islands). Null on every other page ⇒ the spiral below.

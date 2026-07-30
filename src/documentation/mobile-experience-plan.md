@@ -7,7 +7,7 @@
 > `mobile-usable-first-plan.md`, written from a full code audit after the gate proved to
 > blank unmarked hives on every phone. The machinery this doc built (mode service,
 > pheromones, prompts, bar, sheets, §8 adoption design) carries forward unchanged; read
-> the new plan first.
+> the new plan first. 
 
 This document is self-contained: it names every primitive it borrows with file paths,
 states the doctrine constraints inline, and phases the work with acceptance criteria.
@@ -16,7 +16,7 @@ The implementing session should read this top to bottom before touching code.
 ### Build log
 
 **Verified in the dev shell (2026-07-24, port 4253):** app boots clean;
-`withPheromone('mobile:friendly')` → `['home','slides','website']`; gate OFF → both
+`withPheromone('mobile:friendly')` → `['slides','website']`; gate OFF → both
 genesis tiles render; gate ON → only the `mobile:friendly`-marked tile renders, the
 unmarked one is excluded (never loaded); marks persist to the store across reload
 (cold-load reads them via the store-authoritative reach scan); unmark reflects after

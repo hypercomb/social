@@ -14,7 +14,7 @@ still the author's. No reposts, no feeds — paths worn by walking. The
 mesh's ~90s events are the ephemeral half of broadcast; trails are the
 durable half, persisting exactly as long as anyone keeps caring.
 Roadmap consequence: the share switch and the mark verb are two hands
-of one gesture — design them within sight of each other.
+of one gesture — design them within sight of each other. 
 
 ## The idea, verbatim
 
@@ -230,6 +230,21 @@ portable truth). The mechanism is **scoping**:
   verdict: edge lists are projections; children-by-pheromone is
   rejected as truth). Truth stays the layers' own tags + `children`.
   Cacheable in the optimize phase keyed by the path's head sigs.
+
+#### Collection baseline from the parent
+
+A collection root's author-tier pheromones are the default context for its
+items. While filtering that collection, the nose evaluates each item against
+`parent marks ∪ item marks`; the parent mark therefore keeps the collection's
+ordinary members visible without stamping the same mark onto every child.
+This is derived scope, not copied state.
+
+An item may explicitly replace or suppress the inherited baseline. That
+override must be represented as an author-tier rule on the item (not by
+deleting the parent's mark and not by a community deposit), so adoption keeps
+the exception and changing the collection baseline remains one edit. Until the
+override record shape is implemented, readers preserve today's direct-mark
+semantics rather than guessing that absence means opt-out.
 - **The chain is AUTHOR-TIER only — deposits weight candidates, never
   the chain.** Scoping structure (staff here, friends there) is
   authored structure, read from each layer's own tags. If community
@@ -270,6 +285,71 @@ The reference vocabulary, weakest binding to strongest:
 1. **by requirement** — kind + scope, living, session-anchored
 2. **by name** — a hive entry, durable, position-free
 3. **by sig** — exact sealed content, immutable
+
+### Places is the reference editor (Jaime, 2026-07-29)
+
+Places indexes references to arbitrary named tiles. It is not a collection
+browser: a tile with no children is just as eligible as a branch. A Places row
+therefore represents a target, and may own several **named filtered references**
+to that same target:
+
+```text
+Howard
+  Team       → Howard + requires(person)
+  Projects   → Howard + requires(project)
+  Photos     → Howard + requires(photo)
+```
+
+These are live views, not copies and not versions of the target's bytes. Each
+hexagon stores a reference identity:
+
+```text
+{ display name, targetSegments, targetSig?, requiredMarks }
+```
+
+Clicking the row's Edit action does two coordinated things:
+
+- the Places row expands to a horizontal strip of reference hexagons, which
+  remain available as drag handles;
+- the canvas enters a real **reference-editing layer** containing those same
+  reference tiles.
+
+The layer is the editing surface. New reference tiles are added there through
+the ordinary tile-creation path, and their text/name uses the ordinary tile
+editor. The Places strip is a projection of that layer, not a second store or
+second editor. A reference added or renamed on the canvas appears in the strip;
+the strip never owns independent state.
+
+Pheromones are configured through the existing pheromone window:
+
+- open the pheromone window while standing in the reference-editing layer;
+- drag a pheromone onto a reference tile, or select several reference tiles and
+  apply it once;
+- the reference's `requiredMarks` are rewritten, preserving its target;
+- removing the pheromone removes that requirement;
+- dragging a reference hexagon from either the canvas or the Places strip onto
+  any hive writes that exact live reference at the drop location;
+- clicking it follows the target with its structural filter active.
+
+No pheromone picker, chips editor, or filter form is added to Places. The only
+new plumbing is semantic routing at the existing painter's write boundary:
+painting an ordinary tile writes a `tag` decoration as today; painting a
+reference tile edits that reference's `requiredMarks` using the same canonical
+rewrite as `/requires`. This distinction is load-bearing—adding an ordinary
+tag to the reference tile would label the doorway but would not filter its
+target.
+
+The unfiltered reference is the base doorway. Filtered references are siblings
+of it, never children baked into the target and never duplicated collections.
+Two differently named hexagons may point to the same tile and carry different
+`requiredMarks`; their reference-decoration bytes keep those identities apart.
+
+The expanded strip belongs to the shared aggregate-index contract rather than
+`CollectionsSource`. Places supplies the target and reference-layer data; the
+reusable panel supplies expansion and drag gestures; the canvas, tile editor,
+selection, and pheromone painter keep owning authoring. That keeps the
+capability valid for every tile and avoids duplicating mature hive interactions
+inside a management window.
 
 ### Filtering is a PRIMITIVE — show and share are one operation (Jaime, 2026-07-21)
 

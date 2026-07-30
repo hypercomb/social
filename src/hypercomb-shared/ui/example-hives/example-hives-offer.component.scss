@@ -1,18 +1,5 @@
-// hypercomb-shared/ui/example-hives/example-hives-offer.component.scss
-//
-// Centered frosted card over a quiet dim — same cold chrome family as the
-// preview banner. No motion, no glow: the covers carry the warmth. The
-// backdrop deliberately takes NO click handler — only the explicit buttons
-// act (a passive close is not consent, and a stray click must not discard
-// the offer).
-
-// #pixi-host reparents itself to <body> at z-index 59989 with a
-// pointer-events:auto <canvas> inside (pixi-host.worker.ts). Anything below
-// that lands UNDER the canvas: the card still paints (the canvas is
-// transparent) but every click hits the canvas instead of the button, so the
-// welcome screen looked alive and did nothing. This is a modal card, not a
-// full-surface takeover, so it rides the modal tier the other dialogs use
-// (confirm-dialog / mesh-modal: 100000) rather than suppressing the canvas.
+// First-run welcome, not a utility modal. The hive remains legible around a
+// generous two-part surface: orientation first, visual starting points second.
 :host {
   position: fixed;
   inset: 0;
@@ -24,8 +11,10 @@
 .offer-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(8, 8, 10, 0.55);
-  backdrop-filter: blur(2px);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(126, 182, 214, 0.07), transparent 35rem),
+    rgba(7, 10, 14, 0.48);
+  backdrop-filter: blur(3px) saturate(0.75);
   pointer-events: auto;
 }
 
@@ -33,167 +22,336 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(34rem, calc(100vw - 2rem));
-  max-height: min(80vh, 42rem);
-  overflow-y: auto;
-  padding: 1.4rem 1.5rem 1.1rem;
-  border-radius: 0.9rem;
-  background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 92%, transparent);
-  border: 1px solid rgba(245, 245, 245, 0.1);
-  backdrop-filter: blur(10px);
-  color: rgba(245, 245, 245, 0.88);
+  // The composition was tuned at 80% browser zoom. Bake that visual density
+  // into the surface so normal 100% zoom has the same proportions without
+  // shrinking the rest of the application.
+  transform: translate(-50%, -50%) scale(0.8);
+  width: min(64rem, calc(100vw - 3rem));
+  // Desktop uses the composition's natural height. The surface is visually
+  // scaled below, so constraining its unscaled box to viewport height creates
+  // a false overflow at ordinary 1920 × 1080 resolutions.
+  max-height: none;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.72fr) minmax(28rem, 1.28fr);
+  border-radius: 1.35rem;
+  background: rgba(12, 17, 24, 0.94);
+  border: 1px solid rgba(216, 230, 238, 0.12);
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(18px) saturate(1.1);
+  color: #d8e6ee;
   pointer-events: auto;
 
   h2 {
-    margin: 0 0 0.3rem;
-    font-size: 1.15rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
+    margin: 0;
+    max-width: 9ch;
+    font-size: clamp(2.25rem, 4vw, 3.75rem);
+    line-height: 0.96;
+    font-weight: 730;
+    letter-spacing: -0.045em;
   }
 }
 
-.subtitle {
-  margin: 0 0 1rem;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: rgba(245, 245, 245, 0.55);
+.welcome {
+  display: flex;
+  flex-direction: column;
+  padding: clamp(1.75rem, 3vw, 2.75rem);
+  background:
+    linear-gradient(145deg, rgba(126, 182, 214, 0.13), transparent 48%),
+    rgba(8, 13, 19, 0.52);
+  border-right: 1px solid rgba(216, 230, 238, 0.09);
 }
+
+.eyebrow,
+.section-kicker {
+  display: block;
+  margin-bottom: 0.9rem;
+  color: #7eb6d6;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.subtitle {
+  margin: 1rem 0 1.5rem;
+  max-width: 30rem;
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: rgba(216, 230, 238, 0.62);
+}
+
+.first-actions {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: auto;
+
+  button {
+    width: 100%;
+    min-height: 4.6rem;
+    display: grid;
+    grid-template-columns: 2.2rem 1fr auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid rgba(126, 182, 214, 0.28);
+    border-radius: 0.85rem;
+    background: rgba(126, 182, 214, 0.08);
+    color: #d8e6ee;
+    text-align: left;
+
+    &:hover {
+      background: rgba(126, 182, 214, 0.15);
+      border-color: rgba(126, 182, 214, 0.48);
+      transform: translateY(-1px);
+    }
+  }
+}
+
+.action-mark {
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: #7eb6d6;
+  color: #0c1118;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.action-mark-add { font-size: 1.5rem; font-weight: 400; }
+.action-copy { display: grid; gap: 0.16rem; }
+.action-copy strong { font-size: 0.88rem; }
+.action-copy small { color: rgba(216, 230, 238, 0.5); font-size: 0.71rem; }
+.action-arrow { color: #7eb6d6; font-size: 1.1rem; }
+
+.examples {
+  min-width: 0;
+  padding: clamp(1.5rem, 2.5vw, 2.25rem);
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+
+  h3 { margin: 0; font-size: 1.2rem; font-weight: 650; }
+}
+
+.section-kicker { margin-bottom: 0.35rem; color: rgba(216, 230, 238, 0.42); }
+.section-note { max-width: 13rem; color: rgba(216, 230, 238, 0.38); font-size: 0.7rem; line-height: 1.4; text-align: right; }
 
 .rows {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
+  display: grid;
+  // The roster is intentionally small. On desktop it is one visual strip;
+  // allowing a third card to wrap created most of the needless height.
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
 }
 
 .row {
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  padding: 0.55rem 0.6rem;
-  border: 1px solid rgba(245, 245, 245, 0.08);
-  border-radius: 0.7rem;
-  background: rgba(245, 245, 245, 0.03);
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border: 1px solid rgba(216, 230, 238, 0.1);
+  border-radius: 0.9rem;
+  background: rgba(216, 230, 238, 0.035);
 
-  &.is-added {
-    border-color: rgba(111, 211, 154, 0.35);
-  }
+  &.is-added { border-color: rgba(111, 211, 154, 0.35); }
 }
+
+.cover-wrap { position: relative; }
 
 .cover {
-  width: 3.4rem;
-  height: 3.4rem;
-  flex: none;
-  border-radius: 0.55rem;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2.15 / 1;
   object-fit: cover;
-  border: 1px solid rgba(245, 245, 245, 0.1);
-  background: rgba(245, 245, 245, 0.05);
+  background:
+    radial-gradient(circle at 38% 45%, rgba(126, 182, 214, 0.23), transparent 2.5rem),
+    linear-gradient(135deg, rgba(126, 182, 214, 0.1), rgba(216, 230, 238, 0.02));
+  border-bottom: 1px solid rgba(216, 230, 238, 0.08);
 }
 
-.cover-blank {
-  display: inline-block;
-}
+.cover-blank { display: block; }
 
 .text {
-  flex: 1;
   min-width: 0;
+  padding: 0.85rem 0.9rem 0.65rem;
   display: flex;
   flex-direction: column;
-  gap: 0.14rem;
+  gap: 0.3rem;
 }
 
 .name {
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   text-transform: capitalize;
 }
 
 .description {
   font-size: 0.78rem;
   line-height: 1.4;
-  color: rgba(245, 245, 245, 0.55);
+  color: rgba(216, 230, 238, 0.5);
 }
 
 .meta {
+  position: absolute;
+  right: 0.55rem;
+  bottom: 0.55rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(8, 13, 19, 0.78);
   font-size: 0.7rem;
-  color: rgba(245, 245, 245, 0.38);
+  color: rgba(216, 230, 238, 0.68);
 }
 
 button {
-  border: 1px solid rgba(245, 245, 245, 0.14);
-  border-radius: 999px;
-  padding: 0.3rem 0.9rem;
+  border: 1px solid rgba(216, 230, 238, 0.14);
+  border-radius: 0.55rem;
+  padding: 0.48rem 0.8rem;
+  font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
   background: transparent;
-  color: rgba(245, 245, 245, 0.85);
-  transition: background 120ms ease, border-color 120ms ease;
-  flex: none;
+  color: rgba(216, 230, 238, 0.85);
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 
-  &:hover { background: rgba(245, 245, 245, 0.08); }
+  &:hover { background: rgba(216, 230, 238, 0.08); }
+  &:focus-visible { outline: 2px solid #7eb6d6; outline-offset: 2px; }
 }
 
 .add {
-  border-color: rgba(111, 211, 154, 0.5);
-  color: #6fd39a;
-
-  &:hover { background: rgba(111, 211, 154, 0.12); }
-}
-
-.adding,
-.added {
-  flex: none;
-  font-size: 0.74rem;
-  color: rgba(245, 245, 245, 0.55);
-  white-space: nowrap;
-}
-
-.added {
-  color: #6fd39a;
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.add-tile {
-  border-color: rgba(126, 182, 214, 0.5);
-  color: rgb(126, 182, 214);
+  justify-self: start;
+  margin: 0 0.9rem 0.9rem;
+  border-color: rgba(126, 182, 214, 0.38);
+  color: #a8d0e7;
 
   &:hover { background: rgba(126, 182, 214, 0.12); }
 }
 
-.tour {
-  color: rgba(245, 245, 245, 0.78);
+.adding,
+.added {
+  align-self: end;
+  justify-self: start;
+  margin: 0 0.9rem 0.9rem;
+  font-size: 0.74rem;
+  color: rgba(216, 230, 238, 0.55);
+  white-space: nowrap;
+}
+
+.added { color: #6fd39a; }
+
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  padding: 0.85rem;
+  border-top: 1px solid rgba(216, 230, 238, 0.08);
 }
 
 .dismiss {
-  color: rgba(245, 245, 245, 0.6);
+  border: 0;
+  color: rgba(216, 230, 238, 0.48);
+  background: transparent;
+
+  &:hover { color: rgba(216, 230, 238, 0.8); background: transparent; }
 }
 
-// Phones: full-width bottom sheet posture, big touch targets.
-@media (max-width: 599px), (max-height: 599px) and (pointer: coarse) {
+@media (max-width: 760px) {
   .offer-card {
     top: auto;
     bottom: 0;
     left: 0;
+    // Touch targets and body copy stay at native size on phones.
     transform: none;
     width: 100vw;
-    max-height: 78vh;
-    border-radius: 0.9rem 0.9rem 0 0;
-    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px));
+    max-height: 94dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    grid-template-columns: 1fr;
+    border-radius: 1.1rem 1.1rem 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  button {
-    padding: 0.45rem 1.05rem;
-    font-size: 0.85rem;
+  .welcome { border-right: 0; border-bottom: 1px solid rgba(216, 230, 238, 0.09); }
+  .offer-card h2 { max-width: none; font-size: 2.35rem; }
+  .subtitle { margin: 0.85rem 0 1.25rem; }
+  .rows { grid-template-columns: 1fr; }
+  .section-note { display: none; }
+  .offer-card::-webkit-scrollbar { display: none; }
+}
+
+// Short laptops and landscape phones genuinely need vertical room. Preserve
+// scrolling without drawing a bright browser scrollbar through the welcome.
+@media (min-width: 761px) and (max-height: 760px) {
+  .offer-card {
+    max-height: calc(100dvh - 1.5rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
   }
+
+  .offer-card::-webkit-scrollbar { display: none; }
+  .welcome,
+  .examples { padding: 1.5rem; }
+  .offer-card h2 { font-size: clamp(2rem, 5vh, 2.75rem); }
+  .subtitle { margin: 0.8rem 0 1rem; line-height: 1.45; }
+  .first-actions button { min-height: 3.8rem; }
+  .cover { aspect-ratio: 2.65 / 1; }
+}
+
+// 1080p desktops, including 2560 × 1080 ultrawides: a denser card that fits
+// cleanly above the taskbar while keeping the examples large enough to read.
+@media (min-width: 1200px) and (min-height: 761px) and (max-height: 1150px) {
+  .offer-card {
+    width: min(68rem, calc(100vw - 5rem));
+  }
+
+  .welcome { padding: 2rem; }
+  .examples { padding: 1.75rem; }
+  .offer-card h2 { font-size: 2.75rem; }
+  .subtitle { margin: 0.85rem 0 1.2rem; }
+  .cover { aspect-ratio: 2.1 / 1; }
+}
+
+// The common 34-inch 3440 × 1440 class. Use the extra canvas instead of
+// merely magnifying the compact modal: broader columns, airier rhythm, and no
+// internal scroll region.
+@media (min-width: 3000px) and (min-height: 1200px) {
+  .offer-card {
+    width: 78rem;
+    grid-template-columns: minmax(22rem, 0.78fr) minmax(38rem, 1.22fr);
+    border-radius: 1.6rem;
+  }
+
+  .welcome { padding: 3.25rem; }
+  .examples { padding: 2.75rem; }
+  .offer-card h2 { font-size: 3.8rem; }
+  .subtitle { font-size: 1.02rem; }
+  .first-actions { gap: 0.8rem; }
+  .first-actions button { min-height: 5rem; }
+  .rows { gap: 1rem; }
+  .cover { aspect-ratio: 2 / 1; }
+}
+
+// Large 16:9 displays (4K at native scale) get the same breathing room, but a
+// slightly narrower measure than an ultrawide.
+@media (min-width: 2400px) and (min-height: 1300px) and (max-aspect-ratio: 2/1) {
+  .offer-card { width: 72rem; }
+  .welcome { padding: 3rem; }
+  .examples { padding: 2.5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
 }

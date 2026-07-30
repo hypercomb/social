@@ -90,6 +90,7 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   readonly #draft = signal<string | null>(null)
   #unsubDraft: (() => void) | null = null
   #unsubStepBack: (() => void) | null = null
+  #unsubModal: (() => void) | null = null
 
   readonly shieldColor = computed(() => {
     const draft = this.#draft()
@@ -111,6 +112,16 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     this.#unsubStepBack = EffectBus.on('mesh:privacy-step-back', () => {
       if (!this.meshPublic) this.#setStage(STAGE_WORLD)
     })
+    // Cancelling the join selector abandons the whole entry cycle. Return the
+    // icon from HOST to PRIVATE instead of leaving a stale filled hub behind.
+    // Other closes are intentional transitions: save joins, and opting back
+    // into the privacy review explicitly restores WORLD above.
+    this.#unsubModal = EffectBus.on<{ open?: boolean; cancelled?: boolean }>(
+      'mesh:modal-open',
+      ({ open, cancelled }) => {
+        if (!open && cancelled && !this.meshPublic) this.#setStage(STAGE_PRIVATE)
+      },
+    )
     // ALWAYS boot at PRIVATE — a refresh never carries a sharing posture.
     this.#setStage(STAGE_PRIVATE)
   }
@@ -133,6 +144,7 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   ngOnDestroy(): void {
     this.#unsubDraft?.()
     this.#unsubStepBack?.()
+    this.#unsubModal?.()
   }
 
   // One control, cycling PRIVATE → WORLD → HOST → (wrap) PRIVATE.

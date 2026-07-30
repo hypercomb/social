@@ -55,7 +55,7 @@ export class FilesViewerComponent implements OnDestroy {
 
   /** The three reaches, in order — same ids and glyphs as everywhere else. */
   readonly scopeOptions: readonly { id: Reach; icon: string }[] = [
-    { id: 'local', icon: 'center_focus_strong' },
+    { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
     { id: 'global', icon: 'public' },
   ]

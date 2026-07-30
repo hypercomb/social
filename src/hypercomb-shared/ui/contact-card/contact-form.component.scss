@@ -75,11 +75,13 @@ $accent: #a8ffd8;
 }
 
 .contact-form-body {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
   padding: 1rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .contact-row {

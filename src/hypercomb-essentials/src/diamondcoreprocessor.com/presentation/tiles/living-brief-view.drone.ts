@@ -1,0 +1,247 @@
+// Living Brief — a trusted, text-only document projection of a tile hierarchy.
+// It executes no participant content and creates no second content store.
+
+import { Drone } from '@hypercomb/core'
+import { childNamesOf } from '../../history/layer-placement.js'
+import { tagsForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
+import { isFeatureHidden } from '../../sharing/feature-hidden.js'
+import { LIVING_BRIEF_KIND, LIVING_BRIEF_VIEW } from '../../commands/brief.queen.js'
+import type { Note } from '../../notes/notes.drone.js'
+
+type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
+type HistoryShape = {
+  sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
+  currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
+  getLayerBySig(sig: string): Promise<Record<string, unknown> | null>
+  commitLayer(locationSig: string, layer: Record<string, unknown>): Promise<string>
+}
+type NotesShape = { getNotesAtSegments(segments: readonly string[]): Promise<Note[]> }
+type Section = { name: string; title: string; tags: string[]; notes: Note[] }
+
+export class LivingBriefViewDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'presentation'
+  override description = 'Professional document projection of categories, pheromones, and notes.'
+
+  #host: HTMLElement | null = null
+  #targetSegments: string[] | null = null
+  #bound = false
+  #active = false
+  #busy = false
+  #again = false
+
+  protected override heartbeat = async (): Promise<void> => {
+    if (!this.#bound) {
+      this.#vm()?.addEventListener('change', this.#change)
+      window.addEventListener('keydown', this.#key, true)
+      window.addEventListener('contextmenu', this.#context, true)
+      this.onEffect('notes:changed', this.#refresh)
+      this.onEffect('decorations:changed', this.#refresh)
+      this.onEffect('cell:added', this.#refresh)
+      this.onEffect('cell:removed', this.#refresh)
+      this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
+        if (payload?.view !== LIVING_BRIEF_VIEW) return
+        this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
+        this.#vm()?.setMode(LIVING_BRIEF_VIEW)
+        void this.#reconcile()
+      })
+      this.#bound = true
+    }
+    await this.#reconcile()
+  }
+
+  protected override dispose(): void {
+    this.#vm()?.removeEventListener('change', this.#change)
+    window.removeEventListener('keydown', this.#key, true)
+    window.removeEventListener('contextmenu', this.#context, true)
+    this.#teardown()
+  }
+
+  readonly #change = (): void => { void this.#reconcile() }
+  readonly #refresh = (): void => { if (this.#vm()?.mode === LIVING_BRIEF_VIEW) void this.#reconcile() }
+  readonly #key = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || this.#vm()?.mode !== LIVING_BRIEF_VIEW) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    this.#vm()?.setMode('hexagons')
+  }
+  readonly #context = (event: MouseEvent): void => {
+    if (this.#vm()?.mode !== LIVING_BRIEF_VIEW) return
+    event.preventDefault()
+    this.#vm()?.setMode('hexagons')
+  }
+
+  #vm(): ViewModeShape | undefined {
+    return window.ioc?.get<ViewModeShape>('@hypercomb.social/ViewMode')
+  }
+
+  async #reconcile(): Promise<void> {
+    if (this.#busy) { this.#again = true; return }
+    this.#busy = true
+    try {
+      if (this.#vm()?.mode !== LIVING_BRIEF_VIEW) { this.#targetSegments = null; this.#teardown(); return }
+      const lineage = window.ioc?.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+      const segments = this.#targetSegments
+        ? [...this.#targetSegments]
+        : [...(lineage?.explorerSegments?.() ?? [])]
+      if (await isFeatureHidden(segments, LIVING_BRIEF_KIND)) { this.#teardown(); return }
+      const sections = await this.#sections(segments)
+      if (this.#vm()?.mode !== LIVING_BRIEF_VIEW) return
+      this.#render(segments, sections)
+    } finally {
+      this.#busy = false
+      if (this.#again) { this.#again = false; void this.#reconcile() }
+    }
+  }
+
+  async #sections(segments: readonly string[]): Promise<Section[]> {
+    const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
+    const notes = window.ioc?.get<NotesShape>('@diamondcoreprocessor.com/NotesService')
+    if (!history || !notes) return []
+    const loc = await history.sign({ explorerSegments: () => segments })
+    const layer = await history.currentLayerAt(loc)
+    if (!layer) return []
+    const names = await childNamesOf(history, layer as Parameters<typeof childNamesOf>[1])
+    return Promise.all(names.map(async name => ({
+      name,
+      title: titleForLabel(name, navigator.language) || name,
+      tags: [...tagsForLabel(name)],
+      notes: await notes.getNotesAtSegments([...segments, name]),
+    })))
+  }
+
+  #render(segments: readonly string[], sections: readonly Section[]): void {
+    this.#teardown()
+    const host = document.createElement('section')
+    host.className = 'hc-living-brief'
+    const title = segments.length ? titleForLabel(segments.at(-1)!, navigator.language) || segments.at(-1)! : 'Living Brief'
+    host.innerHTML = `<style>${CSS}</style>`
+
+    const chrome = document.createElement('header')
+    chrome.className = 'brief-chrome'
+    const brand = document.createElement('span')
+    brand.textContent = 'LIVING BRIEF'
+    const close = document.createElement('button')
+    close.type = 'button'
+    close.setAttribute('aria-label', 'Return to hexagons')
+    close.textContent = '×'
+    close.onclick = () => this.#vm()?.setMode('hexagons')
+    chrome.append(brand, close)
+
+    const paper = document.createElement('article')
+    paper.className = 'brief-paper'
+    const mast = document.createElement('header')
+    mast.className = 'brief-mast'
+    mast.append(this.#el('p', 'brief-kicker', 'Hypercom document'))
+    mast.append(this.#el('h1', '', title))
+    mast.append(this.#el('p', 'brief-deck', `${sections.length} ${sections.length === 1 ? 'category' : 'categories'} · composed live from the hive`))
+    paper.append(mast)
+
+    const contents = document.createElement('nav')
+    contents.className = 'brief-contents'
+    contents.setAttribute('aria-label', 'Contents')
+    contents.append(this.#el('strong', '', 'Contents'))
+    sections.forEach((section, index) => {
+      const link = document.createElement('a')
+      link.href = `#brief-${index}`
+      link.textContent = `${String(index + 1).padStart(2, '0')}  ${section.title}`
+      contents.append(link)
+    })
+    if (sections.length) paper.append(contents)
+
+    if (!sections.length) {
+      const empty = this.#el('div', 'brief-empty', 'This brief is ready. Add category tiles and notes; the document will compose itself.')
+      paper.append(empty)
+    }
+    sections.forEach((section, index) => paper.append(this.#section(section, index)))
+    host.append(chrome, paper)
+    document.body.appendChild(host)
+    this.#host = host
+    this.#setActive(true)
+  }
+
+  #section(section: Section, index: number): HTMLElement {
+    const el = document.createElement('section')
+    el.className = 'brief-section'
+    el.id = `brief-${index}`
+    const number = this.#el('span', 'brief-number', String(index + 1).padStart(2, '0'))
+    const heading = this.#el('h2', '', section.title)
+    const head = document.createElement('header')
+    head.append(number, heading)
+    if (section.tags.length) {
+      const tags = document.createElement('div')
+      tags.className = 'brief-tags'
+      section.tags.forEach(tag => tags.append(this.#el('span', '', tag)))
+      head.append(tags)
+    }
+    el.append(head)
+    if (!section.notes.length) el.append(this.#el('p', 'brief-muted', 'No notes yet.'))
+    else section.notes.forEach(note => el.append(this.#note(note, 0, section.tags)))
+    return el
+  }
+
+  #note(note: Note, depth: number, tags: readonly string[]): HTMLElement {
+    const role = this.#role(note, tags)
+    const el = document.createElement(role === 'question' ? 'aside' : 'div')
+    el.className = `brief-note brief-${role}`
+    if (role !== 'body') el.append(this.#el('span', 'brief-note-label', role))
+    const text = this.#el(role === 'question' ? 'h3' : 'p', '', note.text)
+    el.append(text)
+    if (note.children.length) {
+      const children = document.createElement('div')
+      children.className = 'brief-note-children'
+      note.children.forEach(child => children.append(this.#note(child, depth + 1, tags)))
+      el.append(children)
+    }
+    if (depth) el.style.setProperty('--note-depth', String(depth))
+    return el
+  }
+
+  #role(note: Note, tags: readonly string[]): 'body' | 'question' | 'answer' | 'decision' | 'callout' {
+    const signals = [note.mark, ...tags].map(v => String(v ?? '').toLowerCase())
+    if (signals.some(v => v === 'question' || v === 'help' || v.includes('question'))) return 'question'
+    if (signals.some(v => v === 'answer' || v === 'response' || v.includes('answer'))) return 'answer'
+    if (signals.some(v => v === 'decision' || v === 'gavel' || v.includes('decision'))) return 'decision'
+    return note.mark || note.shape ? 'callout' : 'body'
+  }
+
+  #el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text: string): HTMLElementTagNameMap[K] {
+    const el = document.createElement(tag)
+    if (className) el.className = className
+    el.textContent = text
+    return el
+  }
+
+  #teardown(): void {
+    this.#host?.remove()
+    this.#host = null
+    this.#setActive(false)
+  }
+
+  #setActive(active: boolean): void {
+    if (this.#active === active) return
+    this.#active = active
+    const modes = window.ioc?.get<{ enter(m: string, o: string): void; exit(m: string, o: string): void }>('@diamondcoreprocessor.com/ModeRegistry')
+    if (active) modes?.enter('view:active', 'living-brief-view')
+    else modes?.exit('view:active', 'living-brief-view')
+  }
+}
+
+const CSS = `
+.hc-living-brief{position:fixed;inset:0;z-index:150;background:#e9e7e1;color:#202322;overflow:auto;font:16px/1.65 Inter,ui-sans-serif,system-ui,sans-serif}
+.brief-chrome{position:sticky;top:0;z-index:2;height:52px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;background:rgba(27,32,31,.94);color:#dce5e1;letter-spacing:.18em;font-size:11px}
+.brief-chrome button{border:0;background:transparent;color:inherit;font:30px/1 serif;cursor:pointer}
+.brief-paper{box-sizing:border-box;width:min(880px,calc(100% - 32px));min-height:calc(100vh - 92px);margin:40px auto 80px;padding:clamp(42px,8vw,96px);background:#fff;box-shadow:0 16px 60px rgba(28,31,30,.13)}
+.brief-mast{padding-bottom:46px;border-bottom:1px solid #c9ceca}.brief-kicker{margin:0;color:#57756c;text-transform:uppercase;letter-spacing:.19em;font-size:11px;font-weight:700}
+.brief-mast h1{max-width:700px;margin:14px 0;font:600 clamp(40px,7vw,72px)/.98 Georgia,serif;letter-spacing:-.045em}.brief-deck{color:#69706d}
+.brief-contents{display:grid;grid-template-columns:120px 1fr;gap:6px 22px;margin:42px 0 70px;padding:22px 0;border-block:1px solid #e1e4e1}.brief-contents strong{grid-row:1/99;text-transform:uppercase;letter-spacing:.14em;font-size:11px}.brief-contents a{color:#35423e;text-decoration:none}
+.brief-section{scroll-margin-top:70px;margin:0 0 72px}.brief-section>header{display:grid;grid-template-columns:44px 1fr;align-items:start;border-top:3px solid #252c29;padding-top:14px}.brief-number{color:#668277;font-size:12px;font-weight:700}.brief-section h2{margin:0;font:600 32px/1.15 Georgia,serif}
+.brief-tags{grid-column:2;display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}.brief-tags span{padding:3px 9px;border:1px solid #bdcbc5;border-radius:999px;color:#4f6b61;font-size:11px}
+.brief-note{margin:24px 0 0 44px}.brief-note p{margin:0;white-space:pre-wrap}.brief-note-label{display:block;margin-bottom:5px;color:#527066;text-transform:uppercase;letter-spacing:.15em;font-size:10px;font-weight:800}
+.brief-question{padding:22px 24px;background:#eef4f1;border-left:4px solid #63897c}.brief-question h3{margin:0;font:600 22px/1.35 Georgia,serif}.brief-answer,.brief-decision,.brief-callout{padding-left:18px;border-left:2px solid #b9c8c2}.brief-decision{border-left-color:#9b754b}.brief-note-children{margin-left:18px}.brief-muted,.brief-empty{color:#777f7b;font-style:italic}.brief-empty{padding:60px 0;text-align:center}
+@media(max-width:640px){.brief-paper{width:100%;margin:0;padding:40px 24px;box-shadow:none}.brief-contents{grid-template-columns:1fr}.brief-contents strong{grid-row:auto}.brief-note{margin-left:0}.brief-section>header{grid-template-columns:34px 1fr}}
+@media print{.hc-living-brief{position:static;background:#fff;overflow:visible}.brief-chrome{display:none}.brief-paper{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}.brief-section{break-inside:avoid}}
+`
+
+const _livingBrief = new LivingBriefViewDrone()
+window.ioc.register('@diamondcoreprocessor.com/LivingBriefViewDrone', _livingBrief)

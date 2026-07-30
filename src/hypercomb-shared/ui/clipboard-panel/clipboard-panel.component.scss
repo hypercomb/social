@@ -206,7 +206,9 @@ $steel: rgb(126, 182, 214);
 
 .clipboard-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.4em 0;
 }
 

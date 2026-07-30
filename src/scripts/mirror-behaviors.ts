@@ -96,7 +96,6 @@ const CATEGORIES: Category[] = [
       ['present', "Present view — play this area's diagram tiles as slides; on | off | here | slide", `${E}/commands/present.queen.ts`],
       ['website', 'Toggle website view, export subtree, or build pages via Claude', `${E}/commands/website.queen.ts`],
       ['view', 'Toggle between hexagons and website rendering', `${E}/commands/view.queen.ts`],
-      ['home', 'Home view — render this tile area as your home; on | off | here', `${E}/commands/home.queen.ts`],
       ['lightbox', "Lightbox — show this tile's pictures full screen", `${E}/commands/lightbox.queen.ts`],
       ['tutor', 'Study games — turn this hive into spaced-repetition games; on | off | here | build | list', `${E}/tutorial/tutor.queen.ts`],
       ['mobile', 'Mobile viewer: on, off, auto, or sweep to mark tiles', `${E}/commands/mobile.queen.ts`],

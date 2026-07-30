@@ -225,6 +225,6 @@ ellipse over the pattern's reach. The bee wins when the cursor is on it, but
 the area is what makes this usable: you should not have to chase a dancing
 insect with a mouse.
 
-The panel is a panel, not a takeover — the hive stays visible behind it, so you
-can watch the other bees. It locks the input gate (`agent-panel`) rather than
-entering a view mode, so typing in it never drives the tiles underneath.
+The panel is a panel, not a takeover — the hive stays visible and navigable
+behind it, so you can keep moving through tiles and watching the other bees.
+Its native text controls own typing without globally locking hive navigation. 

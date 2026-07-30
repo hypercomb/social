@@ -43,7 +43,12 @@ import '@hypercomb/shared/core/header-size'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
-import { initializeRuntime, DroneRegistry, IconProviderRegistry } from '@hypercomb/shared/core'
+import {
+  initializeRuntime,
+  DroneRegistry,
+  IconProviderRegistry,
+  protectOriginStorage,
+} from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
@@ -91,6 +96,9 @@ const main = async (): Promise<void> => {
   register('@hypercomb/SignatureStore', new SignatureStore())
 
   ;(window as any).__hcBoot('main() started')
+  // Match production's OPFS eviction protection without putting the permission
+  // check or a possible Firefox prompt on the boot path.
+  void protectOriginStorage()
   await ensureSwControl()
 
   // Hand the service worker the host domains (self + community) so an

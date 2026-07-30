@@ -2,6 +2,7 @@
 import { isMac as _isMac } from '@hypercomb/core'
 
 export type HexOrientation = 'point-top' | 'flat-top'
+export const DEFAULT_HEX_ORIENTATION: HexOrientation = 'point-top'
 
 export class Settings  {
 

@@ -156,7 +156,9 @@ $steel: rgb(126, 182, 214);
   margin: 0;
   padding: 0.25rem 0 0.6rem;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .fv-row {

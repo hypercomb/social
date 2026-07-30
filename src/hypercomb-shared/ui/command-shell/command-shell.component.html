@@ -213,6 +213,24 @@
       >
         <span class="mat-sym" aria-hidden="true">forum</span>
       </button>
+
+      <!-- Beehaviors — the trailing landscape control, deliberately to the
+           right of Feedback so Feedback no longer crowds the rail's outer
+           divider. Opens the same context-sensitive Beehaviors window as a
+           tile's puzzle-piece action. -->
+      @if (showFeaturesToggle()) {
+        <button
+          class="rail-btn features-toggle-btn"
+          [class.on]="featuresPanelOpen()"
+          type="button"
+          (mousedown)="$event.preventDefault(); featuresToggle.emit()"
+          [attr.aria-label]="featuresPanelOpen() ? featuresLabel() + ' — open' : featuresLabel()"
+          [attr.aria-pressed]="featuresPanelOpen()"
+          [title]="featuresPanelOpen() ? featuresLabel() + ' — open' : featuresLabel()"
+        >
+          <span class="mat-sym" aria-hidden="true">extension</span>
+        </button>
+      }
     </div>
 
   </div>

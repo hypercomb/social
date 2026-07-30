@@ -16,7 +16,7 @@
     [showOpenForSubscribersToggle]="showOpenForSubscribersToggle()"
     [openForSubscribers]="openForSubscribers()"
     [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
-    [viewToggles]="viewToggles()"
+    [viewToggles]="isMobile() ? [] : viewToggles()"
     [notesPanelOpen]="notesPanelOpen()"
     [notesLabel]="'controls.notes' | t"
     [feedbackPanelOpen]="feedbackPanelOpen()"
@@ -71,7 +71,7 @@
        otherwise just collapses the command-line back to hidden. -->
   <button class="mobile-go-btn" type="button" (click)="closeMobileInput()"
     [attr.aria-label]="'command-line.go' | t">
-    {{ 'command-line.go' | t }}
+    <span class="mat-sym" aria-hidden="true">arrow_forward</span>
   </button>
 </div>
 

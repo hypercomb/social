@@ -157,6 +157,7 @@ window.ioc.register('@diamondcoreprocessor.com/TutorQueenBee', _tutor)
       descriptionKey: 'view.tutor.description',
       queenKey: '@diamondcoreprocessor.com/TutorQueenBee',
       adoptable: true,
+      pheromones: ['platform:desktop'],
     })
   },
 )

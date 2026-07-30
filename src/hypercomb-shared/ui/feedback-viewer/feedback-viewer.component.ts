@@ -111,7 +111,7 @@ export class FeedbackViewerComponent implements OnDestroy {
   // ── reach scope (mirrors the pheromone panel's three reaches) ──
   readonly scope = signal<Scope>('local')
   readonly scopeOptions: readonly { id: Scope; icon: string }[] = [
-    { id: 'local', icon: 'center_focus_strong' },
+    { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
     { id: 'global', icon: 'public' },
   ]

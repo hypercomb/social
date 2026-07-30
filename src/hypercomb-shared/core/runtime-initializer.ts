@@ -31,6 +31,12 @@ export type RuntimeInitializerOptions = {
 const DEV_DEFAULT_HOST = 'jwize.com'
 const DEV_DEFAULT_SECRET = 'downtown'
 
+// Reset the former flat-top rollout once, then preserve every explicit
+// participant choice made after this revision. Keeping the revision separate
+// from `hc:hex-orientation` makes point-top a real default without turning it
+// into a forced setting on every boot.
+const HEX_ORIENTATION_DEFAULT_REVISION = 'point-top-2026-07-29'
+
 // Idempotent: callers in different parts of the boot sequence (web's
 // main.ts, then App constructor → CoreAdapter.initialize) used to each
 // call initializeRuntime, double-registering EffectBus listeners and
@@ -53,6 +59,19 @@ const _runInitializeRuntime = async (
     logOpfs = false,
     onMeshStateChange,
   } = options
+
+  try {
+    if (localStorage.getItem('hc:hex-orientation-default-revision')
+      !== HEX_ORIENTATION_DEFAULT_REVISION) {
+      localStorage.setItem('hc:hex-orientation', 'point-top')
+      localStorage.setItem(
+        'hc:hex-orientation-default-revision',
+        HEX_ORIENTATION_DEFAULT_REVISION,
+      )
+    }
+  } catch {
+    // Storage-free sessions already use the in-memory point-top default.
+  }
 
   // Every participant has a host. Three cases, resolved in order:
   //
@@ -414,6 +433,15 @@ const _runInitializeRuntime = async (
     pivotOn = !pivotOn
     localStorage.setItem('hc:hex-pivot', String(pivotOn))
     EffectBus.emit('render:set-pivot', { pivot: pivotOn })
+  })
+
+  // orientation: J switches between the existing point-top default and
+  // flat-top, persisting the participant's explicit choice.
+  EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+    if (cmd !== 'render.toggleOrientation') return
+    const flat = localStorage.getItem('hc:hex-orientation') !== 'flat-top'
+    localStorage.setItem('hc:hex-orientation', flat ? 'flat-top' : 'point-top')
+    EffectBus.emit('render:set-orientation', { flat })
   })
 
   // mesh: toggle public/private on keymap command

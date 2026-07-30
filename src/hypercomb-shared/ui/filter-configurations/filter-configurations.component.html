@@ -1,0 +1,57 @@
+@if (visible()) {
+  <aside class="filter-panel" hcDockInset="right" hcDockedPanel="filter-configurations"
+    dockSide="right" [minWidth]="260" [maxWidth]="520" [defaultWidth]="320"
+    data-consumes-wheel role="dialog" [attr.aria-label]="'filter.aria' | t">
+    <header>
+      <strong>{{ 'filter.title' | t }}</strong>
+      <div class="scope" role="group" [attr.aria-label]="'filter.scope-aria' | t">
+        <button type="button" [class.active]="scope() === 'local'" (click)="setScope('local')" [title]="'filter.scope.local' | t"><span class="mat-sym">account_tree</span></button>
+        <button type="button" [class.active]="scope() === 'global'" (click)="setScope('global')" [title]="'filter.scope.global' | t"><span class="mat-sym">public</span></button>
+      </div>
+      <button class="close" type="button" (click)="close()" [attr.aria-label]="'filter.close' | t">×</button>
+    </header>
+
+    <p class="hint">{{ 'filter.hint' | t }}</p>
+    <button class="new-view" type="button" (click)="openNew()">{{ 'filter.new' | t }}</button>
+
+    <section class="draft" [class.empty]="draft().length === 0">
+      @if (draft().length === 0) {
+        <p>{{ 'filter.drop' | t }}</p>
+      } @else {
+        @for (place of draft(); track place.key) {
+          <div class="place">
+            <span class="mat-sym">place</span><span>{{ place.label }}</span>
+            <button type="button" (click)="removePlace(place.key)" [attr.aria-label]="'filter.remove-place' | t">×</button>
+          </div>
+        }
+      }
+    </section>
+
+    <div class="save-row">
+      <input type="text" maxlength="64" [value]="name()" (input)="onName($event)" [placeholder]="'filter.name-placeholder' | t" />
+      <button type="button" [disabled]="!name().trim()" (click)="save()">{{ 'filter.save' | t }}</button>
+    </div>
+
+    @if (configurations().length > 0) {
+      <h3>{{ 'filter.saved' | t }}</h3>
+      <ul>
+        @for (config of configurations(); track config.name) {
+          <li>
+            <button class="config" type="button" (click)="select(config)"
+              (pointerdown)="onConfigPointerDown($event, config)">
+              <span class="mat-sym">{{ config.scope === 'global' ? 'public' : 'account_tree' }}</span>
+              <span>{{ config.name }}</span><small>{{ config.places.length }}</small>
+            </button>
+            <button class="delete" type="button" (click)="delete(config, $event)" [attr.aria-label]="'filter.delete' | t">×</button>
+          </li>
+        }
+      </ul>
+    }
+  </aside>
+}
+
+@if (dragging(); as config) {
+  <div class="drag-ghost" [style.left.px]="dragPos().x" [style.top.px]="dragPos().y">
+    <span class="mat-sym">filter_alt</span>{{ config.name }}
+  </div>
+}

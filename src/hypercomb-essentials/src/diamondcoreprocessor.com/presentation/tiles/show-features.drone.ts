@@ -85,7 +85,7 @@ const SIG_RE = /^[a-f0-9]{64}$/
  *  cascading ones a container declares for its whole subtree (the typed file
  *  dropbox, contacts), node-local content behaviours whose kind is written by
  *  a bee that renders it somewhere ELSE (a slide, played by its parent deck's
- *  slideshow; a widget, rendered by its parent's home view), and build-intent
+ *  slideshow), and build-intent
  *  markers a queen drops for the next generation pass to consume
  *  (`/website here`, `/tutor here`).
  *
@@ -137,22 +137,13 @@ const CAPABILITIES: Readonly<Record<string, {
     addable: false,
   },
   // Node-local content behaviours rendered elsewhere: a slide plays in its
-  // parent deck's slideshow; a widget renders on its parent's home view.
+  // parent deck's slideshow.
   'visual:diagram:slide': {
     view: 'slide',
     slashCommand: '/present slide',
     labelKey: 'features.cap.slide',
     descriptionKey: 'features.cap.slide.desc',
     fallbackLabel: 'Slide',
-    cascades: false,
-    addable: false,
-  },
-  'visual:home:widget': {
-    view: 'home-widget',
-    slashCommand: '/home',
-    labelKey: 'features.cap.homeWidget',
-    descriptionKey: 'features.cap.homeWidget.desc',
-    fallbackLabel: 'Home widget',
     cascades: false,
     addable: false,
   },

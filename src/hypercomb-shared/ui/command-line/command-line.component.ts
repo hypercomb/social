@@ -634,7 +634,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     switch (this.#tagScope()) {
       case 'children': return 'account_tree'
       case 'global': return 'public'
-      default: return 'center_focus_strong'
+      default: return 'blur_on'
     }
   })
   // Whether the pheromone panel is open — mirrored from the panel's own
@@ -1790,6 +1790,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') {
       EffectBus.emit('search:filter', { keyword: ctx.normalized })
+      if (!this.#filterModeOpen) EffectBus.emit('swarm:filter-view-open', {})
     } else if (this.lastFilterKeyword) {
       EffectBus.emit('search:filter', { keyword: '' })
       this.lastFilterKeyword = ''
@@ -1797,6 +1798,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (ctx.active && ctx.mode === 'filter') {
       this.lastFilterKeyword = ctx.normalized
     }
+    this.#filterModeOpen = ctx.active && ctx.mode === 'filter'
 
     // select mode side-effects: index overlay, move preview, real-time navigation
     if (ctx.active && ctx.mode === 'select') {
@@ -1814,6 +1816,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   private lastFilterKeyword = ''
+  #filterModeOpen = false
 
   /** Bridge: shell forwarded a keydown it didn't consume (not Escape/Up/Down/Tab/Enter). */
   public onShellKeydown = (e: KeyboardEvent): void => {

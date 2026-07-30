@@ -94,7 +94,9 @@ $accent: #7eb6d6;
 
 .observe-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.25em 0 0.5em;
 }
 

@@ -293,11 +293,25 @@
 // a row of icons a finger has to hit needs finger-sized boxes. ONE set of
 // numbers for every icon on the rail, exactly as on desktop: the rail never
 // resizes a single button, it resizes all of them or none.
-@media (max-width: $bp-phone-max) and (min-height: 450px) {
+// Orientation survives the soft-keyboard height reduction in portrait.
+@media (max-width: $bp-phone-max) and (orientation: portrait) {
   .header-bar {
     --hc-rail-btn: 2.6rem;
     --hc-rail-glyph: 1.6rem;
     --hc-rail-gap: 0.35rem;
+    --hc-rail-cols: 5;
+    // The prompt and GO draw their own frame. Keeping the header frame here
+    // would make the icon rail look like it was still inside the command line.
+    padding: 0;
+    background: transparent;
+    backdrop-filter: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .header-bar:focus-within,
+  .header-bar.input-open {
+    border-color: transparent;
   }
 }
 

@@ -72,9 +72,13 @@ export class EditActionsComponent implements OnInit, OnDestroy {
   readonly saving = signal(false)
   // selected tiles — gates the cut/copy/remove verbs.
   readonly selectionCount = signal(0)
+  // Current hive orientation, used to describe the rotate button's destination.
+  // The actual toggle remains owned by runtime-initializer.
+  readonly flatTop = signal(false)
 
   #cursorUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
+  #orientationUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // Start the shared inset→CSS-var bridge. edit-actions is template-mounted in
@@ -99,11 +103,23 @@ export class EditActionsComponent implements OnInit, OnDestroy {
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (s) => {
       this.selectionCount.set(s?.selected?.length ?? 0)
     })
+
+    this.flatTop.set(localStorage.getItem('hc:hex-orientation') === 'flat-top')
+    this.#orientationUnsub = EffectBus.on<{ flat?: boolean }>('render:set-orientation', ({ flat }) => {
+      this.flatTop.set(!!flat)
+    })
   }
 
   ngOnDestroy(): void {
     this.#cursorUnsub?.()
     this.#selectionUnsub?.()
+    this.#orientationUnsub?.()
+  }
+
+  // Reuse the keyboard command path so persistence, rendering and layout
+  // history stay identical whether the participant clicks here or presses J.
+  readonly toggleOrientation = (): void => {
+    EffectBus.emit('keymap:invoke', { cmd: 'render.toggleOrientation' })
   }
 
   // ── undo / redo ──────────────────────────────────────────

@@ -8,6 +8,16 @@
   <button
     class="ea-btn"
     type="button"
+    (click)="toggleOrientation()"
+    [attr.aria-label]="(flatTop() ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t"
+    [title]="(flatTop() ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t"
+  >
+    <span class="mat-sym">crop_rotate</span>
+  </button>
+
+  <button
+    class="ea-btn"
+    type="button"
     (click)="undo()"
     [disabled]="!canUndo()"
     [attr.aria-label]="'controls.undo' | t"

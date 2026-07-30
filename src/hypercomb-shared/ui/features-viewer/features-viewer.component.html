@@ -46,6 +46,12 @@
          room for the search; the subject line keeps it always visible. -->
     @if (group(); as g) {
       <div class="features-tile" [title]="g.cell">{{ g.cell }}</div>
+      @if (isPhone() && !reviewTarget()) {
+        <button class="features-select-tile" type="button" (click)="selectTile()">
+          <span class="mat-sym" aria-hidden="true">select_all</span>
+          {{ 'features.selectTile' | t }}
+        </button>
+      }
     }
 
     <!-- ── Paint bar: the brush and where it lands ──
@@ -398,7 +404,7 @@
                     </div>
                     <!-- Open: ENTER this view behaviour (play the slides, show
                          the page). Distinct from the row toggle — only on,
-                         enterable views (slides/website/home/tutor) show it. -->
+                         enterable views (slides/website/tutor) show it. -->
                     @if (isOpenable(group, feat)) {
                       <button
                         class="feat-open"

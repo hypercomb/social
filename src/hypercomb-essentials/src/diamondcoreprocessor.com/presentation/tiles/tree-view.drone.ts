@@ -16,7 +16,7 @@
 // column index, clicking a ring focuses it (everything else dims), and the
 // rail then reports and acts on that whole ring at once.
 //
-// Lifecycle mirrors HomeViewDrone: idempotent heartbeat, lineage + ViewMode
+// Lifecycle uses an idempotent heartbeat plus lineage and ViewMode
 // listeners, fixed host above the Pixi layer, owner-counted `view:active`
 // via ModeRegistry, zero shell edits. Exits: Escape, right-click, or the
 // toolbar's exit button.

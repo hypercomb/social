@@ -482,9 +482,10 @@ $bp-phone-max: 599px;
   flex-shrink: 0;
   gap: var(--hc-rail-gap, 0.3rem);
   margin-left: var(--hc-rail-gap, 0.3rem);
-  // No trailing padding: the shell's own 0.25rem is the air before whatever
-  // follows (the pinned-entrance strip's hairline, then the header's own
-  // divider). Adding more here made that seam wider than the rail's.
+  // Keep the last button's circular hover surface clear of the divider that
+  // follows the command line. Match the rail's leading gap so the row is
+  // visually balanced at both ends.
+  padding-right: var(--hc-rail-gap, 0.3rem);
 }
 
 // A group wraps rather than squeezing. `--hc-rail-cols` icons per row, then
@@ -597,6 +598,30 @@ $bp-phone-max: 599px;
   }
 }
 
+// Beehaviors is the doorway to a whole tool window, so its active state needs
+// to remain legible under the pointer instead of collapsing into the generic
+// rail hover. Keep the shared dimensions and rhythm; a filled puzzle piece,
+// inset ring, and stronger halo say that the window behind it is open.
+.features-toggle-btn {
+  &.on {
+    color: var(--glow-color);
+    background: rgba(var(--glow-color-rgb), 0.24);
+    box-shadow:
+      inset 0 0 0 1px rgba(var(--glow-color-rgb), 0.72),
+      0 0 9px rgba(var(--glow-color-rgb), 0.72);
+
+    .mat-sym { font-variation-settings: 'FILL' 1; }
+  }
+
+  &.on:hover {
+    color: var(--md-on-surface-strong);
+    background: rgba(var(--glow-color-rgb), 0.36);
+    box-shadow:
+      inset 0 0 0 1px var(--glow-color),
+      0 0 13px rgba(var(--glow-color-rgb), 0.9);
+  }
+}
+
 // The mic is the other member with its own colour — live-red while it is
 // listening, because "is this thing recording me" must never be a guess. Box,
 // glyph size and gap stay on the rail; identity comes from colour alone.
@@ -640,14 +665,14 @@ $bp-phone-max: 599px;
   // Brighten the input text on dark background.
   .command-input {
     color: #fafafa;
-    font-size: 1.6em;
+    font-size: 1.4em;
   }
   .command-input::placeholder {
     color: rgba(180, 215, 255, 0.78);
   }
   .ghost {
     color: rgba(180, 215, 255, 0.55);
-    font-size: 1.6em;
+    font-size: 1.4em;
   }
   .prompt-glyph {
     width: 1.55em;
@@ -655,9 +680,6 @@ $bp-phone-max: 599px;
     margin-left: 1rem;
   }
   // Hide the chevron on phone — armed thumbnails still show
-  .prompt-glyph:not(.armed) {
-    display: none;
-  }
   .prompt-chevron {
     font-size: 1.55em;
   }
@@ -678,9 +700,19 @@ $bp-phone-max: 599px;
 // LANDSCAPE KEEPS THE OLD SHAPE (Jaime: "unless it's in landscape which is OK
 // to be inside the command line") — a landscape phone is wide and short, so
 // the width is there and the height is what is scarce. The query is spelled
-// out rather than reusing `phone-only`: portrait phone = narrow AND NOT short,
-// which is exactly the complement of the landscape rule in `_header-bar.scss`.
-@media (max-width: $bp-phone-max) and (min-height: 450px) {
+// out rather than reusing `phone-only`: portrait orientation remains stable
+// when the soft keyboard reduces the available viewport height.
+// Orientation is intentional: the soft keyboard can make a portrait viewport
+// shorter than 450px, but the icon rail must remain below the text.
+@media (max-width: $bp-phone-max) and (orientation: portrait) {
+  :host {
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
   // Stack them. The rail is already a sibling of the shell, so this is the
   // whole move: the strip lands UNDER the text box and OUTSIDE it. It is not
   // a second row inside the box — that shape grew the prompt and shoved the
@@ -697,6 +729,10 @@ $bp-phone-max: 599px;
     flex: 1 1 auto;
     width: 100%;
     min-height: 2.75rem;
+    background: rgba(8, 16, 26, 0.72);
+    border: 1px solid rgba(126, 182, 214, 0.5);
+    padding-right: var(--mobile-go-width, 5.5rem);
+    border-radius: 0;
   }
   .command-row {
     height: 100%;
@@ -706,8 +742,14 @@ $bp-phone-max: 599px;
   .shell-actions {
     flex: 0 0 auto;
     width: 100%;
+    box-sizing: border-box;
     margin-left: 0;
     padding: 0.1rem 0.25rem 0.15rem;
+    background: transparent;
+    // A portrait rail is five equal slots. A sixth control therefore creates
+    // real horizontal overflow instead of squeezing the existing five.
+    justify-content: flex-start;
+    gap: 0;
     // One line, scrolled — never a second wrapped row. A wrapped rail eats
     // the viewport; a scrolled one holds as many icons as we ever add.
     overflow-x: auto;
@@ -722,9 +764,16 @@ $bp-phone-max: 599px;
   // rail reads left-to-right like everything else, and the scroll carries the
   // overflow the wrap used to.
   .action-group {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    max-width: none;
+    display: contents;
+  }
+
+  // Group semantics remain in the DOM/accessibility tree, but the portrait
+  // rail is one uninterrupted five-slot rhythm.
+  .rail-divider { display: none; }
+
+  .rail-btn {
+    flex: 0 0 20%;
+    width: auto;
   }
 
   // The whole strip claims the horizontal drag so scrolling the icons never

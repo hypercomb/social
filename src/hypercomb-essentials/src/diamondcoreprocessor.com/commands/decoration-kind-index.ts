@@ -808,12 +808,35 @@ const checkedLabels = new Map<string, Set<string>>()
 /** Forget that we've walked `label` so the next `render:cell-count` re-walks
  *  its `decorations` slot. Called when a tile's whole layer is replaced
  *  out-of-band — e.g. a swarm `sync` folds the publisher's branch over the
- *  local copy, which can add decorations WITHOUT firing per-decoration
- *  `decorations:changed` events. Additive-safe: we only clear the
- *  checked-flag (not the kind set), so the re-walk adds any new kinds while
- *  the existing ones keep the `features` icon stable across the refresh.
+ *  local copy, which can add or remove decorations WITHOUT firing
+ *  per-decoration `decorations:changed` events. Clear both the checked flag
+ *  and the derived values so the re-walk reconciles to canonical layer state.
  *  Clears the label at EVERY location — callers don't know the path. */
 export function forgetDecorationLabel(label: string): void {
+  // A whole-layer replacement can remove decorations without emitting their
+  // individual removeSig events. Reconciliation must therefore discard the
+  // old derived state, not merely permit an additive re-scan; otherwise a
+  // removed feature remains a first-class icon until the next page load.
+  const keys = new Set(checkedLabels.get(label) ?? [])
+  // Live decorations populate the location index directly and need not have
+  // passed through hydrateLabel/checkedLabels yet.
+  for (const [key, segments] of segmentsByKey) {
+    if (segments[segments.length - 1] === label) keys.add(key)
+  }
+  for (const key of keys) {
+    kindsByKey.delete(key)
+    tagsByKey.delete(key)
+    sigByKeyTag.delete(key)
+    launchShapeByKey.delete(key)
+    launchKeyByKey.delete(key)
+    launchRoleByKey.delete(key)
+    launchGroupByKey.delete(key)
+    referenceTargetByKey.delete(key)
+    referenceSigByKey.delete(key)
+    referenceMarksByKey.delete(key)
+    titleByKey.delete(key)
+    segmentsByKey.delete(key)
+  }
   checkedLabels.delete(label)
 }
 

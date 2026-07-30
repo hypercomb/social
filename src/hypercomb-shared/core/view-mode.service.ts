@@ -38,7 +38,11 @@ const DEFAULT_MODE: ViewMode = 'hexagons'
 // full-surface view registers, add its mode string. Missing entries were
 // exactly the 2026-07-27 lightbox/tutor boot-strand bug.
 const TRANSIENT_MODES = new Set<ViewMode>([
+  // `home` is retired, but older builds persisted it. Keep it here as a
+  // tombstone so an existing browser cannot boot into a mode whose renderer
+  // has been removed and strand the participant on a blank canvas.
   'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
+  'living-brief', 'evidence-atlas', 'knowledge-studio',
 ])
 
 export class ViewModeService extends EventTarget {

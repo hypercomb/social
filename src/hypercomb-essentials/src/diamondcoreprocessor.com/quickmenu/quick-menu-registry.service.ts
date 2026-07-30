@@ -56,7 +56,7 @@ const ROOT: QuickMenuDefinition = {
     // "find" here — typing a name creates it or goes to it.
     { direction: 'centre', label: 'command', labelKey: 'quickmenu.command', action: { kind: 'effect', effect: 'command:focus', payload: { cell: '' } } },
     { direction: 'east', label: 'collections', labelKey: 'quickmenu.collections', action: { kind: 'command', command: 'collections' } },
-    { direction: 'southeast', label: 'marks', labelKey: 'quickmenu.marks', action: { kind: 'command', command: 'tags' } },
+    { direction: 'southeast', label: 'tags', labelKey: 'quickmenu.tags', action: { kind: 'command', command: 'tags' } },
     { direction: 'southwest', label: 'history', labelKey: 'quickmenu.history', action: { kind: 'command', command: 'history' } },
     { direction: 'west', label: 'tree', labelKey: 'quickmenu.tree', action: { kind: 'command', command: 'tree' } },
     { direction: 'northwest', label: 'help', labelKey: 'quickmenu.help', action: { kind: 'command', command: 'help' } },
@@ -76,7 +76,6 @@ const ROOT_VIEW: QuickMenuDefinition = {
     { direction: 'east', label: 'present', labelKey: 'quickmenu.present', action: { kind: 'command', command: 'present' } },
     { direction: 'southeast', label: 'theme', labelKey: 'quickmenu.theme', action: { kind: 'command', command: 'theme' } },
     { direction: 'southwest', label: 'layout', labelKey: 'quickmenu.layout', action: { kind: 'command', command: 'layout' } },
-    { direction: 'west', label: 'home', labelKey: 'quickmenu.home', action: { kind: 'command', command: 'home' } },
     { direction: 'northwest', label: 'website', labelKey: 'quickmenu.website', action: { kind: 'command', command: 'website' } },
     { direction: 'northeast', label: 'tutor', labelKey: 'quickmenu.tutor', action: { kind: 'command', command: 'tutor' } },
   ],
@@ -160,7 +159,7 @@ const SELECTION: QuickMenuDefinition = {
   contexts: [],
   slots: [
     { direction: 'centre', label: 'done', labelKey: 'quickmenu.done', action: { kind: 'effect', effect: 'select:done', payload: {} } },
-    { direction: 'east', label: 'marks', labelKey: 'quickmenu.marks', action: { kind: 'command', command: 'tags' } },
+    { direction: 'east', label: 'tags', labelKey: 'quickmenu.tags', action: { kind: 'command', command: 'tags' } },
     { direction: 'southeast', label: 'copy', labelKey: 'quickmenu.copy', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.copy' } } },
     { direction: 'southwest', label: 'cut', labelKey: 'quickmenu.cut', action: { kind: 'effect', effect: 'keymap:invoke', payload: { cmd: 'clipboard.cut' } } },
     { direction: 'west', label: 'remove', labelKey: 'quickmenu.remove', action: { kind: 'command', command: 'remove' } },

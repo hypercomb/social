@@ -3,11 +3,34 @@
 Speed is the currency of Hypercomb. This document is the living ledger of tile-rendering
 performance: what the engine already does right (don't regress it), what should be fixed
 (ranked by expected impact), and a parking lot of overkill ideas kept for future
-configurations. Findings dated 2026-07-28 from a full audit of
+configurations. Findings dated 2026-07-28 from a full audit of 
 `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/`.
 
 Related docs: `optimize-phase.md` (derived-cache doctrine), `streamline-audit-2026-07.md`,
 `mobile-usable-first-plan.md`.
+
+## Audit log
+
+- **2026-07-28** — initial full audit; baseline, 10 ranked fixes, parking lot.
+- **2026-07-29** — re-audit. Ranked fixes #1-#10 all still unapplied (verified: no
+  `autoStart`/`maxFPS` anywhere; `hex-image.atlas.ts:72-74` still `resolution: 2` +
+  `antialias: true`; atlases still have no class-level `destroy()`; the dead overlay
+  tick still calls the `setTime` stub). Line refs in the ranked list are as of
+  2026-07-28 — show-cell/tile-overlay have since shifted ~±20 lines from the mobile
+  work; search by symbol. New since the audit: two wins landed (see "Recent wins"),
+  one new hot-path finding added as #11. New view drones (`living-brief-view`,
+  `view-library`) audited clean — no tickers, no image decodes, no per-frame work.
+
+## Recent wins (keep these properties)
+
+- **Back-nav fast path no longer blocks on atlas refill** (2026-07-29,
+  `show-cell.drone.ts` back-nav branch): cached pages — including empty ones — paint
+  synchronously; viewport restore never awaits OPFS; evicted atlas slots are repaired
+  *after* the cached paint in a detached async block that repaints only if the layer
+  is still current. Do not reintroduce an await between the Back gesture and the paint.
+- **`tile:hover` now carries the resolved label** (2026-07-29): the O(tiles) scan of
+  `renderedCells` per hover event is now a compatibility fallback for old emitters
+  that only send q/r, not the steady-state path.
 
 ---
 
@@ -144,6 +167,26 @@ every pass, readiness flip, and back-nav. Replace with a rolling numeric hash/bi
   (`tiles/thumbnails.ts:31`) — only `tree-icons.ts` does. For heavily zoomed-out views a
   thumbnail beats even the 512 px optimized visual.
 
+### 11. Per-wheel forced style reads in `wheelBelongsToUi` (new 2026-07-29)
+`mousewheel-zoom.input.ts` (`wheelBelongsToUi`): every wheel event — registered
+**non-passive on `window`** (`:86-91`), so the browser already can't composite-scroll
+past it — walks the full `composedPath()` calling `getComputedStyle(node)` plus
+`scrollHeight`/`clientHeight` reads per element. All three are forced layout/style
+reads; during a zoom flick the wheel fires at device rate (can exceed 100 Hz on
+trackpads) and each event pays the walk even when the pointer is over bare canvas
+(the common case — path is canvas→body→html, ~3 style reads per tick, more under
+overlays). The scroll-container heuristic itself is right (a forgotten
+`data-consumes-wheel` must not break panel scrollbars); make it pay only when it can
+matter:
+- Fast-out first: if `event.target` is the Pixi canvas, return false immediately —
+  no walk, no style reads. This alone removes the cost from the zoom hot path.
+- Two-pass the remainder: scan the path for `data-consumes-wheel` attributes (cheap,
+  no layout) before any `getComputedStyle`/`scrollHeight` touch.
+- Cache the verdict per gesture: wheel bursts share a target; memoize by
+  `event.target` and clear on `pointermove`/a short timer, so a burst pays the walk
+  once. `zoomToFit`'s new `getComputedStyle(document.documentElement)` read is fine —
+  fit is a rare, user-initiated action.
+
 ### Flags (correct today, watch)
 - `background.drone.ts:66` and `grid-lines.drone.ts:98` create 200000×200000 objects to
   cover the pan range — correct, but they defeat bounds culling and give the
@@ -198,6 +241,19 @@ hardware tiers, kiosk/embedded builds) can shop here.
   preferences drone owns.
 - **Half-float atlas + shared exponent.** RGBA4/565 for the image atlas would halve VRAM
   again below fix #2, at visible banding cost — only for a low-memory device tier.
+- **`TEXTURE_2D_ARRAY` instead of a packed atlas.** (added 2026-07-29) The 256 slots are
+  already fixed-size, so a WebGL2 2D texture array (one 512×512 layer per slot, slot
+  index as the W coordinate) is a drop-in shape change. It dissolves fix #4's caveat
+  entirely: each layer mips independently, so mipmapping needs **no gutter and can
+  never bleed neighbours** at any LOD. Costs: shader samples `sampler2DArray`
+  (`textureLod`/`texture` with a vec3), per-slot upload via `texSubImage3D`, and Pixi
+  doesn't wrap it — needs a raw-GL path like the label atlas's `gl.scissor` fast path
+  already has. Worth pricing when #4 lands, instead of the gutter, not after it.
+- **`ImageDecoder` (WebCodecs) for prioritized decode.** `createImageBitmap` decodes on
+  an uncontrollable browser pool; the WebCodecs `ImageDecoder` API allows decode at
+  reduced `desiredWidth/Height` (skips full-res JPEG decode for a 512 px cell — a real
+  win on multi-MP camera shots) and can be aborted mid-decode when the user pans away.
+  Chromium-only today; would live behind capability detection in the atlas load path.
 
 ---
 

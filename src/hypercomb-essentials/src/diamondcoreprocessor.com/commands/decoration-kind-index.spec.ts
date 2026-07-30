@@ -110,6 +110,9 @@ const requiringSig = (targetSegments: string[], requiredMarks: unknown[]) =>
 const titleSig = (text: Record<string, string>) =>
   putResource({ kind: 'title', appliesTo: [], payload: { text } })
 
+const featureSig = (kind: string) =>
+  putResource({ kind, appliesTo: [], payload: {} })
+
 /** Commit a decoration onto the cell at `segments`, the way DecorationService
  *  does — and wait for the index's async record fetch to settle. */
 async function decorate(segments: string[], sig: string): Promise<void> {
@@ -252,6 +255,22 @@ describe('decoration index — location is the identity', () => {
     // …and the flatten's paths must not survive into the next ordinary page.
     EffectBus.emit('render:cell-count', { labels: ['people'], flatPaths: {} })
     expect(index.tagsForLabel('people')).toEqual([])
+  })
+
+  it('reconciles removed feature kinds after a whole-layer replacement', async () => {
+    const website = featureSig('website')
+    await decorate(['adopted', 'page'], website)
+    goTo('adopted')
+    expect(index.hasDecorationKind('page', 'website')).toBe(true)
+
+    // importTree replaces this layer wholesale, so no per-decoration
+    // decorations:changed removeSig event accompanies the removal.
+    layers.set('adopted/page', [])
+    index.forgetDecorationLabel('page')
+    EffectBus.emit('render:cell-count', { labels: ['page'], flatPaths: {} })
+
+    await vi.waitFor(() =>
+      expect(index.hasDecorationKind('page', 'website')).toBe(false))
   })
 
   // ── Reference FACE: resolve THROUGH the pointer ─────────────────────────

@@ -1,14 +1,14 @@
 // diamondcoreprocessor.com/quickmenu/quick-menu.input.ts
 //
-// The gesture. Hold, flick, release.
+// The gesture. Summon, roll through focus, activate.
 //
 // ── The shape of it ───────────────────────────────────────────────────
 //
 //   summon   middle-mouse press, or a long-press on touch
-//   aim      the pointer is HIDDEN; travel direction picks one of six
-//   descend  crossing the far edge on a slot that opens another ring
-//            re-blooms that ring under your hand, mid-gesture
-//   commit   release fires the lit slot
+//   aim      the pointer is HIDDEN; rolling over a neighbour focuses it
+//   descend  a pathway eases into becoming the next ring's centre
+//   activate a leaf either fires on arrival or waits for release/click,
+//            as declared by the behaviour that owns it
 //   cancel   come back to the centre and release; the centre relabels
 //            itself the moment you leave, so the way out is visible
 //
@@ -78,6 +78,8 @@ type Level = {
   readonly definition: QuickMenuDefinition
   /** Direction that returns to the parent ring; null on the root ring. */
   readonly back: QuickMenuDirection | null
+  /** Screen location this level treats as its centre of focus. */
+  readonly focus: { readonly x: number; readonly y: number }
 }
 
 export class QuickMenuInput {
@@ -92,6 +94,8 @@ export class QuickMenuInput {
   #sticky = false
   #current: QuickMenuDirection = 'centre'
   #leftDeadZone = false
+  /** Focus just moved through a pathway; releasing now parks on the new ring. */
+  #justFocused = false
 
   #bloomTimer: ReturnType<typeof setTimeout> | null = null
   #holdTimer: ReturnType<typeof setTimeout> | null = null
@@ -163,11 +167,18 @@ export class QuickMenuInput {
     document.addEventListener('pointerlockchange', this.#onLockChange)
     document.addEventListener('pointerlockerror', this.#onLockChange)
 
-    // The ring is anchored to the middle of the screen, so the middle moving
-    // has to move it.
+    // Resize restarts at a stable screen-centred root; an in-flight hierarchy
+    // cannot preserve meaningful screen-space focus while the viewport moves.
     window.addEventListener('resize', () => {
       if (!this.#painted) return
-      this.#virtual = this.#centre()
+      const focus = this.#centre()
+      this.#levels = this.#levels.length
+        ? [{ ...this.#levels[0], focus }]
+        : this.#levels
+      this.#virtual = focus
+      this.#current = 'centre'
+      this.#leftDeadZone = false
+      this.#justFocused = false
       this.#paint()
     })
 
@@ -304,12 +315,14 @@ export class QuickMenuInput {
     if (!registry) return
     this.warmup()
 
-    this.#levels = [{ definition: registry.forContext(), back: null }]
+    const focus = this.#centre()
+    this.#levels = [{ definition: registry.forContext(), back: null, focus }]
     this.#pointerId = pointerId
     this.#armed = true
     this.#current = 'centre'
     this.#leftDeadZone = false
-    this.#virtual = this.#centre()
+    this.#justFocused = false
+    this.#virtual = focus
 
     get<GateLike>('@diamondcoreprocessor.com/InputGate')?.lock(OWNER)
     get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.push(this.#mode)
@@ -379,15 +392,15 @@ export class QuickMenuInput {
     if (!this.#locked && held && (this.#armed || this.#sticky)) this.#end()
   }
 
-  #paint(): void {
+  #paint(fromFocus?: { x: number; y: number }): void {
     const level = this.#levels[this.#levels.length - 1]
     if (!level) return
     const registry = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')
     if (!registry) return
 
-    const centre = this.#centre()
+    const centre = level.focus
     const backLabel = registry.label({ label: 'back', labelKey: 'quickmenu.back' })
-    this.#overlay.paint(level.definition, centre, level.back, registry.label, backLabel)
+    this.#overlay.paint(level.definition, centre, level.back, registry.label, backLabel, fromFocus)
     this.#overlay.highlight(this.#current)
     this.#overlay.setCancelArmed(this.#leftDeadZone)
     this.#overlay.setCursor(this.#virtual.x - centre.x, this.#virtual.y - centre.y)
@@ -429,7 +442,9 @@ export class QuickMenuInput {
    * we fall back to the absolute position.
    */
   #advance(e: PointerEvent): void {
-    const centre = this.#centre()
+    const level = this.#levels[this.#levels.length - 1]
+    if (!level) return
+    const centre = level.focus
     if (this.#locked) {
       this.#virtual.x += e.movementX ?? 0
       this.#virtual.y += e.movementY ?? 0
@@ -467,6 +482,7 @@ export class QuickMenuInput {
     }
 
     this.#current = direction
+    if (direction !== 'centre') this.#justFocused = false
     if (this.#painted) {
       this.#overlay.highlight(direction)
       this.#overlay.setCursor(dx, dy)
@@ -488,7 +504,14 @@ export class QuickMenuInput {
       return
     }
     const slot = this.#slotFor(direction)
-    if (slot?.action.kind === 'menu') this.#descend(slot.action.menu, direction)
+    if (slot?.action.kind === 'menu') {
+      this.#descend(slot.action.menu, direction)
+      return
+    }
+    if (slot?.activation === 'arrive') {
+      this.#end()
+      this.#fire(slot)
+    }
   }
 
   #slotFor(direction: QuickMenuDirection): QuickMenuSlot | undefined {
@@ -501,23 +524,30 @@ export class QuickMenuInput {
   #descend(menu: string, via: QuickMenuDirection): void {
     const definition = get<QuickMenuRegistry>('@diamondcoreprocessor.com/QuickMenuRegistry')?.byName(menu)
     if (!definition) return
-    this.#levels.push({ definition, back: OPPOSITE_DIRECTION[via] })
-    this.#resetLevel()
+    const from = this.#levels[this.#levels.length - 1]?.focus
+    const focus = { ...this.#virtual }
+    this.#levels.push({ definition, back: OPPOSITE_DIRECTION[via], focus })
+    this.#justFocused = true
+    this.#resetLevel(from)
   }
 
   #ascend(): void {
     if (this.#levels.length <= 1) return
+    const from = this.#levels[this.#levels.length - 1]?.focus
     this.#levels.pop()
-    this.#resetLevel()
+    this.#justFocused = true
+    this.#resetLevel(from)
   }
 
   /** A fresh ring starts un-travelled: the drawn pointer returns to the
    *  middle, centre commits, nothing is lit. */
-  #resetLevel(): void {
+  #resetLevel(from?: { x: number; y: number }): void {
+    const level = this.#levels[this.#levels.length - 1]
+    if (!level) return
     this.#current = 'centre'
     this.#leftDeadZone = false
-    this.#virtual = this.#centre()
-    if (this.#painted) this.#paint()
+    this.#virtual = { ...level.focus }
+    if (this.#painted) this.#paint(from)
   }
 
   // ── commit ──────────────────────────────────────────────────────────
@@ -570,6 +600,14 @@ export class QuickMenuInput {
 
   #release(): void {
     const direction = this.#current
+
+    // The pathway itself was the last act. Releasing during the ease means
+    // "stay at this focus", not "activate the new ring's centre leaf".
+    if (this.#justFocused) {
+      this.#sticky = true
+      if (!this.#painted) this.#paint()
+      return
+    }
 
     // Left and came back — the escape hatch. Nothing fires.
     if (this.#leftDeadZone && direction === 'centre') { this.#end(); return }
@@ -701,6 +739,7 @@ export class QuickMenuInput {
     this.#levels = []
     this.#current = 'centre'
     this.#leftDeadZone = false
+    this.#justFocused = false
     this.#overlay.clear()
     document.documentElement.classList.remove('hc-quick-menu-active')
     // Give the cursor back. The browser restores it to exactly where it was
@@ -729,11 +768,13 @@ export class QuickMenuInput {
 
     this.#end()
     this.warmup()
-    this.#levels = [{ definition, back: null }]
+    const focus = this.#centre()
+    this.#levels = [{ definition, back: null, focus }]
     this.#sticky = true
     this.#current = 'centre'
     this.#leftDeadZone = false
-    this.#virtual = this.#centre()
+    this.#justFocused = false
+    this.#virtual = focus
     get<GateLike>('@diamondcoreprocessor.com/InputGate')?.lock(OWNER)
     get<StackLike>('@diamondcoreprocessor.com/InputModeStack')?.push(this.#mode)
     this.#paint()

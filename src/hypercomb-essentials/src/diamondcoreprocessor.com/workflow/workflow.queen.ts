@@ -185,6 +185,7 @@ window.ioc.register('@diamondcoreprocessor.com/WorkflowQueenBee', _workflow)
       adoptable: true,
       adoptScope: 'hierarchy',
       resourceScope: 'layer',
+      pheromones: ['platform:desktop'],
     })
   },
 )

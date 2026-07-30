@@ -106,7 +106,9 @@
 
 .sidebar-properties {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: calc(8px * var(--s)) 0;
 }
 

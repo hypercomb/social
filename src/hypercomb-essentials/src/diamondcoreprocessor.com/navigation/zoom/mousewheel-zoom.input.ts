@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input.ts
 import type { InputGate } from '../input-gate.service.js'
 import type { InputMode, InputModeStack } from '../input-mode-stack.service.js'
+import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 
 type Point = { x: number; y: number }
 
@@ -10,6 +11,34 @@ const SNAP_LEVELS = [
   0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0,
   6.0, 8.0, 12.0,
 ]
+
+/** True when the wheel is over DOM content that owns scrolling.
+ *
+ * Most first-party panels carry [data-consumes-wheel], but relying on every
+ * present and future tool window to remember that marker is brittle. Detect
+ * real CSS scroll containers as well, including elements reached through a
+ * shadow-DOM composed path. Once a scroll region owns the pointer it keeps the
+ * whole wheel gesture, even at its boundary; falling through to canvas zoom at
+ * the top/bottom of a list is surprising and makes scrollbars feel broken. */
+function wheelBelongsToUi(event: WheelEvent): boolean {
+  const path = typeof event.composedPath === 'function'
+    ? event.composedPath()
+    : [event.target]
+
+  for (const node of path) {
+    if (!(node instanceof Element)) continue
+    if (node.hasAttribute('data-consumes-wheel')) return true
+
+    const style = getComputedStyle(node)
+    const scrollsY = /^(auto|scroll|overlay)$/.test(style.overflowY)
+      && node.scrollHeight > node.clientHeight + 1
+    const scrollsX = /^(auto|scroll|overlay)$/.test(style.overflowX)
+      && node.scrollWidth > node.clientWidth + 1
+    if (scrollsY || scrollsX) return true
+  }
+
+  return false
+}
 
 export class MousewheelZoomInput {
   private enabled = false
@@ -96,13 +125,14 @@ export class MousewheelZoomInput {
     // any leaked claim would otherwise leave wheel scrolling permanently
     // dead until an escape-cascade clear.
 
-    // bail if the event is aimed at a UI surface that wants to consume
-    // wheel itself (scrollable panels marked [data-consumes-wheel]).
+    // Bail if the event is aimed at UI that owns wheel input. Explicit
+    // [data-consumes-wheel] surfaces cover purpose-built wheel controls;
+    // actual CSS scroll containers are detected automatically so a forgotten
+    // marker can never turn a tool window's mouse wheel into canvas zoom.
     // Canvas is full-screen so geometric rect checks alone wouldn't
     // distinguish "over the history viewer overlay" from "over the
     // canvas beneath it".
-    const target = event.target as Element | null
-    if (target?.closest?.('[data-consumes-wheel]')) return
+    if (wheelBelongsToUi(event)) return
 
     const rect = this.canvas.getBoundingClientRect()
     if (
@@ -118,6 +148,24 @@ export class MousewheelZoomInput {
     // wheel did nothing.
     if (this.gate?.locked) {
       this.gate.notifyLockedAttempt()
+      return
+    }
+
+    // Lane arrangements are old-game scrollers: the wheel advances only
+    // along their length and never changes scale. A vertical wheel maps to
+    // horizontal travel for flat-top rows; trackpad horizontal deltas remain
+    // natural. PanningDrone enforces the axis again for touch/drag callers.
+    const laneAxis = getLaneScrollAxis()
+    if (laneAxis) {
+      const pan = window.ioc.get<{ panBy: (delta: Point) => void }>(
+        '@diamondcoreprocessor.com/PanningDrone',
+      )
+      const along = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY
+      pan?.panBy(laneAxis === 'x' ? { x: -along, y: 0 } : { x: 0, y: -along })
+      event.preventDefault()
+      event.stopPropagation()
       return
     }
 

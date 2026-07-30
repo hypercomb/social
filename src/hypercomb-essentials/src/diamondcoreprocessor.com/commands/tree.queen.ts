@@ -226,6 +226,7 @@ window.ioc.register('@diamondcoreprocessor.com/TreeQueenBee', _tree)
       // Marking a root says "this branch reads as a tree", which is exactly
       // the kind of statement that should travel with the branch.
       adoptScope: 'hierarchy',
+      pheromones: ['platform:desktop'],
     })
   },
 )

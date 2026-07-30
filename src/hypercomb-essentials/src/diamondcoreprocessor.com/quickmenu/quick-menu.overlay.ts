@@ -45,6 +45,8 @@ const CANCEL_FILL = 'rgba(214,126,126,0.12)'
 const CANCEL_STROKE = 'rgba(214,126,126,0.55)'
 const CANCEL_TEXT = 'rgb(214,146,146)'
 const CURSOR = 'rgb(126,182,214)'
+const FOCUS_EASE_MS = 120
+const FOCUS_EASE = 'cubic-bezier(0.2, 0.8, 0.2, 1)'
 
 /**
  * Above everything the participant can be looking at.
@@ -229,16 +231,28 @@ export class QuickMenuOverlay {
     backDirection: QuickMenuDirection | null,
     labelOf: (slot: { label: string; labelKey?: string }) => string,
     backLabel: string,
+    fromOrigin?: { x: number; y: number },
   ): void {
     const host = this.#ensureHost()
     const built = this.ensure(definition, labelOf)
 
     if (this.#active && this.#active !== built) this.#active.svg.remove()
 
-    built.svg.style.left = `${origin.x - HALF_WIDTH}px`
-    built.svg.style.top = `${origin.y - HALF_HEIGHT}px`
+    const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    const start = fromOrigin && !reducedMotion ? fromOrigin : origin
+    built.svg.style.transition = 'none'
+    built.svg.style.left = `${start.x - HALF_WIDTH}px`
+    built.svg.style.top = `${start.y - HALF_HEIGHT}px`
     if (!built.svg.isConnected) host.appendChild(built.svg)
     host.style.display = 'block'
+    if (start !== origin) {
+      // Commit the starting position before applying the fast focus ease.
+      void built.svg.getBoundingClientRect()
+      built.svg.style.transition =
+        `left ${FOCUS_EASE_MS}ms ${FOCUS_EASE}, top ${FOCUS_EASE_MS}ms ${FOCUS_EASE}`
+      built.svg.style.left = `${origin.x - HALF_WIDTH}px`
+      built.svg.style.top = `${origin.y - HALF_HEIGHT}px`
+    }
 
     this.#active = built
     this.#activeName = definition.name

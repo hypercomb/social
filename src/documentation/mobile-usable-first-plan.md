@@ -11,7 +11,7 @@ designed** and **real bugs**, roughly half and half. The viewer-first plan expli
 ruled "Viewers type nothing" (§9 disposition, line 668) and shipped an opt-in visibility
 gate with no fallback — so two of the three complaints are the shipped spec, not defects.
 The third leg is genuine iOS/boot breakage. This plan pivots the posture (mobile is a
-**participant surface**, not a brochure) and fixes the breakage.
+**participant surface**, not a brochure) and fixes the breakage. 
 
 ---
 
@@ -97,7 +97,7 @@ non-mobile behaviors. The beehaviors would have to be marked as mobile or mobile
 desktop." Content is NEVER filtered by platform; the tile-level gate is not a lens, it
 is GONE (union-delete, corridor scan, `mobile:mode`/`mobile:gate` plumbing removed from
 show-cell.drone.ts — doctrine 10/10). Platform capability lives on **behaviors**: a
-bee/view declares `mobile` or `mobile+desktop` via the registry pheromones
+bee/view declares `platform:mobile`, `platform:desktop`, or both via the registry pheromones
 (visual-bee-registry `pheromones`/`withPheromone`), and the shell activates only what
 the platform supports. `mobile:friendly` tile marks remain harmless curation data
 (`/mobile sweep|hive`, roots pool) for future gallery/lens features that must never
@@ -106,6 +106,13 @@ gate rendering. This dissolves S1, S2, and S3-for-visibility outright. Root caus
 from render (verified live: gate payload total:1/shown:0 → after removal the swallowed
 tile reappeared alongside the new one). The mobile-empty-prompt drone is now dormant
 (nothing emits `mobile:gate`) — remove it in the Phase 1 cleanup pass.
+
+**Capability ratchet (2026-07-29): BUILT.** `VisualBeeRegistry.register()` now
+rejects a behaviour that declares neither platform capability, and
+`forPlatform('mobile'|'desktop')` resolves the effective set after participant
+overrides. Existing views are explicit: home, slides, website, and lightbox
+declare both; tutor, tree, and workflow declare desktop until their touch affordances are ready.
+Platform support is therefore a decision every new behaviour makes at birth.
 
 **D2 — Typing is first-class on mobile. PARTIALLY BUILT (2026-07-28).** The "Viewers
 type nothing" verdict (§9 line 668 of the old plan) is revoked. Landed and verified

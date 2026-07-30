@@ -301,8 +301,8 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // `dangerRow: true` no longer HIDES the trash bin — every icon a tile offers
   // is on screen at once now — but it still orders it LAST, so delete lands at
   // the end of the bottom row, the furthest point from where the pointer
-  // enters the band. The selection menu and Delete/Backspace remain as the
-  // other deletion paths.
+  // enters the band. Delete/Backspace remains selection-only; it must never
+  // remove merely the tile under the pointer.
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'private', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // Promote this tile UP one level into its parent (the inverse of drop-into).

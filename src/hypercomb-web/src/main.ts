@@ -48,7 +48,11 @@ import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
-import { DependencyLoader, initializeRuntime } from '@hypercomb/shared/core'
+import {
+  DependencyLoader,
+  initializeRuntime,
+  protectOriginStorage,
+} from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
 
 // Ensure side-effect registration
@@ -132,6 +136,11 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
+
+  // OPFS starts as best-effort storage. Check its eviction protection without
+  // delaying boot, then request persistence inside the participant's first
+  // trusted interaction (Firefox may prompt; Chromium/Safari decide silently).
+  void protectOriginStorage()
 
   // SW readiness runs OVERLAPPED with the install chain instead of gating it.
   // ensureSwControl can block up to 1500ms waiting for controllerchange on a

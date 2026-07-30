@@ -688,6 +688,11 @@ export class AggregateIndexComponent implements OnDestroy {
     EffectBus.emit('drop:dragging', { active: false })
     this.#cdr.detectChanges()
     this.#swallowClick = true
+    const groupTarget = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+    if (groupTarget?.closest?.('hc-filter-configurations')) {
+      EffectBus.emit('filter-config:place-drop', { item: p.item })
+      return
+    }
 
     // RELEASE POINT, not a remembered hover — see the header note.
     const overlay = ioc()?.get('@diamondcoreprocessor.com/TileOverlayDrone') as OverlayLike | undefined

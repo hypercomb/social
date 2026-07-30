@@ -90,7 +90,9 @@ $accent: #a8ffd8;
 }
 
 .contact-hover-body {
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.5rem;
   display: flex;
   flex-direction: column;

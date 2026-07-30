@@ -95,7 +95,9 @@ $steel: rgb(126, 182, 214);
 }
 
 .action-card-body {
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.65rem 0.8rem 0.75rem;
   display: flex;
   flex-direction: column;

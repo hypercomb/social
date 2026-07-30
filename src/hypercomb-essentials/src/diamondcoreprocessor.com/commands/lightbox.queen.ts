@@ -230,7 +230,7 @@ window.ioc.register('@diamondcoreprocessor.com/LightboxQueenBee', _lightbox)
       takeoverRank: 1,
       // Ships mobile-friendly: full-screen pictures are a first-class mobile
       // surface, and the viewer is the slides engine (already mobile-friendly).
-      pheromones: ['mobile:friendly'],
+      pheromones: ['platform:mobile', 'platform:desktop'],
     })
   },
 )

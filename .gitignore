@@ -62,3 +62,7 @@ src/hypercomb-relay/relay.err-*
 # is pure browser scratch — never source/content. Real scripts are not dotfiles.
 src/scripts/ai-inside/.*/
 src/diamond-core-processor/public/
+src/documentation/build_invoice.py
+src/documentation/invoice_revolucion_styles.html
+src/NUL
+src/NUL.map

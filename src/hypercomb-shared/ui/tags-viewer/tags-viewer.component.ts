@@ -145,7 +145,7 @@ export class TagsViewerComponent implements OnDestroy {
   /** The three reaches, each named and explained. The whole point of the panel:
    *  a reach you can read instead of a glyph you have to decode. */
   readonly scopeOptions: readonly { id: Scope; icon: string }[] = [
-    { id: 'local', icon: 'center_focus_strong' },
+    { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
     { id: 'global', icon: 'public' },
   ]
