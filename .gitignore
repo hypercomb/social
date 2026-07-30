@@ -66,3 +66,6 @@ src/documentation/build_invoice.py
 src/documentation/invoice_revolucion_styles.html
 src/NUL
 src/NUL.map
+
+src/documentation/build_invoice.py
+src/documentation/invoice_revolucion_styles.html
