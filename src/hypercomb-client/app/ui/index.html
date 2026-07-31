@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hypercomb — host check</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 2rem;
+    background: #0b0d10; color: #d8dee6;
+    font: 14px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  h1 { font-size: 1rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #7d8794; margin: 0 0 1.5rem; }
+  #root { display: grid; gap: .35rem; max-width: 70rem; }
+  .row { display: grid; grid-template-columns: 1.5rem 1fr auto; gap: .75rem; align-items: baseline; }
+  .ok    { color: #6ee7a8; }
+  .fail  { color: #ff8080; }
+  .note  { color: #7d8794; }
+  .detail { grid-column: 2 / -1; color: #7d8794; white-space: pre-wrap; word-break: break-all; }
+  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #1c2128; color: #7d8794; }
+</style>
+</head>
+<body>
+<h1>Host check</h1>
+<div id="root"></div>
+<footer id="summary" class="note">running…</footer>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

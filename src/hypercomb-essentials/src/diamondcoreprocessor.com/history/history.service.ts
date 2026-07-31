@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/core/history.service.ts
 import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, isPoolAddress, poolAddresses, poolMeaningOf, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
+import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
 import { parseHeadIndex, buildFlushIndex } from './head-index.js'
 import { chooseSealChildHandle } from './seal-preference.js'
@@ -76,8 +77,22 @@ export type LayerContent = {
   [slot: string]: unknown
 }
 
-// SHA-256 of canonical JSON: {"children":[],"name":""}
-export const EMPTY_LAYER_CONTENT_SIG = 'a8a9aaacd1d7631b9d1b66a6b0e4b14fdd2f1052ffd5dfac2e92c0740020ee8d'
+/**
+ * SHA-256 of the CANONICAL bytes of the empty layer: `{"name":""}`.
+ *
+ * Note the canonical form has NO `children` key — `canonicalizeLayer` drops
+ * empty arrays (the sparse-layer invariant) and emits `name` first. This
+ * constant previously read `a8a9aaac…`, the hash of `{"children":[],"name":""}`,
+ * which is a shape the canonicalizer never produces; it disagreed with
+ * `commitLayer` and was only harmless because nothing consumed it. Corrected
+ * against the conformance vectors — see `documentation/protocol/conformance.md`
+ * §4.
+ */
+export const EMPTY_LAYER_CONTENT_SIG = '1390696a77e5d6f4375e9b36450c26bb67e99662fcd31b71cecd8ceda332040e'
+
+/** The empty layer as an OBJECT, carrying `children: []` as a read default
+ *  (see layer-diff). Its canonical BYTES drop that empty array, so this does
+ *  NOT hash to EMPTY_LAYER_CONTENT_SIG directly — canonicalize first. */
 export const EMPTY_LAYER_CONTENT: Readonly<LayerContent> = Object.freeze({ name: '', children: [] })
 
 /** Minimal Store surface the neighbourhood warm needs to hydrate a tile's own
@@ -822,30 +837,12 @@ export class HistoryService {
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
    *
-   * Rules:
-   *   - `name` always present, always first. Layer's only intrinsic.
-   *   - All other fields are SLOTS (open set; drones plug in via
-   *     LayerSlotRegistry). They follow `name` in alphabetical order
-   *     by key for stable byte output regardless of registration /
-   *     mutation order. Slot-agnostic: `children` is just one slot
-   *     among many — no special positioning.
-   *   - Slot values kept as-is (each slot is responsible for its own
-   *     internal canonical form — sorted arrays, sorted nested keys).
-   *     Empty arrays / empty objects / undefined are dropped to keep
-   *     the sparse-layer invariant.
+   * THE IMPLEMENTATION LIVES IN `canonical-layer.ts` — a pure module with no
+   * browser/IoC dependency, so a second implementation's conformance vector
+   * generator can import it directly. This static is a re-export kept for the
+   * existing call sites; do not fork the logic back in here.
    */
-  static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => {
-    const out: LayerContent = { name: layer.name }
-    const slotKeys = Object.keys(layer).filter(k => k !== 'name').sort()
-    for (const key of slotKeys) {
-      const v = layer[key]
-      if (v === undefined || v === null) continue
-      if (Array.isArray(v) && v.length === 0) continue
-      if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0) continue
-      out[key] = v
-    }
-    return out
-  }
+  static readonly canonicalizeLayer = canonicalizeLayer<LayerContent>
 
   /**
    * Commit a complete layer snapshot for a lineage.

@@ -1,0 +1,17 @@
+[package]
+name = "hypercomb-store"
+description = "Content-addressed storage: a memory-mapped B-tree for records, loose files for blobs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypercomb-protocol.workspace = true
+redb.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true

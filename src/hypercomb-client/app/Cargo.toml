@@ -1,0 +1,21 @@
+[package]
+name = "hypercomb-client"
+description = "Hypercomb for Windows — a native window on your hive."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hypercomb-host.workspace = true
+hypercomb-store.workspace = true
+tauri = { version = "2", features = [] }
+serde.workspace = true
+serde_json.workspace = true
+
+[features]
+# Enabled by `tauri dev`/`tauri build`; keeps the custom protocol available.
+custom-protocol = ["tauri/custom-protocol"]
