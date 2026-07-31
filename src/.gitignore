@@ -11,3 +11,7 @@ __webgl2-probe-test.html
 
 # Revolución site preview build (npm run revolucion:preview)
 site-preview/
+
+# Rust build output (cargo). Thousands of fingerprint files per profile, all
+# reproducible from the sources — never committed.
+hypercomb-client/target/
