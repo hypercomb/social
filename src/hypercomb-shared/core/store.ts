@@ -2,6 +2,7 @@
 // hypercomb-web/src/app/core/store.ts
 
 import { Bee, EffectBus, SignatureService, isSignature, registerPoolMeaning } from '@hypercomb/core'
+import { nativeRoot } from './native-filesystem'
 
 /** How long a host-resolution MISS is remembered before the cascade may be
  *  re-dialed for that sig. Render passes within the window get an instant
@@ -281,7 +282,24 @@ export class Store extends EventTarget {
   }
 
   #doInit = async (): Promise<void> => {
-    try {
+    // NATIVE SHELL: when running inside hypercomb-client, the hive lives on a
+    // real filesystem rather than in OPFS. `nativeRoot()` hands back a
+    // FileSystemDirectoryHandle-shaped view of it, so everything downstream —
+    // including the 44 files that address the root directly rather than going
+    // through this class — works unchanged.
+    //
+    // Inert in a browser: `nativeRoot()` returns null and the OPFS path below
+    // runs exactly as before.
+    // Everything AFTER this point runs identically on both paths. Pools are
+    // created the same way; the legacy `__x__` sources simply report absent
+    // natively, so every drain and migration below becomes a no-op on its own
+    // without needing a branch.
+    const native = nativeRoot()
+    if (native) {
+      this.opfsRoot = native as unknown as FileSystemDirectoryHandle
+      this.#opfsAvailable = true
+      console.log('[store] native hive — no OPFS, no quota, no bucket eviction')
+    } else try {
       this.opfsRoot = await Promise.race([
         navigator.storage.getDirectory(),
         // A cold or busy OPFS (Chrome initialises it lazily; the heavier

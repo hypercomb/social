@@ -15,10 +15,11 @@ export class FolderSyncQueenBee extends QueenBee {
   override readonly aliases = ['folder', 'backup-folder', 'offline-backup']
   override readonly description =
     'Back up the complete local hive to a private folder, USB disk, NAS, or cloud-synced directory'
-  override readonly options = ['hard-copy', 'local', 'status', 'connect', 'resume', 'sync', 'now', 'import', 'disconnect']
+  override readonly options = ['hard-copy', 'local', 'status', 'connect', 'resume', 'sync', 'now', 'verify', 'import', 'disconnect']
   override readonly examples = [
     { input: '/folder-sync', result: 'Choose or resume a folder and create a portable hard copy' },
-    { input: '/folder-sync local', result: 'Copy and verify the exact local OPFS tree without network reads' },
+    { input: '/folder-sync local', result: 'Copy the exact local OPFS tree without network reads' },
+    { input: '/folder-sync verify', result: 'Re-hash every backed-up file and prove it still matches' },
     { input: '/folder-sync import', result: 'Safely merge a folder backup into this browser without overwriting conflicts' },
   ]
 
@@ -75,6 +76,11 @@ export class FolderSyncQueenBee extends QueenBee {
         this.#showOutcome(service)
         break
       }
+      case 'verify': {
+        await service.verify()
+        this.#showOutcome(service)
+        break
+      }
       case 'disconnect': {
         await service.disconnect()
         this.#toast('info', 'Folder backup', 'Folder access forgotten. Existing backup files were not deleted.')
@@ -128,17 +134,32 @@ export class FolderSyncQueenBee extends QueenBee {
     switch (state.status) {
       case 'backed-up':
         return [
-          `${state.mode === 'hard-copy' ? 'Portable hard copy' : 'Local mirror'} verified in ${state.folder ?? 'the selected folder'}:`,
-          `${state.scanned ?? 0} files, ${this.#formatBytes(state.totalBytes ?? 0)}.`,
-          'Every OPFS root file and every nested folder was read back after copying.',
+          state.damaged === 0 && state.verified
+            ? `Backup re-hashed in ${state.folder ?? 'the selected folder'}: all ${state.verified} files match.`
+            : [
+                `${state.mode === 'hard-copy' ? 'Portable hard copy' : 'Local mirror'} complete in ${state.folder ?? 'the selected folder'}:`,
+                `${state.scanned ?? 0} files, ${this.#formatBytes(state.totalBytes ?? 0)}.`,
+                // Content is named by its own signature, so a file already
+                // present at the right size is already correct. Claiming a
+                // byte-level re-read here would be a lie — that is /verify.
+                'Unchanged files were kept, not rewritten; run /folder-sync verify to re-hash every file.',
+              ].join(' '),
           'Open hypercomb-backup/BACKUP-REPORT.txt for the full category and path inventory.',
         ].join(' ')
       case 'incomplete':
-        return [
-          `Local bytes were copied and verified: ${state.scanned ?? 0} files, ${this.#formatBytes(state.totalBytes ?? 0)}.`,
-          `This is not yet a complete portable hard copy because ${state.missingReferences ?? 0} referenced items could not be made local.`,
-          'Open hypercomb-backup/BACKUP-REPORT.txt and retry /folder-sync hard-copy while the sources are reachable.',
-        ].join(' ')
+        return state.damaged
+          ? [
+              `${state.damaged} of ${state.scanned ?? 0} backed-up files did not match their recorded signature.`,
+              'Run /folder-sync hard-copy to rewrite them, then verify again.',
+            ].join(' ')
+          : [
+              `Local bytes were copied: ${state.scanned ?? 0} files, ${this.#formatBytes(state.totalBytes ?? 0)}.`,
+              `This is not yet a complete portable hard copy because ${state.missingReferences ?? 0} referenced items could not be made local`,
+              state.failedRoots
+                ? `and ${state.failedRoots} closure root${state.failedRoots === 1 ? '' : 's'} produced no layer, leaving everything beneath unmeasured.`
+                : '.',
+              'Open hypercomb-backup/BACKUP-REPORT.txt and retry /folder-sync hard-copy while the sources are reachable.',
+            ].join(' ')
       case 'syncing':
         return `${state.phase ?? 'Backing up'} — ${state.scanned ?? 0} files / ${this.#formatBytes(state.totalBytes ?? 0)} checked, ${state.copied ?? 0} copied.`
       case 'needs-permission':

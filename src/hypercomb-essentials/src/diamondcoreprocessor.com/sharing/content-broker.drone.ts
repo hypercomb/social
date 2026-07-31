@@ -133,6 +133,17 @@ const MAX_RESPONSE_BYTES = 256 * 1024
 // a caller knows their content is rare in the swarm.
 const DEFAULT_TIMEOUT_MS = 2000
 
+// Bounds on deep resource descent. The walk follows signatures found inside
+// fetched content, which may be peer-authored, so none of these limits may be
+// derived from the content itself. Exceeding one is REPORTED, never silently
+// obeyed — a dropped reference means the copy is not portable.
+const DEEP_RESOURCE_LIMIT = 50_000
+const DEEP_DEPTH_LIMIT = 64
+/** Records larger than this are not parsed for further signatures. Guards the
+ *  JSON.parse itself: a huge hostile record should cost a size check, not a
+ *  full parse and a signature sweep over the result. */
+const DEEP_RECORD_MAX_BYTES = 8 * 1024 * 1024
+
 // Hard cap on a single HTTP-direct probe. DEFAULT_TIMEOUT_MS bounds only
 // the MESH wait; the HTTP cascade's fetches had no timeout at all, so one
 // hung/unreachable host wedged every awaiting caller for the browser's
@@ -1089,9 +1100,9 @@ export class ContentBrokerDrone extends Drone {
    * `quiet` keeps that interactive event lane untouched for background
    * materialization jobs that report their own aggregate progress.
    */
-  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; silent?: boolean; quiet?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number }> => {
+  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; deepResources?: boolean; maxResources?: number; silent?: boolean; quiet?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number; truncated: number }> => {
     const root = String(rootSig ?? '').toLowerCase().trim()
-    const stats = { layers: 0, leaves: 0, failed: 0 }
+    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0 }
     if (!SIG_RE.test(root)) return stats
     const visited = new Set<string>()
 
@@ -1144,33 +1155,7 @@ export class ContentBrokerDrone extends Drone {
         // nested in cell properties), minus child layers and bees.
         const referenced = new Set<string>()
         this.#collectSigs(parsed, referenced)
-        for (const r of referenced) {
-          if (childSet.has(r) || bees.has(r) || visited.has(r)) continue
-          visited.add(r)
-          const got = await this.fetchBySig(r, 'resource')
-          if (got) stats.leaves++; else stats.failed++
-          // Per-resource progress, not just per-layer: a one-layer branch
-          // with many images otherwise sits silent for the whole resource
-          // phase — the UI cue must climb as resources resolve.
-          if (!opts.quiet) this.emitEffect('adopt:progress', { sig: r, ...stats })
-
-          // Decoration-descent: a decoration record (e.g. a website page) is a
-          // resource leaf to #collectSigs, but the content it points at — the
-          // HTML body (payload.htmlSig) and every image/stylesheet that body
-          // embeds — lives INSIDE the record, not in the layer. Pull it too so
-          // the adopted site is self-contained, not a record that 404s its
-          // assets. No-op for ordinary resources (decorationClosureSigs → []).
-          if (got) {
-            const nested = await decorationClosureSigs(got, s => this.fetchBySig(s, 'resource'))
-            for (const n of nested) {
-              if (childSet.has(n) || bees.has(n) || visited.has(n)) continue
-              visited.add(n)
-              const leaf = await this.fetchBySig(n, 'resource')
-              if (leaf) stats.leaves++; else stats.failed++
-              if (!opts.quiet) this.emitEffect('adopt:progress', { sig: n, ...stats })
-            }
-          }
-        }
+        await this.#walkResources([...referenced], stats, visited, opts, childSet, bees)
       }
 
       for (const c of children) await walkLayer(c)
@@ -1183,6 +1168,122 @@ export class ContentBrokerDrone extends Drone {
     // navigate for.
     if (!opts.quiet) this.emitEffect('adopt:done', { root, silent: opts.silent === true, ...stats })
     return stats
+  }
+
+  /**
+   * Materialize a RESOURCE closure starting from `sigs`. Shared by adopt()'s
+   * leaf phase and by callers that start from resource references rather than
+   * a layer — pool records (threads, clipboard, manifests) name content that
+   * no layer points at, so nothing else would ever pull it local.
+   *
+   * `deepResources` is what makes a closure whole. A layer is a CONTRACT: it
+   * names content by signature. So do many resources — thread manifests hold
+   * `contentSig`, install/instruction manifests and presets hold sigs too.
+   * Without descent the walk fetches the contracts and stops, which reads as
+   * success while the actual bytes stay remote. With it, any fetched resource
+   * that parses as a JSON object is re-read for further signatures until the
+   * closure is exhausted. Non-JSON bytes (images, binaries) are leaves.
+   *
+   * Off by default: interactive adopt is deliberately slim, and eager deep
+   * pulls are exactly what once dragged 350+ files into a single adopt.
+   */
+  #walkResources = async (
+    seeds: readonly string[],
+    stats: { layers: number; leaves: number; failed: number; truncated?: number },
+    visited: Set<string>,
+    opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number },
+    skipChildren: ReadonlySet<string> = new Set(),
+    skipBees: ReadonlySet<string> = new Set(),
+  ): Promise<void> => {
+    // depth 0 = named by the layer; depth 1+ = reached through a record. The
+    // default path expands depth 0 only, which is the established
+    // single-level decoration hop, symmetric with the renderer.
+    const queue: Array<{ sig: string; depth: number }> =
+      seeds.map(sig => ({ sig, depth: 0 }))
+    // Deep descent follows signatures found INSIDE fetched content, and that
+    // content can be peer-authored. A hostile or corrupt record naming a huge
+    // set of sigs would otherwise turn one backup into an unbounded fetch
+    // storm — disk here, and an amplified request fan-out at whatever hosts
+    // those sigs resolve against. Bytes are still signature-verified, so this
+    // is not about poisoning; it is about being made to do unbounded work.
+    const limit = Math.max(1, opts.maxResources ?? DEEP_RESOURCE_LIMIT)
+    // Dedupe at PUSH, not just at pop: the same sig named a thousand times
+    // would otherwise occupy a thousand queue slots before any of it is
+    // recognised as already seen.
+    const queued = new Set<string>(queue.map(q => q.sig))
+    const enqueue = (sig: string, depth: number): void => {
+      if (visited.has(sig) || queued.has(sig)) return
+      if (queued.size >= limit || depth > DEEP_DEPTH_LIMIT) {
+        // Never silently truncate — a dropped reference is content the
+        // backup does not hold, and the caller must be able to report the
+        // copy as incomplete rather than portable.
+        stats.truncated = (stats.truncated ?? 0) + 1
+        return
+      }
+      queued.add(sig)
+      queue.push({ sig, depth })
+    }
+
+    while (queue.length > 0) {
+      const { sig, depth } = queue.shift()!
+      if (skipChildren.has(sig) || skipBees.has(sig) || visited.has(sig)) continue
+      visited.add(sig)
+      const got = await this.fetchBySig(sig, 'resource')
+      if (!got) { stats.failed++; continue }
+      stats.leaves++
+      // Per-resource progress, not just per-layer: a one-layer branch with
+      // many images otherwise sits silent for the whole resource phase — the
+      // UI cue must climb as resources resolve.
+      if (!opts.quiet) this.emitEffect('adopt:progress', { sig, ...stats })
+      if (depth > 0 && !opts.deepResources) continue
+
+      // Decoration-descent: a decoration record (e.g. a website page) is a
+      // resource leaf to #collectSigs, but the content it points at — the
+      // HTML body (payload.htmlSig) and every image/stylesheet that body
+      // embeds — lives INSIDE the record, not in the layer. Pull it too so
+      // the adopted site is self-contained, not a record that 404s its
+      // assets. No-op for ordinary resources (decorationClosureSigs → []).
+      for (const n of await decorationClosureSigs(got, s => this.fetchBySig(s, 'resource'))) {
+        enqueue(n, depth + 1)
+      }
+
+      if (opts.deepResources) {
+        for (const s of this.#recordSigs(got)) enqueue(s, depth + 1)
+      }
+    }
+  }
+
+  /**
+   * Signatures named by a resource that is itself a record. Gated on the bytes
+   * parsing as a JSON object so image and binary leaves are never scanned —
+   * this must not blind-harvest 64-hex runs out of arbitrary content.
+   */
+  #recordSigs = (bytes: Uint8Array): string[] => {
+    if (bytes.byteLength > DEEP_RECORD_MAX_BYTES) return []
+    let text: string
+    try { text = new TextDecoder().decode(bytes).trim() } catch { return [] }
+    if (!text.startsWith('{') && !text.startsWith('[')) return []
+    let parsed: unknown
+    try { parsed = JSON.parse(text) } catch { return [] }
+    if (!parsed || typeof parsed !== 'object') return []
+    const out = new Set<string>()
+    this.#collectSigs(parsed, out)
+    return [...out]
+  }
+
+  /**
+   * Public entry for a resource-rooted closure — used by the portable backup
+   * pass, which must reach content named by pool records as well as by layers.
+   */
+  public adoptResources = async (
+    sigs: readonly string[],
+    opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number } = {},
+  ): Promise<{ leaves: number; failed: number; truncated: number }> => {
+    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0 }
+    const seeds = sigs.map(s => String(s ?? '').toLowerCase().trim()).filter(s => SIG_RE.test(s))
+    if (seeds.length === 0) return { leaves: 0, failed: 0, truncated: 0 }
+    await this.#walkResources(seeds, stats, new Set<string>(), opts)
+    return { leaves: stats.leaves, failed: stats.failed, truncated: stats.truncated ?? 0 }
   }
 
   /** Recursively collect every 64-hex signature reachable inside a value

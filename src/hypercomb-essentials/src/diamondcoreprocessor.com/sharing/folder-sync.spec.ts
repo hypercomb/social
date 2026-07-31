@@ -216,10 +216,12 @@ describe('FolderSyncService', () => {
     })
     const adopt = vi.fn(async (
       rootSig: string,
-      options?: { silent?: boolean; quiet?: boolean },
+      options?: { deepResources?: boolean; silent?: boolean; quiet?: boolean },
     ) => {
       expect(rootSig).toBe(layerSig)
-      expect(options).toEqual({ silent: true, quiet: true })
+      // A hard copy must descend through resources that name further content,
+      // not stop at the contracts.
+      expect(options).toEqual({ deepResources: true, silent: true, quiet: true })
       await put(opfs, layerSig, layer)
       await put(opfs, resourceSig, resource)
       EffectBus.emit('content:wrote', {
@@ -265,6 +267,232 @@ describe('FolderSyncService', () => {
       deviceId,
       manifestSha256: manifestSig,
     })
+  })
+
+  it('re-hashes every backed-up file on demand and catches damage', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Backups')
+    const bytes = new TextEncoder().encode('real content')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(opfs, sig, bytes)
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+
+    const service = new FolderSyncService()
+    await service.connect('local')
+    const deviceId = service.state().deviceId
+
+    await service.verify()
+    expect(service.state()).toMatchObject({
+      status: 'backed-up',
+      verified: 1,
+      damaged: 0,
+    })
+
+    // Corrupt the mirror behind the service's back. A copy pass skips this
+    // file on name and size; only a re-hash can catch it.
+    await put(
+      chosen,
+      `hypercomb-backup/devices/${deviceId}/opfs/${sig}`,
+      new TextEncoder().encode('tampered!!!'),
+    )
+    await service.verify()
+    expect(service.state()).toMatchObject({ status: 'incomplete', damaged: 1, verified: 0 })
+  })
+
+  it('advances verifiedAt only on a real re-hash, never on a copy pass', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Backups')
+    const bytes = new TextEncoder().encode('content')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(opfs, sig, bytes)
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+
+    const service = new FolderSyncService()
+    await service.connect('local')
+    const deviceId = service.state().deviceId
+    const manifestPath = `hypercomb-backup/devices/${deviceId}/manifest.json`
+    const afterCopy = JSON.parse(new TextDecoder().decode(await read(chosen, manifestPath)))
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await service.verify()
+    const afterVerify = JSON.parse(new TextDecoder().decode(await read(chosen, manifestPath)))
+    expect(afterVerify.verifiedAt).toBeGreaterThan(afterCopy.verifiedAt)
+  })
+
+  it('follows content named by pool records, which no layer references', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Backups')
+    // sign('threads') — a pool of meaning, not a lineage bag.
+    const threadsPool = await SignatureService.sign(
+      new TextEncoder().encode('threads').buffer as ArrayBuffer,
+    )
+    const messageSig = 'a1'.repeat(32)
+    await put(
+      opfs,
+      `${threadsPool}/manifest`,
+      new TextEncoder().encode(JSON.stringify({
+        turns: [{ role: 'user', contentSig: messageSig }],
+      })),
+    )
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+    const adoptResources = vi.fn(async () => ({ leaves: 1, failed: 0 }))
+    registrations.set('@diamondcoreprocessor.com/ContentBrokerDrone', {
+      adopt: async () => ({ layers: 0, leaves: 0, failed: 0 }),
+      adoptResources,
+    })
+
+    const service = new FolderSyncService()
+    await service.connect('hard-copy')
+
+    // The message body is named only by a thread manifest in a pool. Nothing
+    // in the layer walk would ever reach it.
+    expect(adoptResources).toHaveBeenCalledWith(
+      [messageSig],
+      { deepResources: true, quiet: true },
+    )
+    expect(service.state()).toMatchObject({ status: 'backed-up', mode: 'hard-copy' })
+  })
+
+  it('will not call pool-named content portable when it cannot be materialized', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Backups')
+    const threadsPool = await SignatureService.sign(
+      new TextEncoder().encode('threads').buffer as ArrayBuffer,
+    )
+    await put(
+      opfs,
+      `${threadsPool}/manifest`,
+      new TextEncoder().encode(JSON.stringify({ contentSig: 'b2'.repeat(32) })),
+    )
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+    registrations.set('@diamondcoreprocessor.com/ContentBrokerDrone', {
+      adopt: async () => ({ layers: 0, leaves: 0, failed: 0 }),
+      adoptResources: async () => ({ leaves: 0, failed: 1 }),
+    })
+
+    const service = new FolderSyncService()
+    await service.connect('hard-copy')
+    expect(service.state()).toMatchObject({ status: 'incomplete', missingReferences: 1 })
+  })
+
+  it('joins an in-flight full pass instead of queueing a repeat', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Backups')
+    const lineage = 'c'.repeat(64)
+    const layer = new TextEncoder().encode(JSON.stringify({ name: 'root' }))
+    const layerSig = await SignatureService.sign(layer.buffer as ArrayBuffer)
+    await put(opfs, layerSig, layer)
+    await put(
+      opfs,
+      `${lineage}/00000000`,
+      new TextEncoder().encode(JSON.stringify({ layer: layerSig })),
+    )
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+    const adopt = vi.fn(async () => ({ layers: 1, leaves: 0, failed: 0 }))
+    registrations.set('@diamondcoreprocessor.com/ContentBrokerDrone', { adopt })
+
+    const service = new FolderSyncService()
+    const first = service.connect('hard-copy')
+    const second = service.syncNow('hard-copy')
+    await Promise.all([first, second])
+
+    // Two requests, one materialization. The boot-time passive pass must
+    // likewise decline once a pass has already run this session.
+    expect(adopt).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(adopt).toHaveBeenCalledTimes(1)
+  })
+
+  it('copies no bytes on a second pass over unchanged content-addressed files', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Backups')
+    const bytes = new TextEncoder().encode('immutable content')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(opfs, sig, bytes)
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+
+    const service = new FolderSyncService()
+    expect(await service.connect('local')).toBe(true)
+    expect(service.state()).toMatchObject({ scanned: 1, copied: 1 })
+
+    await service.syncNow('local')
+    expect(service.state()).toMatchObject({ scanned: 1, copied: 0, copiedBytes: 0 })
+  })
+
+  it('reports a root that produced no layer as an unmeasured closure', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Backups')
+    const lineage = 'd'.repeat(64)
+    const missingRoot = 'e'.repeat(64)
+    await put(
+      opfs,
+      `${lineage}/00000000`,
+      new TextEncoder().encode(JSON.stringify({ layer: missingRoot })),
+    )
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+    registrations.set('@diamondcoreprocessor.com/ContentBrokerDrone', {
+      adopt: async () => ({ layers: 0, leaves: 0, failed: 1 }),
+    })
+
+    const service = new FolderSyncService()
+    await service.connect('hard-copy')
+    expect(service.state()).toMatchObject({
+      status: 'incomplete',
+      closureRoots: 1,
+      failedRoots: 1,
+    })
+    // An unmeasured closure must never be importable as a portable hard copy.
+    await expect(new FolderSyncService().importFromFolder())
+      .rejects.toThrow('no sealed, complete, verified')
   })
 
   it('imports missing files but never overwrites a conflicting local file', async () => {
@@ -358,6 +586,36 @@ describe('FolderSyncService', () => {
     expect(new TextDecoder().decode(await read(activeOpfs, secondSig))).toBe('from computer two')
   })
 
+  it('exports and imports a participant backup on a browser with no DCP', async () => {
+    // A private window can never have DCP attached. Requiring a DCP half made
+    // both halves of the round trip impossible there.
+    delete (globalThis as any).__getSentinel
+    delete (globalThis as any).__sentinelBridge
+    const chosen = new MemoryDir('Export')
+    let activeOpfs = new MemoryDir('source')
+    const bytes = new TextEncoder().encode('participant bytes')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(activeOpfs, sig, bytes)
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => activeOpfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+
+    const exporter = new FolderSyncService()
+    expect(await exporter.connect('hard-copy')).toBe(true)
+    expect(exporter.state().status).toBe('backed-up')
+
+    activeOpfs = new MemoryDir('private window')
+    localStorage.clear()
+    const result = await new FolderSyncService().importFromFolder()
+    expect(result).toMatchObject({ copied: 1, conflicts: 0, invalid: 0 })
+    expect(new TextDecoder().decode(await read(activeOpfs, sig))).toBe('participant bytes')
+  })
+
   it('rejects a local mirror because it is not a sealed portable export', async () => {
     const chosen = new MemoryDir('Local mirror')
     let activeOpfs = new MemoryDir('source')
@@ -374,7 +632,7 @@ describe('FolderSyncService', () => {
     expect(await new FolderSyncService().connect('local')).toBe(true)
     activeOpfs = new MemoryDir('fresh')
     await expect(new FolderSyncService().importFromFolder())
-      .rejects.toThrow('no sealed, complete, verified DCP snapshot')
+      .rejects.toThrow('no sealed, complete, verified hard-copy snapshots')
   })
 
   it('rejects a sealed export when any listed backup file is damaged', async () => {

@@ -47,6 +47,8 @@ const DEVICE_INVENTORY = 'INVENTORY.txt'
 const DCP_DIR = 'dcp'
 const DCP_MANIFEST = 'manifest.json'
 const COMPLETE_RE = /^COMPLETE-([A-F0-9]{12})\.hypercomb$/
+/** Files between manifest checkpoints. The manifest IS the resume cursor. */
+const CHECKPOINT_FILES = 200
 
 type FolderSyncStatus =
   | 'unsupported'
@@ -80,6 +82,10 @@ export interface FolderSyncState {
   resolvedLayers?: number
   resolvedResources?: number
   missingReferences?: number
+  closureRoots?: number
+  failedRoots?: number
+  verified?: number
+  damaged?: number
   at: number
   error?: string
 }
@@ -107,16 +113,47 @@ interface DeviceManifest {
   fileCount: number
   totalBytes: number
   categories: Record<string, CategoryStamp>
+  /**
+   * Set while a full pass is mid-walk. The manifest is checkpointed during the
+   * walk so a refresh resumes from the last checkpoint instead of restarting;
+   * an active pass means `files` is a partial union, never a completion record.
+   */
+  pass?: { active: boolean; startedAt: number }
   files: Record<string, FileStamp>
 }
 
 interface HardCopyResult {
+  /** Lineage markers seen while enumerating closure roots. */
+  markers: number
+  /**
+   * Roots whose walk produced no layer at all. `adopt` reports such a root as
+   * ONE failure and returns, so its entire unwalked subtree — potentially
+   * hundreds of resources — never appears in `missing`. A single failed root
+   * therefore means the closure is unmeasured, not merely one item short.
+   */
+  rootsFailed: number
+  /** Signatures named by pool records rather than by any layer. */
+  poolReferences: number
+  /** References dropped because the walk hit its safety bound. */
+  truncated: number
   roots: number
   layers: number
   resources: number
   missing: number
   resolverAvailable: boolean
 }
+
+const emptyClosure = (): HardCopyResult => ({
+  markers: 0,
+  rootsFailed: 0,
+  poolReferences: 0,
+  truncated: 0,
+  roots: 0,
+  layers: 0,
+  resources: 0,
+  missing: 0,
+  resolverAvailable: true,
+})
 
 interface CompletionSeal {
   kind: 'hypercomb-backup-completion'
@@ -148,8 +185,17 @@ interface DcpBackupManifest {
 interface ContentBrokerLike {
   adopt?: (
     rootSig: string,
-    options?: { layersOnly?: boolean; silent?: boolean; quiet?: boolean },
-  ) => Promise<{ layers: number; leaves: number; failed: number }>
+    options?: {
+      layersOnly?: boolean
+      deepResources?: boolean
+      silent?: boolean
+      quiet?: boolean
+    },
+  ) => Promise<{ layers: number; leaves: number; failed: number; truncated?: number }>
+  adoptResources?: (
+    sigs: readonly string[],
+    options?: { deepResources?: boolean; quiet?: boolean },
+  ) => Promise<{ leaves: number; failed: number; truncated?: number }>
 }
 
 interface PermissionHandle extends FileSystemDirectoryHandle {
@@ -174,6 +220,25 @@ type MarkerPayload = {
 
 const validSegment = (name: string): boolean =>
   !!name && name !== '.' && name !== '..' && !/[\\/]/.test(name)
+
+// Effect payloads cross module and worker boundaries, where `instanceof`
+// compares against a different realm's constructor and reports false for a
+// perfectly good buffer. Tag inspection is realm-independent.
+const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
+  Object.prototype.toString.call(value) === '[object ArrayBuffer]'
+
+/** Every 64-hex signature reachable inside a parsed record. */
+const collectSigs = (value: unknown, out: Set<string>): void => {
+  if (typeof value === 'string') {
+    const s = value.toLowerCase()
+    if (SIG_RE.test(s)) out.add(s)
+    return
+  }
+  if (Array.isArray(value)) { for (const v of value) collectSigs(v, out); return }
+  if (value && typeof value === 'object') {
+    for (const v of Object.values(value as Record<string, unknown>)) collectSigs(v, out)
+  }
+}
 
 const equalBytes = (a: Uint8Array, b: Uint8Array): boolean => {
   if (a.byteLength !== b.byteLength) return false
@@ -294,6 +359,12 @@ export class FolderSyncService {
   #manifest: DeviceManifest | null = null
   #serial: Promise<void> = Promise.resolve()
   #reconciling = false
+  // A full pass is expensive and idempotent, so a second request while one is
+  // in flight must JOIN it, never queue a repeat. Without this, `connect()` and
+  // the boot-time passive reconciliation each enqueued a complete pass and the
+  // second started the instant the first finished.
+  #fullPass: Promise<void> | null = null
+  #fullPassRanThisSession = false
   #pendingMirrors = new Map<string, { relativePath: string[]; bytes: ArrayBuffer }>()
   #mirrorDrainScheduled = false
   #lastPathReportAt = 0
@@ -305,7 +376,7 @@ export class FolderSyncService {
 
   constructor() {
     EffectBus.on<{ sig: string; bytes: ArrayBuffer }>('content:wrote', payload => {
-      if (!SIG_RE.test(payload?.sig ?? '') || !(payload?.bytes instanceof ArrayBuffer)) return
+      if (!SIG_RE.test(payload?.sig ?? '') || !isArrayBuffer(payload?.bytes)) return
       // A full reconciliation scans OPFS after hard-copy materialization.
       // Mirroring each materialized object separately would duplicate that
       // work and, once the full pass finished, downgrade its inventory to a
@@ -316,7 +387,7 @@ export class FolderSyncService {
     EffectBus.on<MarkerPayload>('history:marker-wrote', payload => {
       if (!SIG_RE.test(payload?.lineageSig ?? '')
           || !/^\d{8}$/.test(payload?.markerName ?? '')
-          || !(payload?.bytes instanceof ArrayBuffer)) return
+          || !isArrayBuffer(payload?.bytes)) return
       if (this.#reconciling) return
       this.#queueMirror([payload.lineageSig, payload.markerName], payload.bytes)
     })
@@ -358,7 +429,10 @@ export class FolderSyncService {
       this.#report('unsupported')
       return
     }
-    this.#selected = await this.#loadHandle()
+    // A handle established by an explicit connect/resume outranks the stored
+    // lookup. Overwriting it with a null read silently disabled every
+    // subsequent drain — the boot lookup lands AFTER an early connect.
+    this.#selected ??= await this.#loadHandle()
     if (!this.#selected) {
       this.#report('unconfigured')
       return
@@ -422,9 +496,29 @@ export class FolderSyncService {
     this.#report('unconfigured')
   }
 
-  /** Complete OPFS reconciliation. Serialized behind incremental writes. */
-  public readonly syncNow = (mode: FolderSyncMode = 'hard-copy'): Promise<void> =>
-    this.#enqueue(() => this.#syncAll(mode))
+  /**
+   * Complete OPFS reconciliation. Serialized behind incremental writes, and
+   * deduplicated: a request made while a pass is in flight joins that pass.
+   */
+  public readonly syncNow = (mode: FolderSyncMode = 'hard-copy'): Promise<void> => {
+    if (this.#fullPass) return this.#fullPass
+    const run = this.#enqueue(() => this.#syncAll(mode)).finally(() => {
+      this.#fullPass = null
+      this.#fullPassRanThisSession = true
+    })
+    this.#fullPass = run
+    return run
+  }
+
+  /**
+   * Re-hash every file this device's manifest lists and compare it against the
+   * recorded signature. A copy pass deliberately does NOT do this — it skips
+   * unchanged content on name and size, which is sound because content is
+   * addressed by its own hash. This is where the participant can demand the
+   * expensive proof instead, and it is the only thing that legitimately
+   * advances `verifiedAt`.
+   */
+  public readonly verify = (): Promise<void> => this.#enqueue(() => this.#verifyAll())
 
   /**
    * Choose a portable backup and union its newest device snapshot into OPFS.
@@ -444,31 +538,38 @@ export class FolderSyncService {
 
     const backup = await this.#resolveBackupRoot(selected)
     if (!backup) throw new Error('The selected folder is not a Hypercomb backup.')
+    // A DCP snapshot is an OPTIONAL component of a backup. A browser without
+    // the installer writes a complete participant tree and no dcp/ directory;
+    // requiring one made every such backup permanently unimportable, and made
+    // import impossible in a private window, where DCP can never be present.
     const dcpSnapshot = await this.#verifiedDcpSnapshot(backup)
-    if (!dcpSnapshot) {
-      throw new Error('The selected folder contains no sealed, complete, verified DCP snapshot.')
+    if (dcpSnapshot === null) {
+      throw new Error('This backup contains a DCP snapshot, but it is not sealed, complete, and verified.')
     }
     const sources = await this.#deviceSnapshots(backup)
     if (sources.length === 0) {
       throw new Error('The selected folder contains no sealed, complete, verified hard-copy snapshots.')
     }
 
-    const getSentinel = (globalThis as any).__getSentinel as
-      | (() => Promise<SentinelBackupBridge | null>)
-      | undefined
-    const existingBridge = (globalThis as any).__sentinelBridge as SentinelBackupBridge | undefined
-    const restoreBridge = existingBridge?.importBackupFile ? existingBridge : await getSentinel?.()
-    if (!restoreBridge?.importBackupFile) {
-      throw new Error('DCP is unavailable, so this portable backup cannot be restored safely.')
-    }
-    for (const [path, stamp] of Object.entries(dcpSnapshot.manifest.entries)) {
-      const bytes = await this.#readPath(dcpSnapshot.opfs, path)
-      if (!bytes || !(await restoreBridge.importBackupFile({
-        path,
-        sha256: stamp.sha256,
-        bytes,
-      }))) {
-        throw new Error(`DCP restore failed for "${path}". No profile files were imported.`)
+    if (dcpSnapshot !== 'absent') {
+      const getSentinel = (globalThis as any).__getSentinel as
+        | (() => Promise<SentinelBackupBridge | null>)
+        | undefined
+      const existingBridge = (globalThis as any).__sentinelBridge as SentinelBackupBridge | undefined
+      const restoreBridge = existingBridge?.importBackupFile ? existingBridge : await getSentinel?.()
+      // The participant tree below is still importable without DCP; only the
+      // profile half of this backup is skipped, and it is reported as such.
+      if (restoreBridge?.importBackupFile) {
+        for (const [path, stamp] of Object.entries(dcpSnapshot.manifest.entries)) {
+          const bytes = await this.#readPath(dcpSnapshot.opfs, path)
+          if (!bytes || !(await restoreBridge.importBackupFile({
+            path,
+            sha256: stamp.sha256,
+            bytes,
+          }))) {
+            throw new Error(`DCP restore failed for "${path}". No profile files were imported.`)
+          }
+        }
       }
     }
 
@@ -609,22 +710,16 @@ export class FolderSyncService {
       const source = await navigator.storage.getDirectory()
       const hardCopy = mode === 'hard-copy'
         ? await this.#materializeHardCopy(source, selected.name, mode, agentId)
-        : {
-            roots: 0,
-            layers: 0,
-            resources: 0,
-            missing: 0,
-            resolverAvailable: true,
-          } satisfies HardCopyResult
+        : emptyClosure()
 
       const backup = this.#backupHandle
       await this.#writeRootManifest(backup)
       if (mode === 'hard-copy') {
         const dcpSnapshot = await this.#exportDcpBackup(backup, agentId)
-        if (!dcpSnapshot) {
+        if (dcpSnapshot === null) {
           hardCopy.resolverAvailable = false
           hardCopy.missing++
-        } else {
+        } else if (dcpSnapshot !== 'absent') {
           this.#report('syncing', {
             folder: selected.name,
             mode,
@@ -650,6 +745,7 @@ export class FolderSyncService {
         : this.#freshManifest()
       const previousFiles = manifest.files
       const nextFiles: Record<string, FileStamp> = {}
+      manifest.pass = { active: true, startedAt: Date.now() }
       const pools = await poolMeanings()
       let scanned = 0
       let copied = 0
@@ -658,46 +754,57 @@ export class FolderSyncService {
 
       for await (const entry of walkFiles(source)) {
         const file = await entry.handle.getFile()
-        const sourceBuffer = await file.arrayBuffer()
-        const sourceBytes = new Uint8Array(sourceBuffer)
-        const sha256 = await SignatureService.sign(sourceBuffer)
+        const parts = entry.path.split('/')
+        const name = parts.pop()!
+        // A root-level sig-named file is content-addressed: the NAME is the
+        // hash, and the bytes behind a signature can never change. Presence at
+        // the right size is therefore a complete answer — no read, no hash.
+        const contentSig = parts.length === 0 && SIG_RE.test(name) ? name : null
+        const old = previousFiles[entry.path]
         const stamp: FileStamp = {
           size: file.size,
           modified: file.lastModified,
-          sha256,
+          sha256: contentSig ?? old?.sha256,
           category: categoryFor(entry.path, pools),
         }
-        const old = previousFiles[entry.path]
-        let present = false
-        const parts = entry.path.split('/')
-        const name = parts.pop()!
+        // Mutable paths (markers, records) fall back to size + mtime against
+        // the recorded stamp; a recorded hash is required so the import-time
+        // verifier still has something to check.
+        const cheapMatch = contentSig !== null
+          || (!!old?.sha256 && old.size === file.size && old.modified === file.lastModified)
+
         const targetDir = await directoryAt(destination, parts, true)
-        if (old?.size === stamp.size && old?.sha256 === stamp.sha256) {
+        let present = false
+        if (cheapMatch) {
           try {
-            const targetHandle = await targetDir.getFileHandle(name, { create: false })
-            const targetFile = await targetHandle.getFile()
-            if (targetFile.size === stamp.size) {
-              const targetHash = await SignatureService.sign(await targetFile.arrayBuffer())
-              present = targetHash === sha256
-            }
+            present = (await (
+              await targetDir.getFileHandle(name, { create: false })
+            ).getFile()).size === file.size
           } catch {
             present = false
           }
         }
         if (!present) {
+          // The only path that touches bytes: one read, one write. Byte-level
+          // re-verification of the whole mirror belongs to import (which
+          // re-hashes every listed file) and to an explicit verify pass —
+          // not to every drain.
+          const sourceBuffer = await file.arrayBuffer()
+          stamp.sha256 = contentSig ?? await SignatureService.sign(sourceBuffer)
           await writeFile(targetDir, name, sourceBuffer)
-          const written = new Uint8Array(await (
-            await (await targetDir.getFileHandle(name, { create: false })).getFile()
-          ).arrayBuffer())
-          if (!equalBytes(sourceBytes, written)) {
-            throw new Error(`read-back verification failed for OPFS path "${entry.path}"`)
-          }
           copied++
           copiedBytes += stamp.size
         }
         nextFiles[entry.path] = stamp
         scanned++
         totalBytes += stamp.size
+        if (scanned % CHECKPOINT_FILES === 0) {
+          // Checkpoint: the manifest is the resume cursor. Union with the
+          // prior record so an interrupted pass never discards knowledge of
+          // files it has not reached yet, and mark the pass active so this
+          // partial record is never mistaken for a completion.
+          await this.#checkpoint(device, manifest, { ...previousFiles, ...nextFiles })
+        }
         this.#reportLatestPath(
           agentId,
           `${selected.name}\\${BACKUP_DIR}\\${DEVICES_DIR}\\${this.#deviceId}\\opfs\\${entry.path.replaceAll('/', '\\')}`,
@@ -706,7 +813,7 @@ export class FolderSyncService {
           this.#report('syncing', {
             folder: selected.name,
             mode,
-            phase: 'Copying and verifying every root file and folder',
+            phase: 'Copying every new or changed root file and folder',
             copied,
             scanned,
             copiedBytes,
@@ -723,6 +830,7 @@ export class FolderSyncService {
       }
 
       manifest.files = nextFiles
+      manifest.pass = { active: false, startedAt: manifest.pass?.startedAt ?? Date.now() }
       manifest.updatedAt = Date.now()
       manifest.verifiedAt = manifest.updatedAt
       const retainedPortable = mode === 'local'
@@ -738,12 +846,13 @@ export class FolderSyncService {
       const complete = manifest.mode === 'hard-copy'
         && manifest.closure.resolverAvailable
         && manifest.closure.missing === 0
+        && (manifest.closure.rootsFailed ?? 0) === 0
       await this.#writeManifestAndSeal(device, manifest, complete)
       await this.#writeDeviceInventory(device, manifest, manifest.mode, manifest.closure)
       await this.#writeBackupReport(backup)
       this.#manifest = manifest
       const passSucceeded = mode === 'local'
-        || (hardCopy.resolverAvailable && hardCopy.missing === 0)
+        || (hardCopy.resolverAvailable && hardCopy.missing === 0 && hardCopy.rootsFailed === 0)
       let dcpManifest: DcpBackupManifest | null = null
       if (mode === 'hard-copy') {
         try {
@@ -769,10 +878,15 @@ export class FolderSyncService {
         resolvedLayers: hardCopy.layers,
         resolvedResources: hardCopy.resources,
         missingReferences: hardCopy.missing,
+        closureRoots: hardCopy.roots,
+        failedRoots: hardCopy.rootsFailed,
         error: passSucceeded
           ? undefined
           : hardCopy.resolverAvailable
             ? `${hardCopy.missing} referenced item${hardCopy.missing === 1 ? '' : 's'} could not be made local`
+              + (hardCopy.rootsFailed > 0
+                ? ` — and ${hardCopy.rootsFailed} of ${hardCopy.roots} closure roots produced no layer, so everything beneath them is unmeasured`
+                : '')
             : 'the content resolver was unavailable, so remote references could not be audited',
       })
       EffectBus.emit('agent:end', {
@@ -801,6 +915,118 @@ export class FolderSyncService {
     }
   }
 
+  readonly #verifyAll = async (): Promise<void> => {
+    const selected = this.#selected
+    if (!selected) {
+      this.#report('unconfigured')
+      return
+    }
+    if (await this.#permission(selected, false) !== 'granted') {
+      this.#report('needs-permission', { folder: selected.name })
+      return
+    }
+
+    const agentId = `folder-verify:${this.#deviceId}`
+    EffectBus.emit('agent:start', {
+      id: agentId,
+      behavior: 'folder-sync',
+      kind: 'script',
+      request: `Re-hash every backed-up file in ${selected.name}`,
+      targets: ['folder-backup'],
+      segments: [],
+    })
+    try {
+      const backup = await selected.getDirectoryHandle(BACKUP_DIR, { create: false })
+      const devices = await backup.getDirectoryHandle(DEVICES_DIR, { create: false })
+      const device = await devices.getDirectoryHandle(this.#deviceId, { create: false })
+      const opfs = await device.getDirectoryHandle('opfs', { create: false })
+      const manifest = await readJson<DeviceManifest>(device, DEVICE_MANIFEST)
+      if (manifest?.kind !== 'hypercomb-folder-backup-device') {
+        throw new Error('this device has no backup manifest to verify against')
+      }
+
+      const entries = Object.entries(manifest.files ?? {})
+      const damaged: string[] = []
+      let verified = 0
+      let verifiedBytes = 0
+      for (const [path, stamp] of entries) {
+        const bytes = await this.#readPath(opfs, path)
+        // A stamp with no recorded hash cannot be proven. Copying it again is
+        // the fix, so it counts as damaged rather than quietly passing.
+        if (!bytes || !stamp.sha256
+            || bytes.byteLength !== stamp.size
+            || await SignatureService.sign(bytes) !== stamp.sha256) {
+          damaged.push(path)
+        } else {
+          verified++
+          verifiedBytes += bytes.byteLength
+        }
+        if ((verified + damaged.length) % 25 === 0) {
+          this.#report('syncing', {
+            folder: selected.name,
+            mode: manifest.mode,
+            phase: `Re-hashing every backed-up file (${verified + damaged.length}/${entries.length})`,
+            verified,
+            damaged: damaged.length,
+            scanned: entries.length,
+            totalBytes: verifiedBytes,
+          })
+          EffectBus.emit('agent:progress', {
+            id: agentId,
+            activity: `re-hashed ${verified + damaged.length}/${entries.length}; ${damaged.length} damaged`,
+          })
+        }
+      }
+
+      const sound = damaged.length === 0
+      if (sound) {
+        // Only a real re-hash may advance this. The copy pass moves
+        // `updatedAt` alone.
+        manifest.verifiedAt = Date.now()
+        const complete = manifest.mode === 'hard-copy'
+          && manifest.closure?.resolverAvailable === true
+          && manifest.closure.missing === 0
+          && (manifest.closure.rootsFailed ?? 0) === 0
+        await this.#writeManifestAndSeal(device, manifest, complete)
+        await this.#writeDeviceInventory(device, manifest, manifest.mode, manifest.closure)
+        await this.#writeBackupReport(backup)
+        this.#manifest = manifest
+      }
+      this.#report(sound ? 'backed-up' : 'incomplete', {
+        folder: selected.name,
+        mode: manifest.mode,
+        phase: sound
+          ? `Re-hashed and matched all ${verified} backed-up files`
+          : `${damaged.length} backed-up file${damaged.length === 1 ? '' : 's'} did not match`,
+        verified,
+        damaged: damaged.length,
+        scanned: entries.length,
+        totalBytes: verifiedBytes,
+        error: sound
+          ? undefined
+          : `${damaged.length} file${damaged.length === 1 ? '' : 's'} damaged or missing`
+            + ` (first: ${damaged.slice(0, 3).join(', ')}) — run /folder-sync hard-copy to rewrite them`,
+      })
+      EffectBus.emit('agent:end', {
+        id: agentId,
+        ok: sound,
+        summary: `${verified} verified (${formatBytes(verifiedBytes)}); ${damaged.length} damaged`,
+      })
+      EffectBus.emit('activity:log', {
+        message: sound
+          ? `backup verified byte for byte: ${verified} files (${formatBytes(verifiedBytes)}) in ${selected.name}`
+          : `backup verification FAILED: ${damaged.length} of ${entries.length} files damaged or missing`,
+        icon: sound ? '◈' : '!',
+      })
+    } catch (error) {
+      this.#report('error', {
+        folder: selected.name,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      EffectBus.emit('agent:end', { id: agentId, ok: false, summary: String(error) })
+    }
+  }
+
   /**
    * Make every history revision's reachable layer/resource closure physical
    * before a hard-copy pass. The broker's adopt walker first checks OPFS, then
@@ -816,41 +1042,57 @@ export class FolderSyncService {
     agentId: string,
   ): Promise<HardCopyResult> => {
     const roots = new Set<string>()
+    // Content named by pool records — threads, clipboard, manifests — that no
+    // layer references. Nothing else in the walk would ever pull it local, so
+    // without this a hard copy silently omits it.
+    const poolReferenced = new Set<string>()
     const pools = await poolMeanings()
+    let markers = 0
+    let markersUnread = 0
 
     for await (const [name, handle] of (source as any).entries()) {
-      if (handle.kind !== 'directory' || !SIG_RE.test(name) || pools.has(name)) continue
+      if (handle.kind === 'directory' && pools.has(name)) {
+        await this.#collectPoolReferences(handle as FileSystemDirectoryHandle, poolReferenced)
+        continue
+      }
+      if (handle.kind !== 'directory' || !SIG_RE.test(name)) continue
       for await (const [markerName, markerHandle] of (handle as any).entries()) {
         if (markerHandle.kind !== 'file' || !MARKER_RE.test(markerName)) continue
+        markers++
         try {
           const marker = await (markerHandle as FileSystemFileHandle).getFile()
           const extracted = await extractLayerSigFromMarker(await marker.arrayBuffer())
           if (SIG_RE.test(extracted.layerSig)) roots.add(extracted.layerSig.toLowerCase())
         } catch {
-          // An unreadable marker is still copied by the raw OPFS pass. It
-          // cannot safely name a closure root, so the read-back inventory is
-          // the place where the participant will see it.
+          // Extraction itself does not throw (a legacy marker falls back to
+          // hashing its own bytes), so this is only reached when the marker
+          // file cannot be read. The root it would have named is lost, which
+          // the pass must not treat as "nothing to fetch".
+          markersUnread++
         }
       }
     }
 
     const broker = (window as any).ioc?.get?.(CONTENT_BROKER_KEY) as ContentBrokerLike | undefined
-    if (roots.size > 0 && !broker?.adopt) {
+    if ((roots.size > 0 || poolReferenced.size > 0) && !broker?.adopt) {
       return {
+        ...emptyClosure(),
+        markers,
         roots: roots.size,
-        layers: 0,
-        resources: 0,
-        missing: roots.size,
+        rootsFailed: roots.size,
+        missing: roots.size + markersUnread,
         resolverAvailable: false,
       }
     }
 
     const result: HardCopyResult = {
+      ...emptyClosure(),
+      markers,
       roots: roots.size,
-      layers: 0,
-      resources: 0,
-      missing: 0,
-      resolverAvailable: true,
+      // An unread marker names a root that was never walked. That is an
+      // unaudited closure, and must never pass as portable just because no
+      // fetch was attempted for it.
+      missing: markersUnread,
     }
     let index = 0
     for (const root of roots) {
@@ -868,15 +1110,83 @@ export class FolderSyncService {
         activity: `materializing referenced content ${index}/${roots.size}`,
       })
       try {
-        const stats = await broker!.adopt!(root, { silent: true, quiet: true })
+        // deepResources: a hard copy is everything. A layer names content by
+        // signature, and so do many resources — without descent the pass
+        // fetches the contracts and calls it complete while the bytes they
+        // name stay remote.
+        const stats = await broker!.adopt!(root, {
+          deepResources: true,
+          silent: true,
+          quiet: true,
+        })
         result.layers += stats.layers
         result.resources += stats.leaves
-        result.missing += stats.failed
+        // A walk that hit its safety bound left content unfetched. That is
+        // missing content, not a completed closure.
+        result.missing += stats.failed + (stats.truncated ?? 0)
+        result.truncated += stats.truncated ?? 0
+        // No layer at all means the walk stopped at the root: nothing below
+        // it was enumerated, so `missing` (which grew by exactly one) is not
+        // a measure of what this closure actually lacks.
+        if (stats.layers === 0) result.rootsFailed++
       } catch {
+        result.rootsFailed++
         result.missing++
       }
     }
+
+    // Pool-named content last: by now the layer closure is local, so most of
+    // these are already-present sigs the broker resolves for free.
+    if (poolReferenced.size > 0 && broker?.adoptResources) {
+      this.#report('syncing', {
+        folder,
+        mode,
+        phase: `Materializing ${poolReferenced.size} items named by pool records`,
+        resolvedLayers: result.layers,
+        resolvedResources: result.resources,
+        missingReferences: result.missing,
+      })
+      try {
+        const stats = await broker.adoptResources([...poolReferenced], {
+          deepResources: true,
+          quiet: true,
+        })
+        result.poolReferences = poolReferenced.size
+        result.resources += stats.leaves
+        result.missing += stats.failed + (stats.truncated ?? 0)
+        result.truncated += stats.truncated ?? 0
+      } catch {
+        result.poolReferences = poolReferenced.size
+        result.missing += poolReferenced.size
+      }
+    } else if (poolReferenced.size > 0) {
+      // No resource-rooted entry point available: this content is unaudited,
+      // which is a missing closure, not a clean pass.
+      result.poolReferences = poolReferenced.size
+      result.missing += poolReferenced.size
+    }
     return result
+  }
+
+  /**
+   * Signatures named by the records in one pool of meaning. Records are JSON;
+   * anything that does not parse as an object/array is a leaf and is never
+   * scanned, so this can never blind-harvest hex out of binary content.
+   */
+  readonly #collectPoolReferences = async (
+    pool: FileSystemDirectoryHandle,
+    out: Set<string>,
+  ): Promise<void> => {
+    for await (const entry of walkFiles(pool)) {
+      try {
+        const text = (await (await entry.handle.getFile()).text()).trim()
+        if (!text.startsWith('{') && !text.startsWith('[')) continue
+        collectSigs(JSON.parse(text), out)
+      } catch {
+        // An unreadable or non-JSON pool record names nothing we can follow.
+        // Its own bytes are still copied verbatim by the OPFS walk.
+      }
+    }
   }
 
   readonly #mirrorIncremental = async (
@@ -917,19 +1227,14 @@ export class FolderSyncService {
       }
       manifest.updatedAt = Date.now()
       manifest.verifiedAt = manifest.updatedAt
+      // A drain only ADDS bytes, so it must never restate closure facts.
+      // Overwriting them erased the record of what a full pass reported
+      // missing AND dropped the snapshot below the bar `#deviceSnapshots`
+      // requires, quietly making a backup unrestorable with no signal.
       const remainsPortable = manifest.mode === 'hard-copy'
-        && manifest.closure?.resolverAvailable
+        && manifest.closure?.resolverAvailable === true
         && manifest.closure.missing === 0
-      if (!remainsPortable) {
-        manifest.mode = 'local'
-        manifest.closure = {
-          roots: 0,
-          layers: 0,
-          resources: 0,
-          missing: 0,
-          resolverAvailable: true,
-        }
-      }
+        && (manifest.closure.rootsFailed ?? 0) === 0
       manifest.fileCount = Object.keys(manifest.files).length
       const summary = summarizeFiles(manifest.files)
       manifest.totalBytes = summary.totalBytes
@@ -1021,9 +1326,11 @@ export class FolderSyncService {
         continue
       }
       if (manifest.kind !== 'hypercomb-folder-backup-device'
+          || manifest.pass?.active === true
           || manifest.mode !== 'hard-copy'
           || !manifest.closure?.resolverAvailable
-          || manifest.closure.missing !== 0) continue
+          || manifest.closure.missing !== 0
+          || (manifest.closure.rootsFailed ?? 0) !== 0) continue
       const manifestSha256 = await SignatureService.sign(manifestBytes)
       if (!(await this.#hasValidCompletionSeal(dir, manifestSha256, deviceId))) continue
       try {
@@ -1057,7 +1364,9 @@ export class FolderSyncService {
       '',
       'Hypercomb uses content signatures as filenames, so many resources look like',
       'long hexadecimal names. They are real local files, not internet shortcuts.',
-      'The dcp/ snapshot is streamed from DCP itself and verified separately.',
+      'The dcp/ snapshot is streamed from DCP itself and verified separately. It is',
+      'present only when this browser has DCP attached; a browser without it writes',
+      'a complete participant backup and no dcp/ directory.',
       '',
       'HOW TO VERIFY IT',
       `Open ${BACKUP_REPORT} for the total file count, byte count, category`,
@@ -1066,12 +1375,25 @@ export class FolderSyncService {
       '',
       'MODES',
       'local: exact hard bytes already held by this browser; never uses the network.',
-      'hard-copy: first materializes reachable online-only layers/resources, then',
-      'copies and verifies the expanded OPFS. Missing items are reported as incomplete.',
+      'hard-copy: first materializes everything the hive references, then copies',
+      'the expanded OPFS. A signature can name content that itself names more',
+      'content, so the walk follows those chains to the end rather than stopping',
+      'at the records that hold them, and it also follows content named by pool',
+      'records (threads, clipboard, manifests) that no layer points at.',
+      'Missing items are reported as incomplete, as is any closure root that',
+      'produced no layer — everything beneath such a root is unmeasured, so the',
+      'copy cannot be called portable.',
+      '',
+      'A pass copies only new or changed files: content here is named by its own',
+      'signature, so a file already present at the right size is already correct.',
+      'Every listed file IS re-hashed and checked at restore time, before any of',
+      'it is accepted.',
       '',
       'RESTORE',
       'Use /folder-sync import and choose this directory or its parent.',
       'Import accepts only a complete, cryptographically sealed hard-copy export.',
+      'A dcp/ snapshot, when present, is verified and restored first; when this',
+      'backup has none, the participant tree is imported on its own.',
       'Existing differing local files are never overwritten automatically.',
       '',
     ].join('\n'))
@@ -1094,7 +1416,11 @@ export class FolderSyncService {
       `Physical bytes: ${manifest.totalBytes} (${formatBytes(manifest.totalBytes)})`,
       'This device inventory covers participant/profile OPFS only.',
       `DCP packages and behaviors are inventoried separately in ../../${DCP_DIR}/${DCP_MANIFEST}.`,
+      `History markers seen: ${hardCopy.markers}`,
       `Closure roots checked: ${hardCopy.roots}`,
+      `Roots that produced no layer (subtree unmeasured): ${hardCopy.rootsFailed}`,
+      `Items named by pool records (no layer references them): ${hardCopy.poolReferences}`,
+      `References dropped at the safety bound (copy is NOT portable): ${hardCopy.truncated}`,
       `Referenced layers made local: ${hardCopy.layers}`,
       `Referenced resources made local: ${hardCopy.resources}`,
       `Missing referenced items: ${hardCopy.missing}`,
@@ -1138,10 +1464,15 @@ export class FolderSyncService {
     manifests.sort((a, b) => b.updatedAt - a.updatedAt)
     const aggregateFiles = manifests.reduce((sum, manifest) => sum + (manifest.fileCount ?? 0), 0)
     const aggregateBytes = manifests.reduce((sum, manifest) => sum + (manifest.totalBytes ?? 0), 0)
-    const dcp = await readJson<DcpBackupManifest>(
-      await backup.getDirectoryHandle(DCP_DIR, { create: true }),
-      DCP_MANIFEST,
-    )
+    // Never `create: true` here. An empty dcp/ minted by the report writer
+    // reads at import time as "a DCP snapshot that fails verification".
+    let dcp: DcpBackupManifest | null = null
+    try {
+      dcp = await readJson<DcpBackupManifest>(
+        await backup.getDirectoryHandle(DCP_DIR, { create: false }),
+        DCP_MANIFEST,
+      )
+    } catch { /* participant-only backup: no DCP half */ }
     const lines = [
       'HYPERCOMB BACKUP REPORT',
       '',
@@ -1162,7 +1493,8 @@ export class FolderSyncService {
         `DEVICE ${manifest.deviceId}`,
         `  verified: ${new Date(manifest.verifiedAt || manifest.updatedAt).toISOString()}`,
         `  mode: ${manifest.mode ?? 'legacy local snapshot'}`,
-        `  portable closure: ${manifest.mode === 'hard-copy' && manifest.closure?.resolverAvailable && manifest.closure.missing === 0 ? 'complete' : 'not asserted'}`,
+        `  portable closure: ${manifest.mode === 'hard-copy' && manifest.closure?.resolverAvailable && manifest.closure.missing === 0 && (manifest.closure.rootsFailed ?? 0) === 0 ? 'complete' : 'not asserted'}`,
+        `  closure roots: ${manifest.closure?.roots ?? 'unknown'} (${manifest.closure?.rootsFailed ?? 'unknown'} produced no layer)`,
         `  missing referenced items: ${manifest.closure?.missing ?? 'unknown'}`,
         `  files: ${manifest.fileCount}`,
         `  bytes: ${manifest.totalBytes ?? 0} (${formatBytes(manifest.totalBytes ?? 0)})`,
@@ -1184,18 +1516,33 @@ export class FolderSyncService {
     updatedAt: Date.now(),
     verifiedAt: 0,
     mode: 'local',
-    closure: {
-      roots: 0,
-      layers: 0,
-      resources: 0,
-      missing: 0,
-      resolverAvailable: true,
-    },
+    closure: emptyClosure(),
     fileCount: 0,
     totalBytes: 0,
     categories: {},
     files: {},
   })
+
+  /**
+   * Persist mid-walk progress. Never sealed and never marked complete: an
+   * interrupted pass must resume, not masquerade as a finished backup.
+   */
+  readonly #checkpoint = async (
+    device: FileSystemDirectoryHandle,
+    manifest: DeviceManifest,
+    files: Record<string, FileStamp>,
+  ): Promise<void> => {
+    const summary = summarizeFiles(files)
+    await writeFile(device, DEVICE_MANIFEST, new TextEncoder().encode(JSON.stringify({
+      ...manifest,
+      files,
+      fileCount: Object.keys(files).length,
+      totalBytes: summary.totalBytes,
+      categories: summary.categories,
+      updatedAt: Date.now(),
+      pass: { active: true, startedAt: manifest.pass?.startedAt ?? Date.now() },
+    } satisfies DeviceManifest, null, 2)))
+  }
 
   readonly #writeManifestAndSeal = async (
     device: FileSystemDirectoryHandle,
@@ -1220,16 +1567,22 @@ export class FolderSyncService {
     )
   }
 
+  /**
+   * `'absent'` — no DCP is attached to this browser, so there is no profile
+   * half to copy. That is a complete participant backup, not a failure.
+   * `null` — DCP IS present but its export was broken or empty, which must
+   * make the pass incomplete.
+   */
   readonly #exportDcpBackup = async (
     backup: FileSystemDirectoryHandle,
     agentId: string,
-  ): Promise<{ files: number; bytes: number } | null> => {
+  ): Promise<{ files: number; bytes: number } | 'absent' | null> => {
     const getSentinel = (globalThis as any).__getSentinel as
       | (() => Promise<SentinelBackupBridge | null>)
       | undefined
     const existing = (globalThis as any).__sentinelBridge as SentinelBackupBridge | undefined
     const bridge = existing?.exportBackup ? existing : await getSentinel?.()
-    if (!bridge?.exportBackup) return null
+    if (!bridge?.exportBackup) return 'absent'
 
     const dcp = await backup.getDirectoryHandle(DCP_DIR, { create: true })
     const destination = await dcp.getDirectoryHandle('opfs', { create: true })
@@ -1290,13 +1643,24 @@ export class FolderSyncService {
     return { files: writtenFiles, bytes: writtenBytes }
   }
 
+  /**
+   * `'absent'` — this backup carries no DCP half at all (no dcp/ directory or
+   * no manifest in it), which is a valid participant-only backup.
+   * `null` — a DCP snapshot IS present but fails verification, which is a
+   * corrupt backup and must never be restored.
+   */
   readonly #verifiedDcpSnapshot = async (
     backup: FileSystemDirectoryHandle,
-  ): Promise<{ manifest: DcpBackupManifest; opfs: FileSystemDirectoryHandle } | null> => {
+  ): Promise<{ manifest: DcpBackupManifest; opfs: FileSystemDirectoryHandle } | 'absent' | null> => {
+    let dcp: FileSystemDirectoryHandle
     try {
-      const dcp = await backup.getDirectoryHandle(DCP_DIR, { create: false })
+      dcp = await backup.getDirectoryHandle(DCP_DIR, { create: false })
+    } catch {
+      return 'absent'
+    }
+    try {
       const manifestBytes = await readFileBytes(dcp, DCP_MANIFEST)
-      if (!manifestBytes) return null
+      if (!manifestBytes) return 'absent'
       const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as DcpBackupManifest
       if (manifest?.kind !== 'hypercomb-dcp-backup' || manifest.version !== 1) return null
       const hash = await SignatureService.sign(manifestBytes)
@@ -1383,6 +1747,9 @@ export class FolderSyncService {
 
   readonly #schedulePassiveReconciliation = (): void => {
     const run = (): void => {
+      // An explicit connect/resume already covers this boot. Re-running would
+      // repeat the whole materialization for no new bytes.
+      if (this.#fullPass || this.#fullPassRanThisSession) return
       const settings = this.settings()
       if (settings.automatic) void this.syncNow(settings.mode)
     }
