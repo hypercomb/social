@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-import { Drone, EffectBus, consumePointerGesture, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
-import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
+import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
+import { Application, Container, Graphics, Point, Sprite, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
@@ -9,7 +9,6 @@ import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
 import { cellLocationSig } from '../../editor/tile-properties.js'
-import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
@@ -215,20 +214,29 @@ const DRAG_ALPHA = 0.6
 const INERT_ALPHA = 0.4
 const DROP_HIGHLIGHT_TINT = 0x88ffff
 
+// TILE VIEW PENDING. A view assigned to a tile may need to read its layer,
+// decorations, notes, or media before it can cover the hexagon surface. Keep
+// the acknowledgement compact and inside the tile the participant pressed:
+// the hourglass says "your click landed" while the orbit says work is live.
+const VIEW_PENDING_Y = -9
+const VIEW_PENDING_BACKING_RADIUS = 7.5
+const VIEW_PENDING_RING_RADIUS = 6.15
+const VIEW_PENDING_COLOR = 0x9bcfe8
+const VIEW_PENDING_SAND = 0xe6bf72
+
 // ── Action hint constants ────────────────────────────────────────
 const HINT_DELAY_MS = 110       // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
-const HINT_EXPAND_DELAY_MS = 1100 // sustained hover after the label appears → expanded description; clicks always fire the action
 const HINT_Y_OFFSET = 17        // below the label band — moved up 7 with ICON_Y (absolute, does not follow on its own)
-const HINT_FONT_SIZE = 6
+const HINT_FONT_SIZE = 4
 const HINT_COLOR = 0xeaf0ff     // near-white — reads crisp against the dark hint pill
-const HINT_EXPANDED_FONT_SIZE = 5.5
-const HINT_MAX_WIDTH = 60
+const HINT_EXPANDED_FONT_SIZE = 3.25
+const HINT_MAX_WIDTH = 44
 // Tooltip pill behind the hint text — turns the bare floating glyph into a
 // clean, legible label that reads against any tile content.
 const HINT_PILL_FILL = 0x0c0c1a
 const HINT_PILL_ALPHA = 0.82
-const HINT_PILL_PAD_X = 3
-const HINT_PILL_PAD_Y = 1.5
+const HINT_PILL_PAD_X = 2.5
+const HINT_PILL_PAD_Y = 2
 const HINT_PILL_RADIUS = 2
 // Hint Text rasterisation resolution. The stage is scaled 1.8× and the
 // camera can zoom further, so the renderer's default DPR alone leaves
@@ -261,6 +269,21 @@ export class TileOverlayDrone extends Drone {
   #overlay: Container | null = null
   #hexBg: HexOverlayMesh | null = null
   #actions: OverlayAction[] = []
+  /** In-tile acknowledgement between `view:open-for-tile` and the assigned
+   *  view entering owner-counted `view:active`. Independent of hover: moving
+   *  the pointer away must not make an in-flight click look forgotten. */
+  #viewPending: { view: string; label: string } | null = null
+  #viewPendingIndicator: Container | null = null
+  #viewPendingRing: Graphics | null = null
+  #viewPendingHourglass: Graphics | null = null
+  /** `view:open-for-tile` is a gesture but EffectBus retains last values.
+   *  Suppress the subscription-time replay; only opens occurring after this
+   *  overlay is listening are live work that needs acknowledgement. */
+  #acceptViewOpen = false
+  /** Rows currently laid out for the hovered tile: its name plus icon rows.
+   *  Travels with tile:hover so navigation cannot pair a fresh hover with a
+   *  stale global row count. */
+  #bandRows = 1
   /** Unhook for the ioc.onRegister watch that un-shades a feature affordance
    *  the moment its backing bee registers (feature-readiness shade). */
   #unregisterBackingWatch: (() => void) | undefined
@@ -427,8 +450,8 @@ export class TileOverlayDrone extends Drone {
   // ── Action hint state ──────────────────────────────────────────
   #hintText: Text | null = null
   #hintBg: Graphics | null = null
+  #hintIcon: Sprite | null = null
   #hintDescriptionText: Text | null = null
-  #hintDescriptionBg: Graphics | null = null
   #hintTimer: ReturnType<typeof setTimeout> | null = null
   #hintActionName: string | null = null
   #hintExpanded = false
@@ -454,6 +477,7 @@ export class TileOverlayDrone extends Drone {
     'icon:edit-mode', 'icon:override-changed',
     'tags:removal-pending', 'tags:apply-pending',
     'sample:mode', 'select:mode', 'tile:enter-request',
+    'view:open-for-tile', 'view:active',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
 
@@ -657,6 +681,7 @@ export class TileOverlayDrone extends Drone {
         if (this.#currentAxial) {
           this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
         }
+        this.#positionViewPending()
       })
 
       this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
@@ -673,6 +698,14 @@ export class TileOverlayDrone extends Drone {
         this.#flatPaths = new Map(Object.entries(payload.flatPaths ?? {}))
         this.#filterBlocked = new Set(payload.filterBlocked ?? [])
         this.#rebuildOccupiedMap()
+        // A same-layer repaint can shift slot assignments while the assigned
+        // view is still reading. Follow the tile by label; if it genuinely
+        // left this layer, there is no honest tile anchor left to show.
+        if (this.#viewPending && !this.#cellLabels.includes(this.#viewPending.label)) {
+          this.#clearViewPending()
+        } else {
+          this.#positionViewPending()
+        }
         // The maps above now describe the level on screen — release the
         // backstop's tile-enter latch. cell-count only fires at render
         // completion for the CURRENT location, which is exactly the arrival
@@ -760,6 +793,7 @@ export class TileOverlayDrone extends Drone {
         this.#flat = payload.flat
         this.#updateHexBg()
         if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
+        this.#positionViewPending()
       })
 
       this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
@@ -768,6 +802,36 @@ export class TileOverlayDrone extends Drone {
         if (detector) detector.spacing = geo.spacing
         this.#updateHexBg()
         if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
+        this.#positionViewPending()
+      })
+
+      // A tile-assigned takeover begins asynchronously: acknowledge it on the
+      // hexagon surface immediately, before its first layer/resource await.
+      // The target path is explicit, so this also works when Beehaviors opens
+      // a visible tile without relying on whichever tile is still hovered.
+      this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', (payload) => {
+        if (!this.#acceptViewOpen) return
+        const view = String(payload?.view ?? '').trim()
+        const segments = Array.isArray(payload?.segments)
+          ? payload!.segments!.map(s => String(s ?? '').trim()).filter(Boolean)
+          : []
+        const label = segments.at(-1) ?? ''
+        if (!view || !label || !this.#cellLabels.includes(label)) {
+          this.#clearViewPending()
+          return
+        }
+        this.#viewPending = { view, label }
+        this.#ensureViewPendingIndicator()
+        this.#positionViewPending()
+        if (this.#viewPendingIndicator) this.#viewPendingIndicator.visible = !this.#hiveHidden
+        this.#canvas?.setAttribute('aria-busy', 'true')
+      })
+      this.#acceptViewOpen = true
+
+      // View drones enter this owner-counted mode only after their surface is
+      // mounted. That is the exact end of the otherwise silent pause.
+      this.onEffect<{ active?: boolean }>('view:active', ({ active }) => {
+        if (active === true) this.#clearViewPending()
       })
 
       this.onEffect('navigation:guard-start', () => { this.#beginNavigationTransition() })
@@ -784,7 +848,10 @@ export class TileOverlayDrone extends Drone {
       // wired to a tile nobody can see.
       this.onEffect<{ visible: boolean }>('render:set-hive-visible', ({ visible }) => {
         this.#hiveHidden = !visible
-        if (this.#hiveHidden) { if (this.#overlay) this.#overlay.visible = false }
+        if (this.#hiveHidden) {
+          if (this.#overlay) this.#overlay.visible = false
+          if (this.#viewPendingIndicator) this.#viewPendingIndicator.visible = false
+        }
         else this.#updateVisibility()
       })
 
@@ -968,6 +1035,13 @@ export class TileOverlayDrone extends Drone {
       this.#app.ticker.remove(this.#animTickBound)
       this.#animTickBound = null
     }
+    this.#clearViewPending()
+    if (this.#viewPendingIndicator) {
+      this.#viewPendingIndicator.destroy({ children: true })
+      this.#viewPendingIndicator = null
+      this.#viewPendingRing = null
+      this.#viewPendingHourglass = null
+    }
     if (this.#overlay) {
       this.#overlay.destroy({ children: true })
       this.#overlay = null
@@ -1001,6 +1075,14 @@ export class TileOverlayDrone extends Drone {
         this.#animTime += (ticker.deltaMS ?? 16) / 1000
         if (this.#hexBg && this.#overlay?.visible) {
           this.#hexBg.setTime(this.#animTime)
+        }
+        if (this.#viewPendingIndicator?.visible && this.#viewPendingRing) {
+          // A slow orbit and very shallow breath keep it alive without making
+          // the tiny mark busy or flashy.
+          this.#viewPendingRing.rotation = this.#animTime * 1.65
+          if (this.#viewPendingHourglass) {
+            this.#viewPendingHourglass.alpha = 0.9 + Math.sin(this.#animTime * 2.4) * 0.07
+          }
         }
         if (this.#arrangeMode || this.#iconEditOn) {
           this.#animateArrangeWiggle()
@@ -1057,6 +1139,91 @@ export class TileOverlayDrone extends Drone {
 
   #updateHexBg(): void {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
+  }
+
+  /** Build the pending mark once. It is deliberately its own container rather
+   *  than part of #overlay: the hover menu comes and goes with the pointer,
+   *  while an accepted click remains acknowledged until its view mounts. */
+  #ensureViewPendingIndicator(): void {
+    if (!this.#renderContainer || this.#viewPendingIndicator) return
+
+    const indicator = new Container()
+    indicator.visible = false
+    indicator.zIndex = 10001
+
+    // A tiny six-sided glass plaque belongs to the hive geometry and occupies
+    // far less visual mass than the old circular badge.
+    const backing = new Graphics()
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 3
+      const x = Math.cos(a) * VIEW_PENDING_BACKING_RADIUS
+      const y = Math.sin(a) * VIEW_PENDING_BACKING_RADIUS
+      if (i === 0) backing.moveTo(x, y)
+      else backing.lineTo(x, y)
+    }
+    backing.closePath()
+    backing.fill({ color: 0x0b1520, alpha: 0.66 })
+    backing.stroke({ width: 0.55, color: VIEW_PENDING_COLOR, alpha: 0.34, join: 'round' })
+    indicator.addChild(backing)
+
+    const ring = new Graphics()
+    ring.arc(0, 0, VIEW_PENDING_RING_RADIUS, -0.9, 0.85)
+    ring.stroke({ width: 0.85, color: VIEW_PENDING_COLOR, alpha: 0.88, cap: 'round' })
+    indicator.addChild(ring)
+
+    const glass = new Graphics()
+    // Fine frame plus curved glass sides: enough silhouette to read instantly,
+    // without the heavy crossed lines of the first pass.
+    glass.moveTo(-2.65, -3.5)
+    glass.lineTo(2.65, -3.5)
+    glass.moveTo(-2.65, 3.5)
+    glass.lineTo(2.65, 3.5)
+    glass.moveTo(-2.15, -2.9)
+    glass.bezierCurveTo(-2.05, -1.45, -0.55, -0.65, 0, 0)
+    glass.bezierCurveTo(-0.55, 0.65, -2.05, 1.45, -2.15, 2.9)
+    glass.moveTo(2.15, -2.9)
+    glass.bezierCurveTo(2.05, -1.45, 0.55, -0.65, 0, 0)
+    glass.bezierCurveTo(0.55, 0.65, 2.05, 1.45, 2.15, 2.9)
+    glass.stroke({ width: 0.78, color: 0xeaf6fb, alpha: 0.94, cap: 'round', join: 'round' })
+    // A restrained warm sand bed and falling thread.
+    glass.moveTo(-1.7, 2.75)
+    glass.lineTo(1.7, 2.75)
+    glass.lineTo(0, 1.05)
+    glass.closePath()
+    glass.fill({ color: VIEW_PENDING_SAND, alpha: 0.92 })
+    glass.moveTo(0, -0.2)
+    glass.lineTo(0, 1.35)
+    glass.stroke({ width: 0.62, color: VIEW_PENDING_SAND, alpha: 0.9, cap: 'round' })
+    indicator.addChild(glass)
+
+    this.#renderContainer.addChild(indicator)
+    this.#renderContainer.sortableChildren = true
+    this.#viewPendingIndicator = indicator
+    this.#viewPendingRing = ring
+    this.#viewPendingHourglass = glass
+  }
+
+  #positionViewPending(): void {
+    if (!this.#viewPending || !this.#viewPendingIndicator) return
+    const index = this.#cellLabels.indexOf(this.#viewPending.label)
+    const coord = index >= 0 ? this.#cellCoords[index] : undefined
+    if (!coord) {
+      this.#viewPendingIndicator.visible = false
+      return
+    }
+    const px = this.#axialToPixel(coord.q, coord.r)
+    this.#viewPendingIndicator.position.set(
+      px.x + this.#meshOffset.x,
+      px.y + this.#meshOffset.y + VIEW_PENDING_Y,
+    )
+  }
+
+  #clearViewPending(): void {
+    this.#viewPending = null
+    if (this.#viewPendingIndicator) this.#viewPendingIndicator.visible = false
+    if (this.#canvas?.getAttribute('aria-busy') === 'true') {
+      this.#canvas.removeAttribute('aria-busy')
+    }
   }
 
   /** Sync read of "does this cell have notes at the current lineage?"
@@ -1127,6 +1294,11 @@ export class TileOverlayDrone extends Drone {
         size: DEFAULT_ICON_SIZE,
         hoverTint: desc.hoverTint,
       })
+      // Visibility belongs to the hovered tile, not the profile. Keep a newly
+      // built icon out of the scene until the complete per-tile set has been
+      // resolved below; otherwise the profile's full set briefly establishes
+      // one band height before visibleWhen narrows it to the real row count.
+      btn.visible = false
       this.#overlay.addChild(btn)
       // Icon protocol: a participant reskin (overlay:<name>) wins over the
       // author SVG — render the chosen Material glyph to a texture instead.
@@ -1150,8 +1322,8 @@ export class TileOverlayDrone extends Drone {
       })
     }
 
-    // Layout: single centered row, evenly spaced at ICON_Y
-    this.#layoutIconRow()
+    // Resolve the complete initial icon set once. That single pass establishes
+    // the band's starting row count before any icon becomes visible.
     this.#updatePerTileVisibility()
   }
 
@@ -1200,7 +1372,13 @@ export class TileOverlayDrone extends Drone {
     // plus one per icon row. A tile with no icons keeps the text's height and
     // does not grow at all. Emitted every layout so it tracks per-tile
     // visibility.
-    this.emitEffect('overlay:band-rows', { rows: 1 + rows.length })
+    this.#bandRows = 1 + rows.length
+    const bandLabel = this.#currentAxial
+      ? this.#occupiedByAxial.get(
+          TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
+        )?.label ?? null
+      : null
+    this.emitEffect('overlay:band-rows', { rows: this.#bandRows, label: bandLabel })
 
     if (rows.length === 0) return
 
@@ -1240,10 +1418,18 @@ export class TileOverlayDrone extends Drone {
     // the restore at the bottom, stranding the menu hidden under a visible hex
     // ("icons gone after dropping an image / editing"). Now a missing tile
     // hides cleanly and #recoverHover re-derives once the cascade settles.
-    if (!this.#currentAxial) { this.#hideAllButtons(); return }
+    if (!this.#currentAxial) {
+      this.#hideAllButtons()
+      this.#layoutIconRow()
+      return
+    }
 
     // during image drag-over, hide all action buttons — overlay is just a drop target
-    if (this.#dropDragging) { this.#hideAllButtons(); return }
+    if (this.#dropDragging) {
+      this.#hideAllButtons()
+      this.#layoutIconRow()
+      return
+    }
 
     // Public mode used to hide every icon here, on the theory that
     // public was a "clean view" surface. With paired-channel sync we
@@ -1254,11 +1440,16 @@ export class TileOverlayDrone extends Drone {
     // In arrange mode, all icons are always visible
     if (this.#arrangeMode) {
       for (const action of this.#actions) action.button.visible = true
+      this.#layoutIconRow()
       return
     }
 
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
-    if (!entry) { this.#hideAllButtons(); return }
+    if (!entry) {
+      this.#hideAllButtons()
+      this.#layoutIconRow()
+      return
+    }
 
     const ctx: OverlayTileContext = {
       label: entry.label,
@@ -1833,6 +2024,11 @@ export class TileOverlayDrone extends Drone {
     document.addEventListener('click', this.#onClick)
     document.addEventListener('pointerup', this.#onPointerUp)
     document.addEventListener('contextmenu', this.#onContextMenu)
+    // consumePointerGesture swallows pointerup at window capture, before this
+    // drone's document listener can release #consumedPointerId. Hear the
+    // consumer's bookkeeping-only end signal or the stale latch will discard
+    // the next ordinary tile click after a press-triggered navigation.
+    window.addEventListener(POINTER_GESTURE_END, this.#onConsumedGestureEnd as EventListener)
     // A hold must never survive the gesture it belongs to: a cancelled pointer
     // (browser gesture takeover, pen leaving range) or a window that loses
     // focus mid-press would otherwise navigate under a participant who is no
@@ -1976,7 +2172,12 @@ export class TileOverlayDrone extends Drone {
       // Ctrl/Meta held: track position but hide overlay (selection mode, not navigation)
       if (e.ctrlKey || e.metaKey) {
         this.#overlay.visible = false
-        this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry?.label ?? null })
+        this.emitEffect('tile:hover', {
+          q: axial.q,
+          r: axial.r,
+          label: entry?.label ?? null,
+          bandRows: 1,
+        })
         return
       }
 
@@ -1985,7 +2186,12 @@ export class TileOverlayDrone extends Drone {
       this.#updatePerTileVisibility()
       // Carry the hovered tile's label so consumers (avatar swarm, contact
       // hover panel) can react without re-deriving from the occupied map.
-      this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry?.label ?? null })
+      this.emitEffect('tile:hover', {
+        q: axial.q,
+        r: axial.r,
+        label: entry?.label ?? null,
+        bandRows: entry ? this.#bandRows : 1,
+      })
     }
 
     // Ctrl/Meta held but hex didn't change — still hide overlay
@@ -2069,11 +2275,10 @@ export class TileOverlayDrone extends Drone {
     this.#overlay.addChild(this.#hintText)
     this.#hintExpanded = false
 
-    // Keep hovering → the description expands on its own. Expansion used
-    // to be click-triggered, which turned every icon into a two-stage
-    // button whenever the label was showing (first click expanded, second
-    // click acted). The timer reuses #hintTimer so #clearHint cancels it.
-    this.#hintTimer = setTimeout(() => this.#expandHint(), HINT_EXPAND_DELAY_MS)
+    // An icon has one explanation, so show it as one complete card from the
+    // start. A label-only phase made the same hint look like two separate
+    // popups as it expanded.
+    this.#expandHint()
   }
 
   #expandHint(): void {
@@ -2093,18 +2298,65 @@ export class TileOverlayDrone extends Drone {
         fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
         fontSize: HINT_EXPANDED_FONT_SIZE,
         fill: HINT_COLOR,
-        align: 'center',
+        align: 'left',
+        lineHeight: 4.25,
         wordWrap: true,
         wordWrapWidth: HINT_MAX_WIDTH,
       }),
       resolution: HINT_TEXT_RESOLUTION,
     })
-    this.#hintDescriptionText.anchor.set(0.5, 0)
-    const yBelow = HINT_Y_OFFSET + (this.#hintText ? this.#hintText.height + 3 : HINT_FONT_SIZE + 3)
-    this.#hintDescriptionText.position.set(0, yBelow)
-    this.#hintDescriptionText.alpha = 0.92
-    this.#hintDescriptionBg = this.#makeHintPill(this.#hintDescriptionText, 0, yBelow)
-    this.#overlay.addChild(this.#hintDescriptionBg)
+    this.#hintDescriptionText.anchor.set(0, 0)
+
+    // The expanded hint is one panel: the operation leads at the start and
+    // its explanation flows directly underneath. Previously each line owned
+    // a separate pill, which read as two overlapping popups.
+    const headerGap = 1.5
+    const rowGap = 1.25
+    const iconSize = 4.5
+    const titleHeight = this.#hintText?.height ?? HINT_FONT_SIZE
+    const textWidth = Math.max(
+      this.#hintText?.width ?? 0,
+      this.#hintDescriptionText.width,
+    )
+    const contentWidth = iconSize + headerGap + textWidth
+    const left = -contentWidth / 2
+    const textLeft = left + iconSize + headerGap
+
+    const sourceIcon = action.button.children.find(child => child instanceof Sprite)
+    if (sourceIcon instanceof Sprite) {
+      this.#hintIcon = new Sprite(sourceIcon.texture)
+      this.#hintIcon.anchor.set(0.5)
+      this.#hintIcon.width = iconSize
+      this.#hintIcon.height = iconSize
+      this.#hintIcon.tint = sourceIcon.tint
+      this.#hintIcon.alpha = 0.9
+      this.#hintIcon.position.set(left + iconSize / 2, HINT_Y_OFFSET + titleHeight / 2)
+    }
+    if (this.#hintText) {
+      this.#hintText.anchor.set(0, 0)
+      this.#hintText.position.set(textLeft, HINT_Y_OFFSET)
+    }
+    const yBelow = HINT_Y_OFFSET + titleHeight + rowGap
+    this.#hintDescriptionText.position.set(textLeft, yBelow)
+    this.#hintDescriptionText.alpha = 0.72
+
+    if (this.#hintBg) {
+      this.#hintBg.parent?.removeChild(this.#hintBg)
+      this.#hintBg.destroy()
+    }
+    const panelWidth = contentWidth + HINT_PILL_PAD_X * 2
+    const panelHeight = titleHeight + rowGap + this.#hintDescriptionText.height + HINT_PILL_PAD_Y * 2
+    this.#hintBg = new Graphics()
+    this.#hintBg.roundRect(
+      -panelWidth / 2,
+      HINT_Y_OFFSET - HINT_PILL_PAD_Y,
+      panelWidth,
+      panelHeight,
+      HINT_PILL_RADIUS,
+    )
+    this.#hintBg.fill({ color: HINT_PILL_FILL, alpha: HINT_PILL_ALPHA })
+    this.#overlay.addChildAt(this.#hintBg, this.#overlay.getChildIndex(this.#hintText!))
+    if (this.#hintIcon) this.#overlay.addChild(this.#hintIcon)
     this.#overlay.addChild(this.#hintDescriptionText)
     this.#hintExpanded = true
   }
@@ -2141,10 +2393,10 @@ export class TileOverlayDrone extends Drone {
       this.#hintText.destroy()
       this.#hintText = null
     }
-    if (this.#hintDescriptionBg) {
-      this.#hintDescriptionBg.parent?.removeChild(this.#hintDescriptionBg)
-      this.#hintDescriptionBg.destroy()
-      this.#hintDescriptionBg = null
+    if (this.#hintIcon) {
+      this.#hintIcon.parent?.removeChild(this.#hintIcon)
+      this.#hintIcon.destroy()
+      this.#hintIcon = null
     }
     if (this.#hintDescriptionText) {
       this.#hintDescriptionText.parent?.removeChild(this.#hintDescriptionText)
@@ -2590,21 +2842,7 @@ export class TileOverlayDrone extends Drone {
       this.#navigateInto(entry.label)
     } else {
       // ── LEAF TILE ───────────────────────────────────────────
-      // A leaf never reaches #navigateInto, so the takeover picker has never
-      // been consulted for one. Consult it HERE too: a childless tile carrying
-      // a deck or gallery decoration should open ITS view, exactly as a branch
-      // with the same decoration does.
-      const takeover = this.#viewTakeoverFor(entry.label)
-      if (takeover) {
-        const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
-        this.emitEffect('view:open-for-tile', {
-          view: takeover,
-          segments: [...segs, entry.label],
-        })
-        return
-      }
-
-      // No decorated view claims it. On TOUCH the per-tile action band is
+      // On TOUCH the per-tile action band is
       // unreachable (it is hover-derived), which left a plain leaf tile a dead
       // end — `tile:action open` is consumed only by link and contact tiles, so
       // tapping anything else did nothing at all. Open the default fullscreen
@@ -2668,6 +2906,12 @@ export class TileOverlayDrone extends Drone {
     if (!this.#editing) return
     const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
     drone?.cancelEditing()
+  }
+
+  #onConsumedGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {
+    if (e.detail?.pointerId !== this.#consumedPointerId) return
+    this.#consumedPointerId = null
+    this.#pressCapture = null
   }
 
   #onContextMenu = (e: MouseEvent): void => {
@@ -2755,28 +2999,6 @@ export class TileOverlayDrone extends Drone {
     if (this.#currentLocationKey() === before) this.#endNavigationTransition()
   }
 
-  /** The view of a behaviour on this tile that TAKES OVER the click — opening
-   *  its view instead of entering the tile. Null when the tile carries none.
-   *  Both reads are synchronous (the hot decoration index + the registry), so
-   *  this stays safe inside the click path.
-   *
-   *  When SEVERAL behaviours on the tile open on click, the winner is the
-   *  lowest `takeoverRank` (unset = 0), then registration order — never the
-   *  decoration index's insertion order, which is an accident of which
-   *  decoration resolved first this session. Switching a behaviour off on the
-   *  tile (the hidden pool) removes it from contention here, because
-   *  `hasDecorationKind` already filters hidden kinds. */
-  #viewTakeoverFor(label: string): string | null {
-    const registry = window.ioc.get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
-    if (!registry?.all) return null
-    let winner: VisualBeeDescriptor | null = null
-    for (const bee of registry.all()) {
-      if (!bee.opensOnTileClick || !hasDecorationKind(label, bee.decorationKind)) continue
-      if (!winner || (bee.takeoverRank ?? 0) < (winner.takeoverRank ?? 0)) winner = bee
-    }
-    return winner?.view ?? null
-  }
-
   #navigateInto(label: string): void {
     // Navigation itself never uses a cooldown, and readiness never refuses:
     // a shaded destination is entered like any other, with the preloader
@@ -2823,20 +3045,6 @@ export class TileOverlayDrone extends Drone {
         message: i18n?.t('tags.filter.blocked.message', { cell: label })
           ?? `"${label}" has no tagged tiles inside. Clear the filter to browse it.`,
       })
-      return
-    }
-
-    // VIEW TAKEOVER: this tile carries a behaviour that declares it OPENS ON
-    // TILE CLICK (a slides deck). PLAY it instead of entering its hexagon
-    // layer — the view mounts over THIS layer and nothing navigates, so closing
-    // it returns the participant right here and the deck's own grid is never
-    // rendered. Deliberately BEFORE the navigation transition is armed: there
-    // is no navigation to guard, and arming it would strand the guard.
-    const takeover = this.#viewTakeoverFor(label)
-    if (takeover) {
-      const segs = (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-        ?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-      EffectBus.emit('view:open-for-tile', { view: takeover, segments: [...segs, label] })
       return
     }
 
@@ -3114,6 +3322,7 @@ export class TileOverlayDrone extends Drone {
         q: this.#currentAxial.q,
         r: this.#currentAxial.r,
         label: entry?.label ?? null,
+        bandRows: entry ? this.#bandRows : 1,
       })
     }
   }
@@ -3215,7 +3424,7 @@ export class TileOverlayDrone extends Drone {
     // chrome (docked panel, edit-actions cluster) lit the hover ring on
     // whatever tile happens to sit at index 0 and yanked the avatar-swarm
     // anchor there. Absence, not a sentinel.
-    this.emitEffect('tile:hover', { label: null })
+    this.emitEffect('tile:hover', { label: null, bandRows: 1 })
   }
 
   #positionOverlay(q: number, r: number): void {

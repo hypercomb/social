@@ -12,6 +12,8 @@
        hcDockInset="right"
        [hcDockInsetActive]="dockSide() === 'right'"
        hcDockedPanel="notes-strip" dockSide="right" [ownsSize]="false"
+       [dockExclusive]="dockSide() === 'right'"
+       (hcDockedPanelClose)="hide()"
        [minWidth]="256" [maxWidth]="900"
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
        [style.transform]="panelTransformActive()"

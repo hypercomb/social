@@ -4,30 +4,26 @@
     [class.reviewing]="isPhone() && !!reviewTarget()"
     hcDockInset="right"
     hcDockedPanel="features-viewer"
+    (hcDockedPanelClose)="close()"
     dockSide="right"
-    [minWidth]="280"
+    [minWidth]="300"
     [maxWidth]="680"
-    [defaultWidth]="360"
+    [defaultWidth]="404"
     data-consumes-wheel
     (keydown)="onKey($event)"
     tabindex="-1"
     role="dialog"
     [attr.aria-label]="'features.viewer.title' | t"
   >
-    <!-- The header IS the search — the panel name lives in the placeholder
-         ("search beehaviors…"). Typing filters every section's rows live;
-         Escape clears the query first, then closes the panel. -->
+    <!-- Product identity and global actions stay visible; search gets a full
+         row of its own below. Escape clears the query first, then closes. -->
     <header class="features-header">
-      <input
-        class="features-search"
-        type="search"
-        [placeholder]="'features.search.placeholder' | t"
-        [attr.aria-label]="'features.search.placeholder' | t"
-        [value]="query()"
-        (input)="onQuery($any($event.target).value)"
-        spellcheck="false"
-        autocomplete="off"
-      />
+      <div class="features-brand">
+        <span class="features-brand-mark" aria-hidden="true">
+          <span class="mat-sym">extension</span>
+        </span>
+        <span class="features-title">{{ 'features.viewer.title' | t }}</span>
+      </div>
       <!-- The mode switch. MANAGE: rows are on/off switches for this tile.
            PAINT: rows narrow to what's ON here and each click picks it into
            the brush, which lands on the selected tiles in one press. -->
@@ -39,13 +35,46 @@
         [attr.title]="(isPainting() ? 'features.mode.manage.hint' : 'features.mode.paint.hint') | t"
         [attr.aria-pressed]="isPainting()"
       ><span class="mat-sym" aria-hidden="true">format_paint</span></button>
-      <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
+      <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">
+        <span class="mat-sym" aria-hidden="true">close</span>
+      </button>
     </header>
 
-    <!-- The ONE tile the panel is scoped to — moved out of the header to make
-         room for the search; the subject line keeps it always visible. -->
+    <div class="features-searchbar">
+      <span class="mat-sym" aria-hidden="true">search</span>
+      <input
+        class="features-search"
+        type="search"
+        [placeholder]="'features.search.placeholder' | t"
+        [attr.aria-label]="'features.search.placeholder' | t"
+        [value]="query()"
+        (input)="onQuery($any($event.target).value)"
+        spellcheck="false"
+        autocomplete="off"
+      />
+    </div>
+
+    <!-- The ONE tile the manager is scoped to, plus a stable inventory summary. -->
     @if (group(); as g) {
-      <div class="features-tile" [title]="g.cell">{{ g.cell }}</div>
+      <div class="features-context" [title]="g.cell">
+        <span class="features-context-icon" aria-hidden="true">
+          <span class="mat-sym">grid_view</span>
+        </span>
+        <span class="features-context-copy">
+          <span class="features-context-label">{{ 'features.origin.direct' | t }}</span>
+          <strong class="features-tile">{{ g.cell }}</strong>
+        </span>
+        <span class="features-context-stats">
+          <span class="context-stat active">
+            <b>{{ activeAppliedCount(g) }}</b>
+            {{ 'features.hidden.hide' | t }}
+          </span>
+          <span class="context-stat">
+            <b>{{ g.available.length }}</b>
+            {{ 'features.section.available' | t }}
+          </span>
+        </span>
+      </div>
       @if (isPhone() && !reviewTarget()) {
         <button class="features-select-tile" type="button" (click)="selectTile()">
           <span class="mat-sym" aria-hidden="true">select_all</span>
@@ -261,8 +290,13 @@
                     (keydown.space)="rowClick(group, feat); $event.preventDefault()"
                     [attr.title]="(canPaint(feat) ? 'features.paint.pick.hint' : 'features.paint.unpaintable.hint') | t"
                   >
+                    <span class="feature-icon" aria-hidden="true">
+                      <span class="mat-sym">{{ feat.icon }}</span>
+                    </span>
                     <div class="feature-meta">
-                      <span class="feature-name">{{ feat.label }}</span>
+                      <div class="feature-title-line">
+                        <span class="feature-name">{{ feat.label }}</span>
+                      </div>
                       <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
                       @if (feat.foreign) {
                         <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
@@ -313,6 +347,9 @@
                     (keydown.space)="rowClick(group, feat); $event.preventDefault()"
                     [attr.title]="(isOn(group, feat) ? 'features.hide.hint' : 'features.turnon.hint') | t"
                   >
+                    <span class="feature-icon" aria-hidden="true">
+                      <span class="mat-sym">{{ feat.icon }}</span>
+                    </span>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
                       <!-- Origin: direct on the node, or cascaded from a parent. -->
@@ -445,13 +482,20 @@
                        and click only selects. -->
                   <li
                     class="features-row available"
+                    [class.addable]="feat.addable"
                     [class.selected]="isSelected(group, feat)"
                     [class.busy]="isPending(group, feat)"
                     [attr.role]="feat.addable ? 'checkbox' : null"
                     [attr.aria-checked]="feat.addable ? false : null"
+                    [attr.tabindex]="feat.addable ? 0 : null"
                     [attr.title]="feat.addable ? ('features.enable.hint' | t) : null"
                     (click)="availableRowClick(group, feat, $event)"
+                    (keydown.enter)="feat.addable && availableRowClick(group, feat)"
+                    (keydown.space)="feat.addable && availableRowClick(group, feat); $event.preventDefault()"
                   >
+                    <span class="feature-icon available-icon" aria-hidden="true">
+                      <span class="mat-sym">{{ feat.icon }}</span>
+                    </span>
                     <div class="feature-meta">
                       <span class="feature-name">
                         {{ feat.label }}

@@ -110,7 +110,8 @@ const hasSideEffectByContent = (f: string): boolean => {
 const isSideEffectModule = (f: string): boolean =>
   hasSideEffectBySuffix(f) || hasSideEffectByContent(f)
 const isGenerated = (f: string) =>
-  f.endsWith('-keys.ts') || f.endsWith('.d.ts') || basename(f) === 'index.ts' || basename(f) === 'side-effects.ts'
+  f.endsWith('-keys.ts') || f.endsWith('.d.ts') || basename(f) === 'index.ts'
+  || basename(f) === 'side-effects.ts' || basename(f) === 'preload-effects.ts'
 
 const relFrom = (root: string, full: string) =>
   full.replace(root, '').replace(/^[\\/]/, '').replace(/\\/g, '/')
@@ -522,7 +523,9 @@ if (prepareCache?.treeSignature === treeSignature) {
   const masterKeysFile = join(SRC_ROOT, 'essentials-keys.ts')
   const rootIndexFile = join(SRC_ROOT, 'index.ts')
   const sideEffectsFile = join(SRC_ROOT, 'side-effects.ts')
-  if (existsSync(masterKeysFile) && existsSync(rootIndexFile) && existsSync(sideEffectsFile)) {
+  const preloadEffectsFile = join(SRC_ROOT, 'preload-effects.ts')
+  if (existsSync(masterKeysFile) && existsSync(rootIndexFile)
+    && existsSync(sideEffectsFile) && existsSync(preloadEffectsFile)) {
     console.log('[prepare] tree signature unchanged — skipping (beeline)')
     process.exit(0)
   }
@@ -595,7 +598,16 @@ else filesSkipped++
     .filter(f => isSideEffectModule(f) && !isGenerated(f) && !isTestFile(f))
     .sort()
 
-  const lines = sideEffectFiles.map(f => {
+  // Games are useful but never render-critical. Keep their self-registering
+  // modules out of the initial dev bundle and preload their generated chunk
+  // after the first settled render. Classification is path-derived so adding
+  // a new game requires no barrel or signature upkeep.
+  const isPreload = (f: string): boolean =>
+    relFrom(SRC_ROOT, f).startsWith('diamondcoreprocessor.com/games/')
+  const startupFiles = sideEffectFiles.filter(f => !isPreload(f))
+  const preloadFiles = sideEffectFiles.filter(isPreload)
+
+  const lines = startupFiles.map(f => {
     const rel = relFrom(SRC_ROOT, f).replace(/\.ts$/, '')
     return `import './${rel}'`
   })
@@ -610,6 +622,25 @@ ${lines.join('\n')}
 `
 
   if (writeIfChanged(join(SRC_ROOT, 'side-effects.ts'), sideEffectsContent)) filesWritten++
+  else filesSkipped++
+
+  const preloadImports = preloadFiles.map(f => {
+    const rel = relFrom(SRC_ROOT, f).replace(/\.ts$/, '')
+    return `  import('./${rel}')`
+  })
+  const preloadEffectsContent = `// auto-generated
+// post-render preload lane — non-critical self-registering modules
+// Classification is derived from source paths; do not edit manually.
+
+let loading: Promise<void> | undefined
+
+export function preloadEffects(): Promise<void> {
+  return loading ??= Promise.all([
+${preloadImports.join(',\n')}
+  ]).then(() => undefined)
+}
+`
+  if (writeIfChanged(join(SRC_ROOT, 'preload-effects.ts'), preloadEffectsContent)) filesWritten++
   else filesSkipped++
 }
 

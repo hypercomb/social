@@ -338,7 +338,13 @@ export class LayerCommitter {
             from?: string
             to?: string
             sigs?: readonly string[]
+            viaUpdate?: boolean
           }>(trigger, p => {
+            // Some callers use the public awaited commitSlot* API, but still
+            // emit the trigger immediately so synchronous read models repaint
+            // in the click's event turn. Their direct commit is the durable
+            // write; do not enqueue the same delta a second time.
+            if (p?.viaUpdate) return
             if (p?.op === 'set' && Array.isArray(p?.sigs)) {
               this.#queueSlotSet(p?.segments, slotName, p.sigs)
             } else if (p?.op === 'swap' && typeof p?.from === 'string' && typeof p?.to === 'string') {

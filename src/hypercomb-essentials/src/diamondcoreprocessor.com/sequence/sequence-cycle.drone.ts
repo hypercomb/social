@@ -10,13 +10,17 @@
 //
 // The cycle is:
 //   [ Rectangle, Flowers, …every set saved via /sequence ]
-// The two built-ins (commands/../arrangements.ts) are computed live from
+// Three lanes is deliberately NOT part of that per-location cycle. It is a
+// mobile-only global action reached through `/lanes`; treating it like a
+// location preference made navigation restore the lane viewport constraint,
+// which disabled zoom and one pan axis on ordinary desktop pages.
+// The built-ins (commands/../arrangements.ts) are computed live from
 // the current tile count, so they always fit. The saved sets are the ones
 // "we have already created" — authored with the SequenceEditorBee and held
 // by SequenceService (content-addressed, shareable, bound per-location via
 // the cascading `sequence:target` decoration).
 //
-// The active position in the cycle is participant-local (localStorage,
+// The active position in the ordinary cycle is participant-local (localStorage,
 // keyed by location) — it is a view preference, like the viewport, not
 // shared content. The arrangement itself IS committed: the reorder goes
 // through `writeTilePropertiesAt({ index })` per tile exactly like a drag,
@@ -78,7 +82,7 @@ export class SequenceCycleDrone extends Drone {
   }
   protected override listens = [
     'render:cell-count', 'render:set-orientation',
-    'keymap:invoke', 'sequence:select', 'sequence:edit',
+    'keymap:invoke', 'sequence:select', 'sequence:edit', 'mobile:mode',
   ]
   protected override emits = ['arrange:preview', 'cell:reorder', 'toast:show']
 
@@ -93,6 +97,10 @@ export class SequenceCycleDrone extends Drone {
   #commitTail: Promise<void> = Promise.resolve()
   readonly #commitRevision = new Map<string, number>()
   #threeLaneAxis: LaneScrollAxis | null = null
+  // Runtime-only owner of the lane viewport. This is intentionally not read
+  // from hc:arrange-active and not restored on navigation/reload: /lanes is a
+  // global action, never a property of the tile/location being visited.
+  #laneLocation: string | null = null
   #flat = localStorage.getItem('hc:hex-orientation') === 'flat-top'
 
   protected override heartbeat = async (): Promise<void> => {
@@ -102,15 +110,18 @@ export class SequenceCycleDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellLabels = payload.labels ?? []
       this.#cellCoords = payload.coords ?? []
-      this.#restoreLaneMode()
+      this.#dropLaneModeOutsideOwner()
     })
     this.onEffect<{ flat?: boolean }>('render:set-orientation', ({ flat }) => {
       this.#flat = !!flat
-      const entry = this.#activeEntry()
-      if (entry?.kind !== 'builtin' || entry.id !== 'three-lanes') return
+      if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) return
       this.#threeLaneAxis = this.#laneAxis()
       setLaneScrollAxis(this.#threeLaneAxis)
       void this.#cycle(+1, 'three-lanes')
+    })
+    this.onEffect<{ active?: boolean }>('mobile:mode', ({ active }) => {
+      if (active) return
+      this.#clearLaneMode()
     })
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
@@ -136,6 +147,15 @@ export class SequenceCycleDrone extends Drone {
 
   #cycle = async (dir: number, requestedId?: string): Promise<void> => {
     if (this.#busy) return
+
+    const requestedLanes = requestedId === 'three-lanes'
+    if (requestedLanes && !this.#mobileMode()) {
+      // Defense in depth: /lanes is intentionally a mobile global action.
+      // A stale command invocation must never install the axis lock on desktop.
+      this.#clearLaneMode()
+      this.#toastLanesMobileOnly()
+      return
+    }
 
     const axialSvc = this.resolve<AxialServiceLike>('axial')
     if (!axialSvc?.items?.size) return
@@ -175,13 +195,19 @@ export class SequenceCycleDrone extends Drone {
         : -1
       const nextIdx = requestedIdx >= 0
         ? requestedIdx
-        : ((active + dir) % cycle.length + cycle.length) % cycle.length
+        : this.#nextOrdinaryIndex(cycle, active, dir)
+      if (nextIdx < 0) return
       const entry = cycle[nextIdx]
       const threeLanes = entry.kind === 'builtin' && entry.id === 'three-lanes'
-      // Point-top is the default vertical strip. Flat-top remains available
-      // only when the participant explicitly rotates the hive.
-      this.#threeLaneAxis = threeLanes ? this.#laneAxis() : null
-      setLaneScrollAxis(this.#threeLaneAxis)
+      if (threeLanes) {
+        // Point-top is the default vertical strip. Flat-top remains available
+        // only when the participant explicitly rotates the hive.
+        this.#laneLocation = locationKey
+        this.#threeLaneAxis = this.#laneAxis()
+        setLaneScrollAxis(this.#threeLaneAxis)
+      } else {
+        this.#clearLaneMode()
+      }
 
       const indexes = this.#indexesFor(entry, orderedNames.length, coordToIndex)
       if (!indexes || indexes.length === 0) return
@@ -194,7 +220,9 @@ export class SequenceCycleDrone extends Drone {
       // renderer's in-memory geometry path. No layer/resource read or write is
       // on the activation path. The scoped preview remains authoritative for
       // this location until the background commit catches up.
-      this.#writeActive(locationKey, nextIdx)
+      // Ordinary arrangements remember where this location stopped in the
+      // cycle. Lanes never does: it is a runtime global action, not tile state.
+      if (!threeLanes) this.#writeActive(locationKey, nextIdx)
       this.emitEffect('sequence:selected', { id: entry.id, kind: entry.kind, location: locationKey })
       this.emitEffect('arrange:preview', {
         location: locationKey,
@@ -245,37 +273,43 @@ export class SequenceCycleDrone extends Drone {
     }, 80)
   }
 
-  /** Restore the constrained scroller after navigation/reload from the
-   * participant-local active arrangement for this location. */
-  #restoreLaneMode = (): void => {
-    const lineage = this.resolve<LineageLike>('lineage')
-    const segments = (lineage?.explorerSegments?.() ?? [])
-      .map((s) => String(s ?? '').trim())
-      .filter(Boolean)
-    const active = this.#readActive(segments.join('/'))
-    const entry = this.#buildCycle()[active]
-    const threeLanes = entry?.kind === 'builtin' && entry.id === 'three-lanes'
-    const axis: LaneScrollAxis | null =
-      threeLanes
-        ? this.#laneAxis()
-        : null
-    const changed = setLaneScrollAxis(axis)
-    this.#threeLaneAxis = axis
-    if (entry) this.emitEffect('sequence:selected', {
-      id: entry.id, kind: entry.kind, location: segments.join('/'),
-    })
-    if (changed && axis) this.#fitToCenter()
-  }
-
   #laneAxis = (): LaneScrollAxis => this.#flat ? 'x' : 'y'
 
-  #activeEntry = (): CycleEntry | undefined => {
+  #locationKey = (): string => {
     const lineage = this.resolve<LineageLike>('lineage')
-    const location = (lineage?.explorerSegments?.() ?? [])
+    return (lineage?.explorerSegments?.() ?? [])
       .map((s) => String(s ?? '').trim())
       .filter(Boolean)
       .join('/')
-    return this.#buildCycle()[this.#readActive(location)]
+  }
+
+  #mobileMode = (): boolean =>
+    window.ioc.get<{ active?: boolean }>('@diamondcoreprocessor.com/MobileMode')?.active === true
+
+  #clearLaneMode = (): void => {
+    this.#laneLocation = null
+    this.#threeLaneAxis = null
+    setLaneScrollAxis(null)
+  }
+
+  /** A lane action owns only the view it was explicitly invoked on. Arriving
+   * anywhere else drops the runtime constraint; no tile/location can restore
+   * it from localStorage. */
+  #dropLaneModeOutsideOwner = (): void => {
+    if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) {
+      this.#clearLaneMode()
+    }
+  }
+
+  /** `a` / Shift+A walk only the ordinary per-location arrangements. Lanes
+   * is reached solely by the explicit global `/lanes` action. */
+  #nextOrdinaryIndex = (cycle: readonly CycleEntry[], active: number, dir: number): number => {
+    for (let step = 1; step <= cycle.length; step++) {
+      const idx = ((active + dir * step) % cycle.length + cycle.length) % cycle.length
+      const entry = cycle[idx]
+      if (!(entry?.kind === 'builtin' && entry.id === 'three-lanes')) return idx
+    }
+    return -1
   }
 
   /** Built-ins first, then every saved set in the palette. */
@@ -355,10 +389,11 @@ export class SequenceCycleDrone extends Drone {
       .then(async () => {
         await this.#persistPlacement(commit.segments, commit.placement)
 
-        // Bind the chosen arrangement as the drop-target so NEW tiles created
-        // here continue the same pattern. This is durable bookkeeping only;
-        // it never delays the visible activation.
-        await this.#bind(commit.segments, commit.entry, commit.indexes)
+        // Bind ordinary arrangements as drop-targets so NEW tiles continue
+        // their pattern. Lanes is a global runtime action, never a cascading
+        // sequence:target decoration on this tile/location.
+        const lanes = commit.entry.kind === 'builtin' && commit.entry.id === 'three-lanes'
+        if (!lanes) await this.#bind(commit.segments, commit.entry, commit.indexes)
         void new hypercomb().act()
 
         // A newer gesture at this location owns the preview. Only the newest
@@ -449,6 +484,13 @@ export class SequenceCycleDrone extends Drone {
     const prefix = i18n?.t ? i18n.t('arrange.toast', { name }) : ''
     const message = prefix && prefix !== 'arrange.toast' ? prefix : `Arranged: ${name}`
     this.emitEffect('toast:show', { type: 'tip', message })
+  }
+
+  #toastLanesMobileOnly = (): void => {
+    this.emitEffect('toast:show', {
+      type: 'info',
+      message: 'Lanes is available in mobile mode.',
+    })
   }
 }
 

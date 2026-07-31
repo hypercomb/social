@@ -54,7 +54,6 @@ export class SequenceViewerComponent implements OnDestroy {
   close(): void { this.visible.set(false) }
   refresh(): void {
     const builtIns: Row[] = [
-      { id: 'three-lanes', name: 'Three lanes', detail: 'A readable three-lane scrolling strip.', builtIn: true },
       { id: 'rectangle', name: 'Rectangle', detail: 'A compact, balanced block.', builtIn: true },
       { id: 'flower', name: 'Flowers', detail: 'Clusters of seven around a centre tile.', builtIn: true },
     ]

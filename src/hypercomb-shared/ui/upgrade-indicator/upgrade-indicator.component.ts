@@ -1,64 +1,65 @@
-// hypercomb-shared/ui/upgrade-indicator/upgrade-indicator.component.ts
-//
-// In-place "New features" control. Appears when the web shell's post-boot
-// `checkForUpdate` emits `update:available` (the bundled `/content/` package
-// differs from the cached install). It is NOT a window and it never opens the
-// DCP installer — the three actions happen right here in the header:
-//
-//   • Adopt   — install the update now. Dispatches `hypercomb:apply-update`;
-//               the shell fetches this origin's bytes and reloads, the bee
-//               swarm (install:sync) is the in-flow cue. The installer is only
-//               the messenger (sig → domains, via the hidden sentinel); the
-//               origin does the fetch.
-//   • Save    — not now, remind me later. Snoozed for THIS session and
-//               remembered in a saved list (so a future "saved features" view
-//               can re-offer it); the chip reappears next session.
-//   • Discard — dismiss this version for good; the chip never re-nags for
-//               this package signature.
-//
-// All decisions are participant-local (localStorage / sessionStorage), keyed
-// by the package signature, so they're per-version and never skew a layer.
-//
-// Stays hidden until an update is detected, and hidden once decided. In the
-// dev shell (no `/content/` to compare) the event never fires, so this never
-// shows.
-
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
-/** Payload of `update:available` — availability, delta count, and the package
- *  signature the Save/Discard decisions are keyed on. */
 interface UpdateAvailablePayload {
   available?: boolean
   newCount?: number
   packageSig?: string
+  newBees?: string[]
+  previous?: string | null
+  label?: string
 }
 
-const SAVED_KEY = 'hc:features-saved'         // localStorage: remembered for later
-const DISCARDED_KEY = 'hc:features-discarded' // localStorage: dismissed for good
-const SNOOZE_KEY = 'hc:features-snoozed'      // sessionStorage: hidden this session (Save)
+type UpdatePhase = 'idle' | 'available' | 'naming' | 'snapshotting' | 'applying' | 'complete' | 'error'
+interface UpdateStatusPayload {
+  phase?: Exclude<UpdatePhase, 'idle' | 'available' | 'naming'>
+  message?: string
+}
+
+const SAVED_KEY = 'hc:features-saved'
+const DISCARDED_KEY = 'hc:features-discarded'
+const SNOOZE_KEY = 'hc:features-snoozed'
+const COMPLETE_KEY = 'hc:update-complete'
+const COMPLETE_VISIBLE_MS = 12_000
 
 @Component({
   selector: 'hc-upgrade-indicator',
   standalone: true,
   imports: [TranslatePipe],
   template: `
-    @if (available()) {
-      <div class="upgrade-indicator" role="group" [attr.aria-label]="'upgrade.available' | t">
-        <span class="upgrade-meta">
-          <span class="mat-sym">deployed_code_update</span>
-          <span class="upgrade-label">{{ 'upgrade.label' | t }}</span>
-          @if (newCount() > 0) {
+    @if (phase() !== 'idle') {
+      <div class="upgrade-indicator" role="status" aria-live="polite" [attr.data-phase]="phase()">
+        <button class="status-button" type="button" (click)="toggleExpanded()"
+          [disabled]="busy()" [attr.aria-expanded]="expanded()"
+          [attr.aria-label]="statusText()" [title]="statusText()">
+          <span>{{ statusText() }}</span>
+          @if (phase() === 'available' && newCount() > 0) {
             <span class="upgrade-count">{{ newCount() }}</span>
           }
-        </span>
-        <button class="upgrade-act adopt" type="button" (click)="adopt()"
-          [attr.aria-label]="'upgrade.adopt' | t" [attr.title]="'upgrade.adopt' | t">{{ 'upgrade.adopt' | t }}</button>
-        <button class="upgrade-act save" type="button" (click)="save()"
-          [attr.aria-label]="'upgrade.save' | t" [attr.title]="'upgrade.save' | t">{{ 'upgrade.save' | t }}</button>
-        <button class="upgrade-act discard" type="button" (click)="discard()"
-          [attr.aria-label]="'upgrade.discard' | t" [attr.title]="'upgrade.discard' | t">{{ 'upgrade.discard' | t }}</button>
+        </button>
+
+        @if (phase() === 'available' && expanded()) {
+          <button class="upgrade-act adopt" type="button" (click)="beginAdopt()">{{ 'upgrade.adopt' | t }}</button>
+          <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
+          <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
+        }
+
+        @if (phase() === 'naming') {
+          <label class="restore-name">
+            <span>Restore point</span>
+            <input type="text" autofocus [value]="restorePointName()"
+              (input)="restorePointName.set($any($event.target).value)"
+              (keydown.enter)="adopt()" (keydown.escape)="cancelAdopt()" />
+          </label>
+          <button class="upgrade-act adopt" type="button" (click)="adopt()"
+            [disabled]="!restorePointName().trim()">Update</button>
+          <button class="upgrade-act save" type="button" (click)="cancelAdopt()">Cancel</button>
+        }
+
+        @if (phase() === 'error') {
+          <button class="upgrade-act save" type="button" (click)="returnToAvailable()">Try again</button>
+        }
       </div>
     }
   `,
@@ -67,50 +68,139 @@ const SNOOZE_KEY = 'hc:features-snoozed'      // sessionStorage: hidden this ses
 export class UpgradeIndicatorComponent implements OnDestroy {
   readonly available = signal(false)
   readonly newCount = signal(0)
+  readonly phase = signal<UpdatePhase>('idle')
+  readonly expanded = signal(false)
+  readonly restorePointName = signal('Default')
+  readonly statusMessage = signal('')
+
   #packageSig = ''
-  #unsub: (() => void) | null = null
+  #newBees: string[] = []
+  #previous: string | null = null
+  #label = ''
+  #unsubs: (() => void)[] = []
+  #completeTimer: number | null = null
 
   constructor() {
-    // Last-value replay means a late-mounted component still catches an
-    // update detected before it rendered.
-    this.#unsub = EffectBus.on<UpdateAvailablePayload>(
-      'update:available',
-      (payload) => {
-        const sig = String(payload?.packageSig ?? '').trim().toLowerCase()
-        this.#packageSig = sig
-        // Hide if the participant already discarded this version for good, or
-        // snoozed it this session (Save). A saved-but-new-session update shows
-        // again — Save is "remind me later", not "never".
-        const suppressed = this.#inList(DISCARDED_KEY, sig, localStorage)
-          || this.#inList(SNOOZE_KEY, sig, sessionStorage)
-        this.available.set(!!payload?.available && !suppressed)
-        this.newCount.set(payload?.newCount ?? 0)
-      },
-    )
+    this.#restoreCompletedState()
+
+    this.#unsubs.push(EffectBus.on<UpdateAvailablePayload>('update:available', payload => {
+      const sig = String(payload?.packageSig ?? '').trim().toLowerCase()
+      this.#packageSig = sig
+      this.#newBees = Array.isArray(payload?.newBees) ? payload.newBees.map(String) : []
+      this.#previous = typeof payload?.previous === 'string' ? payload.previous : null
+      this.#label = String(payload?.label ?? '').trim()
+      const suppressed = this.#inList(DISCARDED_KEY, sig, localStorage)
+        || this.#inList(SNOOZE_KEY, sig, sessionStorage)
+      this.available.set(!!payload?.available && !suppressed)
+      this.newCount.set(payload?.newCount ?? 0)
+      if (payload?.available && !suppressed && !this.busy() && this.phase() !== 'complete') {
+        this.phase.set('available')
+      } else if (!payload?.available && this.phase() === 'available') {
+        this.phase.set('idle')
+      }
+    }))
+
+    this.#unsubs.push(EffectBus.on<UpdateStatusPayload>('update:status', payload => {
+      const next = payload?.phase
+      if (!next) return
+      this.statusMessage.set(String(payload.message ?? '').trim())
+      this.expanded.set(false)
+      this.phase.set(next)
+      if (next === 'complete') {
+        try { sessionStorage.setItem(COMPLETE_KEY, String(Date.now())) } catch { /* unavailable */ }
+        this.#armCompleteTimer()
+      }
+    }))
   }
 
   ngOnDestroy(): void {
-    this.#unsub?.()
+    for (const unsub of this.#unsubs) unsub()
+    if (this.#completeTimer !== null) window.clearTimeout(this.#completeTimer)
   }
 
-  /** Adopt — install now. Fires the window event the web shell binds to
-   *  upgradeFromBundled() + reload (which also raises the install:sync bee
-   *  swarm). No installer shown; the shell's apply guards re-entry. */
+  readonly busy = (): boolean => this.phase() === 'snapshotting' || this.phase() === 'applying'
+
+  readonly statusText = (): string => {
+    if (this.statusMessage()) return this.statusMessage()
+    switch (this.phase()) {
+      case 'naming': return 'Name the restore point first'
+      case 'snapshotting': return 'Saving restore point…'
+      case 'applying': return 'Updating…'
+      case 'complete': return 'Everything is updated'
+      case 'error': return 'Update stopped safely'
+      default: return 'Update available'
+    }
+  }
+
+  readonly toggleExpanded = (): void => {
+    if (this.phase() === 'available') this.expanded.update(value => !value)
+  }
+
+  readonly beginAdopt = (): void => {
+    this.expanded.set(false)
+    window.dispatchEvent(new CustomEvent('portal:open', {
+      detail: {
+        target: 'dcp',
+        label: this.#label,
+        upgrade: {
+          packageSig: this.#packageSig || null,
+          newBees: this.#newBees,
+          previous: this.#previous,
+        },
+      },
+    }))
+  }
+
+  readonly cancelAdopt = (): void => {
+    this.phase.set('available')
+    this.expanded.set(true)
+  }
+
   readonly adopt = (): void => {
-    window.dispatchEvent(new CustomEvent('hypercomb:apply-update'))
+    const restorePointName = this.restorePointName().trim()
+    if (!restorePointName) return
+    window.dispatchEvent(new CustomEvent('hypercomb:apply-update', { detail: { restorePointName } }))
   }
 
-  /** Save — remind me later. Snooze for this session + remember the sig. */
   readonly save = (): void => {
     this.#remember(SNOOZE_KEY, this.#packageSig, sessionStorage)
     this.#remember(SAVED_KEY, this.#packageSig, localStorage)
     this.available.set(false)
+    this.phase.set('idle')
   }
 
-  /** Discard — dismiss this version for good. */
   readonly discard = (): void => {
     this.#remember(DISCARDED_KEY, this.#packageSig, localStorage)
     this.available.set(false)
+    this.phase.set('idle')
+  }
+
+  readonly returnToAvailable = (): void => {
+    this.statusMessage.set('')
+    this.phase.set(this.available() ? 'available' : 'idle')
+    this.expanded.set(this.available())
+  }
+
+  #restoreCompletedState(): void {
+    try {
+      const at = Number(sessionStorage.getItem(COMPLETE_KEY) ?? 0)
+      if (at > 0 && Date.now() - at < COMPLETE_VISIBLE_MS) {
+        this.phase.set('complete')
+        this.#armCompleteTimer(COMPLETE_VISIBLE_MS - (Date.now() - at))
+      } else {
+        sessionStorage.removeItem(COMPLETE_KEY)
+      }
+    } catch { /* unavailable */ }
+  }
+
+  #armCompleteTimer(delay = COMPLETE_VISIBLE_MS): void {
+    if (this.#completeTimer !== null) window.clearTimeout(this.#completeTimer)
+    this.#completeTimer = window.setTimeout(() => {
+      this.#completeTimer = null
+      try { sessionStorage.removeItem(COMPLETE_KEY) } catch { /* unavailable */ }
+      this.statusMessage.set('')
+      this.phase.set(this.available() ? 'available' : 'idle')
+    }, Math.max(0, delay))
   }
 
   #inList(key: string, sig: string, store: Storage): boolean {
@@ -128,6 +218,6 @@ export class UpgradeIndicatorComponent implements OnDestroy {
       const set = new Set<string>(Array.isArray(arr) ? arr : [])
       set.add(sig)
       store.setItem(key, JSON.stringify([...set]))
-    } catch { /* storage unavailable — decision is best-effort */ }
+    } catch { /* storage unavailable */ }
   }
 }

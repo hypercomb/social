@@ -71,6 +71,45 @@
       </div>
     </header>
 
+    <section class="home-revisions" aria-label="DCP revision history">
+      <button class="home-revisions-toggle" type="button"
+        (click)="revisionsExpanded.set(!revisionsExpanded())"
+        [attr.aria-expanded]="revisionsExpanded()">
+        <span>Revision history</span>
+        <span class="revision-count">{{ homeRevisions().length || 1 }}</span>
+      </button>
+      <span class="revision-state">
+        @switch (revisionStatus()) {
+          @case ('saving') { Saving restore point… }
+          @case ('restoring') { Restoring… }
+          @case ('saved') { Updated }
+          @case ('error') { Stopped safely }
+        }
+      </span>
+
+      @if (revisionsExpanded()) {
+        <div class="home-revision-items">
+          @if (!homeRevisions().length) {
+            <span class="home-revision-item current">
+              <strong>Default</strong>
+              <span>current baseline</span>
+            </span>
+          }
+          @for (revision of homeRevisions(); track revision.name + revision.logicalRootSig) {
+            <button class="home-revision-item" type="button"
+              [class.current]="currentLogicalRootSig() === revision.logicalRootSig"
+              [disabled]="revisionStatus() === 'saving' || revisionStatus() === 'restoring'"
+              (click)="restoreHomeRevision(revision)"
+              [title]="revision.logicalRootSig">
+              <strong>{{ revision.name }}</strong>
+              <code>{{ revision.logicalRootSig.slice(0, 8) }}</code>
+              @if (currentLogicalRootSig() === revision.logicalRootSig) { <span>current</span> }
+            </button>
+          }
+        </div>
+      }
+    </section>
+
     <!-- First-run orientation — the visible tier of the explanation that
          otherwise lives only in hover hints. Dismiss persists locally
          (participant decoration, never in any lineage). -->
@@ -194,17 +233,39 @@
                      Adopt = enabled (live), Save = installed but off, Discard
                      = uninstall. The current state is the highlighted segment,
                      spelled out by the visible note beside it. -->
-                <span class="adopt-state-note">{{ (packageState(section) === 'adopted' ? 'dcp.state-adopted' : 'dcp.state-saved') | t }}</span>
-                <div class="adopt-control" role="group" [attr.aria-label]="'dcp.adopt-state' | t">
-                  <button type="button" class="adopt-seg adopt"
-                    [class.on]="packageState(section) === 'adopted'"
-                    (click)="adoptPackage(section)" [title]="'dcp.adopt-hint' | t">{{ 'dcp.adopt' | t }}</button>
-                  <button type="button" class="adopt-seg save"
-                    [class.on]="packageState(section) === 'saved'"
-                    (click)="savePackage(section)" [title]="'dcp.save-hint' | t">{{ 'dcp.save' | t }}</button>
-                  <button type="button" class="adopt-seg discard"
-                    (click)="discardPackage(section)" [title]="'dcp.discard-hint' | t">{{ 'dcp.discard' | t }}</button>
-                </div>
+                @if (adoptingPackageSig() === section.rootSig) {
+                  <div class="adopt-restore-point">
+                    <label [for]="'restore-' + section.rootSig">Restore point</label>
+                    <input [id]="'restore-' + section.rootSig" type="text" autofocus
+                      [value]="adoptRestorePointName()"
+                      [disabled]="revisionStatus() === 'saving'"
+                      (input)="adoptRestorePointName.set($any($event.target).value)"
+                      (keydown.enter)="confirmPackageAdopt(section)"
+                      (keydown.escape)="cancelPackageAdopt()" />
+                    <button type="button" class="adopt-confirm"
+                      [disabled]="revisionStatus() === 'saving' || !adoptRestorePointName().trim()"
+                      (click)="confirmPackageAdopt(section)">
+                      {{ revisionStatus() === 'saving' ? 'Saving…' : ('dcp.adopt' | t) }}
+                    </button>
+                    <button type="button" class="adopt-cancel" [disabled]="revisionStatus() === 'saving'"
+                      (click)="cancelPackageAdopt()">Cancel</button>
+                    @if (adoptRestorePointError()) {
+                      <span class="adopt-error">{{ adoptRestorePointError() }}</span>
+                    }
+                  </div>
+                } @else {
+                  <span class="adopt-state-note">{{ (packageState(section) === 'adopted' ? 'dcp.state-adopted' : 'dcp.state-saved') | t }}</span>
+                  <div class="adopt-control" role="group" [attr.aria-label]="'dcp.adopt-state' | t">
+                    <button type="button" class="adopt-seg adopt"
+                      [class.on]="packageState(section) === 'adopted'"
+                      (click)="adoptPackage(section)" [title]="'dcp.adopt-hint' | t">{{ 'dcp.adopt' | t }}</button>
+                    <button type="button" class="adopt-seg save"
+                      [class.on]="packageState(section) === 'saved'"
+                      (click)="savePackage(section)" [title]="'dcp.save-hint' | t">{{ 'dcp.save' | t }}</button>
+                    <button type="button" class="adopt-seg discard"
+                      (click)="discardPackage(section)" [title]="'dcp.discard-hint' | t">{{ 'dcp.discard' | t }}</button>
+                  </div>
+                }
               </div>
             }
             @if (section.loading || adoptResolvedCount(section) !== null) {

@@ -107,7 +107,10 @@ export class ViewBee extends Worker {
     lineage?.addEventListener?.('change', () => this.#schedule())
 
     const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
-    vm?.addEventListener?.('change', () => this.#schedule())
+    vm?.addEventListener?.('change', () => {
+      this.#schedule()
+      void this.#enforceActiveViewEnabled()
+    })
 
     // Decoration hydration + live decoration mutations can change which
     // views are available — recompute on both. (When the build skill writes
@@ -121,6 +124,23 @@ export class ViewBee extends Worker {
     // cursor.load() finished after our last recompute left the PREVIOUS
     // node's toggles (the website icon) stuck on the new page.
     EffectBus.on('history:cursor-changed', () => this.#schedule())
+
+    // One activation choke point for every render view. The Beehaviors and
+    // Views panels both publish `feature:hidden` at the gesture boundary; if
+    // that behavior owns the current global surface, release it immediately.
+    // Renderers still keep their hidden gate as defense-in-depth, but none of
+    // them has to invent its own "off means hexagons" transition.
+    EffectBus.on<{ view?: string; featKind?: string }>('feature:hidden', (payload) => {
+      const vmNow = get<ViewModeLike>('@hypercomb.social/ViewMode')
+      if (!vmNow || vmNow.mode === DEFAULT_SURFACE) { this.#schedule(); return }
+      const registry = get<RegistryLike>('@diamondcoreprocessor.com/VisualBeeRegistry')
+      const descriptor = registry?.get?.(vmNow.mode)
+      const ownsSurface = payload?.view === vmNow.mode ||
+        (!!payload?.featKind && descriptor?.decorationKind === payload.featKind)
+      if (ownsSurface) vmNow.setMode(DEFAULT_SURFACE)
+      this.#schedule()
+    })
+    EffectBus.on('feature:restored', () => this.#schedule())
 
     // Command-line click and the `/website` slash command both arrive here.
     // A `navigation` behavior delegates to its controller (open/close a
@@ -151,6 +171,25 @@ export class ViewBee extends Worker {
     // First paint — without this the toggles wouldn't appear until the
     // first navigation/render event after boot.
     this.#schedule()
+  }
+
+  /** Final generic gate for every render view, including older renderers that
+   *  do not yet import feature-hidden themselves. Direct slash commands can
+   *  set ViewMode without going through a tile icon; validate that transition
+   *  against the same hidden substrate before allowing the surface to remain.
+   */
+  async #enforceActiveViewEnabled(): Promise<void> {
+    const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
+    if (!vm || vm.mode === DEFAULT_SURFACE) return
+    const descriptor = get<RegistryLike>('@diamondcoreprocessor.com/VisualBeeRegistry')?.get?.(vm.mode)
+    if (!descriptor?.decorationKind || descriptor.behavior === 'navigation') return
+    const segments = (get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    const branchScoped = descriptor.scope === 'branch' || !!descriptor.cascades
+    const hidden = await (branchScoped
+      ? isFeatureHiddenWithin(segments, descriptor.decorationKind)
+      : isFeatureHidden(segments, descriptor.decorationKind)).catch(() => false)
+    if (hidden && vm.mode === descriptor.view) vm.setMode(DEFAULT_SURFACE)
   }
 
   #schedule(): void {

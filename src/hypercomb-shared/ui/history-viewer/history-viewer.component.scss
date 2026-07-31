@@ -31,7 +31,7 @@
   // bg = no paint-under, no per-frame backdrop-filter cost.
   background: #0b0d13;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  border-radius: tw.$radius-floating;
   display: flex;
   flex-direction: column;
   color: rgba(235, 240, 250, 0.85);
@@ -48,6 +48,7 @@
   z-index: 59990;
   pointer-events: auto;
   isolation: isolate;
+  @include tw.floating-panel(#7eb6d6);
 }
 
 .history-viewer-header {
@@ -257,7 +258,7 @@
   max-height: 80vh;
   background: rgba(16, 18, 26, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: tw.$radius-card;
   color: rgba(240, 245, 255, 0.9);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   z-index: 60001;

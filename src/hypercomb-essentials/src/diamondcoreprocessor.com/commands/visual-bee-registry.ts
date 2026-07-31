@@ -48,6 +48,7 @@
 //       view: 'website',
 //       slashCommand: '/website',
 //       iconName: 'website',
+//       toggleIcon: 'web',
 //       decorationKind: 'visual:website:page',
 //       labelKey: 'view.website',
 //       descriptionKey: 'view.website.description',
@@ -106,9 +107,10 @@ export type VisualBeeDescriptor = {
    * own distinct glyph and the user can change it later by rewriting the
    * decoration. `toggleIcon` is used only when the decoration doesn't set
    * one. Optional — ViewBee falls back to a generic glyph when both are
-   * absent.
+   * absent. Every behavior must declare its own unique ligature: management
+   * views use this as the behavior's stable visual identity.
    */
-  readonly toggleIcon?: string
+  readonly toggleIcon: string
 
   /**
    * Whether this view surfaces a per-node toggle on the command line
@@ -223,6 +225,16 @@ export type VisualBeeDescriptor = {
   readonly adoptScope?: 'tile' | 'hierarchy'
 
   /**
+   * Source reaches this view lets a participant choose when attaching it.
+   * The choice is stored per declaration as `payload.sourceScope`.
+   * `'layer'` reads direct children; `'hierarchy'` reads all descendants.
+   *
+   * Omit for views whose reach is intrinsic (websites, decks, and trees).
+   * The Views window offers this choice only when a renderer declares it.
+   */
+  readonly sourceScopes?: readonly ('layer' | 'hierarchy')[]
+
+  /**
    * Where this behavior's records LIVE — the undo/redo opt-out (see
    * documentation/aggregation-layer-model.md).
    *   - `'layer'` (default when absent): records ride layers/commits —
@@ -266,25 +278,19 @@ export type VisualBeeDescriptor = {
   readonly attachable?: boolean
 
   /**
-   * Whether clicking a tile that carries this behaviour OPENS THE VIEW
-   * instead of entering the tile's hexagon layer.
+   * Whether this behavior's on-tile ICON opens the view in place rather than
+   * navigating into the tile before switching modes.
    *
-   * The view takes the screen in place — nothing navigates — so closing it
-   * drops the participant back on the layer they clicked from, and they never
-   * see the tile's own grid. Leave unset for behaviours that should not
-   * hijack the primary navigation gesture.
+   * The property keeps its original name for descriptor compatibility. Tile
+   * BODY clicks always navigate normally; behaviors are launched explicitly
+   * from their distinct `view-enter:*` icons.
    */
   readonly opensOnTileClick?: boolean
 
   /**
-   * Tie-break when SEVERAL behaviours on one tile all declare
-   * `opensOnTileClick`: the lowest rank is the tile's click default (unset =
-   * 0), and equal ranks fall back to registration order. The rule is fixed and
-   * code-declared so the winner never depends on which decoration happened to
-   * resolve first this session; the per-tile override is switching the
-   * unwanted behaviour off (the hidden pool), which the picker already honors.
-   * The other views stay reachable from the tile's hover band (`view-enter:*`
-   * icons) and the Beehaviors panel.
+   * Legacy ordering hint retained for descriptor compatibility. Defaults no
+   * longer take over tile-body navigation; the participant's per-tile choice
+   * (`hc:view-defaults`) accents the matching behavior icon instead.
    */
   readonly takeoverRank?: number
 
@@ -345,6 +351,9 @@ export class VisualBeeRegistry extends EventTarget {
     if (!bee.iconName || typeof bee.iconName !== 'string') {
       throw new Error(`[VisualBeeRegistry] bee "${bee.view}" must declare an iconName`)
     }
+    if (!bee.toggleIcon || typeof bee.toggleIcon !== 'string') {
+      throw new Error(`[VisualBeeRegistry] bee "${bee.view}" must declare a toggleIcon`)
+    }
     if (!bee.decorationKind || typeof bee.decorationKind !== 'string') {
       throw new Error(`[VisualBeeRegistry] bee "${bee.view}" must declare a decorationKind`)
     }
@@ -360,6 +369,15 @@ export class VisualBeeRegistry extends EventTarget {
       return
     }
     if (existing === bee) return // idempotent
+    const iconOwner = [...this.#bees.values()].find(
+      other => other.view !== bee.view && other.toggleIcon === bee.toggleIcon,
+    )
+    if (iconOwner) {
+      throw new Error(
+        `[VisualBeeRegistry] bee "${bee.view}" must use its own toggleIcon; ` +
+        `"${bee.toggleIcon}" already belongs to "${iconOwner.view}"`,
+      )
+    }
     this.#bees.set(bee.view, bee)
     this.dispatchEvent(new CustomEvent('change'))
   }

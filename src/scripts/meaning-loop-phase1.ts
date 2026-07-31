@@ -111,7 +111,17 @@ async function main(): Promise<void> {
   // ── 3. Ask-gate question (same record shape as fb.cjs ask) ───────────
   const qId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
   const question = 'my-lounge carries an ai:request: build the three.js 3D lounge room (passive load AFTER the Pixi tile canvas; spaces classic-lounge + beach; renders earned furniture/trophies/upgrades). Approve building it?'
-  const qa = await send({ op: 'optimization-add', text: JSON.stringify({ kind: 'qa', appliesTo: LOUNGE, payload: { qId, question } }) })
+  const qa = await send({ op: 'optimization-add', text: JSON.stringify({
+    kind: 'qa',
+    appliesTo: LOUNGE,
+    payload: {
+      qId,
+      question,
+      origin: 'meaning-loop',
+      reason: 'The meaning loop found a pending AI request and needs your approval before generation can start.',
+      responseKind: 'approval',
+    },
+  }) })
   if (!qa.ok) { console.error(`[ml1] ABORT: ask-gate question failed: ${qa.error}`); process.exit(1) }
   console.log(`[ml1] ask-gate question minted ${qId}`)
 

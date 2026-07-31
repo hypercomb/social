@@ -2,11 +2,26 @@
 // It executes no participant content and creates no second content store.
 
 import { Drone } from '@hypercomb/core'
-import { childNamesOf } from '../../history/layer-placement.js'
-import { tagsForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
+import {
+  ensureDecorationsIndexed,
+  tagsForSegments,
+  titleForLabel,
+  titleForSegments,
+} from '../../commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { LIVING_BRIEF_KIND, LIVING_BRIEF_VIEW } from '../../commands/brief.queen.js'
-import type { Note } from '../../notes/notes.drone.js'
+import {
+  viewSourceConfigAt,
+  writeViewSourceSelection,
+  type ViewSourceConfig,
+  type ViewSourceScope,
+} from '../../commands/view-source-scope.js'
+import {
+  filterDocumentViewItems,
+  readDocumentViewItems,
+  type DocumentViewItem,
+} from './document-view-source.js'
+import { openDocumentViewCurator } from './document-view-curator.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type HistoryShape = {
@@ -16,7 +31,8 @@ type HistoryShape = {
   commitLayer(locationSig: string, layer: Record<string, unknown>): Promise<string>
 }
 type NotesShape = { getNotesAtSegments(segments: readonly string[]): Promise<Note[]> }
-type Section = { name: string; title: string; tags: string[]; notes: Note[] }
+type Note = import('../../notes/notes.drone.js').Note
+type Section = DocumentViewItem
 
 export class LivingBriefViewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -24,6 +40,7 @@ export class LivingBriefViewDrone extends Drone {
   override description = 'Professional document projection of categories, pheromones, and notes.'
 
   #host: HTMLElement | null = null
+  #curator: HTMLElement | null = null
   #targetSegments: string[] | null = null
   #bound = false
   #active = false
@@ -39,6 +56,8 @@ export class LivingBriefViewDrone extends Drone {
       this.onEffect('decorations:changed', this.#refresh)
       this.onEffect('cell:added', this.#refresh)
       this.onEffect('cell:removed', this.#refresh)
+      this.onEffect('feature:hidden', this.#refresh)
+      this.onEffect('feature:restored', this.#refresh)
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
         if (payload?.view !== LIVING_BRIEF_VIEW) return
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
@@ -63,6 +82,11 @@ export class LivingBriefViewDrone extends Drone {
     if (event.key !== 'Escape' || this.#vm()?.mode !== LIVING_BRIEF_VIEW) return
     event.preventDefault()
     event.stopImmediatePropagation()
+    if (this.#curator) {
+      this.#curator.remove()
+      this.#curator = null
+      return
+    }
     this.#vm()?.setMode('hexagons')
   }
   readonly #context = (event: MouseEvent): void => {
@@ -84,33 +108,50 @@ export class LivingBriefViewDrone extends Drone {
       const segments = this.#targetSegments
         ? [...this.#targetSegments]
         : [...(lineage?.explorerSegments?.() ?? [])]
-      if (await isFeatureHidden(segments, LIVING_BRIEF_KIND)) { this.#teardown(); return }
-      const sections = await this.#sections(segments)
+      if (await isFeatureHidden(segments, LIVING_BRIEF_KIND)) {
+        // OFF means the ordinary hive owns the surface. Merely removing the
+        // document host while leaving ViewMode on `living-brief` produces a
+        // blank takeover and carries that non-tile mode through navigation.
+        this.#targetSegments = null
+        this.#teardown()
+        this.#vm()?.setMode('hexagons')
+        return
+      }
+      const config = await viewSourceConfigAt(LIVING_BRIEF_KIND, segments)
+      const allSections = await this.#sections(segments, config.scope)
+      const sections = config.scope === 'hierarchy'
+        ? filterDocumentViewItems(allSections, segments, config.includedPaths)
+        : allSections
       if (this.#vm()?.mode !== LIVING_BRIEF_VIEW) return
-      this.#render(segments, sections)
+      this.#render(segments, sections, allSections, config)
     } finally {
       this.#busy = false
       if (this.#again) { this.#again = false; void this.#reconcile() }
     }
   }
 
-  async #sections(segments: readonly string[]): Promise<Section[]> {
+  async #sections(segments: readonly string[], scope: ViewSourceScope): Promise<Section[]> {
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     const notes = window.ioc?.get<NotesShape>('@diamondcoreprocessor.com/NotesService')
     if (!history || !notes) return []
-    const loc = await history.sign({ explorerSegments: () => segments })
-    const layer = await history.currentLayerAt(loc)
-    if (!layer) return []
-    const names = await childNamesOf(history, layer as Parameters<typeof childNamesOf>[1])
-    return Promise.all(names.map(async name => ({
-      name,
-      title: titleForLabel(name, navigator.language) || name,
-      tags: [...tagsForLabel(name)],
-      notes: await notes.getNotesAtSegments([...segments, name]),
-    })))
+    return readDocumentViewItems({
+      history,
+      notes,
+      segments,
+      scope,
+      locale: navigator.language,
+      ensureMetadata: ensureDecorationsIndexed,
+      titleForSegments,
+      tagsForSegments,
+    })
   }
 
-  #render(segments: readonly string[], sections: readonly Section[]): void {
+  #render(
+    segments: readonly string[],
+    sections: readonly Section[],
+    allSections: readonly Section[],
+    config: ViewSourceConfig,
+  ): void {
     this.#teardown()
     const host = document.createElement('section')
     host.className = 'hc-living-brief'
@@ -121,12 +162,26 @@ export class LivingBriefViewDrone extends Drone {
     chrome.className = 'brief-chrome'
     const brand = document.createElement('span')
     brand.textContent = 'LIVING BRIEF'
+    const reach = document.createElement('span')
+    reach.className = 'brief-reach'
+    reach.textContent = config.scope === 'hierarchy' ? 'WHOLE HIERARCHY' : 'CURRENT LAYER'
+    const viewActions = document.createElement('div')
+    viewActions.className = 'brief-view-actions'
+    viewActions.append(reach)
+    if (config.scope === 'hierarchy') {
+      const curate = document.createElement('button')
+      curate.type = 'button'
+      curate.className = 'brief-curate'
+      curate.textContent = 'Choose contents'
+      curate.onclick = () => this.#openCurator(host, segments, allSections, config)
+      viewActions.append(curate)
+    }
     const close = document.createElement('button')
     close.type = 'button'
     close.setAttribute('aria-label', 'Return to hexagons')
     close.textContent = '×'
     close.onclick = () => this.#vm()?.setMode('hexagons')
-    chrome.append(brand, close)
+    chrome.append(brand, viewActions, close)
 
     const paper = document.createElement('article')
     paper.className = 'brief-paper'
@@ -134,7 +189,11 @@ export class LivingBriefViewDrone extends Drone {
     mast.className = 'brief-mast'
     mast.append(this.#el('p', 'brief-kicker', 'Hypercom document'))
     mast.append(this.#el('h1', '', title))
-    mast.append(this.#el('p', 'brief-deck', `${sections.length} ${sections.length === 1 ? 'category' : 'categories'} · composed live from the hive`))
+    mast.append(this.#el(
+      'p',
+      'brief-deck',
+      `${sections.length} ${sections.length === 1 ? 'category' : 'categories'} · ${config.scope === 'hierarchy' ? 'curated hierarchy' : 'current layer'} · composed live from the hive`,
+    ))
     paper.append(mast)
 
     const contents = document.createElement('nav')
@@ -144,7 +203,8 @@ export class LivingBriefViewDrone extends Drone {
     sections.forEach((section, index) => {
       const link = document.createElement('a')
       link.href = `#brief-${index}`
-      link.textContent = `${String(index + 1).padStart(2, '0')}  ${section.title}`
+      link.textContent = `${String(index + 1).padStart(2, '0')}  ${section.source}`
+      link.style.paddingLeft = `${Math.min(section.depth, 5) * 14}px`
       contents.append(link)
     })
     if (sections.length) paper.append(contents)
@@ -164,10 +224,15 @@ export class LivingBriefViewDrone extends Drone {
     const el = document.createElement('section')
     el.className = 'brief-section'
     el.id = `brief-${index}`
+    el.style.setProperty('--section-depth', String(Math.min(section.depth, 5)))
     const number = this.#el('span', 'brief-number', String(index + 1).padStart(2, '0'))
     const heading = this.#el('h2', '', section.title)
     const head = document.createElement('header')
     head.append(number, heading)
+    if (section.depth > 0) {
+      const source = this.#el('p', 'brief-source', section.source)
+      head.append(source)
+    }
     if (section.tags.length) {
       const tags = document.createElement('div')
       tags.className = 'brief-tags'
@@ -205,6 +270,35 @@ export class LivingBriefViewDrone extends Drone {
     return note.mark || note.shape ? 'callout' : 'body'
   }
 
+  #openCurator(
+    host: HTMLElement,
+    segments: readonly string[],
+    allSections: readonly Section[],
+    config: ViewSourceConfig,
+  ): void {
+    if (this.#curator) return
+    const rootLabel = titleForLabel(segments.at(-1) ?? '', navigator.language) ||
+      segments.at(-1) || 'Document'
+    this.#curator = openDocumentViewCurator({
+      host,
+      rootLabel,
+      rootSegments: segments,
+      items: allSections,
+      includedPaths: config.includedPaths,
+      onCancel: () => { this.#curator = null },
+      onDone: async includedPaths => {
+        await writeViewSourceSelection({
+          kind: LIVING_BRIEF_KIND,
+          segments,
+          includedPaths,
+          defaults: { version: 1, layout: 'editorial' },
+        })
+        this.#curator = null
+        void this.#reconcile()
+      },
+    })
+  }
+
   #el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text: string): HTMLElementTagNameMap[K] {
     const el = document.createElement(tag)
     if (className) el.className = className
@@ -215,6 +309,7 @@ export class LivingBriefViewDrone extends Drone {
   #teardown(): void {
     this.#host?.remove()
     this.#host = null
+    this.#curator = null
     this.#setActive(false)
   }
 
@@ -229,17 +324,17 @@ export class LivingBriefViewDrone extends Drone {
 
 const CSS = `
 .hc-living-brief{position:fixed;inset:0;z-index:150;background:#e9e7e1;color:#202322;overflow:auto;font:16px/1.65 Inter,ui-sans-serif,system-ui,sans-serif}
-.brief-chrome{position:sticky;top:0;z-index:2;height:52px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;background:rgba(27,32,31,.94);color:#dce5e1;letter-spacing:.18em;font-size:11px}
+.brief-chrome{position:sticky;top:0;z-index:2;height:52px;padding:0 24px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:rgba(27,32,31,.94);color:#dce5e1;letter-spacing:.18em;font-size:11px}.brief-view-actions{display:flex;align-items:center;gap:10px}.brief-reach{color:#90ada3;font-size:9px}.brief-curate{padding:5px 8px!important;border:1px solid #607b71!important;border-radius:5px;background:#263c34!important;color:#dce9e4!important;font:700 10px/1 Inter,sans-serif!important;letter-spacing:0!important}.brief-chrome button{justify-self:end}
 .brief-chrome button{border:0;background:transparent;color:inherit;font:30px/1 serif;cursor:pointer}
 .brief-paper{box-sizing:border-box;width:min(880px,calc(100% - 32px));min-height:calc(100vh - 92px);margin:40px auto 80px;padding:clamp(42px,8vw,96px);background:#fff;box-shadow:0 16px 60px rgba(28,31,30,.13)}
 .brief-mast{padding-bottom:46px;border-bottom:1px solid #c9ceca}.brief-kicker{margin:0;color:#57756c;text-transform:uppercase;letter-spacing:.19em;font-size:11px;font-weight:700}
 .brief-mast h1{max-width:700px;margin:14px 0;font:600 clamp(40px,7vw,72px)/.98 Georgia,serif;letter-spacing:-.045em}.brief-deck{color:#69706d}
 .brief-contents{display:grid;grid-template-columns:120px 1fr;gap:6px 22px;margin:42px 0 70px;padding:22px 0;border-block:1px solid #e1e4e1}.brief-contents strong{grid-row:1/99;text-transform:uppercase;letter-spacing:.14em;font-size:11px}.brief-contents a{color:#35423e;text-decoration:none}
-.brief-section{scroll-margin-top:70px;margin:0 0 72px}.brief-section>header{display:grid;grid-template-columns:44px 1fr;align-items:start;border-top:3px solid #252c29;padding-top:14px}.brief-number{color:#668277;font-size:12px;font-weight:700}.brief-section h2{margin:0;font:600 32px/1.15 Georgia,serif}
+.brief-section{scroll-margin-top:70px;margin:0 0 72px;padding-left:calc(var(--section-depth,0) * 14px)}.brief-section>header{display:grid;grid-template-columns:44px 1fr;align-items:start;border-top:3px solid #252c29;padding-top:14px}.brief-number{color:#668277;font-size:12px;font-weight:700}.brief-section h2{margin:0;font:600 32px/1.15 Georgia,serif}.brief-source{grid-column:2;margin:7px 0 0;color:#718078;font-size:11px}
 .brief-tags{grid-column:2;display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}.brief-tags span{padding:3px 9px;border:1px solid #bdcbc5;border-radius:999px;color:#4f6b61;font-size:11px}
 .brief-note{margin:24px 0 0 44px}.brief-note p{margin:0;white-space:pre-wrap}.brief-note-label{display:block;margin-bottom:5px;color:#527066;text-transform:uppercase;letter-spacing:.15em;font-size:10px;font-weight:800}
 .brief-question{padding:22px 24px;background:#eef4f1;border-left:4px solid #63897c}.brief-question h3{margin:0;font:600 22px/1.35 Georgia,serif}.brief-answer,.brief-decision,.brief-callout{padding-left:18px;border-left:2px solid #b9c8c2}.brief-decision{border-left-color:#9b754b}.brief-note-children{margin-left:18px}.brief-muted,.brief-empty{color:#777f7b;font-style:italic}.brief-empty{padding:60px 0;text-align:center}
-@media(max-width:640px){.brief-paper{width:100%;margin:0;padding:40px 24px;box-shadow:none}.brief-contents{grid-template-columns:1fr}.brief-contents strong{grid-row:auto}.brief-note{margin-left:0}.brief-section>header{grid-template-columns:34px 1fr}}
+@media(max-width:640px){.brief-paper{width:100%;margin:0;padding:40px 24px;box-shadow:none}.brief-reach{display:none}.brief-contents{grid-template-columns:1fr}.brief-contents strong{grid-row:auto}.brief-note{margin-left:0}.brief-section{padding-left:0}.brief-section>header{grid-template-columns:34px 1fr}}
 @media print{.hc-living-brief{position:static;background:#fff;overflow:visible}.brief-chrome{display:none}.brief-paper{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}.brief-section{break-inside:avoid}}
 `
 

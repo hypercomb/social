@@ -53,12 +53,21 @@ export type SentinelSyncResult = {
   files: SentinelFile[]
 }
 
+export type SentinelBackupResult = {
+  files: number
+  bytes: number
+}
+
 export class SentinelBridge {
 
   #port: MessagePort
   #pending = new Map<string, { resolve: (v: any) => void; reject: (e: any) => void }>()
   #fileCollectors = new Map<string, SentinelFile[]>()
   #progressListeners = new Map<string, (p: { phase: string; current: number; total: number }) => void>()
+  #backupCollectors = new Map<string, {
+    writes: Promise<void>[]
+    onFile: (file: { path: string; sha256: string; bytes: ArrayBuffer }) => Promise<void>
+  }>()
   #ridCounter = 0
   #onToggleChanged: (() => void) | null = null
   #onDcpClosed: (() => void) | null = null
@@ -137,6 +146,43 @@ export class SentinelBridge {
       })
       try {
         this.#port.postMessage({ type: 'intake', rid, signature, kind, bytes }, [bytes])
+      } catch {
+        this.#pending.delete(rid)
+        resolve(false)
+      }
+    })
+  }
+
+  async exportBackup(
+    onFile: (file: { path: string; sha256: string; bytes: ArrayBuffer }) => Promise<void>,
+    onProgress?: (p: { phase: string; current: number; total: number }) => void,
+  ): Promise<SentinelBackupResult | null> {
+    const rid = this.#nextRid()
+    this.#backupCollectors.set(rid, { writes: [], onFile })
+    if (onProgress) this.#progressListeners.set(rid, onProgress)
+    return new Promise(resolve => {
+      this.#pending.set(rid, { resolve, reject: () => resolve(null) })
+      this.#port.postMessage({ type: 'backup-export', rid })
+    })
+  }
+
+  async importBackupFile(
+    file: { path: string; sha256: string; bytes: ArrayBuffer },
+  ): Promise<boolean> {
+    const rid = this.#nextRid()
+    return new Promise(resolve => {
+      this.#pending.set(rid, {
+        resolve: (ok: boolean) => resolve(ok === true),
+        reject: () => resolve(false),
+      })
+      try {
+        this.#port.postMessage({
+          type: 'backup-import-file',
+          rid,
+          path: file.path,
+          sha256: file.sha256,
+          bytes: file.bytes,
+        }, [file.bytes])
       } catch {
         this.#pending.delete(rid)
         resolve(false)
@@ -294,6 +340,42 @@ export class SentinelBridge {
       case 'file': {
         const files = this.#fileCollectors.get(rid)
         files?.push({ signature: msg.signature, kind: msg.kind, bytes: msg.bytes })
+        break
+      }
+
+      case 'backup-file': {
+        const collector = this.#backupCollectors.get(rid)
+        if (collector) {
+          collector.writes.push(Promise.resolve(collector.onFile({
+            path: msg.path,
+            sha256: msg.sha256,
+            bytes: msg.bytes,
+          })))
+        }
+        break
+      }
+
+      case 'backup-done': {
+        const collector = this.#backupCollectors.get(rid)
+        this.#backupCollectors.delete(rid)
+        this.#progressListeners.delete(rid)
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        if (!msg.ok || !collector) {
+          pending?.resolve(null)
+          break
+        }
+        void Promise.all(collector.writes).then(
+          () => pending?.resolve({ files: msg.files, bytes: msg.bytes }),
+          () => pending?.resolve(null),
+        )
+        break
+      }
+
+      case 'backup-import-ack': {
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        pending?.resolve(msg.ok === true)
         break
       }
 

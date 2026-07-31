@@ -35,7 +35,10 @@
 // bypassing view encapsulation) so no component needs a per-panel grip element
 // in its template or SCSS. Shell UI — no essentials import.
 
-import { Directive, ElementRef, Input, inject, type OnDestroy, type OnInit } from '@angular/core'
+import {
+  Directive, ElementRef, EventEmitter, Input, Output, inject,
+  type OnDestroy, type OnInit,
+} from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 
 // The GROUP model — membership text and shared attributes — lives in
@@ -54,6 +57,8 @@ const t = (key: string, fallback: string, params?: Record<string, unknown>): str
 /** Every mounted docked panel — the chrome-side view of `members`, used to
  *  repaint gears and popovers when grouping changes anywhere. */
 const live = new Set<HcDockedPanelDirective>()
+let sideClaimSequence = 0
+const latestSideClaim: Record<'left' | 'right', number> = { left: 0, right: 0 }
 
 /** A self-sizing window that holds its width in a SIGNAL rather than in the
  *  element's inline style. Such a window must be told, not written to — an
@@ -144,6 +149,17 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
    *  common settings gear offers Add/Remove from controls and persists through
    *  the controls bar's participant-local preference map. */
   @Input() launcherControlId = ''
+  /** Side docks are single-window lanes. Set false only while a surface is
+   * genuinely floating or when a future multi-window host owns its layout. */
+  @Input() set dockExclusive(value: boolean) {
+    const next = value !== false
+    const joined = !this.#dockExclusive && next
+    this.#dockExclusive = next
+    if (this.#initialized && joined) this.#scheduleSideClaim()
+  }
+  /** The owning component handles this through its normal close method, keeping
+   * its signal, launcher state, and teardown path authoritative. */
+  @Output() readonly hcDockedPanelClose = new EventEmitter<void>()
 
   readonly #el: HTMLElement = inject(ElementRef).nativeElement
   #grip: HTMLElement | null = null
@@ -155,6 +171,9 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   #startX = 0
   #startWidth = 0
   #dragging = false
+  #dockExclusive = true
+  #initialized = false
+  #claimQueued = false
   /** Only when `ownsSize` is false: watches the window's self-driven resize so
    *  its group mates track it, exactly as the grip does for owned panels. */
   #sizeWatch: ResizeObserver | null = null
@@ -172,6 +191,8 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   ngOnInit(): void {
     live.add(this)
     members.add(this)
+    this.#initialized = true
+    if (this.#dockExclusive) this.#scheduleSideClaim()
     this.#group = readMembership(this.id)
     // A grouped panel opens at its GROUP's width rather than its own remembered
     // one — that is what "shares attributes" has to mean for a window that
@@ -206,6 +227,7 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   }
 
   ngOnDestroy(): void {
+    this.#initialized = false
     live.delete(this)
     members.delete(this)
     this.#stopListeners()
@@ -214,6 +236,28 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     this.#sizeWatch = null
     this.#grip?.removeEventListener('pointerdown', this.#onDown)
     this.#gearBtn?.removeEventListener('click', this.#onGearClick)
+  }
+
+  /** Claim this edge after the current Angular turn. That keeps sibling signal
+   * updates out of one another's initial change-detection pass while still
+   * closing the previous window before the browser paints. */
+  #scheduleSideClaim(): void {
+    if (this.#claimQueued) return
+    this.#claimQueued = true
+    const side = this.dockSide
+    const claim = ++sideClaimSequence
+    latestSideClaim[side] = claim
+    queueMicrotask(() => {
+      this.#claimQueued = false
+      if (!this.#initialized || !this.#dockExclusive || !live.has(this)) return
+      // If two surfaces became visible in one Angular turn, the last launcher
+      // wins rather than whichever directive's microtask happened to run first.
+      if (latestSideClaim[side] !== claim) return
+      for (const panel of [...live]) {
+        if (panel === this || !panel.#dockExclusive || panel.dockSide !== side) continue
+        panel.hcDockedPanelClose.emit()
+      }
+    })
   }
 
   /** Self-sizing windows only: the window's own resize becomes the group's,

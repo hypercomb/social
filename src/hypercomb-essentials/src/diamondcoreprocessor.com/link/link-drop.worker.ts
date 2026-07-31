@@ -7,9 +7,26 @@ import { parseYouTubeVideoId, youTubeThumbnailUrl, fetchYouTubeTitle } from './y
 import { fetchImageBlob } from './photo.js'
 import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
-import type { SelectionService } from '../selection/selection.service.js'
 import type { LinkSafetyService, SafetyVerdict } from '../safety/link-safety.service.js'
 import { armImageBlob } from '../editor/arm-resource.js'
+import { linkDropDestination, persistDroppedTileLink } from './link-drop-destination.js'
+import './youtube-metadata-queue.js'
+import type { YouTubeMetadataQueue } from './youtube-metadata-queue.js'
+import {
+  cellLocationSig,
+  readTilePropsIndex,
+  readTilePropsSigAt,
+  writeTilePropertiesAt,
+  writeTilePropsIndex,
+} from '../editor/tile-properties.js'
+
+type TileOverlay = {
+  labelAtClient(clientX: number, clientY: number): string | null
+}
+
+type Lineage = {
+  explorerSegments?(): readonly string[]
+}
 
 export class LinkDropWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -58,8 +75,16 @@ export class LinkDropWorker extends Worker {
     const url = this.#extractUrl(e)
     if (!url) return
 
+    // A drop belongs to the tile under the release point. Selection is not a
+    // proxy for aiming: a participant can drop on an unselected tile, or on
+    // empty canvas while some other tile remains selected.
+    const targetLabel = this.#tileOverlay?.labelAtClient(e.clientX, e.clientY) ?? null
+    // Bind the address at gesture time. Safety/thumbnail requests can span
+    // navigation, but the drop must always write where it landed.
+    const targetSegments = [...(this.#lineage?.explorerSegments?.() ?? [])]
+
     e.preventDefault()
-    void this.#routeLink(url)
+    void this.#routeLink(url, targetLabel, targetSegments)
   }
 
   // ── URL extraction ────────────────────────────────────────────
@@ -83,7 +108,11 @@ export class LinkDropWorker extends Worker {
 
   // ── routing ───────────────────────────────────────────────────
 
-  async #routeLink(url: string): Promise<void> {
+  async #routeLink(
+    url: string,
+    targetLabel: string | null,
+    targetSegments: readonly string[],
+  ): Promise<void> {
     if (this.#busy) return
     this.#busy = true
 
@@ -98,6 +127,21 @@ export class LinkDropWorker extends Worker {
       if (verdict.decision === 'deny') {
         EffectBus.emit('link:safety-blocked', { url, reason: verdict.reason })
         console.warn('[link-drop] blocked:', url, verdict.reason)
+        return
+      }
+
+      const editorSvc = this.#editorService
+      const destination = linkDropDestination(editorSvc?.mode, targetLabel)
+
+      // A drop on an existing tile is a complete edit gesture: persist the
+      // link immediately. Requiring an unrelated editor Save left the field
+      // looking populated while the canonical tile properties stayed stale.
+      if (destination.kind === 'tile') {
+        await this.#saveTileLink(destination.label, targetSegments, url)
+        if (verdict.decision === 'warn') {
+          EffectBus.emit('link:safety-warning', { url, reason: verdict.reason })
+          console.warn('[link-drop] warning:', url, verdict.reason)
+        }
         return
       }
 
@@ -123,29 +167,16 @@ export class LinkDropWorker extends Worker {
         thumbnailBlob = await fetchImageBlob(url)
       }
 
-      // 3. three-path routing (same as ImagePasteWorker)
-      const editorSvc = this.#editorService
-
+      // 3. Route by the actual release target.
       // Path A: editor already open — set link + optional image
-      if (editorSvc?.mode === 'editing') {
+      if (destination.kind === 'editor' && editorSvc) {
         editorSvc.setLink(url)
         if (thumbnailBlob) {
           editorSvc.setLargeBlob(thumbnailBlob)
           await this.#loadImageWhenReady(thumbnailBlob)
         }
       }
-      // Path B: tile selected — open editor, then set link + image
-      else if (this.#selection && this.#selection.count > 0 && this.#selection.active) {
-        const cell = this.#selection.active
-        EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
-        await this.#waitForEditorMode()
-        this.#editorService?.setLink(url)
-        if (thumbnailBlob) {
-          this.#editorService?.setLargeBlob(thumbnailBlob)
-          await this.#loadImageWhenReady(thumbnailBlob)
-        }
-      }
-      // Path C: nothing selected — arm the link in the command-line chevron slot.
+      // Path B: empty canvas — arm the link in the command-line chevron slot.
       // User types a cell name and presses Enter to commit.
       else {
         await this.#armLink(url, videoId, thumbnailBlob)
@@ -196,14 +227,26 @@ export class LinkDropWorker extends Worker {
 
   // ── helpers ───────────────────────────────────────────────────
 
-  async #waitForEditorMode(): Promise<void> {
-    if (this.#editorService?.mode === 'editing') return
-    await new Promise<void>(resolve => {
-      const off = EffectBus.on<{ active: boolean }>('editor:mode', (payload) => {
-        if (payload?.active) { off(); resolve() }
-      })
-      setTimeout(() => { off(); resolve() }, 2000)
+  async #saveTileLink(
+    cell: string,
+    parentSegments: readonly string[],
+    url: string,
+  ): Promise<void> {
+    await persistDroppedTileLink(parentSegments, cell, url, {
+      writeProperties: writeTilePropertiesAt,
+      readPropertiesSig: readTilePropsSigAt,
+      locationSig: cellLocationSig,
+      readIndex: readTilePropsIndex,
+      writeIndex: writeTilePropsIndex,
     })
+
+    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', {
+      cell,
+      segments: parentSegments,
+    })
+    if (parseYouTubeVideoId(url)) {
+      this.#metadataQueue?.enqueue({ segments: parentSegments, cell, url })
+    }
   }
 
   async #loadImageWhenReady(blob: Blob): Promise<void> {
@@ -227,8 +270,16 @@ export class LinkDropWorker extends Worker {
     return get('@diamondcoreprocessor.com/ImageEditorService') as ImageEditorService | undefined
   }
 
-  get #selection(): SelectionService | undefined {
-    return get('@diamondcoreprocessor.com/SelectionService') as SelectionService | undefined
+  get #tileOverlay(): TileOverlay | undefined {
+    return get('@diamondcoreprocessor.com/TileOverlayDrone') as TileOverlay | undefined
+  }
+
+  get #lineage(): Lineage | undefined {
+    return get('@hypercomb.social/Lineage') as Lineage | undefined
+  }
+
+  get #metadataQueue(): YouTubeMetadataQueue | undefined {
+    return get('@diamondcoreprocessor.com/YouTubeMetadataQueue') as YouTubeMetadataQueue | undefined
   }
 
   get #safetyService(): LinkSafetyService | undefined {

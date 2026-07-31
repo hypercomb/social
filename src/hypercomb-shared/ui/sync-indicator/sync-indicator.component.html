@@ -7,7 +7,6 @@
 @if (visible()) {
   <div class="sync-cell" [class.done]="done()" role="status" aria-live="polite">
     <div class="sync-line">
-      <span class="sync-dot"></span>
       <span class="sync-label">
         @if (done()) {
           @if (doneCount() > 0) {

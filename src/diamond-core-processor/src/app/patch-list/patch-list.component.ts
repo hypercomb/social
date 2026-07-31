@@ -20,7 +20,7 @@ import type { PatchRecord } from '../core/patch-store'
               class="patch-item original"
               [class.active]="!isPatched()"
               (click)="switchRoot.emit(originalRootSig())">
-              <span class="patch-label">original</span>
+              <span class="patch-label">Default</span>
               <code class="patch-sig">{{ originalRootSig().slice(0, 10) }}&hellip;</code>
             </button>
 

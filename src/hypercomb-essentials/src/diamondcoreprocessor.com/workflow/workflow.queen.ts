@@ -176,7 +176,7 @@ window.ioc.register('@diamondcoreprocessor.com/WorkflowQueenBee', _workflow)
       view: 'workflow',
       slashCommand: '/workflow',
       iconName: 'workflow',
-      toggleIcon: 'account_tree',
+      toggleIcon: 'conversion_path',
       decorationKind: 'visual:workflow:step',
       slot: WORKFLOW_SLOT,
       labelKey: 'view.workflow',

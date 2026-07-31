@@ -68,17 +68,43 @@ export class App implements AfterViewInit {
    * On success, reloads the page so the freshly-installed bees take over.
    */
   protected upgrading = signal(false)
-  protected async upgradeFromBundledClicked(): Promise<void> {
+  protected async upgradeFromBundledClicked(
+    restorePointName?: string,
+    requireCheckpoint = false,
+  ): Promise<void> {
     if (this.upgrading()) return
     this.upgrading.set(true)
     try {
+      if (requireCheckpoint) {
+        EffectBus.emit('update:status', { phase: 'snapshotting', message: 'Saving restore point…' })
+        const queen = window.ioc?.get<{
+          createRestorePoint?: (name: string) => Promise<boolean>
+        }>('@diamondcoreprocessor.com/SnapshotQueenBee')
+        const checkpointed = await queen?.createRestorePoint?.(String(restorePointName ?? '').trim())
+        if (!checkpointed) {
+          EffectBus.emit('update:status', {
+            phase: 'error',
+            message: 'Update stopped — the restore point was not saved',
+          })
+          this.upgrading.set(false)
+          return
+        }
+      }
+      EffectBus.emit('update:status', { phase: 'applying', message: 'Updating packages and website…' })
       const ok = await upgradeFromBundled()
       // Cache the map the upgrade just made resolvable so the reload boots
       // with it live before the module graph (see setup/resolve-import-map).
-      if (ok) { await cacheImportMap(); location.reload() }
-      else this.upgrading.set(false)
+      if (ok) {
+        await cacheImportMap()
+        EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
+        location.reload()
+      } else {
+        EffectBus.emit('update:status', { phase: 'error', message: 'Update failed — nothing was adopted' })
+        this.upgrading.set(false)
+      }
     } catch (err) {
       console.error('[app] upgradeFromBundled failed', err)
+      EffectBus.emit('update:status', { phase: 'error', message: 'Update failed — nothing was adopted' })
       this.upgrading.set(false)
     }
   }
@@ -168,7 +194,10 @@ export class App implements AfterViewInit {
     // The mesh only announces WHICH features changed; the bytes are fetched
     // by THIS origin from its own bundled `/content/` (upgradeFromBundled),
     // then the shell reloads so the freshly-installed bees take over.
-    window.addEventListener('hypercomb:apply-update', () => void this.upgradeFromBundledClicked())
+    window.addEventListener('hypercomb:apply-update', event => {
+      const restorePointName = String((event as CustomEvent<{ restorePointName?: string }>).detail?.restorePointName ?? '').trim()
+      void this.upgradeFromBundledClicked(restorePointName, true)
+    })
 
     // ViewMode subscription — drives Pixi-canvas visibility via app.html.
     // Self-registered in shared/core/view-mode.service.ts at module load.

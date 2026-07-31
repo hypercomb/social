@@ -1,95 +1,113 @@
-// Host participates directly in the .header-bar flex row (like the other
-// header cells), so the control itself is the flex item.
-:host {
-  display: contents;
-}
+:host { display: contents; }
 
-// The whole control: meta (icon + label + count) followed by the three
-// inline actions. Slim, cold-clean chrome — a steel/blue hairline, no chunk.
 .upgrade-indicator {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.42rem;
   flex-shrink: 0;
-  padding: 0 0.75rem;
-  margin: 0;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
-  color: #4da6ff;
+  min-width: 0;
+  min-height: 2.15rem;
+  padding: 0.28rem 0.38rem;
+  color: #74baff;
+  border: 1px solid rgba(116, 186, 255, 0.28);
+  border-radius: 5px;
+  background: rgba(9, 14, 20, 0.94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+
+  &[data-phase='complete'] { color: #74c98a; }
+  &[data-phase='error'] { color: #e78b8b; }
 }
 
-.upgrade-meta {
-  display: flex;
+.status-button {
+  display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  // Gentle attention pulse on the meta only — an update is waiting, not an error.
-  animation: upgrade-pulse 1.8s ease-in-out infinite;
-
-  .mat-sym {
-    font-family: 'Material Symbols Outlined';
-    font-size: 1.3rem;
-    line-height: 1;
-  }
-
-  .upgrade-label {
-    font: 600 0.72rem/1 var(--hc-ui-font, system-ui, sans-serif);
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-  }
-
-  .upgrade-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 1.1rem;
-    height: 1.1rem;
-    padding: 0 0.3rem;
-    border-radius: 999px;
-    background: rgba(77, 166, 255, 0.16);
-    font: 600 0.6rem/1 var(--hc-mono, ui-monospace, monospace);
-    color: #4da6ff;
-  }
-}
-
-// The three inline actions. Adopt is the confident affirmative (accent);
-// Save / Discard are subdued so they don't compete.
-.upgrade-act {
-  font: 600 0.66rem/1 var(--hc-ui-font, system-ui, sans-serif);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 0.3rem 0.55rem;
-  border-radius: 4px;
-  border: 1px solid transparent;
+  gap: 0.45rem;
+  min-height: 1.55rem;
+  padding: 0 0.5rem;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  font: 650 0.66rem/1 var(--hc-ui-font, system-ui, sans-serif);
+  letter-spacing: 0.025em;
+
+  &:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+  &:focus-visible { outline: 1px solid currentColor; outline-offset: 1px; }
+  &:disabled { cursor: default; }
+}
+
+.upgrade-count {
+  display: grid;
+  place-items: center;
+  min-width: 0.9rem;
+  height: 0.9rem;
+  padding: 0 0.15rem;
+  border-radius: 999px;
+  background: #4da6ff;
+  color: #07121c;
+  font: 700 0.52rem/1 var(--hc-mono, ui-monospace, monospace);
+}
+
+.upgrade-label {
+  max-width: 15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 0.68rem/1 var(--hc-ui-font, system-ui, sans-serif);
+}
+
+.upgrade-act {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: rgba(220, 234, 245, 0.68);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  font: 600 0.62rem/1 var(--hc-ui-font, system-ui, sans-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
+
+  &:hover:not(:disabled) { color: #f0f6fb; background: rgba(255, 255, 255, 0.07); }
+  &:disabled { opacity: 0.4; cursor: default; }
 
   &.adopt {
-    color: #4da6ff;
-    border-color: rgba(77, 166, 255, 0.4);
-    background: rgba(77, 166, 255, 0.12);
-
-    &:hover { background: rgba(77, 166, 255, 0.22); color: #7ec0ff; }
-    &:active { transform: scale(0.97); }
+    color: #74baff;
+    border-color: rgba(116, 186, 255, 0.35);
+    background: rgba(77, 166, 255, 0.1);
   }
-
-  &.save,
-  &.discard {
-    color: rgba(220, 234, 245, 0.5);
-
-    &:hover { color: rgba(220, 234, 245, 0.85); background: rgba(255, 255, 255, 0.06); }
-  }
-
-  &:focus-visible { outline: 1px solid rgba(77, 166, 255, 0.5); outline-offset: 1px; }
 }
 
-@keyframes upgrade-pulse {
-  0%, 100% { opacity: 0.72; }
-  50%      { opacity: 1; }
+.restore-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: rgba(220, 234, 245, 0.55);
+  font: 600 0.58rem/1 var(--hc-ui-font, system-ui, sans-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+
+  input {
+    width: min(13rem, 22vw);
+    height: 1.8rem;
+    box-sizing: border-box;
+    padding: 0 0.5rem;
+    border: 1px solid rgba(116, 186, 255, 0.35);
+    border-radius: 4px;
+    outline: 0;
+    color: #eaf4fc;
+    background: rgba(6, 12, 18, 0.72);
+    font: 500 0.68rem/1 var(--hc-ui-font, system-ui, sans-serif);
+
+    &:focus { border-color: #74baff; }
+  }
 }
 
-// Hidden on phones — the header collapses there; updates are reachable from
-// the controls bar's DCP action instead.
 @media (max-width: 599px) {
-  .upgrade-indicator { display: none; }
+  .upgrade-indicator { max-width: calc(100vw - 1rem); }
+  .restore-name { display: none; }
 }

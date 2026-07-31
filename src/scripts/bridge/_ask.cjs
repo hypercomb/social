@@ -1,6 +1,6 @@
 // Author a Q&A entry through the proper external-optimization channel.
 //
-//   node scripts/bridge/_ask.cjs <cell-path> "<question>" [--id <qId>]
+//   node scripts/bridge/_ask.cjs <cell-path> "<question>" [--id <qId>] [--approval]
 //
 // Writes a `{ kind: 'qa', appliesTo, payload: { qId, question, askedAt },
 // mark: 'persistent' }` JSON object into the renderer's OPFS
@@ -50,17 +50,19 @@ function parseSegments(arg) {
 function parseArgs(argv) {
   const positional = []
   let qId = null
+  let approval = false
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--id') { qId = argv[++i]; continue }
+    if (argv[i] === '--approval') { approval = true; continue }
     positional.push(argv[i])
   }
-  return { cellPath: positional[0], question: positional[1], qId }
+  return { cellPath: positional[0], question: positional[1], qId, approval }
 }
 
 async function main() {
-  const { cellPath, question, qId: providedQid } = parseArgs(process.argv.slice(2))
+  const { cellPath, question, qId: providedQid, approval } = parseArgs(process.argv.slice(2))
   if (!cellPath || !question) {
-    console.error('Usage: node scripts/bridge/_ask.cjs <cell-path> "<question>" [--id <qId>]')
+    console.error('Usage: node scripts/bridge/_ask.cjs <cell-path> "<question>" [--id <qId>] [--approval]')
     process.exit(1)
   }
   const segments = parseSegments(cellPath)
@@ -77,6 +79,11 @@ async function main() {
       qId,
       question: question.trim(),
       askedAt: Date.now(),
+      origin: 'assistant',
+      reason: approval
+        ? 'An assistant needs your approval before it can continue.'
+        : 'An assistant needs your answer before it can continue.',
+      ...(approval ? { responseKind: 'approval' } : {}),
     },
     mark: 'persistent',
   }

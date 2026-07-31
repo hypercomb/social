@@ -1,5 +1,7 @@
+@use '../toolwindow' as tw;
+
 :host { position: fixed; inset: 0; pointer-events: none; z-index: 59994; }
-.filter-panel { position: fixed; top: var(--hc-header-anchor); right: 0; bottom: 0; width: 320px; padding: .65rem; box-sizing: border-box; overflow: auto; pointer-events: auto; background: color-mix(in srgb, var(--md-surface-c-low,#171717) 94%, transparent); color: rgba(245,245,245,.9); font-family: var(--hc-font); }
+.filter-panel { @include tw.panel(#7eb6d6, right); position: fixed; top: var(--hc-header-anchor); right: 0; bottom: 0; width: 320px; padding: .65rem; box-sizing: border-box; overflow: auto; pointer-events: auto; color: rgba(245,245,245,.9); }
 header, .scope, .save-row, li, .place, .config { display: flex; align-items: center; gap: .4rem; }
 header strong { flex: 1; }
 button, input { font: inherit; }
@@ -7,17 +9,17 @@ button { cursor: pointer; }
 .scope button, .close, .delete { background: transparent; border: 0; color: rgba(245,245,245,.55); }
 .scope button.active { color: var(--md-primary,#7eb6d6); }
 .hint { color: rgba(245,245,245,.52); font-size: .75rem; line-height: 1.4; }
-.new-view { width: 100%; padding: .45rem; background: transparent; border: 1px solid rgba(245,245,245,.15); border-radius: 8px; color: inherit; }
-.draft { min-height: 88px; margin: .65rem 0; padding: .45rem; border: 1px dashed rgba(126,182,214,.45); border-radius: 10px; }
+.new-view { width: 100%; padding: .45rem; background: transparent; border: 1px solid rgba(245,245,245,.15); border-radius: tw.$radius-control; color: inherit; }
+.draft { min-height: 88px; margin: .65rem 0; padding: .45rem; border: 1px dashed rgba(126,182,214,.45); border-radius: tw.$radius-card; }
 .draft.empty { display: grid; place-items: center; color: rgba(245,245,245,.4); }
 .place { padding: .35rem; }
 .place span:nth-child(2) { flex: 1; }
 .place button { background: transparent; border: 0; color: rgba(245,245,245,.45); }
-.save-row input { min-width: 0; flex: 1; padding: .45rem; background: rgba(0,0,0,.25); border: 1px solid rgba(245,245,245,.15); border-radius: 8px; color: inherit; }
+.save-row input { min-width: 0; flex: 1; padding: .45rem; background: rgba(0,0,0,.25); border: 1px solid rgba(245,245,245,.15); border-radius: tw.$radius-control; color: inherit; }
 .save-row > button { padding: .45rem .7rem; }
 h3 { margin: .9rem 0 .35rem; font-size: .75rem; color: rgba(245,245,245,.55); }
 ul { list-style: none; margin: 0; padding: 0; }
-li { border-radius: 8px; }
+li { border-radius: tw.$radius-card; }
 li:hover { background: rgba(245,245,245,.05); }
 .config { flex: 1; min-width: 0; padding: .45rem; background: transparent; border: 0; color: inherit; text-align: left; }
 .config small { margin-left: auto; opacity: .5; }

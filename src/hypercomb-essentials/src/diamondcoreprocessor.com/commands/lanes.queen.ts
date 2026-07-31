@@ -1,8 +1,8 @@
 // diamondcoreprocessor.com/commands/lanes.queen.ts
 //
-// Mobile/command-line door to the orientation-aware three-lane arrangement.
-// Unlike the `a` shortcut this selects the target directly, so invoking it is
-// deterministic regardless of where the participant last stopped the cycle.
+// Mobile-only global door to the orientation-aware three-lane arrangement.
+// Unlike the per-location `a` cycle this selects the target directly and never
+// installs a sequence target on the current tile.
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 
@@ -11,7 +11,7 @@ export class LanesQueenBee extends QueenBee {
   readonly command = 'lanes'
   override readonly aliases = ['three', 'three-lanes']
   override description =
-    'Arrange tiles into three point-top columns or three flat-top rows'
+    'In mobile mode, arrange tiles into three point-top columns or three flat-top rows'
   override descriptionKey = 'slash.lanes'
   override examples = [
     {

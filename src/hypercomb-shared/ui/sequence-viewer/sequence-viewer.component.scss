@@ -4,3 +4,8 @@
 .intro,article small{color:#8fa19b}.intro{margin:0;padding:1rem;font-size:.8rem}.list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:.7rem}.list article{display:grid;grid-template-columns:2.2rem 1fr auto auto;align-items:center;gap:.65rem;margin-bottom:.55rem;padding:.8rem;border:1px solid #293733;border-radius:.6rem;background:#17201e}.list article.active{border-color:#7eb8a4;box-shadow:inset 3px 0 #7eb8a4}.icon{display:grid;place-items:center;width:2.2rem;height:2.2rem;border-radius:.45rem;background:#22342e;color:#91beae}.list article>div{display:flex;min-width:0;flex-direction:column}.list small{font-size:.7rem}.apply{border:1px solid #4e7668;border-radius:.35rem;padding:.4rem .55rem;background:#294f42;color:#edf5f2;cursor:pointer}.edit{font-size:1rem}
 footer{padding:.8rem;border-top:1px solid #293733}footer button{display:flex;align-items:center;justify-content:center;gap:.35rem;width:100%;padding:.6rem;border:1px dashed #527568;border-radius:.45rem;background:transparent;color:#b8cec6;cursor:pointer}
 @media(max-width:599px){.sequence-panel{left:0;right:0;width:auto!important}}
+
+// Hyper-window standard: shared shell and low-radius managed objects.
+.sequence-panel { @include tw.panel(#7eb8a4, right); }
+.list article { border-radius: tw.$radius-card; }
+.icon, .apply, footer button { border-radius: tw.$radius-control; }

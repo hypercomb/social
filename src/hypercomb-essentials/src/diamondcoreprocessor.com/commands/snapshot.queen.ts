@@ -78,12 +78,23 @@ export class SnapshotQueenBee extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const trimmed = String(args ?? '').trim()
     if (trimmed.toLowerCase() === 'list') return this.#list()
-    return this.#take(trimmed)
+    await this.#take(trimmed)
   }
 
   // ── take ────────────────────────────────────────────────
 
-  async #take(name: string): Promise<void> {
+  public createRestorePoint(name: string): Promise<boolean> {
+    return this.#take(String(name ?? '').trim())
+  }
+
+  public async suggestedRestorePointName(fallback = 'Before update'): Promise<string> {
+    const existing = await readSnapshots()
+    return existing.length === 0
+      ? 'Default'
+      : (String(fallback ?? '').trim() || `Restore point ${existing.length + 1}`)
+  }
+
+  async #take(name: string): Promise<boolean> {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     const history = get<HistoryService>(HISTORY_KEY)
     const store = get<StoreLike>(STORE_KEY)
@@ -92,7 +103,7 @@ export class SnapshotQueenBee extends QueenBee {
     if (!history?.sealSubtree || !store?.putResource || !committer?.commitSlotAppend) {
       this.#toast('error', this.#t(i18n, 'snapshot.title', 'Snapshot'),
         this.#t(i18n, 'snapshot.not-ready', 'Core services are not ready yet — try again in a moment.'))
-      return
+      return false
     }
 
     // 1. A merkle-coherent root from live heads; heal once, retry, else
@@ -107,7 +118,7 @@ export class SnapshotQueenBee extends QueenBee {
       this.#toast('error', this.#t(i18n, 'snapshot.title', 'Snapshot'),
         this.#t(i18n, 'snapshot.seal-failed',
           'The hive could not be sealed (a tile is cold or unresolvable) — visit it once, then run /snapshot again.'))
-      return
+      return false
     }
 
     // 2 + 3. Mirror the sealed closure to DCP and wait for receipts.
@@ -122,9 +133,22 @@ export class SnapshotQueenBee extends QueenBee {
     if (!sig || !SIG_RE.test(sig)) {
       this.#toast('error', this.#t(i18n, 'snapshot.title', 'Snapshot'),
         this.#t(i18n, 'snapshot.write-failed', 'The snapshot record could not be written.'))
-      return
+      return false
     }
     await committer.commitSlotAppend([], SNAPSHOTS_SLOT, sig)
+
+    // This commit is also the row Revision History displays. Give the marker
+    // the restore-point name instead of leaving an opaque snapshots-slot diff.
+    try {
+      if (history.sign && history.listMarkerFilenames && history.setMarkerMeta) {
+        const rootLocation = await history.sign({ explorerSegments: () => [] } as never)
+        const markers = await history.listMarkerFilenames(rootLocation)
+        const latest = [...markers].sort().at(-1)
+        if (latest) await history.setMarkerMeta(rootLocation, latest, { label, marked: true, path: [] })
+      }
+    } catch (err) {
+      console.warn('[snapshot] restore point committed but its revision label could not be written', err)
+    }
 
     // Name the seal in the installer too, so the backup is more than an
     // undifferentiated pile of received layers: a durable, named pointer
@@ -149,6 +173,7 @@ export class SnapshotQueenBee extends QueenBee {
           'Saved "{label}" — {seal}. No installer is connected, so this snapshot is local only; it uploads on its own once one is.',
           { label, seal: short }))
     }
+    return true
   }
 
   /**

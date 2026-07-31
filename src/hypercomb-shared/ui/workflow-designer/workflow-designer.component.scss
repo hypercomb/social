@@ -45,6 +45,7 @@ $dim: #7f95a3;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(0.78rem * var(--hc-panel-scale, 1));
   color: #c8d6de;
+  @include tw.panel($steel, left);
 }
 
 // The dragged kind, riding the cursor. Never intercepts the pointer — the drop

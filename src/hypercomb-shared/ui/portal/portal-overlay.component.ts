@@ -169,6 +169,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
    *  accepted headless install from a discarded one. */
   #applyInProgress = false
 
+  namingRestorePoint = false
+  restorePointName = 'Default'
+  applyingRestorePoint = false
+  restorePointError = ''
+  #restorePointNamedByDcp = false
+
   /** Full URL of the currently-loaded iframe content, for the title-attr tooltip. */
   get activeUrl(): string | null { return this.#activeUrl }
 
@@ -310,6 +316,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     // made while the portal is up surfaces a Done button (see pendingPackageChange).
     this.#openLogicalBaseline = this.#snapshotLogicalRootSig()
     this.pendingPackageChange = false
+    this.#restorePointNamedByDcp = false
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
     this.headless = detail?.headless === true && (detail?.target ?? '') === 'dcp'
@@ -401,14 +408,24 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     // enforce origin boundary
     if (e.origin !== expectedOrigin) return
 
-    const data = e.data as { type?: string } | null
+    const data = e.data as { type?: string; name?: string } | null
     if (!data?.type) return
 
     switch (data.type) {
+      case 'dcp:restore-point': {
+        const name = String(data.name ?? '').trim()
+        if (name) {
+          this.restorePointName = name
+          this.#restorePointNamedByDcp = true
+          this.#cdr.detectChanges()
+        }
+        break
+      }
+
       case 'portal:confirm':
       case 'dcp:confirm':
         // Iframe-initiated accept — equivalent to clicking Done in the chrome.
-        this.apply()
+        void this.beginApply()
         break
 
       case 'portal:cancel':
@@ -447,7 +464,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (this.#headlessApplyTimer !== null) window.clearTimeout(this.#headlessApplyTimer)
     this.#headlessApplyTimer = window.setTimeout(() => {
       this.#headlessApplyTimer = null
-      if (this.headless) this.apply()
+      if (this.headless) void this.beginApply()
     }, HEADLESS_SETTLE_MS)
   }
 
@@ -637,6 +654,10 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#activeTarget = null
     this.#activeRequest = null
     this.pendingPackageChange = false
+    this.namingRestorePoint = false
+    this.applyingRestorePoint = false
+    this.restorePointError = ''
+    this.#restorePointNamedByDcp = false
     this.#openLogicalBaseline = undefined
     this.#cdr.detectChanges()
     // Per-branch outcome — a headless install is invisible, so its end must be
@@ -668,11 +689,92 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // installer's enabled config into the hive (SwarmAdoptDrone) and resyncs /
   // reloads the web shell (main.ts). Nothing installs or runs until the
   // participant authorizes it here.
-  public apply = (): void => {
+  /** First click exposes a restore-point name. A headless install uses a
+   * deterministic name because it has no visible form. */
+  public beginApply = async (): Promise<void> => {
+    if (this.applyingRestorePoint) return
+    if (this.#restorePointNamedByDcp && this.restorePointName.trim()) {
+      await this.#applyWithCheckpoint(this.restorePointName.trim())
+      return
+    }
+    if (this.headless) {
+      const label = this.#requestLabel(this.#activeRequest).replaceAll('"', '')
+      await this.#applyWithCheckpoint(await this.#suggestRestorePointName(`Before adopting ${label}`))
+      return
+    }
+    this.restorePointName = await this.#suggestRestorePointName(
+      `Before update ${new Date().toLocaleDateString()}`,
+    )
+    this.namingRestorePoint = true
+    this.restorePointError = ''
+    this.#cdr.detectChanges()
+  }
+
+  public cancelRestorePoint = (): void => {
+    if (this.applyingRestorePoint) return
+    this.namingRestorePoint = false
+    this.restorePointError = ''
+    this.#cdr.detectChanges()
+  }
+
+  public confirmApply = (): void => {
+    const name = this.restorePointName.trim()
+    if (!name || this.applyingRestorePoint) return
+    void this.#applyWithCheckpoint(name)
+  }
+
+  async #suggestRestorePointName(fallback: string): Promise<string> {
+    const queen = window.ioc?.get<{
+      suggestedRestorePointName?: (name?: string) => Promise<string>
+    }>('@diamondcoreprocessor.com/SnapshotQueenBee')
+    return await queen?.suggestedRestorePointName?.(fallback).catch(() => fallback) ?? fallback
+  }
+
+  async #applyWithCheckpoint(restorePointName: string): Promise<void> {
+    if (this.#activeTarget !== 'dcp') {
+      this.#finishApply(restorePointName, false)
+      return
+    }
+
+    this.applyingRestorePoint = true
+    this.restorePointError = ''
+    this.#cdr.detectChanges()
+    EffectBus.emit('update:status', { phase: 'snapshotting', message: 'Saving restore point…' })
+
+    try {
+      const queen = window.ioc?.get<{
+        createRestorePoint?: (name: string) => Promise<boolean>
+      }>('@diamondcoreprocessor.com/SnapshotQueenBee')
+      const checkpointed = await queen?.createRestorePoint?.(restorePointName)
+      if (!checkpointed) {
+        this.applyingRestorePoint = false
+        this.restorePointError = 'The restore point could not be saved. Nothing was adopted.'
+        EffectBus.emit('update:status', { phase: 'error', message: 'Adopt stopped — restore point not saved' })
+        this.#cdr.detectChanges()
+        return
+      }
+      this.#finishApply(restorePointName, true)
+    } catch (err) {
+      console.warn('[portal] pre-adopt restore point failed', err)
+      this.applyingRestorePoint = false
+      this.restorePointError = 'The restore point could not be saved. Nothing was adopted.'
+      EffectBus.emit('update:status', { phase: 'error', message: 'Adopt stopped — restore point not saved' })
+      this.#cdr.detectChanges()
+    }
+  }
+
+  #finishApply(restorePointName: string, checkpointed: boolean): void {
     const wasDcp = this.#activeTarget === 'dcp'
+    const contentChanges = this.pendingAdds + this.pendingRemoves
+    const transactionId = `adopt:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
     this.#applyInProgress = true
     try { this.close() } finally { this.#applyInProgress = false }
-    if (wasDcp) window.dispatchEvent(new CustomEvent('actions:available'))
+    if (wasDcp) {
+      EffectBus.emit('update:status', { phase: 'applying', message: 'Adopting packages and website…' })
+      window.dispatchEvent(new CustomEvent('actions:available', {
+        detail: { checkpointed, restorePointName, contentChanges, transactionId },
+      }))
+    }
   }
 }
 

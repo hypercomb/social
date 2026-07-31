@@ -2,17 +2,22 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
-import { listDecorations, removeDecoration, writeDecoration } from './decoration-manifest.js'
+import {
+  listDecorations,
+  removeDecorationAndWait,
+  writeDecoration,
+} from './decoration-manifest.js'
+import {
+  VIEW_SOURCE_SCOPES,
+  viewSourceScopeFromArgs,
+  writeViewSourceScope,
+  type ViewSourceScope,
+} from './view-source-scope.js'
 
 export const EVIDENCE_ATLAS_VIEW = 'evidence-atlas'
 export const EVIDENCE_ATLAS_KIND = 'visual:document:evidence-atlas'
 export const KNOWLEDGE_STUDIO_VIEW = 'knowledge-studio'
 export const KNOWLEDGE_STUDIO_KIND = 'visual:document:knowledge-studio'
-const LIBRARY_VIEW_KINDS = [
-  'visual:document:living-brief',
-  EVIDENCE_ATLAS_KIND,
-  KNOWLEDGE_STUDIO_KIND,
-] as const
 
 type Mode = { mode: string; setMode(next: string): void }
 type Lineage = { explorerSegments?: () => readonly string[] }
@@ -26,33 +31,70 @@ abstract class LibraryViewQueen extends QueenBee {
 
   protected async execute(args: string): Promise<void> {
     const action = args.trim().toLowerCase()
-    if (action === 'here' || action === 'mark' || action === 'attach') {
-      const segments = [...(get<Lineage>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])]
-      const existing = await listDecorations({ kind: this.kind, segments })
-      if (existing.length) {
-        existing.forEach(record => removeDecoration({ sig: record.sig, segments }))
-        EffectBus.emit('activity:log', { message: `${this.label} removed from this category`, icon: 'view_quilt' })
-      } else {
-        // The toolwindow is a chooser, not a stack: one document projection
-        // per layer. Leave websites, slides, and other unrelated behaviours
-        // alone; exclusivity belongs only to this view library.
-        for (const kind of LIBRARY_VIEW_KINDS) {
-          if (kind === this.kind) continue
-          const prior = await listDecorations({ kind, segments })
-          for (const record of prior) removeDecoration({ sig: record.sig, segments })
-        }
-        await writeDecoration({
-          kind: this.kind, appliesTo: segments, segments,
-          payload: { version: 1 }, mark: 'persistent',
-        })
-        EffectBus.emit('activity:log', { message: `${this.label} attached`, icon: 'view_quilt' })
-      }
+    const [verb = '', reach = ''] = action.split(/\s+/, 2)
+    if (verb === 'scope') {
+      const scope = viewSourceScopeFromArgs(reach)
+      if (scope) await this.#setScope(scope)
+      return
+    }
+    if (verb === 'here' || verb === 'mark' || verb === 'attach') {
+      await this.#toggle(viewSourceScopeFromArgs(reach))
       return
     }
     const vm = get<Mode>('@hypercomb.social/ViewMode')
     if (!vm) return
     if (['off', 'close', 'hexagons'].includes(action)) vm.setMode('hexagons')
     else vm.setMode(vm.mode === this.view && !['on', 'open', 'view'].includes(action) ? 'hexagons' : this.view)
+  }
+
+  #segments(): string[] {
+    return [...(get<Lineage>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])]
+  }
+
+  async #toggle(requestedScope: ViewSourceScope | null): Promise<void> {
+    const segments = this.#segments()
+    const existing = await listDecorations({ kind: this.kind, segments })
+    if (existing.length && requestedScope) {
+      await this.#setScope(requestedScope)
+      return
+    }
+    if (existing.length) {
+      await Promise.all(existing.map(record =>
+        removeDecorationAndWait({ sig: record.sig, segments })))
+      EffectBus.emit('activity:log', { message: `${this.label} removed from this category`, icon: 'view_quilt' })
+      return
+    }
+    await this.#attach(segments, requestedScope ?? 'layer')
+  }
+
+  async #setScope(scope: ViewSourceScope): Promise<void> {
+    const segments = this.#segments()
+    const existing = await listDecorations({ kind: this.kind, segments })
+    if (!existing.length) {
+      await this.#attach(segments, scope)
+      return
+    }
+    await writeViewSourceScope({
+      kind: this.kind,
+      segments,
+      scope,
+      defaults: { version: 1 },
+    })
+    EffectBus.emit('activity:log', {
+      message: `${this.label} now reads the ${scope === 'hierarchy' ? 'whole hierarchy' : 'current layer'}`,
+      icon: scope === 'hierarchy' ? 'account_tree' : 'layers',
+    })
+  }
+
+  async #attach(segments: readonly string[], scope: ViewSourceScope): Promise<void> {
+    await writeDecoration({
+      kind: this.kind, appliesTo: segments, segments,
+      payload: { version: 1, sourceScope: scope }, mark: 'persistent',
+    })
+    EffectBus.emit('activity:log', {
+      message: `${this.label} attached — reading the ${scope === 'hierarchy' ? 'whole hierarchy' : 'current layer'}`,
+      icon: 'view_quilt',
+    })
   }
 }
 
@@ -63,7 +105,7 @@ export class AtlasQueenBee extends LibraryViewQueen {
   readonly kind = EVIDENCE_ATLAS_KIND
   readonly label = 'Evidence Atlas'
   override description = 'Evidence Atlas — organize notes into questions, evidence, decisions, and open issues'
-  override options = ['on', 'off', 'here']
+  override options = ['on', 'off', 'here', 'here layer', 'here hierarchy', 'scope layer', 'scope hierarchy']
 }
 
 export class StudioQueenBee extends LibraryViewQueen {
@@ -73,7 +115,7 @@ export class StudioQueenBee extends LibraryViewQueen {
   readonly kind = KNOWLEDGE_STUDIO_KIND
   readonly label = 'Knowledge Studio'
   override description = 'Knowledge Studio — turn categories into a guided editorial sequence'
-  override options = ['on', 'off', 'here']
+  override options = ['on', 'off', 'here', 'here layer', 'here hierarchy', 'scope layer', 'scope hierarchy']
 }
 
 const atlas = new AtlasQueenBee()
@@ -86,10 +128,11 @@ window.ioc.register('@diamondcoreprocessor.com/StudioQueenBee', studio)
   registry => {
     registry.register({
       view: EVIDENCE_ATLAS_VIEW, slashCommand: '/atlas', iconName: 'account_tree',
-      toggleIcon: 'account_tree', behavior: 'render', decorationKind: EVIDENCE_ATLAS_KIND,
+      toggleIcon: 'hub', behavior: 'render', decorationKind: EVIDENCE_ATLAS_KIND,
       labelKey: 'view.evidenceAtlas', descriptionKey: 'view.evidenceAtlas.description',
       queenKey: '@diamondcoreprocessor.com/AtlasQueenBee', adoptable: true,
-      adoptScope: 'hierarchy', attachable: true, opensOnTileClick: true,
+      adoptScope: 'hierarchy', sourceScopes: VIEW_SOURCE_SCOPES,
+      attachable: true, opensOnTileClick: true,
       pheromones: ['platform:mobile', 'platform:desktop'],
     })
     registry.register({
@@ -97,7 +140,8 @@ window.ioc.register('@diamondcoreprocessor.com/StudioQueenBee', studio)
       toggleIcon: 'view_carousel', behavior: 'render', decorationKind: KNOWLEDGE_STUDIO_KIND,
       labelKey: 'view.knowledgeStudio', descriptionKey: 'view.knowledgeStudio.description',
       queenKey: '@diamondcoreprocessor.com/StudioQueenBee', adoptable: true,
-      adoptScope: 'hierarchy', attachable: true, opensOnTileClick: true,
+      adoptScope: 'hierarchy', sourceScopes: VIEW_SOURCE_SCOPES,
+      attachable: true, opensOnTileClick: true,
       pheromones: ['platform:mobile', 'platform:desktop'],
     })
   },

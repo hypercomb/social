@@ -46,16 +46,18 @@ honeybee traces. Every pattern is a sibling of it.
 
 | Kind | Dance | Mark |
 |---|---|---|
-| `model` | the loved figure-8, unchanged | burst |
+| `model` | a compact version of the loved figure-8 | burst |
 | `script` | a flat, even patrol — a triangle wave, no dance to it | gear |
 | `system` | a slow circle | ring |
-| `orchestrator` | the same figure-8, 3× wide and ⅓ the speed | eye |
+| `orchestrator` | the same compact figure-8 at ⅓ the speed | eye |
 
 A script's motion is deliberately not a dance: deterministic work should not
 look like it is deliberating.
 
-The dance scales with status — a waiting bee barely moves, a working one
-dances full size. That difference is the whole signal; nothing flashes.
+The dance keeps one compact size for every status, so its width does not pulse
+as work moves between waiting and working. Each dance stays close to its tile
+and pauses as soon as the pointer enters its hit area, leaving a still target
+for the click. Nothing flashes.
 
 `kindFor()` derives the kind from the behaviour name unless the caller
 declares one. Anything that is not a recognised model, the sync lane, or the

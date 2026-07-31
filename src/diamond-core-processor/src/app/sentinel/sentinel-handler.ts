@@ -47,6 +47,8 @@ export type SentinelRequest =
   // what exists; changing what runs is re-validated here before it lands.
   | { type: 'revisions'; rid: string; domain?: string }
   | { type: 'use-revision'; rid: string; domain: string; rootSig: string }
+  | { type: 'backup-export'; rid: string }
+  | { type: 'backup-import-file'; rid: string; path: string; sha256: string; bytes: ArrayBuffer }
 
 export type SentinelResponse =
   | { type: 'result'; rid: string; ok: true; data: ArrayBuffer | string | object }
@@ -60,6 +62,9 @@ export type SentinelResponse =
   | { type: 'domains-result'; rid: string; ok: boolean; domains: string[]; error?: string }
   | { type: 'revisions-result'; rid: string; ok: boolean; groups: RevisionGroup[]; error?: string }
   | { type: 'use-revision-result'; rid: string; ok: boolean; error?: string }
+  | { type: 'backup-file'; rid: string; path: string; sha256: string; bytes: ArrayBuffer }
+  | { type: 'backup-done'; rid: string; ok: boolean; files: number; bytes: number; error?: string }
+  | { type: 'backup-import-ack'; rid: string; ok: boolean; error?: string }
 
 /** One host's published chain — every deployed root in its manifest, plus the
  *  one currently in effect for this participant. */
@@ -100,6 +105,111 @@ export class SentinelHandler {
       case 'domains-for': return this.#handleDomainsFor(msg, port)
       case 'revisions': return this.#handleRevisions(msg, port)
       case 'use-revision': return this.#handleUseRevision(msg, port)
+      case 'backup-export': return this.#handleBackupExport(msg, port)
+      case 'backup-import-file': return this.#handleBackupImportFile(msg, port)
+    }
+  }
+
+  async #handleBackupImportFile(
+    msg: SentinelRequest & { type: 'backup-import-file' },
+    port: MessagePort,
+  ): Promise<void> {
+    const parts = String(msg.path ?? '').split('/')
+    const name = parts.pop()
+    const valid = (part: string): boolean =>
+      !!part && part !== '.' && part !== '..' && !/[\\/]/.test(part)
+    if (!name || !valid(name) || !parts.every(valid)
+        || !/^[a-f0-9]{64}$/.test(msg.sha256)) {
+      port.postMessage({ type: 'backup-import-ack', rid: msg.rid, ok: false, error: 'unsafe path' })
+      return
+    }
+    if (await SignatureService.sign(msg.bytes) !== msg.sha256) {
+      port.postMessage({ type: 'backup-import-ack', rid: msg.rid, ok: false, error: 'hash mismatch' })
+      return
+    }
+    try {
+      await this.#store.initialize()
+      let dir = this.#store.root
+      for (const part of parts) dir = await dir.getDirectoryHandle(part, { create: true })
+      let existing: ArrayBuffer | null = null
+      try {
+        existing = await (await (await dir.getFileHandle(name, { create: false })).getFile()).arrayBuffer()
+      } catch { /* missing */ }
+      if (existing) {
+        if (await SignatureService.sign(existing) !== msg.sha256) {
+          throw new Error('existing DCP file differs')
+        }
+      } else {
+        const handle = await dir.getFileHandle(name, { create: true })
+        const writable = await handle.createWritable()
+        try { await writable.write(msg.bytes) } finally { await writable.close() }
+        const readBack = await (await handle.getFile()).arrayBuffer()
+        if (await SignatureService.sign(readBack) !== msg.sha256) {
+          throw new Error('DCP restore read-back failed')
+        }
+      }
+      port.postMessage({ type: 'backup-import-ack', rid: msg.rid, ok: true })
+    } catch (error) {
+      port.postMessage({
+        type: 'backup-import-ack',
+        rid: msg.rid,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
+   * Stream a byte-for-byte inventory of DCP's own OPFS. The receiver writes
+   * these under a separate disk namespace; paths never enter the hive OPFS.
+   * Every file carries its sha256 so the disk writer can verify read-back.
+   */
+  async #handleBackupExport(
+    msg: SentinelRequest & { type: 'backup-export' },
+    port: MessagePort,
+  ): Promise<void> {
+    try {
+      await this.#store.initialize()
+      let files = 0
+      let bytes = 0
+      const walk = async (dir: FileSystemDirectoryHandle, prefix = ''): Promise<void> => {
+        for await (const [name, handle] of (dir as any).entries()) {
+          if (!name || name === '.' || name === '..' || /[\\/]/.test(name)) continue
+          const path = prefix ? `${prefix}/${name}` : name
+          if (handle.kind === 'directory') {
+            await walk(handle as FileSystemDirectoryHandle, path)
+            continue
+          }
+          const data = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
+          const sha256 = await SignatureService.sign(data)
+          files++
+          bytes += data.byteLength
+          port.postMessage(
+            { type: 'backup-file', rid: msg.rid, path, sha256, bytes: data },
+            [data],
+          )
+          if (files % 25 === 0) {
+            port.postMessage({
+              type: 'progress',
+              rid: msg.rid,
+              phase: 'streaming DCP files',
+              current: files,
+              total: 0,
+            })
+          }
+        }
+      }
+      await walk(this.#store.root)
+      port.postMessage({ type: 'backup-done', rid: msg.rid, ok: true, files, bytes })
+    } catch (error) {
+      port.postMessage({
+        type: 'backup-done',
+        rid: msg.rid,
+        ok: false,
+        files: 0,
+        bytes: 0,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 

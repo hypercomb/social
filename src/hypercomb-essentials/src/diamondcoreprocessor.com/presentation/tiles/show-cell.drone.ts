@@ -2326,7 +2326,6 @@ export class ShowCellDrone extends Drone {
     // A takeover feature (screensaver) owns the screen — keep the hive hidden
     // and do no work. A queued requestRender fires on restore (set-hive-visible).
     if (this.#hiveHidden) { if (this.layer) this.layer.visible = false; return }
-    this.shader?.setHoveredIndex(-1)
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
       this.clearMesh("synchronize: pixi not ready")
       return
@@ -2397,6 +2396,14 @@ export class ShowCellDrone extends Drone {
       return
     }
     this.#forceNextRender = false
+
+    // Only a pass that actually proceeds may invalidate shader hover. One
+    // navigation queues several duplicate renders; a late duplicate commonly
+    // reaches the unchanged-page return above. Clearing hover before that
+    // return left the stationary pointer's tile with a one-row band until the
+    // cursor exited and re-entered. A real pass emits render:cell-count when it
+    // completes, so TileOverlayDrone recovers hover against the fresh map.
+    this.shader?.setHoveredIndex(-1)
 
     // From here on we own the render for this target. Wrap the rest in
     // try/finally so the flag is reliably cleared even on early return
@@ -4266,6 +4273,16 @@ export class ShowCellDrone extends Drone {
     for (let i = 0; i < cells.length; i++) {
       this.#axialToIndex.set(`${cells[i].q},${cells[i].r}`, i)
     }
+    // Geometry replacement can change every aCellIndex while the cursor stays
+    // still. Hover is label-owned, so rebind that label to the NEW index map
+    // before exposing the completed frame. Relying only on another tile:hover
+    // event left the normal one-row image strip under a still-visible action
+    // overlay until the pointer exited and re-entered the tile.
+    const restoredHoverIndex = this.#hoverRevealLabel
+      ? this.#labelToIndex.get(this.#hoverRevealLabel)
+      : undefined
+    this.shader.setBandRows(this.#bandRows)
+    this.shader.setHoveredIndex(restoredHoverIndex ?? -1)
     this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
     this.#emitRenderTags(cells)
   }
@@ -5759,14 +5776,19 @@ export class ShowCellDrone extends Drone {
     // owns this because it does the icon wrapping; the shader only draws what
     // it is told, so a tile whose icons fit one row keeps the text's own band
     // height instead of growing for nothing.
-    this.onEffect<{ rows?: number }>('overlay:band-rows', (payload) => {
+    this.onEffect<{ rows?: number; label?: string | null }>('overlay:band-rows', (payload) => {
+      // Row layout belongs to one hovered tile. Ignore a late layout from the
+      // level being replaced; tile:hover below carries the arriving tile's
+      // row count atomically and establishes the new owner.
+      const owner = typeof payload?.label === 'string' ? payload.label : null
+      if (owner !== this.#hoverRevealLabel) return
       this.#bandRows = Math.max(1, payload?.rows ?? 1)
       this.shader?.setBandRows(this.#bandRows)
     })
 
     // q/r and label are absent on the "nothing hovered" broadcast (pointer
     // over chrome), which clears the ring and reveal: chrome is not the hive.
-    this.onEffect<{ q?: number; r?: number; label?: string | null }>('tile:hover', (payload) => {
+    this.onEffect<{ q?: number; r?: number; label?: string | null; bandRows?: number }>('tile:hover', (payload) => {
       // The overlay already resolved the occupied tile. Prefer its
       // authoritative label: while geometry and occupancy are being replaced,
       // deriving it again from q/r can briefly miss and leave a hideText tile
@@ -5783,8 +5805,17 @@ export class ShowCellDrone extends Drone {
         }
       }
 
-      // Keep reveal state current while the shader is between rebuilds. The
-      // next geometry bake will then write the visible label UV immediately.
+      // The band geometry and the hover target are one visual state. Applying
+      // the row count from this same payload FIRST means the background begins
+      // at its final height; the label and icons never paint into a one-row
+      // band that grows underneath them on the following update.
+      this.#bandRows = hoverLabel
+        ? Math.max(1, payload.bandRows ?? this.#bandRows)
+        : 1
+      this.shader?.setBandRows(this.#bandRows)
+
+      // Reveal only after the background has its initial row count. The next
+      // geometry bake will then write the visible label UV immediately.
       this.#setHoverReveal(hoverLabel)
 
       if (!this.shader) return

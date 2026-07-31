@@ -43,6 +43,7 @@ $accent: #a8c8ff;
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #f3f3f3;
   outline: none;
+  @include tw.panel($accent, right);
 }
 
 .files-header {
@@ -82,7 +83,7 @@ $accent: #a8c8ff;
   padding: 0.15rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
+  border-radius: tw.$radius-control;
 }
 
 .files-scope-btn {
@@ -92,7 +93,7 @@ $accent: #a8c8ff;
   padding: 0.24rem 0.4rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   color: rgba(226, 235, 244, 0.55);
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
@@ -175,7 +176,7 @@ $accent: #a8c8ff;
   padding: 0.25em 0.4em;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
+  border-radius: tw.$radius-card;
   color: rgba(255, 255, 255, 0.8);
   font-family: inherit;
   font-size: 0.72em;
@@ -202,7 +203,7 @@ $accent: #a8c8ff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: tw.$radius-card;
   background: $accent;
   color: #0e0e16;
   font-size: 0.58em;

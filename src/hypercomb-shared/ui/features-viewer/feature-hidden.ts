@@ -27,12 +27,15 @@
 // Store's syncable kinds. Swapping the substrate is internal to this module;
 // the exported API does not change.
 
+import { EffectBus } from '@hypercomb/core'
+
 const SIG_RE = /^[a-f0-9]{64}$/
 
 /** Runtime service locator — shared must never statically import essentials. */
 const get = (key: string): any => (globalThis as { ioc?: { get(k: string): unknown } }).ioc?.get(key)
 
 type StoreLike = {
+  initialize?: () => Promise<void>
   putOptimization?: (blob: Blob) => Promise<string>
   getOptimization?: (sig: string) => Promise<Blob | null>
   removeOptimization?: (sig: string) => Promise<boolean>
@@ -68,28 +71,76 @@ export function hiddenKey(featKind: string, segments: readonly string[]): string
 export async function hideFeature(feature: {
   featKind: string; view: string; label: string; segments: readonly string[]
 }): Promise<string | null> {
+  const segments = norm(feature.segments)
+  EffectBus.emit('feature:hidden', {
+    featKind: feature.featKind, view: feature.view, segments,
+  })
   const store = get('@hypercomb.social/Store') as StoreLike | undefined
-  if (!store?.putOptimization) return null
+  if (!store?.putOptimization) {
+    EffectBus.emit('feature:restored', {
+      featKind: feature.featKind, view: feature.view, segments,
+    })
+    return null
+  }
+  try { await store.initialize?.() } catch {
+    EffectBus.emit('feature:restored', {
+      featKind: feature.featKind, view: feature.view, segments,
+    })
+    return null
+  }
   const record = {
     kind: 'hidden',
-    appliesTo: norm(feature.segments),
+    appliesTo: segments,
     payload: { featKind: feature.featKind, view: feature.view, label: feature.label },
     mark: 'persistent',
   }
   try {
-    return await store.putOptimization(new Blob([new TextEncoder().encode(JSON.stringify(record)) as BlobPart]))
+    const sig = await store.putOptimization(new Blob([new TextEncoder().encode(JSON.stringify(record)) as BlobPart]))
+    EffectBus.emit('feature:activation-settled', {
+      hidden: true, featKind: feature.featKind, view: feature.view, segments,
+    })
+    return sig
   } catch {
+    EffectBus.emit('feature:restored', {
+      featKind: feature.featKind, view: feature.view, segments,
+    })
     return null
   }
 }
 
 /** Restore a hidden feature — remove its pool member by signature. */
-export async function restoreFeature(recordSig: string): Promise<boolean> {
+export async function restoreFeature(
+  recordSig: string,
+  feature?: { featKind: string; view: string; segments: readonly string[] },
+): Promise<boolean> {
   const s = String(recordSig ?? '').trim().toLowerCase()
   if (!SIG_RE.test(s)) return false
+  const segments = norm(feature?.segments ?? [])
+  if (feature) {
+    EffectBus.emit('feature:restored', {
+      featKind: feature.featKind, view: feature.view, segments,
+    })
+  }
+  const rollback = (): void => {
+    if (!feature) return
+    EffectBus.emit('feature:hidden', {
+      featKind: feature.featKind, view: feature.view, segments, recordSig: s,
+    })
+  }
   const store = get('@hypercomb.social/Store') as StoreLike | undefined
-  if (!store?.removeOptimization) return false
-  try { return await store.removeOptimization(s) } catch { return false }
+  if (!store?.removeOptimization) { rollback(); return false }
+  try { await store.initialize?.() } catch { rollback(); return false }
+  try {
+    const removed = await store.removeOptimization(s)
+    if (!removed) rollback()
+    else if (feature) EffectBus.emit('feature:activation-settled', {
+      hidden: false, featKind: feature.featKind, view: feature.view, segments,
+    })
+    return removed
+  } catch {
+    rollback()
+    return false
+  }
 }
 
 /** Every hide record currently in the pool. Scans the substrate and keeps only
@@ -99,6 +150,7 @@ export async function restoreFeature(recordSig: string): Promise<boolean> {
 export async function loadHidden(): Promise<HiddenFeature[]> {
   const store = get('@hypercomb.social/Store') as StoreLike | undefined
   if (!store?.listOptimizations || !store?.getOptimization) return []
+  try { await store.initialize?.() } catch { return [] }
   let sigs: string[] = []
   try { sigs = await store.listOptimizations() } catch { return [] }
   const out: HiddenFeature[] = []

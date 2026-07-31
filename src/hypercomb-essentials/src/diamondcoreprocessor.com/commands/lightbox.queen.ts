@@ -31,9 +31,8 @@
 //
 // `name@lightbox` from the command line attaches it declaratively (the
 // behaviour is `attachable`: its content is what the tile already has, so
-// writing the decoration IS the whole install). Clicking a tile that carries
-// it OPENS it in place — closing drops you back where you were, which is
-// exactly what a lightbox is for.
+// writing the decoration IS the whole install). Clicking its photo-library
+// icon opens it in place; clicking the tile body still navigates normally.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
@@ -220,13 +219,10 @@ window.ioc.register('@diamondcoreprocessor.com/LightboxQueenBee', _lightbox)
       // pictures), so writing the decoration IS the whole install — that is
       // what makes `name@lightbox` work straight off a dropped image.
       attachable: true,
-      // A lightbox is a takeover by definition: clicking the tile shows the
-      // pictures in place, and closing returns you to the layer you came from.
+      // Its photo-library icon shows the pictures in place, and closing returns
+      // you to the layer where the icon was clicked.
       opensOnTileClick: true,
-      // When a tile ALSO carries a slides deck, the authored deck is the click
-      // default and the gallery yields — reachable from the tile's hover band
-      // and the Beehaviors panel, or made the default by switching slides off
-      // on that tile.
+      // Retained as a legacy ordering hint; icon clicks identify the exact view.
       takeoverRank: 1,
       // Ships mobile-friendly: full-screen pictures are a first-class mobile
       // surface, and the viewer is the slides engine (already mobile-friendly).

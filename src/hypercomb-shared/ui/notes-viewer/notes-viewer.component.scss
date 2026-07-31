@@ -19,7 +19,7 @@ $accent: #ffe14a;
   align-items: flex-start;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: tw.$radius-card;
   position: relative;
 
   // Indentation guide line at depth 1+. Sits in the left padding
@@ -118,6 +118,7 @@ $accent: #ffe14a;
 }
 
 .viewer-card {
+  @include tw.floating-panel($accent);
   pointer-events: auto;
   width: min(560px, calc(100vw - 2rem));
   // Cap well short of the viewport so a long note scrolls inside
@@ -126,12 +127,6 @@ $accent: #ffe14a;
   max-height: min(70vh, 34rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border: 1px solid rgba($accent, 0.55);
-  border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($accent, 0.08) inset;
-  font-family: var(--hc-mono, system-ui);
-  color: #f3f3f3;
 }
 
 .viewer-header {
@@ -166,7 +161,7 @@ $accent: #ffe14a;
   padding: 4px 6px 4px 10px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: tw.$radius-control;
   color: rgba(255, 255, 255, 0.72);
   font-family: inherit;
   font-size: 0.78rem;
@@ -262,7 +257,7 @@ $accent: #ffe14a;
   padding: 0.2rem 0.55rem;
   background: rgba($accent, 0.1);
   border: 1px solid rgba($accent, 0.4);
-  border-radius: 12px;
+  border-radius: tw.$radius-card;
   color: rgba($accent, 0.95);
   font-family: inherit;
   font-size: 0.8rem;
@@ -299,7 +294,7 @@ $accent: #ffe14a;
   padding: 0.2rem 0.55rem;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
+  border-radius: tw.$radius-card;
   color: rgba(255, 255, 255, 0.85);
   font-family: inherit;
   font-size: 0.8rem;

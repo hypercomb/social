@@ -57,24 +57,29 @@ export async function countTilesBeneath(
 }
 
 /** Ask the user to confirm removing `targetNames` from `parentLayer`. Returns
- *  true to proceed. When nothing is nested beneath the targets there is no
- *  branch to lose, so the dialog is skipped and we proceed immediately. */
+ *  true to proceed. Leaf removals skip the dialog unless `always` is set,
+ *  which protects direct remove-icon clicks from accidental deletion. */
 export async function confirmRemoval(
   history: HistoryLike,
   parentLayer: ParentLayer | null,
   targetNames: readonly string[],
+  { always = false }: { always?: boolean } = {},
 ): Promise<boolean> {
   const nested = await countTilesBeneath(history, parentLayer, targetNames)
-  if (nested <= 0) return true
+  if (nested <= 0 && !always) return true
 
   return requestConfirm({
     title: 'confirm.delete-title',
     // Plural on the number of TILES being deleted (one named tile vs N).
-    message: 'confirm.remove-message',
+    message: nested > 0 ? 'confirm.remove-message' : 'confirm.delete-message',
     messageParams: { name: targetNames[0] ?? '', count: targetNames.length },
     // Plural on the number of NESTED tiles — the hierarchy count, in red.
-    warning: 'confirm.remove-children',
-    warningParams: { count: nested },
+    ...(nested > 0
+      ? {
+          warning: 'confirm.remove-children',
+          warningParams: { count: nested },
+        }
+      : {}),
     danger: true,
   })
 }

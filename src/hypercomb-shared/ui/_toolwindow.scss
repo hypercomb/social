@@ -20,8 +20,64 @@
 //   @use '../toolwindow' as tw;
 //   .files-header { @include tw.header; border-bottom: 1px solid …; }
 
-/// The one common tool-window header height. ~42px at the default root font.
-$header-height: 2.6rem;
+/// Shape vocabulary for Hyper windows. Rounded geometry is reserved for
+/// genuinely round things (status pills, toggles, avatars).
+$radius-control: 2px;
+$radius-card: 4px;
+$radius-floating: 5px;
+$radius-pill: 999px;
+
+/// Compact text actions use the platform's tighter 80% padding rhythm.
+/// Fixed-size icon buttons keep their explicit dimensions below.
+$button-padding-compact-block: 0.22em;
+$button-padding-compact-inline: 0.56em;
+
+/// The one common tool-window header height.
+$header-height: 2.8rem;
+
+/// Shared docked shell. Layout geometry and accent identity stay with the
+/// caller; material, edge, elevation, typography and shape live here.
+@mixin panel($accent, $side: right) {
+  --hc-window-accent: #{$accent};
+  --hc-window-radius-control: #{$radius-control};
+  --hc-window-radius-card: #{$radius-card};
+  --hc-window-radius-floating: #{$radius-floating};
+
+  background: rgba(13, 15, 21, 0.975);
+  backdrop-filter: blur(14px) saturate(1.04);
+  -webkit-backdrop-filter: blur(14px) saturate(1.04);
+  border-radius: 0;
+  font-family: var(--hc-mono, system-ui);
+  color: #eef2f5;
+  outline: none;
+
+  @if $side == left {
+    border-left: 0;
+    border-right: 1px solid rgba($accent, 0.38);
+    box-shadow: 14px 0 44px rgba(0, 0, 0, 0.46), inset -1px 0 rgba(255, 255, 255, 0.025);
+  } @else {
+    border-right: 0;
+    border-left: 1px solid rgba($accent, 0.38);
+    box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46), inset 1px 0 rgba(255, 255, 255, 0.025);
+  }
+}
+
+/// Shared floating/modal shell. It uses the same material with only enough
+/// radius to distinguish a free object from the canvas behind it.
+@mixin floating-panel($accent) {
+  --hc-window-accent: #{$accent};
+  --hc-window-radius-control: #{$radius-control};
+  --hc-window-radius-card: #{$radius-card};
+  --hc-window-radius-floating: #{$radius-floating};
+
+  background: rgba(13, 15, 21, 0.98);
+  border: 1px solid rgba($accent, 0.38);
+  border-radius: $radius-floating;
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.03);
+  font-family: var(--hc-mono, system-ui);
+  color: #eef2f5;
+  outline: none;
+}
 
 /// The shared header band: fixed height, centered content, consistent padding.
 /// Panels add their own `border-bottom` (accent) and, where the close button
@@ -33,5 +89,28 @@ $header-height: 2.6rem;
   align-items: center;
   gap: 0.5rem;
   min-height: $header-height;
-  padding: 0 0.9rem;
+  padding: 0 0.85rem;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+@mixin control {
+  border-radius: $radius-control;
+  font-family: inherit;
+}
+
+@mixin card {
+  border-radius: $radius-card;
+}
+
+@mixin compact-button-padding {
+  padding: $button-padding-compact-block $button-padding-compact-inline;
+}
+
+@mixin icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border-radius: $radius-control;
 }

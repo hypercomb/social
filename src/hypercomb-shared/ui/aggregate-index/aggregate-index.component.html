@@ -3,6 +3,7 @@
     class="ai-panel"
     hcDockInset="left"
     [hcDockedPanel]="'aggregate-' + src.id"
+    (hcDockedPanelClose)="close()"
     dockSide="left"
     [minWidth]="220"
     [maxWidth]="480"

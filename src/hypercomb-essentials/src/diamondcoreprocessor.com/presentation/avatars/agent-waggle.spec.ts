@@ -44,11 +44,10 @@ describe('kindFor', () => {
 })
 
 describe('waggle patterns', () => {
-  it('keeps the tutorial figure-8 for models — 30 across, 11 down, 1:2', () => {
-    // The dance Jaime picked. If this changes, it was changed on purpose.
+  it('keeps a compact version of the tutorial figure-8 for models', () => {
     expect(waggleOffset('model', 0, 0, 1)).toEqual({ x: 0, y: 0 })
     const quarter = waggleOffset('model', Math.PI / 2 / 7.4, 0, 1)
-    expect(quarter.x).toBeCloseTo(30, 5)
+    expect(quarter.x).toBeCloseTo(14, 5)
     // Twice the frequency vertically is what makes it an 8 and not an ellipse.
     expect(Math.abs(quarter.y)).toBeLessThan(1e-6)
   })
@@ -77,8 +76,8 @@ describe('waggle patterns', () => {
     expect(new Set(shapes).size).toBe(KINDS.length)
   })
 
-  it('the orchestrator dances the same figure-8, wider and slower', () => {
-    expect(waggleFor('orchestrator').reach.x).toBeGreaterThan(waggleFor('model').reach.x * 2)
+  it('the orchestrator dances the same-size figure-8, more slowly', () => {
+    expect(waggleFor('orchestrator').reach).toEqual(waggleFor('model').reach)
     // Slower: at the model's quarter-turn the orchestrator is nowhere near its own.
     const t = Math.PI / 2 / 7.4
     expect(Math.abs(waggleOffset('orchestrator', t, 0, 1).x)).toBeLessThan(waggleFor('orchestrator').reach.x * 0.6)
@@ -123,12 +122,14 @@ describe('wagglePath', () => {
 describe('inWaggleArea', () => {
   it('accepts the centre and a near miss, rejects a far one', () => {
     expect(inWaggleArea('model', 0, 0)).toBe(true)
-    expect(inWaggleArea('model', 38, 0)).toBe(true)   // within reach + margin
+    expect(inWaggleArea('model', 26, 0)).toBe(true)   // within reach + margin
+    expect(inWaggleArea('model', 38, 0)).toBe(false)
     expect(inWaggleArea('model', 90, 0)).toBe(false)
   })
 
-  it('gives the orchestrator the widest target — it is the least urgent to hit precisely', () => {
-    expect(inWaggleArea('orchestrator', 80, 0)).toBe(true)
-    expect(inWaggleArea('script', 80, 0)).toBe(false)
+  it('gives both infinity dances the same compact target', () => {
+    expect(inWaggleArea('orchestrator', 26, 0)).toBe(true)
+    expect(inWaggleArea('orchestrator', 38, 0)).toBe(false)
+    expect(inWaggleArea('orchestrator', 26, 0)).toBe(inWaggleArea('model', 26, 0))
   })
 })

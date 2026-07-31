@@ -51,11 +51,11 @@ interface BeeSprite {
   x: number
   y: number
   seed: number
+  /** Per-bee dance clock. It stops while the pointer is over this bee. */
+  danceTime: number
   alpha: number
   fadeTarget: number
   facing: number
-  /** How big the dance is right now, 0..1 — a waiting bee barely moves. */
-  intensity: number
 }
 
 /** Bee size on screen, in CSS pixels, regardless of zoom. */
@@ -71,6 +71,8 @@ const ANCHOR_INTERVAL_MS = 400
 const FLAP_FPS = 13
 /** How far above its tile a bee dances, in CSS px. */
 const HOVER_PX = 38
+/** Fixed compact waggle size. Agent status must not pulse the path width. */
+const WAGGLE_SCALE = 0.34
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -219,10 +221,10 @@ export class AgentBeeDrone extends Drone {
       x: anchor.x,
       y: anchor.y,
       seed: Math.random() * 6.28,
+      danceTime: 0,
       alpha: 0,
       fadeTarget: 1,
       facing: 1,
-      intensity: 0,
     }
     this.#bees.set(agent.id, bee)
 
@@ -306,23 +308,24 @@ export class AgentBeeDrone extends Drone {
       // centre. Two layers, so a pan or a repaint moves the whole dance
       // smoothly instead of teleporting the bee mid-figure.
       const hover = HOVER_PX / worldScale
-      bee.centreX += (bee.anchorX - bee.centreX) * 0.06
-      bee.centreY += (bee.anchorY - hover - bee.centreY) * 0.06
+      const hovered = this.#hovering === id
+      if (!hovered) {
+        bee.centreX += (bee.anchorX - bee.centreX) * 0.06
+        bee.centreY += (bee.anchorY - hover - bee.centreY) * 0.06
+      }
 
-      // Waiting work barely moves; working work dances full size. That
-      // difference is the whole signal — no flashing, no colour change.
-      const wanted = agent?.status === 'working' ? 1 : agent?.status === 'pending' ? 0.34 : 0.15
-      bee.intensity += (wanted - bee.intensity) * 0.05
-
-      const offset = waggleOffset(bee.kind, this.#time, bee.seed, bee.intensity)
-      const ahead = waggleOffset(bee.kind, this.#time + 0.05, bee.seed, bee.intensity)
+      // Freeze a hovered bee in place so the following press has a stable
+      // target. Its wings can keep beating; only the waggle motion pauses.
+      if (!hovered) bee.danceTime += dt
+      const offset = waggleOffset(bee.kind, bee.danceTime, bee.seed, WAGGLE_SCALE)
+      const ahead = waggleOffset(bee.kind, bee.danceTime + 0.05, bee.seed, WAGGLE_SCALE)
       bee.x = bee.centreX + offset.x / worldScale
       bee.y = bee.centreY + offset.y / worldScale
       // Face the way the dance is going — the turn at each end of the run is
       // what makes a figure-8 read as a figure-8.
       if (Math.abs(ahead.x - offset.x) > 0.2) bee.facing = ahead.x >= offset.x ? 1 : -1
 
-      if (agent?.status === 'done' || agent?.status === 'failed') {
+      if (!hovered && (agent?.status === 'done' || agent?.status === 'failed')) {
         // Finished work drifts upward and out, so a landing reads as a
         // departure rather than a disappearance.
         bee.centreY -= 26 * dt
@@ -357,14 +360,14 @@ export class AgentBeeDrone extends Drone {
     if (!trace) return
     trace.clear()
     for (const [id, bee] of this.#bees) {
-      if (bee.alpha < 0.1 || bee.intensity < 0.2) continue
+      if (bee.alpha < 0.1) continue
       const path = wagglePath(bee.kind)
       const hovered = this.#hovering === id
-      trace.moveTo(bee.centreX + (path[0].x * bee.intensity) / worldScale,
-                   bee.centreY + (path[0].y * bee.intensity) / worldScale)
+      trace.moveTo(bee.centreX + (path[0].x * WAGGLE_SCALE) / worldScale,
+                   bee.centreY + (path[0].y * WAGGLE_SCALE) / worldScale)
       for (let i = 1; i < path.length; i++) {
-        trace.lineTo(bee.centreX + (path[i].x * bee.intensity) / worldScale,
-                     bee.centreY + (path[i].y * bee.intensity) / worldScale)
+        trace.lineTo(bee.centreX + (path[i].x * WAGGLE_SCALE) / worldScale,
+                     bee.centreY + (path[i].y * WAGGLE_SCALE) / worldScale)
       }
       trace.closePath()
       trace.stroke({

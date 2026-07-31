@@ -15,18 +15,13 @@ $steel: rgb(126, 182, 214);
 }
 
 .pools-panel {
+  @include tw.floating-panel($steel);
   pointer-events: auto;
   position: absolute;
   width: 340px;
   max-height: calc(100vh - 2rem);
   display: flex;
   flex-direction: column;
-  background: rgba(10, 14, 19, 0.96);
-  border: 1px solid rgba($steel, 0.45);
-  border-radius: 9px;
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($steel, 0.06) inset;
-  font-family: var(--hc-mono, system-ui);
-  color: #f3f3f3;
   overflow: hidden;
 
   &.peek { cursor: pointer; }
@@ -108,7 +103,7 @@ $steel: rgb(126, 182, 214);
   gap: 0.45rem;
   padding: 0.35rem 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
+  border-radius: tw.$radius-card;
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.78rem;
 }

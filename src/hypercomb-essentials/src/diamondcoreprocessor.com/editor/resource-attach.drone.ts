@@ -23,6 +23,10 @@ type AttachPayload = {
   type: 'image' | 'youtube' | 'link' | 'document'
 }
 
+type YouTubeMetadataQueue = {
+  enqueue(input: { segments: readonly string[]; cell: string; url: string }): string
+}
+
 export class ResourceAttachDrone {
 
   constructor() {
@@ -111,6 +115,11 @@ export class ResourceAttachDrone {
     }
 
     EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: payload.cell, segments })
+
+    if (payload.type === 'youtube' && payload.url) {
+      window.ioc.get<YouTubeMetadataQueue>('@diamondcoreprocessor.com/YouTubeMetadataQueue')
+        ?.enqueue({ segments, cell: payload.cell, url: payload.url })
+    }
 
     // Release the substrate lock — the cell is now fully described by its props.
     EffectBus.emit('cell:attach-pending', { cell: payload.cell, pending: false })

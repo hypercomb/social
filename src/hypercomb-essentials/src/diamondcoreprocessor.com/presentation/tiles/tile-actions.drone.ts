@@ -883,8 +883,8 @@ export class TileActionsDrone extends Drone {
     if (!parent) return
 
     // Deleting a tile takes its whole branch with it. Count what's nested and
-    // confirm (the dialog is skipped when nothing is nested — see helper).
-    if (!(await confirmRemoval(history, parent, [label]))) return
+    // always confirm direct remove-icon clicks; nested tiles add a count warning.
+    if (!(await confirmRemoval(history, parent, [label], { always: true }))) return
 
     // SIG-PRESERVING drop — keep every survivor's EXACT stored sig, remove only
     // the target. Rebuilding `children` from survivor NAMES makes committer.update

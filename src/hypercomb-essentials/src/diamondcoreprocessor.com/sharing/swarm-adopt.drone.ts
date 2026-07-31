@@ -1339,30 +1339,51 @@ export class SwarmAdoptDrone extends Drone {
   // ── DCP→hive config fold (accept-gated: actions:available) ────────
   #onDcpDone = (ev?: Event): void => {
     console.info('[swarm-adopt] fold trigger:', ev?.type ?? 'manual')
-    void this.#foldEnabledConfig()
+    const detail = (ev as CustomEvent<{ checkpointed?: boolean; transactionId?: string }> | undefined)?.detail
+    void this.#foldEnabledConfig(!!detail?.checkpointed, String(detail?.transactionId ?? ''))
   }
 
   #folding = false
   #foldQueued = false
+  #queuedFoldCheckpointed = false
+  #foldTransactionId = ''
+  #queuedFoldTransactionId = ''
   // One auto-checkpoint per accept-burst (not per coalesced sub-run) — reset
   // when the burst ends so the next Done takes a fresh restore point.
   #checkpointedThisFold = false
-  #foldEnabledConfig = async (): Promise<void> => {
+  #foldEnabledConfig = async (alreadyCheckpointed = false, transactionId = ''): Promise<void> => {
     // COALESCE re-entry, never drop it: sequential headless installs (the
     // portal-overlay pending-open queue) fire `actions:available` back-to-back,
     // and a trigger landing while a fold is mid-flight carries NEWLY-accepted
     // config — skipping it would silently leave that install unfolded. A
     // single trailing re-run reads the latest snapshot, so N triggers coalesce.
-    if (this.#folding) { this.#foldQueued = true; return }
+    if (this.#folding) {
+      this.#foldQueued = true
+      this.#queuedFoldCheckpointed ||= alreadyCheckpointed
+      if (transactionId) this.#queuedFoldTransactionId = transactionId
+      return
+    }
     this.#folding = true
-    this.#checkpointedThisFold = false
+    this.#checkpointedThisFold = alreadyCheckpointed
+    this.#foldTransactionId = transactionId
     try {
       do {
         this.#foldQueued = false
         await this.#foldEnabledConfigOnce()
+        if (this.#foldQueued && this.#queuedFoldCheckpointed) {
+          this.#checkpointedThisFold = true
+          this.#queuedFoldCheckpointed = false
+        }
+        if (this.#foldQueued && this.#queuedFoldTransactionId) {
+          this.#foldTransactionId = this.#queuedFoldTransactionId
+          this.#queuedFoldTransactionId = ''
+        }
       } while (this.#foldQueued)
     } finally {
       this.#folding = false
+      this.#queuedFoldCheckpointed = false
+      this.#foldTransactionId = ''
+      this.#queuedFoldTransactionId = ''
     }
   }
 
@@ -1411,7 +1432,18 @@ export class SwarmAdoptDrone extends Drone {
     const removes = folded.filter(f => !desiredSigs.has(f.sig))
 
     console.info(`[swarm-adopt] fold: desired ${desired.length}, folded ${folded.length} → +${adds.length} −${removes.length}`)
-    if (!adds.length && !removes.length) return
+    if (!adds.length && !removes.length) {
+      // A caller may have computed its pending count from the immediately
+      // preceding registry projection. A coalesced/duplicate accept can make
+      // that diff empty by the time we read it; still acknowledge completion
+      // so the shell does not sit on an hourglass until its safety timeout.
+      const transactionId = this.#foldTransactionId
+      queueMicrotask(() =>
+        EffectBus.emit('fold:receipt', {
+          committed: 0, removed: 0, unavailable: 0, transactionId,
+        }))
+      return
+    }
 
     // A real diff — the hive is about to change at potentially many locations.
     // Take a restore point FIRST (once per accept-burst), before any mutation,
@@ -1451,7 +1483,9 @@ export class SwarmAdoptDrone extends Drone {
     // sha256 is the hive's installed signature the installer can verify).
     this.#saveFolded([...nextFolded].sort((a, b) => a.sig.localeCompare(b.sig)))
     console.info(`[swarm-adopt] DCP config fold — +${committed} −${removed} (${unavailable} unavailable)`)
-    EffectBus.emit('fold:receipt', { committed, removed, unavailable })
+    EffectBus.emit('fold:receipt', {
+      committed, removed, unavailable, transactionId: this.#foldTransactionId,
+    })
   }
 
   // ── recoverable fold receipt (persisted) ──────────────────────────

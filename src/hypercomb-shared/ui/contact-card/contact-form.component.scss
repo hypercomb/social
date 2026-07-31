@@ -24,6 +24,7 @@ $accent: #a8ffd8;
 }
 
 .contact-form-panel {
+  @include tw.floating-panel($accent);
   pointer-events: auto;
   position: absolute;
   top: 50%;
@@ -33,13 +34,6 @@ $accent: #a8ffd8;
   max-height: calc(100vh - 3rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.97);
-  border: 1px solid rgba($accent, 0.45);
-  border-radius: 10px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($accent, 0.06) inset;
-  font-family: var(--hc-mono, system-ui);
-  color: #f3f3f3;
-  outline: none;
 }
 
 .contact-form-header {
@@ -111,7 +105,7 @@ textarea {
   color: #f3f3f3;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   padding: 0.45rem 0.55rem;
   outline: none;
   transition: border-color 150ms ease, background 150ms ease;
@@ -130,7 +124,7 @@ textarea { resize: vertical; }
   font-weight: 600;
   color: #fff;
   padding: 0.4rem 0.55rem;
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   background: rgba($accent, 0.08);
   border: 1px solid rgba($accent, 0.22);
   overflow: hidden;
@@ -153,7 +147,7 @@ textarea { resize: vertical; }
   font-size: 0.75rem;
   color: rgba($accent, 0.85);
   border: 1px dashed rgba($accent, 0.4);
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   padding: 0.35rem 0.6rem;
   transition: background 150ms ease, border-color 150ms ease;
 
@@ -164,7 +158,7 @@ textarea { resize: vertical; }
   font-family: inherit;
   font-size: 0.8rem;
   cursor: pointer;
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   padding: 0.4rem 0.85rem;
   transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 

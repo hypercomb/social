@@ -3,7 +3,7 @@
 import { Component, computed, effect, ElementRef, inject, OnDestroy, signal, viewChild } from '@angular/core'
 import { TreeResolverService } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
-import { DcpDomainStorage, normalizeDomainKey } from '../core/dcp-domain-storage.service'
+import { DcpDomainStorage, LOGICAL_LINEAGE, normalizeDomainKey } from '../core/dcp-domain-storage.service'
 import { PatchStore, type PatchRecord } from '../core/patch-store'
 import { PackageExportService } from '../core/package-export.service'
 import { TreeViewComponent } from '../tree-view/tree-view.component'
@@ -155,6 +155,18 @@ export class HomeComponent implements OnDestroy {
   // itself lives in the `logical` sigbag lineage (DcpDomainStorage); this is
   // just the signal that says "it changed, re-read it".
   readonly #logicalVersion = signal(0)
+
+  // DCP's own install-state revision history. "Default" is always the first
+  // visible baseline; named saves point at immutable logical roots.
+  readonly homeRevisions = signal<{ name: string; logicalRootSig: string }[]>([])
+  readonly currentLogicalRootSig = signal<string | null>(null)
+  readonly revisionsExpanded = signal(false)
+  readonly revisionStatus = signal<'idle' | 'saving' | 'restoring' | 'saved' | 'error'>('idle')
+
+  // Package Adopt is gated by this inline restore-point form.
+  readonly adoptingPackageSig = signal<string | null>(null)
+  readonly adoptRestorePointName = signal('')
+  readonly adoptRestorePointError = signal('')
 
   readonly receivedLayerSigs = signal<string[]>([])
   #fromHcChannel: BroadcastChannel | null = null
@@ -698,6 +710,8 @@ export class HomeComponent implements OnDestroy {
     void this.#domainStorage.loadSettingsCache()
       .then(() => this.#visibilityVersion.update(v => v + 1))
       .catch(() => { /* empty/first-run — defaults apply */ })
+
+    void this.#refreshHomeRevisions()
 
     // #60: render the installer's adopted-branch sections FROM the domains
     // lineage on load. The lineage is the durable source of "what I've
@@ -1649,25 +1663,113 @@ export class HomeComponent implements OnDestroy {
     return this.#domainStorage.isFeatureEnabled(section.rootSig) ? 'adopted' : 'saved'
   }
 
-  #setPackageEnabled(section: DomainSection, enabled: boolean): void {
-    if (!/^[a-f0-9]{64}$/.test(section.rootSig)) return
-    void this.#domainStorage.setFeatureEnabled(section.rootSig, enabled)
-      .then(() => this.#domainStorage.recomputeLogical())
-      .then(() => { this.#logicalVersion.update(v => v + 1); void this.#postRegistrySnapshot() })
-      .catch(e => console.warn('[home] package adopt/save failed', e))
+  async #setPackageEnabled(section: DomainSection, enabled: boolean): Promise<boolean> {
+    if (!/^[a-f0-9]{64}$/.test(section.rootSig)) return false
+    try {
+      await this.#domainStorage.setFeatureEnabled(section.rootSig, enabled)
+      await this.#domainStorage.recomputeLogical()
+      this.#logicalVersion.update(v => v + 1)
+      await Promise.all([this.#postRegistrySnapshot(), this.#refreshHomeRevisions()])
+      this.#toggleState.notifyChanged()
+      return true
+    } catch (e) {
+      console.warn('[home] package adopt/save failed', e)
+      return false
+    }
     // Tell any connected hive to resync — the next sync sig reflects the new
     // enabled set (resyncFromSentinel adds/removes the package's files).
-    this.#toggleState.notifyChanged()
   }
 
   /** Adopt: install + enable (live in the logical view now). */
-  adoptPackage(section: DomainSection): void { this.#setPackageEnabled(section, true) }
+  adoptPackage(section: DomainSection): void {
+    if (this.packageState(section) === 'adopted') return
+    this.adoptingPackageSig.set(section.rootSig)
+    this.adoptRestorePointName.set(
+      this.homeRevisions().length === 0 ? 'Default' : `Before ${this.displayLabel(section)}`,
+    )
+    this.adoptRestorePointError.set('')
+  }
 
   /** Save: keep installed but OFF — a saved revision to enable / change to later. */
-  savePackage(section: DomainSection): void { this.#setPackageEnabled(section, false) }
+  cancelPackageAdopt(): void {
+    if (this.revisionStatus() === 'saving') return
+    this.adoptingPackageSig.set(null)
+    this.adoptRestorePointError.set('')
+  }
+
+  async confirmPackageAdopt(section: DomainSection): Promise<void> {
+    const name = this.adoptRestorePointName().trim()
+    if (!name || this.revisionStatus() === 'saving') return
+    this.revisionStatus.set('saving')
+    this.adoptRestorePointError.set('')
+    try {
+      let history = await this.#domainStorage.loadHomeHistory()
+      if (history.length === 0) {
+        const baseline = await this.#domainStorage.captureLogicalAsDefault()
+        const savedDefault = await this.#domainStorage.saveBranch('Default')
+        if (!baseline || !savedDefault) throw new Error('default restore point was not saved')
+        history = await this.#domainStorage.loadHomeHistory()
+      }
+      if (name.toLowerCase() !== 'default' || !history.some(r => r.name.toLowerCase() === 'default')) {
+        const saved = await this.#domainStorage.saveBranch(name)
+        if (!saved) throw new Error('named restore point was not saved')
+      }
+
+      // Let the embedding hive reuse this exact name for its whole-hive
+      // checkpoint at final Apply. One typed name covers both DCP install
+      // state and hive content; the participant is not asked twice.
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'dcp:restore-point', name }, '*')
+      }
+
+      if (!(await this.#setPackageEnabled(section, true))) throw new Error('package activation failed')
+      this.adoptingPackageSig.set(null)
+      this.revisionStatus.set('saved')
+      window.setTimeout(() => {
+        if (this.revisionStatus() === 'saved') this.revisionStatus.set('idle')
+      }, 4000)
+    } catch (err) {
+      console.warn('[home] safe package adopt stopped', err)
+      this.revisionStatus.set('error')
+      this.adoptRestorePointError.set('Restore point was not saved. Nothing was adopted.')
+    }
+  }
+
+  savePackage(section: DomainSection): void { void this.#setPackageEnabled(section, false) }
 
   /** Discard: uninstall the package (same removal the × performs). */
   discardPackage(section: DomainSection): void { this.removeDomain(section.domain) }
+
+  async #refreshHomeRevisions(): Promise<void> {
+    try {
+      const [history, current] = await Promise.all([
+        this.#domainStorage.loadHomeHistory(),
+        this.#domainStorage.currentRootSig(LOGICAL_LINEAGE),
+      ])
+      this.homeRevisions.set(history)
+      this.currentLogicalRootSig.set(current)
+    } catch (err) {
+      console.warn('[home] revision history refresh failed', err)
+    }
+  }
+
+  async restoreHomeRevision(revision: { name: string; logicalRootSig: string }): Promise<void> {
+    if (!revision.logicalRootSig || this.revisionStatus() === 'restoring') return
+    this.revisionStatus.set('restoring')
+    try {
+      await this.#domainStorage.restoreLogicalRoot(revision.logicalRootSig)
+      this.#logicalVersion.update(v => v + 1)
+      await Promise.all([this.#postRegistrySnapshot(), this.#refreshHomeRevisions()])
+      this.#toggleState.notifyChanged()
+      this.revisionStatus.set('saved')
+      window.setTimeout(() => {
+        if (this.revisionStatus() === 'saved') this.revisionStatus.set('idle')
+      }, 4000)
+    } catch (err) {
+      console.warn('[home] revision restore failed', err)
+      this.revisionStatus.set('error')
+    }
+  }
 
 
   // ─── Per-domain visibility toggle (sticky, OPFS-persisted) ──────────

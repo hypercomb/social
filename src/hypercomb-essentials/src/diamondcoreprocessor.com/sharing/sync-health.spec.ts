@@ -31,6 +31,9 @@ const state = (host: string, status: string, pending: number): void =>
 const receipt = (): void =>
   EffectBus.emit('host:receipt', { sig: 'a'.repeat(64) })
 
+const folderState = (status: string, detail: Record<string, unknown> = {}): void =>
+  EffectBus.emit('folder-sync:state', { status, ...detail })
+
 const boot = async (): Promise<void> => {
   drone = new SyncHealthDrone()
   await (drone as unknown as { pulse: (g: string) => Promise<void> }).pulse('test')
@@ -108,9 +111,40 @@ describe('sync-health pill', () => {
     expect(pills).toHaveLength(1)
   })
 
+  it('names the local-only risk until a folder backup is connected', () => {
+    folderState('unconfigured')
+    expect(pills.at(-1)).toMatchObject({ key: 'folder-sync', icon: 'backup' })
+    expect(pills.at(-1)!.label).toContain('/folder-sync connect')
+  })
+
+  it('shows folder progress and clears it when the backup is current', () => {
+    folderState('syncing', {
+      folder: 'USB',
+      scanned: 80,
+      copied: 12,
+      totalBytes: 4 * 1024 * 1024,
+      copiedBytes: 1024 * 1024,
+    })
+    expect(pills.at(-1)!.label).toBe('Backing up to USB — 80 files / 4.0 MB checked, 1.0 MB written')
+    folderState('backed-up', { folder: 'USB' })
+    expect(clears).toContain('folder-sync')
+  })
+
+  it('surfaces a remembered folder whose permission needs renewing', () => {
+    folderState('needs-permission', { folder: 'Private backup' })
+    expect(pills.at(-1)!.label).toContain('/folder-sync resume')
+  })
+
+  it('never hides a hard copy with unresolved referenced bytes', () => {
+    folderState('incomplete', { folder: 'USB', missingReferences: 3 })
+    expect(pills.at(-1)).toMatchObject({ key: 'folder-sync', icon: 'backup' })
+    expect(pills.at(-1)!.label).toContain('3 referenced items are not local')
+  })
+
   it('evicts sync pills persisted by a previous session at boot', async () => {
     localStorage.setItem('hc:indicators', JSON.stringify([
       { key: 'sync:jwize.com', icon: 'cloud_sync', label: 'stale', dismissable: true },
+      { key: 'folder-sync', icon: 'folder_off', label: 'stale folder', dismissable: true },
       { key: 'notes', icon: 'sticky_note_2', label: 'not ours', dismissable: true },
     ]))
     const evicted: string[] = []
@@ -118,6 +152,7 @@ describe('sync-health pill', () => {
     const fresh = new SyncHealthDrone()
     await (fresh as unknown as { pulse: (g: string) => Promise<void> }).pulse('test')
     expect(evicted).toContain('sync:jwize.com')
+    expect(evicted).toContain('folder-sync')
     expect(evicted).not.toContain('notes')
     fresh.markDisposed()
   })

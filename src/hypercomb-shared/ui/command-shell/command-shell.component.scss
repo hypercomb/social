@@ -457,6 +457,18 @@ $bp-phone-max: 599px;
   }
 }
 
+.indicator-pill.action {
+  color: #f4bf75;
+  border-color: rgba(244, 191, 117, 0.48);
+  background: rgba(244, 191, 117, 0.12);
+
+  &:hover {
+    color: #ffd89f;
+    border-color: rgba(244, 191, 117, 0.75);
+    background: rgba(244, 191, 117, 0.2);
+  }
+}
+
 .indicator-x {
   opacity: 0.35;
   font-size: 0.85em;

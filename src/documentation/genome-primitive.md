@@ -360,6 +360,39 @@ the genome is not specific to tag queries. it's the universal short-circuit for 
 | search index | `computed['search']` | full-text index of cell content |
 | layout snapshot | `computed['layout']` | pre-computed tile positions |
 
+### active genome weight
+
+> **Built (2026-07-30).** `ActiveGenomeService` derives an exact census from
+> a read-only walk of each reachable lineage's latest marker and stores the
+> canonical result in the `sign('computed')` meaning pool under the
+> `active-genome` sub-key. `/genome` (alias `/weight`) reports it.
+
+The census includes the maximum numbered marker in every reachable lineage
+(including `00000000` when it is the current marker), every current layer, and
+every resource, bee and dependency reachable by expanding the layer slots and
+JSON resources. Content in the flat root is deduplicated by signature; marker
+bytes remain per-lineage because marker files are positional. A parent's child
+signature is only the path hint: when that child's lineage has a newer marker,
+the newer marker wins. The measurement never calls the sharing seal or writes
+consolidated layers merely to count them.
+
+The computed record is deliberately outside the layer it measures. Putting a
+size back into `properties` or another live slot would change the genome merely
+to describe the genome and create a self-measuring write loop. A head change
+marks the census dirty; collection is debounced, and an epoch check discards a
+walk if the tree moved while it was being read. Missing bytes are listed and
+only the known subtotal is reported until the closure is complete.
+
+The result is passive and durable. The latest coherent record is loaded from
+`sign('computed')` on boot and shown as the non-dismissable `genome-weight`
+status indicator; `/genome` is only an inspection command, not the producer.
+Every layer/resource arrival queues its signature in the same computed pool
+under `active-genome-queue`. The queue is coalescing because every queued
+signature requests the same whole-hive derivation. It is cleared only after the
+replacement census has been written successfully. While work is queued, the
+old coherent byte count remains on screen with `· updating`; a failed or
+interrupted pass leaves the signature queued for the next pass or reload.
+
 any new feature that needs to aggregate over a subtree should:
 1. check the genome — if unchanged, load cached result
 2. if changed, compute the result, sign it, store under the genome's `computed` map

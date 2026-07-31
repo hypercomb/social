@@ -17,10 +17,17 @@
   justify-content: center;
   gap: 0.3rem;
   flex-shrink: 0;
-  min-width: 9rem;
+  min-width: 10rem;
   max-width: 16rem;
-  padding: 0 0.85rem;
-  border-left: 1px solid rgba(126, 182, 214, 0.28);
+  min-height: 2.15rem;
+  box-sizing: border-box;
+  padding: 0.38rem 0.7rem;
+  border: 1px solid rgba(126, 182, 214, 0.25);
+  border-radius: 5px;
+  background: rgba(9, 14, 20, 0.94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
   font-family: var(--hc-font);
   animation: sync-fade-in 360ms ease-out;
 }
@@ -42,25 +49,15 @@
   text-overflow: ellipsis;
 }
 
-.sync-cell.done .sync-label {
-  color: rgba(245, 245, 245, 0.55);
+.sync-cell.done {
+  border-color: rgba(110, 201, 110, 0.28);
+
+  .sync-label {
+    color: rgba(220, 245, 225, 0.76);
+  }
 }
 
 // Honey-amber while syncing — installer work, not swarm presence.
-.sync-dot {
-  display: inline-block;
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #e0a93e;
-  animation: sync-pulse 1.2s ease-in-out infinite;
-}
-
-.sync-cell.done .sync-dot {
-  background: #6ec96e;
-  animation: none;
-}
 
 // ── progress bar ─────────────────────────────────────────
 // Determinate: fill width tracks current/total. Indeterminate (no
@@ -90,11 +87,6 @@
 @keyframes sync-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
-}
-
-@keyframes sync-pulse {
-  0%, 100% { opacity: 1;    transform: scale(1);    }
-  50%      { opacity: 0.55; transform: scale(0.85); }
 }
 
 @keyframes sync-sweep {

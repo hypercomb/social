@@ -46,6 +46,7 @@
 import { EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
 import { hasDecorationKind } from './decoration-kind-index.js'
+import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
 
 /** IoC key for the shell-side icon registry. */
 const ICON_REGISTRY_KEY = '@hypercomb.social/IconProviderRegistry'
@@ -67,23 +68,6 @@ const ENTER_ACTION_PREFIX = 'view-enter:'
  *  rather than the always-on row. */
 const ICON_PROFILE = 'public-external'
 
-/** Bare-bones default SVG used when a visual bee doesn't carry its own
- *  icon mark. Replace per-bee by registering a richer icon under the
- *  same name in IconProviderRegistry from the bee's own module. */
-// xmlns + explicit width/height are REQUIRED: the rasteriser decodes the
-// markup as an <img> blob (no-xmlns SVGs throw EncodingError and the icon
-// renders as an empty backdrop) and scales by rewriting the width/height
-// attributes. Stroke is pure white so the overlay's tint pipeline works.
-const DEFAULT_VIEW_ICON_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-     fill="none" stroke="#ffffff" stroke-width="1.6"
-     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <circle cx="12" cy="12" r="9"/>
-  <path d="M3 12h18"/>
-  <path d="M12 3a14 14 0 0 1 0 18"/>
-  <path d="M12 3a14 14 0 0 0 0 18"/>
-</svg>`.trim()
-
 type TileIconProvider = {
   name: string
   owner?: string
@@ -98,6 +82,7 @@ type TileIconProvider = {
   featureRow?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: unknown) => boolean
+  tintWhen?: (ctx: unknown) => number | null | undefined
   labelKey?: string
   descriptionKey?: string
 }
@@ -119,6 +104,21 @@ function enterIconNameForBee(bee: VisualBeeDescriptor): string {
   return `${ENTER_ACTION_PREFIX}${bee.view}`
 }
 
+function isPreferredView(ctx: unknown, view: string): boolean {
+  const label = String((ctx as { label?: string })?.label ?? '').trim()
+  if (!label) return false
+  const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+  const here = (lineage?.explorerSegments?.() ?? [])
+    .map(segment => String(segment ?? '').trim()).filter(Boolean)
+  const location = [...here, label].join('\u0000')
+  try {
+    const stored = JSON.parse(localStorage.getItem('hc:view-defaults') ?? '{}') as Record<string, unknown>
+    return String(stored?.[location] ?? '') === view
+  } catch {
+    return false
+  }
+}
+
 /** Sync the IconProviderRegistry to the current set of adoptable visual
  *  bees. Runs on every VisualBeeRegistry `change` event. Idempotent —
  *  re-adds skip the dup check inside IconProviderRegistry. */
@@ -135,7 +135,7 @@ function syncIcons(): void {
     iconRegistry.add({
       name,
       owner: '@diamondcoreprocessor.com/visual-bee-icons',
-      svgMarkup: DEFAULT_VIEW_ICON_SVG,
+      svgMarkup: visualBeeIconSvg(bee.toggleIcon, bee.view),
       profile: ICON_PROFILE,
       labelKey: bee.labelKey,
       descriptionKey: bee.descriptionKey,
@@ -175,14 +175,21 @@ function syncIcons(): void {
     iconRegistry.add({
       name,
       owner: '@diamondcoreprocessor.com/visual-bee-icons',
-      svgMarkup: DEFAULT_VIEW_ICON_SVG,
+      svgMarkup: visualBeeIconSvg(bee.toggleIcon, bee.view),
       profiles: ['private', 'public-own', 'public-external'],
       defaultActive: true,
       // A view IS a tile feature: ⋮ reveals it bigger on the feature row —
       // never the always-visible top row. While any feature icon shows, the
       // overlay keeps the delete (danger) row hidden.
-      featureRow: true,
+      // Enabled views are direct choices on the tile. With several enabled
+      // views, each icon remains visible instead of hiding behind the feature
+      // expander.
+      featureRow: false,
       hoverTint: 0xa8d8ff,
+      // A default is only a preferred glyph now. Tile bodies always navigate;
+      // the accent makes the chosen icon easy to find without stealing that
+      // primary gesture.
+      tintWhen: (ctx) => isPreferredView(ctx, bee.view) ? 0xc8b8ff : 0xd8e1e8,
       labelKey: bee.labelKey,
       descriptionKey: bee.descriptionKey,
       visibleWhen: (ctx) => {
@@ -255,11 +262,9 @@ function dispatchEnterAction(action: string, label: string | undefined): void {
   const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
   const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
 
-  // TAKEOVER views (a slides deck, a lightbox) mount over the CURRENT layer —
-  // the same in-place open a tile click performs, so closing drops you back on
-  // the layer you clicked from. This icon is also how you reach a view the
-  // tile-click default OUTRANKS (see takeoverRank): the event names the view
-  // explicitly, so the picker's precedence never applies here.
+  // In-place views (a slides deck, a lightbox) mount over the CURRENT layer,
+  // so closing drops you back on the layer where the icon was clicked. The
+  // icon names the exact view; tile-body navigation never enters this path.
   if (bee.opensOnTileClick) {
     EffectBus.emit('view:open-for-tile', { view: bee.view, segments: [...here, label] })
     return

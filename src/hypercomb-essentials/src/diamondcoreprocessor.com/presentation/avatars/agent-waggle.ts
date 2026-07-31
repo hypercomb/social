@@ -64,39 +64,39 @@ const triangle = (phase: number): number => {
 }
 
 const PATTERNS: Record<AgentKind, WaggleShape> = {
-  // The tutorial's dance, to the digit. Do not retune without watching it.
+  // The tutorial's figure-8, scaled down to stay close to its tile.
   model: {
-    reach: { x: 30, y: 12 },
+    reach: { x: 14, y: 6 },
     at: (t, seed) => ({
-      x: Math.sin(t * 7.4 + seed) * 30,
-      y: Math.sin(t * 14.8 + seed * 2) * 11,
+      x: Math.sin(t * 7.4 + seed) * 14,
+      y: Math.sin(t * 14.8 + seed * 2) * 5,
     }),
   },
 
   // Even, unhurried, no flourish: a machine going back and forth.
   script: {
-    reach: { x: 26, y: 6 },
+    reach: { x: 12, y: 4 },
     at: (t, seed) => ({
-      x: triangle(t * 3.4 + seed) * 26,
-      y: Math.sin(t * 6.8 + seed) * 3,
+      x: triangle(t * 3.4 + seed) * 12,
+      y: Math.sin(t * 6.8 + seed) * 2,
     }),
   },
 
   // A slow orbit — present, not urgent.
   system: {
-    reach: { x: 20, y: 20 },
+    reach: { x: 9, y: 9 },
     at: (t, seed) => ({
-      x: Math.cos(t * 1.7 + seed) * 20,
-      y: Math.sin(t * 1.7 + seed) * 20,
+      x: Math.cos(t * 1.7 + seed) * 9,
+      y: Math.sin(t * 1.7 + seed) * 9,
     }),
   },
 
   // The same figure-8, wide and slow: watching rather than working.
   orchestrator: {
-    reach: { x: 86, y: 34 },
+    reach: { x: 14, y: 6 },
     at: (t, seed) => ({
-      x: Math.sin(t * 2.4 + seed) * 86,
-      y: Math.sin(t * 4.8 + seed * 2) * 32,
+      x: Math.sin(t * 2.4 + seed) * 14,
+      y: Math.sin(t * 4.8 + seed * 2) * 5,
     }),
   },
 }
@@ -104,7 +104,7 @@ const PATTERNS: Record<AgentKind, WaggleShape> = {
 export const waggleFor = (kind: AgentKind): WaggleShape => PATTERNS[kind] ?? PATTERNS.script
 
 /** The offset to add to a bee's dance centre. `intensity` ∈ [0,1] scales the
- *  whole dance: a waiting bee barely moves, a working one dances full size. */
+ *  whole dance; the renderer uses one fixed compact scale for every status. */
 export const waggleOffset = (
   kind: AgentKind,
   t: number,

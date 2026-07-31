@@ -2,6 +2,7 @@
   <aside class="history-viewer"
          hcDockInset="left"
          hcDockedPanel="history-viewer" dockSide="left"
+         (hcDockedPanelClose)="hide()"
          [ownsSize]="false" [sizeOwner]="this" [minWidth]="240" [maxWidth]="1200"
          [attr.data-consumes-wheel]="''"
          [style.width.px]="customWidth()"

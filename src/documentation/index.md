@@ -81,6 +81,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 Forward-looking proposals and migration plans — not yet built. Retained so the intended direction is legible before any code lands.
 
+- [workflow-inputs.md](workflow-inputs.md) — Structured question cards, one-click answers, workflow pauses, and shared voice input
 - [feature-tuning-garage.md](feature-tuning-garage.md) — Installer feature-gating, two-lens review, capability dedup, and signature-addressed tuning recipes
 - [sign-meaning-pool-migration-plan.md](sign-meaning-pool-migration-plan.md) — Removing the underscore folders in favour of `sign(meaning)` pools
 - [three-js-migration-plan.md](three-js-migration-plan.md) — Pixi.js → three.js feasibility and strategy evaluation

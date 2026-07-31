@@ -45,6 +45,8 @@ import { enableAggregation, disableAggregation, listAggregation } from '../../co
 /** A feature already applied to the layer. */
 interface FeatureRow {
   view: string
+  /** Material Symbols ligature declared by this behavior. */
+  icon: string
   kind: string
   label: string
   description: string
@@ -101,6 +103,8 @@ interface FeatureRow {
 /** A feature the app knows but this layer doesn't have yet. */
 interface AvailableRow {
   view: string
+  /** Material Symbols ligature declared by this behavior. */
+  icon: string
   kind: string
   label: string
   description: string
@@ -385,6 +389,41 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ value?: boolean }>('selection:has-features', (p) => {
       this.canvasSelectionHasFeatures.set(p?.value === true)
     }))
+    this.#cleanups.push(
+      EffectBus.on<{ featKind?: string; view?: string; segments?: readonly string[]; recordSig?: string }>(
+        'feature:hidden',
+        (payload) => {
+          const featKind = String(payload?.featKind ?? '').trim()
+          const segments = (payload?.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+          if (!featKind) return
+          const key = hiddenKey(featKind, segments)
+          this.hidden.update(list => list.some(record =>
+            hiddenKey(record.featKind, record.appliesTo) === key)
+            ? list
+            : [...list, {
+              recordSig: String(payload?.recordSig ?? ''),
+              featKind,
+              view: String(payload?.view ?? ''),
+              label: featKind,
+              appliesTo: segments,
+            }])
+        },
+      ),
+      EffectBus.on<{ featKind?: string; segments?: readonly string[] }>(
+        'feature:restored',
+        (payload) => {
+          const featKind = String(payload?.featKind ?? '').trim()
+          const segments = (payload?.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+          if (!featKind) return
+          const key = hiddenKey(featKind, segments)
+          this.hidden.update(list => list.filter(record =>
+            hiddenKey(record.featKind, record.appliesTo) !== key))
+        },
+      ),
+      EffectBus.on('feature:activation-settled', () => {
+        if (this.visible()) void this.#refreshHidden()
+      }),
+    )
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {
       if (!p?.cell) return
       // Mutually exclusive with the Files panel — they share the right-side
@@ -791,8 +830,10 @@ export class FeaturesViewerComponent implements OnDestroy {
     const sigs = new Set(records.map(r => r.recordSig))
     this.hidden.update(list => list.filter(r => !sigs.has(r.recordSig)))
     for (const rec of records) {
-      void restoreFeature(rec.recordSig).then(ok => {
-        if (ok) EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
+      void restoreFeature(rec.recordSig, {
+        featKind: rec.featKind,
+        view: rec.view || feat.view,
+        segments: rec.appliesTo,
       }).catch(() => undefined)
     }
   }
@@ -829,6 +870,12 @@ export class FeaturesViewerComponent implements OnDestroy {
   /** The "Available to add" rows, through the same search filter. */
   visibleAvailable(group: FeatureGroup): AvailableRow[] {
     return group.available.filter(f => this.#matchesQuery(group, f))
+  }
+
+  /** Number of behaviors currently active in this context. Off rows remain in
+   *  the applied list by design, so the list length is not an active count. */
+  activeAppliedCount(group: FeatureGroup): number {
+    return group.applied.filter(f => this.isOn(group, f)).length
   }
 
   /** Is this row's checkbox CHECKED — is the behavior ENABLED here? A hidden
@@ -997,7 +1044,6 @@ export class FeaturesViewerComponent implements OnDestroy {
       return
     }
     this.hidden.update(list => list.map(r => r === optimistic ? { ...r, recordSig: sig } : r))
-    EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
     // Menu removal rides the committer FIFO — background, never blocks the row.
     if (isRootWebsite && wasMember) void disableAggregation('websites', segments).catch(() => false)
   }
@@ -1021,16 +1067,28 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (isRootWebsite && !wasMember) this.websiteMembers.update(s => new Set(s).add(memberKey))
 
     if (rec) {
-      const ok = await restoreFeature(rec.recordSig)
+      const ok = await restoreFeature(rec.recordSig, {
+        featKind: rec.featKind,
+        view: rec.view || feat.view,
+        segments: rec.appliesTo,
+      })
       if (!ok) {
-        this.hidden.update(list => [...list, rec])
+        const key = hiddenKey(rec.featKind, rec.appliesTo)
+        this.hidden.update(list => {
+          let replaced = false
+          const next = list.map(record => {
+            if (hiddenKey(record.featKind, record.appliesTo) !== key) return record
+            replaced = true
+            return rec
+          })
+          return replaced ? next : [...next, rec]
+        })
         if (isRootWebsite && !wasMember) {
           this.websiteMembers.update(s => { const next = new Set(s); next.delete(memberKey); return next })
         }
         this.rowNotes.update(m => new Map(m).set(this.rowKey(group, feat), this.#t('features.note.noanswer', 'no answer — try again')))
         return
       }
-      EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
     }
     if (isRootWebsite) {
       // The menu commit (one committer.update per enable) runs in the

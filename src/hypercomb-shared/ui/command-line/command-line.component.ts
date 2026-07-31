@@ -26,6 +26,7 @@ import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { SELECT_OPS } from './select-ops'
+import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
   { behaviour: { name: 'remove', description: 'remove selected tiles', descriptionKey: 'slash.remove-builtin' }, provider: null },
@@ -246,6 +247,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Overlap count = how many tiles share this feature (the popularity metric).
       count: metrics?.kindCount(b.decorationKind ?? '') ?? 0,
     }))
+    if (!mapped.some(item => item.view === 'keywords')) {
+      mapped.push({
+        view: 'keywords',
+        icon: 'sell',
+        slashCommand: '/keywords',
+        description: 'Generate transcript keywords with Haiku in the background, then review what gets added',
+        count: 0,
+      })
+    }
     const filtered = q ? mapped.filter(m => m.view.toLowerCase().startsWith(q)) : mapped
     // Most-shared first; alpha breaks ties so order is stable.
     return [...filtered].sort((a, b) => b.count - a.count || a.view.localeCompare(b.view))
@@ -560,7 +570,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // ── status indicators ─────────────────────────────────
 
-  readonly #indicators = signal<Map<string, { key: string; icon: string; label: string; dismissable?: boolean }>>(new Map())
+  readonly #indicators = signal<Map<string, {
+    key: string
+    icon: string
+    label: string
+    dismissable?: boolean
+    actionable?: boolean
+  }>>(new Map())
   readonly activeIndicators = computed(() => [...this.#indicators().values()])
 
   #indicatorUnsubs: (() => void)[] = []
@@ -612,6 +628,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // in the top chrome since notes ride along with every page.
   readonly #notesPanelOpen = signal(false)
   readonly notesPanelOpen = this.#notesPanelOpen.asReadonly()
+
+  readonly #viewsPanelOpen = signal(false)
+  readonly viewsPanelOpen = this.#viewsPanelOpen.asReadonly()
 
   // ── feedback toggle ───────────────────────────────────
   //
@@ -669,7 +688,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Listen for indicator registration/removal
     this.#indicatorUnsubs.push(
-      EffectBus.on<{ key: string; icon: string; label: string }>('indicator:set', (p) => {
+      EffectBus.on<{
+        key: string
+        icon: string
+        label: string
+        dismissable?: boolean
+        actionable?: boolean
+      }>('indicator:set', (p) => {
         if (!p?.key) return
         this.#indicators.update(m => { const n = new Map(m); n.set(p.key, p); return n })
         this.#persistIndicators()
@@ -693,6 +718,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       EffectBus.on<{ open?: boolean }>('notes:panel-state', ({ open }) => {
         this.#notesPanelOpen.set(!!open)
         if (open) this.#encloseOthers('notes')
+      }),
+      EffectBus.on<{ open?: boolean }>('views:state', ({ open }) => {
+        this.#viewsPanelOpen.set(!!open)
       }),
       // Share-feedback panel open/closed — lights the feedback toggle.
       EffectBus.on<{ open?: boolean }>('feedback:panel-state', ({ open }) => {
@@ -722,8 +750,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const saved = localStorage.getItem('hc:indicators')
     if (saved) {
       try {
-        const list = JSON.parse(saved) as { key: string; icon: string; label: string; dismissable?: boolean }[]
-        const m = new Map<string, { key: string; icon: string; label: string; dismissable?: boolean }>()
+        const list = JSON.parse(saved) as {
+          key: string
+          icon: string
+          label: string
+          dismissable?: boolean
+          actionable?: boolean
+        }[]
+        const m = new Map<string, {
+          key: string
+          icon: string
+          label: string
+          dismissable?: boolean
+          actionable?: boolean
+        }>()
         for (const ind of list) {
           if (!ind?.key || ind.dismissable === false) continue
           m.set(ind.key, ind)
@@ -760,6 +800,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.#openForSubscribers.set(!!p?.open)
       }),
     )
+    // Producer-owned indicators are not persisted. Ask their producers to
+    // replay current state now that the command-line listener is live.
+    EffectBus.emit('indicator:query', {})
   }
 
   /** Flip the open-for-subscribers toggle. Called from the shell's
@@ -809,6 +852,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emit('notes:panel', { visible: !this.#notesPanelOpen() })
   }
 
+  onViewsToggle(): void {
+    EffectBus.emit(this.#viewsPanelOpen() ? 'views:close' : 'views:open', {})
+  }
+
   /** Flip the feedback panel — FeedbackViewerComponent listens and
    *  broadcasts state back via `feedback:panel-state`. */
   onFeedbackToggle(): void {
@@ -836,12 +883,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#persistIndicators()
   }
 
+  onIndicatorActivate(key: string): void {
+    EffectBus.emit('indicator:activate', { key })
+  }
+
   #persistIndicators(): void {
     // Only user-dismissable pills are persisted. Producer-owned pills
     // (dismissable === false) are re-emitted live by their drone on every
     // boot, so keeping them out of storage is the structural guard against
     // a stale key/label outliving the producer that created it.
-    const list = [...this.#indicators().values()].filter(ind => ind.dismissable !== false)
+    const list = [...this.#indicators().values()]
+      .filter(ind => ind.dismissable !== false && ind.actionable !== true)
     if (list.length > 0) {
       localStorage.setItem('hc:indicators', JSON.stringify(list))
     } else {
@@ -2093,6 +2145,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // '@' feature attach/detach — `abc@gallery` / `~abc@gallery`. Only consumed
     // when the fragment resolves to a registered behavior; an unknown `@name`
     // falls through to normal handling (so a stray `@` never eats input).
+    const targetedKeywords = parseTargetedKeywordsInput(v)
+    if (targetedKeywords) {
+      const target = this.completions.normalize(targetedKeywords.target)
+      if (target) {
+        const selection = get('@diamondcoreprocessor.com/SelectionService') as
+          { clear(): void; add(label: string): void } | undefined
+        if (selection) {
+          this.#syncDirection = 'command'
+          selection.clear()
+          selection.add(target)
+          this.#syncDirection = 'idle'
+        }
+        const queen = get('@diamondcoreprocessor.com/KeywordsQueenBee') as
+          { invoke(args: string): Promise<void> | void } | undefined
+        await queen?.invoke(targetedKeywords.transcript)
+        this.clear()
+        return
+      }
+    }
+
     const feat = this.#parseFeatureInput(v)
     if (feat) {
       await this.#applyFeatureOps(feat)

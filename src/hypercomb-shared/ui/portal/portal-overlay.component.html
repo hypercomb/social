@@ -51,10 +51,31 @@
         <span class="close-label">{{ 'portal.back' | t }}</span>
       </button>
 
-      @if (hasPendingCommit) {
-        <button class="portal-apply" (click)="apply()">
-          <span class="apply-label">{{ 'portal.done' | t }}</span>
+      @if (hasPendingCommit && !namingRestorePoint) {
+        <button class="portal-apply" (click)="beginApply()">
+          <span class="apply-label">{{ 'upgrade.adopt' | t }}</span>
         </button>
+      }
+
+      @if (namingRestorePoint) {
+        <div class="portal-restore-point" role="group" aria-label="Name restore point before adopting">
+          <label for="portal-restore-name">Restore point</label>
+          <input id="portal-restore-name" type="text" autofocus
+            [value]="restorePointName"
+            [disabled]="applyingRestorePoint"
+            (input)="restorePointName = $any($event.target).value"
+            (keydown.enter)="confirmApply()"
+            (keydown.escape)="cancelRestorePoint()" />
+          <button class="portal-apply" type="button" (click)="confirmApply()"
+            [disabled]="applyingRestorePoint || !restorePointName.trim()">
+            <span class="apply-label">{{ applyingRestorePoint ? 'Saving…' : ('upgrade.adopt' | t) }}</span>
+          </button>
+          <button class="portal-cancel-restore" type="button" (click)="cancelRestorePoint()"
+            [disabled]="applyingRestorePoint">Cancel</button>
+          @if (restorePointError) {
+            <span class="portal-restore-error">{{ restorePointError }}</span>
+          }
+        </div>
       }
     </div>
   </div>

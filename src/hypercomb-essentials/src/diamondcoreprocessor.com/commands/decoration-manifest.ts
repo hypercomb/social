@@ -91,6 +91,45 @@ type StoreLike = {
   getResource(signature: string): Promise<Blob | null>
 }
 
+type LayerCommitterLike = {
+  commitSlotAppend(segments: readonly string[], slot: string, sig: string): Promise<void>
+  commitSlotRemove(segments: readonly string[], slot: string, sig: string): Promise<void>
+}
+
+async function commitDecorationDelta(opts: {
+  segments: readonly string[]
+  op: 'append' | 'removeSig'
+  sig: string
+}): Promise<void> {
+  const committer = window.ioc.get<LayerCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+  const method = opts.op === 'append'
+    ? committer?.commitSlotAppend?.bind(committer)
+    : committer?.commitSlotRemove?.bind(committer)
+  if (!method) {
+    // Compatibility fallback for a partial runtime: the registered slot
+    // trigger still commits, but cannot offer after-commit sequencing.
+    EffectBus.emit(DECORATIONS_TRIGGER, opts)
+    return
+  }
+
+  // Update hot indexes synchronously, while the pointer gesture is still in
+  // flight. `viaUpdate` tells LayerCommitter this notification is visual only;
+  // the awaited public API below owns the one durable delta.
+  EffectBus.emit(DECORATIONS_TRIGGER, { ...opts, viaUpdate: true })
+  try {
+    await method(opts.segments, DECORATIONS_SLOT, opts.sig)
+  } catch (error) {
+    // Put the synchronous read model back if persistence failed.
+    EffectBus.emit(DECORATIONS_TRIGGER, {
+      segments: opts.segments,
+      op: opts.op === 'append' ? 'removeSig' : 'append',
+      sig: opts.sig,
+      viaUpdate: true,
+    })
+    throw error
+  }
+}
+
 /**
  * Write a decoration JSON as a content resource (root sig file) and append
  * its sig to the cell's `decorations` slot via the active trigger.
@@ -135,7 +174,7 @@ export async function writeDecoration<TPayload>(opts: {
   const blob = new Blob([JSON.stringify(record)], { type: 'application/json' })
   const sig = await store.putResource(blob)
 
-  EffectBus.emit(DECORATIONS_TRIGGER, {
+  await commitDecorationDelta({
     segments: opts.segments,
     op: 'append',
     sig,
@@ -157,6 +196,20 @@ export function removeDecoration(opts: {
   segments: readonly string[]
 }): void {
   EffectBus.emit(DECORATIONS_TRIGGER, {
+    segments: opts.segments,
+    op: 'removeSig',
+    sig: opts.sig,
+  })
+}
+
+/** Remove a decoration and resolve only after the leaf and every ancestor have
+ * committed. The hot decoration index is updated synchronously before the
+ * await, so switches and tile takeover behavior answer on the first click. */
+export function removeDecorationAndWait(opts: {
+  sig: string
+  segments: readonly string[]
+}): Promise<void> {
+  return commitDecorationDelta({
     segments: opts.segments,
     op: 'removeSig',
     sig: opts.sig,

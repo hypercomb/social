@@ -236,6 +236,7 @@ const bootstrap = async (): Promise<void> => {
     }
     return sentinelPromise
   }
+  ;(globalThis as any).__getSentinel = getSentinel
 
   // The resync pass: pull DCP's enabled set into OPFS, then either reload
   // (cold install) or load + run the enabled drones in place. It runs ONLY
@@ -317,7 +318,64 @@ const bootstrap = async (): Promise<void> => {
   // activate anything — nothing runs before authorization. reloadIfDrifted
   // resyncs and reloads the shell only if the accepted change advanced the
   // sync sig.
-  window.addEventListener('actions:available', () => reloadIfDrifted('installer accepted'))
+  window.addEventListener('actions:available', event => {
+    const detail = (event as CustomEvent<{ contentChanges?: number; transactionId?: string }>).detail
+    const expectedContentChanges = Math.max(0, Number(detail?.contentChanges ?? 0))
+    const transactionId = String(detail?.transactionId ?? '')
+
+    // Subscribe before the first await: SwarmAdoptDrone receives the same
+    // window event and may finish a small fold quickly. The update is not
+    // complete until BOTH the package resync and the website/content fold
+    // report success.
+    const foldDone = expectedContentChanges > 0
+      ? new Promise<void>((resolve, reject) => {
+          let unsub: (() => void) | null = null
+          const timer = window.setTimeout(() => {
+            unsub?.()
+            reject(new Error('content adoption did not finish in time'))
+          }, 60_000)
+          unsub = EffectBus.on<{ unavailable?: number; transactionId?: string }>('fold:receipt', receipt => {
+            if (transactionId && receipt?.transactionId !== transactionId) return
+            window.clearTimeout(timer)
+            unsub?.()
+            if ((receipt?.unavailable ?? 0) > 0) {
+              reject(new Error(`${receipt.unavailable} adopted item(s) are still unavailable`))
+            } else {
+              resolve()
+            }
+          })
+        })
+      : Promise.resolve()
+
+    void (async () => {
+      try {
+        EffectBus.emit('update:status', { phase: 'applying', message: 'Adopting packages and website…' })
+        // Content first, then package/code. If the website fold cannot finish,
+        // no new executable package is loaded into the live session. If the
+        // later package leg fails, the already-committed named restore point
+        // still provides a one-gesture return path for the content leg.
+        await foldDone
+        await resyncAndEnforce()
+
+        const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
+        const drifted = !!currentSyncSig && currentSyncSig !== bootSyncSig
+        if (drifted) await cacheImportMap()
+
+        // Persisted by the indicator so the check survives a required reload.
+        EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
+        if (drifted) {
+          console.log('[main] installer accepted with drift — reloading after all adoption work completed')
+          location.reload()
+        }
+      } catch (err) {
+        console.error('[main] accepted DCP update failed safely', err)
+        EffectBus.emit('update:status', {
+          phase: 'error',
+          message: 'Update incomplete — your restore point is safe',
+        })
+      }
+    })()
+  })
 
   // First-run "Start" — the welcome card's single button, fully unattended.
   // Mount the hidden sentinel and pull DCP's enabled set: DCP resolves

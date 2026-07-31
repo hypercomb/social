@@ -34,6 +34,35 @@ type SyncStatus = 'backed-up' | 'syncing' | 'unauthorized'
 
 interface SyncState { host: string; pending: number; status: SyncStatus }
 
+type FolderStatus =
+  | 'unsupported'
+  | 'unconfigured'
+  | 'needs-permission'
+  | 'syncing'
+  | 'backed-up'
+  | 'incomplete'
+  | 'error'
+
+interface FolderSyncState {
+  status: FolderStatus
+  folder?: string
+  copied?: number
+  scanned?: number
+  copiedBytes?: number
+  totalBytes?: number
+  phase?: string
+  missingReferences?: number
+  error?: string
+}
+
+const formatBytes = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / 1024 ** unit
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`
+}
+
 const ICONS: Record<Exclude<SyncStatus, 'backed-up'>, string> = {
   'syncing': 'cloud_sync',
   'unauthorized': 'sync_problem',
@@ -51,7 +80,7 @@ export class SyncHealthDrone extends Drone {
   override description =
     'Surfaces the host-sync backup state as a plain-language indicator pill — quiet when backed up, counting down while stuck'
 
-  protected override listens = ['sync:state', 'host:receipt', 'indicator:dismiss']
+  protected override listens = ['sync:state', 'host:receipt', 'folder-sync:state', 'indicator:dismiss', 'indicator:click']
   protected override emits = ['sync:health', 'indicator:set', 'indicator:clear', 'activity:log']
 
   #initialized = false
@@ -62,6 +91,8 @@ export class SyncHealthDrone extends Drone {
   /** Hosts whose pill the user dismissed for the CURRENT episode.
    *  Cleared when the host transitions to backed-up (episode over). */
   #dismissed = new Set<string>()
+
+  #folderState: FolderSyncState | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#initialized) return
@@ -87,6 +118,15 @@ export class SyncHealthDrone extends Drone {
         this.#state.set(host, next)
         if (!this.#dismissed.has(host) && next.pending > 0) this.#setPill(next)
       }
+    })
+
+    this.onEffect<FolderSyncState>('folder-sync:state', state => {
+      if (!state?.status) return
+      this.#applyFolder(state)
+    })
+
+    this.onEffect<{ key: string }>('indicator:click', ({ key }) => {
+      if (key === 'folder-sync') EffectBus.emit('folder-sync:open', {})
     })
 
     // Respect the user's dismissal for the current episode only.
@@ -147,6 +187,66 @@ export class SyncHealthDrone extends Drone {
       ?? FALLBACK.syncing.replace('{n}', String(s.pending)).replace('{host}', s.host)
   }
 
+  #applyFolder = (next: FolderSyncState): void => {
+    const prev = this.#folderState
+    if (prev?.status === next.status
+        && prev?.folder === next.folder
+        && prev?.copied === next.copied
+        && prev?.scanned === next.scanned
+        && prev?.copiedBytes === next.copiedBytes
+        && prev?.totalBytes === next.totalBytes
+        && prev?.phase === next.phase
+        && prev?.missingReferences === next.missingReferences
+        && prev?.error === next.error) return
+    this.#folderState = next
+
+    if (next.status === 'backed-up') {
+      EffectBus.emit('indicator:clear', { key: 'folder-sync' })
+      if (prev && ['needs-permission', 'error'].includes(prev.status)) {
+        EffectBus.emit('activity:log', {
+          message: `folder backup recovered — current in ${next.folder ?? 'the selected folder'}`,
+          icon: '◈',
+        })
+      }
+    } else {
+      const label = this.#folderLabel(next)
+      if (label) {
+        EffectBus.emit('indicator:set', {
+          key: 'folder-sync',
+          icon: 'backup',
+          label,
+          dismissable: true,
+        })
+      }
+    }
+
+    this.emitEffect('sync:health', {
+      target: 'folder',
+      status: next.status,
+      folder: next.folder ?? null,
+      at: Date.now(),
+    })
+  }
+
+  #folderLabel = (state: FolderSyncState): string => {
+    switch (state.status) {
+      case 'unconfigured':
+        return 'Only on this device — run /folder-sync connect for a private folder backup'
+      case 'needs-permission':
+        return `Folder backup paused — run /folder-sync resume for ${state.folder ?? 'the selected folder'}`
+      case 'syncing':
+        return `${state.phase ?? `Backing up to ${state.folder ?? 'folder'}`} — ${state.scanned ?? 0} files / ${formatBytes(state.totalBytes ?? 0)} checked, ${formatBytes(state.copiedBytes ?? 0)} written`
+      case 'incomplete':
+        return `Hard copy incomplete — ${state.missingReferences ?? 0} referenced items are not local; run /folder-sync hard-copy to retry`
+      case 'error':
+        return `Folder backup needs attention — ${state.error ?? 'run /folder-sync now to retry'}`
+      case 'unsupported':
+        return 'Folder backup is unavailable in this browser — use /download for an offline snapshot'
+      default:
+        return ''
+    }
+  }
+
   /** Drop `sync:*` pills from the component's persisted dismissable set —
    *  same stale-pill guard content-health applies to `health:*`, but sync
    *  hosts aren't enumerable before the first sync:state, so the sweep
@@ -157,7 +257,8 @@ export class SyncHealthDrone extends Drone {
       if (!saved) return
       const keys = (JSON.parse(saved) as { key?: string }[])
         .map(p => p?.key)
-        .filter((k): k is string => typeof k === 'string' && k.startsWith('sync:'))
+        .filter((k): k is string =>
+          typeof k === 'string' && (k.startsWith('sync:') || k === 'folder-sync'))
       for (const key of keys) EffectBus.emit('indicator:clear', { key })
     } catch { /* malformed persistence — the component tolerates it too */ }
   }

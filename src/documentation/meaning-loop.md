@@ -165,7 +165,7 @@ A bounded walk (the routine caps depth/cells per cycle) that collects,
 per scope cell: recognized intent pheromones + pending `ai:request`s.
 For each finding:
 
-- **Never generate.** Mint ONE feedback-window question via the existing qa
+- **Never generate.** Mint ONE approval-mode feedback-window question via the existing qa
   system: *"`revolucion` carries `jwize.com:website` — N child branches
   look like site items. Build/refresh pages here?"* Mark the request
   `asked` (with `askedQId`) so the sweep never re-asks.

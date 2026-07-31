@@ -1,5 +1,6 @@
 @if (visible()) {
   <aside class="views-panel" hcDockInset="right" hcDockedPanel="views-viewer"
+    (hcDockedPanelClose)="close()"
     dockSide="right" [minWidth]="280" [maxWidth]="620" [defaultWidth]="370"
     data-consumes-wheel tabindex="-1" role="dialog" [attr.aria-label]="'views.aria' | t">
     <header class="views-header">
@@ -21,17 +22,57 @@
 
     <div class="views-list" aria-live="polite">
       @for (row of rows(); track row.view) {
-        <article class="view-card" [class.is-attached]="row.attached" [class.is-active]="row.active"
+        <article class="view-card" [class.is-attached]="row.enabled" [class.is-active]="row.active"
           role="button" tabindex="0" (click)="activate(row)"
           (keydown.enter)="activate(row)" (keydown.space)="$event.preventDefault(); activate(row)">
           <span class="view-icon mat-sym" aria-hidden="true">{{ icon(row) }}</span>
           <div class="view-copy">
             <div class="view-heading">
               <strong>{{ name(row) }}</strong>
-              @if (row.attached) { <span class="active-pill">{{ 'views.on' | t }}</span> }
+              @if (row.enabled) { <span class="active-pill">{{ 'views.on' | t }}</span> }
               @else { <span class="attached-pill">{{ 'views.off' | t }}</span> }
             </div>
             <p>{{ description(row) }}</p>
+            @if (row.enabled) {
+              <div class="view-actions">
+                @if (row.opensOnTileClick) {
+                  <button class="view-default" type="button"
+                    [class.is-selected]="defaultView() === row.view"
+                    [attr.aria-pressed]="defaultView() === row.view"
+                    [attr.title]="'views.default.hint' | t"
+                    (click)="setDefault($event, row)">
+                    <span class="mat-sym" aria-hidden="true">
+                      {{ defaultView() === row.view ? 'radio_button_checked' : 'radio_button_unchecked' }}
+                    </span>
+                    {{ 'views.default' | t }}
+                  </button>
+                }
+                <button class="view-open" type="button"
+                  (click)="$event.stopPropagation(); openView(row)">
+                  <span class="mat-sym" aria-hidden="true">open_in_new</span>
+                  {{ 'views.open' | t }}
+                </button>
+              </div>
+            }
+            @if (hasSourceScopes(row)) {
+              <div class="view-scope" role="group" [attr.aria-label]="'views.scope.aria' | t">
+                <button type="button" [class.is-selected]="row.sourceScope === 'layer'"
+                  [attr.aria-pressed]="row.sourceScope === 'layer'"
+                  (click)="setSourceScope($event, row, 'layer')">
+                  <span class="mat-sym" aria-hidden="true">layers</span>
+                  {{ 'views.scope.layer' | t }}
+                </button>
+                <button type="button" [class.is-selected]="row.sourceScope === 'hierarchy'"
+                  [attr.aria-pressed]="row.sourceScope === 'hierarchy'"
+                  (click)="setSourceScope($event, row, 'hierarchy')">
+                  <span class="mat-sym" aria-hidden="true">account_tree</span>
+                  {{ 'views.scope.hierarchy' | t }}
+                </button>
+              </div>
+              <small class="view-scope-help">
+                {{ (row.sourceScope === 'hierarchy' ? 'views.scope.hierarchy-desc' : 'views.scope.layer-desc') | t }}
+              </small>
+            }
             @if (!row.attachable || !row.queenKey) {
               <span class="view-command">{{ 'views.create-with' | t: { command: row.slashCommand } }}</span>
             }

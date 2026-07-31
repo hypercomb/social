@@ -41,6 +41,7 @@ $mint: #6fbf94;
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #eaf0f4;
   outline: none;
+  @include tw.panel($steel, right);
 }
 
 // ── phone: bottom sheet ───────────────────────────────────
@@ -63,7 +64,7 @@ $mint: #6fbf94;
     max-height: min(62vh, 30rem);
     border-left: none;
     border-top: 1px solid rgba($steel, 0.5);
-    border-radius: 14px 14px 0 0;
+    border-radius: tw.$radius-floating tw.$radius-floating 0 0;
     box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($steel, 0.06) inset;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
@@ -133,7 +134,7 @@ $mint: #6fbf94;
   padding: 0.15rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
+  border-radius: tw.$radius-control;
 }
 
 .tags-scope-btn {
@@ -143,7 +144,7 @@ $mint: #6fbf94;
   padding: 0.24rem 0.4rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   color: rgba(226, 235, 244, 0.55);
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
@@ -517,7 +518,7 @@ $mint: #6fbf94;
   margin-top: 0.5em;
   padding: 0.4em 0.6em;
   border: 1px dashed rgba($mint, 0.45);
-  border-radius: 7px;
+  border-radius: tw.$radius-card;
   background: rgba($mint, 0.06);
   color: rgba(214, 238, 226, 0.85);
   cursor: pointer;
@@ -666,7 +667,7 @@ $mint: #6fbf94;
   align-items: center;
   gap: 0.45em;
   padding: 0.3em 0.6em 0.3em 0.35em;
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   background: rgba(14, 17, 24, 0.96);
   border: 1px solid rgba($steel, 0.5);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);

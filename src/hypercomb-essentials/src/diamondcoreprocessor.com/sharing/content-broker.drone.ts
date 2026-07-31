@@ -1086,8 +1086,10 @@ export class ContentBrokerDrone extends Drone {
    * Idempotent + dedup via a visited set; fetchBySig's local fast-path
    * makes already-present sigs free. Emits `adopt:progress` as it fills
    * and `adopt:done` at the end (UI can sprout the cell as counts climb).
+   * `quiet` keeps that interactive event lane untouched for background
+   * materialization jobs that report their own aggregate progress.
    */
-  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; silent?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number }> => {
+  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; silent?: boolean; quiet?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number }> => {
     const root = String(rootSig ?? '').toLowerCase().trim()
     const stats = { layers: 0, leaves: 0, failed: 0 }
     if (!SIG_RE.test(root)) return stats
@@ -1107,7 +1109,7 @@ export class ContentBrokerDrone extends Drone {
     // sources to the user, and fall back across them if any fail.
     const knownDomains = this.#knownDomainsBySig.get(root)
     const domains: string[] = knownDomains && knownDomains.size ? [...knownDomains] : []
-    this.emitEffect('adopt:meta', { rootSig: root, domains })
+    if (!opts.quiet) this.emitEffect('adopt:meta', { rootSig: root, domains })
 
     const asSigs = (v: unknown): string[] =>
       Array.isArray(v) ? v.map(x => String(x).toLowerCase().trim()).filter(s => SIG_RE.test(s)) : []
@@ -1118,7 +1120,7 @@ export class ContentBrokerDrone extends Drone {
       const bytes = await this.fetchBySig(sig, 'layer') // fill + verify + store
       if (!bytes) { stats.failed++; return }
       stats.layers++
-      this.emitEffect('adopt:progress', { sig, ...stats })
+      if (!opts.quiet) this.emitEffect('adopt:progress', { sig, ...stats })
 
       let parsed: Record<string, unknown>
       try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> }
@@ -1150,7 +1152,7 @@ export class ContentBrokerDrone extends Drone {
           // Per-resource progress, not just per-layer: a one-layer branch
           // with many images otherwise sits silent for the whole resource
           // phase — the UI cue must climb as resources resolve.
-          this.emitEffect('adopt:progress', { sig: r, ...stats })
+          if (!opts.quiet) this.emitEffect('adopt:progress', { sig: r, ...stats })
 
           // Decoration-descent: a decoration record (e.g. a website page) is a
           // resource leaf to #collectSigs, but the content it points at — the
@@ -1165,7 +1167,7 @@ export class ContentBrokerDrone extends Drone {
               visited.add(n)
               const leaf = await this.fetchBySig(n, 'resource')
               if (leaf) stats.leaves++; else stats.failed++
-              this.emitEffect('adopt:progress', { sig: n, ...stats })
+              if (!opts.quiet) this.emitEffect('adopt:progress', { sig: n, ...stats })
             }
           }
         }
@@ -1179,7 +1181,7 @@ export class ContentBrokerDrone extends Drone {
     // the shells' adopt:done handlers switch the view to hexagons for a REAL
     // adopt landing, which must not fire for a walk the user never asked to
     // navigate for.
-    this.emitEffect('adopt:done', { root, silent: opts.silent === true, ...stats })
+    if (!opts.quiet) this.emitEffect('adopt:done', { root, silent: opts.silent === true, ...stats })
     return stats
   }
 

@@ -8,6 +8,7 @@ import { normalizeLink } from './normalize.js'
 import { parseYouTubeVideoId } from './youtube.js'
 import { readCellProperties, readTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 import type { PhotoView } from './photo.view.js'
+import type { YouTubeMetadataQueue } from './youtube-metadata-queue.js'
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -40,6 +41,11 @@ export class LinkOpenWorker extends Worker {
     // how link tiles opened before the emit was lost; YoutubeViewerComponent
     // listens for `viewer:open` kind:'youtube' and shows the embed overlay.
     if (parseYouTubeVideoId(link)) {
+      const lineage = get('@hypercomb.social/Lineage') as
+        { explorerSegments?: () => readonly string[] } | undefined
+      const parentSegments = lineage?.explorerSegments?.() ?? []
+      const queue = get('@diamondcoreprocessor.com/YouTubeMetadataQueue') as YouTubeMetadataQueue | undefined
+      if (queue?.openReadyForTile(parentSegments, label, link)) return
       EffectBus.emit('viewer:open', { kind: 'youtube', url: link })
       return
     }

@@ -179,8 +179,16 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Optional color swatches keyed by suggestion name (CSS color string). */
   readonly colorMap = input<ReadonlyMap<string, string>>(new Map())
 
-  /** Active status indicators shown as pills on the right side of the input. */
-  readonly indicators = input<readonly { key: string; icon: string; label: string; dismissable?: boolean }[]>([])
+  /** Active status indicators shown as pills on the right side of the input.
+   *  `actionable` indicators are producer-owned attention entries: clicking
+   *  activates their workflow without dismissing the underlying state. */
+  readonly indicators = input<readonly {
+    key: string
+    icon: string
+    label: string
+    dismissable?: boolean
+    actionable?: boolean
+  }[]>([])
 
   /**
    * Whether the "open for subscribers" floating icon is rendered. When
@@ -201,6 +209,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   /** Aria-label / tooltip for the notes toggle. */
   readonly notesLabel = input<string>('notes')
+
+  readonly viewsPanelOpen = input<boolean>(false)
+  readonly viewsLabel = input<string>('views')
 
   readonly showFeaturesToggle = input<boolean>(false)
   readonly featuresPanelOpen = input<boolean>(false)
@@ -300,6 +311,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Emitted when an indicator pill is clicked (to turn it off). */
   readonly indicatorDismiss = output<string>()
 
+  /** Emitted when a producer-owned attention indicator is activated. */
+  readonly indicatorActivate = output<string>()
+
   /** Emitted when the user clicks the armed-resource thumbnail to dismiss it. */
   readonly armedResourceDismiss = output<void>()
 
@@ -310,6 +324,8 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Emitted when the notes toggle is clicked. Parent flips the strip
    *  via the `notes:panel` command channel — the shell stays presentational. */
   readonly notesToggle = output<void>()
+
+  readonly viewsToggle = output<void>()
 
   readonly featuresToggle = output<void>()
 

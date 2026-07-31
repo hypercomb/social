@@ -91,6 +91,18 @@ export class App implements AfterViewInit {
       this.orientation.set(flat ? 'flat-top' : 'point-top')
     })
 
+    // Development imports the startup behavior graph directly. Non-critical
+    // lanes are generated into a separate chunk and warm only after the hive
+    // has completed its first render, matching production's lazy posture.
+    let preloadStarted = false
+    EffectBus.on<{ count?: number; settled?: boolean }>('render:cell-count', ({ count, settled }) => {
+      if (preloadStarted || (!(Number(count) > 0) && settled !== true)) return
+      preloadStarted = true
+      void import('@hypercomb/essentials/preload-effects')
+        .then(({ preloadEffects }) => preloadEffects())
+        .catch(error => console.warn('[app] post-render preload failed', error))
+    })
+
     // Mobile command-line reveal: long-press on empty canvas (or controls
     // bar toggle) emits this; the header-bar must un-hide so the
     // command-line inside it becomes visible.

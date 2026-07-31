@@ -178,6 +178,14 @@ export function tagsForLabel(label: string): readonly string[] {
   return set ? [...set] : []
 }
 
+/** Every tag applied at an explicit hierarchy path. Document views use this
+ * while walking descendants: a bare label would resolve against the visible
+ * parent and smear or miss same-named tiles deeper in the tree. */
+export function tagsForSegments(segments: readonly string[]): readonly string[] {
+  const set = tagsByKey.get(locationKey(segments))
+  return set ? [...set] : []
+}
+
 /** The decoration sig of a specific tag on a cell, or undefined if the index
  *  hasn't seen it. The remove path uses this to splice one tag from the cell's
  *  slot; callers fall back to `listDecorations` when the index is cold.

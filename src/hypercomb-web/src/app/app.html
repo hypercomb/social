@@ -1,8 +1,6 @@
 @if(showHeader){
 <div class="header-bar" [class.input-open]="inputOpen()" [style.visibility]="(viewActive() || viewMode() === 'website') ? 'hidden' : null">
   <app-header></app-header>
-  <hc-upgrade-indicator></hc-upgrade-indicator>
-  <hc-sync-indicator></hc-sync-indicator>
   <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-mesh-header>
 </div>
 }
@@ -18,6 +16,10 @@
      site overlay's 59988). Single source of truth — see styles.scss. -->
 <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
 <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+<div class="update-status-dock">
+  <hc-upgrade-indicator></hc-upgrade-indicator>
+  <hc-sync-indicator></hc-sync-indicator>
+</div>
 <hc-edit-actions [style.visibility]="viewActive() ? 'hidden' : null"></hc-edit-actions>
 <!-- Every other shell surface is registry-fed: registered in
      shared/ui/shell-surfaces/shell-surfaces.barrel.ts, mounted here in `order`

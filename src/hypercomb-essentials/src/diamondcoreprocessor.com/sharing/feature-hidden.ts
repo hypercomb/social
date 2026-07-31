@@ -29,6 +29,7 @@
 import { EffectBus } from '@hypercomb/core'
 
 type StoreLike = {
+  initialize?: () => Promise<void>
   getOptimization?: (sig: string) => Promise<Blob | null>
   listOptimizations?: () => Promise<string[]>
 }
@@ -52,6 +53,10 @@ export function hiddenKey(featKind: string, segments: readonly string[]): string
 let cache: Set<string> | null = null
 let loading: Promise<void> | null = null
 let wired = false
+// A restore can land while the initial pool scan is reading the record it is
+// removing. Remember that transition so the stale scan result cannot add the
+// key back after the runtime has already enabled the feature.
+const restoredDuringLoad = new Set<string>()
 
 function keyFromEvent(p: { featKind?: unknown; segments?: unknown } | undefined): string | null {
   const featKind = String(p?.featKind ?? '').trim()
@@ -67,10 +72,13 @@ function wire(): void {
   // before these fire (the panel awaits put/remove), so the set stays truthful.
   EffectBus.on('feature:hidden', (p: { featKind?: unknown; segments?: unknown } | undefined) => {
     const k = keyFromEvent(p); if (!k) return
+    restoredDuringLoad.delete(k)
     ;(cache ??= new Set<string>()).add(k)
   })
   EffectBus.on('feature:restored', (p: { featKind?: unknown; segments?: unknown } | undefined) => {
-    const k = keyFromEvent(p); if (k && cache) cache.delete(k)
+    const k = keyFromEvent(p); if (!k) return
+    restoredDuringLoad.add(k)
+    cache?.delete(k)
   })
 }
 
@@ -78,6 +86,13 @@ async function buildKeys(): Promise<Set<string>> {
   const out = new Set<string>()
   const store = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<StoreLike>('@hypercomb.social/Store')
   if (!store?.listOptimizations || !store?.getOptimization) return out
+  // The Store is registered before its OPFS pools have necessarily finished
+  // opening. listOptimizations() deliberately returns [] while `optimization`
+  // is absent, so reading it too early and caching that result would make
+  // persisted OFF switches look ON again for the whole refreshed session.
+  // Join the Store's memoised initialization before taking the one-time
+  // hidden-key snapshot.
+  try { await store.initialize?.() } catch { return out }
   let sigs: string[] = []
   try { sigs = await store.listOptimizations() } catch { return out }
   for (const sig of sigs) {
@@ -102,7 +117,12 @@ function ensureWarm(): void {
   wire()
   if (cache || loading) return
   loading = buildKeys().then(set => {
-    if (cache) { for (const k of set) cache.add(k) } else { cache = set }
+    if (cache) {
+      for (const k of set) if (!restoredDuringLoad.has(k)) cache.add(k)
+    } else {
+      cache = new Set([...set].filter(k => !restoredDuringLoad.has(k)))
+    }
+    restoredDuringLoad.clear()
     loading = null
   })
 }

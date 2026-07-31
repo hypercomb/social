@@ -926,6 +926,11 @@ export class HistoryService {
         const seedBytes = new TextEncoder().encode(JSON.stringify(seedRecord))
         const seedWritable = await seedHandle.createWritable()
         try { await seedWritable.write(seedBytes.buffer as ArrayBuffer) } finally { await seedWritable.close() }
+        EffectBus.emit('history:marker-wrote', {
+          lineageSig: locationSig,
+          markerName: seedMarkerName,
+          bytes: seedBytes.buffer as ArrayBuffer,
+        })
         if (seedList) seedList.push({ layerSig: seeded, at: Date.now(), filename: seedMarkerName })
       } catch { /* best-effort — the commit below is still correct without it */ }
     }
@@ -968,6 +973,11 @@ export class HistoryService {
     const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
     const markerWritable = await markerHandle.createWritable()
     try { await markerWritable.write(markerBytes.buffer as ArrayBuffer) } finally { await markerWritable.close() }
+    EffectBus.emit('history:marker-wrote', {
+      lineageSig: locationSig,
+      markerName,
+      bytes: markerBytes.buffer as ArrayBuffer,
+    })
 
     // Keep the in-memory marker list coherent: the entry we just wrote
     // IS the bag's new tail. cursor.onNewLayer reads it via listLayers'
@@ -1054,6 +1064,13 @@ export class HistoryService {
     const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
     const writable = await handle.createWritable()
     try { await writable.write(markerBytes.buffer as ArrayBuffer) } finally { await writable.close() }
+    if (locationSig) {
+      EffectBus.emit('history:marker-wrote', {
+        lineageSig: locationSig,
+        markerName: '00000000',
+        bytes: markerBytes.buffer as ArrayBuffer,
+      })
+    }
 
     // Mirror the LAYER bytes (not marker bytes) into the preloader cache
     // — sig→content lookups want the layer JSON, not the marker JSON.
@@ -1644,13 +1661,20 @@ export class HistoryService {
     // to the root, because the warm had bumped the epoch underneath it). Only
     // a head that MOVES from a value we already knew is a change.
     const prev = this.#latestSigByLineage.get(lineageSig)
-    if (prev !== undefined && prev !== layerSig) this.#treeEpoch++
+    if (prev !== undefined && prev !== layerSig) {
+      this.#treeEpoch++
+      EffectBus.emit('history:head-changed', { lineageSig, from: prev, to: layerSig, epoch: this.#treeEpoch })
+    }
     this.#latestSigByLineage.set(lineageSig, layerSig)
   }
 
   /** Drop a lineage head, bumping {@link treeEpoch} when one was present. */
   readonly #dropHead = (lineageSig: string): void => {
-    if (this.#latestSigByLineage.delete(lineageSig)) this.#treeEpoch++
+    const previous = this.#latestSigByLineage.get(lineageSig)
+    if (this.#latestSigByLineage.delete(lineageSig)) {
+      this.#treeEpoch++
+      EffectBus.emit('history:head-changed', { lineageSig, from: previous, to: null, epoch: this.#treeEpoch })
+    }
   }
 
   /** This session now owns the lineage's head (derived / committed). */

@@ -76,7 +76,10 @@ const oneIncomingBranch = (opts: { snapshotThrows?: boolean } = {}) => {
   registrySnapshot = { branches: [{ branchSig: BRANCH, name: 'thing', at: [], enabled: true, kind: 'content' }] }
 }
 
-const done = () => window.dispatchEvent(new Event('actions:available'))
+const done = (detail?: { checkpointed?: boolean; transactionId?: string }) =>
+  window.dispatchEvent(detail
+    ? new CustomEvent('actions:available', { detail })
+    : new Event('actions:available'))
 
 beforeEach(() => { localStorage.clear() })
 
@@ -103,6 +106,15 @@ describe('restore point before an incoming fold', () => {
 
     expect(snapshotInvoke).not.toHaveBeenCalled()
     expect(committer.importTree).not.toHaveBeenCalled()
+  })
+
+  it('does not duplicate the checkpoint already committed by the portal', async () => {
+    oneIncomingBranch()
+    done({ checkpointed: true, transactionId: 'adopt:test' })
+    await settle()
+
+    expect(snapshotInvoke).not.toHaveBeenCalled()
+    expect(timeline).toContain('fold')
   })
 
   it('a snapshot failure never blocks the accepted fold', async () => {

@@ -42,6 +42,13 @@ Only the records that must reach the *other* side are replicated:
 | `qa` | routine → submitter | the question the user answers in the feedback window |
 | `qa-answer` | submitter → routine | the answer the routine drains to notes |
 
+Questions that authorize an AI action carry
+`payload.responseKind:'approval'`. The feedback window holds those in a pinned
+band with **Approve** and **Discard**
+actions instead of asking the participant to encode a decision in prose. The
+result stays a normal `qa-answer`, with both the compatibility `answer` string
+and a machine-readable `payload.decision:'approved'|'declined'`.
+
 Routine-local bookkeeping stays put — it is meaningless to the other side:
 
 - `feedback-seen`, `notes-digest` — **local only**, never published.
@@ -263,13 +270,40 @@ lists both kinds from the local `sign('optimization')` pool:
   from a granted visitor over the swarm handshake, or arriving over this
   channel. Reach-scoped against the current location (this page / this page
   and below / the whole hive) like the pheromone filter. Per-item **Resolve**
-  retires it.
-- `qa` — an open question, listed first and **never reach-scoped out**:
-  feedback is about a place, but a question is a task addressed to *you*, and
-  one minted on a tile three levels down must not be invisible from wherever
-  you happen to stand. **Answer** opens an inline box; submitting writes the
-  `qa-answer` record (with the answerer's identity) and removes the open `qa` —
-  byte-for-byte what `QaModalView` committed, minus the modal.
+  retires it through both a visibility marker and the loop's stable
+  `feedback-seen` id ledger, so replaying the channel bytes cannot put it back
+  in the inbox.
+- `qa` — an open question, listed first and reach-scoped by its `appliesTo`
+  route just like feedback. With **This page** selected, navigating onto the
+  question's page makes it appear; navigating away removes it from that view.
+  **Answer** opens an inline box; submitting writes the
+  `qa-answer` record (with the answerer's identity) and removes the open `qa`.
+  On every reload, the answer's `qSig` / `qId` closes the question. Submitting
+  also writes a local `qa-answered` tombstone with the same pair: the routine
+  consumes and removes `qa-answer`, while this small ledger survives so an
+  add-only channel replay still cannot ask it again.
+  An approval-mode `qa` is additionally pinned above the scrolling inbox and
+  resolves directly through **Approve** or **Discard**.
+
+Every question shows a short provenance line explaining why it needs the
+participant. New producers stamp `payload.origin` and `payload.reason`; legacy
+questions receive an honest state-based fallback ("work is paused until you
+answer") instead of appearing without context. Sending a reply also retires the
+feedback row—the response completes the inbox task.
+
+Retired feedback is a panel-local history lens, deliberately separate from the
+tile renderer's global `hc:show-hidden` state (which tile actions may
+auto-enable). The feedback panel opens with history off every time. Only its
+own **Show hidden** control reveals retired rows and their **Restore** action;
+with that control off, retired rows do not participate in the list or its
+scope counts.
+
+The page reach follows navigation while the window remains open. The panel
+reads the new URL on the universal `navigate` event (go, replace, browser back,
+and browser forward) and rechecks after `navigation:guard-end`. With **This
+page** selected, all page-addressed feedback and questions swap to the new
+page immediately; return-channel replies are unscoped and remain visible until
+resolved.
 
 No rendering pass, no bag to mint, no auto-remount problem: the panel
 live-refreshes on `feedback:channel-ingested` and `feedback:submitted` while
@@ -312,8 +346,8 @@ name can never receive each other's replies.
   out over the community channel), toasts, and emits
   `feedback:reply-ingested`. The feedback window lists it as a `reply` row —
   quoting the original item — in its own band between questions and feedback,
-  exempt from reach-scoping like questions (it is addressed to you, not to a
-  place). **Resolve** retires it.
+  exempt from reach-scoping because the return-channel record has no page
+  route. **Resolve** retires it.
 - **Durability v1**: the 7-day relay window (unique d-tag + expiration,
   idempotent replay) — the same story as visitor posts. If replies need to
   outlive that, graft the channel drone's pending-map + read-back confirm.

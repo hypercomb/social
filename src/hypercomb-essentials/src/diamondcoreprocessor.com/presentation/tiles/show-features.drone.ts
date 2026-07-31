@@ -94,6 +94,8 @@ const SIG_RE = /^[a-f0-9]{64}$/
  *  is the bug this table exists to prevent. */
 const CAPABILITIES: Readonly<Record<string, {
   view: string
+  /** Material Symbols ligature unique to this behavior. */
+  icon: string
   slashCommand: string
   labelKey: string
   descriptionKey: string
@@ -108,6 +110,7 @@ const CAPABILITIES: Readonly<Record<string, {
 }>> = {
   'files:dropbox': {
     view: 'dropbox',
+    icon: 'upload_file',
     slashCommand: '/dropbox',
     labelKey: 'features.cap.dropbox',
     descriptionKey: 'features.cap.dropbox.desc',
@@ -120,6 +123,7 @@ const CAPABILITIES: Readonly<Record<string, {
   // or deck. Sub-records of the website/tutor views, not views of their own.
   'visual:website:pending': {
     view: 'website-pending',
+    icon: 'language',
     slashCommand: '/website here',
     labelKey: 'features.cap.websitePending',
     descriptionKey: 'features.cap.websitePending.desc',
@@ -129,6 +133,7 @@ const CAPABILITIES: Readonly<Record<string, {
   },
   'visual:tutor:pending': {
     view: 'tutor-pending',
+    icon: 'pending_actions',
     slashCommand: '/tutor here',
     labelKey: 'features.cap.tutorPending',
     descriptionKey: 'features.cap.tutorPending.desc',
@@ -140,6 +145,7 @@ const CAPABILITIES: Readonly<Record<string, {
   // parent deck's slideshow.
   'visual:diagram:slide': {
     view: 'slide',
+    icon: 'crop_landscape',
     slashCommand: '/present slide',
     labelKey: 'features.cap.slide',
     descriptionKey: 'features.cap.slide.desc',
@@ -151,6 +157,7 @@ const CAPABILITIES: Readonly<Record<string, {
   // ContactService resolves it down the whole subtree.
   'visual:contact:enabled': {
     view: 'contact',
+    icon: 'contacts',
     slashCommand: '/contact',
     labelKey: 'features.cap.contact',
     descriptionKey: 'features.cap.contact.desc',
@@ -185,6 +192,8 @@ type Origin = 'direct' | 'cascade'
  *  this tile's branch (direct features only). */
 interface FeatureItem {
   view: string
+  /** Material Symbols ligature declared by this behavior. */
+  icon: string
   kind: string
   slashCommand?: string
   behavior?: string
@@ -249,6 +258,8 @@ interface FeatureItem {
  *  writes the decoration at the tile's own segments). */
 interface AvailableItem {
   view: string
+  /** Material Symbols ligature declared by this behavior. */
+  icon: string
   kind: string
   slashCommand?: string
   label: string
@@ -301,6 +312,7 @@ interface HistoryLike {
 /** Unified shape resolved from either a visual bee or a cascading capability. */
 interface RecognizedFeature {
   view: string
+  icon: string
   slashCommand?: string
   behavior?: string
   labelKey?: string
@@ -627,6 +639,7 @@ export class ShowFeaturesDrone extends Drone {
         const moduleName = moduleFromKind(kind)
         applied.push({
           view: kind,
+          icon: 'deployed_code_alert',
           kind,
           label: nameFromKind(kind),
           description: this.#t(i18n, 'features.foreign.desc', '')
@@ -815,6 +828,7 @@ export class ShowFeaturesDrone extends Drone {
       seen.add(bee.view)
       out.push({
         view: bee.view,
+        icon: bee.toggleIcon || bee.iconName,
         kind: bee.decorationKind,
         slashCommand: bee.slashCommand,
         label: this.#t(i18n, bee.labelKey, bee.view),
@@ -834,6 +848,7 @@ export class ShowFeaturesDrone extends Drone {
       seen.add(cap.view)
       out.push({
         view: cap.view,
+        icon: cap.icon,
         kind,
         slashCommand: cap.slashCommand,
         label: this.#t(i18n, cap.labelKey, cap.fallbackLabel),
@@ -863,6 +878,7 @@ export class ShowFeaturesDrone extends Drone {
     if (bee) {
       return {
         view: bee.view,
+        icon: bee.toggleIcon || bee.iconName,
         slashCommand: bee.slashCommand,
         behavior: bee.behavior,
         labelKey: bee.labelKey,
@@ -877,6 +893,7 @@ export class ShowFeaturesDrone extends Drone {
     if (cap) {
       return {
         view: cap.view,
+        icon: cap.icon,
         slashCommand: cap.slashCommand || undefined,
         labelKey: cap.labelKey,
         descriptionKey: cap.descriptionKey,
@@ -903,6 +920,7 @@ export class ShowFeaturesDrone extends Drone {
   ): FeatureItem {
     return {
       view: feature.view,
+      icon: feature.icon,
       kind,
       slashCommand: feature.slashCommand,
       behavior: feature.behavior,

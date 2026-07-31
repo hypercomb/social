@@ -50,6 +50,7 @@ import {
   protectOriginStorage,
 } from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
+import { initSentinel, type SentinelBridge } from '../../hypercomb-web/src/setup/sentinel-bridge'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
 
@@ -111,6 +112,13 @@ const main = async (): Promise<void> => {
 
   await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done')
+
+  // Dev uses the same explicit, lazy DCP transaction channel as production.
+  // Folder hard-copy and the push queue can request it without making DCP part
+  // of the startup critical path.
+  let sentinelPromise: Promise<SentinelBridge | null> | null = null
+  ;(globalThis as any).__getSentinel = (): Promise<SentinelBridge | null> =>
+    sentinelPromise ??= initSentinel()
 }
 
 main().catch(err => console.error(err))

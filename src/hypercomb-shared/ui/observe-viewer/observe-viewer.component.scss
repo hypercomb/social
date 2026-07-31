@@ -41,6 +41,7 @@ $accent: #7eb6d6;
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #eef3f6;
   outline: none;
+  @include tw.panel($accent, right);
 }
 
 .observe-header {

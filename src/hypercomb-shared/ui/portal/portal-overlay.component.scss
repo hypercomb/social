@@ -179,6 +179,74 @@
   color: #161616;
 }
 
+.portal-restore-point {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem 0.45rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  background: rgba(14, 18, 24, 0.94);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+
+  label {
+    color: rgba(245, 245, 245, 0.58);
+    font: 600 0.58rem/1 var(--hc-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  input {
+    width: min(18rem, 32vw);
+    height: 2rem;
+    box-sizing: border-box;
+    padding: 0 0.65rem;
+    border: 1px solid rgba(200, 151, 90, 0.46);
+    border-radius: 3px;
+    outline: 0;
+    color: rgba(245, 245, 245, 0.92);
+    background: rgba(4, 8, 12, 0.72);
+    font: 500 0.72rem/1 var(--hc-ui-font, system-ui, sans-serif);
+
+    &:focus { border-color: rgba(212, 164, 102, 1); }
+    &:disabled { opacity: 0.55; }
+  }
+
+  .portal-apply {
+    box-shadow: none;
+    padding: 0.55rem 1rem;
+  }
+}
+
+.portal-cancel-restore {
+  padding: 0.45rem 0.65rem;
+  border: 0;
+  color: rgba(245, 245, 245, 0.62);
+  background: transparent;
+  cursor: pointer;
+  font: 600 0.6rem/1 var(--hc-mono);
+  text-transform: uppercase;
+
+  &:hover:not(:disabled) { color: rgba(245, 245, 245, 0.95); }
+  &:disabled { opacity: 0.45; cursor: default; }
+}
+
+.portal-restore-error {
+  position: absolute;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(34rem, 80vw);
+  padding: 0.45rem 0.7rem;
+  border-radius: 4px;
+  color: #f0b0b0;
+  background: rgba(35, 12, 12, 0.94);
+  font: 600 0.65rem/1.3 var(--hc-ui-font, system-ui, sans-serif);
+}
+
 // Pending +adds / −removes, sitting at the LEFT of the action bar.
 // Display-only — clicks pass through. tabular-nums so the digits don't
 // jitter as counts change.

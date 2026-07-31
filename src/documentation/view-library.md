@@ -53,7 +53,10 @@ Decoration kind: `visual:document:knowledge-studio`
 
 All three views:
 
-- use the current category's child order;
+- offer the same source-reach choice:
+  - **Current layer** uses the current category's direct child tiles;
+  - **Hierarchy** walks every descendant depth-first, preserving layer order,
+    depth, and the full source path;
 - resolve participant-facing titles;
 - read notes by explicit tile path;
 - preserve nested note text;
@@ -70,10 +73,29 @@ Run `/views` to open the docked Views window. It follows the current category
 and discovers render views from `VisualBeeRegistry`, so newly installed view
 behaviours appear without another hardcoded catalogue.
 
-Each library-view row is a single on/off control. Turning one on writes its view
-declaration onto the layer you are currently inside; that layer's child tiles
-become the view's source material. Turning it off removes only the declaration.
-Categories, pheromones, notes, and child tiles are never removed.
+Each library-view row has an on/off control and a source-reach choice. Turning
+one on writes its view declaration onto the layer you are currently inside.
+Choose **Current layer** for a concise view over direct children, or
+**Hierarchy** for a detailed view composed from the entire descendant tree.
+The choice rides the declaration as `payload.sourceScope`, so it is historical,
+adoptable, and stable across reloads. Existing declarations default to Current
+layer. Turning a view off removes only the declaration. Categories, pheromones,
+notes, and child tiles are never removed.
+
+Hierarchy views also expose **Choose contents** inside the rendered view. That
+starts a deliberate curation phase without leaving view mode:
+
+1. the picker starts at the view root;
+2. open a branch to drill into its children;
+3. include or exclude exact tiles at any depth;
+4. use **Done** to commit the subset, or **Cancel** to discard the draft.
+
+The saved `payload.includedPaths` are relative to the view root, so moving or
+adopting the branch does not invalidate the selection. An absent selection
+means “use the complete live hierarchy”; an explicit empty selection means the
+participant deliberately included nothing. New descendants therefore appear
+automatically until the first curated subset is committed, after which the
+document remains intentionally bounded.
 
 After a view is applied, return to the parent and click that tile: its applied
 view opens in place instead of navigating into the ordinary child hexagons.
@@ -95,5 +117,7 @@ The implementation lives in:
 - `hypercomb-essentials/src/diamondcoreprocessor.com/commands/view-library.queen.ts`
 - `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/living-brief-view.drone.ts`
 - `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/view-library.drone.ts`
+- `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/document-view-source.ts`
+- `hypercomb-essentials/src/diamondcoreprocessor.com/commands/view-source-scope.ts`
 - `hypercomb-essentials/src/diamondcoreprocessor.com/commands/views.queen.ts`
 - `hypercomb-shared/ui/views-viewer/`

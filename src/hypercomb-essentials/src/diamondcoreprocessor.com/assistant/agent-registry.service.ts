@@ -143,7 +143,7 @@ export class AgentRegistry extends EventTarget {
       })
     })
 
-    EffectBus.on<{ id?: string; sig?: string; activity?: string; status?: AgentStatus; current?: number; total?: number }>(
+    EffectBus.on<{ id?: string; sig?: string; activity?: string; latest?: boolean; status?: AgentStatus; current?: number; total?: number }>(
       'agent:progress',
       p => {
         const id = String(p?.id || p?.sig || '')
@@ -153,7 +153,14 @@ export class AgentRegistry extends EventTarget {
         else if (agent.status === 'pending') agent.status = 'working'
         if (typeof p?.current === 'number') agent.current = p.current
         if (typeof p?.total === 'number') agent.total = p.total
-        if (p?.activity) this.#note(agent, String(p.activity))
+        if (p?.activity) {
+          const text = String(p.activity)
+          if (p.latest && agent.activity.at(-1)?.text.startsWith('Latest file:')) {
+            agent.activity[agent.activity.length - 1] = { at: Date.now(), text }
+          } else {
+            this.#note(agent, text)
+          }
+        }
         agent.updatedAt = Date.now()
         this.#changed()
       },

@@ -3,6 +3,7 @@
     class="feedback-viewer-panel"
     hcDockInset="right"
     hcDockedPanel="feedback-viewer"
+    (hcDockedPanelClose)="close()"
     dockSide="right"
     [minWidth]="280"
     [maxWidth]="680"
@@ -27,6 +28,17 @@
          and below / the whole hive. -->
     <div class="fv-reach">
       <span class="fv-subtitle">{{ 'feedback.viewer.subtitle' | t }}</span>
+      <button
+        class="fv-hidden-mode"
+        type="button"
+        [class.active]="showHidden()"
+        [attr.aria-pressed]="showHidden()"
+        [attr.aria-label]="(showHidden() ? 'feedback.viewer.hide-retired' : 'controls.show-hidden') | t"
+        [title]="(showHidden() ? 'feedback.viewer.hide-retired' : 'controls.show-hidden') | t"
+        (click)="toggleHidden()"
+      >
+        <span class="mat-sym" aria-hidden="true">{{ showHidden() ? 'visibility' : 'visibility_off' }}</span>
+      </button>
       <div class="fv-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
         @for (opt of scopeOptions; track opt.id) {
           <button
@@ -42,11 +54,56 @@
     </div>
 
     @if (scoped().length === 0) {
-      <p class="fv-empty">{{ (items().length === 0 ? 'feedback.viewer.empty' : 'feedback.viewer.empty-scope') | t }}</p>
+      <p class="fv-empty">{{ (shownItems().length === 0 ? 'feedback.viewer.empty' : 'feedback.viewer.empty-scope') | t }}</p>
     } @else {
-      <ul class="fv-list">
-        @for (item of scoped(); track trackBySig($index, item)) {
-          <li class="fv-row" [class.issue]="item.category === 'issue'" [class.question]="item.kind === 'qa'" [class.reply]="item.kind === 'reply'">
+      <div class="fv-inbox">
+      @if (pinned().length) {
+        <section class="fv-pinned" [attr.aria-label]="'feedback.approval.title' | t">
+          <div class="fv-pinned-label">
+            <span class="mat-sym" aria-hidden="true">push_pin</span>
+            {{ 'feedback.approval.title' | t }}
+          </div>
+          <ul class="fv-pinned-list">
+            @for (item of pinned(); track trackBySig($index, item)) {
+              <li class="fv-row question approval">
+                <span class="fv-icon mat-sym">{{ icon(item) }}</span>
+                <div class="fv-body">
+                  <p class="fv-text">{{ item.text }}</p>
+                  <p class="fv-why">
+                    <span class="mat-sym" aria-hidden="true">info</span>
+                    {{ item.why }}
+                  </p>
+                  <div class="fv-meta">
+                    @if (item.route) {
+                      <button class="fv-route" type="button" [title]="item.route" (click)="goToQuestion(item)">{{ item.route }}</button>
+                    }
+                    <span class="fv-time">{{ relativeTime(item.at) }}</span>
+                  </div>
+                </div>
+                <div class="fv-decision-actions">
+                  <button class="fv-decision approve" type="button" (click)="submitDecision(item, 'approved')" [disabled]="sending()">
+                    {{ 'feedback.approval.approve' | t }}
+                  </button>
+                  <button class="fv-decision discard" type="button" (click)="submitDecision(item, 'declined')" [disabled]="sending()">
+                    {{ 'feedback.approval.discard' | t }}
+                  </button>
+                </div>
+              </li>
+            }
+          </ul>
+        </section>
+      }
+
+      @if (unpinned().length) {
+        <ul class="fv-list">
+          @for (item of unpinned(); track trackBySig($index, item)) {
+          <li
+            class="fv-row"
+            [class.issue]="item.category === 'issue'"
+            [class.question]="item.kind === 'qa'"
+            [class.reply]="item.kind === 'reply'"
+            [class.hidden]="isRetired(item)"
+          >
             <span class="fv-icon mat-sym">{{ icon(item) }}</span>
             <div class="fv-body">
               <!-- A reply quotes the feedback it answers, so the sender knows
@@ -55,6 +112,12 @@
                 <p class="fv-quote" [title]="item.re">{{ item.re }}</p>
               }
               <p class="fv-text">{{ item.text }}</p>
+              @if (item.kind === 'qa') {
+                <p class="fv-why">
+                  <span class="mat-sym" aria-hidden="true">info</span>
+                  {{ item.why }}
+                </p>
+              }
               <div class="fv-meta">
                 <!-- Who it came from. Always first: an item with no author is
                      the thing this panel exists to stop happening. -->
@@ -72,6 +135,12 @@
                   >{{ item.route }}</button>
                 }
                 <span class="fv-time">{{ relativeTime(item.at) }}</span>
+                @if (isRetired(item)) {
+                  <span class="fv-hidden-label">
+                    <span class="mat-sym" aria-hidden="true">visibility_off</span>
+                    {{ 'controls.show-hidden' | t }}
+                  </span>
+                }
               </div>
 
               <!-- A question takes an answer right here — this is what the
@@ -115,6 +184,11 @@
               </button>
             } @else {
               <div class="fv-row-actions">
+                @if (isRetired(item)) {
+                  <button class="fv-resolve restore" type="button" (click)="restore(item)">
+                    {{ 'action.break-apart' | t }}
+                  </button>
+                } @else {
                 @if (canReply(item)) {
                   <button class="fv-resolve" type="button" (click)="toggleReply(item)">
                     {{ (replyingTo() === item.sig ? 'feedback.viewer.close' : 'feedback.viewer.reply') | t }}
@@ -123,11 +197,14 @@
                 <button class="fv-resolve" type="button" (click)="resolve(item)" [attr.aria-label]="'feedback.viewer.resolve' | t">
                   {{ 'feedback.viewer.resolve' | t }}
                 </button>
+                }
               </div>
             }
           </li>
-        }
-      </ul>
+          }
+        </ul>
+      }
+      </div>
     }
 
     <!-- Compose — the old share-feedback panel, docked at the bottom. -->

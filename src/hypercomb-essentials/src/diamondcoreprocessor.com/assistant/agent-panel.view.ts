@@ -20,6 +20,9 @@ import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/a
 
 const STYLE_ID = 'hc-agent-panel-styles'
 const STEEL = '126, 182, 214'
+const WIDTH_KEY = 'hc:agent-panel-width'
+const FULLSCREEN_KEY = 'hc:agent-panel-fullscreen'
+const MIN_WIDTH = 320
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -38,6 +41,9 @@ export class AgentPanelView extends EventTarget {
   #body: HTMLDivElement | null = null
   #input: HTMLTextAreaElement | null = null
   #registry: AgentRegistry | undefined
+  #expandedActivity = new Set<string>()
+  #fullscreen = false
+  #resizeCleanup: (() => void) | null = null
 
   #onKey = (event: KeyboardEvent): void => {
     if (event.key === 'Escape' && this.#panel) { event.stopPropagation(); this.close() }
@@ -64,12 +70,26 @@ export class AgentPanelView extends EventTarget {
     this.#registry = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
     const agent = this.#registry?.get(id)
     if (!agent) return
+    if (agent.behavior === 'folder-sync') {
+      EffectBus.emit('folder-sync:open', { agentId: id })
+      return
+    }
 
     this.#id = id
     this.#ensureStyles()
 
     const panel = document.createElement('div')
     panel.className = 'hc-agent'
+    const savedWidth = Number.parseFloat(localStorage.getItem(WIDTH_KEY) ?? '')
+    if (Number.isFinite(savedWidth)) panel.style.width = `${Math.max(MIN_WIDTH, savedWidth)}px`
+    this.#fullscreen = localStorage.getItem(FULLSCREEN_KEY) === 'true'
+    panel.classList.toggle('fullscreen', this.#fullscreen)
+
+    const resize = document.createElement('div')
+    resize.className = 'hc-agent-resize'
+    resize.title = this.#t('agent.resize', 'Drag to resize')
+    resize.setAttribute('aria-hidden', 'true')
+    resize.addEventListener('pointerdown', event => this.#beginResize(event))
 
     const head = document.createElement('div')
     head.className = 'hc-agent-head'
@@ -90,13 +110,32 @@ export class AgentPanelView extends EventTarget {
       ? `${agent.vendor}${agent.tier ? ` · ${agent.tier}` : ''}`
       : this.#t(`agent.kind.${agent.kind}`, agent.kind)
     title.appendChild(kind)
+    const fullscreen = document.createElement('button')
+    fullscreen.type = 'button'
+    fullscreen.className = 'hc-agent-window'
+    const updateFullscreenButton = (): void => {
+      fullscreen.textContent = this.#fullscreen ? '↙' : '⛶'
+      const label = this.#fullscreen
+        ? this.#t('agent.restore', 'Restore window')
+        : this.#t('agent.fullscreen', 'Full screen')
+      fullscreen.title = label
+      fullscreen.setAttribute('aria-label', label)
+      fullscreen.setAttribute('aria-pressed', String(this.#fullscreen))
+    }
+    updateFullscreenButton()
+    fullscreen.addEventListener('click', () => {
+      this.#fullscreen = !this.#fullscreen
+      panel.classList.toggle('fullscreen', this.#fullscreen)
+      localStorage.setItem(FULLSCREEN_KEY, String(this.#fullscreen))
+      updateFullscreenButton()
+    })
     const close = document.createElement('button')
     close.type = 'button'
     close.className = 'hc-agent-close'
     close.textContent = '×'
     close.setAttribute('aria-label', this.#t('agent.close', 'Close'))
     close.addEventListener('click', () => this.close())
-    head.append(avatar, title, close)
+    head.append(avatar, title, fullscreen, close)
 
     const body = document.createElement('div')
     body.className = 'hc-agent-body'
@@ -120,7 +159,7 @@ export class AgentPanelView extends EventTarget {
     row.append(input, send)
     this.#input = input
 
-    panel.append(head, body, row)
+    panel.append(resize, head, body, row)
     document.body.appendChild(panel)
     this.#panel = panel
 
@@ -218,17 +257,29 @@ export class AgentPanelView extends EventTarget {
     wrap.appendChild(head)
     const log = document.createElement('div')
     log.className = 'hc-agent-log'
-    for (const entry of agent.activity) {
-      const line = document.createElement('div')
+    agent.activity.forEach((entry, index) => {
+      const key = `${entry.at}:${index}:${entry.text}`
+      const line = document.createElement('button')
+      line.type = 'button'
       line.className = 'hc-agent-logline'
+      line.classList.toggle('expanded', this.#expandedActivity.has(key))
+      line.title = entry.text
+      line.setAttribute('aria-expanded', String(this.#expandedActivity.has(key)))
       const time = document.createElement('span')
       time.className = 'hc-agent-dim'
       time.textContent = new Date(entry.at).toLocaleTimeString()
       const text = document.createElement('span')
+      text.className = 'hc-agent-logtext'
       text.textContent = entry.text
       line.append(time, text)
+      line.addEventListener('click', () => {
+        const expanded = line.classList.toggle('expanded')
+        line.setAttribute('aria-expanded', String(expanded))
+        if (expanded) this.#expandedActivity.add(key)
+        else this.#expandedActivity.delete(key)
+      })
       log.appendChild(line)
-    }
+    })
     wrap.appendChild(log)
     return wrap
   }
@@ -250,11 +301,40 @@ export class AgentPanelView extends EventTarget {
   close(): void {
     this.#registry?.removeEventListener('change', this.#render)
     document.removeEventListener('keydown', this.#onKey, true)
+    this.#resizeCleanup?.()
+    this.#resizeCleanup = null
     this.#panel?.remove()
     this.#panel = null
     this.#body = null
     this.#input = null
     this.#id = ''
+    this.#expandedActivity.clear()
+  }
+
+  #beginResize(event: PointerEvent): void {
+    const panel = this.#panel
+    if (!panel || this.#fullscreen) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = panel.getBoundingClientRect().width
+    const move = (next: PointerEvent): void => {
+      const right = Math.max(16, window.innerWidth - panel.getBoundingClientRect().right)
+      const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - right - 16)
+      const width = Math.min(maxWidth, Math.max(MIN_WIDTH, startWidth + startX - next.clientX))
+      panel.style.width = `${width}px`
+    }
+    const finish = (): void => {
+      localStorage.setItem(WIDTH_KEY, String(Math.round(panel.getBoundingClientRect().width)))
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerup', finish, true)
+      window.removeEventListener('pointercancel', finish, true)
+      this.#resizeCleanup = null
+    }
+    this.#resizeCleanup?.()
+    this.#resizeCleanup = finish
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerup', finish, true)
+    window.addEventListener('pointercancel', finish, true)
   }
 
   #ensureStyles(): void {
@@ -266,15 +346,21 @@ export class AgentPanelView extends EventTarget {
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(30rem,70vh);padding:0.75rem 0.85rem;box-sizing:border-box;
   background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:10px;}
+.hc-agent.fullscreen{inset:0.75rem;width:auto!important;max-width:none;height:auto;max-height:none;}
+.hc-agent-resize{position:absolute;z-index:1;inset:0 auto 0 -0.35rem;width:0.7rem;cursor:ew-resize;}
+.hc-agent-resize::after{content:"";position:absolute;top:42%;bottom:42%;left:0.25rem;
+  border-left:1px solid rgba(${STEEL},0.42);}
+.hc-agent.fullscreen .hc-agent-resize{display:none;}
 .hc-agent-head{display:flex;align-items:center;gap:0.5rem;flex:0 0 auto;}
 .hc-agent-avatar{width:1.9rem;height:1.9rem;flex:0 0 auto;}
 .hc-agent-title{flex:1 1 auto;font-family:var(--hc-mono,monospace);font-size:0.76rem;font-weight:600;
   letter-spacing:0.1em;text-transform:uppercase;color:rgba(${STEEL},0.95);}
 .hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;
   color:rgba(216,230,238,0.45);}
-.hc-agent-close{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
+.hc-agent-close,.hc-agent-window{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
   font-size:1.3rem;line-height:1;cursor:pointer;border-radius:6px;}
-.hc-agent-close:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
+.hc-agent-window{font-size:1rem;}
+.hc-agent-close:hover,.hc-agent-window:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
 .hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.6rem;}
 .hc-agent-status{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;}
 .hc-agent-pill{padding:0.12rem 0.5rem;border-radius:999px;font-size:0.68rem;letter-spacing:0.08em;
@@ -288,9 +374,14 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-text{font-size:0.85rem;line-height:1.45;color:rgba(238,244,250,0.9);white-space:pre-wrap;
   word-break:break-word;}
 .hc-agent-log{display:flex;flex-direction:column;gap:0.25rem;}
-.hc-agent-logline{display:flex;gap:0.5rem;font-size:0.78rem;line-height:1.4;
-  color:rgba(238,244,250,0.82);}
+.hc-agent-logline{display:flex;width:100%;min-width:0;gap:0.5rem;padding:0.1rem 0;border:0;
+  background:none;text-align:left;font:inherit;font-size:0.78rem;line-height:1.4;
+  color:rgba(238,244,250,0.82);cursor:pointer;border-radius:4px;}
+.hc-agent-logline:hover,.hc-agent-logline:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
 .hc-agent-logline .hc-agent-dim{flex:0 0 auto;}
+.hc-agent-logtext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-logline.expanded .hc-agent-logtext{overflow:visible;text-overflow:clip;white-space:pre-wrap;
+  overflow-wrap:anywhere;}
 .hc-agent-row{display:flex;gap:0.5rem;align-items:flex-end;flex:0 0 auto;}
 .hc-agent-input{flex:1 1 auto;box-sizing:border-box;resize:none;padding:0.5rem 0.6rem;font:inherit;
   font-size:16px;line-height:1.4;color:whitesmoke;background:rgba(255,255,255,0.05);

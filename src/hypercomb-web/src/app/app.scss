@@ -1,6 +1,20 @@
 @use '../../../hypercomb-shared/ui/header-bar';
 @use '../../../hypercomb-shared/ui/breakpoints' as *;
 
+.update-status-dock {
+  position: fixed;
+  left: 50%;
+  bottom: calc(2.8rem + var(--hc-safe-bottom, 0px));
+  z-index: 60010;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transform: translateX(-50%);
+  pointer-events: none;
+
+  > * { pointer-events: auto; }
+}
+
 // ── view-mode: website ──────────────────────────────────────
 // When ViewMode is 'website' the host has class .view-website. The
 // rendering surface fully replaces the hex UI — every hex-mode artifact
@@ -130,6 +144,7 @@
 :host.intro-active hc-sensitivity-bar,
 :host.intro-active hc-docs-overlay,
 :host.intro-active hc-confirm-dialog,
+:host.intro-active .update-status-dock,
 :host.intro-active .header-bar {
   display: none !important;
 }

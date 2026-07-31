@@ -57,7 +57,15 @@
       @if (indicators().length) {
         <div class="indicators">
           @for (ind of indicators(); track ind.key) {
-            @if (ind.dismissable !== false) {
+            @if (ind.actionable) {
+              <button
+                class="indicator-pill action"
+                [title]="ind.label"
+                [attr.aria-label]="ind.label"
+                (mousedown)="$event.preventDefault(); indicatorActivate.emit(ind.key)">
+                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
+              </button>
+            } @else if (ind.dismissable !== false) {
               <button
                 class="indicator-pill"
                 [title]="ind.label"
@@ -149,6 +157,18 @@
       <!-- notes toggle — always present; lights while the notes strip is
            open. Post-it yellow (filled glyph) carries its identity; the
            box stays on the rail's size like every other icon. -->
+      <button
+        class="rail-btn views-toggle-btn"
+        [class.on]="viewsPanelOpen()"
+        type="button"
+        (mousedown)="$event.preventDefault(); viewsToggle.emit()"
+        [attr.aria-label]="viewsLabel()"
+        [attr.aria-pressed]="viewsPanelOpen()"
+        [title]="viewsLabel()"
+      >
+        <span class="mat-sym" aria-hidden="true">view_quilt</span>
+      </button>
+
       <button
         class="rail-btn notes-toggle-btn"
         [class.on]="notesPanelOpen()"

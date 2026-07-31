@@ -47,6 +47,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #eaf0f4;
   outline: none;
+  @include tw.panel($steel, left);
 }
 
 // ── header ───────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   height: 1.6rem;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: tw.$radius-control;
   background: none;
   color: rgba(207, 226, 238, 0.62);
   cursor: pointer;
@@ -129,7 +130,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   gap: 0.35em;
   padding: 0.3em 0.5em;
   border: 1px solid rgba($steel, 0.28);
-  border-radius: 7px;
+  border-radius: tw.$radius-control;
   background: rgba(12, 17, 24, 0.6);
   transition: border-color 150ms ease, background 150ms ease;
 
@@ -147,7 +148,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 1.85em;
   padding: 0;
   border: 1px solid rgba($steel, 0.28);
-  border-radius: 7px;
+  border-radius: tw.$radius-control;
   background: rgba(12, 17, 24, 0.6);
   color: rgba(207, 226, 238, 0.7);
   cursor: pointer;
@@ -256,7 +257,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   // it is part of that row, not a sibling of it, so a wrap rather than a
   // separate list keeps the two visually attached.
   flex-wrap: wrap;
-  border-radius: 7px;
+  border-radius: tw.$radius-card;
   transition: background 140ms ease;
 
   &:hover { background: rgba($steel, 0.08); }
@@ -363,7 +364,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   box-sizing: border-box;
   padding: 0.25em 0.4em;
   border: 1px solid rgba($steel, 0.6);
-  border-radius: 6px;
+  border-radius: tw.$radius-control;
   background: rgba(12, 17, 24, 0.8);
   color: #eaf3f9;
   font: inherit;
@@ -621,7 +622,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   gap: 0.1em 0.5em;
   padding: 0.22em 0.45em;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: tw.$radius-control;
   background: none;
   color: #cfe2ee;
   font: inherit;
