@@ -33,6 +33,32 @@ Recurring execution (`loop`), app driving (`run`), review passes (`review`,
 `keybindings-help`, `fewer-permission-prompts`), reference (`claude-api`),
 scaffolding (`init`), plugin `automation-recommender`.
 
+### community-skills — the ecosystem's top 100 (`mirror-community-skills.cjs`)
+There are thousands of published skills; the mirror carries the ~100 the
+ecosystem itself ranks highest — by stars (superpowers ~94K, karpathy-guard
+~144K), installs (frontend-design 277K+, code-reviewer #1 on Agensi), author
+credibility (Trail of Bits, Expo, Anthropic official) and singular capability
+(skill-seekers, loki-mode, tapestry). Ten domain collections:
+
+| domain | headline skills |
+|---|---|
+| `engineering-method` | superpowers, karpathy-guard, TDD, subagent-driven-development, get-shit-done |
+| `code-workflow` | code-reviewer, git-commit-writer, pr-description-writer, changelog-generator |
+| `design-frontend` | frontend-design, web-artifacts-builder, ui-ux-pro-max, shadcn-ui, d3js |
+| `testing-automation` | playwright-automation, webapp-testing, ios-simulator, expo-skills |
+| `security` | trail-of-bits-security, ffuf-web-fuzzing, threat-hunting-sigma |
+| `research-data` | deep-research, recursive-research, tapestry, postgres-readonly |
+| `content-seo` | claude-seo, humanize-writing, content-research-writer, building-blog |
+| `business-ops` | lead-research-assistant, brand-build-library, competitive-ads-extractor |
+| `media-creative` | imagen-generation, image-enhancer, pixelbin-media, slack-gif-creator |
+| `integration-orchestration` | composio-connect (1000+ apps), mcp-builder, skill-seekers, loki-mode, n8n |
+
+Curated 2026-07-31 from: [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills),
+[travisvn/awesome-claude-skills](https://github.com/travisvn/awesome-claude-skills),
+the MCP Market skills leaderboard, Agensi marketplace install counts, and
+claudeskills.info rankings. Re-curate by editing the arrays in the script and
+re-running (idempotent).
+
 ## The lazy-load contract (Claude Bridge incorporation)
 
 The mirror tiles hold **name + trigger + source — never the instructions**.
