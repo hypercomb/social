@@ -417,3 +417,55 @@ fn a_pool_address_is_not_treated_as_a_bag_on_restore() {
     assert_eq!(target.pool_get(pool, "member").unwrap().as_deref(), Some(&b"pool bytes"[..]));
     assert_eq!(target.markers(bag).unwrap().len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// root-scoped backup — the drain, one item at a time
+// ---------------------------------------------------------------------------
+
+#[test]
+fn export_root_carries_the_closure_and_nothing_else() {
+    use hypercomb_store::interchange::export_root;
+    let (_dir_a, source) = store();
+
+    // The subtree to back up: home -> child (with a deep image), plus the
+    // child's own bag with TWO revisions (history must travel whole).
+    let image = source.put(&vec![7u8; BLOB_THRESHOLD * 2]).unwrap();
+    let mut child = Layer::empty("child");
+    child.set("visual", serde_json::json!({ "cover": image.to_hex() }));
+    let child_sig = source.put(child.canonical_json().as_bytes()).unwrap();
+    source.append(bag_addr(&["home", "child"]), &Marker::pointer(Layer::empty("old-rev").sig())).unwrap();
+    source.put(Layer::empty("old-rev").canonical_json().as_bytes()).unwrap();
+    source.append(bag_addr(&["home", "child"]), &Marker::pointer(hypercomb_protocol::LayerSig::from_sig(child_sig))).unwrap();
+
+    let mut home = Layer::empty("home");
+    home.set("children", serde_json::json!([child_sig.to_hex()]));
+    let home_sig = source.put(home.canonical_json().as_bytes()).unwrap();
+    source.append(bag_addr(&["home"]), &Marker::pointer(hypercomb_protocol::LayerSig::from_sig(home_sig))).unwrap();
+
+    // An UNRELATED root and a pool member — must NOT travel.
+    let stray = source.put(b"unrelated content").unwrap();
+    source.append(bag_addr(&["elsewhere"]), &Marker::pointer(Layer::empty("elsewhere").sig())).unwrap();
+    source.put(Layer::empty("elsewhere").canonical_json().as_bytes()).unwrap();
+    let mut registry = PoolRegistry::new();
+    source.pool_put(registry.address("clipboard"), "entry", b"local only").unwrap();
+
+    let folder = TempDir::new().unwrap();
+    let moved = export_root(&source, &["home".to_string()], folder.path()).unwrap();
+    assert!(moved.changed());
+
+    // Restore is the SAME generalized union — a root backup needs no special reader.
+    let (_dir_b, target) = store();
+    restore(&target, folder.path()).unwrap();
+
+    assert!(target.has(home_sig).unwrap(), "root layer travelled");
+    assert!(target.has(child_sig).unwrap(), "child layer travelled");
+    assert!(target.has(image).unwrap(), "deep resource travelled");
+    assert_eq!(target.markers(bag_addr(&["home", "child"])).unwrap().len(), 2, "child HISTORY travelled whole");
+    assert!(!target.has(stray).unwrap(), "unrelated content did NOT travel");
+    assert!(target.markers(bag_addr(&["elsewhere"])).unwrap().is_empty(), "unrelated bag did NOT travel");
+    assert!(target.pools().unwrap().is_empty(), "pools are local and did NOT travel");
+
+    // One item at a time, skip-if-exists: a second run moves nothing.
+    let again = export_root(&source, &["home".to_string()], folder.path()).unwrap();
+    assert!(!again.changed(), "root export is idempotent");
+}

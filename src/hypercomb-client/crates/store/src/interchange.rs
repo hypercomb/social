@@ -155,6 +155,102 @@ pub fn restore(store: &impl ContentStore, source: impl AsRef<Path>) -> Result<Tr
     Ok(moved)
 }
 
+/// Export ONE root's closure to a directory in the interchange form.
+///
+/// The drain model, as specified: take each layer out of the history, expand
+/// every resource and component it references onto disk, one item at a time,
+/// skip-if-exists. Scoped to a root rather than dumping the whole store, so a
+/// backup can never carry unreachable junk — and a restore of it can never
+/// import any.
+///
+/// The walk: for the root path and every descendant reached by name —
+///   1. write the path's bag (every marker, indices preserved);
+///   2. for every marker: write the layer bytes, then every signature the
+///      layer references at any depth (resources, images, slot payloads);
+///   3. read each child's layer to learn its NAME, and recurse into
+///      `parent-path + name` — child bags are addressed by lineage, so names
+///      are the only way from a parent to its children's history.
+///
+/// Pools are deliberately NOT exported here: clipboard, caches and device
+/// state are local by design. Content another device needs travels inside
+/// the closure; the full-store [`export`] remains for whole-hive backups.
+pub fn export_root(
+    store: &impl ContentStore,
+    root_segments: &[String],
+    target: impl AsRef<Path>,
+) -> Result<Transfer> {
+    let target = target.as_ref();
+    std::fs::create_dir_all(target)?;
+    let mut moved = Transfer::default();
+
+    let mut content_done: std::collections::BTreeSet<Sig> = std::collections::BTreeSet::new();
+    let mut queue: Vec<Vec<String>> = vec![root_segments.to_vec()];
+    let mut visited_bags: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    while let Some(segments) = queue.pop() {
+        let bag = hypercomb_protocol::bag_addr(&segments);
+        if !visited_bags.insert(bag.to_hex()) {
+            continue; // two names canonicalizing to one bag — already walked
+        }
+
+        let markers = store.markers(bag)?;
+        if markers.is_empty() {
+            continue;
+        }
+
+        let bag_dir = target.join(bag.to_hex());
+        std::fs::create_dir_all(&bag_dir)?;
+
+        for (index, marker) in &markers {
+            if write_if_different(&bag_dir.join(marker_filename(*index)), &marker.to_bytes())? {
+                moved.markers += 1;
+            } else {
+                moved.markers_skipped += 1;
+            }
+
+            // The layer, then its whole reference closure — resources at any
+            // depth, marker side-fields included. One item at a time.
+            let mut worklist: Vec<Sig> = vec![marker.layer().sig()];
+            worklist.extend(hypercomb_protocol::sig::collect_signatures_in(&marker.to_bytes()));
+
+            while let Some(sig) = worklist.pop() {
+                if !content_done.insert(sig) {
+                    continue;
+                }
+                let Some(bytes) = store.get(sig)? else { continue };
+                worklist.extend(hypercomb_protocol::sig::collect_signatures_in(&bytes));
+
+                let path = target.join(sig.to_hex());
+                if path.exists() {
+                    moved.content_skipped += 1;
+                } else {
+                    std::fs::write(&path, &bytes)?;
+                    moved.content += 1;
+                }
+            }
+
+            // Children's HISTORY lives in their own bags, addressed by name.
+            if let Some(layer_bytes) = store.get(marker.layer().sig())? {
+                if let Ok(layer) = hypercomb_protocol::Layer::from_json(&layer_bytes) {
+                    for child_sig in layer.children() {
+                        let Ok(parsed) = child_sig.parse::<Sig>() else { continue };
+                        let Some(child_bytes) = store.get(parsed)? else { continue };
+                        let Ok(child) = hypercomb_protocol::Layer::from_json(&child_bytes) else { continue };
+                        if child.name.is_empty() {
+                            continue;
+                        }
+                        let mut child_path = segments.clone();
+                        child_path.push(child.name.clone());
+                        queue.push(child_path);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(moved)
+}
+
 /// Export a hive to a directory in the interchange form.
 ///
 /// The target is written into, not cleared — exporting into a directory that

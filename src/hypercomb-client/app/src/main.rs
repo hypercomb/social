@@ -354,6 +354,7 @@ fn instance_name() -> String {
 fn main() {
     let instance = instance_name();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             // The hive lives beside the app's own data, not in a browser
             // sandbox. No quota, no bucket eviction, no OPFS wedge. The
@@ -398,6 +399,59 @@ fn main() {
                 .initialization_script(&format!("window.__HC_INSTANCE = '{instance}';"))
                 .initialization_script(RENDERER_DIAGNOSTICS)
                 .build()?;
+
+            // ── Hive menu: backup and restore ─────────────────────────────
+            //
+            // File operations live in a NATIVE menu with NATIVE pickers, on
+            // purpose: the renderer never supplies a filesystem path (see the
+            // module docs — that rule is what keeps adopted content from ever
+            // reaching the disk). Backup is the root-scoped closure drain;
+            // restore is the generalized union (exists → skip, bags merge,
+            // idempotent), so restoring a backup twice or restoring another
+            // hive's backup over this one is always safe.
+            {
+                use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+                let backup = MenuItemBuilder::with_id("hive-backup", "Back Up Hive…").build(app)?;
+                let restore = MenuItemBuilder::with_id("hive-restore", "Restore Into Hive…").build(app)?;
+                let hive = SubmenuBuilder::new(app, "Hive").item(&backup).item(&restore).build()?;
+                app.set_menu(MenuBuilder::new(app).item(&hive).build()?)?;
+
+                app.on_menu_event(move |app, event| {
+                    let id = event.id().as_ref().to_string();
+                    if id != "hive-backup" && id != "hive-restore" {
+                        return;
+                    }
+                    let app = app.clone();
+                    // Off the main thread: the folder picker blocks, and the
+                    // walk over a large hive is real work.
+                    std::thread::spawn(move || {
+                        use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                        let Some(folder) = app.dialog().file().blocking_pick_folder() else {
+                            return; // user cancelled — not an event
+                        };
+                        let Ok(path) = folder.into_path() else { return };
+                        let host = app.state::<Host>();
+
+                        let (title, outcome) = if id == "hive-backup" {
+                            ("Backup", host.export_root(&[], &path))
+                        } else {
+                            ("Restore", host.restore(&path))
+                        };
+
+                        let (kind, message) = match outcome {
+                            Ok(moved) => (
+                                MessageDialogKind::Info,
+                                format!(
+                                    "{title} complete.\n\n{} content items ({} already present)\n{} history markers ({} already present)",
+                                    moved.content, moved.content_skipped, moved.markers, moved.markers_skipped,
+                                ),
+                            ),
+                            Err(e) => (MessageDialogKind::Error, format!("{title} failed: {e}")),
+                        };
+                        app.dialog().message(message).kind(kind).title(title).show(|_| {});
+                    });
+                });
+            }
 
             Ok(())
         })

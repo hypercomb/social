@@ -384,6 +384,15 @@ impl Host {
     // interchange
     // -----------------------------------------------------------------
 
+    /// Back up ONE root's closure to a folder — the drain, one item at a time.
+    ///
+    /// Layer out of the history, every referenced resource expanded onto disk,
+    /// children's history followed by name, skip-if-exists throughout. Pools
+    /// stay home (clipboard and caches are device-local by design).
+    pub fn export_root(&self, segments: &[String], target: impl AsRef<Path>) -> Result<Transfer> {
+        Ok(hypercomb_store::interchange::export_root(&self.store, segments, target)?)
+    }
+
     /// Restore a hive from a folder in the interchange form.
     ///
     /// Unions rather than replaces: content is deduped by signature, bag
