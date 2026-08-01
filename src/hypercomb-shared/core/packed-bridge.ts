@@ -178,6 +178,7 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
       stats: () => bridge.invoke('pack_stats'),
       drain: (limit = 200) => bridge.invoke('pack_drain', { limit }),
       compact: () => bridge.invoke('pack_compact'),
+      collect: () => bridge.invoke('pack_collect'),
     }
     return { root: new NativeRootDirectory(bridge), bridge, info }
   } catch (error) {

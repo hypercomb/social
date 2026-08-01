@@ -56,6 +56,7 @@ import {
   type PackedEntry,
   type SyncFile,
 } from './packed-store-engine'
+import { collect, type Collected } from './packed-collect'
 
 interface BridgeRequest {
   id: number
@@ -606,6 +607,30 @@ class PackedHost {
   stats(): unknown {
     return this.#engine.stats()
   }
+
+  /**
+   * Reclaim orphaned content — bytes no committed layer ever referenced.
+   *
+   * Loose blobs are collected too: they are hive content that simply lives
+   * outside the pack, and leaving them out would mean the large abandoned
+   * files (exactly the ones worth reclaiming) could never be freed. The
+   * reachability answer is the same for both.
+   */
+  async collect(): Promise<Collected> {
+    return await collect(this.#engine, {
+      looseSigs: async () => {
+        const out: string[] = []
+        for (const [name, handle] of await snapshot(this.#root)) {
+          if (handle.kind === 'file' && isSigName(name)) out.push(name)
+        }
+        return out
+      },
+      sizeOfBlob: async sig => (await this.#looseFile(sig))?.size ?? 0,
+      sweepBlob: async sig => {
+        try { await this.#root.removeEntry(sig); return true } catch { return false }
+      },
+    })
+  }
 }
 
 
@@ -710,6 +735,11 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
     }
     case 'pack_compact':
       return { result: await host.compact(true), transfer: [] }
+    case 'pack_collect':
+      // MANUAL / IDLE ONLY. Walks every marker and every pool member — the
+      // one thing the packed store exists to avoid doing on boot. Nothing
+      // schedules this; it is invoked deliberately.
+      return { result: await host.collect(), transfer: [] }
     case 'pack_stats':
       return { result: host.stats(), transfer: [] }
     case 'pack_close':
