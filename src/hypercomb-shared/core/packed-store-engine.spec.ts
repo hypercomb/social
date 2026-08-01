@@ -354,10 +354,13 @@ describe('packed store: cold open at hive scale', () => {
     // Every head after that is at most one offset read on that same handle —
     // never a directory listing, never a second open.
     expect(reads).toBeLessThanOrEqual(BAGS + 1)
-    // And the wall clock, checked loosely so a contended CI box cannot fail
-    // it while a genuine regression (a reintroduced per-record scan) still
-    // would: the flat scan took 13.6 SECONDS.
-    expect(packedMs).toBeLessThan(MEASURED_FLAT_SCAN_MS / 10)
+    // The wall clock is LOGGED, NEVER ASSERTED. It was asserted twice and
+    // flaked twice — in isolation this runs in ~27ms (505x the measured flat
+    // scan), but under the parallel suite on a loaded machine the same code
+    // takes orders of magnitude longer, and a bar that fails on a busy CI box
+    // teaches people to ignore the suite. Nothing is lost by dropping it: a
+    // reintroduced per-record scan cannot hide from the read count above,
+    // which is exact and load-independent.
   })
 
   it('head lookup does not enumerate — the head index has nothing left to cache', () => {
