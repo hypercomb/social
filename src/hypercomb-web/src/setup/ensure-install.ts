@@ -131,7 +131,21 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
       EffectBus.emit('boot:status', { kind: 'cached' } as BootStatus)
       return
     }
-    console.warn('[ensure-install] cached state spot-check failed — wiping and awaiting fresh install')
+    // Name the evidence. A bare "spot-check failed" is undiagnosable after
+    // the fact — during the native-client bring-up this line fired for
+    // legitimate reasons (a genuinely broken install) but reads identically
+    // to a misfire, and a misfire here costs the user a full reinstall
+    // cycle. NOTE the wipe below is scoped to the INSTALL CACHE only
+    // (bees/deps pools + legacy drains + SW cache) — it must never grow to
+    // touch root content, lineage bags, or user pools.
+    const missingBees = (cachedManifest.bees ?? []).filter(sig => !beeNames.has(`${sig}.js`))
+    const missingDeps = [...new Set([...beeDepSigs, ...(cachedManifest.dependencies ?? [])])]
+      .filter(sig => !depNames.has(`${sig}.js`))
+    console.warn(
+      `[ensure-install] cached state spot-check failed — wiping install cache and awaiting fresh install ` +
+      `(missing ${missingBees.length} bees, ${missingDeps.length} deps: ` +
+      `${[...missingBees, ...missingDeps].slice(0, 3).map(s => s.slice(0, 8)).join(', ')}…)`,
+    )
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
     await purgeStaleOpfsArtifacts(store)
