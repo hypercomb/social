@@ -1,10 +1,10 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Bee, EffectBus, SignatureService, isSignature, registerPoolMeaning } from '@hypercomb/core'
+import { Bee, EffectBus, PACKED_STORE_FLAG_KEY, SignatureService, isSignature, registerPoolMeaning } from '@hypercomb/core'
 import { nativeRoot } from './native-filesystem'
 import { PACKED_STORE_MEANING } from './packed-store-engine'
-import { installPackedStorageOverride, packedRoot } from './packed-bridge'
+import { installPackedStorageOverride, packedRoot, packedStoreHasRecords } from './packed-bridge'
 
 /** How long a host-resolution MISS is remembered before the cascade may be
  *  re-dialed for that sig. Render passes within the window get an instant
@@ -340,8 +340,31 @@ export class Store extends EventTarget {
       // The flat->pack drain: per-record copy->verify->remove, chunked,
       // resumable, and OFF the boot path like every other self-clean.
       setTimeout(() => { void this.#drainPackedStore(packed.bridge) }, Store.#SELF_CLEAN_DELAY_MS)
-    } else try {
-      this.opfsRoot = await Promise.race([
+    } else {
+      // THE ONE-WAY DOOR. The drain removes records from the flat layout as
+      // it packs them, so once it has run the flat layout is no longer a
+      // whole hive. Taking the flat path now would not fail — it would
+      // SUCCEED, showing a hive with bags and pools silently missing, and
+      // the next commit would build on that hollow state. Refuse instead.
+      //
+      // Only reached when packed mode did NOT engage: the flag was turned
+      // off, or the pack is held by another tab. Both are the same danger.
+      // An empty pack (created, never drained) is not a door at all — the
+      // flat layout is still whole — and does not trip this.
+      const packPoolSig = await Store.poolSignature(PACKED_STORE_MEANING)
+      if (await packedStoreHasRecords(packPoolSig)) {
+        this.#opfsAvailable = false
+        this.#initPromise = null
+        throw new Error(
+          '[store] this hive has been migrated into the packed store, so the flat ' +
+          'layout no longer holds all of it. Refusing to open a partial hive.\n' +
+          `Re-enable packed mode — localStorage['${PACKED_STORE_FLAG_KEY}'] = '1' — and reload.\n` +
+          'If another tab already has the hive open, use that tab instead: the packed ' +
+          'store admits one writer at a time.',
+        )
+      }
+      try {
+        this.opfsRoot = await Promise.race([
         navigator.storage.getDirectory(),
         // A cold or busy OPFS (Chrome initialises it lazily; the heavier
         // pool/migration boot below adds contention) can take several seconds
@@ -351,17 +374,18 @@ export class Store extends EventTarget {
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('OPFS timed out')), 10_000)
         )
-      ])
-    } catch (err) {
-      console.warn('[store] OPFS root unavailable — running without persistent storage', err)
-      this.#opfsAvailable = false
-      // Recoverable: clearing the memoised init lets the NEXT initialize()
-      // re-attempt instead of leaving the store dead (no persistence) for the
-      // whole session. A single transient timeout must not permanently disable
-      // saving — the previous behaviour meant one slow boot = every subsequent
-      // tile create silently lost until a full page reload.
-      this.#initPromise = null
-      return
+        ])
+      } catch (err) {
+        console.warn('[store] OPFS root unavailable — running without persistent storage', err)
+        this.#opfsAvailable = false
+        // Recoverable: clearing the memoised init lets the NEXT initialize()
+        // re-attempt instead of leaving the store dead (no persistence) for the
+        // whole session. A single transient timeout must not permanently disable
+        // saving — the previous behaviour meant one slow boot = every subsequent
+        // tile create silently lost until a full page reload.
+        this.#initPromise = null
+        return
+      }
     }
 
     // Pool-of-meaning addresses are DERIVED, never registered: sha256

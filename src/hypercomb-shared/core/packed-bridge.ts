@@ -16,6 +16,7 @@
 
 import { packedStoreEnabled, setBulkSigner } from '@hypercomb/core'
 import { NativeRootDirectory, type NativeBridge } from './native-filesystem'
+import { PACK_MAGIC, PACK_POINTER_FILENAME, packFilename } from './packed-store-engine'
 
 interface PendingCall {
   resolve: (value: unknown) => void
@@ -98,6 +99,42 @@ export interface PackedStoreConfig {
   legacyContentDirs: string[]
   legacyBagParents: string[]
   emptyContentSig: string
+}
+
+/**
+ * Does a populated pack exist for this origin?
+ *
+ * THE ONE-WAY DOOR. The drain moves records into the pack and removes them
+ * from the flat layout, so once it has run the flat layout is no longer a
+ * complete hive. Booting flat after that would not fail — it would SUCCEED,
+ * quietly, showing a hive with bags and pools missing, and the user's next
+ * commit would build on top of that hollow state. A silent partial hive is
+ * far worse than a stopped boot, so `Store` checks this before taking the
+ * flat path and refuses rather than serving it.
+ *
+ * Cheap: resolve the pool dir, read a one-byte pointer, stat one file. No
+ * worker, no sync handle — this runs on the path where packed mode is OFF.
+ *
+ * An EMPTY pack (created, never drained) does not count. Nothing has moved,
+ * the flat layout is still whole, and flipping the flag off is genuinely
+ * safe there.
+ */
+export const packedStoreHasRecords = async (packPoolSig: string): Promise<boolean> => {
+  try {
+    const root = await navigator.storage.getDirectory()
+    const dir = await root.getDirectoryHandle(packPoolSig)
+    let generation = 0
+    try {
+      const pointer = await (await dir.getFileHandle(PACK_POINTER_FILENAME)).getFile()
+      const parsed = Number.parseInt(await pointer.text(), 10)
+      if (Number.isFinite(parsed) && parsed >= 0) generation = parsed
+    } catch { /* no pointer — generation 0 */ }
+    const pack = await (await dir.getFileHandle(packFilename(generation))).getFile()
+    return pack.size > PACK_MAGIC.length
+  } catch {
+    // No pool dir, no pack, no pointer — nothing was ever drained.
+    return false
+  }
 }
 
 export interface PackedBoot {

@@ -41,6 +41,8 @@ import '@hypercomb/shared/core/invite-capture'
 // `/header` slash command (auto-wires via ioc.onRegister).
 import '@hypercomb/shared/core/header-size'
 import { bootstrapApplication } from '@angular/platform-browser'
+import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
+import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
 import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import {
@@ -97,6 +99,13 @@ const main = async (): Promise<void> => {
   register('@hypercomb/SignatureStore', new SignatureStore())
 
   ;(window as any).__hcBoot('main() started')
+  // ONE-WAY DOOR GATE. Must be the FIRST thing in ${0,0}main — before any module can
+  // acquire OPFS. A hive drained into the packed store is not fully present in
+  // the flat layout, and booting on it would silently build atop a partial
+  // hive. Returns true only when a POPULATED pack exists and packed mode is
+  // not engaging; it renders its own explanation and seals storage.
+  if (await packedStoreBlocksBoot(await Store.poolSignature(PACKED_STORE_MEANING))) return
+
   // Match production's OPFS eviction protection without putting the permission
   // check or a possible Firefox prompt on the boot path.
   void protectOriginStorage()

@@ -43,6 +43,9 @@ import '@hypercomb/shared/core/header-size'
 
 import { bootstrapApplication } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
+import { Store } from '@hypercomb/shared'
+import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
+import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
 import { ensureInstall, resyncFromSentinel, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
 import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
@@ -136,6 +139,13 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
+  // ONE-WAY DOOR GATE. Must be the FIRST thing in ${0,0}main — before any module can
+  // acquire OPFS. A hive drained into the packed store is not fully present in
+  // the flat layout, and booting on it would silently build atop a partial
+  // hive. Returns true only when a POPULATED pack exists and packed mode is
+  // not engaging; it renders its own explanation and seals storage.
+  if (await packedStoreBlocksBoot(await Store.poolSignature(PACKED_STORE_MEANING))) return
+
 
   // OPFS starts as best-effort storage. Check its eviction protection without
   // delaying boot, then request persistence inside the participant's first
