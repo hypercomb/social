@@ -62,6 +62,7 @@ import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
+import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
@@ -280,6 +281,10 @@ interface FeaturesOpenPayload {
   applied: FeatureItem[]
   /** Features the app knows but this layer doesn't have yet. */
   available: AvailableItem[]
+  /** True when this location IS an adopted branch root or sits beneath one.
+   *  The panel opens such a tile at DIRECT reach — you see the branch as it
+   *  arrived, not with your own hive-wide behaviours cascaded over it. */
+  adopted?: boolean
 }
 
 interface TileActionPayload {
@@ -746,6 +751,7 @@ export class ShowFeaturesDrone extends Drone {
 
     this.emitEffect<FeaturesOpenPayload>('features:open', {
       cell: label, segments, applied, available,
+      adopted: isWithinAdoptedRoot(segments),
     })
   }
 

@@ -1,0 +1,70 @@
+<!-- The Rewind window — two-stage visual undo.
+     Stage 1: filmstrip of tile moments (hex thumbnail mosaics).
+     Stage 2: behaviour stepper, constrained to the chosen range. -->
+@if (visible()) {
+  <div class="rewind-scrim" (click)="hide()"></div>
+  <section class="rewind-window" role="dialog" [attr.aria-label]="'rewind.title' | t">
+
+    <header class="rewind-header">
+      <span class="title">{{ 'rewind.title' | t }}</span>
+      <span class="path">{{ pathLabel() }}</span>
+      <button type="button" class="close" (click)="hide()" [attr.aria-label]="'rewind.close' | t">✕</button>
+    </header>
+
+    <!-- Stage 1 — by tiles -->
+    <div class="filmstrip" role="listbox">
+      @for (moment of moments(); track moment.step.filename) {
+        <button type="button"
+                class="moment"
+                [class.active]="momentIsActive(moment)"
+                (click)="pickMoment(moment)">
+          <span class="mosaic">
+            @for (tile of moment.tiles; track tile.childSig) {
+              <span class="hex" [title]="tile.name">
+                @if (thumbUrl(tile.childSig); as url) {
+                  <img [src]="url" [alt]="tile.name" draggable="false" />
+                } @else {
+                  <span class="letter">{{ initial(tile.name) }}</span>
+                }
+              </span>
+            }
+            @if (moment.overflow > 0) {
+              <span class="hex more">+{{ moment.overflow }}</span>
+            }
+            @if (moment.tiles.length === 0) {
+              <span class="hex empty"></span>
+            }
+          </span>
+          <span class="delta" [style.color]="behaviourColor(moment.step.behaviour)">{{ moment.step.delta }}</span>
+          <span class="when">{{ when(moment.step.at) }}</span>
+        </button>
+      }
+    </div>
+
+    <!-- Stage 2 — by behaviours, only inside the chosen range -->
+    @if (showBehaviours()) {
+      <div class="behaviours">
+        <button type="button" class="step" (click)="stepBack()" [disabled]="!canStepBack()" [attr.aria-label]="'rewind.stepBack' | t">‹</button>
+        <span class="track">
+          @for (step of behaviourSteps(); track step.filename) {
+            <button type="button"
+                    class="dot"
+                    [class.current]="step.index === activeIndex()"
+                    [style.--dot]="behaviourColor(step.behaviour)"
+                    [title]="step.delta + ' · ' + when(step.at)"
+                    (click)="pickBehaviour(step)"></button>
+          }
+        </span>
+        <button type="button" class="step" (click)="stepForward()" [disabled]="!canStepForward()" [attr.aria-label]="'rewind.stepForward' | t">›</button>
+        @if (activeStep(); as step) {
+          <span class="readout">
+            <span class="swatch" [style.background]="behaviourColor(step.behaviour)"></span>
+            {{ step.delta }} · {{ when(step.at) }}
+          </span>
+        }
+      </div>
+    }
+
+    <footer class="hint">{{ 'rewind.hint' | t }}</footer>
+  </section>
+}

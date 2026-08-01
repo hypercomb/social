@@ -1579,6 +1579,79 @@ $path-fail: #e08a8a;     // failed terminal
   color: rgba(255, 255, 255, 0.31);
 }
 
+// ── reach selector ────────────────────────────────────────────────
+// A quiet segmented control, not a mode: it changes what the list SHOWS,
+// never what the tile HAS. Sits directly under the subject block, because
+// the question it answers ("whose behaviours am I looking at?") is about
+// the subject.
+.features-reach {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.18rem;
+  margin: 0 1rem 0.7rem;
+  padding: 0.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: tw.$radius-control;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.reach-opt {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.34rem 0.4rem;
+  border: 0;
+  border-radius: calc(#{tw.$radius-control} - 0.15rem);
+  background: transparent;
+  font: 600 0.6rem/1.2 inherit;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.36);
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease;
+
+  &:hover { color: rgba(255, 255, 255, 0.62); }
+
+  &.active {
+    background: rgba($accent, 0.16);
+    color: rgba($accent, 0.95);
+  }
+}
+
+// The provenance mark, not a control: this tile came from someone else.
+.reach-adopted {
+  flex: 0 0 auto;
+  margin-left: 0.15rem;
+  padding: 0.2rem 0.42rem;
+  border-radius: 999px;
+  background: rgba($accent, 0.1);
+  font-size: 0.5rem;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba($accent, 0.75);
+}
+
+// What the reach is holding back — a line you can press to see it.
+.reach-beyond {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed rgba($accent, 0.22);
+  border-radius: tw.$radius-card;
+  background: transparent;
+  font-size: 0.6rem;
+  text-align: left;
+  color: rgba($accent, 0.62);
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.06);
+    color: rgba($accent, 0.85);
+  }
+}
+
 @media (max-width: 599px), (max-height: 449px) {
   .features-header { padding-top: env(safe-area-inset-top, 0px); }
   .features-searchbar { margin-top: 0.25rem; }
@@ -1590,8 +1663,12 @@ $path-fail: #e08a8a;     // failed terminal
 
   .features-scroll { padding-inline: 0.65rem; }
 
+  .features-reach { margin-inline: 0.65rem; }
+  .reach-adopted { display: none; }   // the reach itself already says it
+
   .features-panel.reviewing {
     .features-searchbar,
+    .features-reach,
     .features-context { display: none; }
   }
 }

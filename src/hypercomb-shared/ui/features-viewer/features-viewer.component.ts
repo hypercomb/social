@@ -136,7 +136,25 @@ interface FeatureGroup {
   segments: string[]
   applied: FeatureRow[]
   available: AvailableRow[]
+  /** This tile IS an adopted branch root, or sits beneath one. */
+  adopted: boolean
 }
+
+/** How far out the "On this layer" list reaches — the ladder of WHERE a
+ *  behaviour is declared, narrowest first:
+ *
+ *   • `direct`  — attached to THIS tile. On an adopted branch this is the
+ *     tile exactly as it arrived: nothing of your hive cascaded over it.
+ *   • `context` — the above, plus what an ancestor of this tile declares
+ *     (a website scope, a container capability) — the branch's own context.
+ *   • `hive`    — everything, including the behaviours you turned on at the
+ *     hive ROOT, which reach every tile you hold.
+ *
+ * A superset ladder, not three filters: each rung contains the one before it.
+ */
+type Reach = 'direct' | 'context' | 'hive'
+
+const REACH_ORDER: readonly Reach[] = ['direct', 'context', 'hive']
 
 /** Download-leash trip point: this much SILENCE (no progress tick, no done)
  *  means the producer died mid-walk — matches the sync pill's stale guard. */
@@ -160,6 +178,7 @@ interface FeaturesOpenPayload {
   segments: string[]
   applied: FeatureRow[]
   available: AvailableRow[]
+  adopted?: boolean
 }
 
 /** Shell-safe slice of the essentials picker, resolved through IoC so this
@@ -248,6 +267,12 @@ export class FeaturesViewerComponent implements OnDestroy {
   // tutor deck, a website page) can't be brushed — they say so on the row.
 
   readonly mode = signal<'manage' | 'paint'>('manage')
+
+  /** How far out the applied list reaches (see `Reach`). Chosen per subject
+   *  tile, never sticky across tiles: an ADOPTED tile opens at `direct` — the
+   *  branch as it arrived — and everything else opens at `hive`, the full
+   *  picture. Changing it is a look, never a write; nothing is toggled. */
+  readonly reach = signal<Reach>('hive')
 
   /** The behaviour kinds loaded in the brush. Picked in paint mode; cleared
    *  when the mode closes, the subject changes, or the paint lands. */
@@ -434,6 +459,7 @@ export class FeaturesViewerComponent implements OnDestroy {
         segments: Array.isArray(p.segments) ? p.segments : [],
         applied: Array.isArray(p.applied) ? p.applied : [],
         available: Array.isArray(p.available) ? p.available : [],
+        adopted: p.adopted === true,
       }
       // One tile at a time: re-clicking the SAME tile refreshes it in place;
       // clicking a DIFFERENT tile replaces the subject (and drops the old
@@ -447,6 +473,11 @@ export class FeaturesViewerComponent implements OnDestroy {
         // starts empty rather than silently carrying another tile's rows.
         this.brush.set(new Set())
         this.paintNote.set('')
+        // The reach belongs to the SUBJECT, not to the panel: an adopted tile
+        // opens showing only what the branch itself carries, everything else
+        // opens on the whole picture. Re-clicking the same tile (or a nav
+        // refresh of it) keeps whatever reach you moved to.
+        this.reach.set(group.adopted ? 'direct' : 'hive')
       }
       this.group.set(group)
       if (!this.visible()) {
@@ -686,6 +717,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.rowNotes.set(new Map())
     this.query.set('')
     this.mode.set('manage')
+    this.reach.set('hive')
     this.brush.set(new Set())
     this.paintNote.set('')
     this.downloadResults.set([])
@@ -864,7 +896,54 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  that silences it lives above this node). Nothing ever moves or
    *  disappears when toggled. */
   visibleApplied(group: FeatureGroup): FeatureRow[] {
-    return group.applied.filter(f => this.#matchesQuery(group, f))
+    return group.applied.filter(f => this.#withinReach(f) && this.#matchesQuery(group, f))
+  }
+
+  // ── reach: how far out the applied list looks ─────────────────────
+  //
+  // ShowFeaturesDrone already tags every applied row with WHERE it comes
+  // from — `direct` on the tile, `cascade` from an ancestor named by
+  // `originCell`, and cascade with NO originCell meaning the hive root (a
+  // behaviour you turned on globally). That is the whole ladder; this only
+  // decides how much of it to show. Nothing here writes anything: narrowing
+  // the reach hides rows from the LIST, it never turns a behaviour off.
+
+  /** Which rung this row sits on. */
+  #reachOf(feat: FeatureRow): Reach {
+    if (feat.origin !== 'cascade') return 'direct'
+    return feat.originCell ? 'context' : 'hive'
+  }
+
+  #withinReach(feat: FeatureRow): boolean {
+    return REACH_ORDER.indexOf(this.#reachOf(feat)) <= REACH_ORDER.indexOf(this.reach())
+  }
+
+  setReach(value: Reach): void {
+    this.reach.set(value)
+  }
+
+  isReach(value: Reach): boolean {
+    return this.reach() === value
+  }
+
+  /** How many applied rows the current reach is holding back — the honest
+   *  "+N from wider than here" line, so a narrowed list never reads as the
+   *  whole truth. Search is deliberately NOT applied: this counts what the
+   *  REACH hides, not what you happen to be typing. */
+  outOfReachCount(group: FeatureGroup): number {
+    return group.applied.filter(f => !this.#withinReach(f)).length
+  }
+
+  /** The rung one step wider than the current one ('' at `hive`) — what the
+   *  out-of-reach line offers to open up to. */
+  widerReach(): Reach | '' {
+    const next = REACH_ORDER[REACH_ORDER.indexOf(this.reach()) + 1]
+    return next ?? ''
+  }
+
+  widen(): void {
+    const next = this.widerReach()
+    if (next) this.reach.set(next)
   }
 
   /** The "Available to add" rows, through the same search filter. */

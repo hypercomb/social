@@ -71,10 +71,14 @@ jargon; what's true + what will happen next. All copy through i18n
 
 ### 3. Surfaces (all existing conventions — nothing new invented)
 
-- **Indicator pill** (`indicator:set`/`indicator:clear`, rendered by
-  `command-line.component.ts:604-613`): one pill per active condition,
-  keyed `health:{condition}`, icon `cloud_off`/`link_off`. Dismissable
-  except `offline`. This is the primary surface.
+- **Indicator pill — RETIRED.** Health used to park a `cloud_off`/`link_off`
+  pill (keyed `health:{condition}`) in the command line; the same went for
+  sync-health's `cloud_sync`/`backup` pills. They read as broken chrome and
+  sat there permanently, so neither drone emits `indicator:set` any more —
+  both only sweep stale keys with `indicator:clear` at boot. Health is
+  reported through the `content:health` / `sync:health` effects and the
+  recovery activity line. Do not reintroduce a pill; the drone specs assert
+  that none is emitted.
 - **Sync-indicator**: `waiting` shows its count there too ("waiting on
   {n} files") — loaders show file counts, per convention.
 - **Activity log**: transition moments only ("{host} is answering again").

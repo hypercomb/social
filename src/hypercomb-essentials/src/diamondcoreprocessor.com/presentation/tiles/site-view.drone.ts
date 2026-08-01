@@ -53,20 +53,32 @@ const restoreBackground = (s: CSSStyleDeclaration, snap: readonly string[]): voi
   BG_PROPS.forEach((p, i) => { s[p] = snap[i] })
 }
 
-/** Inline style for the raw-DOM exit overlay. A near-max z-index keeps it
- *  above any embedded-page content; the Material Symbols family renders the
- *  glyph set as the button's textContent. No external stylesheet, so a site's
- *  CSS can't reach it. */
+/** Inline style for the raw-DOM exit overlay — the STANDARD site chrome every
+ *  embedded page wears, identical from page to page (pages are independent
+ *  documents with no shared template, so the one constant is this button).
+ *
+ *  It is the ONLY corner control in website mode: the shell's own bottom-right
+ *  clusters (command line, document actions, controls bar) all step aside on
+ *  `view:active`, and the duplicate shell-side chip that used to stack on top
+ *  of this one is gone. Design rules that keep it out of the way:
+ *   - small (2.25rem) and tight into the corner, honouring the safe-area inset
+ *     so it never lands under a phone's home indicator;
+ *   - cold steel, not a coloured blob — it reads as chrome, not as page content;
+ *   - dimmed at rest (opacity .38) and full on hover/focus, so it recedes while
+ *     reading and is still unmistakably there when looked for;
+ *   - near-max z-index so a site's own fixed header/footer can never bury it.
+ *  Inline-only, so a site's CSS can't reach or restyle it. */
 const EXIT_OVERLAY_CSS = [
-  'position:fixed', 'right:1.4rem', 'bottom:1.4rem', 'z-index:2147483600',
-  // a round button — the website-mode "back to hexagon view" toggle reads
-  // cleaner as a circle than the hive hexagon when laid over a live page
-  'width:3rem', 'height:3rem', 'display:flex', 'align-items:center', 'justify-content:center',
+  'position:fixed', 'z-index:2147483600',
+  'right:calc(0.75rem + env(safe-area-inset-right, 0px))',
+  'bottom:calc(0.75rem + env(safe-area-inset-bottom, 0px))',
+  'width:2.25rem', 'height:2.25rem', 'display:flex', 'align-items:center', 'justify-content:center',
   'border-radius:50%',
-  'background:rgba(126,182,214,.92)',
-  'box-shadow:0 8px 26px rgba(0,0,0,.5)', 'color:#0c1118', 'cursor:pointer',
-  "font-family:'Material Symbols Outlined'", 'font-size:1.5rem', 'line-height:1', 'padding:0',
-  'pointer-events:auto', 'transition:filter .16s ease',
+  'background:rgba(12,17,24,.82)', 'border:1px solid rgba(126,182,214,.42)',
+  '-webkit-backdrop-filter:blur(6px)', 'backdrop-filter:blur(6px)',
+  'box-shadow:0 2px 10px rgba(0,0,0,.45)', 'color:#cfe2ee', 'cursor:pointer',
+  "font-family:'Material Symbols Outlined'", 'font-size:1.15rem', 'line-height:1', 'padding:0',
+  'pointer-events:auto', 'opacity:.38', 'transition:opacity .16s ease,background .16s ease',
 ].join(';')
 
 /** Raw-DOM review-gate card. Out-of-Angular, opaque full-viewport backdrop:
@@ -735,10 +747,25 @@ export class SiteViewDrone extends Drone {
       btn.type = 'button'
       btn.style.cssText = EXIT_OVERLAY_CSS
       btn.addEventListener('click', () => { this.#exitToHive() })
-      // Hover affordance without a stylesheet — cheap inline listeners.
-      btn.addEventListener('pointerenter', () => { btn.style.filter = 'brightness(1.12)' })
-      btn.addEventListener('pointerleave', () => { btn.style.filter = 'none' })
+      // Rest/active affordance without a stylesheet — cheap inline listeners.
+      // Dim at rest so it stops competing with the page; solid on approach.
+      const wake = (): void => {
+        btn.style.opacity = '1'
+        btn.style.background = 'rgba(20,29,40,.94)'
+      }
+      const rest = (): void => {
+        btn.style.opacity = '.38'
+        btn.style.background = 'rgba(12,17,24,.82)'
+      }
+      btn.addEventListener('pointerenter', wake)
+      btn.addEventListener('focus', wake)
+      btn.addEventListener('pointerleave', rest)
+      btn.addEventListener('blur', rest)
       document.body.appendChild(btn)
+      // Touch has no hover: show it solid for a beat when the site opens, then
+      // let it settle into the dimmed rest state.
+      wake()
+      window.setTimeout(() => { if (this.#exitOverlay === btn) rest() }, 2500)
       this.#exitOverlay = btn
     }
     this.#refreshExitOverlay()

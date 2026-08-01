@@ -163,7 +163,10 @@ export async function writeDecoration<TPayload>(opts: {
   // the decoration's bytes — every 64-hex sig nested in the payload (a file
   // attachment's blob, a sequence set, an invite bundle). Empty for marker
   // decorations (dropbox accept-list, contact-enabled) → field omitted.
-  const refs = collectSigsDeep(opts.payload)
+  // Group decorations declare NO refs: payload.sig is a group signature —
+  // identity (sha256('group:'+meaning)), not content. Bytes never exist for
+  // it, so a declared ref would 404 on every host forever.
+  const refs = opts.kind === 'group' ? [] : collectSigsDeep(opts.payload)
   const record: DecorationRecord<TPayload> = {
     kind: opts.kind,
     appliesTo: opts.appliesTo,

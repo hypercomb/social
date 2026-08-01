@@ -88,7 +88,16 @@ export function collectSigsDeep(value: unknown): string[] {
       return
     }
     if (Array.isArray(v)) { for (const x of v) walk(x); return }
-    if (v && typeof v === 'object') for (const x of Object.values(v as Record<string, unknown>)) walk(x)
+    if (v && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        // `groupSig` fields carry a GROUP SIGNATURE — sha256('group:'+meaning),
+        // a pure identity mark with no bytes behind it anywhere (see
+        // core/group-signature.ts). Declaring it as a ref sends every closure
+        // walker on a permanent 404 cascade across all byte hosts.
+        if (k === 'groupSig') continue
+        walk(x)
+      }
+    }
   }
   walk(value)
   return [...out]
@@ -180,6 +189,13 @@ export async function decorationClosureSigs(
   try { record = JSON.parse(decode(recordBytes)) as Record<string, unknown> }
   catch { return [] }
   if (!record || typeof record !== 'object' || typeof record['kind'] !== 'string') return []
+
+  // Group decorations carry ONLY identity: payload.sig is a group signature
+  // (sha256('group:'+meaning)) — no bytes exist behind it on any host, by
+  // construction. Already-minted records declare it in refs[] (the write-side
+  // guard came later), so without this every walker fetches it forever: an
+  // 8-URL 404 cascade per group, repeating each MISS-TTL expiry.
+  if (record['kind'] === 'group') return []
 
   const out = new Set<string>()
 

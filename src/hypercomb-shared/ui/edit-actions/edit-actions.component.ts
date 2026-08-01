@@ -76,9 +76,19 @@ export class EditActionsComponent implements OnInit, OnDestroy {
   // The actual toggle remains owned by runtime-initializer.
   readonly flatTop = signal(false)
 
+  /**
+   * A full-viewport view (website, slides, tree, tutor, photo …) owns the
+   * screen. The document actions edit the HIVE, not the view, so the whole
+   * cluster steps aside while one is up — same `view:active` contract the
+   * controls-bar uses. Without this the bottom-right cluster paints over the
+   * website's own exit control and reads as the site's chrome.
+   */
+  readonly viewActive = signal(false)
+
   #cursorUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #orientationUnsub: (() => void) | null = null
+  #viewActiveUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // Start the shared inset→CSS-var bridge. edit-actions is template-mounted in
@@ -108,12 +118,17 @@ export class EditActionsComponent implements OnInit, OnDestroy {
     this.#orientationUnsub = EffectBus.on<{ flat?: boolean }>('render:set-orientation', ({ flat }) => {
       this.flatTop.set(!!flat)
     })
+
+    this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+      this.viewActive.set(!!active)
+    })
   }
 
   ngOnDestroy(): void {
     this.#cursorUnsub?.()
     this.#selectionUnsub?.()
     this.#orientationUnsub?.()
+    this.#viewActiveUnsub?.()
   }
 
   // Reuse the keyboard command path so persistence, rendering and layout

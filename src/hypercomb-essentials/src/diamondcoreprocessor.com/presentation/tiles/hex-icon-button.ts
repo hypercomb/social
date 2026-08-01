@@ -27,6 +27,38 @@ const SVG_VIEWBOX = 24
 const SVG_RENDER_SCALE = 8
 
 /**
+ * Decode an SVG string to something drawable.
+ *
+ * The Image element leads: `createImageBitmap` REJECTS an SVG blob outright in
+ * Chromium (InvalidStateError — verified in the dev shell), so trying it first
+ * would just burn a rejected promise per icon. It stays as the fallback for
+ * engines that do support it, on the off chance the Image path is the one that
+ * fails.
+ *
+ * Both paths are best-effort and BOTH can fail — a decode that rejects used to
+ * leave the button permanently blank, which is why callers park for repair
+ * rather than swallowing the error.
+ */
+async function decodeSvg(hiResSvg: string, renderPx: number): Promise<CanvasImageSource> {
+  const blob = new Blob([hiResSvg], { type: 'image/svg+xml' })
+
+  const img = new Image(renderPx, renderPx)
+  const url = URL.createObjectURL(blob)
+  try {
+    img.src = url
+    await img.decode()
+    return img
+  } catch (e) {
+    if (typeof createImageBitmap === 'function') {
+      try { return await createImageBitmap(blob) } catch { /* both paths out */ }
+    }
+    throw e
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/**
  * Rasterise an SVG string at high resolution into a Pixi Texture via an
  * offscreen Image → Canvas pipeline. Shared by the hover-overlay icon
  * buttons and the persistent per-tile badge layer so both render the same
@@ -38,6 +70,7 @@ export async function rasteriseSvgToTexture(
   viewBox = SVG_VIEWBOX,
   renderScale = SVG_RENDER_SCALE,
 ): Promise<Texture> {
+  if (!svgMarkup) throw new Error('rasteriseSvgToTexture: empty markup')
   const renderPx = viewBox * renderScale
 
   // Inject higher render dimensions while keeping the viewBox
@@ -45,23 +78,15 @@ export async function rasteriseSvgToTexture(
     .replace(`width="${viewBox}"`, `width="${renderPx}"`)
     .replace(`height="${viewBox}"`, `height="${renderPx}"`)
 
-  // Decode SVG via Image element
-  const img = new Image(renderPx, renderPx)
-  const blob = new Blob([hiResSvg], { type: 'image/svg+xml' })
-  const url = URL.createObjectURL(blob)
-  try {
-    img.src = url
-    await img.decode()
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+  const source = await decodeSvg(hiResSvg, renderPx)
 
   // Draw to canvas at exact resolution — no browser DPR ambiguity
   const canvas = document.createElement('canvas')
   canvas.width = renderPx
   canvas.height = renderPx
   const ctx = canvas.getContext('2d')!
-  ctx.drawImage(img, 0, 0, renderPx, renderPx)
+  ctx.drawImage(source, 0, 0, renderPx, renderPx)
+  if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) source.close()
 
   const texture = Texture.from({
     resource: canvas,
@@ -93,10 +118,21 @@ export async function renderMaterialGlyphToTexture(ligature: string): Promise<Te
   const font = `${fontSize}px "Material Symbols Outlined"`
   // Ensure the font (+ this ligature) is loaded before rasterising, else the
   // canvas draws the literal text or tofu.
+  const fonts = (document as unknown as {
+    fonts?: { load?: (f: string, t?: string) => Promise<unknown>; check?: (f: string, t?: string) => boolean }
+  }).fonts
   try {
-    await (document as unknown as { fonts?: { load?: (f: string, t?: string) => Promise<unknown> } })
-      .fonts?.load?.(font, ligature)
-  } catch { /* best effort — proceed */ }
+    await fonts?.load?.(font, ligature)
+  } catch { /* best effort — verified below */ }
+
+  // VERIFY, don't assume. If the face never arrived (cold cache, offline, a
+  // navigation that dropped the font before the overlay rebuilt), `fillText`
+  // renders the LIGATURE AS LITERAL WORDS — "edit", "delete" — sitting in the
+  // icon band looking like labels. Throwing here is what makes the caller fall
+  // back to the author SVG, which is always a real glyph.
+  if (fonts?.check && !fonts.check(font, ligature)) {
+    throw new Error(`Material Symbols unavailable for "${ligature}"`)
+  }
 
   const canvas = document.createElement('canvas')
   canvas.width = px
@@ -121,6 +157,29 @@ export async function renderMaterialGlyphToTexture(ligature: string): Promise<Te
   return texture
 }
 
+// ── Deferred repair ─────────────────────────────────────────────────
+//
+// A button whose icon failed to rasterise is NOT left as a labelled blank. It
+// parks here, and the next time the document becomes visible (or is restored
+// from the back/forward cache — the "diverted to another origin and came back"
+// path) every parked button retries. Repair is idempotent: a button that
+// succeeds unparks itself, and one that is destroyed drops out.
+
+const AWAITING_REPAIR = new Set<HexIconButton>()
+let repairArmed = false
+
+function armRepair(): void {
+  if (repairArmed || typeof document === 'undefined') return
+  repairArmed = true
+  const retry = () => {
+    if (document.visibilityState !== 'visible') return
+    for (const btn of [...AWAITING_REPAIR]) void btn.repair()
+  }
+  document.addEventListener('visibilitychange', retry)
+  window.addEventListener('pageshow', retry)
+  window.addEventListener('focus', retry)
+}
+
 export type IconButtonConfig = {
   /** Display size in Pixi units (square) */
   size: number
@@ -138,6 +197,9 @@ export class HexIconButton extends Container {
   #hoverTint: number
   #hovered = false
   #alive = true
+  /** Last requested artwork — kept so a failed load can be retried, never lost. */
+  #svgMarkup: string | null = null
+  #glyph: string | null = null
 
   constructor(config: IconButtonConfig) {
     super()
@@ -152,21 +214,52 @@ export class HexIconButton extends Container {
 
   async load(svgMarkup: string): Promise<void> {
     if (!this.#alive) return
+    this.#svgMarkup = svgMarkup
+    this.#glyph = null
 
     try {
       const texture = await this.#rasterise(svgMarkup)
-      if (!this.#alive) return
-
-      const sprite = new Sprite(texture)
-      sprite.width = this.#size
-      sprite.height = this.#size
-      sprite.anchor.set(0.5, 0.5)
-      sprite.tint = this.#normalTint
-      this.#sprite = sprite
-      this.addChild(sprite)
+      if (!this.#alive) { texture.destroy(); return }
+      this.#adopt(texture)
+      this.#park(false)
     } catch (e) {
-      console.warn('[HexIconButton] load failed:', e)
+      console.warn('[HexIconButton] load failed — parked for repair:', e)
+      this.#park(true)
     }
+  }
+
+  /** True once a glyph is actually on screen. A false here with the button in
+   *  the scene IS the labels-without-icons state. */
+  get loaded(): boolean { return this.#sprite !== null }
+
+  /**
+   * Retry whatever this button was last asked to show. Safe to call any number
+   * of times; a no-op once a sprite is present. A glyph override that still
+   * cannot render falls back to the author SVG rather than staying blank.
+   */
+  async repair(): Promise<void> {
+    if (!this.#alive || this.#sprite) { this.#park(false); return }
+    if (this.#glyph) {
+      await this.setGlyph(this.#glyph)
+      if (this.#sprite) return
+    }
+    if (this.#svgMarkup) await this.load(this.#svgMarkup)
+  }
+
+  #park(pending: boolean): void {
+    if (pending) { AWAITING_REPAIR.add(this); armRepair() }
+    else AWAITING_REPAIR.delete(this)
+  }
+
+  #adopt(texture: Texture): void {
+    if (this.#sprite) { this.#sprite.destroy(); this.#sprite = null }
+    const sprite = new Sprite(texture)
+    sprite.width = this.#size
+    sprite.height = this.#size
+    sprite.anchor.set(0.5, 0.5)
+    sprite.tint = this.#hovered ? this.#hoverTint : this.#normalTint
+    this.#sprite = sprite
+    this.addChild(sprite)
   }
 
   /**
@@ -175,19 +268,21 @@ export class HexIconButton extends Container {
    */
   async setGlyph(materialName: string): Promise<void> {
     if (!this.#alive) return
+    this.#glyph = materialName
     try {
       const texture = await renderMaterialGlyphToTexture(materialName)
       if (!this.#alive) { texture.destroy(); return }
-      if (this.#sprite) { this.#sprite.destroy(); this.#sprite = null }
-      const sprite = new Sprite(texture)
-      sprite.width = this.#size
-      sprite.height = this.#size
-      sprite.anchor.set(0.5, 0.5)
-      sprite.tint = this.#hovered ? this.#hoverTint : this.#normalTint
-      this.#sprite = sprite
-      this.addChild(sprite)
+      this.#adopt(texture)
+      this.#park(false)
     } catch (e) {
-      console.warn('[HexIconButton] setGlyph failed:', e)
+      // The reskin could not render (font missing / unknown ligature). Keep the
+      // author SVG rather than an empty button — an override must never be able
+      // to erase an icon.
+      console.warn('[HexIconButton] setGlyph failed — falling back to author SVG:', e)
+      if (this.#svgMarkup) {
+        await this.load(this.#svgMarkup)
+        this.#glyph = materialName   // keep the override so a later repair retries it
+      } else this.#park(true)
     }
   }
 
@@ -227,6 +322,7 @@ export class HexIconButton extends Container {
 
   override destroy(options?: Parameters<Container['destroy']>[0]): void {
     this.#alive = false
+    AWAITING_REPAIR.delete(this)
     super.destroy(options)
   }
 

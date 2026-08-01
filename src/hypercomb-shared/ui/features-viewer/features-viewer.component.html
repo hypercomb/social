@@ -75,6 +75,26 @@
           </span>
         </span>
       </div>
+      <!-- ── Reach: how far out the list looks ──
+           this tile / its context / your whole hive. A LOOK, not a switch —
+           narrowing hides rows from the list and turns nothing off. An
+           ADOPTED tile opens on "this tile", so you see the branch as it
+           arrived rather than with your own hive-wide behaviours over it. -->
+      <div class="features-reach" role="group" [attr.aria-label]="'features.reach.label' | t">
+        @for (r of ['direct', 'context', 'hive']; track r) {
+          <button
+            type="button"
+            class="reach-opt"
+            [class.active]="isReach($any(r))"
+            [attr.aria-pressed]="isReach($any(r))"
+            [attr.title]="('features.reach.' + r + '.hint') | t"
+            (click)="setReach($any(r))"
+          >{{ ('features.reach.' + r) | t }}</button>
+        }
+        @if (g.adopted) {
+          <span class="reach-adopted" [attr.title]="'features.reach.adopted.hint' | t">{{ 'features.reach.adopted' | t }}</span>
+        }
+      </div>
       @if (isPhone() && !reviewTarget()) {
         <button class="features-select-tile" type="button" (click)="selectTile()">
           <span class="mat-sym" aria-hidden="true">select_all</span>
@@ -319,6 +339,14 @@
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
               <span class="section-count">{{ visibleApplied(group).length }}</span>
             </div>
+            <!-- What the reach is holding back, said plainly with the way to
+                 see it — a narrowed list must never read as the whole truth. -->
+            @if (outOfReachCount(group); as beyond) {
+              <button class="reach-beyond" type="button" (click)="widen()"
+                      [attr.title]="'features.reach.widen.hint' | t">
+                {{ 'features.reach.beyond' | t: { count: beyond } }}
+              </button>
+            }
             @if (visibleApplied(group).length === 0) {
               <p class="section-empty">{{ 'features.applied.empty' | t }}</p>
             } @else {

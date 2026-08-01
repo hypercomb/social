@@ -606,7 +606,10 @@ export class ClaudeBridgeWorker extends Worker {
     // future kind that points straight at resources. Without this the
     // decoration JSON travels but its referenced bytes (the diagram SVGs) 404
     // for a fresh adopter.
-    for (const s of collectSigsDeep(payload)) refs.add(s)
+    // — except group decorations: payload.sig is a group signature (pure
+    // identity, sha256('group:'+meaning)); no bytes exist for it anywhere,
+    // so declaring it would send every closure walker on a permanent 404.
+    if (kind !== 'group') for (const s of collectSigsDeep(payload)) refs.add(s)
     // (b) When the payload names an HTML body, read it NOW (it is local — the
     // caller put-resourced it moments ago) and capture `htmlSig` plus every
     // resource the body embeds (chrome.css, images). This closes the

@@ -286,10 +286,10 @@ The reference vocabulary, weakest binding to strongest:
 2. **by name** — a hive entry, durable, position-free
 3. **by sig** — exact sealed content, immutable
 
-### Places is the reference editor (Jaime, 2026-07-29)
+### Portals is the reference editor (Jaime, 2026-07-29)
 
-Places indexes references to arbitrary named tiles. It is not a collection
-browser: a tile with no children is just as eligible as a branch. A Places row
+Portals indexes references to arbitrary named tiles. It is not a collection
+browser: a tile with no children is just as eligible as a branch. A Portals row
 therefore represents a target, and may own several **named filtered references**
 to that same target:
 
@@ -309,14 +309,14 @@ hexagon stores a reference identity:
 
 Clicking the row's Edit action does two coordinated things:
 
-- the Places row expands to a horizontal strip of reference hexagons, which
+- the Portals row expands to a horizontal strip of reference hexagons, which
   remain available as drag handles;
 - the canvas enters a real **reference-editing layer** containing those same
   reference tiles.
 
 The layer is the editing surface. New reference tiles are added there through
 the ordinary tile-creation path, and their text/name uses the ordinary tile
-editor. The Places strip is a projection of that layer, not a second store or
+editor. The Portals strip is a projection of that layer, not a second store or
 second editor. A reference added or renamed on the canvas appears in the strip;
 the strip never owns independent state.
 
@@ -327,11 +327,11 @@ Pheromones are configured through the existing pheromone window:
   apply it once;
 - the reference's `requiredMarks` are rewritten, preserving its target;
 - removing the pheromone removes that requirement;
-- dragging a reference hexagon from either the canvas or the Places strip onto
+- dragging a reference hexagon from either the canvas or the Portals strip onto
   any hive writes that exact live reference at the drop location;
 - clicking it follows the target with its structural filter active.
 
-No pheromone picker, chips editor, or filter form is added to Places. The only
+No pheromone picker, chips editor, or filter form is added to Portals. The only
 new plumbing is semantic routing at the existing painter's write boundary:
 painting an ordinary tile writes a `tag` decoration as today; painting a
 reference tile edits that reference's `requiredMarks` using the same canonical
@@ -345,7 +345,7 @@ Two differently named hexagons may point to the same tile and carry different
 `requiredMarks`; their reference-decoration bytes keep those identities apart.
 
 The expanded strip belongs to the shared aggregate-index contract rather than
-`CollectionsSource`. Places supplies the target and reference-layer data; the
+`CollectionsSource`. Portals supplies the target and reference-layer data; the
 reusable panel supplies expansion and drag gestures; the canvas, tile editor,
 selection, and pheromone painter keep owning authoring. That keeps the
 capability valid for every tile and avoids duplicating mature hive interactions

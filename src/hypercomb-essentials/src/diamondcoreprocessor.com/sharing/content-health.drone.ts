@@ -8,12 +8,16 @@
 // success points and this drone turns that stream into ONE overall
 // condition, surfaced through the existing conventions only:
 //
-//   • indicator pill  — 'indicator:set' / 'indicator:clear', keyed
-//     `health:<condition>`; dismissable except `offline`
 //   • activity log    — recovery transitions only ("{host} is
 //     answering again"); no toasts on degradation
 //   • 'content:health' effect — emitted on condition TRANSITIONS only
 //     (EffectBus last-value replay makes late surfaces correct)
+//
+// NO indicator pill. The cloud/link glyphs this drone used to park in the
+// command line read as broken chrome and sat there permanently; the pill
+// surface is gone. Health is reported through 'content:health' (for any
+// surface that wants it) and the recovery activity line only — the
+// classifier and ledger are unchanged.
 //
 // Doctrine (load-bearing):
 //   • Render never awaits network — this drone does ZERO work on any
@@ -58,24 +62,8 @@ const HOST_DOWN_STREAK = 3
 const ALL_DOWN_HOSTS = 2
 const ALL_DOWN_STREAK = 2
 
-// Doc's two icons — quiet chrome, nothing new invented.
-const ICONS: Record<Exclude<HealthCondition, 'healthy'>, string> = {
-  'offline': 'cloud_off',
-  'host-down': 'link_off',
-  'waiting': 'cloud_off',
-  'missing': 'cloud_off',
-  'tampered': 'link_off',
-}
-
-// English fallbacks (the doc's exact sentences) for when i18n isn't up yet.
-const FALLBACK: Record<Exclude<HealthCondition, 'healthy'>, string> = {
-  'offline': "you're offline — showing what's saved on this device",
-  'host-down': "{host} isn't answering — some images can't load right now. they'll come back when it does.",
-  'waiting': 'waiting for {n} files from the swarm',
-  'missing': 'nobody we know has this content yet',
-  'tampered': "a file from {host} didn't match its signature and was ignored",
-}
-
+/** Keys of the retired health pills — swept on boot so a persisted one
+ *  from an older build can't linger in the command line. */
 const ALL_PILL_KEYS: readonly string[] = (['offline', 'host-down', 'waiting', 'missing', 'tampered'] as const)
   .map(c => `health:${c}`)
 
@@ -85,8 +73,8 @@ export class ContentHealthDrone extends Drone {
   override description =
     'Classifies per-host fetch outcomes into one plain-language content-health condition and surfaces it as an indicator pill'
 
-  protected override listens = ['broker:outcome', 'indicator:dismiss']
-  protected override emits = ['content:health', 'indicator:set', 'indicator:clear', 'activity:log']
+  protected override listens = ['broker:outcome']
+  protected override emits = ['content:health', 'indicator:clear', 'activity:log']
 
   #initialized = false
 
@@ -97,11 +85,6 @@ export class ContentHealthDrone extends Drone {
   #condition: HealthCondition = 'healthy'
   #conditionHost: string | null = null
 
-  /** Conditions whose pill the user dismissed for the CURRENT episode.
-   *  Cleared when the condition transitions away (a new episode may pill
-   *  again); `offline` is never dismissable so never lands here. */
-  #dismissed = new Set<HealthCondition>()
-
   /** Microtask-coalesced classify — keeps the outcome handler O(1) so
    *  a broker emit from a render-adjacent fetch costs nothing here. */
   #classifyQueued = false
@@ -110,20 +93,14 @@ export class ContentHealthDrone extends Drone {
     if (this.#initialized) return
     this.#initialized = true
 
-    // Evict any health pill a previous session persisted — the ledger is
-    // session-scoped, so a restored pill would be an ownerless orphan.
+    // The pill surface is retired — sweep any key an older build left in
+    // the command line's persisted set.
     for (const key of ALL_PILL_KEYS) EffectBus.emit('indicator:clear', { key })
 
     this.onEffect<BrokerOutcome>('broker:outcome', (p) => {
       if (!p?.host || !p.cls) return
       this.#record(p)
       this.#scheduleClassify()
-    })
-
-    // Respect the user's dismissal for the current episode only.
-    this.onEffect<{ key: string }>('indicator:dismiss', ({ key }) => {
-      if (!key?.startsWith('health:')) return
-      this.#dismissed.add(key.slice('health:'.length) as HealthCondition)
     })
 
     // The missing browser inputs — the fetch pipeline had zero of these.
@@ -243,23 +220,8 @@ export class ContentHealthDrone extends Drone {
     this.#condition = next
     this.#conditionHost = host
 
-    // One pill per active condition — clear the outgoing one.
-    if (prev !== 'healthy' && prev !== next) {
-      EffectBus.emit('indicator:clear', { key: `health:${prev}` })
-      this.#dismissed.delete(prev)  // episode over — a recurrence pills again
-    }
-
-    if (next !== 'healthy' && !this.#dismissed.has(next)) {
-      EffectBus.emit('indicator:set', {
-        key: `health:${next}`,
-        icon: ICONS[next],
-        label: this.#label(next, host),
-        dismissable: next !== 'offline',
-      })
-    }
-
     // Activity log on RECOVERY only — the downed host answered again.
-    // Degradation stays quiet: the pill is the whole surface.
+    // Degradation stays quiet.
     if (prev === 'host-down' && next !== 'offline' && prevHost) {
       const entry = this.#ledger.get(prevHost)
       if (entry && this.#answers(entry)) {
@@ -274,12 +236,6 @@ export class ContentHealthDrone extends Drone {
     this.emitEffect('content:health', { condition: next, host, prev, at: Date.now() })
   }
 
-  #label = (condition: Exclude<HealthCondition, 'healthy'>, host: string | null): string => {
-    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
-    const params = host ? { host } : undefined
-    return i18n?.t(`health.${condition}`, params)
-      ?? FALLBACK[condition].replace('{host}', host ?? '')
-  }
 }
 
 const _contentHealth = new ContentHealthDrone()

@@ -79,23 +79,12 @@
   </button>
 </div>
 
-<!-- Active-view exit toggle — when a full-viewport view (website) takes
-     over, the command line is hidden; this lone icon hovers in the
-     bottom-right corner and drops back to tiles when clicked. Sibling of
-     the wrapper (not inside it) so the wrapper's visibility:hidden in
-     website mode never hides it too. -->
-@if (viewActive() && activeViewToggle(); as vt) {
-  <button
-    class="site-view-exit"
-    type="button"
-    (click)="onViewToggle({ view: vt.view, disable: false })"
-    [attr.aria-label]="vt.label"
-    [attr.aria-pressed]="true"
-    [title]="vt.label"
-  >
-    <span class="mat-sym" aria-hidden="true">{{ vt.icon }}</span>
-  </button>
-}
+<!-- NO exit toggle here. The website's way out is the site's OWN chrome —
+     the raw-DOM exit button the site-view drone owns (`#hc-site-exit`),
+     which is guaranteed present whenever a site is on screen. A second
+     shell-side chip in the same corner stacked two buttons on top of each
+     other and collided with the document-action cluster; one control,
+     owned by the surface it exits, is the standard. -->
 
 <hc-hint-bar
   [items]="hintItems()"

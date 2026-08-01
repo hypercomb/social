@@ -124,6 +124,17 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
   ArrowDown:  { dq:  0, dr:  1 },
 }
 
+/** Local recall of executed lines — per-device convenience, never hive state. */
+const COMMAND_HISTORY_KEY = 'hc:command-history'
+const COMMAND_HISTORY_MAX = 100
+
+function loadCommandHistory(): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(COMMAND_HISTORY_KEY) ?? '[]')
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []
+  } catch { return [] }
+}
+
 @Component({
   selector: 'hc-command-line',
   standalone: true,
@@ -590,18 +601,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #viewToggles = signal<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
   readonly viewToggles = this.#viewToggles.asReadonly()
 
-  /**
-   * The website's view-toggle while website mode is the active render
-   * surface, else null. When set (and {@link viewActive} is true) the
-   * command line is hidden and this single icon floats in the bottom-right
-   * corner as the only chrome — the lone way back to tiles. Photo / qa-modal
-   * overlays also raise `view:active`, but they don't flip ViewMode, so the
-   * website toggle never reads `active` during them — keeping this strictly
-   * the website case and never a stray icon over a photo or modal.
-   */
-  readonly activeViewToggle = computed(
-    () => this.viewToggles().find(v => v.view === 'website' && v.active) ?? null,
-  )
+  // NOTE: there is deliberately no `activeViewToggle` exit chip here any
+  // more. Website mode's exit belongs to the website surface itself (the
+  // site-view drone's `#hc-site-exit`), so exactly ONE control sits in the
+  // corner instead of two stacked ones fighting the document actions.
 
   // Arcade games (Solomon's Key, Bubble Bobble, Arkanoid, Roper, …) are no
   // longer per-game header icons here — they aggregate under the "games"
@@ -611,14 +614,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // ── open-for-subscribers toggle ───────────────────────
   //
   // Floating icon inside the command-line that flips
-  // swarm.setOpenForSubscribers. Visible whenever the SwarmDrone has
-  // registered in IoC (so it appears the moment the swarm module is
-  // loaded; stays hidden in non-swarm contexts).
+  // swarm.setOpenForSubscribers.
+  //
+  // Registration is NOT the gate. The SwarmDrone loads with the rest of
+  // the module set, so keying visibility off IoC alone parked a swarm
+  // antenna in the private/solo view, where there are no subscribers to
+  // be open to and the control answers a question nobody asked. It shows
+  // only while the hive is actually public ('mesh:public-changed', last-
+  // value replayed so a late mount is correct).
 
   readonly #swarmAvailable = signal(false)
+  readonly #meshPublic = signal(false)
   readonly #openForSubscribers = signal(true)  // matches swarm default
   readonly openForSubscribers = this.#openForSubscribers.asReadonly()
-  readonly showOpenForSubscribersToggle = this.#swarmAvailable.asReadonly()
+  readonly showOpenForSubscribersToggle = computed(() =>
+    this.#swarmAvailable() && this.#meshPublic())
 
   // ── notes toggle ──────────────────────────────────────
   //
@@ -798,6 +808,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#indicatorUnsubs.push(
       EffectBus.on<{ open: boolean }>('swarm:open-for-subscribers-changed', (p) => {
         this.#openForSubscribers.set(!!p?.open)
+      }),
+      // Private/solo hides the antenna entirely — see the field comment.
+      EffectBus.on<{ public?: boolean }>('mesh:public-changed', (p) => {
+        this.#meshPublic.set(!!p?.public)
       }),
     )
     // Producer-owned indicators are not persisted. Ask their producers to
@@ -1831,6 +1845,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public onShellValueChange = (v: string): void => {
     this.value.set(v)
 
+    // Typing leaves the recall walk — the line is the user's again.
+    this.#historyIndex = -1
+
     // auto-populate index when typing '(' after /move
     if (this.#autoPopulateMoveIndex(v)) {
       // shell value was mutated — re-sync
@@ -1959,6 +1976,52 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
       return
     }
+
+    // Plain Up/Down with nothing else claiming them → walk the commands you
+    // have already run, the way every terminal does. The shell only forwards
+    // these when the completion dropdown is closed, so recall never fights
+    // suggestion navigation.
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown')
+      && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey
+      && !this.#captureMode() && this.#selectPhase() === 'none') {
+      if (this.#recallHistory(e.key === 'ArrowUp' ? 1 : -1)) e.preventDefault()
+      return
+    }
+  }
+
+  // ── command history (local recall, like a terminal) ──────
+  //
+  // Not hive state: what you typed at the bar is per-device convenience, the
+  // same class as the clipboard. It lives in localStorage, never in a layer.
+
+  #commandHistory: string[] = loadCommandHistory()
+  /** -1 = live line; 0 = most recent entry; walks back as it grows. */
+  #historyIndex = -1
+  /** What was typed before the walk started, restored on Down past the end. */
+  #historyDraft = ''
+
+  /** Record an executed line. Newest first; consecutive repeats collapse. */
+  #recordHistory(line: string): void {
+    const entry = line.trim()
+    if (!entry || entry === this.#commandHistory[0]) { this.#historyIndex = -1; return }
+    this.#commandHistory = [entry, ...this.#commandHistory].slice(0, COMMAND_HISTORY_MAX)
+    this.#historyIndex = -1
+    this.#historyDraft = ''
+    try {
+      localStorage.setItem(COMMAND_HISTORY_KEY, JSON.stringify(this.#commandHistory))
+    } catch { /* quota / private mode — recall is best-effort */ }
+  }
+
+  /** Step through history. `dir` +1 = older (Up), -1 = newer (Down). */
+  #recallHistory(dir: 1 | -1): boolean {
+    if (!this.#commandHistory.length) return false
+    const next = this.#historyIndex + dir
+    if (next < -1 || next >= this.#commandHistory.length) return false
+    if (this.#historyIndex === -1 && dir === 1) this.#historyDraft = this.value()
+    this.#historyIndex = next
+    const line = next === -1 ? this.#historyDraft : this.#commandHistory[next] ?? ''
+    this.#setShellValue(line, true)
+    return true
   }
 
   /**
@@ -2095,6 +2158,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#commitCapture(capture, original)
       return
     }
+
+    // Remember the line as TYPED (before tag stripping) — recall should give
+    // back exactly what the user ran, ready to edit and run again.
+    this.#recordHistory(original)
 
     const cleaned = await this.#extractAndPersistTags(original)
 

@@ -564,6 +564,16 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     }
     if (e.key === 'ArrowRight' && this.handleArrowRightAccept(e)) return
 
+    // Up/Down on an EMPTY line belong to the parent's command recall. With
+    // nothing typed the dropdown is offering "everything", so walking it is
+    // worth little — whereas Up is the universal terminal gesture for "the
+    // command I just ran". Once something IS typed the list is a real filtered
+    // set and Up/Down go back to navigating it.
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && this.value() === '') {
+      this.shellKeydown.emit(e)
+      return
+    }
+
     // Try completion keys first (when suggestions are visible)
     if (this.handleCompletionKeys(e)) return
 

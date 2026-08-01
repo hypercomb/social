@@ -4,7 +4,8 @@
      grows the selection verbs — visually cut · copy · remove, left of
      undo. Container is row-reverse: later DOM children extend LEFT, so
      undo never moves under the cursor. -->
-<div class="edit-actions" role="group" [attr.aria-label]="'controls.edit-actions' | t">
+<div class="edit-actions" role="group" [attr.aria-label]="'controls.edit-actions' | t"
+  [style.display]="viewActive() ? 'none' : null">
   <button
     class="ea-btn"
     type="button"

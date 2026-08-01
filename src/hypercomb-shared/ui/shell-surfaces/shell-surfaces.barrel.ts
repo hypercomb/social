@@ -12,6 +12,7 @@
 // selection flows into each behavior's own tool window now
 // (documentation/selection-tool-windows.md).
 import '../history-viewer/history-viewer.component'
+import '../rewind-window/rewind-window.component'
 import '../notes-strip/notes-strip.component'
 // ONE index panel for every aggregate — Collections, Websites, and anything
 // that registers a source. The per-aggregate landings it replaced (

@@ -225,7 +225,10 @@ const VIEW_PENDING_COLOR = 0x9bcfe8
 const VIEW_PENDING_SAND = 0xe6bf72
 
 // ── Action hint constants ────────────────────────────────────────
-const HINT_DELAY_MS = 110       // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
+// Cool-off between icon-set repair handshakes (see #requestReregister).
+const REREGISTER_REPAIR_MS = 1500
+
+const HINT_DELAY_MS = 110     // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
 const HINT_Y_OFFSET = 17        // below the label band — moved up 7 with ICON_Y (absolute, does not follow on its own)
 const HINT_FONT_SIZE = 4
 const HINT_COLOR = 0xeaf0ff     // near-white — reads crisp against the dark hint pill
@@ -613,8 +616,16 @@ export class TileOverlayDrone extends Drone {
         let changed = false
         for (const [name, desc] of this.#registeredDescriptors) {
           if (desc.owner !== iocKey) continue
-          const order = this.#activeOrder.get(desc.profile)
-          if (order) {
+          // PROFILE-BLIND removal, deliberately. #registeredDescriptors is keyed
+          // by NAME, so one entry backs the SAME name in every profile that
+          // lists it (remove / files / invite / adopt / contact). Splicing only
+          // `desc.profile` — the profile of the LAST-emitted descriptor — while
+          // deleting the shared descriptor left every OTHER profile's order
+          // naming an icon that no longer resolves. #rebuildActiveProfile skips
+          // those silently (`if (!desc) continue`), so the band kept rendering
+          // its label with a permanently shrunken icon row: icons that "cease to
+          // show up" after drone churn and never come back without a reload.
+          for (const order of this.#activeOrder.values()) {
             const idx = order.indexOf(name)
             if (idx >= 0) order.splice(idx, 1)
           }
@@ -1137,6 +1148,21 @@ export class TileOverlayDrone extends Drone {
   }
   #rebuildQueued = false
 
+  /** Ask every icon provider to re-emit its descriptors, because the active
+   *  order named an icon we can no longer resolve. Rate-limited: a provider
+   *  that is genuinely gone (its bee was toggled off) would otherwise leave a
+   *  permanent hole and turn this into a rebuild loop. One repair attempt per
+   *  window is enough to recover from churn without spinning. */
+  #requestReregister(): void {
+    if (this.#reregisterQueued || this.#arrangeMode) return
+    this.#reregisterQueued = true
+    setTimeout(() => {
+      this.#reregisterQueued = false
+      if (!this.#arrangeMode) this.emitEffect('overlay:request-register', {})
+    }, REREGISTER_REPAIR_MS)
+  }
+  #reregisterQueued = false
+
   #updateHexBg(): void {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
   }
@@ -1278,14 +1304,21 @@ export class TileOverlayDrone extends Drone {
     const order = this.#activeOrder.get(key) ?? []
     const seen = new Set<string>()
     const descs: OverlayActionDescriptor[] = []
+    let unresolved = false
     for (const name of order) {
       if (seen.has(name)) continue
       seen.add(name)
       const desc = this.#registeredDescriptors.get(name)
-      if (!desc) continue
+      // An ordered name with no descriptor is a HOLE, not a preference. Dropping
+      // it silently is how the band ends up showing its label over a short (or
+      // empty) icon row with nothing to explain it. Note it and ask the
+      // providers to re-emit — the register handshake is additive and
+      // idempotent, so a repair costs one rebuild and restores the icon.
+      if (!desc) { unresolved = true; continue }
       if (desc.genotype && this.#genotypeVisible.get(desc.genotype) === false) continue
       descs.push(desc)
     }
+    if (unresolved) this.#requestReregister()
     descs.sort((a, b) => (a.name === 'remove' ? 1 : 0) - (b.name === 'remove' ? 1 : 0))
 
     for (const desc of descs) {
