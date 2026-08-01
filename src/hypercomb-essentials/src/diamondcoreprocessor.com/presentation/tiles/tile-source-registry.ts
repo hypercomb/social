@@ -16,7 +16,10 @@
 // in two sources with different kinds is two distinct entries — the
 // renderer is responsible for any kind-aware precedence (typically
 // opfs > ephemeral, since an adopted tile shouldn't double as its own
-// preview). Same name + same kind = first wins.
+// preview). Same name + same kind = first wins — EXCEPT for kind
+// 'peer', which additionally keys on the publisher so every
+// participant's version of a name survives as a stack variant. The
+// renderer still draws one hexagon per name; see tile-stack.ts.
 
 import type {
   LocationContext,
@@ -53,7 +56,15 @@ export class TileSourceRegistry {
         continue
       }
       for (const entry of r.value) {
-        const dedupKey = `${entry.kind}:${entry.name}`
+        // Peer entries dedup by (kind, name, PUBLISHER). Two people
+        // publishing `notes` are two versions of one tile, not one
+        // tile — collapsing them here made the second publisher
+        // unreachable and left the renderer nothing to stack or roll
+        // through (see tile-stack.ts). The renderer still shows ONE
+        // hexagon per name; multiplicity is now something it can read
+        // rather than something the registry has already thrown away.
+        const publisher = entry.kind === 'peer' ? entry.source?.peerPubkey ?? '' : ''
+        const dedupKey = `${entry.kind}:${entry.name}:${publisher}`
         if (seen.has(dedupKey)) continue
         seen.add(dedupKey)
         out.push(entry)
@@ -72,7 +83,8 @@ export class TileSourceRegistry {
     precedence?: TileEntry['kind'],
   ): Promise<readonly string[]> => {
     const entries = await this.resolve(loc)
-    if (!precedence) return entries.map(e => e.name)
+    // Names, not entries — two publishers of one name are one name.
+    if (!precedence) return [...new Set(entries.map(e => e.name))]
     const byName = new Map<string, TileEntry>()
     for (const e of entries) {
       const existing = byName.get(e.name)

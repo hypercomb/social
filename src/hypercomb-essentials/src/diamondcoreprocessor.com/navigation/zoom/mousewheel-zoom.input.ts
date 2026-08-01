@@ -2,6 +2,7 @@
 import type { InputGate } from '../input-gate.service.js'
 import type { InputMode, InputModeStack } from '../input-mode-stack.service.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
+import { hoveredStackDepth, rollHoveredStack } from '../../presentation/tiles/tile-stack.js'
 
 type Point = { x: number; y: number }
 
@@ -164,6 +165,24 @@ export class MousewheelZoomInput {
         ? event.deltaX
         : event.deltaY
       pan?.panBy(laneAxis === 'x' ? { x: -along, y: 0 } : { x: 0, y: -along })
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+
+    // A stacked tile owns the plain wheel. When the tile under the
+    // pointer exists in more than one participant's layer, rolling is
+    // the only way to reach the versions underneath — zoom is reachable
+    // from every other pixel on the canvas, and from Ctrl/Cmd+wheel
+    // right here, so the stack wins the bare gesture. Alt+wheel stays
+    // with SpotlightScrollInput (cycles ALL participants, stacked tile
+    // or not); Ctrl/Cmd keeps fine zoom; both are excluded here so the
+    // three gestures never fight over one event.
+    if (
+      !event.ctrlKey && !event.metaKey && !event.altKey
+      && hoveredStackDepth() > 1
+      && rollHoveredStack(event.deltaY > 0 ? 1 : -1)
+    ) {
       event.preventDefault()
       event.stopPropagation()
       return

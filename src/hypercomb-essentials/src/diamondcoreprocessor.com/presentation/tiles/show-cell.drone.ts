@@ -12,6 +12,7 @@ import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-st
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
+import { setTileStacks, type StackVariant } from './tile-stack.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -101,6 +102,15 @@ function launchShapeToMode(shape: string): number {
  *  TITLE tiles, so a header reads as a header without any new tile shape —
  *  the per-cell borderColor attribute already exists. */
 const HEADER_BORDER: [number, number, number] = [0.494, 0.714, 0.839]
+/** Cold grey-blue for a tile that more than one participant holds, mixed into
+ *  its own border while YOUR version is the one showing. It marks depth, not
+ *  ownership — the moment you roll onto a participant the border takes that
+ *  publisher's identity hue instead, so the two readings never overlap. */
+const STACK_BORDER: [number, number, number] = [0.62, 0.68, 0.78]
+/** How much of STACK_BORDER a stacked tile takes. Enough to read as "there is
+ *  something under this one" across a page, well short of a state change — a
+ *  tile you can roll is still an ordinary tile. */
+const STACK_BORDER_MIX = 0.5
 /** How far a launcher tile may wander while drifting, as a fraction of the hex
  *  circumradius. Small on purpose: the drifted tile must stay inside its home
  *  hex's pointer→axial catchment so clicking the floating tile still opens its
@@ -620,7 +630,7 @@ export class ShowCellDrone extends Drone {
   /** Last resolved TileSourceRegistry entries per location key — the
    *  fallback a render pass uses when source resolution exceeds its
    *  budget (see the bounded resolve in the render path). */
-  readonly #sourceEntriesCache = new Map<string, readonly { name: string; kind: string; source?: { peerIndex?: number } }[]>()
+  readonly #sourceEntriesCache = new Map<string, readonly { name: string; kind: string; source?: { peerIndex?: number; peerPubkey?: string; imageSig?: string } }[]>()
 
   /** Budget for awaited tile-source resolution per render pass. Local
    *  sources answer in single-digit ms; anything slower (a source mid
@@ -1022,6 +1032,19 @@ export class ShowCellDrone extends Drone {
   // the service is registered by then. Render reads this in
   // buildCellsFromAxial to override borderColor for matching tiles.
   #spotlightPubkey: string | null = null
+
+  // Labels rendering the SPOTLIT participant's version of a tile you
+  // also hold. Under superimposition a peer's `notes` is not a second
+  // tile beside yours, it is the same tile seen through their layer —
+  // so while their layer is surfaced these labels ride the external
+  // path (their streamed image, no local prop reads) even though the
+  // name is in localCellSet. Empty whenever no peer is spotlit.
+  #stackVariantLabels = new Set<string>()
+
+  // Depth of each label's participant stack (1 = only one of you holds
+  // it). Read by the GPU write loop to mark tiles that have versions
+  // underneath, so multiplicity is visible BEFORE you roll.
+  #stackDepthByLabel = new Map<string, number>()
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -3205,9 +3228,16 @@ export class ShowCellDrone extends Drone {
     // slot instead of being demoted to the next-free slot (which
     // collides with local cells at low indices).
     const peerIndices = new Map<string, number>()
+    // Stacks are a derivation of THIS pass's peer entries. Reset before
+    // resolving so a location with no publishers (or a registry that
+    // isn't up yet) reads as unstacked instead of inheriting the last
+    // location's multiplicity marks.
+    this.#stackDepthByLabel = new Map()
+    this.#stackVariantLabels = new Set()
+    setTileStacks(new Map())
     try {
       const registry = (window as any).ioc?.get?.('@hypercomb.social/TileSourceRegistry') as
-        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly { name: string; kind: string; source?: { peerIndex?: number } }[]> }
+        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly { name: string; kind: string; source?: { peerIndex?: number; peerPubkey?: string; imageSig?: string } }[]> }
         | undefined
       if (registry?.resolve) {
         const segs = lineage?.explorerSegments?.() ?? []
@@ -3234,6 +3264,68 @@ export class ShowCellDrone extends Drone {
             const gotKey = res.map(e => `${e.kind}:${e.name}`).join('|')
             if (gotKey !== usedKey) this.requestRender()
           }).catch(() => { /* already logged by the registry */ })
+        }
+
+        // ── PARTICIPANT STACKS ───────────────────────────────────────
+        // Every peer entry, INCLUDING the names you already hold. A
+        // peer publishing `notes` where you have `notes` is not a
+        // second tile — same coordinates means same tile
+        // (documentation/superimposition.md) — so it collapses onto
+        // yours as a variant underneath instead of being dropped.
+        //
+        // Order is the participant order the swarm resolved (freshest
+        // publisher first, matching the layer-cycle strip), with YOU at
+        // index 0 wherever you hold the label: rolling always starts
+        // from your own version and comes back to it.
+        const stacks = new Map<string, StackVariant[]>()
+        for (const e of entries) {
+          if (e.kind !== 'peer') continue
+          const pk = e.source?.peerPubkey
+          if (typeof pk !== 'string' || pk.length === 0) continue
+          let bag = stacks.get(e.name)
+          if (!bag) {
+            bag = localCellSet.has(e.name) ? [{ pubkey: '' }] : []
+            stacks.set(e.name, bag)
+          }
+          // One variant per participant. A peer republishing within a
+          // pass must not deepen their own stack entry.
+          if (bag.some(v => v.pubkey === pk)) continue
+          const vsig = e.source?.imageSig
+          const vidx = e.source?.peerIndex
+          bag.push({
+            pubkey: pk,
+            ...(typeof vsig === 'string' && /^[a-f0-9]{64}$/i.test(vsig) ? { imageSig: vsig.toLowerCase() } : {}),
+            ...(typeof vidx === 'number' && Number.isFinite(vidx) && vidx >= 0 ? { index: vidx } : {}),
+          })
+        }
+        setTileStacks(stacks)
+        this.#stackDepthByLabel = new Map(
+          [...stacks].map(([label, variants]) => [label, variants.length]),
+        )
+
+        // Surfacing a participant's layer swaps YOUR version of every
+        // shared tile for THEIRS — their picture, at their slot index.
+        // Only tiles they actually publish move; the rest of your layer
+        // stays put, which is what makes the difference between the two
+        // layers readable rather than a full-page swap.
+        this.#stackVariantLabels = new Set<string>()
+        const spotlit = this.#spotlightPubkey
+        if (spotlit) {
+          for (const [label, variants] of stacks) {
+            if (!localCellSet.has(label)) continue
+            const mine = variants.find(v => v.pubkey === spotlit)
+            if (!mine) continue
+            this.#stackVariantLabels.add(label)
+            this.#peerPubkeyByLabel.set(label, spotlit)
+            if (mine.imageSig) this.registryImageByLabel.set(label, mine.imageSig)
+            // The SLOT stays yours. A shared tile keeps your index while
+            // you roll through its versions — the stack is a depth at
+            // one position, and taking the publisher's index instead
+            // would slide the tile out from under the pointer that is
+            // rolling it. Only tiles that are theirs ALONE take a
+            // published index (the peerIndices path below); those have
+            // no slot of yours to keep.
+          }
         }
 
         // Mismatch check — only mismatched peer names produce any
@@ -3297,8 +3389,13 @@ export class ShowCellDrone extends Drone {
     // Drop pubkey entries for labels that fell out of the peer set
     // (peer went stale, navigated away). Keeps the map tight; new peer
     // contributions repopulate it in the loop above.
+    // Stack-variant labels are spared: they are YOUR tiles showing a
+    // spotlit participant's version, so they were never in peerCellSet
+    // (which is peer-ONLY names) and pruning them would strip the
+    // publisher's hue and image off the tile the same pass that put
+    // them there.
     for (const label of [...this.#peerPubkeyByLabel.keys()]) {
-      if (!peerCellSet.has(label)) this.#peerPubkeyByLabel.delete(label)
+      if (!peerCellSet.has(label) && !this.#stackVariantLabels.has(label)) this.#peerPubkeyByLabel.delete(label)
     }
     // Same prune for the registry image map — it is written ONLY inside the
     // peer block above, so peerCellSet is its membership set. Dropping a
@@ -3307,7 +3404,7 @@ export class ShowCellDrone extends Drone {
     // image after the live publisher leaves; with no fallback, loadOne keeps
     // the already-derived image (fill-if-empty, existing image untouched).
     for (const label of [...this.registryImageByLabel.keys()]) {
-      if (!peerCellSet.has(label)) this.registryImageByLabel.delete(label)
+      if (!peerCellSet.has(label) && !this.#stackVariantLabels.has(label)) this.registryImageByLabel.delete(label)
     }
 
     // Reconcile pendingRemoves against the layer's children list. Under
@@ -5561,13 +5658,18 @@ export class ShowCellDrone extends Drone {
     })
 
     // Spotlight changes — a peer's layer was surfaced (or dismissed
-    // back to merged). Update the cached pubkey and invalidate the
-    // render cache so the next pass re-runs the borderColor path with
-    // the new spotlight state. Cheap: same layer-cells data, just a
-    // different borderColor computation per cell.
+    // back to merged). This is a LAYER move, not a tint: a surfaced
+    // participant supplies their own version of every tile you both
+    // hold, at their own slot indices, so membership and ordering are
+    // recomputed and not just the borderColor path. Clear the derived
+    // caches the same way the participant filter does — leaving
+    // #layerCellsCache/#slots warm would paint the new layer's pictures
+    // into the old layer's arrangement.
     this.onEffect<{ activePeer: string | null }>('spotlight:changed', (payload) => {
       this.#spotlightPubkey = payload?.activePeer ?? null
+      this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
+      this.#slots.clear()
       this.requestRender()
     })
 
@@ -7171,7 +7273,14 @@ export class ShowCellDrone extends Drone {
       const borderColor = cluster?.headers.has(label) ? HEADER_BORDER : undefined
       // Clustered help tiles render PLAIN — no photo/substrate imagery — so the
       // category words and steel headers read cleanly.
-      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared, borderColor, plain: !!cluster })
+      // A tile showing a spotlit participant's version is external for
+      // this pass even though the name is yours: the bytes on screen
+      // are theirs, so it must take the publisher-image path and skip
+      // the local prop reads that would paint your picture back over
+      // it. Dismissing the spotlight empties the set and the tile is
+      // plainly yours again.
+      const external = !localCellSet.has(label) || this.#stackVariantLabels.has(label)
+      out.push({ q: a.q, r: a.r, label, external, heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared, borderColor, plain: !!cluster })
     }
 
     return out
@@ -8922,6 +9031,16 @@ export class ShowCellDrone extends Drone {
         bcr = pr * brightness
         bcg = pg * brightness
         bcb = pb * brightness
+      } else if ((this.#stackDepthByLabel.get(c.label) ?? 0) > 1) {
+        // Yours is the version showing, but other participants hold
+        // this tile too. Mark the depth on the border so a stacked tile
+        // is findable without hovering every hex — this is the whole
+        // affordance for the wheel roll, and an unmarked stack is a
+        // feature nobody discovers.
+        const m = STACK_BORDER_MIX
+        bcr = bcr * (1 - m) + STACK_BORDER[0] * m
+        bcg = bcg * (1 - m) + STACK_BORDER[1] * m
+        bcb = bcb * (1 - m) + STACK_BORDER[2] * m
       }
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12
