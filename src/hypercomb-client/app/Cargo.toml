@@ -1,6 +1,6 @@
 [package]
 name = "hypercomb-client"
-description = "Hypercomb for Windows — a native window on your hive."
+description = "Hypercomb — a native window on your hive."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

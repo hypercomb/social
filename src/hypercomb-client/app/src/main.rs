@@ -1,4 +1,4 @@
-//! Hypercomb for Windows — the native shell.
+//! Hypercomb — the native shell (Windows and macOS from one source).
 //!
 //! This process owns the hive. The web shell runs inside the window and reaches
 //! the store through the commands below and nothing else.
@@ -16,7 +16,7 @@
 //! must be sourced from a native file dialog, never from page script. Until the
 //! dialog is wired they are not exposed at all.
 
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 #![forbid(unsafe_code)]
 
 use hypercomb_host::{Head, Host, HostError};
@@ -396,7 +396,7 @@ fn main() {
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(640.0, 480.0)
                 .theme(Some(tauri::Theme::Dark))
-                .initialization_script(&format!("window.__HC_INSTANCE = '{instance}';"))
+                .initialization_script(format!("window.__HC_INSTANCE = '{instance}';"))
                 .initialization_script(RENDERER_DIAGNOSTICS)
                 .build()?;
 
@@ -410,11 +410,28 @@ fn main() {
             // idempotent), so restoring a backup twice or restoring another
             // hive's backup over this one is always safe.
             {
-                use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+                use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
                 let backup = MenuItemBuilder::with_id("hive-backup", "Back Up Hive…").build(app)?;
                 let restore = MenuItemBuilder::with_id("hive-restore", "Restore Into Hive…").build(app)?;
                 let hive = SubmenuBuilder::new(app, "Hive").item(&backup).item(&restore).build()?;
-                app.set_menu(MenuBuilder::new(app).item(&hive).build()?)?;
+
+                // On macOS the menu bar is the APPLICATION's, not the window's,
+                // and the standard submenus carry key equivalents the system
+                // will not supply otherwise: Cmd+Q to quit, and — the one that
+                // bites — the Edit menu, which is what makes Cmd+C/V/X/A work
+                // inside a WKWebView. A menu built from scratch would leave the
+                // hive unable to copy text. So macOS starts from the platform
+                // default and APPENDS; Windows, where none of that applies and
+                // a menu bar is chrome we would rather not spend, keeps the
+                // single Hive menu it already had.
+                let menu = if cfg!(target_os = "macos") {
+                    let menu = Menu::default(app.handle())?;
+                    menu.append(&hive)?;
+                    menu
+                } else {
+                    MenuBuilder::new(app).item(&hive).build()?
+                };
+                app.set_menu(menu)?;
 
                 app.on_menu_event(move |app, event| {
                     let id = event.id().as_ref().to_string();
