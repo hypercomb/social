@@ -176,6 +176,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A missing secret arrives as an EMPTY STRING, not as an absent
+          # variable — so every credential below is DEFINED even when unset in
+          # the repo. Tauri tests for presence, not for emptiness: it saw
+          # APPLE_CERTIFICATE="" , concluded it should sign, and failed trying
+          # to import an empty certificate into the keychain. The unsigned path
+          # was unreachable. Clearing the empties restores it.
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+                     APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var:-}" ]; then unset "$var"; fi
+          done
+
           if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
             echo "signing as: $APPLE_SIGNING_IDENTITY"
             if [ -n "${APPLE_ID:-}" ]; then
