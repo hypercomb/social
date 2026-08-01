@@ -115,6 +115,8 @@ export class Store extends EventTarget {
   /** How long after init the content self-clean waits before draining
    *  legacy folders — clear of first paint and the warmup walk. */
   static readonly #SELF_CLEAN_DELAY_MS = 20_000
+  /** Minimum quiet gap between drain chunks in a VISIBLE tab — see #drainBreath. */
+  static readonly #DRAIN_SETTLE_MS = 1_500
 
   public opfsRoot!: FileSystemDirectoryHandle
   /** The user-content root IS the OPFS root (assigned `= opfsRoot` in
@@ -530,12 +532,37 @@ export class Store extends EventTarget {
           }
           return
         }
-        // Yield a beat between chunks; the drain is idle-time work.
-        await new Promise(resolve => setTimeout(resolve, 250))
+        await this.#drainBreath()
       }
     } catch (err) {
       console.warn('[packed-store] drain interrupted — will resume next boot', err)
     }
+  }
+
+  /**
+   * The pause between drain chunks.
+   *
+   * A fixed 250ms beat is not "idle-time work" on a real hive: the migration
+   * is thousands of records long, and every chunk monopolises the single
+   * packed worker that EVERY read must queue behind — so navigation went
+   * janky and stayed janky for as long as the drain ran. Three rules now:
+   *
+   *   - a HIDDEN tab drains flat out (nobody is waiting on the worker),
+   *   - a visible tab waits for genuine idle time via requestIdleCallback,
+   *   - and never faster than SETTLE_MS, so a busy page keeps its worker.
+   *
+   * The migration is idempotent and resumable, so trading wall-clock for a
+   * responsive UI costs nothing but time — and the tab the participant is
+   * NOT looking at is where that time is best spent.
+   */
+  #drainBreath = async (): Promise<void> => {
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    if (hidden) return await new Promise(resolve => setTimeout(resolve, 50))
+    await new Promise(resolve => setTimeout(resolve, Store.#DRAIN_SETTLE_MS))
+    const idle = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void })
+      .requestIdleCallback
+    if (typeof idle !== 'function') return
+    await new Promise<void>(resolve => idle(() => resolve(), { timeout: 5_000 }))
   }
 
   // All layers live flat at the root (`<root>/<sig>`) regardless of
