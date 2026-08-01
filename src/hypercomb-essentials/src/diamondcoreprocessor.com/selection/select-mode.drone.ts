@@ -278,7 +278,10 @@ export class SelectModeDrone extends Drone {
     // it reads as a statement about the page rather than another bar control.
     host.style.cssText =
       `position:fixed;left:50%;transform:translateX(-50%);z-index:${PILL_Z};` +
-      'bottom:calc(6.2rem + env(safe-area-inset-bottom,0px));' +
+      // --hc-mobile-row-lift is published by the controls bar while its view
+      // row is up: the pill rises with the row and drops back when it closes,
+      // so the two never stack on the same band of screen.
+      'bottom:calc(6.2rem + var(--hc-mobile-row-lift, 0px) + env(safe-area-inset-bottom,0px));' +
       'display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;' +
       'border-radius:2rem;background:rgba(12,17,24,0.92);backdrop-filter:blur(10px);' +
       'border:1px solid rgba(126,182,214,0.35);box-shadow:0 10px 30px rgba(0,0,0,0.45);' +

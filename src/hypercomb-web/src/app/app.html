@@ -35,6 +35,12 @@
       <button class="install-cta" type="button" (click)="startWelcome()" [disabled]="upgrading()">
         @if (upgrading()) { {{ 'install.starting' | t }} } @else { {{ 'install.start' | t }} }
       </button>
+      <!-- "Starting…" with nothing under it is indistinguishable from a hang.
+           The install already reports phase/current/total; showing it is the
+           difference between "working" and "stuck". -->
+      @if (upgrading() && installProgress()) {
+        <p class="install-progress">{{ installProgress() }}</p>
+      }
     }
   </div>
 </div>

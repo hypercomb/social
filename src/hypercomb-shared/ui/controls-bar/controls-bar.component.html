@@ -193,6 +193,46 @@
              bunches one side. -->
 
         <div class="controls-section mobile-nav">
+          <!-- VIEW ROW — a second five-icon row that pops ABOVE the bar (to
+               its right in landscape) instead of squeezing the bottom row.
+               Everything here changes HOW you see: fullscreen, the lane
+               ladder, the hex rotation, the other arrangements, pheromones.
+               Out of flow, so the bottom row keeps its five-slot rhythm and
+               the camera stays dead centre. Closes on its own button or a
+               tap anywhere else; while it is up, the select pill lifts by
+               --hc-mobile-row-lift so nothing is covered. -->
+          @if (viewRowOpen()) {
+            <div class="mobile-view-row" data-consumes-wheel>
+              <button class="ctl-btn fullscreen-btn" [class.active]="isFullscreen()"
+                      (click)="toggleFullscreen()"
+                      [attr.aria-label]="'controls.fullscreen' | t">
+                <span class="mat-sym">{{ isFullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</span>
+              </button>
+              <!-- LANES — the phone's zoom. Tap walks 3 → 2 → 1 and wraps:
+                   fewer lanes means wider hexagons, a bigger name, a bigger
+                   picture, notes you can actually read. The digit IS the
+                   readout. Long-press releases the lane viewport. -->
+              <button class="ctl-btn lanes-btn" [class.active]="lanesActive()"
+                      (click)="stepLanes()"
+                      (contextmenu)="releaseLanes(); $event.preventDefault()"
+                      [attr.aria-label]="'controls.lanes' | t">
+                <span class="mat-sym">view_column</span>
+                <span class="lane-digit" aria-hidden="true">{{ laneCount() }}</span>
+              </button>
+              <button class="ctl-btn rotate-btn" (click)="rotateHexes()"
+                      [attr.aria-label]="'controls.rotate' | t">
+                <span class="mat-sym">hexagon</span>
+              </button>
+              <button class="ctl-btn arrange-btn" (click)="cycleArrangement()"
+                      [attr.aria-label]="'controls.arrange' | t">
+                <span class="mat-sym">grid_view</span>
+              </button>
+              <button class="ctl-btn pheromone-btn" (click)="openPheromones()"
+                      [attr.aria-label]="'tags.panel.open' | t">
+                <span class="mat-sym">label</span>
+              </button>
+            </div>
+          }
           <div class="mobile-side left" data-consumes-wheel>
             <button class="ctl-btn back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
                     (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
@@ -240,16 +280,15 @@
           </button>
 
           <div class="mobile-side right" data-consumes-wheel>
-            <!-- FULLSCREEN — the fourth slot, where fit used to be. A phone
-                 gives up a fifth of its screen to browser chrome; this takes
-                 it back. Deliberately a BUTTON and not something the first
-                 touch does for you: entering fullscreen needs a user gesture
-                 anyway, and a screen that silently swallows the address bar
-                 on first contact reads as the page misbehaving. -->
-            <button class="ctl-btn fullscreen-btn" [class.active]="isFullscreen()"
-                    (click)="toggleFullscreen()"
-                    [attr.aria-label]="'controls.fullscreen' | t">
-              <span class="mat-sym">{{ isFullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</span>
+            <!-- VIEW — the fourth slot. Fullscreen and the lane ladder used to
+                 compete for it; six controls on one phone-width row squeezed
+                 every one of them. They now live one row up, and this opens
+                 that row. The bottom five stay five, with the camera in the
+                 middle where the thumb lands. -->
+            <button class="ctl-btn view-row-btn" [class.active]="viewRowOpen()"
+                    (click)="toggleViewRow($event)"
+                    [attr.aria-label]="'controls.view-row' | t">
+              <span class="mat-sym">{{ viewRowOpen() ? 'expand_more' : 'expand_less' }}</span>
             </button>
             <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
               <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>

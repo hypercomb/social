@@ -4,12 +4,12 @@
   "version": "0.1.0",
   "identifier": "io.hypercomb.client",
   "build": {
-    "frontendDist": "../../hypercomb-web/dist/hypercomb-web/browser"
+    "frontendDist": "frontend"
   },
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self'; frame-src 'self' https://diamondcoreprocessor.com https://*.diamondcoreprocessor.com; script-src 'self' 'wasm-unsafe-eval'; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' ipc: http://ipc.localhost data: blob: https://fonts.googleapis.com https://fonts.gstatic.com https://diamondcoreprocessor.com https://*.diamondcoreprocessor.com; worker-src 'self' blob:",
+      "csp": "default-src 'self'; frame-src 'self' https://diamondcoreprocessor.com https://*.diamondcoreprocessor.com; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' blob:; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https: https://jwize.com https://content.jwize.com https://pluginthematrix.io https://storagehypercomb.blob.core.windows.net; connect-src 'self' ipc: http://ipc.localhost data: blob: https://fonts.googleapis.com https://fonts.gstatic.com https://diamondcoreprocessor.com https://*.diamondcoreprocessor.com https://jwize.com https://content.jwize.com https://pluginthematrix.io https://storagehypercomb.blob.core.windows.net wss://jwize.com; worker-src 'self' blob:",
       "dangerousDisableAssetCspModification": [
         "style-src",
         "style-src-elem"

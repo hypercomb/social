@@ -15,6 +15,8 @@ export interface RevisionRow {
   label: string
   /** Deploy timestamp (ISO) for chronological context. */
   deployedAt?: string
+  /** Deploy-minted version counter (v1 = genesis). */
+  generation?: number
 }
 
 @Component({
@@ -37,6 +39,9 @@ export interface RevisionRow {
                 [class.active]="activeRootSig() === rev.rootSig"
                 [title]="rev.rootSig"
                 (click)="switchRevision.emit(rev.rootSig)">
+                @if (rev.generation) {
+                  <span class="revision-version">v{{ rev.generation }}</span>
+                }
                 <span class="revision-label">{{ rev.label }}</span>
                 @if (rev.deployedAt) {
                   <span class="revision-time">{{ deployed(rev.deployedAt) }}</span>
@@ -97,6 +102,14 @@ export interface RevisionRow {
     .revision-item.active {
       background: var(--dcp-accent-tint);
       border-color: var(--dcp-accent);
+    }
+
+    .revision-version {
+      font-family: var(--hc-mono);
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--dcp-accent);
+      flex-shrink: 0;
     }
 
     .revision-label {

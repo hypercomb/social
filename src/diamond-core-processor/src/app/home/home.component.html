@@ -110,6 +110,27 @@
       }
     </section>
 
+    <!-- Client registry — the client installs this DCP has seen (each
+         browser, each native instance: separate storage worlds, separately
+         versioned). Identity arrives via the handoff hash; the version is
+         the client's last-reported package resolved to its generation. -->
+    @if (clients().length) {
+      <section class="home-clients" aria-label="Client installs">
+        <span class="home-clients-title">Clients</span>
+        @for (client of clients(); track client.id) {
+          <span class="home-client" [title]="client.id">
+            <strong>{{ client.name }}</strong>
+            <span class="home-client-platform">{{ client.platform }}</span>
+            @if (clientVersion(client)) {
+              <span class="home-client-version">{{ clientVersion(client) }}</span>
+            }
+            <button type="button" class="home-client-forget"
+              (click)="forgetClient(client)" title="Forget this client">×</button>
+          </span>
+        }
+      </section>
+    }
+
     <!-- First-run orientation — the visible tier of the explanation that
          otherwise lives only in hover hints. Dismiss persists locally
          (participant decoration, never in any lineage). -->
@@ -222,6 +243,9 @@
                     (click)="toggleOverwrite()"
                     [title]="'dcp.overwrite-hint' | t">{{ 'dcp.overwrite' | t }}</button>
                 } @else {
+                  @if (section.generation) {
+                    <span class="version-generation" [title]="'deploy version ' + section.generation">v{{ section.generation }}</span>
+                  }
                   <button class="version-name" [title]="section.rootSig"
                     (click)="startLabelEdit(section)">{{ displayLabel(section) }}</button>
                   @if (deployedDisplay(section)) {

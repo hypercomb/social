@@ -118,50 +118,83 @@ export const flowerIndexes = (
   coordToIndex: Map<string, number>,
 ): number[] => coordsToIndexes(flowerCoords(count), coordToIndex)
 
-// ── Three lanes ─────────────────────────────────────────────────────
+// ── Lanes (the mobile legibility ladder) ────────────────────────────
 //
 // A readable, scrollable strip rather than a block which gets smaller as it
-// grows. Point-top is the default and uses three columns filled top→bottom.
-// An explicit flat-top preference uses the natural 3-2-3-2-3 packing across
-// the strip: a column of three, then two cells nested in its gaps, then three
-// again.
+// grows. Lanes always run ACROSS the short axis of the screen and the strip
+// scrolls along the LONG one — portrait gives `lanes` point-top columns
+// filled top→bottom and scrolls up/down; landscape gives the same lanes
+// turned on their side (flat-top, nested `lanes` / `lanes - 1` columns) and
+// scrolls left→right. Same reading, rotated with the device: the tile width
+// is always a known fraction of the SHORT dimension, so text size is a
+// choice rather than an accident of where the last pinch landed.
+//
+// `flatTop` therefore means "the strip runs left↔right" — the two are one
+// decision, because only flat-top hexes pack into straight horizontal lanes
+// and only point-top hexes pack into straight vertical ones.
+//
+// The lane COUNT is the phone's zoom control: fewer lanes ⇒ wider hexes ⇒
+// bigger label, bigger picture, readable notes. Three is the scan step, one
+// is the read step. The count is bounded here so no caller can mint a lane
+// arrangement the ladder cannot walk back.
 
-export const threeLaneCoords = (count: number, flatTop: boolean): AxialLike[] => {
+export const LANE_MIN = 1
+export const LANE_MAX = 3
+export const LANE_DEFAULT = 3
+
+export const clampLanes = (lanes: number): number =>
+  Math.min(LANE_MAX, Math.max(LANE_MIN, Math.round(Number.isFinite(lanes) ? lanes : LANE_DEFAULT)))
+
+export const laneCoords = (count: number, lanes: number, flatTop: boolean): AxialLike[] => {
   const n = Math.max(0, Math.floor(count))
   if (n === 0) return []
+  const lanesN = clampLanes(lanes)
 
   const coords: AxialLike[] = []
   if (flatTop) {
-    // Number of alternating columns needed: pairs hold 3 + 2 tiles.
-    const pairs = Math.floor(n / 5)
-    const remainder = n % 5
-    const cols = pairs * 2 + (remainder > 3 ? 2 : remainder > 0 ? 1 : 0)
-    // Begin on an even q so the first column is the full three. Pick the
+    // A single lane is a straight line — the nested/tucked column has no
+    // meaning there, and `lanes - 1 === 0` would produce empty columns.
+    if (lanesN === 1) {
+      const q0 = -Math.floor((n - 1) / 2)
+      for (let col = 0; col < n; col++) {
+        const q = q0 + col
+        coords.push({ q, r: -Math.floor(q / 2) })
+      }
+      return coords
+    }
+    // Number of alternating columns needed: pairs hold `lanes` + `lanes - 1`.
+    const per = lanesN + (lanesN - 1)
+    const pairs = Math.floor(n / per)
+    const remainder = n % per
+    const cols = pairs * 2 + (remainder > lanesN ? 2 : remainder > 0 ? 1 : 0)
+    // Begin on an even q so the first column is the full one. Pick the
     // even origin nearest the centred position; zoom-to-lanes performs the
     // final exact screen centring.
     const q0 = Math.round((-Math.max(0, cols - 1) / 2) / 2) * 2
     let placed = 0
     for (let col = 0; col < cols && placed < n; col++) {
       const q = q0 + col
-      const capacity = col % 2 === 0 ? 3 : 2
+      const full = col % 2 === 0
+      const capacity = full ? lanesN : lanesN - 1
       for (let slot = 0; slot < capacity && placed < n; slot++) {
-        // Flat-top screen y is r + q/2. Even/full columns land at
-        // -1,0,1; odd/tucked columns land halfway between at -0.5,0.5.
-        const r = slot - 1 - Math.floor(q / 2)
+        // Flat-top screen y is r + q/2. Full columns are centred on the
+        // strip; tucked columns land halfway between their neighbours.
+        const r = slot - Math.floor(lanesN / 2) - Math.floor(q / 2)
         coords.push({ q, r })
         placed++
       }
     }
   } else {
-    const rows = Math.ceil(n / 3)
+    const rows = Math.ceil(n / lanesN)
     const r0 = -Math.floor(rows / 2)
-    for (let col = 0; col < 3; col++) {
+    const c0 = -Math.floor((lanesN - 1) / 2)
+    for (let col = 0; col < lanesN; col++) {
       for (let row = 0; row < rows; row++) {
         const ordinal = col * rows + row
         if (ordinal >= n) break
         const r = r0 + row
-        // odd-r offset → axial; three visually straight vertical columns.
-        const q = col - 1 - Math.floor(r / 2)
+        // odd-r offset → axial; visually straight vertical columns.
+        const q = c0 + col - Math.floor(r / 2)
         coords.push({ q, r })
       }
     }
@@ -169,14 +202,32 @@ export const threeLaneCoords = (count: number, flatTop: boolean): AxialLike[] =>
   return coords
 }
 
+/** Back-compat name for the three-lane case; the ladder generalises it. */
+export const threeLaneCoords = (count: number, flatTop: boolean): AxialLike[] =>
+  laneCoords(count, 3, flatTop)
+
+const flatTopPreferred = (): boolean =>
+  typeof window !== 'undefined'
+  && window.localStorage?.getItem('hc:hex-orientation') === 'flat-top'
+
+/** `horizontal` — the strip runs left↔right (flat-top hexes, the landscape
+ *  reading direction). Omitted, it follows the participant's standing hex
+ *  orientation, which is what the desktop palette entry wants. */
+export const laneIndexes = (
+  count: number,
+  coordToIndex: Map<string, number>,
+  lanes: number,
+  horizontal?: boolean,
+): number[] =>
+  coordsToIndexes(
+    laneCoords(count, lanes, horizontal ?? flatTopPreferred()),
+    coordToIndex,
+  )
+
 export const threeLaneIndexes = (
   count: number,
   coordToIndex: Map<string, number>,
-): number[] => {
-  const flatTop = typeof window !== 'undefined'
-    && window.localStorage?.getItem('hc:hex-orientation') === 'flat-top'
-  return coordsToIndexes(threeLaneCoords(count, flatTop), coordToIndex)
-}
+): number[] => laneIndexes(count, coordToIndex, LANE_DEFAULT)
 
 // ── Apply to existing tiles ──────────────────────────────────────────
 //

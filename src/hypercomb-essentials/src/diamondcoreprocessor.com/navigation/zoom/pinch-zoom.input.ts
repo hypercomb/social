@@ -4,9 +4,19 @@
 // TouchGestureCoordinator calls pinchUpdate() with two touch points
 // when the gesture is classified as PINCH.
 
+import { EffectBus } from '@hypercomb/core'
+import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
+
 type Point = { x: number; y: number }
 
+// In lane mode free zoom is off — the legibility ladder owns scale, so a
+// pinch STEPS it instead. The cumulative ratio since the last step must
+// cross this much before a rung changes: each rung re-arranges tiles and
+// commits, so a jittery finger must never mint a run of layers.
+const LADDER_RATIO = 1.35
+
 export class PinchZoomInput {
+  #ladderRatio = 1
   #zoom: {
     zoomByFactor: (factor: number, pivot: Point) => void
     zoomToFit?: () => void
@@ -53,6 +63,20 @@ export class PinchZoomInput {
     // We scale the deviation from 1.0 by the sensitivity
     const deviation = factor - 1.0
     factor = 1.0 + deviation * sensitivity
+
+    if (getLaneScrollAxis()) {
+      // Spread = read (fewer, wider lanes); squeeze = scan (more lanes).
+      this.#ladderRatio *= factor
+      if (this.#ladderRatio >= LADDER_RATIO) {
+        this.#ladderRatio = 1
+        EffectBus.emit('lanes:step', { dir: -1 })
+      } else if (this.#ladderRatio <= 1 / LADDER_RATIO) {
+        this.#ladderRatio = 1
+        EffectBus.emit('lanes:step', { dir: +1 })
+      }
+      return { distance: dist }
+    }
+    this.#ladderRatio = 1
 
     const pivot = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
 

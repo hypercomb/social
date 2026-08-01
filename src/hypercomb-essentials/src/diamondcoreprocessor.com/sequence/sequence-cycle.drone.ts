@@ -42,13 +42,21 @@ import {
   buildCoordToIndex,
   applyToExisting,
   BUILTIN_ARRANGEMENTS,
+  laneIndexes,
 } from './arrangements.js'
 import {
   writeSequenceTarget,
   listSequenceTargetHere,
   removeSequenceTarget,
 } from './sequence-target.js'
-import { setLaneScrollAxis, type LaneScrollAxis } from './lane-viewport-mode.js'
+import {
+  setLaneScrollAxis,
+  getLaneCount,
+  setLaneCount,
+  stepLaneCount,
+  laneCountAtEdge,
+  type LaneScrollAxis,
+} from './lane-viewport-mode.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[] }
 
@@ -83,8 +91,11 @@ export class SequenceCycleDrone extends Drone {
   protected override listens = [
     'render:cell-count', 'render:set-orientation',
     'keymap:invoke', 'sequence:select', 'sequence:edit', 'mobile:mode',
+    'lanes:set', 'lanes:step', 'lanes:off',
   ]
-  protected override emits = ['arrange:preview', 'cell:reorder', 'toast:show']
+  protected override emits = [
+    'arrange:preview', 'cell:reorder', 'toast:show', 'lanes:changed',
+  ]
 
   // Live snapshot of the current location's tiles (label ↔ axial coord),
   // tracked off render:cell-count exactly like MoveDrone.
@@ -102,6 +113,12 @@ export class SequenceCycleDrone extends Drone {
   // global action, never a property of the tile/location being visited.
   #laneLocation: string | null = null
   #flat = localStorage.getItem('hc:hex-orientation') === 'flat-top'
+  // The participant's standing hex orientation, parked while lanes borrows it.
+  #orientationBeforeLanes: boolean | null = null
+  // Set when WE emit render:set-orientation, so the handler ignores its own
+  // echo instead of re-entering the cycle it was already inside.
+  #orientationEcho = false
+  #laneHorizontalApplied: boolean | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -114,13 +131,46 @@ export class SequenceCycleDrone extends Drone {
     })
     this.onEffect<{ flat?: boolean }>('render:set-orientation', ({ flat }) => {
       this.#flat = !!flat
+      // Our own alignment already re-packs; re-entering here would arrange
+      // twice and commit twice for one act.
+      if (this.#orientationEcho) {
+        this.#orientationEcho = false
+        return
+      }
       if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) return
       this.#threeLaneAxis = this.#laneAxis()
       setLaneScrollAxis(this.#threeLaneAxis)
       void this.#cycle(+1, 'three-lanes')
     })
+    window.addEventListener('resize', this.#onViewportResize)
+    window.addEventListener('orientationchange', this.#onViewportResize)
     this.onEffect<{ active?: boolean }>('mobile:mode', ({ active }) => {
       if (active) return
+      this.#clearLaneMode()
+    })
+
+    // ── the legibility ladder ─────────────────────────────────────────
+    // Fewer lanes ⇒ wider hexes ⇒ readable name, picture and notes; more
+    // lanes ⇒ scan. The rung is a participant preference, but the
+    // arrangement it produces is ordinary tile truth committed once per
+    // step — so the ladder is stepped by deliberate acts (a button, a
+    // settled pinch, `/lanes 1`), never continuously by a moving finger.
+    this.onEffect<{ lanes?: number }>('lanes:set', ({ lanes }) => {
+      if (!this.#requireMobile()) return
+      setLaneCount(Number(lanes))
+      void this.#cycle(+1, 'three-lanes')
+    })
+    this.onEffect<{ dir?: number }>('lanes:step', ({ dir }) => {
+      if (!this.#requireMobile()) return
+      const step = Number(dir) < 0 ? -1 : +1
+      if (laneCountAtEdge(step)) {
+        this.#publishLanes(true)
+        return
+      }
+      stepLaneCount(step)
+      void this.#cycle(+1, 'three-lanes')
+    })
+    this.onEffect('lanes:off', () => {
       this.#clearLaneMode()
     })
 
@@ -203,8 +253,11 @@ export class SequenceCycleDrone extends Drone {
         // Point-top is the default vertical strip. Flat-top remains available
         // only when the participant explicitly rotates the hive.
         this.#laneLocation = locationKey
+        this.#alignOrientation()
+        this.#laneHorizontalApplied = this.#laneHorizontal()
         this.#threeLaneAxis = this.#laneAxis()
         setLaneScrollAxis(this.#threeLaneAxis)
+        this.#publishLanes(true)
       } else {
         this.#clearLaneMode()
       }
@@ -273,7 +326,62 @@ export class SequenceCycleDrone extends Drone {
     }, 80)
   }
 
-  #laneAxis = (): LaneScrollAxis => this.#flat ? 'x' : 'y'
+  // ── lane direction follows the DEVICE, not the hex preference ───────
+  //
+  // Lanes run across the short axis; the strip scrolls along the long one.
+  // Portrait ⇒ point-top columns, scroll y. Landscape ⇒ the same lanes
+  // rotated: flat-top columns packed into a left↔right strip, scroll x.
+  // Keeping the portrait packing in landscape gave very wide tiles that
+  // still only moved up and down — the strip pointing the wrong way.
+  #landscape = (): boolean =>
+    typeof window !== 'undefined' && window.innerWidth > window.innerHeight
+
+  #laneHorizontal = (): boolean => this.#landscape()
+
+  #laneAxis = (): LaneScrollAxis => this.#laneHorizontal() ? 'x' : 'y'
+
+  /** Lanes owns the hex orientation while it owns the viewport: a horizontal
+   *  strip is only straight with flat-top hexes, a vertical one only with
+   *  point-top. The participant's standing choice is remembered and put back
+   *  when lane mode is released. */
+  #alignOrientation = (): void => {
+    const wantFlat = this.#laneHorizontal()
+    if (this.#flat === wantFlat) return
+    if (this.#orientationBeforeLanes === null) this.#orientationBeforeLanes = this.#flat
+    this.#flat = wantFlat
+    this.#orientationEcho = true
+    try {
+      localStorage.setItem('hc:hex-orientation', wantFlat ? 'flat-top' : 'point-top')
+    } catch {
+      /* storage disabled — the orientation still applies for this session */
+    }
+    this.emitEffect('render:set-orientation', { flat: wantFlat })
+  }
+
+  #restoreOrientation = (): void => {
+    const previous = this.#orientationBeforeLanes
+    this.#orientationBeforeLanes = null
+    if (previous === null || previous === this.#flat) return
+    this.#flat = previous
+    this.#orientationEcho = true
+    try {
+      localStorage.setItem('hc:hex-orientation', previous ? 'flat-top' : 'point-top')
+    } catch {
+      /* ignore */
+    }
+    this.emitEffect('render:set-orientation', { flat: previous })
+  }
+
+  /** Device rotation re-lays the strip. The viewport flip is the signal —
+   *  MediaQueryList change events are not delivered under an emulated
+   *  resize, and a resize is exactly what a rotation is. */
+  #onViewportResize = (): void => {
+    if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) return
+    const horizontal = this.#laneHorizontal()
+    if (horizontal === this.#laneHorizontalApplied) return
+    this.#laneHorizontalApplied = horizontal
+    void this.#cycle(+1, 'three-lanes')
+  }
 
   #locationKey = (): string => {
     const lineage = this.resolve<LineageLike>('lineage')
@@ -287,9 +395,30 @@ export class SequenceCycleDrone extends Drone {
     window.ioc.get<{ active?: boolean }>('@diamondcoreprocessor.com/MobileMode')?.active === true
 
   #clearLaneMode = (): void => {
+    const wasActive = this.#laneLocation !== null
     this.#laneLocation = null
     this.#threeLaneAxis = null
+    this.#laneHorizontalApplied = null
     setLaneScrollAxis(null)
+    if (wasActive) {
+      this.#restoreOrientation()
+      this.#publishLanes(false)
+    }
+  }
+
+  /** Lanes is a mobile act. A stale invocation on desktop drops the
+   *  constraint and says so, rather than half-applying the ladder. */
+  #requireMobile = (): boolean => {
+    if (this.#mobileMode()) return true
+    this.#clearLaneMode()
+    this.#toastLanesMobileOnly()
+    return false
+  }
+
+  /** The rung, for anything that shows it (the mobile bar's lane button).
+   *  Replayed by EffectBus, so chrome mounted later still reads it. */
+  #publishLanes = (active: boolean): void => {
+    this.emitEffect('lanes:changed', { active, lanes: getLaneCount() })
   }
 
   /** A lane action owns only the view it was explicitly invoked on. Arriving
@@ -335,6 +464,11 @@ export class SequenceCycleDrone extends Drone {
     coordToIndex: Map<string, number>,
   ): number[] | null => {
     if (entry.kind === 'builtin') {
+      // Lanes is the one built-in whose shape is a live preference: the
+      // ladder rung decides how many columns it packs into.
+      if (entry.id === 'three-lanes') {
+        return laneIndexes(count, coordToIndex, getLaneCount(), this.#laneHorizontal())
+      }
       const builtin = BUILTIN_ARRANGEMENTS.find((b) => b.id === entry.id)
       return builtin ? builtin.generate(count, coordToIndex) : null
     }
@@ -474,6 +608,16 @@ export class SequenceCycleDrone extends Drone {
 
   #toast = (entry: CycleEntry): void => {
     const i18n = window.ioc.get<I18nLike>('@hypercomb.social/I18n')
+    if (entry.kind === 'builtin' && entry.id === 'three-lanes') {
+      // The rung is what changed, so the rung is what the toast names.
+      const count = getLaneCount()
+      const t = i18n?.t ? i18n.t('arrange.lanes', { count }) : ''
+      const message = t && t !== 'arrange.lanes'
+        ? t
+        : count === 1 ? 'One lane — reading' : `${count} lanes`
+      this.emitEffect('toast:show', { type: 'tip', message })
+      return
+    }
     const name =
       entry.labelKey && i18n?.t
         ? (() => {

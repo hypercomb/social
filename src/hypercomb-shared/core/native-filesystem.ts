@@ -485,6 +485,71 @@ export const nativeRoot = (): NativeRootDirectory | null => {
  * Must run before any code that might capture the original function —
  * i.e. first thing in the shell's main module.
  */
+/**
+ * Answer the service worker's byte requests from the native store.
+ *
+ * The SW serves `/opfs/**` modules/layers and `/@resource/` site composition
+ * by reading OPFS — which, inside the native shell, is empty (the hive lives
+ * in the native store, and the SW is a separate global where neither the
+ * Tauri bridge nor the storage override exists). On a miss the SW posts
+ * `hc:bytes-request` over a MessageChannel; this listener resolves it:
+ *
+ *   kind 'content'          → content by signature (layers, site resources)
+ *   kind 'dir'  __bees__            → sign('bees') pool member
+ *               __dependencies__    → sign('dependencies') pool member
+ *               __layers__ <sig>.json → content by signature (frozen URL shape)
+ *               <64-hex>            → that sig-dir's member (bag or pool)
+ *
+ * No response in a plain browser (this never installs), so the SW's timeout
+ * preserves web behavior exactly.
+ */
+export const installNativeSwBridge = (): boolean => {
+  const bridge = ambientBridge()
+  if (!bridge || !('serviceWorker' in navigator)) return false
+
+  const readFor = async (kind: string, dir: string, name: string): Promise<Uint8Array | null> => {
+    const content = async (sig: string): Promise<Uint8Array | null> => {
+      if (!SIG.test(sig)) return null
+      try {
+        const buf = await bridge.invoke('content_get_raw', { sig })
+        return new Uint8Array(buf as ArrayBuffer)
+      } catch { return null }
+    }
+    const pool = async (meaning: string, key: string): Promise<Uint8Array | null> => {
+      const bytes = await bridge.invoke('pool_get', { meaning, key }).catch(() => null)
+      return bytes ? Uint8Array.from(bytes as number[]) : null
+    }
+
+    if (kind === 'content') return content(dir)
+    if (kind !== 'dir') return null
+    if (dir === '__bees__') return pool('bees', name)
+    if (dir === '__dependencies__') return pool('dependencies', name)
+    if (dir === '__layers__') return content(name.replace(/\.json$/, ''))
+    if (SIG.test(dir)) {
+      try {
+        const buf = await bridge.invoke('dir_get_raw', { sig: dir, name })
+        return new Uint8Array(buf as ArrayBuffer)
+      } catch { return null }
+    }
+    return null
+  }
+
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    const data = event.data as { type?: string; kind?: string; dir?: string; name?: string }
+    if (data?.type !== 'hc:bytes-request' || !event.ports[0]) return
+    void (async () => {
+      const bytes = await readFor(data.kind ?? '', data.dir ?? '', data.name ?? '')
+      if (bytes) {
+        // Transfer, don't copy — bee bundles and images are not small.
+        event.ports[0].postMessage({ bytes: bytes.buffer }, [bytes.buffer])
+      } else {
+        event.ports[0].postMessage({ bytes: null })
+      }
+    })()
+  })
+  return true
+}
+
 export const installNativeStorageOverride = (): boolean => {
   const root = nativeRoot()
   if (!root) return false

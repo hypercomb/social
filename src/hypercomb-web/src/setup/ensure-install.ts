@@ -355,7 +355,17 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       // SPA fallback guard: an extension-less flat /content/<sig> on a
       // dev-server origin returns index.html with 200. Sig-addressed
       // bytes are never text/html.
-      if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
+      //
+      // NATIVE EXCEPTION: Tauri's asset server guesses mime by file
+      // extension, so every extension-less sig file arrives as text/html —
+      // the guard rejected all 203 bundled files and the install reported
+      // 0/107 with no error (verified live: correct bytes, wrong header).
+      // There is no SPA fallback inside the native shell, and the sha256
+      // check in applyVerifiedFiles is the real gate — index.html bytes
+      // could never hash to a declared sig. Let the hash decide there.
+      const { nativeAvailable } = await import('@hypercomb/shared/core/native-filesystem')
+      if (!nativeAvailable() &&
+          (res.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
       return await res.arrayBuffer()
     } catch {
       return null
