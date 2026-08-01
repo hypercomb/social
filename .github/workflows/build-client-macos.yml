@@ -137,8 +137,13 @@ jobs:
       # Secrets are unavailable to PRs from forks, so those simply produce
       # unsigned builds — correct, not a misconfiguration.
 
+      # Run from `app/`, the directory holding BOTH tauri.conf.json and the
+      # crate's Cargo.toml. The CLI resolves the project from its working
+      # directory, and that is also where it looks for the platform overlay
+      # (tauri.macos.conf.json) to merge. Invoking from the workspace root with
+      # a --config path is the arrangement that misresolves.
       - name: Build the app bundle
-        working-directory: src/hypercomb-client
+        working-directory: src/hypercomb-client/app
         env:
           # Signing. Absent => unsigned build.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -164,9 +169,9 @@ jobs:
           fi
 
           if [ "${{ inputs.universal }}" = "true" ]; then
-            npx --yes @tauri-apps/cli@^2 build --config app/tauri.conf.json --target universal-apple-darwin
+            npx --yes @tauri-apps/cli@^2 build --target universal-apple-darwin
           else
-            npx --yes @tauri-apps/cli@^2 build --config app/tauri.conf.json
+            npx --yes @tauri-apps/cli@^2 build
           fi
 
       # Verify against the SYSTEM's own opinion, not our intent. `spctl` is the
