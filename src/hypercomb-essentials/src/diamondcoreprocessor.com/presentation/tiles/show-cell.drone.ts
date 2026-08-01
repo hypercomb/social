@@ -39,13 +39,17 @@ const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } cat
 // for debugging the plain own-image shade: localStorage 'hc:child-shade' = '0'.
 const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade') !== '0' } catch { return true } })()
 
-// READINESS SHADE — ON, and purely informational. Dim means "the inside hasn't
-// arrived yet, opening this will make you wait"; it has never meant "you may
-// not open this". Navigation consumes the same predicate only to know which
-// destination to push to the FRONT of the preloader's line when it is entered.
-// Hover may lift opacity as feedback without touching the predicate itself.
-// Escape hatch for debugging: localStorage 'hc:tile-shade' = '0'.
-const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-shade') !== '0' } catch { return true } })()
+// READINESS SHADE — OFF by default, matching main's standing ruling (shade
+// off, navigation never blocked). Beyond the ruling, the shade had a real
+// failure mode: on a first native-client boot the child-warm queue has a long
+// tail, the release repaint lagged, and every branch tile sat dark-shaded
+// indefinitely — reading as "no background images at all" until any forced
+// render (e.g. the rotate button) re-evaluated readiness and everything
+// brightened at once. The readiness PREDICATE is untouched: the preloader
+// still uses it to front-queue an entered destination; only the dimming is
+// gone. Escape hatch to re-enable for debugging: localStorage
+// 'hc:tile-shade' = '1'.
+const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-shade') === '1' } catch { return false } })()
 /** Already-baked label used for the first optimistic frame. The real label's
  *  SDF is rasterized after the commit settles, never in the input frame. */
 const PENDING_CELL_LABEL = '\u2026'
