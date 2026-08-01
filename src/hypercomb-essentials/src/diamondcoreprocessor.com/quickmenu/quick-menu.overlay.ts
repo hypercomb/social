@@ -304,6 +304,24 @@ export class QuickMenuOverlay {
     this.#style('centre', elements, this.#highlight === 'centre')
   }
 
+  /**
+   * Relabel the centre for THIS summon only — the tile a touch long-press was
+   * held over, so the zero-travel slot names its subject instead of the ring's
+   * generic verb. The built subtree is shared and cached, so the override is
+   * written to the live text node only; the next `paint` restores every slot
+   * from its built label, which is what keeps a per-summon word out of the
+   * cache. Truncated: a slot is one hexagon wide, and a tile name is not.
+   */
+  setCentreOverride(label: string | null): void {
+    if (!this.#active) return
+    const elements = this.#active.slots.get('centre')
+    if (!elements) return
+    const shown = label ? (label.length > 12 ? label.slice(0, 11) + '…' : label) : elements.label
+    this.#centreLabel = shown
+    if (this.#cancelArmed) return
+    elements.text.textContent = shown
+  }
+
   #cancelLabel = 'cancel'
 
   /** Supply the localised word for the armed centre. */

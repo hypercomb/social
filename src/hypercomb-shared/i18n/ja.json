@@ -558,6 +558,8 @@
   "features.review.back": "戻る",
   "tile-view.enter": "中へ入る",
   "tile-view.select": "選択",
+  "tile-view.previous": "前のタイル",
+  "tile-view.next": "次のタイル",
   "features.section.applied": "このレイヤー",
   "features.section.available": "追加できる機能",
   "features.hide": "オフにする",

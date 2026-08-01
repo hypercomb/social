@@ -1,6 +1,16 @@
 // diamondcoreprocessor.com/presentation/tiles/tile-view.drone.ts
 //
-// THE DEFAULT FULLSCREEN TILE VIEW — what a tap on a plain content tile opens.
+// THE DEFAULT FULLSCREEN TILE VIEW — the tile's own screen, on a phone.
+//
+// HOW IT OPENS: hold a tile and let go without moving. The touch long-press
+// summons the quick-menu ring, and when the press landed on a tile the ring's
+// zero-travel centre is this view — so the same gesture that reaches the
+// hive-wide verbs (flick to a neighbour) reaches the tile's own (just let go).
+// A plain TAP no longer opens it: a tap goes INTO the tile, everywhere.
+//
+// It is not one tile, either. The layer you were looking at is a row, and the
+// view walks it — swipe left/right, or the next/previous chips — without
+// closing and reopening.
 //
 // On desktop every per-tile action (edit, adopt, share, public/private) lives on
 // the HOVER action band. A stationary touch produces no hover, so on a phone
@@ -51,6 +61,9 @@ const TAP = '3.25rem'
  *  close-up must be the same shape as the tile you tapped. */
 const HEX_CLIP = 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)'
 const HEX_RATIO = '0.866'
+/** Travel that makes a horizontal drag a step to the next tile. Roughly a
+ *  thumb's width — under it, a finger resting and lifting is still a tap. */
+const SWIPE_PX = 56
 
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
@@ -108,6 +121,17 @@ export class TileViewDrone extends Drone {
    *  the verb the close-up would be a dead end for exactly the tiles that have
    *  somewhere to go. */
   #branches = new Set<string>()
+  /** Every tile the current render put on screen, in render order — the row
+   *  the next/previous verbs and the sideways swipe walk along. The close-up
+   *  is one tile at a time, but the LAYER is what you were looking at, so
+   *  leaving the view to reach the tile beside it is a round trip the hand
+   *  should never have to make. */
+  #siblings: string[] = []
+  /** An in-flight horizontal swipe over the view. */
+  #swipe: { pointerId: number; x: number; y: number } | null = null
+  /** Set by a swipe that committed, so the trailing click never also fires the
+   *  chip the finger happened to start on. */
+  #swiped = false
   /** True while we hold the synthetic history entry that catches BACK. */
   #historyTrap = false
   /** Live orientation watch, bound only while the view is up. */
@@ -131,11 +155,13 @@ export class TileViewDrone extends Drone {
     // Adoptability rides the render pass: `external` means "on screen but not a
     // child of my layer" — the same signal that flips the desktop band to its
     // peer profile. tile:hover carries no such flag, so this is the only source.
-    this.onEffect<{ externalLabels?: unknown; branchLabels?: unknown }>('render:cell-count', payload => {
+    this.onEffect<{ externalLabels?: unknown; branchLabels?: unknown; labels?: unknown }>('render:cell-count', payload => {
       const list = Array.isArray(payload?.externalLabels) ? payload.externalLabels : []
       this.#external = new Set(list.map(s => String(s)))
       const branches = Array.isArray(payload?.branchLabels) ? payload.branchLabels : []
       this.#branches = new Set(branches.map(s => String(s)))
+      const labels = Array.isArray(payload?.labels) ? payload.labels : []
+      this.#siblings = labels.map(s => String(s)).filter(Boolean)
     })
 
     // The tile stopped existing under us (deleted, or navigated away from).
@@ -180,16 +206,7 @@ export class TileViewDrone extends Drone {
     if (!this.#label) return
     this.#label = null
     this.#segments = []
-    this.#resizeObserver?.disconnect()
-    this.#resizeObserver = null
-    if (this.#host) {
-      this.#host.remove()
-      this.#host = null
-    }
-    for (const url of this.#urls) {
-      try { URL.revokeObjectURL(url) } catch { /* noop */ }
-    }
-    this.#urls = []
+    this.#teardownDom()
     if (this.#viewActive) this.#setViewActive(false)
     // Drop our synthetic entry so the history stack is exactly as we found it.
     // Guard first: when BACK is what closed us, the entry is already gone and a
@@ -200,6 +217,95 @@ export class TileViewDrone extends Drone {
     }
   }
 
+  // ── walking the row ────────────────────────────────────────
+
+  /** The tile `delta` places along the render order, wrapping at both ends.
+   *  Null when there is nowhere to go (one tile on the layer, or this tile is
+   *  no longer in it — a delete under the view, say). */
+  #sibling(delta: number): string | null {
+    const label = this.#label
+    if (!label || this.#siblings.length < 2) return null
+    const at = this.#siblings.indexOf(label)
+    if (at < 0) return null
+    const count = this.#siblings.length
+    const next = this.#siblings[(at + delta % count + count) % count]
+    return next && next !== label ? next : null
+  }
+
+  /** Move the close-up to another tile on the same layer WITHOUT closing: the
+   *  history trap and the chrome takeover both survive, so a walk along the row
+   *  is one view being re-pointed rather than a stack of opens the BACK button
+   *  then has to unwind. */
+  #step(delta: number): void {
+    const next = this.#sibling(delta)
+    if (!next) return
+    this.#label = next
+    this.#teardownDom()
+    this.#mount()
+    void this.#paintPicture(next)
+  }
+
+  /** Drop the mounted card and everything it owns, leaving the takeover, the
+   *  history trap and `#label` alone. Shared by `#step` and `close`. */
+  #teardownDom(): void {
+    this.#resizeObserver?.disconnect()
+    this.#resizeObserver = null
+    this.#swipe = null
+    if (this.#host) {
+      this.#host.remove()
+      this.#host = null
+    }
+    for (const url of this.#urls) {
+      try { URL.revokeObjectURL(url) } catch { /* noop */ }
+    }
+    this.#urls = []
+  }
+
+  /**
+   * SWIPE SIDEWAYS TO CHANGE TILE. Bound on the host, so it works from
+   * anywhere on the screen — including across the picture, which is the
+   * biggest target and the one a thumb finds without looking.
+   *
+   * Committed on the RELEASE, on a travel threshold with a horizontal bias:
+   * a mostly-vertical drag is a scroll of the notes and must not become a
+   * step, and a drag that starts on a chip must not fire the chip. Nothing is
+   * consumed until the swipe has actually committed, so a plain tap on a chip
+   * is untouched.
+   */
+  #bindSwipe(host: HTMLElement): void {
+    host.addEventListener('pointerdown', e => {
+      this.#swipe = { pointerId: e.pointerId, x: e.clientX, y: e.clientY }
+      this.#swiped = false
+    })
+    const finish = (e: PointerEvent): void => {
+      const swipe = this.#swipe
+      if (!swipe || swipe.pointerId !== e.pointerId) return
+      this.#swipe = null
+      const dx = e.clientX - swipe.x
+      const dy = e.clientY - swipe.y
+      if (Math.abs(dx) < SWIPE_PX || Math.abs(dx) < Math.abs(dy) * 1.4) {
+        // Not a swipe. A still press that began AND ended on the backdrop is
+        // the way out.
+        if (e.target === host && Math.abs(dx) < SWIPE_PX && Math.abs(dy) < SWIPE_PX) this.close()
+        return
+      }
+      this.#swiped = true
+      // Drag LEFT to bring the next tile in from the right — the direction the
+      // content moves, which is the one every deck and gallery has taught.
+      this.#step(dx < 0 ? 1 : -1)
+    }
+    host.addEventListener('pointerup', finish)
+    host.addEventListener('pointercancel', () => { this.#swipe = null })
+    // The chip a swipe started on would otherwise fire on the way out. Capture
+    // phase: the swallow has to beat the button's own listener.
+    host.addEventListener('click', e => {
+      if (!this.#swiped) return
+      this.#swiped = false
+      e.preventDefault()
+      e.stopPropagation()
+    }, true)
+  }
+
   #onPopState = (): void => {
     if (!this.#label) return
     // Our entry is already popped — closing must not pop again.
@@ -208,7 +314,16 @@ export class TileViewDrone extends Drone {
   }
 
   #onKeyDown = (e: KeyboardEvent): void => {
-    if (!this.#label || e.key !== 'Escape') return
+    if (!this.#label) return
+    // The arrows are the swipe, for a keyboard — same row, same order.
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      if (!this.#sibling(e.key === 'ArrowRight' ? 1 : -1)) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      this.#step(e.key === 'ArrowRight' ? 1 : -1)
+      return
+    }
+    if (e.key !== 'Escape') return
     e.preventDefault()
     e.stopImmediatePropagation()
     this.close()
@@ -235,10 +350,12 @@ export class TileViewDrone extends Drone {
       'max(0.9rem,env(safe-area-inset-bottom,0px)) max(0.9rem,env(safe-area-inset-left,0px));'
     host.setAttribute('data-consumes-wheel', '')
     // A tap on the backdrop closes; taps inside the card do not (the card stops
-    // the event). Pointerdown, not click, so it matches the bar's back button.
-    host.addEventListener('pointerdown', e => {
-      if (e.target === host) this.close()
-    })
+    // the event). On the RELEASE, not the press — the backdrop is the widest
+    // part of the screen and therefore where a sideways swipe most often
+    // starts, and a press-to-close would kill every one of those before the
+    // finger had travelled. #bindSwipe owns the release for exactly that
+    // reason, and calls this when the gesture turned out to be a tap.
+    this.#bindSwipe(host)
     document.body.appendChild(host)
     this.#host = host
     this.#setViewActive(true)
@@ -510,6 +627,20 @@ export class TileViewDrone extends Drone {
     for (const chip of chips) {
       if (chip.when && !chip.when()) continue
       row.appendChild(this.#chip(chip, label))
+    }
+    // THE ROW YOU CAME FROM, reachable without leaving. The swipe does the
+    // same thing and does it faster, but a swipe is invisible — these are how
+    // anyone finds out it is there. Hidden outright when there is nowhere to
+    // step, so a single-tile layer never offers a dead control.
+    for (const delta of [-1, 1] as const) {
+      if (!this.#sibling(delta)) continue
+      row.appendChild(this.#chip({
+        action: delta < 0 ? 'previous-tile' : 'next-tile',
+        glyph: delta < 0 ? 'chevron_left' : 'chevron_right',
+        labelKey: delta < 0 ? 'tile-view.previous' : 'tile-view.next',
+        fallback: delta < 0 ? 'previous' : 'next',
+        run: () => this.#step(delta),
+      }, label))
     }
     row.appendChild(this.#exitChip())
     return row

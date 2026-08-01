@@ -576,6 +576,8 @@
   "features.review.back": "Back",
   "tile-view.enter": "go inside",
   "tile-view.select": "select",
+  "tile-view.previous": "previous",
+  "tile-view.next": "next",
   "features.section.applied": "On this layer",
   "features.section.available": "Available to add",
   "features.hide": "turn off",

@@ -37,37 +37,28 @@ const NAV_GUARD_BACKSTOP_MS = 6000
 const TILE_ENTER_HOLD_MS = 450
 const TILE_ENTER_HOLD_JITTER_PX = 8
 
-// HOLD-A-PEER-TILE. On desktop every per-tile verb lives on the hover band, and
-// on a peer tile that band is where `adopt` lives. A finger produces no hover,
-// and a peer tile is a BRANCH — the press walks straight into the publisher's
-// tree — so on touch the band was structurally unreachable on exactly the tiles
-// whose whole point is being adopted. Holding one opens the touch band (the
-// fullscreen tile view, adopt chip and all); a plain tap still enters, on
-// release instead of on press.
+// ── The touch grammar ─────────────────────────────────────────────────
 //
-// Shorter than TILE_ENTER_HOLD_MS on purpose: it must beat the quick menu's
-// 380ms touch summon, so the hand gets the tile's own actions rather than the
-// hive-wide ring.
+//   tap        GO TO THE TILE — enter its layer, ON THE RELEASE, never the
+//              press. A childless tile enters its empty layer; there is no
+//              such thing as a tile a tap cannot walk into.
+//   hold still the quick-menu ring (quickmenu/quick-menu.input.ts, 380ms).
+//              Let go without moving and the ring's zero-travel slot opens
+//              THAT tile's own screen — picture, name, notes, actions. Flick
+//              instead and it is the ordinary hive-wide ring.
+//   hold+drag  move the tile (move/touch-move.input.ts)
 //
-// ── The touch grammar this establishes ────────────────────────────────
+// This drone therefore arms NO hold of its own on touch. It used to open the
+// tile screen from a 340ms hold deliberately timed to beat the ring, which
+// made two long presses on the same finger and left the ring unreachable over
+// a tile. One long press, one owner: the ring, which carries the tile screen
+// as its centre.
 //
-//   tap        enter the tile — ON THE RELEASE, never the press
-//   hold still open the tile's own screen (picture, name, notes, actions)
-//   hold+drag  move the tile (touch-move.input.ts)
-//
-// Entry MUST move to the release. A press that navigates on pointerdown
+// Entry MUST stay on the release. A press that navigates on pointerdown
 // consumes the pointer, and every hold watching it — drag-to-move, the
-// quick-menu ring, this one — dies with the consume before it can mature.
-// That is why a long-press on a phone did nothing at all: the view had
-// already changed under the finger. Nothing is lost by waiting for the
-// release; a tap still walks in, one gesture later than it used to.
-//
-// This began as a peer-tile-only hold, safe because move.drone.ts refuses
-// to drag a peer. On your OWN tiles drag-to-move is live at 300ms, so the
-// two are arbitrated by TRAVEL rather than by these timings alone — see
-// the `#armed` note in touch-move.input.ts.
-const TILE_ACTION_HOLD_MS = 340
-const TILE_ACTION_HOLD_JITTER_PX = 12
+// quick-menu ring — dies with the consume before it can mature. That is why a
+// long-press on a phone once did nothing at all: the view had already changed
+// under the finger.
 
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
@@ -368,8 +359,6 @@ export class TileOverlayDrone extends Drone {
     origin: { x: number; y: number }
     generation: number
     timer: ReturnType<typeof setTimeout>
-    releaseAction?: () => void
-    ready?: boolean
     /** Travel that cancels this hold. A finger rolls further than a mouse
      *  drifts, so the touch hold gets a wider box or it never survives. */
     jitter: number
@@ -2570,12 +2559,12 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // ANY tile under a finger: hold it for its own screen instead of entering.
-    // Entry is not lost — it moves to the release (#onClick's branch path), so
-    // a tap still walks in. Nothing is consumed while the hold is merely
-    // armed. See TILE_ACTION_HOLD_MS for why the release, not the press.
+    // A FINGER on a branch tile: do nothing on the press. Entry happens on the
+    // release (#onClick), the long press belongs to the quick-menu ring, and
+    // the drag belongs to touch-move — none of which survive this drone
+    // consuming the pointer here. See the touch grammar at the top.
     if (e.pointerType === 'touch') {
-      this.#beginActionHold(e, entry.label)
+      this.#cancelEnterHold()
       return
     }
 
@@ -2612,46 +2601,6 @@ export class TileOverlayDrone extends Drone {
       this.#navigateInto(label)
     }, TILE_ENTER_HOLD_MS)
     this.#enterHold = { label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation, timer, jitter: TILE_ENTER_HOLD_JITTER_PX }
-  }
-
-  /** Arms the hold that opens a tile's own screen. Rides the same #enterHold
-   *  slot as hold-to-enter — one hold at a time, one cancel path, and the
-   *  travel/release/cancel wiring already written for it applies unchanged. */
-  #beginActionHold(e: PointerEvent, label: string): void {
-    this.#cancelEnterHold()
-    const pointerId = e.pointerId
-    const generation = this.#mapGeneration
-    const timer = setTimeout(() => {
-      const hold = this.#enterHold
-      if (hold && hold.pointerId === pointerId) hold.ready = true
-    }, TILE_ACTION_HOLD_MS)
-    const releaseAction = (): void => {
-      if (generation !== this.#mapGeneration) return
-      if (this.#arrangeMode || this.#navigationBlocked) return
-      if (this.#editing || this.#editCooldown) return
-      if (this.#hasSelection || this.#picking || this.#touchDragging) return
-      if (this.#tagRemovalArmed || this.#tagApplyArmed) return
-      if (!this.#labelOnScreen(label)) return
-      this.#consumedPointerId = pointerId
-      this.#pressCapture = null
-      try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
-      this.emitEffect('tile:view-open', {
-        label,
-        segments: this.resolve<any>('lineage')?.explorerSegments?.() ?? [],
-      })
-    }
-    this.#enterHold = {
-      label, pointerId, origin: { x: e.clientX, y: e.clientY }, generation,
-      timer, jitter: TILE_ACTION_HOLD_JITTER_PX, releaseAction,
-    }
-  }
-
-  /** Does this label still resolve to a tile in the current map? */
-  #labelOnScreen(label: string): boolean {
-    for (const occupant of this.#occupiedByAxial.values()) {
-      if (occupant.label === label) return true
-    }
-    return false
   }
 
   #cancelEnterHold(): void {
@@ -2875,18 +2824,21 @@ export class TileOverlayDrone extends Drone {
       this.#navigateInto(entry.label)
     } else {
       // ── LEAF TILE ───────────────────────────────────────────
-      // On TOUCH the per-tile action band is
-      // unreachable (it is hover-derived), which left a plain leaf tile a dead
-      // end — `tile:action open` is consumed only by link and contact tiles, so
-      // tapping anything else did nothing at all. Open the default fullscreen
-      // tile view instead: picture, name, notes and thumb-sized actions.
-      // Mouse/pen keep the old behaviour — on desktop the hover band already
-      // carries every action and a fullscreen takeover would be in the way.
-      if (this.#pressWasTouch || this.#mobileMode()) {
-        this.emitEffect('tile:view-open', {
-          label: entry.label,
-          segments: this.resolve<any>('lineage')?.explorerSegments?.() ?? [],
-        })
+      // ON TOUCH, A TAP GOES TO THE TILE. Childless or not: #navigateInto
+      // opens its (empty) layer, the same choke point hold-to-enter uses on
+      // desktop — so one gesture means one thing everywhere on the hive and no
+      // tile is a dead end. The tile's own SCREEN is a long press away (the
+      // ring's centre); it is no longer what a tap produces.
+      //
+      // A LINK tile is the exception, and it is the tile's own doing: its
+      // content is somewhere else, so `open` — which LinkOpenWorker consumes to
+      // route to the viewer or the browser — is what "go to the tile" means
+      // there. Walking into an empty layer instead would be walking past it.
+      //
+      // Mouse/pen keep the old behaviour: on desktop the hover band carries
+      // every action and a fullscreen takeover would be in the way.
+      if ((this.#pressWasTouch || this.#mobileMode()) && !this.#linkLabels.has(entry.label)) {
+        this.#navigateInto(entry.label)
         return
       }
 
@@ -2918,14 +2870,9 @@ export class TileOverlayDrone extends Drone {
 
   // Cancel editor on right-click release (mirrors Escape cascade priority 1)
   #onPointerUp = (e: PointerEvent): void => {
-    const hold = this.#enterHold
-    const releaseAction = hold?.pointerId === e.pointerId && hold.ready
-      ? hold.releaseAction
-      : undefined
-    // A matured touch hold commits here. Travel cancels it before release and
-    // lets the same press become a tile drag instead.
+    // Any armed hold-to-enter dies on the release — it only ever fires from
+    // its own timer, on a press that never moved and never let go.
     this.#cancelEnterHold()
-    releaseAction?.()
     // End a paint stroke on release — the staged set persists (Done commits it),
     // only the stroke does. Left button, before the nav-gesture guards below.
     if (e.button === 0 && this.#applyStroke) {

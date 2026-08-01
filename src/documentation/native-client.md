@@ -87,6 +87,16 @@ npm run build:core
 npm run build:essentials
 npm --prefix hypercomb-web run runtime
 npm run build:web
+```
+
+The bake is `hypercomb-web`'s `postbuild`, so **every web build re-bakes the
+client frontend** — the native app cannot silently ship a stale shell because
+someone forgot a step. It runs as `--if-available`, which skips (with a note,
+exit 0) when the dist has no `content/manifest.json`: in that position a
+contentless dist means the build was a partial one, not that the bake broke.
+Run it by hand — no flag — before a bundle if you want the hard failure:
+
+```bash
 node hypercomb-client/scripts/bake-frontend.mjs
 ```
 

@@ -35,6 +35,9 @@
     },
     {
       "path": "hypercomb-extensions"
+    },
+    {
+      "path": "hypercomb-client"
     }
   ],
   "launch": {

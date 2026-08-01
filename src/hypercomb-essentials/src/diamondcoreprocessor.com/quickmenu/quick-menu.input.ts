@@ -71,6 +71,8 @@ const OWNER = 'quick-menu'
 const REACH = RING_DISTANCE + HEX_RADIUS * 1.1
 
 type SlashLike = { execute(name: string, args: string): unknown }
+type OverlayLike = { labelAtClient(x: number, y: number): string | null }
+type LineageLike = { explorerSegments?: () => readonly string[] }
 type GateLike = { lock(owner: string): void; unlock(owner: string): void; active?: boolean }
 type StackLike = { push(mode: InputMode): void; pop(name: string): void }
 
@@ -105,6 +107,16 @@ export class QuickMenuInput {
   #heldKey: string | null = null
   /** Where a touch landed, while the long-press is still deciding. */
   #touchDown: { x: number; y: number } | null = null
+  /**
+   * The tile the touch long-press was summoned OVER, when it was over one.
+   *
+   * A hold on a tile is the only long-press a finger makes that already has a
+   * subject, and the verb it wants is that tile's own screen — so the ring's
+   * ZERO-TRAVEL slot becomes it. Hold and let go: the close-up. Hold and flick:
+   * the ordinary ring, unchanged. One gesture, and the normal one still costs
+   * nothing to reach.
+   */
+  #tileLabel: string | null = null
   /**
    * Every finger currently down. A touch device has no Escape key and no
    * pointer lock, so the two ways this gesture ends on desktop are both
@@ -279,6 +291,7 @@ export class QuickMenuInput {
       this.#touchDown = { x: e.clientX, y: e.clientY }
       this.#holdTimer = setTimeout(() => {
         this.#holdTimer = null
+        const at = this.#touchDown
         this.#touchDown = null
         // The finger is gone, or a pan/pinch already took the gesture. Either
         // way there is nothing left to summon from.
@@ -286,7 +299,13 @@ export class QuickMenuInput {
         if (isPointerConsumed(e.pointerId)) { this.#pointerId = null; return }
         if (get<GateLike>('@diamondcoreprocessor.com/InputGate')?.active) { this.#pointerId = null; return }
         try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
+        // Resolve the tile from the press COORDINATES. A finger produces no
+        // hover, so there is no remembered tile to read — only where it landed.
+        const overlay = at
+          ? get<OverlayLike>('@diamondcoreprocessor.com/TileOverlayDrone')?.labelAtClient(at.x, at.y) ?? null
+          : null
         this.#begin(e.pointerId)
+        this.#tileLabel = overlay
         this.#paint()
       }, HOLD_MS)
       return
@@ -317,6 +336,7 @@ export class QuickMenuInput {
 
     const focus = this.#centre()
     this.#levels = [{ definition: registry.forContext(), back: null, focus }]
+    this.#tileLabel = null
     this.#pointerId = pointerId
     this.#armed = true
     this.#current = 'centre'
@@ -401,6 +421,9 @@ export class QuickMenuInput {
     const centre = level.focus
     const backLabel = registry.label({ label: 'back', labelKey: 'quickmenu.back' })
     this.#overlay.paint(level.definition, centre, level.back, registry.label, backLabel, fromFocus)
+    // Only the ROOT ring carries the tile: descend and the centre is that
+    // ring's own zero-travel verb again.
+    this.#overlay.setCentreOverride(this.#levels.length === 1 ? this.#tileLabel : null)
     this.#overlay.highlight(this.#current)
     this.#overlay.setCancelArmed(this.#leftDeadZone)
     this.#overlay.setCursor(this.#virtual.x - centre.x, this.#virtual.y - centre.y)
@@ -612,6 +635,20 @@ export class QuickMenuInput {
     // Left and came back — the escape hatch. Nothing fires.
     if (this.#leftDeadZone && direction === 'centre') { this.#end(); return }
 
+    // HELD A TILE AND LET GO. The subject was decided by where the finger
+    // landed, so the zero-travel slot is that tile's own screen rather than the
+    // ring's generic centre verb. Anything else — flick to a neighbour — is the
+    // ordinary ring, so nothing is taken away by this.
+    if (direction === 'centre' && this.#tileLabel && this.#levels.length === 1) {
+      const label = this.#tileLabel
+      this.#end()
+      EffectBus.emit('tile:view-open', {
+        label,
+        segments: get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [],
+      })
+      return
+    }
+
     const slot = this.#slotFor(direction)
     if (!slot) { this.#end(); return }
 
@@ -736,6 +773,7 @@ export class QuickMenuInput {
     this.#pointerId = null
     this.#heldKey = null
     this.#touchDown = null
+    this.#tileLabel = null
     this.#levels = []
     this.#current = 'centre'
     this.#leftDeadZone = false

@@ -8,6 +8,7 @@
     "start": "ng serve --port 4200 --host localhost --configuration development",
     "start:4260": "ng serve --port 4260 --host localhost --configuration development",
     "build": "npm --prefix .. run prebuild:web && ng build --configuration production",
+    "postbuild": "node ../hypercomb-client/scripts/bake-frontend.mjs --if-available",
     "runtime": "npm run runtime:core && npm run runtime:pixi",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",
     "runtime:pixi": "tsx ./scripts/build-pixi-vendor.ts"
