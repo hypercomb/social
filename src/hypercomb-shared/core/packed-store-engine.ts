@@ -85,8 +85,36 @@ export const PACK_MAGIC = new TextEncoder().encode('HCPACK01')
  *  colon, so this address collides with no tile's bag. */
 export const PACKED_STORE_MEANING = 'store:packed'
 
-/** The packed log's filename inside the sign('store:packed') pool dir. */
-export const PACK_FILENAME = 'hive.pack'
+/**
+ * The packed log's filename for a GENERATION.
+ *
+ * Compaction cannot rewrite the live file in place — a crash halfway through
+ * would tear the only copy. Instead each compaction writes the NEXT
+ * generation beside the current one and, once it is complete and flushed,
+ * flips a tiny pointer file. The old generation is deleted only after the
+ * flip, so at every instant some complete generation is authoritative.
+ *
+ * Generation 0 keeps the bare name, so a store written before generations
+ * existed is already generation 0 and needs no adoption pass.
+ */
+export const packFilename = (generation: number): string =>
+  generation === 0 ? 'hive.pack' : `hive.${generation}.pack`
+
+/** Names the authoritative generation. Absent means 0. */
+export const PACK_POINTER_FILENAME = 'current'
+
+/**
+ * Compact when garbage exceeds this share of the file AND the absolute
+ * waste is worth the rewrite.
+ *
+ * Pool members are the reason this matters. Content is signature-addressed
+ * and never rewritten, but a pool member is addressed by NAME — reinstalling
+ * a bee bundle writes a new 220KB value under the same key, and the old one
+ * becomes garbage. Measured on a fresh install: 81 members, 7.6MB. Without
+ * compaction the pack grows by the bundle size on every install, forever.
+ */
+export const COMPACT_GARBAGE_RATIO = 0.35
+export const COMPACT_MIN_GARBAGE_BYTES = 1024 * 1024
 
 const enum Kind {
   Content = 1,
@@ -510,6 +538,14 @@ export class PackedStoreEngine {
     const dirs = new Set<string>([...this.#markers.keys(), ...this.#pools.keys()])
     for (const name of dirs) out.push({ name, directory: true })
     return out
+  }
+
+  /** Is enough of this file superseded to be worth rewriting? */
+  shouldCompact(): boolean {
+    return (
+      this.#garbageBytes >= COMPACT_MIN_GARBAGE_BYTES &&
+      this.#garbageBytes >= this.#end * COMPACT_GARBAGE_RATIO
+    )
   }
 
   stats(): PackedStats {

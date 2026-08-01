@@ -126,6 +126,16 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
     // folder-sync sweeps stop competing with rendering. Callers reach it
     // through `SignatureService.signMany` and never learn a worker exists.
     setBulkSigner(signBulk)
+    // Diagnostic handle. The pack is opaque from the page — the worker owns
+    // the only handle — so without this there is no way to ask the live
+    // store what it holds, force a compaction, or watch a drain. Read-only
+    // commands plus two explicit maintenance ones; nothing here can write a
+    // record.
+    ;(globalThis as unknown as Record<string, unknown>)['hypercombPackedStore'] = {
+      stats: () => bridge.invoke('pack_stats'),
+      drain: (limit = 200) => bridge.invoke('pack_drain', { limit }),
+      compact: () => bridge.invoke('pack_compact'),
+    }
     return { root: new NativeRootDirectory(bridge), bridge, info }
   } catch (error) {
     console.warn('[packed-store] unavailable — continuing on flat OPFS', error)

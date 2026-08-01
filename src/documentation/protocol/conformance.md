@@ -294,7 +294,15 @@ particularly on Windows, where an on-access antivirus filter intercepts every
 open. `hypercomb-client` therefore stores small records in a memory-mapped B-tree
 and keeps only large blobs loose, while reading and writing the form below.
 
-The web shell's OPFS layout IS this form, which is why nothing changes for it.
+The web shell has both. Its flat OPFS layout IS this form; behind the
+`hc:store:packed` flag it instead keeps small records in one packed file
+(`<sign('store:packed')>/hive.pack`, owned by a worker over a
+SyncAccessHandle) with blobs still loose and sig-named. The facade in
+`hypercomb-shared/core/native-filesystem.ts` serves the form above live over
+either backend, so callers cannot tell which is underneath — the same seam
+the native client uses, with a second bridge behind it. Migration between the
+two is per-record copy → verify → remove, with the flat layout as read
+fallback until drained.
 
 ### The form
 

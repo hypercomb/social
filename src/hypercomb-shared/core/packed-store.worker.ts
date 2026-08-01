@@ -18,7 +18,10 @@
 //
 // ## The physical layout this worker owns
 //
-//   <real OPFS root>/<sign('store:packed')>/hive.pack   the packed log
+//   <real OPFS root>/<sign('store:packed')>/hive.pack   the packed log (generation 0;
+//                                                       later generations are
+//                                                       hive.<n>.pack, named by
+//                                                       the  pointer)
 //   <real OPFS root>/<sig>                              loose blobs >= 64KiB
 //                                                       AND undrained flat
 //                                                       content (read-fallback)
@@ -44,7 +47,8 @@
 import {
   BLOB_THRESHOLD,
   PACKED_STORE_MEANING,
-  PACK_FILENAME,
+  PACK_POINTER_FILENAME,
+  packFilename,
   PackedStoreEngine,
   bytesToHex,
   isSigName,
@@ -146,6 +150,7 @@ class PackedHost {
   #root!: FileSystemDirectoryHandle
   #packDir!: FileSystemDirectoryHandle
   #packPoolSig!: string
+  #generation = 0
   #handle!: FileSystemSyncAccessHandle
 
   #config: PackConfig = EMPTY_CONFIG
@@ -156,7 +161,10 @@ class PackedHost {
     this.#root = await navigator.storage.getDirectory()
     this.#packPoolSig = await sign(new TextEncoder().encode(PACKED_STORE_MEANING))
     this.#packDir = await this.#root.getDirectoryHandle(this.#packPoolSig, { create: true })
-    const file = await this.#packDir.getFileHandle(PACK_FILENAME, { create: true }) as SyncCapableFileHandle
+    this.#generation = await this.#readGeneration()
+    const file = await this.#packDir.getFileHandle(
+      packFilename(this.#generation), { create: true },
+    ) as SyncCapableFileHandle
 
     // OPFS refuses a second sync handle while one is open — that is the
     // single-writer guarantee. A second tab retries briefly (the first tab
@@ -181,11 +189,79 @@ class PackedHost {
     }
 
     this.#engine = PackedStoreEngine.open(new OpfsSyncFile(this.#handle))
+    // Any generation that is not the authoritative one is either a
+    // compaction that never completed or one already superseded. Either way
+    // it is not data — the pointer flip is what makes a generation real.
+    await this.#dropOtherGenerations()
     return {
       packPoolSig: this.#packPoolSig,
       stats: this.#engine.stats(),
       coldOpenMs: performance.now() - started,
     }
+  }
+
+  async #readGeneration(): Promise<number> {
+    try {
+      const file = await (await this.#packDir.getFileHandle(PACK_POINTER_FILENAME)).getFile()
+      const parsed = Number.parseInt(await file.text(), 10)
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+    } catch {
+      return 0 // no pointer yet — generation 0 keeps the bare filename
+    }
+  }
+
+  async #dropOtherGenerations(): Promise<void> {
+    const keep = packFilename(this.#generation)
+    for (const [name, handle] of await snapshot(this.#packDir)) {
+      if (handle.kind !== 'file' || name === keep || name === PACK_POINTER_FILENAME) continue
+      if (!/^hive(\.\d+)?\.pack$/.test(name)) continue
+      await this.#packDir.removeEntry(name).catch(() => undefined)
+    }
+  }
+
+  /**
+   * Rewrite the store without its garbage, if there is enough to be worth
+   * it. Crash-safe by construction: the next generation is written and
+   * flushed COMPLETE beside the current one, and only then does the pointer
+   * flip. A crash before the flip leaves the old generation authoritative
+   * and the partial one is swept at the next open; a crash after it leaves
+   * the new one authoritative with the old one swept the same way. There is
+   * no instant at which the authoritative file is incomplete.
+   */
+  async compact(force = false): Promise<{ compacted: boolean; before: number; after: number }> {
+    const before = this.#engine.stats().fileSize
+    if (!force && !this.#engine.shouldCompact()) return { compacted: false, before, after: before }
+
+    const next = this.#generation + 1
+    const nextFile = await this.#packDir.getFileHandle(
+      packFilename(next), { create: true },
+    ) as SyncCapableFileHandle
+    const nextHandle = await nextFile.createSyncAccessHandle()
+    let after = before
+    try {
+      const compacted = this.#engine.compactInto(new OpfsSyncFile(nextHandle))
+      after = compacted.stats().fileSize
+      nextHandle.flush()
+    } catch (error) {
+      nextHandle.close()
+      await this.#packDir.removeEntry(packFilename(next)).catch(() => undefined)
+      throw error
+    }
+
+    // THE FLIP. Everything before this line is invisible; everything after
+    // it is committed.
+    const pointer = await this.#packDir.getFileHandle(PACK_POINTER_FILENAME, { create: true })
+    const writable = await pointer.createWritable()
+    await writable.write(String(next))
+    await writable.close()
+
+    const previous = packFilename(this.#generation)
+    this.#handle.close()
+    this.#handle = nextHandle
+    this.#generation = next
+    this.#engine = PackedStoreEngine.open(new OpfsSyncFile(this.#handle))
+    await this.#packDir.removeEntry(previous).catch(() => undefined)
+    return { compacted: true, before, after }
   }
 
   close(): void {
@@ -592,8 +668,16 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
       for (const buffer of buffers) sigs.push(await sign(new Uint8Array(buffer)))
       return { result: sigs, transfer: [] }
     }
-    case 'pack_drain':
-      return { result: await host.drain(p.limit ?? 200), transfer: [] }
+    case 'pack_drain': {
+      const drained = await host.drain(p.limit ?? 200)
+      // Compaction is checked when the drain settles, not per chunk: the
+      // drain is the one bulk writer, and rewriting mid-drain would be
+      // wasted work.
+      const compaction = drained.done ? await host.compact() : { compacted: false }
+      return { result: { ...drained, compaction }, transfer: [] }
+    }
+    case 'pack_compact':
+      return { result: await host.compact(true), transfer: [] }
     case 'pack_stats':
       return { result: host.stats(), transfer: [] }
     case 'pack_close':
