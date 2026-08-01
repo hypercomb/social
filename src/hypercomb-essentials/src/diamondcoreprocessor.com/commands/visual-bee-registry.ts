@@ -229,6 +229,12 @@ export type VisualBeeDescriptor = {
    * The choice is stored per declaration as `payload.sourceScope`.
    * `'layer'` reads direct children; `'hierarchy'` reads all descendants.
    *
+   * A `'hierarchy'` attachment also means the view APPLIES all the way down
+   * that hierarchy, one layer at a time: ViewBee walks the lineage and
+   * offers the toggle icon on every descendant of the declaring cell, and a
+   * descendant that opens it renders its OWN layer (no local declaration →
+   * default layer reach). A `'layer'` attachment stays node-local.
+   *
    * Omit for views whose reach is intrinsic (websites, decks, and trees).
    * The Views window offers this choice only when a renderer declares it.
    */

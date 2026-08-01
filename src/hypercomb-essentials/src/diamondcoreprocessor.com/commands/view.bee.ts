@@ -282,10 +282,21 @@ export class ViewBee extends Worker {
       // probes only STRICT prefixes of the current path, so standing on the
       // PARENT of a scope root (where it merely sits as a child) never
       // matches — step outside the hierarchy and the toggle drops.
-      if (!present && v.scope === 'branch' && segments.length > 1) {
+      //
+      // The same walk serves ATTACHED views whose declaration chose
+      // `sourceScope: 'hierarchy'` (brief, atlas, studio): a view applied to
+      // a hierarchy applies all the way down it, one layer at a time, so
+      // every descendant must be OFFERED the icon to use it. A layer-scoped
+      // declaration stays node-local — the walk only honors records whose
+      // payload says hierarchy.
+      let hierarchyMember = false
+      const walkable = v.scope === 'branch' ||
+        (v.sourceScopes?.includes('hierarchy') ?? false)
+      if (!present && walkable && segments.length > 1) {
         const root = await this.#branchScopeRoot(segments, v)
         if (root) {
           present = true
+          hierarchyMember = v.scope !== 'branch'
           const record = v.decorationKind ? root.records.find(r => r.kind === v.decorationKind) : undefined
           const payload = record?.payload
           payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
@@ -302,7 +313,7 @@ export class ViewBee extends Worker {
       // a node-local view (home, slides, tutor) hides exactly where the record
       // sits.
       if (v.decorationKind) {
-        const branchScoped = v.scope === 'branch' || !!v.cascades
+        const branchScoped = v.scope === 'branch' || !!v.cascades || hierarchyMember
         const hidden = await (branchScoped
           ? isFeatureHiddenWithin(segments, v.decorationKind)
           : isFeatureHidden(segments, v.decorationKind)).catch(() => false)
@@ -357,34 +368,42 @@ export class ViewBee extends Worker {
     return Array.isArray(slot) && slot.some(s => typeof s === 'string' && SIG_RE.test(s))
   }
 
-  /** Outermost-first ancestor walk for a `scope: 'branch'` APPLICATION SCOPE.
-   *  Returns the scope root's layer + parsed decoration records when the
-   *  current node sits INSIDE the hierarchy, null otherwise. Probes only
-   *  strict prefixes of the path, so the parent of a scope root never
-   *  matches. Mirrors ShowFeaturesDrone's scope pass.
+  /** Outermost-first ancestor walk for an APPLICATION SCOPE. Returns the
+   *  scope root's layer + parsed decoration records when the current node
+   *  sits INSIDE the hierarchy, null otherwise. Probes only strict prefixes
+   *  of the path, so the parent of a scope root never matches. Mirrors
+   *  ShowFeaturesDrone's scope pass.
    *
-   *  A root "carries" the feature the same three ways a node does: the
-   *  descriptor's first-class `slot`, the website slot (the one bee whose
-   *  slot the descriptor can't name), or a `decorationKind` record. */
+   *  A `scope: 'branch'` descriptor roots the same three ways a node
+   *  presents: the descriptor's first-class `slot`, the website slot (the
+   *  one bee whose slot the descriptor can't name), or a `decorationKind`
+   *  record. A node-scoped descriptor with `sourceScopes` roots ONLY via a
+   *  `decorationKind` record whose payload chose `sourceScope: 'hierarchy'`
+   *  — the attachment gesture that says "apply this view all the way down,
+   *  one layer at a time"; a layer-scoped attachment never cascades. */
   async #branchScopeRoot(
     segments: readonly string[],
     v: VisualBeeDescriptor,
   ): Promise<{ layer: LayerLike; records: DecorationRecord[] } | null> {
+    const branch = v.scope === 'branch'
     for (let d = 1; d < segments.length; d++) {
       const layer = await this.#layerAtSegments(segments.slice(0, d))
       if (!layer) continue
-      if (v.slot) {
+      if (branch && v.slot) {
         const slotVal = (layer as Record<string, unknown>)[v.slot]
         if (Array.isArray(slotVal) && slotVal.some(s => typeof s === 'string' && SIG_RE.test(s))) {
           return { layer, records: await this.#decorationRecords(layer) }
         }
       }
-      if (v.view === 'website' && this.#hasWebsiteSlot(layer)) {
+      if (branch && v.view === 'website' && this.#hasWebsiteSlot(layer)) {
         return { layer, records: await this.#decorationRecords(layer) }
       }
       if (v.decorationKind) {
         const records = await this.#decorationRecords(layer)
-        if (records.some(r => r.kind === v.decorationKind)) return { layer, records }
+        const record = records.find(r => r.kind === v.decorationKind)
+        if (record && (branch || record.payload?.['sourceScope'] === 'hierarchy')) {
+          return { layer, records }
+        }
       }
     }
     return null
