@@ -1,0 +1,600 @@
+// hypercomb-shared/core/packed-store.worker.ts
+//
+// THE PACKED-STORE WORKER — the one owner of the hive's packed file.
+//
+// A dedicated worker because `createSyncAccessHandle` exists nowhere else:
+// synchronous, broker-free reads and writes against ONE file are what turn
+// the 13.6s flat cold scan into a single sequential read. OPFS enforces the
+// single-writer model for us — a second handle on `hive.pack` is refused, so
+// exactly one worker (one tab) serves the store at a time.
+//
+// The worker speaks the SAME command vocabulary as the native Tauri host
+// (`hypercomb-client/app/src/main.rs` / `crates/host`): content_put_raw,
+// dir_get_raw, raw_dir_entries, … so `native-filesystem.ts` — the
+// FileSystemDirectoryHandle-shaped facade the 44 direct-File-System-API
+// callers already run through unchanged in the native client — works
+// identically over this bridge. Implement the commands, and the whole shell
+// follows.
+//
+// ## The physical layout this worker owns
+//
+//   <real OPFS root>/<sign('store:packed')>/hive.pack   the packed log
+//   <real OPFS root>/<sig>                              loose blobs >= 64KiB
+//                                                       AND undrained flat
+//                                                       content (read-fallback)
+//   <real OPFS root>/<sigDir>/                          undrained flat bags /
+//                                                       pools (read-fallback)
+//
+// ## Migration doctrine (non-negotiable)
+//
+// NEVER wipe user OPFS. The drain is per-record copy -> verify (byte-exact
+// read-back from the pack) -> remove, chunked and resumable, off the boot
+// path. Until a record is drained, reads fall through to the flat layout —
+// same pattern as the legacy `__x__` drains in store.ts, one level down.
+// Content >= 64KiB is already in its packed-layout home (a loose sig file)
+// and is never moved at all.
+//
+// ## Bulk signing lives here too
+//
+// SHA-256 for bulk operations (install verify, commit cascades) runs in this
+// worker (`sign_bulk`) so hashing stops competing with rendering on the main
+// thread. The worker signs every content_put_raw anyway — content addressing
+// IS verification.
+
+import {
+  BLOB_THRESHOLD,
+  PACKED_STORE_MEANING,
+  PACK_FILENAME,
+  PackedStoreEngine,
+  bytesToHex,
+  isSigName,
+  markerIndexOf,
+  type PackedEntry,
+  type SyncFile,
+} from './packed-store-engine'
+
+interface BridgeRequest {
+  id: number
+  cmd: string
+  payload?: unknown
+  headers?: Record<string, string>
+}
+
+/** Command payload shapes, mirroring the native host's argument names. */
+interface CommandPayload {
+  sig?: string
+  name?: string
+  limit?: number
+}
+
+/** OPFS synchronous access — worker-only, and not in the DOM lib TypeScript
+ *  ships. Declared to what this file actually calls rather than pulling a
+ *  whole extra lib in. */
+interface FileSystemSyncAccessHandle {
+  getSize(): number
+  read(into: Uint8Array, options?: { at?: number }): number
+  write(bytes: Uint8Array, options?: { at?: number }): number
+  truncate(size: number): void
+  flush(): void
+  close(): void
+}
+
+type SyncCapableFileHandle = FileSystemFileHandle & {
+  createSyncAccessHandle(): Promise<FileSystemSyncAccessHandle>
+}
+
+const sign = async (bytes: Uint8Array): Promise<string> => {
+  const buffer = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+    ? bytes.buffer
+    : bytes.slice().buffer
+  return bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer as ArrayBuffer)))
+}
+
+/** OPFS sync-access-handle binding of the engine's SyncFile seam. */
+class OpfsSyncFile implements SyncFile {
+  constructor(private readonly handle: FileSystemSyncAccessHandle) {}
+
+  getSize(): number {
+    return this.handle.getSize()
+  }
+
+  read(offset: number, length: number): Uint8Array {
+    const out = new Uint8Array(length)
+    const got = this.handle.read(out, { at: offset })
+    return got === length ? out : out.subarray(0, got)
+  }
+
+  write(offset: number, bytes: Uint8Array): void {
+    this.handle.write(bytes, { at: offset })
+  }
+
+  truncate(size: number): void {
+    this.handle.truncate(size)
+  }
+
+  flush(): void {
+    this.handle.flush()
+  }
+}
+
+/** Legacy content dirs that may still hold undrained sig-named files. The
+ *  store's own self-clean migrates them to the flat root; until it has, the
+ *  packed read path falls through to them so nothing ever goes dark. */
+const LEGACY_CONTENT_DIRS = ['__hive__', 'hypercomb.io', '__resources__', '__layers__', '__optimized__']
+/** Legacy dir whose CHILDREN are lineage bags (sig dirs of markers). */
+const LEGACY_BAG_PARENTS = ['__history__']
+
+class PackedHost {
+  #engine!: PackedStoreEngine
+  #root!: FileSystemDirectoryHandle
+  #packDir!: FileSystemDirectoryHandle
+  #packPoolSig!: string
+  #handle!: FileSystemSyncAccessHandle
+
+  async open(): Promise<{ packPoolSig: string; stats: unknown; coldOpenMs: number }> {
+    const started = performance.now()
+    this.#root = await navigator.storage.getDirectory()
+    this.#packPoolSig = await sign(new TextEncoder().encode(PACKED_STORE_MEANING))
+    this.#packDir = await this.#root.getDirectoryHandle(this.#packPoolSig, { create: true })
+    const file = await this.#packDir.getFileHandle(PACK_FILENAME, { create: true }) as SyncCapableFileHandle
+
+    // OPFS refuses a second sync handle while one is open — that is the
+    // single-writer guarantee. A second tab retries briefly (the first tab
+    // may be mid-shutdown), then reports busy; Store falls back to the flat
+    // layout read path for that tab rather than serving a partial store.
+    let lastError: unknown
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        this.#handle = await file.createSyncAccessHandle()
+        lastError = undefined
+        break
+      } catch (error) {
+        lastError = error
+        await new Promise(resolve => setTimeout(resolve, 250 + attempt * 150))
+      }
+    }
+    if (!this.#handle) {
+      throw Object.assign(
+        new Error(`packed store is held by another tab: ${String(lastError)}`),
+        { kind: 'Busy' },
+      )
+    }
+
+    this.#engine = PackedStoreEngine.open(new OpfsSyncFile(this.#handle))
+    return {
+      packPoolSig: this.#packPoolSig,
+      stats: this.#engine.stats(),
+      coldOpenMs: performance.now() - started,
+    }
+  }
+
+  close(): void {
+    try { this.#handle?.flush(); this.#handle?.close() } catch { /* already closed */ }
+  }
+
+  // -----------------------------------------------------------------
+  // flat-layout fallback (read-only — writes NEVER target the old layout)
+  // -----------------------------------------------------------------
+
+  async #looseFile(sig: string): Promise<File | null> {
+    try {
+      const handle = await this.#root.getFileHandle(sig)
+      return await handle.getFile()
+    } catch { return null }
+  }
+
+  async #legacyContentFile(sig: string): Promise<File | null> {
+    for (const dirName of LEGACY_CONTENT_DIRS) {
+      try {
+        const dir = await this.#root.getDirectoryHandle(dirName)
+        const handle = await dir.getFileHandle(sig)
+        return await handle.getFile()
+      } catch { /* next source */ }
+    }
+    return null
+  }
+
+  /** The undrained flat sig-dir for an address, if it still exists.
+   *  `__history__/<sig>` is the one legacy source whose bags the virtual
+   *  root can no longer surface by name (non-sig names report absent), so
+   *  its bag joins the fallback chain here until the drain absorbs it. */
+  async #flatDirs(sig: string): Promise<FileSystemDirectoryHandle[]> {
+    if (sig === this.#packPoolSig) return []
+    const out: FileSystemDirectoryHandle[] = []
+    try { out.push(await this.#root.getDirectoryHandle(sig)) } catch { /* drained */ }
+    for (const parentName of LEGACY_BAG_PARENTS) {
+      try {
+        const parent = await this.#root.getDirectoryHandle(parentName)
+        out.push(await parent.getDirectoryHandle(sig))
+      } catch { /* drained */ }
+    }
+    return out
+  }
+
+  // -----------------------------------------------------------------
+  // the bridge commands — same vocabulary as the native host
+  // -----------------------------------------------------------------
+
+  async contentHas(sig: string): Promise<boolean> {
+    if (this.#engine.hasContent(sig)) return true
+    if (await this.#looseFile(sig)) return true
+    return (await this.#legacyContentFile(sig)) !== null
+  }
+
+  async contentGet(sig: string): Promise<Uint8Array> {
+    const packed = this.#engine.getContent(sig)
+    if (packed) return packed
+    const loose = (await this.#looseFile(sig)) ?? (await this.#legacyContentFile(sig))
+    // A 0-byte file under a non-empty-content sig is a torn flat-layout
+    // write, not content — fall through to NotFound so a healthier source
+    // (host fetch) can heal it, mirroring store.ts's incomplete-write guard.
+    if (loose && (loose.size > 0 || sig === EMPTY_CONTENT_SIG)) {
+      return new Uint8Array(await loose.arrayBuffer())
+    }
+    throw notFound(`content ${sig.slice(0, 12)}…`)
+  }
+
+  async contentPut(bytes: Uint8Array): Promise<string> {
+    // Content addressing IS verification: the returned sig is computed from
+    // the bytes, and the facade refuses a mismatch against the requested
+    // name. Small records land in the pack; blobs stay loose sig files.
+    const sig = await sign(bytes)
+    if (bytes.length < BLOB_THRESHOLD) {
+      this.#engine.putContent(sig, bytes)
+      return sig
+    }
+    const existing = await this.#looseFile(sig)
+    if (existing && existing.size === bytes.length) return sig
+    const handle = await this.#root.getFileHandle(sig, { create: true })
+    const writable = await handle.createWritable()
+    await writable.write(bytes as unknown as BufferSource)
+    await writable.close()
+    return sig
+  }
+
+  async dirGet(sig: string, name: string): Promise<Uint8Array> {
+    const index = markerIndexOf(name)
+    const packed = index !== null
+      ? this.#engine.getMarker(sig, index)
+      : this.#engine.getPool(sig, name)
+    if (packed) return packed
+    for (const flat of await this.#flatDirs(sig)) {
+      try {
+        const file = await (await flat.getFileHandle(name)).getFile()
+        return new Uint8Array(await file.arrayBuffer())
+      } catch { /* next source */ }
+    }
+    throw notFound(`${name} in ${sig.slice(0, 12)}…`)
+  }
+
+  dirPut(sig: string, name: string, bytes: Uint8Array): void {
+    const index = markerIndexOf(name)
+    if (index !== null) {
+      // The caller chose the filename — overwrite is allowed here, unlike
+      // restore (opportunistic marker-shape migration rewrites in place).
+      this.#engine.setMarker(sig, index, bytes)
+    } else {
+      this.#engine.putPool(sig, name, bytes)
+    }
+  }
+
+  async dirRemove(sig: string, name: string): Promise<boolean> {
+    // Markers and pool members are REAL deletes — they are not layers and
+    // not in the history graph. Remove from the pack AND from an undrained
+    // flat dir, or the fallback would resurrect the entry on next read.
+    const index = markerIndexOf(name)
+    const packedRemoved = index !== null
+      ? this.#engine.removeMarker(sig, index)
+      : this.#engine.removePool(sig, name)
+    let flatRemoved = false
+    for (const flat of await this.#flatDirs(sig)) {
+      try { await flat.removeEntry(name); flatRemoved = true } catch { /* absent */ }
+    }
+    return packedRemoved || flatRemoved
+  }
+
+  async dirEntries(sig: string): Promise<PackedEntry[]> {
+    // Union: the pack's view plus whatever the flat dir still holds — the
+    // same de-duplication rule as lineage bag union-reads (a name present in
+    // both is one entry; the pack, being the drain target, wins).
+    const out = this.#engine.dirEntries(sig)
+    const seen = new Set(out.map(e => e.name))
+    for (const flat of await this.#flatDirs(sig)) {
+      for await (const [name, handle] of flat as unknown as AsyncIterable<[string, FileSystemHandle]>) {
+        if (seen.has(name)) continue
+        seen.add(name)
+        out.push({ name, directory: handle.kind === 'directory' })
+      }
+    }
+    return out
+  }
+
+  async rootEntries(): Promise<PackedEntry[]> {
+    const out = this.#engine.rootEntries()
+    const seen = new Set(out.map(e => e.name))
+    for await (const [name, handle] of this.#root as unknown as AsyncIterable<[string, FileSystemHandle]>) {
+      // Only sig-named entries are the hive; the pack pool dir is internal
+      // representation and never surfaces in the virtual root.
+      if (name === this.#packPoolSig || !isSigName(name) || seen.has(name)) continue
+      out.push({ name, directory: handle.kind === 'directory' })
+    }
+    return out
+  }
+
+  // -----------------------------------------------------------------
+  // the drain — flat layout -> pack, per-record copy -> verify -> remove
+  // -----------------------------------------------------------------
+
+  /**
+   * One bounded chunk of migration. Idempotent and resumable by
+   * construction (content addressing dedupes; occupied targets are
+   * verified rather than rewritten), so there is no cursor to persist —
+   * every run picks up whatever is left. Returns done=true when a full
+   * sweep found nothing left to move.
+   */
+  async drain(limit = 200): Promise<{ moved: number; done: boolean; failed: number }> {
+    let moved = 0
+    let failed = 0
+    const budget = () => moved + failed >= limit
+    const tally = (outcome: 'moved' | 'skipped' | 'failed') => {
+      if (outcome === 'moved') moved++
+      else if (outcome === 'failed') failed++
+    }
+
+    // Listings are SNAPSHOTTED before any removal — mutating a directory
+    // while async-iterating it is implementation-defined.
+    for (const [name, handle] of await snapshot(this.#root)) {
+      if (budget()) return { moved, done: false, failed }
+      if (name === this.#packPoolSig || !isSigName(name)) continue
+
+      if (handle.kind === 'file') {
+        tally(await this.#drainContentFile(this.#root, name, true))
+        continue
+      }
+
+      const dir = handle as FileSystemDirectoryHandle
+      for (const [entryName, entry] of await snapshot(dir)) {
+        if (budget()) return { moved, done: false, failed }
+        if (entry.kind === 'file') {
+          tally(await this.#drainDirEntry(dir, name, entryName))
+          continue
+        }
+        // Document-pool sub-bucket (`<pool>/<sign(subKey)>/<member>`) — one
+        // level, per the layout. Drained into prefixed member keys, the same
+        // representation the native store uses.
+        const sub = entry as FileSystemDirectoryHandle
+        for (const [leafName, leaf] of await snapshot(sub)) {
+          if (budget()) return { moved, done: false, failed }
+          if (leaf.kind !== 'file') continue
+          tally(await this.#drainDirEntry(sub, name, `${entryName}/${leafName}`, leafName))
+        }
+        await this.#removeIfEmpty(dir, entryName)
+      }
+      await this.#removeIfEmpty(this.#root, name)
+    }
+
+    // Legacy sources, CHAINED behind the flat root: content dirs first,
+    // then `__history__`'s bag dirs. Reads already fall back to them, so
+    // draining them here is the same copy->verify->remove, one level deeper.
+    for (const dirName of LEGACY_CONTENT_DIRS) {
+      if (budget()) return { moved, done: false, failed }
+      const dir = await this.#tryDir(this.#root, dirName)
+      if (!dir) continue
+      for (const [name, entry] of await snapshot(dir)) {
+        if (budget()) return { moved, done: false, failed }
+        if (entry.kind !== 'file' || !isSigName(name)) continue
+        tally(await this.#drainContentFile(dir, name, false))
+      }
+      await this.#removeIfEmpty(this.#root, dirName)
+    }
+    for (const parentName of LEGACY_BAG_PARENTS) {
+      const parent = await this.#tryDir(this.#root, parentName)
+      if (!parent) continue
+      for (const [bagName, bagHandle] of await snapshot(parent)) {
+        if (bagHandle.kind !== 'directory' || !isSigName(bagName)) continue
+        const bag = bagHandle as FileSystemDirectoryHandle
+        for (const [entryName, entry] of await snapshot(bag)) {
+          if (budget()) return { moved, done: false, failed }
+          if (entry.kind !== 'file') continue
+          tally(await this.#drainDirEntry(bag, bagName, entryName))
+        }
+        await this.#removeIfEmpty(parent, bagName)
+      }
+      await this.#removeIfEmpty(this.#root, parentName)
+    }
+
+    // Done = a FULL sweep moved nothing. Failed records (bytes that do not
+    // sign as their name, torn 0-byte writes) are left in place and
+    // reported — they must not keep the drain alive forever.
+    return { moved, done: moved === 0, failed }
+  }
+
+  async #tryDir(parent: FileSystemDirectoryHandle, name: string): Promise<FileSystemDirectoryHandle | null> {
+    try { return await parent.getDirectoryHandle(name) } catch { return null }
+  }
+
+  /** copy -> verify -> remove for one flat content file. Blobs (>= 64KiB)
+   *  at the ROOT are already home and are skipped; blobs in a legacy dir
+   *  move to the root. A file whose bytes do not sign as its name is left
+   *  in place and reported — corruption is surfaced, never deleted. */
+  async #drainContentFile(
+    source: FileSystemDirectoryHandle,
+    sig: string,
+    atRoot: boolean,
+  ): Promise<'moved' | 'skipped' | 'failed'> {
+    const file = await (await source.getFileHandle(sig)).getFile()
+    if (file.size === 0 && sig !== EMPTY_CONTENT_SIG) return 'failed' // torn write — leave for the healing read path
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const actual = await sign(bytes)
+    if (actual !== sig) return 'failed' // does not sign as its name — surface, never delete
+
+    if (bytes.length >= BLOB_THRESHOLD) {
+      if (atRoot) return 'skipped' // a root blob IS the packed layout
+      await this.contentPut(bytes) // legacy blob -> loose root file
+    } else {
+      this.#engine.putContent(sig, bytes)
+      const packed = this.#engine.getContent(sig)
+      if (!packed || !bytesEqual(packed, bytes)) return 'failed'
+    }
+    await source.removeEntry(sig).catch(() => undefined)
+    return 'moved'
+  }
+
+  /** copy -> verify -> remove for one marker or pool member. `key` is the
+   *  stored member key (prefixed for sub-buckets); `fileName` the physical
+   *  entry to remove, defaulting to the key. */
+  async #drainDirEntry(
+    dir: FileSystemDirectoryHandle,
+    address: string,
+    key: string,
+    fileName = key,
+  ): Promise<'moved' | 'skipped' | 'failed'> {
+    const bytes = new Uint8Array(await (await (await dir.getFileHandle(fileName)).getFile()).arrayBuffer())
+    const index = markerIndexOf(key)
+    if (index !== null) {
+      const existing = this.#engine.getMarker(address, index)
+      if (existing && !bytesEqual(existing, bytes)) {
+        // The pack already holds a DIFFERENT marker at this index — the pack
+        // is the live store and wins (the flat copy is stale). Remove the
+        // stale source; the record itself was not moved.
+        await dir.removeEntry(fileName).catch(() => undefined)
+        return 'skipped'
+      }
+      if (!existing) this.#engine.setMarker(address, index, bytes)
+      if (!bytesEqual(this.#engine.getMarker(address, index)!, bytes) && !existing) return 'failed'
+    } else {
+      const existing = this.#engine.getPool(address, key)
+      if (!existing) this.#engine.putPool(address, key, bytes)
+      else if (!bytesEqual(existing, bytes)) {
+        await dir.removeEntry(fileName).catch(() => undefined)
+        return 'skipped'
+      }
+      const packed = this.#engine.getPool(address, key)
+      if (!packed || !bytesEqual(packed, bytes)) return 'failed'
+    }
+    await dir.removeEntry(fileName).catch(() => undefined)
+    return 'moved'
+  }
+
+  /** Gated final removal: only succeeds once the dir is genuinely empty —
+   *  stragglers survive to a later pass, exactly like the `__x__` drains. */
+  async #removeIfEmpty(parent: FileSystemDirectoryHandle, name: string): Promise<void> {
+    try {
+      const dir = await parent.getDirectoryHandle(name)
+      for await (const _ of dir as unknown as AsyncIterable<unknown>) return // not empty
+      await parent.removeEntry(name)
+    } catch { /* already gone or still busy — fine either way */ }
+  }
+
+  stats(): unknown {
+    return this.#engine.stats()
+  }
+}
+
+const EMPTY_CONTENT_SIG = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+
+/** Materialize a directory listing before mutating the directory. */
+const snapshot = async (
+  dir: FileSystemDirectoryHandle,
+): Promise<Array<[string, FileSystemHandle]>> => {
+  const out: Array<[string, FileSystemHandle]> = []
+  for await (const pair of dir as unknown as AsyncIterable<[string, FileSystemHandle]>) out.push(pair)
+  return out
+}
+
+const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean => {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+const notFound = (what: string): Error & { kind: string } =>
+  Object.assign(new Error(`${what} not found`), { kind: 'NotFound' })
+
+// ---------------------------------------------------------------------------
+// RPC surface
+// ---------------------------------------------------------------------------
+
+const host = new PackedHost()
+let ready: Promise<unknown> | null = null
+
+const toTransferable = (bytes: Uint8Array): ArrayBuffer => {
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+    return bytes.buffer as ArrayBuffer
+  }
+  return bytes.slice().buffer as ArrayBuffer
+}
+
+const handle = async (request: BridgeRequest): Promise<{ result: unknown; transfer: Transferable[] }> => {
+  const { cmd, payload, headers } = request
+  const p = (payload ?? {}) as CommandPayload
+
+  if (cmd === 'pack_open') {
+    ready ??= host.open()
+    return { result: await ready, transfer: [] }
+  }
+  if (!ready) throw new Error('packed store not opened — send pack_open first')
+  await ready
+
+  switch (cmd) {
+    case 'content_has':
+      return { result: await host.contentHas(p.sig!), transfer: [] }
+    case 'content_get_raw': {
+      const bytes = await host.contentGet(p.sig!)
+      const buffer = toTransferable(bytes)
+      return { result: buffer, transfer: [buffer] }
+    }
+    case 'content_put_raw':
+      return { result: await host.contentPut(new Uint8Array(payload as ArrayBuffer)), transfer: [] }
+    case 'dir_get_raw': {
+      const bytes = await host.dirGet(p.sig!, p.name!)
+      const buffer = toTransferable(bytes)
+      return { result: buffer, transfer: [buffer] }
+    }
+    case 'dir_put_raw': {
+      const sig = headers?.['x-hc-sig'] as string
+      const name = decodeURIComponent(headers?.['x-hc-name'] ?? '')
+      host.dirPut(sig, name, new Uint8Array(payload as ArrayBuffer))
+      return { result: null, transfer: [] }
+    }
+    case 'raw_dir_remove':
+      return { result: await host.dirRemove(p.sig!, p.name!), transfer: [] }
+    case 'raw_dir_entries':
+      return { result: await host.dirEntries(p.sig!), transfer: [] }
+    case 'raw_root_entries':
+      return { result: await host.rootEntries(), transfer: [] }
+    case 'raw_remove':
+      // Removing content is a no-op — the model, not a limitation. Layers
+      // are atomic and complete; content is reclaimed only by collection.
+      return { result: false, transfer: [] }
+    case 'sign_bulk': {
+      const buffers = payload as ArrayBuffer[]
+      const sigs: string[] = []
+      for (const buffer of buffers) sigs.push(await sign(new Uint8Array(buffer)))
+      return { result: sigs, transfer: [] }
+    }
+    case 'pack_drain':
+      return { result: await host.drain(p.limit ?? 200), transfer: [] }
+    case 'pack_stats':
+      return { result: host.stats(), transfer: [] }
+    case 'pack_close':
+      host.close()
+      return { result: null, transfer: [] }
+    default:
+      throw new Error(`unknown packed-store command: ${cmd}`)
+  }
+}
+
+self.addEventListener('message', (event: MessageEvent<BridgeRequest>) => {
+  const request = event.data
+  void handle(request).then(
+    ({ result, transfer }) =>
+      self.postMessage({ id: request.id, ok: true, result }, { transfer }),
+    (error: Error & { kind?: string }) =>
+      self.postMessage({
+        id: request.id,
+        ok: false,
+        error: { kind: error?.kind ?? 'Error', message: error?.message ?? String(error) },
+      }),
+  )
+})

@@ -3,6 +3,8 @@
 
 import { Bee, EffectBus, SignatureService, isSignature, registerPoolMeaning } from '@hypercomb/core'
 import { nativeRoot } from './native-filesystem'
+import { PACKED_STORE_MEANING } from './packed-store-engine'
+import { installPackedStorageOverride, packedRoot } from './packed-bridge'
 
 /** How long a host-resolution MISS is remembered before the cascade may be
  *  re-dialed for that sig. Render passes within the window get an instant
@@ -295,10 +297,36 @@ export class Store extends EventTarget {
     // natively, so every drain and migration below becomes a no-op on its own
     // without needing a branch.
     const native = nativeRoot()
+    // PACKED STORE (feature-flagged): the browser analogue of the native
+    // hive. A dedicated worker owns ONE packed file over a SyncAccessHandle;
+    // this thread sees the same FileSystemDirectoryHandle-shaped facade the
+    // native client uses, backed by worker RPC instead of Tauri IPC. Null
+    // when the flag is off, the platform can't, or another tab holds the
+    // pack — every null case falls through to flat OPFS unchanged, which is
+    // safe because the pack absorbs the flat layout by drain and the flat
+    // layout keeps every undrained record.
+    const packed = native ? null : await packedRoot()
     if (native) {
       this.opfsRoot = native as unknown as FileSystemDirectoryHandle
       this.#opfsAvailable = true
       console.log('[store] native hive — no OPFS, no quota, no bucket eviction')
+    } else if (packed) {
+      this.opfsRoot = packed.root as unknown as FileSystemDirectoryHandle
+      this.#opfsAvailable = true
+      // The pack's own pool dir is a registered meaning so no walker ever
+      // mistakes it for a lineage bag, in packed mode or out of it.
+      void Store.poolSignature(PACKED_STORE_MEANING)
+      // Nine files acquire the OPFS root directly — land every acquisition
+      // on the one hive, exactly as the native shell does.
+      installPackedStorageOverride(packed.root)
+      const stats = packed.info.stats as { bags?: number; markers?: number } | undefined
+      console.log(
+        `[store] packed hive — cold open ${packed.info.coldOpenMs.toFixed(1)}ms, ` +
+        `${stats?.bags ?? 0} bags / ${stats?.markers ?? 0} markers resident`,
+      )
+      // The flat->pack drain: per-record copy->verify->remove, chunked,
+      // resumable, and OFF the boot path like every other self-clean.
+      setTimeout(() => { void this.#drainPackedStore(packed.bridge) }, Store.#SELF_CLEAN_DELAY_MS)
     } else try {
       this.opfsRoot = await Promise.race([
         navigator.storage.getDirectory(),
@@ -440,6 +468,37 @@ export class Store extends EventTarget {
     // source that still holds the complete bytes. Steady state costs
     // nothing: once the legacy sources are drained and removed, their
     // handles come up undefined and the self-clean never schedules.
+  }
+
+  /** Chunked flat->pack migration, driven from here but EXECUTED in the
+   *  worker (which holds both the pack and the real OPFS root). Each chunk
+   *  is copy->verify->remove for up to `limit` records; between chunks the
+   *  main thread yields so the drain never contends with rendering. Runs
+   *  until a full sweep moves nothing — idempotent, so a reload mid-drain
+   *  simply resumes on the next boot. */
+  #drainPackedStore = async (bridge: { invoke: (cmd: string, payload?: unknown) => Promise<unknown> }): Promise<void> => {
+    try {
+      let total = 0
+      for (;;) {
+        const chunk = await bridge.invoke('pack_drain', { limit: 200 }) as
+          { moved: number; done: boolean; failed: number }
+        total += chunk.moved
+        // A chunk that moved nothing but still hit its budget is all
+        // failures — stop making the same non-progress; next boot retries.
+        if (chunk.moved === 0 && chunk.failed > 0) chunk.done = true
+        if (chunk.done) {
+          if (total) console.log(`[packed-store] drain complete — ${total} records packed`)
+          if (chunk.failed) {
+            console.warn(`[packed-store] ${chunk.failed} records could not be verified and were LEFT IN PLACE`)
+          }
+          return
+        }
+        // Yield a beat between chunks; the drain is idle-time work.
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    } catch (err) {
+      console.warn('[packed-store] drain interrupted — will resume next boot', err)
+    }
   }
 
   // All layers live flat at the root (`<root>/<sig>`) regardless of

@@ -93,6 +93,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // file per copied reference, NAMED BY THE IMAGE SIGNATURE — the pool listing
   // IS the collection, so copying a reference in is the whole write and the
   // same image copied twice lands on one filename.
+  // The packed store's own directory — it holds `hive.pack`, the INTERNAL
+  // representation (conformance.md §7: internal form is not the protocol).
+  // Reserved here so every root walker knows the address is a pool and never
+  // mistakes it for a lineage bag, in packed mode or out of it.
+  'store:packed',
   'substrate:references',
   'substrate:sources',
   'tutorial:artifacts',

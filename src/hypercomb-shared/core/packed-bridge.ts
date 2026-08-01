@@ -1,0 +1,164 @@
+// hypercomb-shared/core/packed-bridge.ts
+//
+// THE SECOND BRIDGE — the packed-store worker behind the NativeBridge seam.
+//
+// `native-filesystem.ts` was built so that its backend is nothing but
+// `NativeBridge { invoke(cmd, payload, opts) }`. The native client plugs
+// Tauri IPC into that seam; this file plugs in the packed-store worker via
+// postMessage RPC. Every one of the 44 files that reach past Store with the
+// raw File System API then runs unchanged over the packed store — the same
+// architectural trick, second backend.
+//
+// The worker owns the OPFS SyncAccessHandle; this side is a thin async RPC
+// with transferable buffers. `packedRoot()` is the boot entry: flag-gated,
+// null when off or unsupported, and Store's #doInit treats null exactly like
+// a missing native host — the flat OPFS path runs as before.
+
+import { packedStoreEnabled } from '@hypercomb/core'
+import { NativeRootDirectory, type NativeBridge } from './native-filesystem'
+
+interface PendingCall {
+  resolve: (value: unknown) => void
+  reject: (error: unknown) => void
+}
+
+/** RPC over the dedicated worker. One instance per shell. */
+export class PackedBridge implements NativeBridge {
+  #worker: Worker
+  #nextId = 1
+  readonly #pending = new Map<number, PendingCall>()
+
+  constructor(worker: Worker) {
+    this.#worker = worker
+    this.#worker.addEventListener('message', (event: MessageEvent) => {
+      const { id, ok, result, error } = event.data as {
+        id: number
+        ok: boolean
+        result?: unknown
+        error?: { kind: string; message: string }
+      }
+      const pending = this.#pending.get(id)
+      if (!pending) return
+      this.#pending.delete(id)
+      if (ok) pending.resolve(result)
+      else pending.reject(Object.assign(new Error(error?.message ?? 'packed store error'), { kind: error?.kind }))
+    })
+  }
+
+  invoke = (
+    command: string,
+    payload?: unknown,
+    options?: { headers?: Record<string, string> },
+  ): Promise<unknown> => {
+    const id = this.#nextId++
+    const transfer: Transferable[] = []
+    // Byte payloads travel as transferred ArrayBuffers — zero-copy both ways.
+    let body = payload
+    if (payload instanceof Uint8Array) {
+      const buffer = payload.byteOffset === 0 && payload.byteLength === payload.buffer.byteLength
+        ? payload.buffer
+        : payload.slice().buffer
+      body = buffer
+      transfer.push(buffer as ArrayBuffer)
+    } else if (payload instanceof ArrayBuffer) {
+      body = payload
+      transfer.push(payload)
+    }
+    return new Promise((resolve, reject) => {
+      this.#pending.set(id, { resolve, reject })
+      this.#worker.postMessage({ id, cmd: command, payload: body, headers: options?.headers }, transfer)
+    })
+  }
+
+  terminate(): void {
+    this.#worker.terminate()
+    for (const pending of this.#pending.values()) {
+      pending.reject(new Error('packed store bridge terminated'))
+    }
+    this.#pending.clear()
+  }
+}
+
+let bootedBridge: PackedBridge | null = null
+
+/** The live bridge, once `packedRoot()` has opened it. Null before boot or
+ *  when packed mode is off — callers (bulk signing, drain scheduling) treat
+ *  null as "do it the old way". */
+export const packedBridge = (): PackedBridge | null => bootedBridge
+
+/** Is the packed store even possible here? Requires workers and OPFS. */
+const packedSupported = (): boolean =>
+  typeof Worker !== 'undefined' &&
+  typeof navigator !== 'undefined' &&
+  !!navigator.storage?.getDirectory
+
+export interface PackedBoot {
+  root: NativeRootDirectory
+  bridge: PackedBridge
+  /** Stats + cold-open timing straight from the worker's pack_open. */
+  info: { packPoolSig: string; stats: unknown; coldOpenMs: number }
+}
+
+/**
+ * Boot the packed store: spawn the worker, open the pack, hand back the
+ * facade root. Null when the flag is off, the platform can't, or the pack is
+ * held by another tab (single-writer) — in every null case Store continues
+ * on flat OPFS unchanged, which is always safe because the pack absorbs the
+ * flat layout by DRAIN, and until a record is drained the flat layout still
+ * holds it.
+ */
+export const packedRoot = async (): Promise<PackedBoot | null> => {
+  if (!packedStoreEnabled() || !packedSupported()) return null
+  try {
+    const worker = new Worker(new URL('./packed-store.worker', import.meta.url), { type: 'module' })
+    const bridge = new PackedBridge(worker)
+    const info = (await bridge.invoke('pack_open')) as PackedBoot['info']
+    bootedBridge = bridge
+    return { root: new NativeRootDirectory(bridge), bridge, info }
+  } catch (error) {
+    console.warn('[packed-store] unavailable — continuing on flat OPFS', error)
+    return null
+  }
+}
+
+/**
+ * SHA-256 for BULK operations (install verify, commit cascades) — routed
+ * through the packed worker so hashing stops competing with rendering on the
+ * main thread. Falls back to main-thread crypto.subtle when packed mode is
+ * off, so callers never branch.
+ */
+export const signBulk = async (buffers: ArrayBuffer[]): Promise<string[]> => {
+  const bridge = bootedBridge
+  if (bridge) {
+    try {
+      return (await bridge.invoke('sign_bulk', buffers)) as string[]
+    } catch { /* worker mid-restart — fall through to inline */ }
+  }
+  const out: string[] = []
+  for (const buffer of buffers) {
+    const hash = await crypto.subtle.digest('SHA-256', buffer)
+    out.push(Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join(''))
+  }
+  return out
+}
+
+/**
+ * Route `navigator.storage.getDirectory()` itself to the packed root — the
+ * same override the native client installs, for the same reason: nine files
+ * acquire the OPFS root directly, and every acquisition must land on the ONE
+ * hive. The REAL root stays reachable for the worker (its own global is
+ * untouched) and for anything holding the captured original.
+ *
+ * Must run before any code that might capture the original function.
+ */
+export const installPackedStorageOverride = (root: NativeRootDirectory): boolean => {
+  try {
+    Object.defineProperty(navigator.storage, 'getDirectory', {
+      configurable: true,
+      value: async () => root as unknown as FileSystemDirectoryHandle,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
