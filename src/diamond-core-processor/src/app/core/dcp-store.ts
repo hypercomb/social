@@ -188,8 +188,12 @@ export class DcpStore {
   }
 
   /** Patched (cascaded) layers write into the domain scope alongside the
-   *  originals — content addressing keeps them distinct, and the
-   *  installer's purge is manifest-diff-scoped so it never touches them. */
+   *  originals — content addressing keeps them distinct. The installer's
+   *  purge shares this scope, so it holds the patch history live on
+   *  purpose: the fresh manifest UNION every patched-cascade sig and
+   *  everything those patched trees still reference (see
+   *  dcp-installer.service `#liveSigs`). Sharing the scope is only safe
+   *  while that union holds — patched bytes exist nowhere else. */
   async patchedLayersDir(domain: string): Promise<FileSystemDirectoryHandle> {
     return this.domainLayersDir(domain)
   }
