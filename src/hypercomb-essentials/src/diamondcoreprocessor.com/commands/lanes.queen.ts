@@ -11,16 +11,34 @@ export class LanesQueenBee extends QueenBee {
   readonly command = 'lanes'
   override readonly aliases = ['three', 'three-lanes']
   override description =
-    'In mobile mode, arrange tiles into three point-top columns or three flat-top rows'
+    'In mobile mode, arrange tiles into readable lanes: 3 to scan, 2 to browse, 1 to read'
   override descriptionKey = 'slash.lanes'
   override examples = [
     {
       input: '/lanes',
-      result: 'Fits three readable lanes across the screen and leaves the long axis pannable',
+      result: 'Fits the current lane count across the screen and leaves the long axis pannable',
+    },
+    {
+      input: '/lanes 1',
+      result: 'One lane — the widest hexagons, for reading',
+    },
+    {
+      input: '/lanes off',
+      result: 'Releases the lane viewport; pan and zoom go back to free',
     },
   ]
 
-  protected execute(): void {
+  protected execute(args: string): void {
+    const arg = (args ?? '').trim().toLowerCase()
+    if (arg === 'off' || arg === 'free') {
+      EffectBus.emit('lanes:off', {})
+      return
+    }
+    const n = Number(arg)
+    if (Number.isFinite(n) && n > 0) {
+      EffectBus.emit('lanes:set', { lanes: n })
+      return
+    }
     EffectBus.emit('keymap:invoke', { cmd: 'sequence.threeLanes' })
   }
 }

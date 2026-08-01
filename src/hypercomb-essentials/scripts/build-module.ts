@@ -1092,8 +1092,9 @@ const main = async (): Promise<void> => {
   // They change manifest.json bytes but NOT rootLayerSig, so naming a package
   // never redefines it. (`at`, the deploy timestamp, is intentionally NOT set
   // here — a fresh timestamp every build would churn the local manifest and
-  // defeat the skip-write below. deploy-azure.ps1 sets `at` + chains the label
-  // against the remote manifest at deploy time.)
+  // defeat the skip-write below. deploy-azure.ps1 sets `at` + `previous` +
+  // `generation` (the version counter) against the remote manifest at deploy
+  // time; `label` stays this short genesis name.)
   const packageEntry = {
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),

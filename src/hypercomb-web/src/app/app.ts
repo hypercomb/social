@@ -2,6 +2,7 @@ import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal
 import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
+import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -49,6 +50,18 @@ export class App implements AfterViewInit {
     const status = this.bootStatus()
     return status?.kind === 'install-needed' && status.reason === 'no-storage'
   })
+  /** What the install is doing right now, shown under "Starting…".
+   *
+   *  An unchanging "Starting…" is indistinguishable from a hang, and the
+   *  install has several slow steps (a DCP handshake that can time out, then a
+   *  bundled fallback) during which nothing visible happens. The routine
+   *  already reports phase/current/total on the `install:sync` bus — this just
+   *  surfaces it. */
+  protected readonly installProgress = signal('')
+
+  /** The native auto-install fires once per session. */
+  #nativeInstallTried = false
+
   /** First-run "Start" — one button, zero choices. Hands off to main.ts's
    *  unattended install routine (hidden sentinel → DCP resolves from its
    *  content domains → stream → reload; bundled package as the silent
@@ -149,7 +162,42 @@ export class App implements AfterViewInit {
       // routine exhausted both sources (sentinel + bundled) — re-arm the
       // Start button so the participant can retry.
       if (status?.kind === 'install-needed') this.upgrading.set(false)
+
+      // NATIVE SHELL: install without waiting to be asked.
+      //
+      // The web shell needs the click — a first-run install there is a user
+      // decision about storing data in their browser. A desktop app has
+      // already been installed deliberately, ships its own content, and owns
+      // its storage, so a "Start" button to unpack what the user just
+      // installed is a stall, not a choice. Fires once; re-arms only if the
+      // install genuinely fails, so a failure still surfaces the button.
+      if (status?.kind === 'install-needed' && nativeAvailable() && !this.#nativeInstallTried) {
+        this.#nativeInstallTried = true
+        // LOOP GUARD. A failed install reloads ('next reload will retry'),
+        // which lands right back here — auto-starting again turns one broken
+        // install into an endless welcome-screen cycle (observed live).
+        // sessionStorage survives reloads but not a fresh launch: auto-start
+        // fires once per app session; after that the button waits for a human.
+        let attempts = 0
+        try { attempts = Number(sessionStorage.getItem('hc:auto-install-attempts') ?? '0') } catch {}
+        if (attempts < 1) {
+          try { sessionStorage.setItem('hc:auto-install-attempts', String(attempts + 1)) } catch {}
+          queueMicrotask(() => this.startWelcome())
+        }
+      }
     })
+
+    // Surface what the install is doing, so "Starting…" is never silent.
+    EffectBus.on<{ active: boolean; source?: string; phase?: string; current?: number; total?: number }>(
+      'install:sync',
+      ({ active, source, phase, current, total }) => {
+        if (!active) { this.installProgress.set(''); return }
+        const counted = typeof current === 'number' && typeof total === 'number' && total > 0
+          ? ` ${current}/${total}`
+          : ''
+        this.installProgress.set(`${source ?? 'install'}${phase ? ` · ${phase}` : ''}${counted}`)
+      },
+    )
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)

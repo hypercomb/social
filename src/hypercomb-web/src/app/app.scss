@@ -100,6 +100,16 @@
     color: rgba(255, 255, 255, 0.6);
   }
 
+  /* Live install phase under "Starting…". Deliberately quiet — it is
+     reassurance that something is happening, not a headline. */
+  .install-progress {
+    margin: 0.5rem 0 0;
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
   .install-cta {
     flex: none;
     padding: 0.55rem 1.5rem;

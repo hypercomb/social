@@ -52,6 +52,15 @@ self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
 })
 
+// NATIVE SHELL ONLY: activate updates immediately. The desktop client ships
+// its worker inside the binary, so a waiting worker means the just-installed
+// build serves routes with the PREVIOUS build's logic until every window
+// closes twice — verified live (an updated worker sat installed-but-inactive
+// while its old version kept answering). Web keeps the default lifecycle.
+self.addEventListener('install', () => {
+  if (self.location.hostname === 'tauri.localhost') self.skipWaiting()
+})
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
@@ -516,13 +525,42 @@ async function fetchUncachedAsset(request) {
  * opfs helpers
  * ------------------------------------- */
 
+// ── native-shell bytes bridge ────────────────────────────────────────────
+// Inside hypercomb-client the hive lives in the NATIVE store, and this
+// worker's own OPFS is empty — every cold read below would 404. On a miss,
+// ask a window client for the bytes over a MessageChannel: the page holds
+// the native root and answers from it. In a normal browser no listener is
+// installed, nothing responds, and the timeout preserves the old 404
+// behavior exactly. One mechanism, every route: modules, layers, site
+// resources.
+async function askClientBytes(kind, dir, name) {
+  try {
+    const clients = await self.clients.matchAll({ type: 'window' })
+    for (const client of clients) {
+      const bytes = await new Promise(resolve => {
+        const channel = new MessageChannel()
+        const timer = setTimeout(() => resolve(null), 1500)
+        channel.port1.onmessage = e => { clearTimeout(timer); resolve(e.data?.bytes ?? null) }
+        client.postMessage({ type: 'hc:bytes-request', kind, dir, name }, [channel.port2])
+      })
+      if (bytes && bytes.byteLength > 0) return new File([bytes], name || dir)
+    }
+  } catch { /* no client, no bridge — behave as a plain miss */ }
+  return null
+}
+
 async function tryReadFromOpfs(dirName, fileName) {
   try {
     const root = await self.navigator.storage.getDirectory()
-    return await readFromDir(root, dirName, fileName)
-  } catch {
-    return null
-  }
+    const hit = await readFromDir(root, dirName, fileName)
+    if (hit) return hit
+  } catch { /* fall through to the client bridge */ }
+  // Callers of this function expect a RESPONSE (readFromDir's contract) —
+  // wrap the bridged File exactly the way readFromDir does. Returning the
+  // bare File here made handleModuleRequest's respondWith reject, which
+  // surfaces as a network-level "Failed to fetch" rather than a 404.
+  const file = await askClientBytes('dir', dirName, fileName)
+  return file ? asJsResponse(file) : null
 }
 
 // Resolve a content sig to its File: the flat OPFS root (`<root>/<sig>`,
@@ -551,7 +589,8 @@ async function tryReadContentFile(sig) {
       if (file.size > 0 || sig === EMPTY_CONTENT_SIG) return file
     } catch { /* not in this drain source — keep falling back */ }
   }
-  return null
+  // Native shell: the content lives in the native store — ask the page.
+  return await askClientBytes('content', sig, '')
 }
 
 // Bare-sig read from one legacy drain dir (e.g. `__resources__`). Read

@@ -343,42 +343,60 @@ if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
         else { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
       }
 
-      # ── Branch-name chaining ──────────────────────────────────────────
+      # ── Version chaining ──────────────────────────────────────────────
       # build-module writes a single local package with a STABLE genesis
       # `label` (the git branch) and `previous: null`. Here, where the remote
-      # manifest is in hand, we name this deploy "<previous>-updated-<stamp>"
-      # against the most recent remote package, and record `at` (deploy time)
-      # + `previous` (the version this supersedes) so the installer can walk
-      # the chain back by name. These are sidecar fields — they never affect
-      # the package's rootLayerSig.
+      # manifest is in hand, we mint the version: `generation` (monotonic
+      # counter — THE version number), `previous` (the rootLayerSig this
+      # supersedes), `at` (deploy time). `label` stays the short genesis name
+      # — it is a human handle, never a chain record (the old
+      # "<previous>-updated-<stamp>" concatenation grew without bound).
+      # These are sidecar fields — they never affect the package's
+      # rootLayerSig.
+      function generation-of($entry) {
+        if ($entry.PSObject.Properties['generation'] -and $null -ne $entry.generation) { return [int]$entry.generation }
+        return 0
+      }
       $newProp  = $localManifest.packages.PSObject.Properties | Select-Object -First 1
       if ($newProp) {
       $newSig   = $newProp.Name
       $newEntry = $newProp.Value
       $remoteForNew = $remoteManifest.packages.PSObject.Properties[$newSig]
       if ($remoteForNew) {
-        # identical content re-deploy: keep the label/at/previous it already
-        # had remotely — do not re-chain a package that hasn't changed.
+        # identical content re-deploy: keep the label/at/previous/generation it
+        # already had remotely — do not re-chain a package that hasn't changed.
         $r = $remoteForNew.Value
-        if ($r.PSObject.Properties['label'])    { set-prop $newEntry 'label'    $r.label }
-        if ($r.PSObject.Properties['at'])       { set-prop $newEntry 'at'       $r.at }
-        if ($r.PSObject.Properties['previous']) { set-prop $newEntry 'previous' $r.previous }
-        write-step " manifest label: $($newEntry.label) (unchanged re-deploy)"
+        foreach ($name in @('label', 'at', 'previous', 'generation')) {
+          if ($r.PSObject.Properties[$name]) { set-prop $newEntry $name $r.$name }
+        }
+        write-step " manifest version: v$(generation-of $newEntry) '$($newEntry.label)' (unchanged re-deploy)"
       } else {
-        # most recent prior package = highest `at` (ISO sorts chronologically);
-        # falls back to first enumerated when none carry `at` (pre-feature).
+        # predecessor = highest `generation`; ties/legacy entries without one
+        # fall back to highest `at` (ISO sorts chronologically).
         $prevProp = $remoteManifest.packages.PSObject.Properties |
-          Sort-Object @{ Expression = { if ($_.Value.PSObject.Properties['at']) { [string]$_.Value.at } else { '' } } } -Descending |
+          Sort-Object `
+            @{ Expression = { generation-of $_.Value } }, `
+            @{ Expression = { if ($_.Value.PSObject.Properties['at']) { [string]$_.Value.at } else { '' } } } `
+            -Descending |
           Select-Object -First 1
-        $previousSig   = if ($prevProp) { $prevProp.Name } else { $null }
-        $previousLabel = if ($prevProp -and $prevProp.Value.PSObject.Properties['label']) { [string]$prevProp.Value.label } else { $null }
+        $previousSig = if ($prevProp) { $prevProp.Name } else { $null }
+        # when legacy entries carry no generation, count them so numbering
+        # continues from the true chain length instead of restarting at 1.
+        $maxGeneration = 0
+        foreach ($p in $remoteManifest.packages.PSObject.Properties) {
+          $g = generation-of $p.Value
+          if ($g -gt $maxGeneration) { $maxGeneration = $g }
+        }
+        if ($maxGeneration -eq 0 -and $prevProp) {
+          $maxGeneration = @($remoteManifest.packages.PSObject.Properties).Count
+        }
         $stamp = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
         $genesis = if ($newEntry.PSObject.Properties['label'] -and $newEntry.label) { [string]$newEntry.label } else { 'genesis' }
-        $newLabel = if ($previousLabel) { "$previousLabel-updated-$stamp" } else { $genesis }
-        set-prop $newEntry 'label'    $newLabel
-        set-prop $newEntry 'at'       $stamp
-        set-prop $newEntry 'previous' $previousSig
-        write-step " manifest label: $newLabel"
+        set-prop $newEntry 'label'      $genesis
+        set-prop $newEntry 'at'         $stamp
+        set-prop $newEntry 'previous'   $previousSig
+        set-prop $newEntry 'generation' ($maxGeneration + 1)
+        write-step " manifest version: v$($maxGeneration + 1) '$genesis'"
       }
       }
 

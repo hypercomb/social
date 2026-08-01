@@ -94,6 +94,86 @@ fn pool_list(host: State<'_, Host>, meaning: String) -> Result<Vec<String>> {
 }
 
 // ---------------------------------------------------------------------------
+// RAW-BYTE TRANSPORT — the four commands that actually carry content
+//
+// invoke()'s default JSON serialization turns a byte array into an array of
+// NUMBERS — a 500 KB bee becomes ~3 MB of JSON, and a first install pushes a
+// hundred of those concurrently. Measured result: WebView2's IPC transport
+// failed outright ("IPC custom protocol failed ... Failed to fetch") and the
+// bundled install wrote 0/107 bees. These commands use Tauri's raw-body
+// channel instead: bytes travel as bytes, metadata rides in headers.
+// ---------------------------------------------------------------------------
+
+/// Store content. Body IS the content; returns its signature.
+#[tauri::command]
+fn content_put_raw(host: State<'_, Host>, request: tauri::ipc::Request<'_>) -> Result<String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(HostError::Storage("content_put_raw expects a raw body".into()));
+    };
+    host.put(bytes)
+}
+
+/// Read content. Returns the bytes raw; absence is the NotFound error, which
+/// the shim maps back to null.
+#[tauri::command]
+fn content_get_raw(host: State<'_, Host>, sig: String) -> Result<tauri::ipc::Response> {
+    match host.get(&sig)? {
+        Some(bytes) => Ok(tauri::ipc::Response::new(bytes)),
+        None => Err(HostError::NotFound),
+    }
+}
+
+/// Write a marker or pool member. Body is the content; the directory address
+/// and member name ride in headers (the name percent-encoded, since header
+/// values are ASCII and pool members carry user-chosen names).
+#[tauri::command]
+fn dir_put_raw(host: State<'_, Host>, request: tauri::ipc::Request<'_>) -> Result<()> {
+    let header = |key: &str| -> Result<String> {
+        request
+            .headers()
+            .get(key)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| HostError::Storage(format!("dir_put_raw: missing {key} header")))
+    };
+    let sig = header("x-hc-sig")?;
+    let name = percent_decode(&header("x-hc-name")?);
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(HostError::Storage("dir_put_raw expects a raw body".into()));
+    };
+    host.raw_dir_put(&sig, &name, bytes)
+}
+
+/// Read a marker or pool member, raw.
+#[tauri::command]
+fn dir_get_raw(host: State<'_, Host>, sig: String, name: String) -> Result<tauri::ipc::Response> {
+    match host.raw_dir_get(&sig, &name)? {
+        Some(bytes) => Ok(tauri::ipc::Response::new(bytes)),
+        None => Err(HostError::NotFound),
+    }
+}
+
+/// Minimal percent-decoding for the `x-hc-name` header (encodeURIComponent on
+/// the JS side). Only %XX escapes; '+' is NOT a space in this scheme.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+// ---------------------------------------------------------------------------
 // RAW ADDRESS SURFACE — for the handle shim only
 //
 // These take raw 64-hex addresses and so give up the safety of the typed
@@ -192,6 +272,19 @@ const RENDERER_DIAGNOSTICS: &str = r#"
     try { window.__TAURI__.core.invoke('renderer_log', { level, message: String(message).slice(0, 2000) }) }
     catch { /* bridge not up yet */ }
   };
+  // console.log is forwarded FILTERED — install/boot subsystems narrate
+  // through it, and those lines are exactly what a silent install stall
+  // needs. Unfiltered would drown the log in render chatter.
+  {
+    const original = console.log.bind(console);
+    console.log = (...args) => {
+      original(...args);
+      const first = String(args[0] ?? '');
+      if (/^\[(main|ensure-install|upgrade|install|sentinel|store|layer-install|dcp)/.test(first)) {
+        send('log', args.map(a => a?.stack ?? a?.message ?? a).join(' '));
+      }
+    };
+  }
   for (const level of ['error', 'warn']) {
     const original = console[level].bind(console);
     console[level] = (...args) => {
@@ -210,6 +303,23 @@ const RENDERER_DIAGNOSTICS: &str = r#"
     }
   }, true);
   window.addEventListener('unhandledrejection', e => send('rejection', e.reason?.stack ?? e.reason));
+  // Boot milestone trace. The shell calls window.__hcBoot('<milestone>') at
+  // each step of bootstrap; forwarding it shows exactly WHERE a silent boot
+  // stalls — the difference between "stuck before ensureInstall" and "stuck
+  // in attachImportMap" without adding a single line to the shell.
+  // main.ts ASSIGNS its own __hcBoot during module evaluation, which would
+  // erase a plain wrapper installed here. A property setter intercepts that
+  // assignment and wraps whatever the shell installs, so the trace survives.
+  let bootStep = 0;
+  let inner;
+  Object.defineProperty(window, '__hcBoot', {
+    configurable: true,
+    get: () => (label, extra) => {
+      try { if (typeof inner === 'function') inner(label, extra) } catch {}
+      send('boot', `#${++bootStep} ${label}${extra ? ' ' + extra : ''}`);
+    },
+    set: fn => { inner = fn; },
+  });
   // The decisive one for a native shell: a CSP block names the directive it
   // violated and the URI it refused, which a resource error never does.
   document.addEventListener('securitypolicyviolation', e =>
@@ -217,16 +327,47 @@ const RENDERER_DIAGNOSTICS: &str = r#"
 })();
 "#;
 
+/// The instance name from `--instance <name>`, sanitized to [a-z0-9-] so it
+/// is always a safe directory suffix. Absent flag = "default". Each named
+/// instance is a fully separate client install (own hive, own identity) —
+/// how one machine runs several clients side by side from one binary.
+fn instance_name() -> String {
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        if arg == "--instance" {
+            if let Some(raw) = args.next() {
+                let name: String = raw
+                    .to_lowercase()
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                    .collect();
+                let name = name.trim_matches('-').to_string();
+                if !name.is_empty() {
+                    return name;
+                }
+            }
+        }
+    }
+    "default".to_string()
+}
+
 fn main() {
+    let instance = instance_name();
     tauri::Builder::default()
-        .setup(|app| {
+        .setup(move |app| {
             // The hive lives beside the app's own data, not in a browser
-            // sandbox. No quota, no bucket eviction, no OPFS wedge.
+            // sandbox. No quota, no bucket eviction, no OPFS wedge. The
+            // default instance keeps the bare "hive" dir (pre-flag installs
+            // are the default instance); named instances get their own.
             let dir = app
                 .path()
                 .app_data_dir()
                 .expect("an app data directory")
-                .join("hive");
+                .join(if instance == "default" {
+                    "hive".to_string()
+                } else {
+                    format!("hive-{instance}")
+                });
 
             let host = Host::open(&dir).map_err(|e| format!("opening hive at {}: {e}", dir.display()))?;
             app.manage(host);
@@ -241,11 +382,20 @@ fn main() {
             // Built here rather than declared in tauri.conf.json so the
             // diagnostics script can be installed BEFORE any page script runs.
             // A window declared in config is created too early to attach one.
+            // The instance name reaches the frontend as `window.__HC_INSTANCE`
+            // so client-identity names this install after it. Sanitized to
+            // [a-z0-9-] above, so it embeds safely in a JS string literal.
+            let title = if instance == "default" {
+                "Hypercomb".to_string()
+            } else {
+                format!("Hypercomb - {instance}")
+            };
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-                .title("Hypercomb")
+                .title(title)
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(640.0, 480.0)
                 .theme(Some(tauri::Theme::Dark))
+                .initialization_script(&format!("window.__HC_INSTANCE = '{instance}';"))
                 .initialization_script(RENDERER_DIAGNOSTICS)
                 .build()?;
 
@@ -253,6 +403,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             content_put,
+            content_put_raw,
+            content_get_raw,
+            dir_put_raw,
+            dir_get_raw,
             content_get,
             content_has,
             bag_address,

@@ -34,6 +34,15 @@
 }
 
 import '@hypercomb/shared/core/ioc.web'
+// NATIVE SHELL: route every OPFS acquisition to the one native hive BEFORE
+// anything can capture the original — nine files call
+// navigator.storage.getDirectory() directly, and WebView2 has a real OPFS
+// bucket they would otherwise silently write into. No-op in a browser.
+import { installNativeStorageOverride, installNativeSwBridge } from '@hypercomb/shared/core/native-filesystem'
+installNativeStorageOverride()
+// Answer the service worker's byte requests from the native store — the SW
+// global can see neither the Tauri bridge nor the storage override.
+installNativeSwBridge()
 // Capture a `/<sig>` meeting-place invite link before navigation parses the
 // URL — stashes the sig for the receive-side MeetingInviteWorker.
 import '@hypercomb/shared/core/invite-capture'
@@ -61,7 +70,13 @@ const _deps = [DependencyLoader]
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
 
-  await navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' })
+  // The native shell stamps window.__hcSwV with the worker's content hash at
+  // bake time: WebView2 would not re-install a changed worker at the same URL
+  // on the custom protocol (verified live — new bytes served, old SW stayed
+  // active). A versioned URL makes every worker change a fresh registration.
+  // Web is untouched: __hcSwV is undefined there.
+  const swV = (window as any).__hcSwV
+  await navigator.serviceWorker.register('/hypercomb.worker.js' + (swV ? '?v=' + swV : ''), { scope: '/' })
   const reg = await navigator.serviceWorker.ready
 
   if (navigator.serviceWorker.controller) return
@@ -137,6 +152,20 @@ const attachImportMap = async (): Promise<void> => {
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
 
+  // The real 'hypercomb:start-install' handler registers at the END of
+  // bootstrap, after Angular is up. An early dispatch — the native shell's
+  // auto-install fires from the App constructor, DURING Angular bootstrap —
+  // lands before that handler exists and is silently lost, leaving the card
+  // on "Starting…" forever. (A human click seconds later never hits this,
+  // which is why the web shell never saw it.) Catch the early dispatch here
+  // and replay it once the real handler is live.
+  let startInstallBeforeReady = false
+  window.addEventListener(
+    'hypercomb:start-install',
+    () => { startInstallBeforeReady = true },
+    { once: true },
+  )
+
   // OPFS starts as best-effort storage. Check its eviction protection without
   // delaying boot, then request persistence inside the participant's first
   // trusted interaction (Firefox may prompt; Chromium/Safari decide silently).
@@ -169,6 +198,34 @@ const bootstrap = async (): Promise<void> => {
   // is detectable. ensureInstall flips this flag when the first sync
   // produces content; the subsequent resyncAndEnforce branch reloads
   // immediately so the user doesn't sit on an empty shell.
+  // THE INSTALLED FLAG IS A CLAIM, NOT EVIDENCE.
+  //
+  // It lives in localStorage; the content it describes lives in the store.
+  // Those can disagree — a reset store, a half-finished install, or a shell
+  // pointed at a different store all leave the flag `true` with nothing
+  // installed. Every downstream check then believes the shell is ready:
+  // `install-needed` is never emitted, the Start card never appears, and the
+  // app comes up with no bees and no error anywhere, because each step
+  // individually "succeeded".
+  //
+  // Verify the claim against the store once, before anything reads it.
+  try {
+    if (localStorage.getItem('hypercomb.installed') === 'true') {
+      const store = get('@hypercomb.social/Store') as
+        { bees?: { keys(): AsyncIterable<string> } } | undefined
+      if (store?.bees) {
+        let any = false
+        for await (const _ of store.bees.keys()) { any = true; break }
+        if (!any) {
+          console.warn('[main] installed flag set but the store holds no bees — clearing it')
+          localStorage.removeItem('hypercomb.installed')
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[main] could not verify the installed flag', err)
+  }
+
   const wasInstalledAtBoot = localStorage.getItem('hypercomb.installed') === 'true'
 
   // Push-only contract: NO DCP iframe is mounted at boot. Boot reads
@@ -387,6 +444,7 @@ const bootstrap = async (): Promise<void> => {
   // sha256-verified against its signature. Only when BOTH sources come
   // up empty does the card re-arm (boot:status install-needed).
   window.addEventListener('hypercomb:start-install', () => {
+    console.log('[main] start-install received')
     // Persistent storage is the install's substrate — without OPFS every
     // source fails (slowly: sentinel timeout → resync no-op → bundled
     // write failure) and the card loops Start → Starting…. Private
@@ -401,8 +459,45 @@ const bootstrap = async (): Promise<void> => {
       // Note: boot status stays 'install-needed' while this runs so the
       // welcome card remains visible with its "Starting…" state — the
       // participant watches one card until the shell reloads ready.
+
+      // THE INSTALLED FLAG IS A CLAIM, NOT EVIDENCE. It lives in
+      // localStorage; the content it claims to describe lives in the store.
+      // Those can disagree — a store reset, a half-finished install, or a
+      // shell pointed at a fresh store all leave the flag true with nothing
+      // installed. The bundled fallback below then returns early and the card
+      // loops Start → Starting… forever, with no error anywhere, because
+      // every step "succeeded".
+      //
+      // So verify the claim against the store before trusting it.
       try {
-        const sentinel = await getSentinel()
+        const store = get('@hypercomb.social/Store') as
+          { bees?: { keys(): AsyncIterable<string> } } | undefined
+        if (localStorage.getItem('hypercomb.installed') === 'true' && store?.bees) {
+          let any = false
+          for await (const _ of store.bees.keys()) { any = true; break }
+          if (!any) {
+            console.warn('[main] installed flag set but no bees present — clearing and reinstalling')
+            localStorage.removeItem('hypercomb.installed')
+          }
+        }
+      } catch (err) {
+        console.warn('[main] could not verify the installed flag', err)
+      }
+
+      try {
+        // NATIVE SHELL: bundled-only, deliberately. The DCP sentinel
+        // handshake requires DCP to recognise the embedding origin, and it
+        // does not know `tauri.localhost` — the iframe loads, the handshake
+        // neither succeeds nor fails, and getSentinel() waits forever with
+        // "Starting…" on screen. Skipping DCP entirely (rather than racing
+        // it) makes the native first-run deterministic: the client installs
+        // from its own bundled content, which is the right contract for a
+        // self-contained desktop install anyway. DCP returns when its
+        // allowlist learns the native origin.
+        const { nativeAvailable } = await import('@hypercomb/shared/core/native-filesystem')
+        console.log('[main] resolving sentinel (native skips DCP)')
+        const sentinel = nativeAvailable() ? null : await getSentinel()
+        console.log('[main] sentinel:', sentinel ? 'present' : 'skipped/absent')
         if (sentinel) {
           // DCP-FIRST: the installer fetches + verifies + RECORDS the
           // baseline package in its registry (so every feature is
@@ -442,17 +537,40 @@ const bootstrap = async (): Promise<void> => {
             console.warn('[main] first-run dcp install failed', err)
           }
         }
-        await resyncAndEnforce()   // reloads on cold-install success
+        // NATIVE: skip the sentinel resync as well — resyncFromSentinel
+        // mounts the DCP iframe itself, and awaiting a handshake DCP will
+        // never answer for the native origin is exactly the hang the sentinel
+        // skip above exists to avoid. Verified live over CDP: "resyncAndEnforce
+        // starting" was the last line the install ever printed. Bundled is the
+        // native install path, and it is next.
+        if (!nativeAvailable()) {
+          console.log('[main] resyncAndEnforce starting')
+          await resyncAndEnforce()   // reloads on cold-install success
+          console.log('[main] resyncAndEnforce done')
+        }
       } catch (err) {
         console.warn('[main] first-run sentinel install failed', err)
       }
       if (localStorage.getItem('hypercomb.installed') === 'true') return
-      const ok = await upgradeFromBundled().catch(() => false)
+      // Log the failure rather than swallowing it. A bundled install that
+      // throws is the difference between "no content available" and "the
+      // install crashed", and without this both look identical from outside —
+      // which cost real time diagnosing the native shell's first boot.
+      const ok = await upgradeFromBundled().catch(err => {
+        console.warn('[main] bundled install threw', err)
+        return false
+      })
       if (ok) { await cacheImportMap(); location.reload(); return }
       console.warn('[main] first-run install exhausted both sources (sentinel + bundled)')
       EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
     })()
   })
+
+  // Replay an auto-install that fired before the handler above existed.
+  if (startInstallBeforeReady) {
+    console.log('[main] replaying early start-install (auto-install raced bootstrap)')
+    window.dispatchEvent(new CustomEvent('hypercomb:start-install'))
+  }
 }
 
 bootstrap().catch(err => console.error(err))

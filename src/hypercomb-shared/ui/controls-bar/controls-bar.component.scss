@@ -1358,6 +1358,35 @@ $actions-corner: 12rem;
   // `data-consumes-wheel` and the landscape ordering) — they lay out nothing.
   .mobile-side { display: contents; }
 
+  // The view row sits OUT OF FLOW above the bar, so the bottom row keeps its
+  // five-slot rhythm and the camera stays dead centre whether it is open or
+  // not. Same disc language as the bar — it is the same bar, one row up.
+  .mobile-nav { position: relative; }
+
+  .mobile-view-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 0.7rem);
+    display: flex;
+    align-items: center;
+    justify-content: space-evenly;
+    gap: 0.4rem;
+    // Resting style IS the final state — the row is visible the moment it is
+    // in the DOM. The animation only adds the rise, so reduced-motion (and a
+    // frozen animation clock) can never leave it invisible.
+    animation: hc-view-row-rise 140ms ease-out;
+  }
+
+  @keyframes hc-view-row-rise {
+    from { opacity: 0; transform: translateY(0.5rem); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mobile-view-row { animation: none; }
+  }
+
   // The centre is the anchor by POSITION, not size — the same footprint as its
   // flanks so the whole row reads evenly balanced. A hair more contrast is the
   // only cue that it is the fixed one.
@@ -1387,6 +1416,39 @@ $actions-corner: 12rem;
   color: #00e5a0;
   background: rgba(0, 229, 160, 0.12);
   border-color: rgba(0, 229, 160, 0.45);
+}
+
+// The view toggle — lit while its row is up, so the chevron is not the only
+// thing saying which way it will go.
+.pill-stage.mobile .view-row-btn.active {
+  color: rgba(126, 182, 214, 0.95);
+  background: rgba(126, 182, 214, 0.14);
+  border-color: rgba(126, 182, 214, 0.45);
+}
+
+// Lanes — the legibility ladder. The digit sits in the corner of the glyph
+// as a readout, not a badge: it says which rung you are reading at, and it
+// is the only thing on the bar that reports a number. Lit while lane mode
+// owns the viewport, so "free zoom is off" is visible rather than deduced.
+.pill-stage.mobile .lanes-btn {
+  position: relative;
+
+  .lane-digit {
+    position: absolute;
+    right: 0.18rem;
+    bottom: 0.1rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0;
+    pointer-events: none;
+  }
+
+  &.active {
+    color: rgba(126, 182, 214, 0.95);
+    background: rgba(126, 182, 214, 0.14);
+    border-color: rgba(126, 182, 214, 0.45);
+  }
 }
 
 // Fullscreen toggle — lit while the document is fullscreen, the same cold
@@ -1468,6 +1530,18 @@ $actions-corner: 12rem;
   // itself is vertical.
   .ctl-btn .hci,
   .ctl-btn .mat-sym { transform: none; }
+
+  // The rail is on the left edge, so the view row pops out to its RIGHT as a
+  // column — the same relationship, rotated with everything else.
+  .mobile-view-row {
+    flex-direction: column;
+    left: calc(100% + 0.7rem);
+    right: auto;
+    bottom: auto;
+    top: 50%;
+    transform: translateY(-50%);
+    animation: none;
+  }
 }
 
 // A landscape phone with the Android editor open can leave only ~300px

@@ -124,6 +124,60 @@
   gap: 7px;
 }
 
+.home-clients {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.home-clients-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dcp-ink-3);
+}
+
+.home-client {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border: 1px solid var(--dcp-border);
+  border-radius: var(--dcp-radius-sm);
+  color: var(--dcp-ink);
+
+  strong { font-weight: 600; }
+}
+
+.home-client-platform {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dcp-ink-3);
+}
+
+.home-client-version {
+  font-family: var(--hc-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--dcp-accent);
+}
+
+.home-client-forget {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--dcp-ink-3);
+  font-size: 11px;
+  line-height: 1;
+  &:hover { color: var(--dcp-ink); }
+}
+
 .home-revisions {
   display: flex;
   align-items: center;
@@ -633,6 +687,14 @@ dcp-command-line {
   font-family: var(--hc-mono);
   font-size: 9px;
   color: var(--dcp-ink-3);
+  white-space: nowrap;
+}
+
+.version-generation {
+  font-family: var(--hc-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--dcp-accent);
   white-space: nowrap;
 }
 

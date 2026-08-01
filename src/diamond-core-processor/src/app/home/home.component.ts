@@ -89,17 +89,51 @@ export interface DomainSection {
   deployedAt?: string
   /** Root sig of the version this one supersedes (the walkback chain link). */
   previous?: string | null
+  /** Deploy-minted version counter (v1 = genesis, higher is newer). */
+  generation?: number
 }
 
-/** Deploy versions of one package, newest-first. ISO `at` sorts
- *  chronologically; ties / missing `at` fall back to the richest tree (most
- *  items) so a resolved version beats an empty import-source marker.
- *  Manifest-sourced versions carry `deployedAt`; local promote-garbage does
- *  not, so it naturally sinks to the bottom of the chain. */
+/** Deploy versions of one package, newest-first. `generation` (the deploy
+ *  version counter) is the real ordering; entries without one (legacy /
+ *  local promote-garbage) fall back to ISO `at`, then to the richest tree
+ *  (most items) so a resolved version beats an empty import-source marker. */
 const byRecency = (a: DomainSection, b: DomainSection): number => {
+  const gen = (b.generation ?? 0) - (a.generation ?? 0)
+  if (gen !== 0) return gen
   const at = (b.deployedAt ?? '').localeCompare(a.deployedAt ?? '')
   if (at !== 0) return at
   return (b.items?.length || 0) - (a.items?.length || 0)
+}
+
+/** A client install this DCP has seen — one entry per isolated storage world
+ *  (a browser profile, a native --instance, a Store install). Participant-
+ *  local bookkeeping (localStorage), never part of any lineage. */
+export interface ClientRecord {
+  /** The install's minted 64-hex identity (hc:client-id on its side). */
+  id: string
+  /** Human handle: instance name / browser name. Display only. */
+  name: string
+  platform: string
+  /** Root sig of the package the client last reported (its installed
+   *  version) — resolved against the manifest for a vN display. */
+  packageSig?: string
+  /** ISO timestamp of the last handoff from this client. */
+  lastSeen: string
+}
+
+const CLIENTS_KEY = 'dcp:clients'
+
+function readClientRegistry(): ClientRecord[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CLIENTS_KEY) ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((r): r is ClientRecord =>
+      !!r && typeof r === 'object' && /^[a-f0-9]{64}$/.test(String(r.id ?? '')))
+  } catch { return [] }
+}
+
+function writeClientRegistry(records: ClientRecord[]): void {
+  try { localStorage.setItem(CLIENTS_KEY, JSON.stringify(records)) } catch { /* non-fatal */ }
 }
 
 /** Section precedence for the cross-section revision collapse — LOWEST WINS.
@@ -258,6 +292,16 @@ export class HomeComponent implements OnDestroy {
   readonly #upgradeNewSet = signal<Set<string>>(new Set())
   #upgradePackageSig: string | null = null
   #upgradeScrolled = false
+
+  // ── Client registry ──────────────────────────────────────────────────
+  // Every handoff into DCP carries `#client=<id>&clientName=…&clientPlatform=…`
+  // — the identity of the client INSTALL that opened us (each browser, each
+  // native --instance, a Store install: separate storage worlds, separately
+  // versioned). We keep a participant-local registry of the clients this DCP
+  // has seen so installs can be told apart and managed from one place. When
+  // the same handoff names a package (`upgrade=`), that becomes the client's
+  // last-known package — resolved to its `generation` for display.
+  readonly clients = signal<ClientRecord[]>(readClientRegistry())
 
   // ── Feature-STAGING pre-tick ──────────────────────────────────────────
   // The hive's "show features" panel lets the participant stage features as
@@ -487,7 +531,7 @@ export class HomeComponent implements OnDestroy {
         // read the same answer.
         const activeSig = activePkg.get(group.domainName) || ''
         const active = packages.find(s => s.rootSig === activeSig) ?? packages[0]
-        group.revisions = packages.map(s => ({ rootSig: s.rootSig, label: this.displayLabel(s), deployedAt: s.deployedAt }))
+        group.revisions = packages.map(s => ({ rootSig: s.rootSig, label: this.displayLabel(s), deployedAt: s.deployedAt, generation: s.generation }))
         group.activeRootSig = active.rootSig
         group.sections = [active, ...content]
       } else {
@@ -940,11 +984,15 @@ export class HomeComponent implements OnDestroy {
     // wanted features' branch sigs to pre-tick ON (benign, no resync).
     this.#processStageHash()
 
+    // Every DCP handoff carries `#client=<id>&clientName=…&clientPlatform=…`
+    // — WHICH client install is talking. Record it in the client registry.
+    this.#processClientHash()
+
     // Browsers do NOT reload an iframe on hash-only URL changes, so when
     // portal-overlay swaps `…#branch=A` → `…#branch=B` for a second adopt
     // the constructor doesn't re-run. Listen for hashchange too so each
     // adopt-via-iframe gets processed even on a persistent DCP instance.
-    window.addEventListener('hashchange', () => { this.#processBranchHash(); this.#processUpgradeHash(); this.#processStageHash() })
+    window.addEventListener('hashchange', () => { this.#processBranchHash(); this.#processUpgradeHash(); this.#processStageHash(); this.#processClientHash() })
   }
 
   /** Climbing resolved-sig count for a section's live broker walk, or null
@@ -1150,6 +1198,74 @@ export class HomeComponent implements OnDestroy {
       setTimeout(() => this.#applyUpgradeMarks(), 600)
       setTimeout(() => this.#applyUpgradeMarks(), 2000)
     } catch { /* malformed hash → silent — the indicator can re-open */ }
+  }
+
+  /** Read `#client=<id>&clientName=…&clientPlatform=…` — the identity of the
+   *  client install that opened us — and upsert it into the registry. When
+   *  the same hash names a package (`upgrade=`), record it as the client's
+   *  installed version. */
+  #processClientHash(): void {
+    try {
+      const hash = window.location.hash.replace(/^#/, '')
+      if (!hash) return
+      const params = new URLSearchParams(hash)
+      const id = (params.get('client') ?? '').trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(id)) return
+      const name = (params.get('clientName') ?? '').trim().slice(0, 60)
+      const platform = (params.get('clientPlatform') ?? '').trim().slice(0, 20)
+      const pkg = (params.get('upgrade') ?? '').trim().toLowerCase()
+
+      let records = this.clients().filter(r => r.id !== id)
+      const prior = this.clients().find(r => r.id === id)
+      records.unshift({
+        id,
+        name: name || prior?.name || id.slice(0, 10),
+        platform: platform || prior?.platform || 'web',
+        packageSig: /^[a-f0-9]{64}$/.test(pkg) ? pkg : prior?.packageSig,
+        lastSeen: new Date().toISOString(),
+      })
+
+      // The relay-aggregated roster rides along as `clients=<json>` — the
+      // participant's OTHER installs (other browsers, native instances),
+      // announced over the mesh and aggregated by the opening shell. Upsert
+      // each; the opener above stays newest.
+      try {
+        const roster = JSON.parse(params.get('clients') ?? '[]')
+        for (const r of Array.isArray(roster) ? roster : []) {
+          const otherId = String(r?.i ?? '').trim().toLowerCase()
+          if (!/^[a-f0-9]{64}$/.test(otherId) || otherId === id) continue
+          const otherPrior = records.find(x => x.id === otherId)
+          records = records.filter(x => x.id !== otherId)
+          const otherPkg = String(r?.k ?? '').trim().toLowerCase()
+          records.push({
+            id: otherId,
+            name: String(r?.n ?? '').trim().slice(0, 60) || otherPrior?.name || otherId.slice(0, 10),
+            platform: String(r?.p ?? '').trim().slice(0, 20) || otherPrior?.platform || 'web',
+            packageSig: /^[a-f0-9]{64}$/.test(otherPkg) ? otherPkg : otherPrior?.packageSig,
+            lastSeen: otherPrior?.lastSeen ?? new Date().toISOString(),
+          })
+        }
+      } catch { /* malformed roster → opener alone still lands */ }
+
+      this.clients.set(records)
+      writeClientRegistry(records)
+    } catch { /* malformed hash → silent */ }
+  }
+
+  /** A client's installed version for display: its last-reported package sig
+   *  resolved to that package's `generation` (vN). Empty when unknown. */
+  clientVersion(record: ClientRecord): string {
+    if (!record.packageSig) return ''
+    const section = this.sections().find(s => s.rootSig === record.packageSig)
+    return section?.generation ? `v${section.generation}` : ''
+  }
+
+  /** Drop a client from the registry (an uninstalled or renamed-away
+   *  install). Registry is bookkeeping only — nothing else references it. */
+  forgetClient(record: ClientRecord): void {
+    const records = this.clients().filter(r => r.id !== record.id)
+    this.clients.set(records)
+    writeClientRegistry(records)
   }
 
   /** Read `#stage=<sig,sig,…>` from the URL hash — the hive's "show features"
@@ -2807,7 +2923,7 @@ export class HomeComponent implements OnDestroy {
           domain, domainName, displayDomain: domainName, rootSig: pkg.sig, originalRootSig: pkg.sig, items: [],
           loading: true, error: null, installStatus: null, patches: [], enabled: true,
           kind: 'package',
-          label: pkg.label, deployedAt: pkg.at, previous: pkg.previous,
+          label: pkg.label, deployedAt: pkg.at, previous: pkg.previous, generation: pkg.generation,
         })
       }
     }

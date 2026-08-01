@@ -253,6 +253,50 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  button reads it to flip its glyph — a toggle that always shows the same
    *  icon can't say which way it will go. */
   readonly isFullscreen = signal(false)
+  /** The legibility ladder: how many lanes of hexagons the phone is reading
+   *  at (3 scan · 2 browse · 1 read), and whether lane mode owns the
+   *  viewport at all. Published by SequenceCycleDrone on `lanes:changed`. */
+  readonly laneCount = signal(3)
+  readonly lanesActive = signal(false)
+  /** The five-icon view row above the bar (right of the rail in landscape). */
+  readonly viewRowOpen = signal(false)
+  /** How far anything floating above the bar must lift to clear the view row.
+   *  Published as a CSS variable so body-appended chrome (the select pill)
+   *  moves with it without a second event contract. */
+  #setViewRowLift = (open: boolean): void => {
+    document.documentElement.style.setProperty('--hc-mobile-row-lift', open ? '4.6rem' : '0px')
+  }
+  #viewRowAway = (event: Event): void => {
+    if (!this.viewRowOpen()) return
+    const target = event.target as HTMLElement | null
+    // The row itself and the button that opened it own their own taps.
+    if (target?.closest?.('.mobile-view-row, .view-row-btn')) return
+    this.closeViewRow()
+  }
+  readonly toggleViewRow = (event?: Event): void => {
+    event?.stopPropagation?.()
+    const next = !this.viewRowOpen()
+    this.viewRowOpen.set(next)
+    this.#setViewRowLift(next)
+    EffectBus.emit('mobile:view-row', { open: next })
+  }
+  readonly closeViewRow = (): void => {
+    if (!this.viewRowOpen()) return
+    this.viewRowOpen.set(false)
+    this.#setViewRowLift(false)
+    EffectBus.emit('mobile:view-row', { open: false })
+  }
+  /** Rotate the grid: point-top ⇄ flat-top. In lane mode the lanes own the
+   *  orientation (they turn with the device), so this is the manual override
+   *  for the free viewport. */
+  readonly rotateHexes = (): void => {
+    EffectBus.emit('keymap:invoke', { cmd: 'render.toggleOrientation' })
+  }
+  /** Walk the ordinary arrangements (Rectangle, Flowers, saved sets) — the
+   *  same `a` cycle the desktop has, which touch could not reach. */
+  readonly cycleArrangement = (): void => {
+    EffectBus.emit('keymap:invoke', { cmd: 'sequence.cycle' })
+  }
   #fullscreenHandler = (): void => { this.isFullscreen.set(!!document.fullscreenElement) }
   #mobileQuery: MediaQueryList | null = null
   #landscapeQuery: MediaQueryList | null = null
@@ -926,6 +970,23 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('camera:capture-open', undefined)
   }
 
+  /** The lane button is the phone's zoom. Tap walks the ladder toward
+   *  reading (3 → 2 → 1) and wraps back to scan at the end, so one thumb
+   *  reaches every rung without a second control. Off ⇒ the first tap
+   *  engages lanes at the remembered rung rather than stepping past it. */
+  readonly stepLanes = (): void => {
+    if (!this.lanesActive()) {
+      EffectBus.emit('lanes:set', { lanes: this.laneCount() })
+      return
+    }
+    EffectBus.emit('lanes:set', { lanes: this.laneCount() <= 1 ? 3 : this.laneCount() - 1 })
+  }
+
+  /** Long-press releases the lane viewport — free pan and zoom back. */
+  readonly releaseLanes = (): void => {
+    EffectBus.emit('lanes:off', {})
+  }
+
   /** Pools of Meaning — just SHOW the collections window. Deliberately does NOT
    *  navigate: the panel's first purpose is dragging collection references onto
    *  the page you are already standing on, so sending you to `/sets` would take
@@ -1000,6 +1061,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
+  #lanesUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
   #lockBumpUnsub: (() => void) | null = null
   #iconEditUnsub: (() => void) | null = null
@@ -1037,6 +1099,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
     })
+
+    // Last-value replay: the bar reads the ladder even when it mounts after
+    // the rung was set (a rotation rebuilds this component, the rung does
+    // not change with it).
+    this.#lanesUnsub = EffectBus.on<{ active?: boolean; lanes?: number }>(
+      'lanes:changed',
+      ({ active, lanes }) => {
+        this.lanesActive.set(!!active)
+        if (Number.isFinite(lanes)) this.laneCount.set(Math.min(3, Math.max(1, Number(lanes))))
+      },
+    )
 
     // Breadcrumb readings are resolved synchronously from the decoration index,
     // which fills in asynchronously — and they are per-locale. Both events have
@@ -1081,6 +1154,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.addEventListener('resize', this.#onResize)
     window.addEventListener('pointermove', this.#onActivity)
     window.addEventListener('pointerdown', this.#onActivity)
+    // Capture phase: a tap on the canvas is consumed by the renderer's own
+    // handlers, so a bubbling listener would never see it and the row would
+    // only ever close from its own button.
+    window.addEventListener('pointerdown', this.#viewRowAway, true)
     window.addEventListener('keydown', this.#onActivity)
     window.addEventListener('navigate', this.#onActivity)
     this.#resetIdleTimer()
@@ -1383,7 +1460,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.removeEventListener('pointermove', this.#onPillDragMove)
     window.removeEventListener('pointerup', this.#onPillDragEnd)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
+    window.removeEventListener('pointerdown', this.#viewRowAway, true)
     this.#fitLockedUnsub?.()
+    this.#lanesUnsub?.()
     this.#zoomManualUnsub?.()
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()

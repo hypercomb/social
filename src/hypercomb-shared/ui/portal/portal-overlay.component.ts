@@ -2,6 +2,7 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } from "@angular/core"
 import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
+import { getClientIdentity } from '../../core/client-identity'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
@@ -292,6 +293,37 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
           .slice(0, 80)
         if (sigs.length) url += `&new=${sigs.join(',')}`
       }
+    }
+
+    // Client identity — WHICH install is talking. Every isolated storage
+    // world (each browser, each native --instance) is a distinct client that
+    // may run a different package version; DCP keeps a registry of the
+    // clients it has seen so installs can be told apart and managed from one
+    // place. Identity travels in the handoff URL because no storage is
+    // shared across clients. Display metadata only — never resolution.
+    if ((detail?.target ?? '') === 'dcp') {
+      const client = getClientIdentity()
+      url += (url.includes('#') ? '&' : '#')
+        + `client=${client.id}`
+        + `&clientName=${encodeURIComponent(client.name)}`
+        + `&clientPlatform=${client.platform}`
+      // The relay-aggregated roster (ClientPresenceDrone writes it): the
+      // participant's OTHER client installs — other browsers, native
+      // instances — so DCP can list clients this browser has never opened
+      // it from. Compact + capped so the hash stays sane. Data contract is
+      // the localStorage record, not an import (shared never imports a
+      // module). Self is already carried above, so it's excluded here.
+      try {
+        const roster = JSON.parse(localStorage.getItem('hc:clients:roster') ?? '[]')
+        const others = (Array.isArray(roster) ? roster : [])
+          .filter((r: { id?: string }) => /^[a-f0-9]{64}$/.test(String(r?.id ?? '')) && r.id !== client.id)
+          .slice(0, 12)
+          .map((r: { id: string; name?: string; platform?: string; packageSig?: string }) => ({
+            i: r.id, n: String(r.name ?? '').slice(0, 60), p: String(r.platform ?? '').slice(0, 20),
+            ...(typeof r.packageSig === 'string' && /^[a-f0-9]{64}$/.test(r.packageSig) ? { k: r.packageSig } : {}),
+          }))
+        if (others.length) url += `&clients=${encodeURIComponent(JSON.stringify(others))}`
+      } catch { /* roster unreadable — self still travels */ }
     }
 
     // Explicit stage sigs → installer pre-tick. A headless code adopt hands

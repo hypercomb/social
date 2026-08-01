@@ -17,6 +17,8 @@ export interface PackageMeta {
   label?: string
   at?: string
   previous?: string | null
+  /** Deploy-minted version counter — v1 is genesis, higher is newer. */
+  generation?: number
 }
 
 /** PascalCase → 'lower case words' (e.g. MeshAdapterDrone → mesh adapter drone) */
@@ -429,7 +431,7 @@ export class TreeResolverService {
       const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
       if (!res.ok) return []
       const content = await res.json()
-      const packages = (content?.packages ?? {}) as Record<string, { label?: string; at?: string; previous?: string | null }>
+      const packages = (content?.packages ?? {}) as Record<string, { label?: string; at?: string; previous?: string | null; generation?: number }>
       return Object.entries(packages)
         .map(([sig, entry]) => ({ sig: sig.trim().toLowerCase(), entry }))
         .filter(({ sig }) => /^[a-f0-9]{64}$/i.test(sig))
@@ -438,6 +440,7 @@ export class TreeResolverService {
           label: typeof entry?.label === 'string' ? entry.label : undefined,
           at: typeof entry?.at === 'string' ? entry.at : undefined,
           previous: typeof entry?.previous === 'string' ? entry.previous : undefined,
+          generation: typeof entry?.generation === 'number' && Number.isFinite(entry.generation) ? entry.generation : undefined,
         }))
     } catch {
       return []

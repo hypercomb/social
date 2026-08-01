@@ -53,7 +53,11 @@
 // `createSyncAccessHandle` (worker-only sync access) has no call sites in the
 // shell and no sane IPC analogue. It throws rather than silently misbehaving.
 
-type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>
+type Invoke = (
+  command: string,
+  payload?: unknown,
+  options?: { headers?: Record<string, string> },
+) => Promise<unknown>
 
 interface RawEntry {
   name: string
@@ -90,7 +94,23 @@ class NativeWritable {
 
   async write(data: unknown): Promise<void> {
     // Mirrors the real FileSystemWritableFileStream, which accepts a blob, a
-    // buffer source, a string, or a {type:'write'} record.
+    // buffer source, a string, or a {type:'write'} command record.
+    //
+    // ORDER MATTERS. A Blob also has a `.type` property (its MIME), so a
+    // naive `'type' in data` check swallows every Blob as a malformed
+    // command record and silently writes ZERO bytes — which then fails the
+    // shim's content-address check on close. Byte-shaped inputs are
+    // recognized first; only plain command records reach the record branch.
+    if (
+      data instanceof Uint8Array ||
+      data instanceof ArrayBuffer ||
+      ArrayBuffer.isView(data) ||
+      typeof data === 'string' ||
+      (typeof Blob !== 'undefined' && data instanceof Blob)
+    ) {
+      this.#chunks.push(await toBytes(data))
+      return
+    }
     if (data && typeof data === 'object' && 'type' in (data as any)) {
       const record = data as { type: string; data?: unknown }
       if (record.type !== 'write') return
@@ -206,14 +226,17 @@ class NativeSigDirectory {
     return new NativeFileHandle(
       name,
       async () => {
-        const bytes = await this.bridge.invoke('raw_dir_get', { sig: this.name, name: key })
-        return bytes ? Uint8Array.from(bytes as number[]) : null
+        try {
+          const buf = await this.bridge.invoke('dir_get_raw', { sig: this.name, name: key })
+          return new Uint8Array(buf as ArrayBuffer)
+        } catch (error) {
+          if ((error as any)?.kind === 'NotFound') return null
+          throw error
+        }
       },
       async bytes => {
-        await this.bridge.invoke('raw_dir_put', {
-          sig: this.name,
-          name: key,
-          bytes: Array.from(bytes),
+        await this.bridge.invoke('dir_put_raw', bytes, {
+          headers: { 'x-hc-sig': this.name, 'x-hc-name': encodeURIComponent(key) },
         })
       },
     )
@@ -329,8 +352,13 @@ export class NativeRootDirectory {
     return new NativeFileHandle(
       name,
       async () => {
-        const bytes = await this.bridge.invoke('content_get', { sig: name })
-        return bytes ? Uint8Array.from(bytes as number[]) : null
+        try {
+          const buf = await this.bridge.invoke('content_get_raw', { sig: name })
+          return new Uint8Array(buf as ArrayBuffer)
+        } catch (error) {
+          if ((error as any)?.kind === 'NotFound') return null
+          throw error
+        }
       },
       async bytes => {
         // Content is addressed by its own hash, so the name is not a choice —
@@ -338,7 +366,7 @@ export class NativeRootDirectory {
         // under a signature name, the store places them at their TRUE
         // signature and the requested name simply does not gain that content.
         // Silently honouring the wrong name would corrupt content addressing.
-        const actual = await this.bridge.invoke('content_put', { bytes: Array.from(bytes) })
+        const actual = await this.bridge.invoke('content_put_raw', bytes)
         if (actual !== name) {
           throw new Error(
             `[hypercomb] refusing to write content under ${name.slice(0, 16)}… — ` +
@@ -435,4 +463,103 @@ const notFound = (name: string, where = ""): DOMException =>
 export const nativeRoot = (): NativeRootDirectory | null => {
   const bridge = ambientBridge()
   return bridge ? new NativeRootDirectory(bridge) : null
+}
+
+/**
+ * Route `navigator.storage.getDirectory()` itself to the native root.
+ *
+ * WHY THIS EXISTS. `Store.opfsRoot` was swapped to the native root, but nine
+ * further files call `navigator.storage.getDirectory()` DIRECTLY —
+ * runtime-initializer, viewport-store, sweep, translation service,
+ * folder-sync, SignatureStore's install path, and friends. WebView2 supports
+ * real OPFS, so inside the native window those calls silently succeed against
+ * the webview's own OPFS bucket — a parallel store the native host never
+ * sees. Measured result: a first install "wrote" 107 bees into that bucket,
+ * verification read the native store, and the count was 0/107 with no error
+ * anywhere, because both halves worked perfectly — against different stores.
+ *
+ * Overriding the entry point ends the class: every acquisition of an OPFS
+ * root, present or future, lands on the ONE hive. In a browser this is a
+ * no-op.
+ *
+ * Must run before any code that might capture the original function —
+ * i.e. first thing in the shell's main module.
+ */
+/**
+ * Answer the service worker's byte requests from the native store.
+ *
+ * The SW serves `/opfs/**` modules/layers and `/@resource/` site composition
+ * by reading OPFS — which, inside the native shell, is empty (the hive lives
+ * in the native store, and the SW is a separate global where neither the
+ * Tauri bridge nor the storage override exists). On a miss the SW posts
+ * `hc:bytes-request` over a MessageChannel; this listener resolves it:
+ *
+ *   kind 'content'          → content by signature (layers, site resources)
+ *   kind 'dir'  __bees__            → sign('bees') pool member
+ *               __dependencies__    → sign('dependencies') pool member
+ *               __layers__ <sig>.json → content by signature (frozen URL shape)
+ *               <64-hex>            → that sig-dir's member (bag or pool)
+ *
+ * No response in a plain browser (this never installs), so the SW's timeout
+ * preserves web behavior exactly.
+ */
+export const installNativeSwBridge = (): boolean => {
+  const bridge = ambientBridge()
+  if (!bridge || !('serviceWorker' in navigator)) return false
+
+  const readFor = async (kind: string, dir: string, name: string): Promise<Uint8Array | null> => {
+    const content = async (sig: string): Promise<Uint8Array | null> => {
+      if (!SIG.test(sig)) return null
+      try {
+        const buf = await bridge.invoke('content_get_raw', { sig })
+        return new Uint8Array(buf as ArrayBuffer)
+      } catch { return null }
+    }
+    const pool = async (meaning: string, key: string): Promise<Uint8Array | null> => {
+      const bytes = await bridge.invoke('pool_get', { meaning, key }).catch(() => null)
+      return bytes ? Uint8Array.from(bytes as number[]) : null
+    }
+
+    if (kind === 'content') return content(dir)
+    if (kind !== 'dir') return null
+    if (dir === '__bees__') return pool('bees', name)
+    if (dir === '__dependencies__') return pool('dependencies', name)
+    if (dir === '__layers__') return content(name.replace(/\.json$/, ''))
+    if (SIG.test(dir)) {
+      try {
+        const buf = await bridge.invoke('dir_get_raw', { sig: dir, name })
+        return new Uint8Array(buf as ArrayBuffer)
+      } catch { return null }
+    }
+    return null
+  }
+
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    const data = event.data as { type?: string; kind?: string; dir?: string; name?: string }
+    if (data?.type !== 'hc:bytes-request' || !event.ports[0]) return
+    void (async () => {
+      const bytes = await readFor(data.kind ?? '', data.dir ?? '', data.name ?? '')
+      if (bytes) {
+        // Transfer, don't copy — bee bundles and images are not small.
+        event.ports[0].postMessage({ bytes: bytes.buffer }, [bytes.buffer])
+      } else {
+        event.ports[0].postMessage({ bytes: null })
+      }
+    })()
+  })
+  return true
+}
+
+export const installNativeStorageOverride = (): boolean => {
+  const root = nativeRoot()
+  if (!root) return false
+  try {
+    Object.defineProperty(navigator.storage, 'getDirectory', {
+      configurable: true,
+      value: async () => root as unknown as FileSystemDirectoryHandle,
+    })
+    return true
+  } catch {
+    return false
+  }
 }
