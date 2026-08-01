@@ -16,6 +16,12 @@ site-preview/
 # reproducible from the sources — never committed.
 hypercomb-client/target/
 
+# The client's baked frontend: a copy of the web build, produced by
+# `node hypercomb-client/scripts/bake-frontend.mjs`. The SCRIPT is the source;
+# its ~800-file output is not, and committing it would duplicate every web
+# asset (content, substrate, documentation) inside the client.
+hypercomb-client/app/frontend/
+
 # Baked client frontend — a fresh copy of hypercomb-web/dist with a static
 # import map written into index.html, produced by
 # `node hypercomb-client/scripts/bake-frontend.mjs` (which rm -rf's it first).
