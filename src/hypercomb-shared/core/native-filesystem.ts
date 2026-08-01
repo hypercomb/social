@@ -505,20 +505,43 @@ export const nativeRoot = (): NativeRootDirectory | null => {
  */
 export const installNativeSwBridge = (): boolean => {
   const bridge = ambientBridge()
-  if (!bridge || !('serviceWorker' in navigator)) return false
+  return bridge ? installSwBytesBridge(bridge) : false
+}
+
+/** Normalize whatever shape a bridge hands back. The Tauri host returns a
+ *  number array for `pool_get` and an ArrayBuffer for the `*_raw` commands;
+ *  the packed-store worker transfers ArrayBuffers throughout. Both are bytes,
+ *  and the caller should not have to care which backend answered. */
+const asBytes = (value: unknown): Uint8Array | null => {
+  if (!value) return null
+  if (value instanceof Uint8Array) return value.byteLength ? value : null
+  if (value instanceof ArrayBuffer) return value.byteLength ? new Uint8Array(value) : null
+  if (Array.isArray(value)) return value.length ? Uint8Array.from(value as number[]) : null
+  return null
+}
+
+/**
+ * Install the listener over ANY bridge — the native host or the packed store.
+ *
+ * Same seam as the rest of this file: the service worker neither knows nor
+ * cares which store is underneath, it just asks the page for bytes it could
+ * not find in OPFS. The native shell needs this because its OPFS is empty.
+ * The web packed store needs it for exactly the same reason — once records
+ * are drained into the pack, the SW's own reads miss, and without this the
+ * modules, layers and `/@resource/` site composition it serves would 404.
+ */
+export const installSwBytesBridge = (bridge: NativeBridge): boolean => {
+  if (!('serviceWorker' in navigator)) return false
 
   const readFor = async (kind: string, dir: string, name: string): Promise<Uint8Array | null> => {
     const content = async (sig: string): Promise<Uint8Array | null> => {
       if (!SIG.test(sig)) return null
       try {
-        const buf = await bridge.invoke('content_get_raw', { sig })
-        return new Uint8Array(buf as ArrayBuffer)
+        return asBytes(await bridge.invoke('content_get_raw', { sig }))
       } catch { return null }
     }
-    const pool = async (meaning: string, key: string): Promise<Uint8Array | null> => {
-      const bytes = await bridge.invoke('pool_get', { meaning, key }).catch(() => null)
-      return bytes ? Uint8Array.from(bytes as number[]) : null
-    }
+    const pool = async (meaning: string, key: string): Promise<Uint8Array | null> =>
+      asBytes(await bridge.invoke('pool_get', { meaning, key }).catch(() => null))
 
     if (kind === 'content') return content(dir)
     if (kind !== 'dir') return null
@@ -527,8 +550,7 @@ export const installNativeSwBridge = (): boolean => {
     if (dir === '__layers__') return content(name.replace(/\.json$/, ''))
     if (SIG.test(dir)) {
       try {
-        const buf = await bridge.invoke('dir_get_raw', { sig: dir, name })
-        return new Uint8Array(buf as ArrayBuffer)
+        return asBytes(await bridge.invoke('dir_get_raw', { sig: dir, name }))
       } catch { return null }
     }
     return null

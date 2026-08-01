@@ -69,6 +69,10 @@ interface CommandPayload {
   sig?: string
   name?: string
   limit?: number
+  /** `pool_get` addresses a pool by its MEANING, not its signature — the
+   *  service worker knows `bees`, not sign('bees'). */
+  meaning?: string
+  key?: string
 }
 
 /** OPFS synchronous access — worker-only, and not in the DOM lib TypeScript
@@ -389,6 +393,23 @@ class PackedHost {
     return packedRemoved || flatRemoved
   }
 
+  /** A pool member by MEANING — the service worker's addressing. Falls back
+   *  to the undrained flat pool dir like every other read, so the SW keeps
+   *  getting bytes while migration is still in flight. */
+  async poolGet(meaning: string, key: string): Promise<Uint8Array | null> {
+    if (!meaning || !key) return null
+    const poolSig = await sign(new TextEncoder().encode(meaning))
+    const packed = this.#engine.getPool(poolSig, key)
+    if (packed) return packed
+    for (const flat of await this.#flatDirs(poolSig)) {
+      try {
+        const file = await (await flat.getFileHandle(key)).getFile()
+        return new Uint8Array(await file.arrayBuffer())
+      } catch { /* next source */ }
+    }
+    return null
+  }
+
   async dirEntries(sig: string): Promise<PackedEntry[]> {
     // Union: the pack's view plus whatever the flat dir still holds — the
     // same de-duplication rule as lineage bag union-reads (a name present in
@@ -654,6 +675,17 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
     }
     case 'raw_dir_remove':
       return { result: await host.dirRemove(p.sig!, p.name!), transfer: [] }
+    case 'pool_get': {
+      // The service-worker bridge's command. Addressed by MEANING because
+      // that is what the SW's URL shape carries (`__bees__`, `__dependencies__`);
+      // sign() turns it into the pool address, exactly as Store.poolSignature
+      // would. Same command name and payload as the native host, so ONE
+      // listener serves both backends.
+      const bytes = await host.poolGet(p.meaning ?? '', p.key ?? '')
+      if (!bytes) return { result: null, transfer: [] }
+      const buffer = toTransferable(bytes)
+      return { result: buffer, transfer: [buffer] }
+    }
     case 'raw_dir_entries':
       return { result: await host.dirEntries(p.sig!), transfer: [] }
     case 'raw_root_entries':

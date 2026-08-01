@@ -15,7 +15,7 @@
 // a missing native host — the flat OPFS path runs as before.
 
 import { packedStoreEnabled, setBulkSigner } from '@hypercomb/core'
-import { NativeRootDirectory, type NativeBridge } from './native-filesystem'
+import { NativeRootDirectory, installSwBytesBridge, type NativeBridge } from './native-filesystem'
 import { PACK_MAGIC, PACK_POINTER_FILENAME, packFilename } from './packed-store-engine'
 
 interface PendingCall {
@@ -163,6 +163,12 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
     // folder-sync sweeps stop competing with rendering. Callers reach it
     // through `SignatureService.signMany` and never learn a worker exists.
     setBulkSigner(signBulk)
+    // The service worker reads OPFS directly to serve `/opfs/**` modules and
+    // `/@resource/` site composition. Once records are drained into the pack
+    // those reads miss, so it falls back to asking a window client for the
+    // bytes — and this is the listener that answers. Without it, packed mode
+    // would 404 every module the SW serves.
+    installSwBytesBridge(bridge)
     // Diagnostic handle. The pack is opaque from the page — the worker owns
     // the only handle — so without this there is no way to ask the live
     // store what it holds, force a compaction, or watch a drain. Read-only
