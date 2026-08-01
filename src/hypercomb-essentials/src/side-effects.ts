@@ -5,6 +5,7 @@
 // do not edit manually
 
 import './diamondcoreprocessor.com/assistant/agent-panel.view'
+import './diamondcoreprocessor.com/assistant/skills-window.view'
 import './diamondcoreprocessor.com/assistant/agent-registry.service'
 import './diamondcoreprocessor.com/assistant/ai-key.drone'
 import './diamondcoreprocessor.com/assistant/ask-screen.view'

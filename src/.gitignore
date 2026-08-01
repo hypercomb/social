@@ -22,3 +22,4 @@ hypercomb-client/target/
 # 72MB, including the bundled content payload; the web shell's equivalent
 # (hypercomb-web/public/content) has always been ignored for the same reason.
 hypercomb-client/app/frontend/
+.claude/skill-library/
