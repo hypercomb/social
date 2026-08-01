@@ -302,6 +302,10 @@ describe('packed store: cold open at hive scale', () => {
     return file
   }
 
+  // 30s, not the 5s default: each of these builds 8,006 records before it
+  // measures anything, and under the parallel suite that alone can outrun a
+  // 5s budget on a loaded machine. The assertions inside are structural and
+  // exact — the timeout is about the fixture, not the thing under test.
   it('opens the whole tree and answers every head in at least 100x fewer file operations', () => {
     // ASSERT THE MECHANISM, NOT THE CLOCK. Wall time in jsdom under a
     // parallel suite measures the scheduler as much as the code, and a
@@ -361,7 +365,7 @@ describe('packed store: cold open at hive scale', () => {
     // teaches people to ignore the suite. Nothing is lost by dropping it: a
     // reintroduced per-record scan cannot hide from the read count above,
     // which is exact and load-independent.
-  })
+  }, 30_000)
 
   it('head lookup does not enumerate — the head index has nothing left to cache', () => {
     const engine = PackedStoreEngine.open(buildHive())
@@ -375,5 +379,5 @@ describe('packed store: cold open at hive scale', () => {
     // budget. This is why HistoryService's localStorage warm-start cache is
     // DELETED rather than ported.
     expect(best).toBeLessThan(250)
-  })
+  }, 30_000)
 })

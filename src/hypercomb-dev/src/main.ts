@@ -43,6 +43,7 @@ import '@hypercomb/shared/core/header-size'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
+import { installScaleProbe } from '@hypercomb/shared/core/packed-store-scale-probe'
 import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import {
@@ -99,6 +100,9 @@ const main = async (): Promise<void> => {
   register('@hypercomb/SignatureStore', new SignatureStore())
 
   ;(window as any).__hcBoot('main() started')
+  // Dev-only: the packed-store scale probe, driven from the console. It
+  // writes only when explicitly told to — see the file's safety notes.
+  installScaleProbe()
   // ONE-WAY DOOR GATE. Must be the FIRST thing in ${0,0}main — before any module can
   // acquire OPFS. A hive drained into the packed store is not fully present in
   // the flat layout, and booting on it would silently build atop a partial
