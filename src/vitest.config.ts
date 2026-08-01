@@ -14,6 +14,7 @@ export default defineConfig({
     alias: {
       '@hypercomb/core': src('./hypercomb-core/src/index.ts'),
       '@hypercomb/essentials': src('./hypercomb-essentials/src/index.ts'),
+      '@hypercomb/shared/core': src('./hypercomb-shared/core'),
       '@hypercomb/shared': src('./hypercomb-shared/index.ts'),
       '@hypercomb/sdk': src('./hypercomb-sdk/src/index.ts'),
     },

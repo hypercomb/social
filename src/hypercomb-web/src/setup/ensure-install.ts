@@ -86,6 +86,12 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   // initiates upgrades, the user initiates upgrades. Boot never does.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   const usableCache = cachedManifest && cachedManifest.bees.length > 0
+  // The localStorage flag is only a summary of the install cache. A reset,
+  // interrupted install, or origin/store change can leave it true after the
+  // manifest has disappeared. Normalize that impossible state here, AFTER
+  // Store.initialize(), so first-run UI and reload decisions cannot trust a
+  // claim whose required manifest is absent.
+  if (!usableCache) localStorage.removeItem(INSTALLED_FLAG_KEY)
   if (usableCache) {
     // Verify EVERY bee + EVERY dep + EVERY layer file is in OPFS. Partial
     // installs (e.g. Edge cold-load with SW race, network glitch mid-fetch)
@@ -148,6 +154,7 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     )
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
+    localStorage.removeItem(INSTALLED_FLAG_KEY)
     await purgeStaleOpfsArtifacts(store)
   }
 
@@ -1000,4 +1007,3 @@ const listFileNames = async (...dirs: (FileSystemDirectoryHandle | undefined)[])
   }
   return names
 }
-

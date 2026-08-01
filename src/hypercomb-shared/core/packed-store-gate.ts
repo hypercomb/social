@@ -26,7 +26,11 @@
 // records are in the pack; the flat layout simply no longer holds all of
 // them. Turning the flag back on restores the whole hive.
 
-import { PACKED_STORE_FLAG_KEY, packedStoreEnabled } from '@hypercomb/core'
+import {
+  PACKED_STORE_FLAG_KEY,
+  packedStoreEnabled,
+  setPackedStoreEnabled,
+} from '@hypercomb/core'
 import { nativeAvailable } from './native-filesystem'
 import { packedStoreHasRecords } from './packed-bridge'
 
@@ -36,7 +40,8 @@ const MESSAGE_BODY =
   'holds all of them. Opening it this way would show a partial hive and quietly ' +
   'build on top of it, so the shell stopped instead. Nothing has been lost.'
 const MESSAGE_FIX =
-  `Re-enable packed mode — localStorage['${PACKED_STORE_FLAG_KEY}'] = '1' — and reload.`
+  `Packed mode could not be restored in localStorage. Allow site storage, set ` +
+  `localStorage['${PACKED_STORE_FLAG_KEY}'] = '1', and reload.`
 const MESSAGE_TAB =
   'If another tab already has this hive open, use that tab: the packed store ' +
   'admits one writer at a time.'
@@ -74,10 +79,11 @@ const render = (): void => {
 /**
  * Should the shell refuse to boot?
  *
- * True only when a POPULATED pack exists and packed mode is not engaging —
- * the flag was turned off, or another tab holds the pack. An empty pack means
- * nothing was ever drained and the flat layout is still whole, so it does not
- * trip.
+ * A populated pack makes packed mode sticky: migration is a one-way door, so
+ * an absent rollout flag is repaired automatically before Store initializes.
+ * The shell stops only when that repair cannot be persisted. An empty pack
+ * means nothing was ever drained and the flat layout is still whole, so it
+ * does not trip.
  *
  * Native shells are unaffected: they never had a flat OPFS layout to fall
  * back to.
@@ -88,6 +94,19 @@ const render = (): void => {
 export const packedStoreBlocksBoot = async (packPoolSig: string): Promise<boolean> => {
   if (nativeAvailable() || packedStoreEnabled()) return false
   if (!(await packedStoreHasRecords(packPoolSig))) return false
+
+  // Before the first drain this key is a feature flag. After the first drain
+  // it is storage metadata: the flat layout is intentionally incomplete and
+  // "off" is no longer a valid mode. Losing/clearing localStorage while OPFS
+  // survives used to strand a healthy hive behind this gate and present as a
+  // catastrophic blank shell. Restore the only safe mode and let this same
+  // boot continue; packedRoot reads the key later in Store.initialize().
+  setPackedStoreEnabled(true)
+  if (packedStoreEnabled()) {
+    console.warn('[hypercomb] populated packed store found — restoring packed mode')
+    return false
+  }
+
   console.error(
     `[hypercomb] ${MESSAGE_TITLE} — refusing to boot on a partial hive.\n` +
     `${MESSAGE_BODY}\n${MESSAGE_FIX}\n${MESSAGE_TAB}`,

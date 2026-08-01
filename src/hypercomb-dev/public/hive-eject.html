@@ -1,0 +1,273 @@
+<!doctype html>
+<!-- hive-eject.html — MAINTENANCE PAGE, no app code.
+
+     Ejects a hive from the packed store back to the flat OPFS layout:
+     parse hive.pack (HCPACK01 append log), restore every surviving record
+     to its interchange home (content -> <root>/<sig>, markers ->
+     <bag>/<00000000>, pool members -> <pool>/<name>), byte-verify each
+     write, and only then park the pack aside and clear the packed flag.
+     Existing flat records are NEVER overwritten (restore semantics).
+
+     Serve: http://localhost:4250/hive-eject.html — run with NO app tab
+     open on this origin so no worker holds the pack's access handle. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>hive eject — packed → flat</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; color: #cfd6e4; background: #0f1319; padding: 2rem; max-width: 60rem; margin: 0 auto }
+  h1 { font-size: 1.1rem; color: #e8edf5 }
+  button { font: inherit; padding: .5rem 1rem; margin-right: .75rem; background: #1c2431; color: #e8edf5; border: 1px solid #33405a; border-radius: 6px; cursor: pointer }
+  button:disabled { opacity: .4; cursor: default }
+  #log { white-space: pre-wrap; font-family: Consolas, monospace; font-size: 12px; background: #0a0d12; border: 1px solid #202836; border-radius: 6px; padding: 1rem; margin-top: 1rem; max-height: 30rem; overflow: auto }
+  .ok { color: #7dcf8a } .warn { color: #e6c26e } .err { color: #e67d7d }
+</style>
+</head>
+<body>
+<h1>Eject the hive from the packed store</h1>
+<p>Dry-run parses the pack and reports. Restore writes missing records to the flat layout and verifies. Finalize parks the pack and clears the flag.</p>
+<div>
+  <button id="dry">1 · Dry run</button>
+  <button id="restore" disabled>2 · Restore to flat</button>
+  <button id="finalize" disabled>3 · Finalize (park pack, flag off)</button>
+</div>
+<div id="log"></div>
+<script>
+const logEl = document.getElementById('log')
+const log = (msg, cls) => {
+  const line = document.createElement('div')
+  if (cls) line.className = cls
+  line.textContent = msg
+  logEl.appendChild(line)
+  logEl.scrollTop = logEl.scrollHeight
+  console.log('[eject]', msg)
+}
+
+const FLAG_KEY = 'hc:store:packed'
+const MAGIC = 'HCPACK01'
+const hex = bytes => [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
+const sha256hex = async bytes => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+
+const packPoolSig = async () => sha256hex(new TextEncoder().encode('store:packed'))
+
+const authoritativePackName = async pool => {
+  try {
+    const f = await (await pool.getFileHandle('current')).getFile()
+    const gen = parseInt((await f.text()).trim(), 10)
+    if (Number.isFinite(gen) && gen > 0) return 'hive.' + gen + '.pack'
+  } catch (e) { /* absent pointer = generation 0 */ }
+  return 'hive.pack'
+}
+
+/** Parse the HCPACK01 log into surviving record maps. */
+const parsePack = bytes => {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const content = new Map()   // sigHex -> Uint8Array
+  const markers = new Map()   // bagHex -> Map(index -> Uint8Array)
+  const pools = new Map()     // poolHex -> Map(name -> Uint8Array)
+  let records = 0, torn = false
+  let p = MAGIC.length
+  if (new TextDecoder().decode(bytes.slice(0, MAGIC.length)) !== MAGIC) {
+    throw new Error('bad magic — not an HCPACK01 file')
+  }
+  while (p + 4 <= bytes.length) {
+    const bodyLen = dv.getUint32(p, true)
+    const bodyStart = p + 4
+    const crcAt = bodyStart + bodyLen
+    if (bodyLen < 3 || crcAt + 4 > bytes.length) { torn = true; break }
+    const kind = bytes[bodyStart]
+    const keyLen = dv.getUint16(bodyStart + 1, true)
+    const keyStart = bodyStart + 3
+    if (keyStart + keyLen > crcAt) { torn = true; break }
+    const key = bytes.slice(keyStart, keyStart + keyLen)
+    const value = bytes.slice(keyStart + keyLen, crcAt)
+    records++
+    if (kind === 1) {            // Content put
+      content.set(hex(key), value)
+    } else if (kind === 2) {     // Marker put: 32B bag + 4B BE index
+      const bag = hex(key.slice(0, 32))
+      const index = new DataView(key.buffer, key.byteOffset + 32, 4).getUint32(0, false)
+      if (!markers.has(bag)) markers.set(bag, new Map())
+      markers.get(bag).set(index, value)
+    } else if (kind === 3) {     // Pool put: 32B pool + utf8 name
+      const pool = hex(key.slice(0, 32))
+      const name = new TextDecoder().decode(key.slice(32))
+      if (!pools.has(pool)) pools.set(pool, new Map())
+      pools.get(pool).set(name, value)
+    } else if (kind === 17) {    // TombContent
+      content.delete(hex(key))
+    } else if (kind === 18) {    // TombMarker
+      const bag = hex(key.slice(0, 32))
+      const index = new DataView(key.buffer, key.byteOffset + 32, 4).getUint32(0, false)
+      markers.get(bag)?.delete(index)
+    } else if (kind === 19) {    // TombPool
+      const pool = hex(key.slice(0, 32))
+      const name = new TextDecoder().decode(key.slice(32))
+      pools.get(pool)?.delete(name)
+    }
+    p = crcAt + 4
+  }
+  return { content, markers, pools, records, torn }
+}
+
+const markerFilename = index => String(index).padStart(8, '0')
+
+const readExisting = async (dir, name) => {
+  try { return new Uint8Array(await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer()) }
+  catch (e) { return null }
+}
+
+const sameBytes = (a, b) => {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+const writeAndVerify = async (dir, name, bytes) => {
+  const handle = await dir.getFileHandle(name, { create: true })
+  const writable = await handle.createWritable()
+  await writable.write(bytes)
+  await writable.close()
+  const back = await readExisting(dir, name)
+  if (!back || !sameBytes(back, bytes)) throw new Error('verify failed for ' + name)
+}
+
+let parsed = null
+let packInfo = null
+
+const dryRun = async () => {
+  logEl.textContent = ''
+  const root = await navigator.storage.getDirectory()
+  const poolSig = await packPoolSig()
+  let pool
+  try { pool = await root.getDirectoryHandle(poolSig) }
+  catch (e) { log('no pack pool directory — nothing to eject', 'warn'); return }
+  const packName = await authoritativePackName(pool)
+  const file = await (await pool.getFileHandle(packName)).getFile()
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  log('pack: ' + packName + ' — ' + bytes.length + ' bytes')
+  parsed = parsePack(bytes)
+  packInfo = { poolSig, packName, size: bytes.length }
+  let markerCount = 0
+  for (const m of parsed.markers.values()) markerCount += m.size
+  let memberCount = 0
+  for (const m of parsed.pools.values()) memberCount += m.size
+  log('records scanned: ' + parsed.records + (parsed.torn ? ' (torn tail — stopped there, everything before is intact)' : ''), parsed.torn ? 'warn' : 'ok')
+  log('surviving: ' + parsed.content.size + ' content · ' + parsed.markers.size + ' bags / ' + markerCount + ' markers · ' + parsed.pools.size + ' pools / ' + memberCount + ' members', 'ok')
+  for (const [bag, m] of parsed.markers) {
+    log('  bag ' + bag.slice(0, 12) + '… : ' + m.size + ' markers, max index ' + Math.max(...m.keys()))
+  }
+  document.getElementById('restore').disabled = false
+}
+
+const restore = async () => {
+  if (!parsed) return
+  const root = await navigator.storage.getDirectory()
+  const counts = { content: 0, contentSkipped: 0, markers: 0, markersSkipped: 0, conflicts: 0, members: 0, membersSkipped: 0, hashMismatch: 0 }
+
+  for (const [sig, bytes] of parsed.content) {
+    const actual = await sha256hex(bytes)
+    if (actual !== sig) { counts.hashMismatch++; log('content ' + sig.slice(0, 12) + '… does not hash to its key — left unrestored', 'err'); continue }
+    const existing = await readExisting(root, sig)
+    if (existing) { counts.contentSkipped++; continue }
+    await writeAndVerify(root, sig, bytes)
+    counts.content++
+  }
+
+  for (const [bag, m] of parsed.markers) {
+    const dir = await root.getDirectoryHandle(bag, { create: true })
+    for (const [index, bytes] of m) {
+      const name = markerFilename(index)
+      const existing = await readExisting(dir, name)
+      if (existing) {
+        if (sameBytes(existing, bytes)) counts.markersSkipped++
+        else { counts.conflicts++; log('CONFLICT ' + bag.slice(0, 12) + '…/' + name + ' — flat copy differs, preserved (pack copy NOT written)', 'warn') }
+        continue
+      }
+      await writeAndVerify(dir, name, bytes)
+      counts.markers++
+    }
+  }
+
+  for (const [pool, m] of parsed.pools) {
+    const dir = await root.getDirectoryHandle(pool, { create: true })
+    for (const [name, bytes] of m) {
+      const parts = name.split('/')
+      let target = dir
+      for (const part of parts.slice(0, -1)) target = await target.getDirectoryHandle(part, { create: true })
+      const leaf = parts[parts.length - 1]
+      const existing = await readExisting(target, leaf)
+      if (existing) { counts.membersSkipped++; continue }
+      await writeAndVerify(target, leaf, bytes)
+      counts.members++
+    }
+  }
+
+  log('restored: ' + counts.content + ' content (+' + counts.contentSkipped + ' already flat) · ' +
+      counts.markers + ' markers (+' + counts.markersSkipped + ' already flat, ' + counts.conflicts + ' conflicts preserved) · ' +
+      counts.members + ' pool members (+' + counts.membersSkipped + ' already flat)' +
+      (counts.hashMismatch ? ' · ' + counts.hashMismatch + ' HASH MISMATCHES left in pack' : ''),
+      counts.hashMismatch || counts.conflicts ? 'warn' : 'ok')
+  log('every write was read back and byte-verified', 'ok')
+  document.getElementById('finalize').disabled = false
+}
+
+const finalize = async () => {
+  if (!packInfo) return
+  const root = await navigator.storage.getDirectory()
+  const pool = await root.getDirectoryHandle(packInfo.poolSig)
+  // Park, do not destroy: rename the pack out of the gate's sight by copying
+  // to a .ejected file and truncating the original names it checks.
+  const file = await (await pool.getFileHandle(packInfo.packName)).getFile()
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  await writeAndVerify(pool, packInfo.packName + '.ejected', bytes)
+  log('parked a byte-identical copy at ' + packInfo.packName + '.ejected', 'ok')
+  await pool.removeEntry(packInfo.packName)
+  try { await pool.removeEntry('current') } catch (e) { /* absent */ }
+  // Remove any other generations so no populated pack remains visible.
+  for await (const [name, handle] of pool.entries()) {
+    if (handle.kind === 'file' && /^hive(\.\d+)?\.pack$/.test(name)) {
+      try { await pool.removeEntry(name); log('removed extra generation ' + name, 'warn') } catch (e) { log('could not remove ' + name + ': ' + e, 'err') }
+    }
+  }
+  localStorage.removeItem(FLAG_KEY)
+  log('pack removed, ' + FLAG_KEY + ' cleared — the shell will boot FLAT on next load', 'ok')
+  log('DONE. Reload the app at http://localhost:4250/', 'ok')
+}
+
+document.getElementById('dry').onclick = () => dryRun().catch(e => log(String(e), 'err'))
+document.getElementById('restore').onclick = () => restore().catch(e => log(String(e), 'err'))
+document.getElementById('finalize').onclick = () => finalize().catch(e => log(String(e), 'err'))
+
+/** Persist the log where any later context can read it (pack pool dir). */
+const persistLog = async status => {
+  try {
+    const root = await navigator.storage.getDirectory()
+    const pool = await root.getDirectoryHandle(await packPoolSig(), { create: true })
+    const handle = await pool.getFileHandle('eject.log', { create: true })
+    const writable = await handle.createWritable()
+    await writable.write(new TextEncoder().encode(status + '\n' + logEl.textContent))
+    await writable.close()
+  } catch (e) { log('could not persist log: ' + e, 'warn') }
+}
+
+const auto = new URLSearchParams(location.search).get('auto') === '1'
+if (auto) {
+  (async () => {
+    try {
+      await dryRun()
+      if (!parsed) { await persistLog('NOTHING-TO-EJECT'); return }
+      await restore()
+      await finalize()
+      await persistLog('DONE')
+    } catch (e) {
+      log(String(e), 'err')
+      await persistLog('FAILED')
+    }
+  })()
+} else {
+  dryRun().catch(e => log(String(e), 'err'))
+}
+</script>
+</body>
+</html>

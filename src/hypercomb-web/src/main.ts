@@ -204,46 +204,19 @@ const bootstrap = async (): Promise<void> => {
   // below rethrows it, preserving the serial chain's abort-boot semantics.
   swChain.catch(() => {})
 
-  // Capture install state BEFORE ensureInstall so the cold-install path
-  // is detectable. ensureInstall flips this flag when the first sync
-  // produces content; the subsequent resyncAndEnforce branch reloads
-  // immediately so the user doesn't sit on an empty shell.
-  // THE INSTALLED FLAG IS A CLAIM, NOT EVIDENCE.
-  //
-  // It lives in localStorage; the content it describes lives in the store.
-  // Those can disagree — a reset store, a half-finished install, or a shell
-  // pointed at a different store all leave the flag `true` with nothing
-  // installed. Every downstream check then believes the shell is ready:
-  // `install-needed` is never emitted, the Start card never appears, and the
-  // app comes up with no bees and no error anywhere, because each step
-  // individually "succeeded".
-  //
-  // Verify the claim against the store once, before anything reads it.
-  try {
-    if (localStorage.getItem('hypercomb.installed') === 'true') {
-      const store = get('@hypercomb.social/Store') as
-        { bees?: { keys(): AsyncIterable<string> } } | undefined
-      if (store?.bees) {
-        let any = false
-        for await (const _ of store.bees.keys()) { any = true; break }
-        if (!any) {
-          console.warn('[main] installed flag set but the store holds no bees — clearing it')
-          localStorage.removeItem('hypercomb.installed')
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[main] could not verify the installed flag', err)
-  }
-
-  const wasInstalledAtBoot = localStorage.getItem('hypercomb.installed') === 'true'
-
   // Push-only contract: NO DCP iframe is mounted at boot. Boot reads
   // OPFS only. The sentinel bridge is created lazily on the first
   // explicit user action that needs DCP — opening the installer from
   // the menu, the install-needed prompt, or the in-app DCP portal.
   await ensureInstall(null)
   ;(window as any).__hcBoot('ensureInstall done')
+
+  // Capture install state only AFTER ensureInstall has initialized the store
+  // and normalized localStorage against the real cache. Reading the flag first
+  // let a stale `true` suppress the cold-install reload even though no usable
+  // install existed — the shell stayed up with no bees and no tiles.
+  const wasInstalledAtBoot = localStorage.getItem('hypercomb.installed') === 'true'
+
   await attachImportMap()
   ;(window as any).__hcBoot('attachImportMap (resolveImportMap) done')
 

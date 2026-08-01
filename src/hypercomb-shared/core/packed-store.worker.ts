@@ -461,7 +461,14 @@ class PackedHost {
 
     // Listings are SNAPSHOTTED before any removal — mutating a directory
     // while async-iterating it is implementation-defined.
-    for (const [name, handle] of await snapshot(this.#root)) {
+    // Directories first: bags and pools are where the drainable records
+    // live, while root files are mostly resident blobs that only cost a
+    // metadata check to skip. Walking dirs first means every bounded chunk
+    // spends its budget moving records instead of re-skipping thousands of
+    // blobs to reach them.
+    const rootListing = await snapshot(this.#root)
+    rootListing.sort((a, b) => Number(b[1].kind === 'directory') - Number(a[1].kind === 'directory'))
+    for (const [name, handle] of rootListing) {
       if (budget()) return { moved, done: false, failed }
       if (name === this.#packPoolSig || !isSigName(name)) continue
 
@@ -542,12 +549,16 @@ class PackedHost {
   ): Promise<'moved' | 'skipped' | 'failed'> {
     const file = await (await source.getFileHandle(sig)).getFile()
     if (file.size === 0 && sig !== this.#config.emptyContentSig) return 'failed' // torn write — leave for the healing read path
+    // A root blob IS the packed layout — decide by size BEFORE touching the
+    // bytes. Reading and hashing every resident blob made each drain sweep
+    // re-digest the whole hive (hundreds of MB) just to conclude 'skipped',
+    // starving every queued store read behind it for minutes.
+    if (atRoot && file.size >= BLOB_THRESHOLD) return 'skipped'
     const bytes = new Uint8Array(await file.arrayBuffer())
     const actual = await sign(bytes)
     if (actual !== sig) return 'failed' // does not sign as its name — surface, never delete
 
     if (bytes.length >= BLOB_THRESHOLD) {
-      if (atRoot) return 'skipped' // a root blob IS the packed layout
       await this.contentPut(bytes) // legacy blob -> loose root file
     } else {
       this.#engine.putContent(sig, bytes)
