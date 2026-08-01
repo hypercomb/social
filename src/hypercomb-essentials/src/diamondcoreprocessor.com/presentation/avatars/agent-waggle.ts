@@ -12,9 +12,11 @@
 //   script       a flat, even patrol — a triangle wave, no dance to it.
 //                Deterministic work should not look like it is deliberating.
 //   system       a slow circle. Housekeeping humming along in the background.
-//   orchestrator the same figure-8, three times as wide and a third the
-//                speed — the overseer walks the same dance, but it is
-//                watching the room rather than working a tile.
+//   orchestrator the same figure-8 at the same size, a third of the speed —
+//                the overseer walks the same dance, but it is watching the
+//                room rather than working a tile. Sharing the model's reach
+//                is deliberate: both infinity dances get ONE compact target
+//                to aim a cursor at. Speed is what tells them apart.
 //
 // Pure math, no Pixi, no DOM: the renderer asks for an offset at time t, and
 // the same functions give the path used to draw (and hit-test) the WAGGLE AREA

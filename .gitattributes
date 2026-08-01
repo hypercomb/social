@@ -10,3 +10,10 @@
 **/__resources__/** binary
 **/__from-hypercomb__/** binary
 src/documentation/glossary.md text eol=lf
+
+# The two shipped service-worker copies must be BYTE-identical across the web
+# and dev shells (service-worker.spec.ts asserts it, because nothing builds one
+# from the other). A checkout that gave one copy CRLF and the other LF failed
+# that check with no content difference at all. Pin both to LF.
+src/hypercomb-web/public/hypercomb.worker.js text eol=lf
+src/hypercomb-dev/public/hypercomb.worker.js text eol=lf

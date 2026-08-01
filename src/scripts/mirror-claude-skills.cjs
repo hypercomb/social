@@ -143,6 +143,15 @@ async function main() {
       console.log(`[mirror] ${group}/${cell}: layer=${part.ok ? 'ok' : part.error} notes=${n}`)
     }
   }
+  // 6. ONE build revision for the whole pass (documentation/build-revisions.md).
+  //    This pass stamps many anchors — the assistant collection, the skills
+  //    cell, three group cells, ~30 skill cells, plus tags and notes — so the
+  //    census is restorable as a single step rather than 40 loose commits.
+  const rev = await send({ op: 'build-record', segments: SKILLS, label: 'claude skills census' })
+  console.log(rev.ok
+    ? `[mirror] build rev ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `[mirror] build rev FAILED: ${rev.error}`)
+
   console.log('[mirror] done. before-head was', JSON.stringify(before.data).slice(0, 120))
 }
 

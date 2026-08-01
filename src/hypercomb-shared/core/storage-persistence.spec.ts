@@ -1,5 +1,10 @@
+// The runner is VITEST, like every other `*.spec.ts` here. `node:test`'s
+// describe/it register with the node test runner, which nothing runs — under
+// `vitest run` this file collected zero suites and failed the whole file with
+// "No test suite found". The assertions stay on node:assert: they are
+// runner-agnostic, and the checks read as equality, not as expectations.
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { protectOriginStorage, STORAGE_PERSISTENCE_STATUS_KEY } from './storage-persistence'
 
 class FakeEvents {

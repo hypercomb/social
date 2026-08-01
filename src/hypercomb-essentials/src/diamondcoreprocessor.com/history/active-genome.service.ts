@@ -12,7 +12,22 @@ import {
 export const ACTIVE_GENOME_KEY = '@diamondcoreprocessor.com/ActiveGenomeService'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const STORE_KEY = '@hypercomb.social/Store'
-const COMPUTED_MEANING = 'computed'
+/** Scoped, never bare. A bare `'computed'` hashes to the same OPFS directory
+ *  as the lineage bag of a root tile called `computed` — sign(meaning) and
+ *  sign(lineageKey(segments)) share one flat namespace, and /flatten would
+ *  hard-delete the pool's members as strays. The colon is unreachable from
+ *  any location, so it is collision-proof by construction.
+ *
+ *  RENAMED FROM `'computed'` — sign() of the new spelling is a DIFFERENT
+ *  address, so anything already written under sign('computed') is stranded.
+ *  No drain is needed and none is planned: this pool holds only the two
+ *  DERIVED docs below. `active-genome` is a census recomputed from the tree
+ *  on every head change (#refresh re-collects and re-persists within a
+ *  debounce of boot), and `active-genome-queue` is its retry marker, which
+ *  #hydrate already treats as absent-or-corrupt → repaired by the boot
+ *  census. A live hive rebuilds both into the new address without noticing;
+ *  the old dir is unreferenced and collected like any other stray. */
+const COMPUTED_MEANING = 'computed:genome'
 const COMPUTED_SUBKEY = 'active-genome'
 const QUEUE_SUBKEY = 'active-genome-queue'
 const DEBOUNCE_MS = 500

@@ -72,8 +72,15 @@ describe('waggle patterns', () => {
       const spread = Math.max(...samples.map(s => s.x)) - Math.min(...samples.map(s => s.x))
       expect(spread).toBeGreaterThan(1)
     }
-    const shapes = KINDS.map(k => JSON.stringify(waggleFor(k).reach))
-    expect(new Set(shapes).size).toBe(KINDS.length)
+    // Compared as the TRAJECTORY, not as the box it fits in. The
+    // orchestrator shares the model's reach by design — the same-size
+    // figure-8, danced a third of the speed (asserted directly below, and by
+    // `inWaggleArea` giving both infinity dances one target) — so four kinds
+    // legitimately have three reaches. What must never collide is how they
+    // move: sampled at the same instants, no two kinds trace the same dance.
+    const dances = KINDS.map(k =>
+      JSON.stringify([0, 0.1, 0.2, 0.3, 0.4].map(t => waggleOffset(k, t, 0, 1))))
+    expect(new Set(dances).size).toBe(KINDS.length)
   })
 
   it('the orchestrator dances the same-size figure-8, more slowly', () => {
