@@ -117,12 +117,29 @@ class OpfsSyncFile implements SyncFile {
   }
 }
 
-/** Legacy content dirs that may still hold undrained sig-named files. The
- *  store's own self-clean migrates them to the flat root; until it has, the
- *  packed read path falls through to them so nothing ever goes dark. */
-const LEGACY_CONTENT_DIRS = ['__hive__', 'hypercomb.io', '__resources__', '__layers__', '__optimized__']
-/** Legacy dir whose CHILDREN are lineage bags (sig dirs of markers). */
-const LEGACY_BAG_PARENTS = ['__history__']
+/**
+ * Drain sources and sentinels, CONFIGURED at `pack_open` rather than named
+ * here. `Store` already owns the legacy directory constants and the
+ * empty-content signature; duplicating either into this file would mint a
+ * second copy that drifts — the exact failure the typed-folder and
+ * hardcoded-signature doctrine ratchets exist to prevent. The worker
+ * receives them and holds no opinion about what the old layout was called.
+ */
+interface PackConfig {
+  /** Legacy dirs that may still hold undrained sig-named CONTENT files. */
+  legacyContentDirs: string[]
+  /** Legacy dirs whose CHILDREN are lineage bags (sig dirs of markers). */
+  legacyBagParents: string[]
+  /** The one signature whose valid content is zero bytes. Any OTHER sig
+   *  stored as a 0-byte file is a torn write, not content. */
+  emptyContentSig: string
+}
+
+const EMPTY_CONFIG: PackConfig = {
+  legacyContentDirs: [],
+  legacyBagParents: [],
+  emptyContentSig: '',
+}
 
 class PackedHost {
   #engine!: PackedStoreEngine
@@ -131,8 +148,11 @@ class PackedHost {
   #packPoolSig!: string
   #handle!: FileSystemSyncAccessHandle
 
-  async open(): Promise<{ packPoolSig: string; stats: unknown; coldOpenMs: number }> {
+  #config: PackConfig = EMPTY_CONFIG
+
+  async open(config: PackConfig): Promise<{ packPoolSig: string; stats: unknown; coldOpenMs: number }> {
     const started = performance.now()
+    this.#config = config
     this.#root = await navigator.storage.getDirectory()
     this.#packPoolSig = await sign(new TextEncoder().encode(PACKED_STORE_MEANING))
     this.#packDir = await this.#root.getDirectoryHandle(this.#packPoolSig, { create: true })
@@ -184,7 +204,7 @@ class PackedHost {
   }
 
   async #legacyContentFile(sig: string): Promise<File | null> {
-    for (const dirName of LEGACY_CONTENT_DIRS) {
+    for (const dirName of this.#config.legacyContentDirs) {
       try {
         const dir = await this.#root.getDirectoryHandle(dirName)
         const handle = await dir.getFileHandle(sig)
@@ -195,14 +215,14 @@ class PackedHost {
   }
 
   /** The undrained flat sig-dir for an address, if it still exists.
-   *  `__history__/<sig>` is the one legacy source whose bags the virtual
+   *  A legacy bag-parent's `<sig>` child is the one source whose bags the virtual
    *  root can no longer surface by name (non-sig names report absent), so
    *  its bag joins the fallback chain here until the drain absorbs it. */
   async #flatDirs(sig: string): Promise<FileSystemDirectoryHandle[]> {
     if (sig === this.#packPoolSig) return []
     const out: FileSystemDirectoryHandle[] = []
     try { out.push(await this.#root.getDirectoryHandle(sig)) } catch { /* drained */ }
-    for (const parentName of LEGACY_BAG_PARENTS) {
+    for (const parentName of this.#config.legacyBagParents) {
       try {
         const parent = await this.#root.getDirectoryHandle(parentName)
         out.push(await parent.getDirectoryHandle(sig))
@@ -228,7 +248,7 @@ class PackedHost {
     // A 0-byte file under a non-empty-content sig is a torn flat-layout
     // write, not content — fall through to NotFound so a healthier source
     // (host fetch) can heal it, mirroring store.ts's incomplete-write guard.
-    if (loose && (loose.size > 0 || sig === EMPTY_CONTENT_SIG)) {
+    if (loose && (loose.size > 0 || sig === this.#config.emptyContentSig)) {
       return new Uint8Array(await loose.arrayBuffer())
     }
     throw notFound(`content ${sig.slice(0, 12)}…`)
@@ -374,9 +394,9 @@ class PackedHost {
     }
 
     // Legacy sources, CHAINED behind the flat root: content dirs first,
-    // then `__history__`'s bag dirs. Reads already fall back to them, so
+    // then the legacy bag parents. Reads already fall back to them, so
     // draining them here is the same copy->verify->remove, one level deeper.
-    for (const dirName of LEGACY_CONTENT_DIRS) {
+    for (const dirName of this.#config.legacyContentDirs) {
       if (budget()) return { moved, done: false, failed }
       const dir = await this.#tryDir(this.#root, dirName)
       if (!dir) continue
@@ -387,7 +407,7 @@ class PackedHost {
       }
       await this.#removeIfEmpty(this.#root, dirName)
     }
-    for (const parentName of LEGACY_BAG_PARENTS) {
+    for (const parentName of this.#config.legacyBagParents) {
       const parent = await this.#tryDir(this.#root, parentName)
       if (!parent) continue
       for (const [bagName, bagHandle] of await snapshot(parent)) {
@@ -423,7 +443,7 @@ class PackedHost {
     atRoot: boolean,
   ): Promise<'moved' | 'skipped' | 'failed'> {
     const file = await (await source.getFileHandle(sig)).getFile()
-    if (file.size === 0 && sig !== EMPTY_CONTENT_SIG) return 'failed' // torn write — leave for the healing read path
+    if (file.size === 0 && sig !== this.#config.emptyContentSig) return 'failed' // torn write — leave for the healing read path
     const bytes = new Uint8Array(await file.arrayBuffer())
     const actual = await sign(bytes)
     if (actual !== sig) return 'failed' // does not sign as its name — surface, never delete
@@ -491,7 +511,6 @@ class PackedHost {
   }
 }
 
-const EMPTY_CONTENT_SIG = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
 /** Materialize a directory listing before mutating the directory. */
 const snapshot = async (
@@ -530,7 +549,7 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
   const p = (payload ?? {}) as CommandPayload
 
   if (cmd === 'pack_open') {
-    ready ??= host.open()
+    ready ??= host.open(payload as PackConfig)
     return { result: await ready, transfer: [] }
   }
   if (!ready) throw new Error('packed store not opened — send pack_open first')

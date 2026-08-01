@@ -305,7 +305,20 @@ export class Store extends EventTarget {
     // pack — every null case falls through to flat OPFS unchanged, which is
     // safe because the pack absorbs the flat layout by drain and the flat
     // layout keeps every undrained record.
-    const packed = native ? null : await packedRoot()
+    // The drain sources are passed IN: Store owns those constants, and a
+    // second copy inside the worker would be exactly the drift the
+    // typed-folder ratchet exists to catch.
+    const packed = native ? null : await packedRoot({
+      legacyContentDirs: [
+        Store.LEGACY_HIVE_DIRECTORY,
+        Store.LEGACY_HYPERCOMB_IO_DIRECTORY,
+        Store.LEGACY_RESOURCES_DIRECTORY,
+        Store.LEGACY_LAYERS_DIRECTORY,
+        Store.LEGACY_OPTIMIZED_DIRECTORY,
+      ],
+      legacyBagParents: [Store.LEGACY_HISTORY_DIRECTORY],
+      emptyContentSig: EMPTY_CONTENT_SIG,
+    })
     if (native) {
       this.opfsRoot = native as unknown as FileSystemDirectoryHandle
       this.#opfsAvailable = true

@@ -117,9 +117,14 @@ export const hexToBytes = (hex: string): Uint8Array => {
   return out
 }
 
+/** byte -> two hex chars. Open converts a 32-byte key per record across
+ *  thousands of records, so the table is not premature: it is most of the
+ *  cold-open cost. */
+const HEX_BYTE = Array.from({ length: 256 }, (_, b) => b.toString(16).padStart(2, '0'))
+
 export const bytesToHex = (bytes: Uint8Array): string => {
   let out = ''
-  for (const b of bytes) out += b.toString(16).padStart(2, '0')
+  for (let i = 0; i < bytes.length; i++) out += HEX_BYTE[bytes[i]]
   return out
 }
 

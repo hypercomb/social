@@ -14,7 +14,7 @@
 // null when off or unsupported, and Store's #doInit treats null exactly like
 // a missing native host — the flat OPFS path runs as before.
 
-import { packedStoreEnabled } from '@hypercomb/core'
+import { packedStoreEnabled, setBulkSigner } from '@hypercomb/core'
 import { NativeRootDirectory, type NativeBridge } from './native-filesystem'
 
 interface PendingCall {
@@ -92,6 +92,14 @@ const packedSupported = (): boolean =>
   typeof navigator !== 'undefined' &&
   !!navigator.storage?.getDirectory
 
+/** What the worker needs to know about the OLD layout. Supplied by `Store`,
+ *  which owns those constants — the worker holds no second copy to drift. */
+export interface PackedStoreConfig {
+  legacyContentDirs: string[]
+  legacyBagParents: string[]
+  emptyContentSig: string
+}
+
 export interface PackedBoot {
   root: NativeRootDirectory
   bridge: PackedBridge
@@ -107,13 +115,17 @@ export interface PackedBoot {
  * flat layout by DRAIN, and until a record is drained the flat layout still
  * holds it.
  */
-export const packedRoot = async (): Promise<PackedBoot | null> => {
+export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot | null> => {
   if (!packedStoreEnabled() || !packedSupported()) return null
   try {
     const worker = new Worker(new URL('./packed-store.worker', import.meta.url), { type: 'module' })
     const bridge = new PackedBridge(worker)
-    const info = (await bridge.invoke('pack_open')) as PackedBoot['info']
+    const info = (await bridge.invoke('pack_open', config)) as PackedBoot['info']
     bootedBridge = bridge
+    // Bulk SHA-256 now happens in the worker, so install verification and
+    // folder-sync sweeps stop competing with rendering. Callers reach it
+    // through `SignatureService.signMany` and never learn a worker exists.
+    setBulkSigner(signBulk)
     return { root: new NativeRootDirectory(bridge), bridge, info }
   } catch (error) {
     console.warn('[packed-store] unavailable — continuing on flat OPFS', error)

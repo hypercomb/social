@@ -949,19 +949,41 @@ export class FolderSyncService {
       const damaged: string[] = []
       let verified = 0
       let verifiedBytes = 0
-      for (const [path, stamp] of entries) {
-        const bytes = await this.#readPath(opfs, path)
-        // A stamp with no recorded hash cannot be proven. Copying it again is
-        // the fix, so it counts as damaged rather than quietly passing.
-        if (!bytes || !stamp.sha256
-            || bytes.byteLength !== stamp.size
-            || await SignatureService.sign(bytes) !== stamp.sha256) {
-          damaged.push(path)
-        } else {
-          verified++
-          verifiedBytes += bytes.byteLength
+      // Hashed in BATCHES, not one at a time: re-hashing a whole backup is
+      // megabytes of SHA-256, and on the main thread that lands directly on
+      // the render budget. `signMany` hands the batch to the packed-store
+      // worker when one is up and signs inline otherwise — same answers,
+      // off the thread that draws. The batch size matches the progress
+      // cadence so reporting is unchanged.
+      const BATCH = 25
+      for (let at = 0; at < entries.length; at += BATCH) {
+        const batch = entries.slice(at, at + BATCH)
+        const loaded = await Promise.all(
+          batch.map(async ([path]) => await this.#readPath(opfs, path)),
+        )
+        // Only readable files are worth hashing; the rest are damaged
+        // whatever their bytes would have signed as.
+        const hashable = loaded
+          .map((bytes, i) => ({ bytes, index: i }))
+          .filter((e): e is { bytes: ArrayBuffer; index: number } => !!e.bytes)
+        const sigs = await SignatureService.signMany(hashable.map(e => e.bytes))
+        const sigByIndex = new Map(hashable.map((e, n) => [e.index, sigs[n]]))
+
+        for (let i = 0; i < batch.length; i++) {
+          const [path, stamp] = batch[i]
+          const bytes = loaded[i]
+          // A stamp with no recorded hash cannot be proven. Copying it again
+          // is the fix, so it counts as damaged rather than quietly passing.
+          if (!bytes || !stamp.sha256
+              || bytes.byteLength !== stamp.size
+              || sigByIndex.get(i) !== stamp.sha256) {
+            damaged.push(path)
+          } else {
+            verified++
+            verifiedBytes += bytes.byteLength
+          }
         }
-        if ((verified + damaged.length) % 25 === 0) {
+        {
           this.#report('syncing', {
             folder: selected.name,
             mode: manifest.mode,

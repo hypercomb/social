@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/history.service.ts
-import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, isPoolAddress, poolAddresses, poolMeaningOf, type UsageRanker } from '@hypercomb/core'
+import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, isPoolAddress, packedStoreEnabled, poolAddresses, poolMeaningOf, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -195,15 +195,28 @@ export class HistoryService {
     // scan still runs, but demoted to an idle reconciliation tail that
     // refreshes + re-persists the index. See #restoreHeadIndex /
     // #scheduleHeadPersist.
-    this.#restoreHeadIndex()
-    try {
-      // Flush the latest head snapshot when the tab is hidden/closed so the
-      // next boot starts warm even if the debounce timer hadn't fired.
-      window.addEventListener('pagehide', this.#flushHeadIndex)
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') this.#flushHeadIndex()
-      })
-    } catch { /* non-DOM context — head persistence is a main-thread-only optimization */ }
+    // PACKED STORE: the cache is DELETED, not disabled-and-kept. It existed
+    // for one reason — to dodge the bag enumeration — and over the packed
+    // store a head is the max marker in a resident index, so there is
+    // nothing left to cache. Keeping a second source of truth for a lookup
+    // that is already instant is how the 2026-07-16 stale-head regression
+    // happened; the cure is removal (see hypercomb-client
+    // crates/store/src/lib.rs, "do not port the head index"). The stored
+    // snapshot is dropped too — it is derived, wipe-safe, and a stale one
+    // must never outlive the code that validated it.
+    if (packedStoreEnabled()) {
+      try { localStorage.removeItem(HistoryService.#HEAD_INDEX_KEY) } catch { /* unavailable */ }
+    } else {
+      this.#restoreHeadIndex()
+      try {
+        // Flush the latest head snapshot when the tab is hidden/closed so the
+        // next boot starts warm even if the debounce timer hadn't fired.
+        window.addEventListener('pagehide', this.#flushHeadIndex)
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') this.#flushHeadIndex()
+        })
+      } catch { /* non-DOM context — head persistence is a main-thread-only optimization */ }
+    }
     try {
       // REAL-TIME SUPERSEDES PRELOADER: any navigation makes an in-flight
       // neighbourhood warm stale (it serves the location the user just LEFT).
@@ -1944,6 +1957,7 @@ export class HistoryService {
   /** Debounced persist. Cheap to call from every head mutation; coalesces
    *  bursts (a cascade touches many lineages) into one write. */
   readonly #scheduleHeadPersist = (): void => {
+    if (packedStoreEnabled()) return // nothing to persist — see the constructor
     if (this.#headPersistTimer) return
     this.#headPersistTimer = setTimeout(this.#flushHeadIndex, 1500)
   }
@@ -1959,6 +1973,7 @@ export class HistoryService {
    *  lineages it never looked at (the regression's spreading step). */
   readonly #flushHeadIndex = (): void => {
     if (this.#headPersistTimer) { clearTimeout(this.#headPersistTimer); this.#headPersistTimer = null }
+    if (packedStoreEnabled()) return
     try {
       const existing = parseHeadIndex(localStorage.getItem(HistoryService.#HEAD_INDEX_KEY))
       const next = buildFlushIndex(existing, this.#latestSigByLineage, this.#headStamp, this.#headOwned, this.#headDropped)
