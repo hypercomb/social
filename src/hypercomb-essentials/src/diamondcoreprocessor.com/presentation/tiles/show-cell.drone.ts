@@ -3316,6 +3316,13 @@ export class ShowCellDrone extends Drone {
         : localCellSet.has(cell)
       if (presentInTruth) {
         reconciled.push(cell)
+      } else if (peerCellSet.has(cell) || ephemeralCellSet.has(cell)) {
+        // SWARM VIEW INVARIANT: everyone sees what peers are sharing. A
+        // locally-deleted name that a LIVE peer still publishes must keep
+        // rendering — as their peer/preview tile (localCellSet no longer
+        // claims it, so it takes the external dress). The pendingRemove
+        // entry stays so local truth remains deleted; only the union
+        // suppression is skipped while an external source contributes it.
       } else {
         union.delete(cell)
       }
