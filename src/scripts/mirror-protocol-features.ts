@@ -81,7 +81,14 @@ function norm(s: string): string {
 }
 
 const ROOT = norm('protocol')
-const STALE_CHILD = norm('native-client')
+
+// Cells the Rust-shaped first pass left at the wrong address. Dropped from
+// `protocol`'s children rather than renamed — there is no rename in the hive.
+// Both have replacements on feature coordinates that carry their content:
+// `native-client`'s modules became the `windows` parts of each feature, and
+// `canonical-layer` (which was only ever the web file) became
+// `canonical-layer-form/canonical-layer`.
+const STALE_CHILDREN = [norm('native-client'), norm('canonical-layer')]
 
 const E = 'hypercomb-essentials/src/diamondcoreprocessor.com'
 const C = 'hypercomb-core/src'
@@ -293,9 +300,9 @@ async function main(): Promise<void> {
   // Phase 1 — feature cells at the shared coordinates, each holding both
   // implementations as parts.
   const featureKeys = FEATURES.map(f => f.key)
-  const keep = existing.filter(c => c !== STALE_CHILD)
+  const keep = existing.filter(c => !STALE_CHILDREN.includes(c))
   const merged = [...keep, ...featureKeys.filter(k => !keep.includes(k))]
-  process.stdout.write(`[struct] ${ROOT} ← ${merged.length} children (−${STALE_CHILD}) ... `)
+  process.stdout.write(`[struct] ${ROOT} ← ${merged.length} children (−${STALE_CHILDREN.join(", −")}) ... `)
   const up = await sendRetry({ op: 'update', segments: [ROOT], layer: { name: ROOT, children: merged } })
   console.log(up.ok ? 'ok' : `FAIL: ${up.error}`)
   if (!up.ok) process.exit(1)
@@ -347,7 +354,7 @@ async function main(): Promise<void> {
     await send({ op: 'submit', text: '' })
   }
 
-  console.log(`[features] DONE — ${written.length} cells, ${okNotes} notes, ${okMarks} marks; ${STALE_CHILD} dropped from ${ROOT}`)
+  console.log(`[features] DONE — ${written.length} cells, ${okNotes} notes, ${okMarks} marks; ${STALE_CHILDREN.join(" + ")} dropped from ${ROOT}`)
   const failed = failNotes + failMarks
   if (failed > 0) console.warn(`[features] ${failed} operations failed — review the log above.`)
 }
