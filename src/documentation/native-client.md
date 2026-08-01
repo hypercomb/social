@@ -100,6 +100,26 @@ npx @tauri-apps/cli@^2 build --config app/tauri.conf.json
 WebView2 — see its own header for the measurements. Baking is harmless on any
 engine, so it runs for both platforms.
 
+### The baked frontend is a COMPILE-time dependency, not a runtime one
+
+`tauri::generate_context!()` reads `frontendDist` while the proc macro
+expands, so **the app crate does not compile until `app/frontend` exists**.
+Not "builds but ships empty" — fails outright with `this path doesn't exist`.
+
+This has a nasty property on a developer machine: once you have baked the
+frontend even once, it sits there gitignored and every later `cargo` command
+works. A clean checkout — that is, CI, or a new machine — hits the wall that
+your machine no longer can. It cost one red CI run to learn, from a local test
+pass that was only green because of a stale directory.
+
+Practical consequences:
+
+- `cargo test`/`clippy` on the LIBRARY crates needs no frontend, and that is
+  where the conformance vectors are. Lint and test them first and separately;
+  the workflow does exactly this.
+- Anything touching `-p hypercomb-client` must come after a bake.
+- If `cargo` suddenly fails on a fresh clone, this is why. Bake, then retry.
+
 ## Testing macOS without a Mac
 
 There is no Mac in the development loop. `.github/workflows/build-client-macos.yml`
