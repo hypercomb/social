@@ -644,16 +644,18 @@ export class HexSdfTextureShader {
       }
 
       // readiness shade: this tile's content is still arriving (image/props
-      // fetch in flight) — heavier desaturate + darken than the world-mode
-      // dim so a warming tile reads unmistakably as "not ready yet". Static
-      // by design (no pulse). The tile is inert to clicks while shaded and
-      // brightens IN PLACE when its bytes land — an attribute flip, never a
-      // geometry change.
-      if (vShaded > 0.5) {
+      // fetch in flight) — desaturated + faded so a warming tile reads as "not
+      // ready yet" while still plainly showing WHAT it is. Static by design (no
+      // pulse). aShaded is CONTINUOUS: 1 while preloading, then ramped to 0 by
+      // the release fade (show-cell #pumpShadeFade), so a tile fades IN when its
+      // bytes land — an attribute ramp, never a geometry change. The shade is
+      // informational only; a faded tile is still hoverable and clickable.
+      if (vShaded > 0.004) {
+        float k = clamp(vShaded, 0.0, 1.0);
         float sgray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-        color.rgb = mix(color.rgb, vec3(sgray), 0.8);
-        color.rgb *= 0.38;
-        color.a *= 0.85;
+        color.rgb = mix(color.rgb, vec3(sgray), 0.6 * k);
+        color.rgb *= mix(1.0, 0.55, k);
+        color.a *= mix(1.0, 0.5, k);
       }
 
       // hover accent: TWO distinct border highlights so a pathway tile (has

@@ -39,17 +39,27 @@ const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } cat
 // for debugging the plain own-image shade: localStorage 'hc:child-shade' = '0'.
 const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade') !== '0' } catch { return true } })()
 
-// READINESS SHADE — OFF by default, matching main's standing ruling (shade
-// off, navigation never blocked). Beyond the ruling, the shade had a real
-// failure mode: on a first native-client boot the child-warm queue has a long
-// tail, the release repaint lagged, and every branch tile sat dark-shaded
-// indefinitely — reading as "no background images at all" until any forced
-// render (e.g. the rotate button) re-evaluated readiness and everything
-// brightened at once. The readiness PREDICATE is untouched: the preloader
-// still uses it to front-queue an entered destination; only the dimming is
-// gone. Escape hatch to re-enable for debugging: localStorage
-// 'hc:tile-shade' = '1'.
-const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-shade') === '1' } catch { return false } })()
+// READINESS SHADE — ON by default (Jaime 2026-08-01: "the tiles don't fade in
+// anymore while preloading, this makes it sketchy again — the participant needs
+// to know if the tile is ready to be clicked or is still preloading in the
+// background"). A preloading tile paints FADED and fades IN over
+// SHADE_FADE_MS when its proof lands. It NEVER blocks: the shade is purely
+// informational, hover lifts it, and a click on a faded tile still enters
+// (front-of-the-line divert) — see tile-overlay #navigateInto.
+//
+// The fade is deliberately LIGHT (see hex-sdf.shader): the earlier near-black
+// treatment had a real failure mode — on a first boot the child-warm queue has
+// a long tail, so branch tiles sat dark for a long time and read as "no
+// background images at all". A faded tile must still show what it is; only its
+// readiness is in question, never its content.
+// Escape hatch to turn it off: localStorage 'hc:tile-fade' = '0'. NOTE the key
+// changed with the default: profiles that debugged the old opt-in flag still
+// carry 'hc:tile-shade' values, and a stale one there would silently suppress
+// the fade for exactly the people who have been testing it.
+const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-fade') !== '0' } catch { return true } })()
+/** How long a released tile takes to fade from faded to full. Short enough to
+ *  feel like arrival, long enough that the eye catches WHICH tile landed. */
+const SHADE_FADE_MS = 280
 /** Already-baked label used for the first optimistic frame. The real label's
  *  SDF is rasterized after the commit settles, never in the input frame. */
 const PENDING_CELL_LABEL = '\u2026'
@@ -6246,6 +6256,9 @@ export class ShowCellDrone extends Drone {
       this.#buf = {}
       this.#labelToIndex.clear()
       this.#shadedLabels.clear()
+      // No buffer to ramp into any more; a fade that outlived its geometry
+      // would write into the next page's indexes.
+      this.#shadeFadeStartedAt.clear()
     }
   }
 
@@ -8358,10 +8371,61 @@ export class ShowCellDrone extends Drone {
     const i = this.#labelToIndex.get(label)
     if (!cell || !shadedBuf || i === undefined || !this.geom) return false
     const shaded = this.#cellIsShaded(cell)
-    this.#writeCellScalar(shadedBuf, i, shaded ? 1 : 0)
     if (shaded) this.#shadedLabels.add(label)
     else this.#shadedLabels.delete(label)
+    // Hover lifts instantly (it is a pointer response, not an arrival); a real
+    // release fades. #shadeValueFor honours whichever is in play.
+    this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
     return this.#pushBuffer('aShaded')
+  }
+
+  // ── Fade-in ────────────────────────────────────────────────────────────
+  // A tile that has EARNED brightness fades in rather than snapping: the eye
+  // catches which tile just became clickable, and a page warming in gives the
+  // participant a continuous read on what has landed. The ramp is an attribute
+  // write per frame on the fading cells only — never a render pass.
+
+  /** label → the timestamp its release started. Absent = not fading. */
+  readonly #shadeFadeStartedAt = new Map<string, number>()
+  #shadeFadeFrame: number | null = null
+
+  /** Current shade strength for a cell: 1 while it is still preloading, then
+   *  ramping 1 → 0 across SHADE_FADE_MS once it has been released. */
+  #shadeValueFor(c: Cell): number {
+    if (this.#cellIsShaded(c)) return 1
+    const startedAt = this.#shadeFadeStartedAt.get(c.label)
+    if (startedAt === undefined) return 0
+    const elapsed = performance.now() - startedAt
+    if (elapsed >= SHADE_FADE_MS) {
+      this.#shadeFadeStartedAt.delete(c.label)
+      return 0
+    }
+    // ease-out: most of the lift happens early, so arrival reads as arrival.
+    const k = 1 - elapsed / SHADE_FADE_MS
+    return k * k
+  }
+
+  #beginShadeFade(label: string): void {
+    if (this.#shadeFadeStartedAt.has(label)) return
+    this.#shadeFadeStartedAt.set(label, performance.now())
+    this.#pumpShadeFade()
+  }
+
+  #pumpShadeFade = (): void => {
+    if (this.#shadeFadeFrame !== null || this.#shadeFadeStartedAt.size === 0) return
+    this.#shadeFadeFrame = requestAnimationFrame(() => {
+      this.#shadeFadeFrame = null
+      const shadedBuf = this.#buf?.shaded
+      if (!shadedBuf || !this.geom) { this.#shadeFadeStartedAt.clear(); return }
+      for (const label of [...this.#shadeFadeStartedAt.keys()]) {
+        const cell = this.renderedCells.get(label)
+        const i = this.#labelToIndex.get(label)
+        if (!cell || i === undefined) { this.#shadeFadeStartedAt.delete(label); continue }
+        this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
+      }
+      this.#pushBuffer('aShaded')
+      this.#pumpShadeFade()
+    })
   }
 
   /** Revoke a branch's ready promise when one of its exact target assets was
@@ -8666,8 +8730,11 @@ export class ShowCellDrone extends Drone {
       if (this.#cellIsShaded(cell)) continue
       const i = this.#labelToIndex.get(label)
       if (i === undefined) return false
-      this.#writeCellScalar(shadedBuf, i, 0)
       this.#shadedLabels.delete(label)
+      // Start the fade rather than snapping to full — the ramp owns this
+      // cell's attribute from here (see #pumpShadeFade).
+      this.#beginShadeFade(label)
+      this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
       flipped.push(label)
     }
     if (flipped.length === 0) return false
@@ -8867,9 +8934,12 @@ export class ShowCellDrone extends Drone {
       divergence.set([dv, dv, dv, dv], dp)
       const us = c.unshared ? 1 : 0
       unshared.set([us, us, us, us], dp)
-      const sh = this.#cellIsShaded(c) ? 1 : 0
+      // Continuous 0..1 — a tile mid-fade keeps its current fade value across a
+      // geometry rebuild, so a repaint that happens to land during the fade
+      // never snaps it to full.
+      const sh = this.#shadeValueFor(c)
       shaded.set([sh, sh, sh, sh], dp)
-      if (sh) this.#shadedLabels.add(c.label)
+      if (this.#cellIsShaded(c)) this.#shadedLabels.add(c.label)
       dp += 4
 
       // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
@@ -9067,10 +9137,11 @@ export class ShowCellDrone extends Drone {
     // Readiness shade follows the fresh image state — brighten (or shade)
     // in place with the same attribute-only push, and keep the mirrored
     // inertness set in step.
-    const shadedNow = this.#cellIsShaded({ ...probe, imageSig: sig ?? undefined })
-    this.#writeCellScalar(this.#buf.shaded, i, shadedNow ? 1 : 0)
+    const probeCell = { ...probe, imageSig: sig ?? undefined }
+    const shadedNow = this.#cellIsShaded(probeCell)
     if (shadedNow) this.#shadedLabels.add(label)
-    else this.#shadedLabels.delete(label)
+    else if (this.#shadedLabels.delete(label)) this.#beginShadeFade(label)
+    this.#writeCellScalar(this.#buf.shaded, i, this.#shadeValueFor(probeCell))
 
     if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor') || !this.#pushBuffer('aLabelUV') || !this.#pushBuffer('aShaded')) {
       return false
