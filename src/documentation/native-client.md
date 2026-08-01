@@ -135,10 +135,52 @@ testing:
 xattr -dr com.apple.quarantine /Applications/Hypercomb.app
 ```
 
-Shipping to anyone who is not you needs a Developer ID Application
-certificate, `APPLE_SIGNING_IDENTITY` plus the notarization credentials in
-repo secrets, and a hardened-runtime entitlements file. That is a separate
-piece of work and is not a flag on the existing build.
+The workflow signs and notarizes automatically **if** the credentials are
+present, and builds unsigned if they are not. Absent secrets never fail the
+run — an unsigned build is still a valid test build; it only changes who can
+open it without friction. So the wiring is done and idle; supplying the
+secrets is the only remaining step.
+
+### What only you can do
+
+Enrolling and issuing the certificate happen in Apple's portal under your
+Apple ID and cannot be automated from here:
+
+1. Enrol in the Apple Developer Program ($99/year).
+2. Create a **Developer ID Application** certificate (this is the one for
+   distributing outside the App Store — not "Apple Distribution", which is
+   App Store only, and not "Development", which only works on registered
+   machines). Export it from Keychain Access as a `.p12` with a password.
+3. Create an **app-specific password** at appleid.apple.com — notarization
+   will not accept your normal Apple ID password.
+
+### Then add these repository secrets
+
+| Secret | What it is |
+|---|---|
+| `APPLE_CERTIFICATE` | the `.p12`, base64-encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | the password you set when exporting it |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (TEAMID)` |
+| `APPLE_ID` | your Apple ID email |
+| `APPLE_APP_SPECIFIC_PASSWORD` | the app-specific password from step 3 |
+| `APPLE_TEAM_ID` | your 10-character team ID |
+
+Base64 the certificate with:
+
+```bash
+base64 -i certificate.p12 | pbcopy
+```
+
+Signing without notarizing is a half-step that looks finished and is not:
+other people's Macs still warn. Both halves, or the friction remains.
+
+### Reading the result
+
+The `Inspect the signature` step asks `spctl` — the component Gatekeeper
+actually consults — rather than reporting our own intent. Its verdict is the
+honest answer to "will this open on someone else's Mac", because a bundle can
+be correctly signed and still be refused when the notarization ticket was
+never stapled.
 
 ## Known gaps
 

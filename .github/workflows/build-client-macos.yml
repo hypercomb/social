@@ -122,20 +122,77 @@ jobs:
 
       # ── Bundle ────────────────────────────────────────────────────────────
       #
-      # Unsigned and un-notarized on purpose: no Apple Developer credentials
-      # live in this repo. Gatekeeper will refuse the result on first open —
-      # right-click > Open, or `xattr -dr com.apple.quarantine`, gets past it
-      # for testing. Shipping to anyone else needs a Developer ID and a
-      # notarization pass; that is a separate piece of work, not a flag here.
+      # Signs and notarizes IF the credentials are present, and builds
+      # unsigned if they are not. One path, not two workflows: an unsigned
+      # build is still a completely valid test build (it runs fine on your own
+      # Mac after one `xattr -dr com.apple.quarantine`), so the absence of
+      # secrets must never fail the run — it only changes who can open the
+      # result without friction.
+      #
+      # Tauri picks all of this up from the environment. Given APPLE_CERTIFICATE
+      # it imports the .p12 into a temporary keychain itself, and given the
+      # notarization credentials it submits the bundle to Apple and staples the
+      # ticket. Nothing here shells out to codesign or notarytool directly.
+      #
+      # Secrets are unavailable to PRs from forks, so those simply produce
+      # unsigned builds — correct, not a misconfiguration.
 
       - name: Build the app bundle
         working-directory: src/hypercomb-client
+        env:
+          # Signing. Absent => unsigned build.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Notarization. Absent => signed but not notarized, which still warns
+          # on other people's machines. Both halves are needed to ship.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "signing as: $APPLE_SIGNING_IDENTITY"
+            if [ -n "${APPLE_ID:-}" ]; then
+              echo "notarization: enabled (this adds several minutes — Apple's queue)"
+            else
+              echo "notarization: SKIPPED (no APPLE_ID) — signed, but other Macs will still warn"
+            fi
+          else
+            echo "signing: SKIPPED (no APPLE_SIGNING_IDENTITY) — test build, unsigned"
+          fi
+
           if [ "${{ inputs.universal }}" = "true" ]; then
             npx --yes @tauri-apps/cli@^2 build --config app/tauri.conf.json --target universal-apple-darwin
           else
             npx --yes @tauri-apps/cli@^2 build --config app/tauri.conf.json
+          fi
+
+      # Verify against the SYSTEM's own opinion, not our intent. `spctl` is the
+      # component Gatekeeper actually consults, so its verdict is the honest
+      # answer to "will this open on someone else's Mac" — a bundle can be
+      # correctly signed and still be refused because the notarization ticket
+      # never got stapled.
+      - name: Inspect the signature
+        if: always()
+        working-directory: src/hypercomb-client
+        run: |
+          set -uo pipefail
+          APP=$(find target -type d -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "no .app to inspect"; exit 0; }
+
+          echo "───────── codesign ─────────"
+          codesign -dv --verbose=4 "$APP" 2>&1 || true
+          echo "───────── deep verify ─────────"
+          codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 || true
+          echo "───────── Gatekeeper ─────────"
+          if spctl -a -vvv -t exec "$APP" 2>&1; then
+            echo "VERDICT: Gatekeeper accepts this bundle — it opens on any Mac."
+          else
+            echo "VERDICT: Gatekeeper rejects this bundle."
+            echo "Fine for your own testing (right-click > Open, or xattr -dr com.apple.quarantine)."
+            echo "To hand it to someone else, it needs BOTH a Developer ID signature and notarization."
           fi
 
       - name: Report what was produced
