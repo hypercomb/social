@@ -218,14 +218,55 @@ class NativeSigDirectory {
   }
 
   async getFileHandle(name: string, options?: { create?: boolean }): Promise<NativeFileHandle> {
-    const entries = await this.#entries()
-    if (!entries.some(e => e.name === name && !e.directory) && !options?.create) {
-      throw notFound(name, `dir ${this.name.slice(0, 12)}…/${this.prefix}`)
+    if (options?.create) return this.#fileHandle(name)
+    // Prove existence by READING, never by listing.
+    //
+    // A pool of meaning holds one member per layer — thousands on a real hive
+    // — and `#entries()` is a full O(n) listing that ALSO re-enumerates the
+    // undrained flat directory inside the worker. Paying that on every lookup
+    // is what made each children-manifest read hang for tens of seconds, so
+    // the renderer resolved no children and the hive painted EMPTY while every
+    // individual layer read stayed instant. `dir_get_raw` settles existence in
+    // one round trip and hands back the very bytes the caller is about to ask
+    // for; the listing cost now scales with nothing.
+    let bytes: Uint8Array
+    try {
+      const buf = await this.bridge.invoke('dir_get_raw', { sig: this.name, name: this.#key(name) })
+      bytes = new Uint8Array(buf as ArrayBuffer)
+    } catch (error) {
+      if ((error as { kind?: string })?.kind === 'NotFound') {
+        throw notFound(name, `dir ${this.name.slice(0, 12)}…/${this.prefix}`)
+      }
+      throw error
     }
+    return this.#fileHandle(name, bytes)
+  }
+
+  /**
+   * A file handle WITHOUT the existence listing.
+   *
+   * `getFileHandle` re-lists the directory to answer "is it there?", which is
+   * right for a blind caller but catastrophic per ITEM of an iteration: a bag
+   * of n markers cost n+1 `raw_dir_entries` round trips, and every one of them
+   * re-enumerates the undrained flat directory inside the worker. On a real
+   * hive (a 251-marker root bag) that turned one listing into minutes of RPCs,
+   * so the root head never resolved and the hive rendered EMPTY — while small
+   * synthetic bags stayed fast enough to look healthy. An entry we are handing
+   * out mid-iteration was just listed; it exists by construction.
+   */
+  #fileHandle(name: string, prefetched?: Uint8Array): NativeFileHandle {
     const key = this.#key(name)
+    // Bytes the existence check already paid for. Served ONCE — a handle kept
+    // across a write must still read through to the store afterwards.
+    let pending = prefetched
     return new NativeFileHandle(
       name,
       async () => {
+        if (pending) {
+          const bytes = pending
+          pending = undefined
+          return bytes
+        }
         try {
           const buf = await this.bridge.invoke('dir_get_raw', { sig: this.name, name: key })
           return new Uint8Array(buf as ArrayBuffer)
@@ -317,7 +358,7 @@ class NativeSigDirectory {
   async #handleFor(entry: RawEntry): Promise<NativeFileHandle | NativeSigDirectory> {
     return entry.directory
       ? new NativeSigDirectory(this.name, this.bridge, `${this.#key(entry.name)}/`)
-      : await this.getFileHandle(entry.name)
+      : this.#fileHandle(entry.name)
   }
 
   async *entries(): AsyncGenerator<[string, NativeFileHandle | NativeSigDirectory]> {
