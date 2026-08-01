@@ -30,6 +30,21 @@
 // NEVER on a write path. This is a manual or idle-time operation: it walks
 // every marker and every pool member, which is the one thing the packed store
 // was built to stop doing on boot.
+//
+// ## THE INSTALL WINDOW — read before scheduling this
+//
+// "Orphan" means "no marker references it", and freshly INSTALLED content
+// satisfies that definition until a commit puts it in the tree. Measured on a
+// scratch origin: boot installed 27 content records, collection swept all 27
+// as unreachable, the next boot reinstalled them, and a second collection
+// swept them again — a stable, pointless churn that would be a disaster if it
+// ever raced an install mid-flight.
+//
+// So: do not collect between an install and the first commit, and do not put
+// this on a timer that could fire during one. The reference implementation
+// has the same property ("never call this on a write path"); this note exists
+// because the web shell reinstalls on every boot, which makes the window far
+// easier to hit here than it is natively.
 
 import type { PackedStoreEngine } from './packed-store-engine'
 
