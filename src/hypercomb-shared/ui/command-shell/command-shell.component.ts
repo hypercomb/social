@@ -179,6 +179,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Optional color swatches keyed by suggestion name (CSS color string). */
   readonly colorMap = input<ReadonlyMap<string, string>>(new Map())
 
+  /** Render the swatches as wide picture chips instead of colour dots — for
+   *  maps whose values are whole backdrops (`/canvas`) rather than one colour. */
+  readonly wideSwatches = input<boolean>(false)
+
   /** Active status indicators shown as pills on the right side of the input.
    *  `actionable` indicators are producer-owned attention entries: clicking
    *  activates their workflow without dismissing the underlying state. */

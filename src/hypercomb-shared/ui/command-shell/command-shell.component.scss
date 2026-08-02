@@ -350,6 +350,17 @@ $bp-phone-max: 599px;
   vertical-align: middle;
 }
 
+// A swatch that is a whole backdrop (`/canvas`) needs room to read as a
+// picture: a landscape chip, hairline-framed so a dark backdrop still has an
+// edge against the dropdown.
+.wide-swatches .color-dot {
+  width: 2.6em;
+  height: 1.25em;
+  border-radius: 3px;
+  border: 1px solid rgba(245, 245, 245, 0.18);
+  margin-right: 0.6em;
+}
+
 .typed { color: var(--glow-color); }
 .rest { color: whitesmoke; opacity: 0.6; }
 

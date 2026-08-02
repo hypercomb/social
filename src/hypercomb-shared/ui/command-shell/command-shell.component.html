@@ -257,7 +257,7 @@
 
   @if (effectiveShowCompletions()) {
     <div class="command-intel" [class.has-detail]="!!activeDetail()">
-      <ul class="command-results" role="listbox">
+      <ul class="command-results" role="listbox" [class.wide-swatches]="wideSwatches()">
         @for (s of suggestions(); track $index; let i = $index) {
           <li
             role="option"

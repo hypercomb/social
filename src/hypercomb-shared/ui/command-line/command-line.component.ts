@@ -1293,12 +1293,31 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return CommandLineComponent.ACCENT_COLOR_MAP
   })
 
-  /** Colour swatches for the dropdown: accent presets in `/accent`, and each
-   *  tag's own colour in the tag modes (`label:tag` and `[a,b]:tag`) so a tag
-   *  suggestion shows its colour dot. */
+  /** True while the dropdown is completing `/canvas` — its swatches are little
+   *  pictures of a backdrop rather than colour dots, so they render wide. */
+  public readonly wideSwatches = computed<boolean>(() => {
+    const ctx = this.context()
+    return !!(ctx.active && ctx.mode === 'slash' && /^\/(canvas|backdrop)[\s]/i.test(ctx.head))
+  })
+
+  /** Colour swatches for the dropdown: accent presets in `/accent`, each tag's
+   *  own colour in the tag modes (`label:tag` and `[a,b]:tag`), and — for
+   *  `/canvas` — a miniature rendering of the backdrop each option would give,
+   *  so the choice is made by eye instead of by name. */
   public readonly dropdownColorMap = computed<ReadonlyMap<string, string>>(() => {
     const accent = this.accentColorMap()
     if (accent.size) return accent
+    if (this.wideSwatches()) {
+      const canvas = get('@diamondcoreprocessor.com/CanvasBackground') as
+        { swatch(tokens: string): string } | undefined
+      if (!canvas?.swatch) return new Map()
+      const map = new Map<string, string>()
+      for (const s of this.suggestions()) {
+        const css = canvas.swatch(s)
+        if (css) map.set(s, css)
+      }
+      return map
+    }
     const ctx = this.context()
     const inTagMode = ctx.active && (ctx.mode === 'tag' || (ctx.mode === 'select' && this.#selectPhase() === 'tag'))
     if (!inTagMode) return new Map()

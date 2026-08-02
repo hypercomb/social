@@ -108,6 +108,38 @@ const cssFor = (arch: string, p: Pal): Css => {
   }
 }
 
+// A tiny standalone rendering of a backdrop, sized for a dropdown chip rather
+// than the viewport. The full backdrops split their look across three surfaces
+// (body CSS, the animated #hc-glow / #hc-aurora elements, and the Pixi lattice
+// in GridLinesDrone), so a swatch cannot simply reuse `cssFor` — it has to
+// fold all three back into one `background` shorthand at chip scale.
+const swatchFor = (arch: string, p: Pal): string => {
+  const a = (alpha: number) => (p.light ? `rgba(${p.accent2},${alpha})` : `rgba(${p.accent},${alpha})`)
+  const base = `linear-gradient(160deg, ${p.base} 0%, ${p.base2} 100%) ${p.base}`
+  const lit = `radial-gradient(120% 110% at 50% 0%, ${glowC(p, p.light ? 0.5 : 0.16)} 0%, transparent 70%) 0 0/cover no-repeat`
+  switch (arch) {
+    case 'grid':
+      return `${lit}, linear-gradient(${a(0.4)} 1px, transparent 1px) 0 0/6px 6px,
+        linear-gradient(90deg, ${a(0.4)} 1px, transparent 1px) 0 0/6px 6px, ${base}`
+    case 'dots':
+      return `${lit}, radial-gradient(${a(0.55)} 1.1px, transparent 1.6px) 0 0/6px 6px, ${base}`
+    case 'honeycomb':
+      return `${lit}, repeating-linear-gradient(60deg, ${a(0.34)} 0 1px, transparent 1px 6px) 0 0/cover,
+        repeating-linear-gradient(-60deg, ${a(0.34)} 0 1px, transparent 1px 6px) 0 0/cover,
+        repeating-linear-gradient(0deg, ${a(0.34)} 0 1px, transparent 1px 6px) 0 0/cover, ${base}`
+    case 'sheen':
+      return `linear-gradient(135deg, transparent 28%, ${a(0.34)} 50%, transparent 72%) 0 0/cover no-repeat, ${base}`
+    case 'mesh':
+      return `radial-gradient(70% 70% at 22% 18%, ${a(0.5)} 0%, transparent 72%) 0 0/cover no-repeat,
+        radial-gradient(75% 75% at 82% 84%, rgba(${p.accent2},${p.light ? 0.5 : 0.7}) 0%, transparent 72%) 0 0/cover no-repeat, ${base}`
+    case 'contour':
+      return `radial-gradient(70% 70% at 50% 50%, ${glowC(p, p.light ? 0.45 : 0.12)} 0%, transparent 72%) 0 0/cover no-repeat,
+        repeating-radial-gradient(circle at 50% 50%, transparent 0 3px, ${a(0.38)} 3px 4px) 0 0/cover, ${base}`
+    default: // depth
+      return `${lit}, radial-gradient(150% 130% at 50% 50%, transparent 55%, rgba(${p.deep},${p.light ? 0.2 : 0.55}) 100%) 0 0/cover no-repeat, ${base}`
+  }
+}
+
 // Animated aurora backdrop — a few large, blurred, slowly-drifting blooms in a
 // fixed screen layer behind the canvas. Pure transforms (GPU-composited, so the
 // blur is rasterised once and only cheaply moved) and paused under
@@ -186,6 +218,30 @@ export class CanvasBackgroundService extends EventTarget {
     this.#persist()
     this.apply()
     return this.status()
+  }
+
+  /**
+   * A CSS `background` shorthand previewing what the given tokens WOULD look
+   * like, without applying anything. Accepts exactly what `set()` accepts — an
+   * archetype, a palette, `auto`, or a pair ("indigo dots") — and fills the
+   * unspecified half from what is showing now, so `/canvas indigo` previews
+   * indigo in the current archetype and `/canvas dots` previews dots in the
+   * current palette. Returns '' for `off` and for tokens that mean nothing.
+   * Backs the swatches in the command-line autocomplete.
+   */
+  swatch(input: string): string {
+    const tokens = input.toLowerCase().split(/\s+/).filter(Boolean)
+    let arch: Archetype = this.#archetype
+    let pal: Palette = this.resolvedPalette()
+    let known = false
+    for (const tok of tokens) {
+      if (tok === 'off' || tok === 'none' || tok === 'hide') return ''
+      const a = ARCH_ALIASES[tok] ?? null
+      if (a) { arch = a; known = true; continue }
+      if (tok === 'auto') { pal = this.#isLight() ? 'daylight' : 'steel'; known = true; continue }
+      if (CANVAS_BG_PALETTES.includes(tok as Palette)) { pal = tok as Palette; known = true; continue }
+    }
+    return known ? swatchFor(arch, PAL[pal]) : ''
   }
 
   status(): string {
