@@ -15,7 +15,7 @@ import { fromRuntime } from '../../core/from-runtime'
 type TagOp = { label: string; tag: string; color?: string; remove: boolean }
 import {
   EffectBus, hypercomb, type I18nProvider,
-  commandRoot, completeCommandPath, commandMembersFor, type CommandObject,
+  commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -321,6 +321,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const idx = this.shell?.activeIndex() ?? 0
     const name = list[Math.max(0, Math.min(idx, list.length - 1))]
     if (!name) return null
+
+    // An OBJECT is being walked: the pane shows what is INSIDE the highlighted
+    // member — its own members — so you can see what you are about to walk into
+    // before you commit to it. This is the same question the dropdown answers
+    // one level up, asked one level down, which is the whole point of the shape:
+    // no per-mode code decides what "inside" means.
+    const active = this.#activeRoot()
+    if (active) {
+      const member = commandMembersFor(active.root, active.args).get(name)
+      const path = commandPath(name)
+      const inside = member?.leaf ? [] : active.root.members(path).map(m => m.name)
+      return {
+        name: path[path.length - 1] ?? name,
+        kind: path.length > 1 ? 'member' : 'object',
+        description: member?.description,
+        icon: member?.icon ?? (member?.leaf ? 'tune' : 'category'),
+        options: inside.length ? inside : undefined,
+      }
+    }
 
     // '@' feature — name + localized description + behavior icon + overlap count.
     if (ctx.mode === 'feature') {
