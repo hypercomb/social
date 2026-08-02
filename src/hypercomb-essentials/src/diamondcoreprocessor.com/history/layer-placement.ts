@@ -375,3 +375,70 @@ export async function flattenLayerTree(
   }
   return updates
 }
+
+// ── STRICT LOCATION READ ─────────────────────────────────────────────────
+//
+// The one read that every membership-writing path must use.
+//
+// A child sig that will not resolve is a COLD POOL MISS, not an absent tile.
+// Treating the two the same is the single operation in this system that can
+// PERMANENTLY LOSE a tile: the rewritten `children` list silently drops a cell
+// whose bytes merely were not warm. `childNamesOfStrict` exists because that
+// already happened once; this wraps it at the level callers actually work at —
+// a LOCATION — so nobody has to remember to assemble the pieces correctly.
+//
+// It had been hand-reimplemented three times (atomize's #currentChildren,
+// organize's #currentMembers, and a cleanup script) before it lived anywhere.
+// Every copy got the null-vs-empty distinction right by luck rather than by
+// construction, which is not a property to rely on for a data-loss guard.
+//
+// THE CONTRACT, and the whole point of it:
+//   • `null`  → the location could not be fully seen. NEVER write membership.
+//   • `[]`    → the location is genuinely empty. Safe to write.
+// Any caller that collapses these two has reintroduced the bug.
+
+/** One child of a location: its name and whether it is itself a branch. */
+export interface StrictChild {
+  readonly name: string
+  readonly childCount: number
+}
+
+/**
+ * Read a location's children STRICTLY. Returns null when the layer will not
+ * resolve, or when ANY child sig fails to resolve — never a partial list.
+ *
+ * `childCount` rides along because the callers that need a strict read almost
+ * always also need to tell a leaf from a branch, and making them re-walk the
+ * children to find out invites a second, laxer read of the same data.
+ */
+export async function readChildrenStrict(
+  history: PlacementHistory,
+  domain: unknown,
+  segments: readonly string[],
+): Promise<StrictChild[] | null> {
+  try {
+    const parent = await resolveCurrentLayer(history, domain, segments, null)
+    if (!parent) return null
+
+    const sigs = childSigsOf(parent)
+    if (sigs.length === 0) return []
+
+    const out: StrictChild[] = []
+    for (const sig of sigs) {
+      const child = await history.getLayerBySig(String(sig))
+      const name = typeof child?.name === 'string' ? child.name : ''
+      if (!child || !name) {
+        console.warn(
+          `[strict-read] cold miss on child ${String(sig).slice(0, 12)}… of /${segments.join('/')}`
+          + ' — refusing to report a partial layer',
+        )
+        return null
+      }
+      out.push({ name, childCount: childSigsOf(child).length })
+    }
+    return out
+  } catch (err) {
+    console.warn(`[strict-read] could not read /${segments.join('/')}:`, err)
+    return null
+  }
+}

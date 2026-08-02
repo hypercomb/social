@@ -32,10 +32,11 @@
 // not a note — the one sanctioned exception to "never introduce tiles to
 // answer a question" (see .claude/skills/bridge-listen/SKILL.md).
 import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
-import { childSigsOf, resolveCurrentLayer, type PlacementHistory, type PlacementLayer } from '../history/layer-placement.js'
+import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { PendingAskIndex } from './ask-scope.js'
 import { ORGANIZE_THRESHOLD } from './organize.drone.js'
 import { mintCreationId } from './creation.js'
+import { ReceiptBuilder, describeReceipt } from './receipt.js'
 
 /** Upper bound on the parts a responder should mint for one tile. */
 const SUBTOPIC_COUNT = 7
@@ -56,11 +57,20 @@ type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
 type LineageLike = { explorerSegments?: () => readonly string[]; domain?: unknown }
 
 /** One tile on the current layer, with enough to tell a leaf from a branch. */
-type LayerChild = { name: string; children: readonly string[] }
+type LayerChild = { name: string; childCount: number }
 
 /** Why a tile was or wasn't asked about. A caller reporting to the
  *  participant needs the REASON — "3 of 8" with no explanation is the kind of
  *  silent shortfall that reads as a bug. */
+/** Wording for every way an atomize can decline. Exported so the slash
+ *  provider phrases the selection case identically — two doors, one voice. */
+export const ATOMIZE_SKIP_LABELS: Record<string, (n: number) => string> = {
+  'has-children': n => `${n} already had children`,
+  'already-queued': n => `${n} already queued`,
+  'ancestor-busy': n => `${n} waiting on a parent already being reshaped`,
+  'failed': n => `${n} could not be read`,
+}
+
 export type AtomizeOutcome = 'queued' | 'has-children' | 'already-queued' | 'ancestor-busy' | 'failed'
 
 export class AtomizeDrone extends Drone {
@@ -173,7 +183,7 @@ export class AtomizeDrone extends Drone {
       return 0
     }
 
-    const leaves = children.filter(c => c.children.length === 0)
+    const leaves = children.filter(c => c.childCount === 0)
     const branches = children.length - leaves.length
 
     if (leaves.length === 0) {
@@ -186,36 +196,28 @@ export class AtomizeDrone extends Drone {
       return 0
     }
 
-    let queued = 0
-    let alreadyQueued = 0
-    let ancestorBusy = 0
+    // One receipt: the count and the reasons come from the same place, so
+    // a shortfall can never be reported without its explanation.
+    const receipt = new ReceiptBuilder()
+    for (const branch of children.filter(c => c.childCount > 0)) {
+      void branch
+      receipt.skipped('has-children')
+    }
     for (const leaf of leaves) {
       // Leafness already established by the walk — skip the re-read.
       const outcome = await this.atomizeTile(leaf.name, true)
-      if (outcome === 'queued') queued++
-      else if (outcome === 'already-queued') alreadyQueued++
-      else if (outcome === 'ancestor-busy') ancestorBusy++
+      if (outcome === 'queued') receipt.landed()
+      else receipt.skipped(outcome)
     }
 
-    // Say what was SKIPPED, and WHY — a foreach that quietly covered less
-    // than the layer reads as "it did everything" when it didn't, and
-    // "already asked" is a different fact from "already has children".
-    const skips = [
-      branches ? `${branches} already had children` : '',
-      alreadyQueued ? `${alreadyQueued} already queued` : '',
-      ancestorBusy ? `${ancestorBusy} waiting on a parent already being reshaped` : '',
-    ].filter(Boolean).join(', ')
-
+    const r = receipt.build()
     EffectBus.emit('toast:show', {
       type: 'tip',
-      message: queued
-        ? `Atomizing ${queued} tile${queued === 1 ? '' : 's'} on ${where}`
-          + (skips ? ` (${skips})` : '')
-          + ' — Haiku is working out the parts.'
-        : `Nothing new to atomize on ${where}${skips ? ` — ${skips}.` : '.'}`,
+      message: describeReceipt(r, 'Atomizing', 'tile', ATOMIZE_SKIP_LABELS)
+        + (r.landed ? ' — Haiku is working out the parts.' : ''),
     })
-    console.log(`[atomize] layer ${where}: ${queued} queued, ${branches} branches, ${alreadyQueued} already queued, ${ancestorBusy} ancestor-busy`)
-    return queued
+    console.log(`[atomize] layer ${where}: ${r.landed}/${r.attempted}`, Object.fromEntries(r.skipped))
+    return r.landed
   }
 
   // ── the ask ──────────────────────────────────────────────
@@ -320,27 +322,19 @@ export class AtomizeDrone extends Drone {
    *  resolve is DROPPED from the foreach rather than guessed at: atomize only
    *  ever ADDS, so the cost of missing one is a tile that didn't get deepened,
    *  and the cost of guessing would be an ask against a tile we can't see. */
+  /** The tiles on a layer, strictly. `null` means "could not see it", never
+   *  "it is empty" — the distinction that keeps a cold pool miss from being
+   *  read as an absent tile. Delegates to the ONE strict read so this path
+   *  cannot drift from the guard the doctrine requires. */
   async #currentChildren(segments: readonly string[]): Promise<LayerChild[] | null> {
     const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     if (!history || !lineage) return null
-    try {
-      const parent = await resolveCurrentLayer(history, lineage.domain, segments, null)
-      if (!parent) return null
-
-      const out: LayerChild[] = []
-      for (const sig of childSigsOf(parent)) {
-        const child = await history.getLayerBySig(String(sig)) as PlacementLayer | null
-        const name = typeof child?.name === 'string' ? child.name : ''
-        if (!child || !name) continue
-        out.push({ name, children: childSigsOf(child) })
-      }
-      return out
-    } catch (err) {
-      console.warn('[atomize] could not read the current layer:', err)
-      return null
-    }
+    const rows = await readChildrenStrict(history, lineage.domain, segments)
+    if (rows === null) return null
+    return rows.map(r => ({ name: r.name, childCount: r.childCount }))
   }
+
 }
 
 const _atomize = new AtomizeDrone()

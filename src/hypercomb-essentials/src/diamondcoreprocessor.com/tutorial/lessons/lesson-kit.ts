@@ -57,3 +57,21 @@ export const hasBehaviour = (name: string): boolean => {
   if (!entries) return true
   return entries.some(e => e?.name === name)
 }
+
+/**
+ * Is a WINDOW mounted in this build? The same question `hasBehaviour` asks, one
+ * layer up: the windows course teaches one tool window per lesson, and a shell
+ * that never registered a surface must lose that lesson rather than open
+ * nothing and narrate over an empty screen.
+ *
+ * `name` is the surface's registered name — its selector by convention
+ * (`hc-tags-viewer`). Answers optimistically before the registry is up; the
+ * course gates again when the lesson actually runs.
+ */
+export const hasWindow = (name: string): boolean => {
+  const registry = window.ioc.get<{ all?: () => { name: string }[] }>(
+    '@hypercomb.social/ShellSurfaceRegistry')
+  const surfaces = registry?.all?.()
+  if (!surfaces) return true
+  return surfaces.some(s => s?.name === name)
+}

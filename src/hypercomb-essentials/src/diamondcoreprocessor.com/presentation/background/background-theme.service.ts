@@ -35,10 +35,21 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 
 type SubstrateLike = {
   ensureLoaded(): Promise<void>
+  warmUp(): Promise<void>
   setActive(id: string | null): Promise<void>
   listSources(): readonly { id: string; label?: string; builtin?: boolean }[]
+  listImages(): { name: string; imageSig: string; enabled: boolean }[]
   activeSource: { id: string } | null
+  poolSigs: readonly string[]
+  pinImage(token: string): { name: string } | null
+  unpinImages(): void
+  restyle(labels: string[], ownedSigs: ReadonlySet<string>): Promise<string[]>
+  allLabels(): Promise<string[]>
 }
+
+/** How far an overwrite reaches. `none` is the default: a theme change dresses
+ *  tiles that have no picture yet and leaves the dressed ones alone. */
+type Reach = 'none' | 'layer' | 'global'
 
 export type BackgroundTheme = {
   /** The one word the participant types. Also the localStorage value. */
@@ -107,16 +118,47 @@ export class BackgroundThemeService extends EventTarget {
   }
 
   /**
-   * Dress the app in a theme. `off` clears the screen backdrop and leaves the
-   * tiles as they are — an empty screen is a look, an empty tile is a gap.
-   * Returns a short status, or null when the word names no theme.
+   * Dress the app in a theme.
+   *
+   *   <theme>                     the group dresses tiles that have none yet;
+   *                               each tile draws its own picture, so a wall of
+   *                               them is varied but coherent
+   *   <theme> <item>              pin ONE picture from the group — every tile
+   *                               wears the same one
+   *   <theme> force               also overwrite the tiles on this layer
+   *   <theme> force-global        also overwrite every tile in the hive
+   *   off                         clear the screen backdrop
+   *
+   * An overwrite replaces ONLY pictures a substrate pool put there. A picture
+   * the participant attached is never touched, at any reach — that is the whole
+   * point of force being safe to type.
+   *
+   * `<item> force-global` is refused: one picture stamped across an entire hive
+   * is not a look, it is damage, and it is the one combination that cannot be
+   * undone by rerolling.
+   *
+   * Returns a short status, or null when the words name no theme.
    */
   async set(input: string): Promise<string | null> {
-    const token = input.toLowerCase().trim()
-    if (!token) return null
+    // DOT SYNTAX. A theme is an object and its pictures are its members, so the
+    // words are walked into with dots — `ember.dots.force` — the way member
+    // completion works everywhere else. Spaces are still split on, because a
+    // sentence that used to work should not start failing, but the dots are
+    // what the completion offers and what the shape actually is.
+    const tokens = input.toLowerCase().split(/[.\s]+/).filter(Boolean)
+    if (tokens.length === 0) return null
+
+    let reach: Reach = 'none'
+    const rest: string[] = []
+    for (const tok of tokens) {
+      if (tok === 'force') { reach = 'layer'; continue }
+      if (tok === 'force-global') { reach = 'global'; continue }
+      rest.push(tok)
+    }
+    const [name, item] = rest
 
     const canvas = get('@diamondcoreprocessor.com/CanvasBackground') as CanvasBackgroundService | undefined
-    if (token === 'off') {
+    if (name === 'off') {
       canvas?.set('off')
       this.#active = 'off'
       this.#persist()
@@ -124,23 +166,50 @@ export class BackgroundThemeService extends EventTarget {
       return 'background off — bare surface'
     }
 
-    const theme = this.theme(token)
+    const theme = name ? this.theme(name) : undefined
     if (!theme) return null
+    if (item && reach === 'global') {
+      return `"${item}" is one picture — it can dress this layer, but not the whole hive. Drop force-global, or drop the picture.`
+    }
 
     const dressed: string[] = []
     if (theme.screen && canvas) {
       canvas.set(`${theme.screen.palette} ${theme.screen.archetype}`)
       dressed.push('screen')
     }
-    if (theme.tiles) {
-      const substrate = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateLike | undefined
-      if (substrate) {
-        await substrate.ensureLoaded()
-        // A theme naming a source that isn't registered dresses what it can
-        // rather than failing the whole change.
-        if (substrate.listSources().some(s => s.id === theme.tiles)) {
-          await substrate.setActive(theme.tiles)
-          dressed.push('tiles')
+
+    let tail = ''
+    const substrate = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateLike | undefined
+    if (theme.tiles && substrate) {
+      await substrate.ensureLoaded()
+      // A theme naming a source that isn't registered dresses what it can
+      // rather than failing the whole change.
+      if (substrate.listSources().some(s => s.id === theme.tiles)) {
+        // The pictures the OUTGOING group put on tiles, captured before the
+        // switch — after it, they are no longer in the pool and an overwrite
+        // could not tell them from the participant's own.
+        const owned = new Set<string>(reach === 'none' ? [] : substrate.poolSigs)
+        await substrate.setActive(theme.tiles)
+        await substrate.warmUp()
+        dressed.push('tiles')
+
+        if (item) {
+          const pinned = substrate.pinImage(item)
+          if (!pinned) {
+            substrate.unpinImages()
+            return `${theme.label} has no picture called "${item}" — try /background ${theme.id} items`
+          }
+          tail = ` · ${pinned.name} on every tile`
+        } else {
+          substrate.unpinImages()
+        }
+
+        if (reach !== 'none') {
+          for (const sig of substrate.poolSigs) owned.add(sig)
+          const labels = reach === 'global' ? await substrate.allLabels() : await this.#layerLabels()
+          const redressed = await substrate.restyle(labels, owned)
+          for (const cell of redressed) EffectBus.emit('substrate:rerolled', { cell })
+          tail += ` · ${redressed.length} tile${redressed.length === 1 ? '' : 's'} re-dressed${reach === 'global' ? ' hive-wide' : ''}`
         }
       }
     }
@@ -150,8 +219,25 @@ export class BackgroundThemeService extends EventTarget {
     this.dispatchEvent(new CustomEvent('change'))
     EffectBus.emit('background:theme', { id: theme.id })
     return dressed.length
-      ? `background → ${theme.label} (${dressed.join(' + ')})`
-      : `background → ${theme.label}`
+      ? `background → ${theme.label} (${dressed.join(' + ')})${tail}`
+      : `background → ${theme.label}${tail}`
+  }
+
+  /** The pictures in a theme's group, by name. Empty until the group is the
+   *  active one — a pool is only warmed when it is in use. */
+  items(id: string): string[] {
+    const theme = this.theme(id)
+    const substrate = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateLike | undefined
+    if (!theme?.tiles || !substrate) return []
+    if (substrate.activeSource?.id !== theme.tiles) return []
+    return substrate.listImages().map(i => i.name)
+  }
+
+  /** The tiles on the layer the participant is looking at. */
+  async #layerLabels(): Promise<string[]> {
+    const show = get('@diamondcoreprocessor.com/ShowCellDrone') as
+      { renderedCells?: Map<string, unknown> } | undefined
+    return [...(show?.renderedCells?.keys() ?? [])]
   }
 
   status(): string {

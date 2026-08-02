@@ -1,5 +1,7 @@
 // diamondcoreprocessor.com/ui/slash-behaviour/slash-behaviour.drone.ts
 import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
+import { ATOMIZE_SKIP_LABELS } from '../assistant/atomize.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'
 
 export class SlashBehaviourDrone extends EventTarget {
@@ -372,28 +374,19 @@ class AtomizeProvider implements SlashBehaviourProvider {
     // answerable and undoable. Mints are serialized inside the drone, which
     // also refuses a tile that already has children and one already queued.
     // Report the REASON, not just the shortfall.
-    const tally: Record<string, number> = {}
+    const receipt = new ReceiptBuilder()
     for (const label of targets) {
       const outcome = await drone.atomizeTile(label)
-      tally[outcome] = (tally[outcome] ?? 0) + 1
+      if (outcome === 'queued') receipt.landed()
+      else receipt.skipped(outcome)
     }
 
-    const queued = tally['queued'] ?? 0
-    const skips = [
-      tally['has-children'] ? `${tally['has-children']} already had children` : '',
-      tally['already-queued'] ? `${tally['already-queued']} already queued` : '',
-      tally['ancestor-busy'] ? `${tally['ancestor-busy']} waiting on a parent already being reshaped` : '',
-      tally['failed'] ? `${tally['failed']} could not be read` : '',
-    ].filter(Boolean).join(', ')
-
+    const r = receipt.build()
     EffectBus.emit('toast:show', {
       type: 'tip',
-      message: queued
-        ? `Atomizing ${queued} tile${queued === 1 ? '' : 's'}`
-          + (skips ? ` (${skips})` : '')
-          + ' — Haiku is working out the parts.'
-        : `Nothing atomized${skips ? ` — ${skips}` : ''}.`
-          + (tally['has-children'] ? ' Use /organize to group a crowded level.' : ''),
+      message: describeReceipt(r, 'Atomizing', 'tile', ATOMIZE_SKIP_LABELS)
+        + (r.landed ? ' — Haiku is working out the parts.'
+           : r.skipped.has('has-children') ? ' Use /organize to group a crowded level.' : ''),
     })
   }
 }
@@ -475,13 +468,32 @@ class OrganizeProvider implements SlashBehaviourProvider {
   readonly behaviours: SlashBehaviour[] = [
     { name: 'organize',
       description: 'Group a crowded layer into subfolders via Claude Haiku', descriptionKey: 'slash.organize',
+      options: ['preview', 'apply'],
       examples: [
         { input: '/organize', result: 'Haiku groups this layer\'s tiles; each group becomes a tile they move into' },
+        { input: '/organize preview', result: 'Shows the grouping it would make and holds it — nothing moves' },
+        { input: '/organize apply', result: 'Runs the plan that /organize preview held' },
       ] }
   ]
 
-  execute(): void {
-    EffectBus.emit('organize:layer', {})
+  async execute(_behaviourName: string, args: string): Promise<void> {
+    const arg = args.trim().toLowerCase()
+
+    // PLAN BEFORE APPLY: `preview` validates a real plan against the live
+    // layer and reports it without moving anything; `apply` runs the held one.
+    if (arg === 'apply') {
+      const drone = get('@diamondcoreprocessor.com/OrganizeDrone') as
+        { applyHeldPlan?: () => Promise<number> } | undefined
+      if (drone?.applyHeldPlan) await drone.applyHeldPlan()
+      return
+    }
+
+    EffectBus.emit('organize:layer', { preview: arg === 'preview' })
+  }
+
+  complete(_behaviourName: string, args: string): readonly string[] {
+    const q = args.toLowerCase().trim()
+    return ['preview', 'apply'].filter(s => s.startsWith(q))
   }
 }
 

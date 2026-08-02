@@ -217,6 +217,26 @@ class CommitMachine {
     })
     return ran
   }
+
+  /**
+   * COMMIT ACKNOWLEDGEMENT — resolves when everything enqueued BEFORE this
+   * call has run. "The write landed", as opposed to "the write was asked for".
+   *
+   * Every path into this machine is fire-and-forget or per-request; nothing
+   * could ask "is the queue drained?". So callers that needed to act AFTER a
+   * commit invented private workarounds — and got them wrong. `act()` returning
+   * means the work was ENQUEUED, not committed: an organize minted eight group
+   * tiles, immediately moved into them, found no destination resolvable, and
+   * refused every move silently. Three separate bugs in one afternoon were this
+   * same mistake wearing different clothes.
+   *
+   * Deliberately NOT per-segment. The chain is one FIFO, so "my commit landed"
+   * and "the queue drained past my commit" are the same fact, and a per-address
+   * variant would imply an ordering guarantee the machine does not have.
+   */
+  settled(): Promise<void> {
+    return this.#chain.then(() => {}, () => {})
+  }
 }
 
 export class LayerCommitter {
@@ -663,6 +683,19 @@ export class LayerCommitter {
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
     nameSlots: ReadonlySet<string> = new Set(['children']),
   ): Promise<void> => this.#machine.enqueue(() => this.#importTree(updates, nameSlots))
+
+  /** COMMIT ACKNOWLEDGEMENT. Resolves once every commit enqueued before this
+   *  call has actually run — the difference between "asked for" and "landed".
+   *
+   *  Await this after any pulse whose RESULT you are about to read or write
+   *  against. `new hypercomb().act()` only guarantees the work was queued, and
+   *  reading a location before the queue drains sees the layer as it was, not
+   *  as you just made it. That gap is the cause of the empty-groups failure and
+   *  of two other silent drops in the same session.
+   *
+   *  Never rejects: a failed commit is the failing caller's problem to report,
+   *  not a reason to leave every waiter hanging. */
+  public settled = (): Promise<void> => this.#machine.settled()
 
   readonly #importTree = async (
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],

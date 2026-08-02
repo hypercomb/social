@@ -947,6 +947,94 @@ export class SubstrateService extends EventTarget {
       ?? null
   }
 
+  /** The props signatures of every image in the CURRENT pool. This is the test
+   *  for "the picture on this tile is one a substrate pool put there" — a tile
+   *  wearing anything else is the participant's own and must never be
+   *  overwritten. Callers hold the OUTGOING pool's sigs across a source switch
+   *  so the picture the previous theme applied can be recognised. */
+  get poolSigs(): readonly string[] { return this.#propsPool.map(p => p.propsSig) }
+
+  /** Pin ONE image from the pool: every pick returns it, so a wall of tiles
+   *  wears the same picture. Built on the same session-only enabled set as
+   *  toggleImage — nothing is persisted, written to a layer, or seen by peers,
+   *  and a reload returns the whole group. Null when the token matches
+   *  nothing. */
+  pinImage(token: string): { name: string } | null {
+    const sig = this.#resolveImage(token)
+    if (!sig) return null
+    this.#disabledImages.clear()
+    for (const image of this.listImages()) if (image.imageSig !== sig) this.#disabledImages.add(image.imageSig)
+    return { name: this.#imageNames.get(sig) ?? sig.slice(0, 8) }
+  }
+
+  /** Undo a pin — the whole group is available again, so tiles vary. */
+  unpinImages(): void { this.#disabledImages.clear() }
+
+  /**
+   * Re-dress tiles from the active pool, replacing ONLY pictures that a
+   * substrate pool put there. `ownedSigs` names which pools may be replaced
+   * (normally the outgoing pool plus the incoming one); a tile wearing anything
+   * else — a picture the participant attached, anything from outside a theme
+   * pack — keeps it. Returns the labels actually re-dressed.
+   */
+  async restyle(labels: string[], ownedSigs: ReadonlySet<string>): Promise<string[]> {
+    if (labels.length === 0) return []
+    const index = readTilePropsIndex()
+    let cleared = 0
+    for (const label of labels) {
+      const key = await this.#indexKeyFor(label)
+      const current = lookupTilePropsSig(index, key, label)
+      if (!current || !ownedSigs.has(current)) continue
+      this.#releaseUsage(current)
+      delete index[key || label]
+      if (index[label] === current) delete index[label]
+      cleared++
+    }
+    if (cleared > 0) writeTilePropsIndex(index)
+    return this.applyToAllBlanks(labels)
+  }
+
+  /**
+   * Every tile label in the hive, from the LAYER tree — the same source the
+   * swarm publishes from. Tiles are layer state and many have no OPFS
+   * directory, so a directory walk misses them. Depth-capped like the stamp
+   * pass; returns an empty list when history is not ready.
+   */
+  async allLabels(): Promise<string[]> {
+    const history = get('@diamondcoreprocessor.com/HistoryService') as {
+      sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+      currentLayerAt?: (sig: string) => Promise<unknown>
+      getLayerBySig?: (s: string) => Promise<{ name?: string } | null>
+    } | undefined
+    if (!history?.sign || !history?.currentLayerAt || !history?.getLayerBySig) return []
+
+    const childNamesAt = async (segments: string[]): Promise<string[]> => {
+      try {
+        // Segments pass through RAW — the root bag signs as the EMPTY list.
+        const sig = await history.sign!({ explorerSegments: () => [...segments] })
+        if (!sig) return []
+        const layer = await history.currentLayerAt!(sig) as { children?: readonly unknown[] } | null
+        const sigs = Array.isArray(layer?.children) ? layer!.children! : []
+        const names = await Promise.all(sigs.map(async (cs) => {
+          try { return (await history.getLayerBySig!(String(cs ?? '')))?.name ?? null }
+          catch { return null }
+        }))
+        return names.filter((n): n is string => typeof n === 'string' && n.length > 0)
+      } catch { return [] }
+    }
+
+    const out: string[] = []
+    const walk = async (segments: string[]): Promise<void> => {
+      if (segments.length > 8) return
+      for (const name of await childNamesAt(segments)) {
+        out.push(name)
+        await walk([...segments, name])
+      }
+    }
+    await walk([])
+    return out
+  }
+
   /** Toggle one image's availability (session-only). Returns the resolved
    *  name + new enabled state, or null when the token matches no pooled image. */
   toggleImage(token: string): { name: string; enabled: boolean } | null {

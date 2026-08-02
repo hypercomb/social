@@ -32,9 +32,10 @@
 // that rewrite, blind, from outside the hive. So the responder never moves
 // anything — it advises, and the hive moves.
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
-import { childSigsOf, resolveCurrentLayer, type PlacementHistory, type PlacementLayer } from '../history/layer-placement.js'
+import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { PendingAskIndex } from './ask-scope.js'
 import { mintCreationId, stampCreation } from './creation.js'
+import { ReceiptBuilder, describeReceipt } from './receipt.js'
 
 /** Below this, a layer is already manageable — organizing it would add a
  *  level of navigation to save nothing. Above it, a layer is CROWDED, and
@@ -63,6 +64,10 @@ type StoreLike = {
   listOptimizations?: () => Promise<string[]>
 }
 type LineageLike = { explorerSegments?: () => readonly string[]; domain?: unknown }
+type CommitterLike = {
+  /** COMMIT ACKNOWLEDGEMENT — resolves when queued commits have actually run. */
+  settled?: () => Promise<void>
+}
 type MoveLike = {
   commitMoveInto?: (
     labels: readonly string[],
@@ -93,6 +98,9 @@ export class OrganizeDrone extends Drone {
    *  every plan but the first — losing work a responder already did. */
   #applyChain: Promise<unknown> = Promise.resolve()
 
+  /** A previewed plan waiting on confirmation. Held, not applied. */
+  heldPlanSig: string | null = null
+
   /** One structural ask per branch. Organize holds the WHOLE layer it stands
    *  on, because it re-homes that layer's children — so it conflicts with a
    *  second organize there AND with any atomize on a tile inside it, whose
@@ -103,8 +111,8 @@ export class OrganizeDrone extends Drone {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
 
-    this.onEffect('organize:layer', () => {
-      void this.organizeLayer()
+    this.onEffect<{ preview?: boolean }>('organize:layer', (payload) => {
+      void this.organizeLayer(payload?.preview === true)
     })
 
     // A plan landing over the bridge is what starts phase 2. The bridge
@@ -120,8 +128,8 @@ export class OrganizeDrone extends Drone {
 
   /** Ask Haiku how the CURRENT layer should be grouped. Creates and moves
    *  nothing — the plan comes back through `applyPlan`. */
-  async organizeLayer(): Promise<boolean> {
-    return this.organizeAt(this.#segments())
+  async organizeLayer(preview = false): Promise<boolean> {
+    return this.organizeAt(this.#segments(), false, preview)
   }
 
   /** Organize a NAMED layer. Same act, explicit location — used by the
@@ -129,7 +137,7 @@ export class OrganizeDrone extends Drone {
    *  the participant happens to be standing by then. `quiet` suppresses the
    *  "already manageable" toast: a cascade probing its own groups is not
    *  something the participant asked about tile by tile. */
-  async organizeAt(segments: readonly string[], quiet = false): Promise<boolean> {
+  async organizeAt(segments: readonly string[], quiet = false, preview = false): Promise<boolean> {
     const where = segments.length ? `/${segments.join('/')}` : 'this hive'
     const members = await this.#currentMembers(segments)
 
@@ -169,7 +177,7 @@ export class OrganizeDrone extends Drone {
       + `- Group names must not collide with an existing tile name on the layer.\n\n`
       + `RETURN THE PLAN by writing this record over the bridge (op \`optimization-add\`, \`text\` = the JSON):\n`
       + `{"kind":"${PLAN_KIND}","payload":{"segments":${JSON.stringify(segments)},"creationId":"${creationId}",`
-      + `"groups":[{"name":"<group>","members":["<tile>","<tile>"]}]}}\n`
+      + `"groups":[{"name":"<group>","members":["<tile>","<tile>"]}]${preview ? ',"preview":true' : ''}}}\n`
       + `Then retire this ask. The hive validates the plan against the live layer and performs the moves itself.\n\n`
       + `Tiles on ${where} (${names.length}): ${names.join(', ')}`
 
@@ -209,6 +217,7 @@ export class OrganizeDrone extends Drone {
           planKind: PLAN_KIND,
           groupsMin: TARGET_GROUPS_MIN,
           groupsMax: TARGET_GROUPS_MAX,
+          ...(preview ? { preview: true } : {}),
           creationId,
           status: 'pending',
           askedAt,
@@ -230,6 +239,36 @@ export class OrganizeDrone extends Drone {
       this.#pending.release(scopePath)
       console.warn('[organize] failed to queue:', err)
       return false
+    }
+  }
+
+  /** Run a plan that was previewed and held. Re-reads and re-validates it
+   *  against the layer as it is NOW — a plan approved a minute ago is still
+   *  a plan about a layer that may have changed since. */
+  async applyHeldPlan(): Promise<number> {
+    const sig = this.heldPlanSig
+    if (!sig) {
+      EffectBus.emit('toast:show', { type: 'tip', message: 'No plan is waiting — run /organize first.' })
+      return 0
+    }
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    const blob = await store?.getOptimization?.(sig)
+    if (!blob) {
+      this.heldPlanSig = null
+      EffectBus.emit('toast:show', { type: 'tip', message: 'The held plan is gone — run /organize again.' })
+      return 0
+    }
+    try {
+      const rec = JSON.parse(await blob.text()) as { payload?: Record<string, unknown> }
+      if (rec.payload) delete rec.payload['preview']
+      const fresh = await store?.putOptimization?.(
+        new Blob([JSON.stringify(rec)], { type: 'application/json' }))
+      await store?.removeOptimization?.(sig)
+      this.heldPlanSig = null
+      return fresh ? await this.applyPlan(fresh) : 0
+    } catch (err) {
+      console.warn('[organize] could not apply the held plan:', err)
+      return 0
     }
   }
 
@@ -277,6 +316,29 @@ export class OrganizeDrone extends Drone {
       const groups = this.#validate(record.payload?.groups, live)
       if (!groups) return 0
 
+      // PLAN BEFORE APPLY. The plan is a separate, inspectable artifact that
+      // exists before anything moves — which is the only reason the failed run
+      // was diagnosable at all, and the only reason a bad plan could be held
+      // back rather than discovered afterwards.
+      //
+      // `preview` makes that reviewable instead of implicit: the plan is fully
+      // validated against the LIVE layer, reported, and left in the pool. Say
+      // `/organize apply` to run the held plan. Nothing is created, nothing
+      // moves, and an invalid plan still fails here rather than in front of
+      // the participant.
+      if ((record.payload as Record<string, unknown> | undefined)?.['preview'] === true) {
+        const lines = groups.map(g => `${g.name} (${g.members.length})`).join(', ')
+        const placed = groups.reduce((n, g) => n + g.members.length, 0)
+        EffectBus.emit('toast:show', {
+          type: 'tip',
+          message: `Plan for ${where}: ${groups.length} groups — ${lines}.`
+            + ` ${placed} of ${live.size} tiles placed. Nothing moved yet — /organize apply to run it.`,
+        })
+        console.log(`[organize] PREVIEW ${where}:`, groups.map(g => [g.name, g.members]))
+        this.heldPlanSig = planSig
+        return 0
+      }
+
       const move = get<MoveLike>('@diamondcoreprocessor.com/MoveDrone')
       if (!move?.commitMoveInto) {
         this.#reject('the move primitive is unavailable')
@@ -286,6 +348,9 @@ export class OrganizeDrone extends Drone {
       // Mint the group tiles first.
       for (const g of groups) EffectBus.emit('cell:added', { cell: g.name, segments: [...segments] })
       await new hypercomb().act()
+      // THE WRITE LANDED, not "the write was asked for". act() only queues;
+      // moving into a destination that has not committed silently refuses.
+      await this.#awaitCommits()
 
       // The creation id the ask carried, echoed back in the plan. Absent on a
       // plan minted before creation ids existed — derive nothing in that
@@ -294,43 +359,28 @@ export class OrganizeDrone extends Drone {
       const creationId = String((record.payload as Record<string, unknown> | undefined)?.['creationId'] ?? '')
       let unstamped = 0
 
-      let landedGroups = 0
+      const receipt = new ReceiptBuilder()
       let landedTiles = 0
       for (const g of groups) {
-        // AWAIT THE DESTINATION. `act()` returning does NOT mean the group's
-        // layer is committed — the committer is a queue machine, so the pulse
-        // only guarantees the work was ENQUEUED. Moving into a path that has
-        // not landed yet makes commitMoveInto resolve no destination and
-        // refuse, silently, for every group: the observed failure was eight
-        // group tiles created and not one tile moved into them.
-        if (!await this.#awaitLayer([...segments, g.name])) {
-          console.warn(`[organize] "${g.name}" never committed — skipping its moves`)
-          continue
+        if (creationId && !await stampCreation([...segments, g.name], creationId, ORGANIZE_TASK, 'group')) {
+          console.warn(`[organize] "${g.name}" could not be stamped`)
         }
-
-        // Stamp BEFORE moving. A group that gets stamped and then fails its
-        // move is identifiable wreckage; one that moves and then fails to be
-        // stamped is indistinguishable from a tile the participant made.
-        if (creationId && !await stampCreation([...segments, g.name], creationId, ORGANIZE_TASK, 'group')) unstamped++
-
         const landed = await move.commitMoveInto(g.members, segments, [...segments, g.name])
-        if (landed.length) { landedGroups++; landedTiles += landed.length }
-        // A group whose members all refused (name collision at the
-        // destination, rewound cursor) leaves an empty group tile rather than
-        // a wrong one. Report it; do not quietly delete a tile we just made.
-        if (landed.length !== g.members.length) {
-          console.warn(`[organize] "${g.name}": ${landed.length}/${g.members.length} tiles moved`)
-        }
+        landedTiles += landed.length
+        if (landed.length === g.members.length) receipt.landed()
+        else if (landed.length === 0) receipt.skipped('refused every move')
+        else receipt.skipped('partly moved')
       }
 
+      const r = receipt.build()
       const ungrouped = live.size - landedTiles
       EffectBus.emit('toast:show', {
         type: 'tip',
-        message: `Organized ${where} into ${landedGroups} group${landedGroups === 1 ? '' : 's'}`
+        message: describeReceipt(r, 'Organized into', 'group')
           + (ungrouped > 0 ? ` — ${ungrouped} tile${ungrouped === 1 ? '' : 's'} stayed put.` : '.'),
       })
-      console.log(`[organize] ${where}: ${landedGroups} groups, ${landedTiles} tiles moved, ${ungrouped} left in place`
-        + (unstamped ? `, ${unstamped} unstamped` : '') + (creationId ? ` [creation ${creationId.slice(0, 12)}…]` : ''))
+      console.log(`[organize] ${where}: ${r.landed}/${r.attempted} groups, ${landedTiles} tiles moved`,
+        Object.fromEntries(r.skipped), creationId ? `[creation ${creationId.slice(0, 12)}…]` : '')
 
       await store?.removeOptimization?.(planSig)
 
@@ -346,7 +396,7 @@ export class OrganizeDrone extends Drone {
         void this.organizeAt([...segments, g.name], true)
       }
 
-      return landedGroups
+      return r.landed
     } catch (err) {
       console.warn('[organize] apply failed:', err)
       return 0
@@ -409,20 +459,20 @@ export class OrganizeDrone extends Drone {
     return groups
   }
 
-  /** Poll until a layer resolves, or give up. The committer queues work, so a
-   *  freshly minted tile exists a moment AFTER the pulse that asked for it. */
-  async #awaitLayer(segments: readonly string[], tries = 20, everyMs = 250): Promise<boolean> {
-    const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
-    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-    if (!history || !lineage) return false
-    for (let i = 0; i < tries; i++) {
-      try {
-        if (await resolveCurrentLayer(history, lineage.domain, segments, null)) return true
-      } catch { /* not yet */ }
-      await new Promise(r => setTimeout(r, everyMs))
+  /** Wait for the commits already queued to actually land.
+   *
+   *  This used to poll for each group layer to appear, because nothing could
+   *  answer "has the queue drained?". The committer can now say so directly,
+   *  which replaces a 20x250ms guess with the fact. */
+  async #awaitCommits(): Promise<void> {
+    const committer = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!committer?.settled) {
+      console.warn('[organize] committer cannot acknowledge commits — proceeding unverified')
+      return
     }
-    return false
+    await committer.settled()
   }
+
 
   #reject(why: string): void {
     console.warn(`[organize] plan rejected — ${why}`)
@@ -439,33 +489,19 @@ export class OrganizeDrone extends Drone {
   /** The tile names on a layer. `null` = could not read it — never confused
    *  with `[]` "the layer is empty", because organize validates a plan
    *  against this list and an empty list would reject every member. */
+  /** The tiles on a layer, name → child count. `null` means "could not see
+   *  it", NEVER "it is empty" — organize rewrites membership, so collapsing
+   *  those two is exactly how a tile gets permanently dropped. The guard
+   *  lives in readChildrenStrict; this only shapes the result. */
   async #currentMembers(segments: readonly string[]): Promise<Map<string, number> | null> {
     const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     if (!history || !lineage) return null
-    try {
-      const parent = await resolveCurrentLayer(history, lineage.domain, segments, null)
-      if (!parent) return null
-      const sigs = childSigsOf(parent)
-      const names = new Map<string, number>()
-      for (const sig of sigs) {
-        const child = await history.getLayerBySig(String(sig)) as PlacementLayer | null
-        const name = typeof child?.name === 'string' ? child.name : ''
-        // A child sig that will not resolve is a COLD MISS, not an absent
-        // tile. Organize rewrites membership, so guessing here is exactly the
-        // failure that loses a tile — refuse the whole read instead.
-        if (!child || !name) {
-          console.warn(`[organize] cold miss on child ${String(sig).slice(0, 12)}… — refusing to plan against a partial layer`)
-          return null
-        }
-        names.set(name, childSigsOf(child).length)
-      }
-      return names
-    } catch (err) {
-      console.warn('[organize] could not read the layer:', err)
-      return null
-    }
+    const rows = await readChildrenStrict(history, lineage.domain, segments)
+    if (rows === null) return null
+    return new Map(rows.map(r => [r.name, r.childCount]))
   }
+
 }
 
 const _organize = new OrganizeDrone()

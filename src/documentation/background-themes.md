@@ -9,6 +9,55 @@ One command, one list, one word.
 `/background` with nothing after it prints the current theme and the whole list.
 `/background off` is bare surface.
 
+## The grammar
+
+```
+/background <theme>[.<picture>][.force | .force-global]
+/background <theme>.items
+/background off
+```
+
+A theme is a **group of pictures**, and by default each tile draws its own from
+the group — a wall of tiles reads varied but coherent. Name a picture and that
+one goes on every tile instead:
+
+```bash
+/background ember.dots
+```
+
+Pinning a picture is session-only: nothing is persisted, written to a layer, or
+seen by peers, and a reload returns the whole group.
+
+**Seeing the group.** `/background ember.items` lists the group's pictures and
+opens the substrate organizer, where they are laid out as thumbnails. A group is
+only listable once it is the active one — a pool is warmed when it is in use —
+so `items` makes the theme active before showing it.
+
+## Force — overwriting what is already dressed
+
+By default a theme change dresses tiles that have **no picture yet** and leaves
+dressed tiles alone. To restyle tiles that already have one:
+
+| | Reach |
+|---|---|
+| `/background ember.force` | every tile on the layer you are looking at |
+| `/background ember.force-global` | every tile in the hive |
+
+**A force never touches a picture the participant attached.** The test is
+whether the tile is wearing something a substrate pool put there: the outgoing
+group's signatures are captured *before* the switch (after it, they are no
+longer in the pool and could not be told apart from your own pictures) and
+unioned with the incoming group's. Anything outside that set is yours and is
+left exactly as it is, at any reach.
+
+The safe direction is the default one: a picture from a theme *older* than the
+one currently active is not recognised as theme-owned, so it survives a force.
+Nothing custom is ever destroyed; at worst a stale theme picture stays.
+
+**`<picture>.force-global` is refused.** One picture stamped across an entire
+hive is not a look, and it is the one combination rerolling cannot undo. Pin a
+picture for a layer; never for the whole tree.
+
 ## What a theme is
 
 A theme is a named look that declares what it dresses:
