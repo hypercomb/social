@@ -3,15 +3,10 @@
          hcDockInset="left"
          hcDockedPanel="history-viewer" dockSide="left"
          (hcDockedPanelClose)="hide()"
-         [ownsSize]="false" [sizeOwner]="this" [minWidth]="240" [maxWidth]="1200"
+         [minWidth]="240" [maxWidth]="1200" [defaultWidth]="420"
+         [minScale]="0.72" [maxScale]="1"
          [attr.data-consumes-wheel]="''"
-         [style.width.px]="customWidth()"
-         [style.--hc-panel-scale]="contentScale()"
-         [style.max-width]="customWidth() !== null ? 'none' : null"
          [attr.aria-label]="'history.viewer-title' | t">
-    <div class="history-viewer-resizer"
-         [attr.aria-label]="'history.resize' | t"
-         (pointerdown)="startResize($event)"></div>
     <header class="history-viewer-header">
       <span class="title">{{ 'history.viewer-title' | t }}</span>
       <span class="count">{{ total() }}</span>

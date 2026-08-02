@@ -9,14 +9,16 @@
 // Clicking a row seeks the HistoryCursor to that entry.
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
-import { AfterViewInit, Component, ElementRef, computed, effect, inject, signal, type OnDestroy, type OnInit } from '@angular/core'
+import { Component, ElementRef, computed, effect, inject, signal, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus, IconRef, type IconRef as IconRefType } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { IconComponent } from '../icon/icon.component'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
-// Settings-only: the gear + group chrome every tool window carries. The viewer
-// keeps its own resizer and width signal — `ownsSize` false, `sizeOwner` this.
-import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
+// Full docked-panel chrome — resize grip, width persistence, `--hc-panel-scale`,
+// control-bar pinning and the settings gear — the SAME shared code the Portals
+// entrance (collections-landing) and aggregate-index panels ride. The viewer
+// owns no sizing of its own.
+import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 
 type CursorState = {
   locationSig: string
@@ -176,29 +178,9 @@ const CATEGORY_BY_ID: ReadonlyMap<Category, CategoryDef> = new Map(
 // a session still work — they just don't persist across visibility
 // toggles.
 
-// Panel width is global, not per-location: the user resizes once and
-// the same width applies everywhere. Null = untouched (CSS default
-// takes over — panel grows to fit content). A number = sticky pixel
-// width set by the user via drag.
-const WIDTH_STORAGE_KEY = 'hc:history-viewer-width'
-
-function loadCustomWidth(): number | null {
-  try {
-    const raw = localStorage.getItem(WIDTH_STORAGE_KEY)
-    if (!raw) return null
-    const n = parseInt(raw, 10)
-    return Number.isFinite(n) && n > 0 ? n : null
-  } catch {
-    return null
-  }
-}
-
-function saveCustomWidth(width: number | null): void {
-  try {
-    if (width == null) localStorage.removeItem(WIDTH_STORAGE_KEY)
-    else localStorage.setItem(WIDTH_STORAGE_KEY, String(width))
-  } catch { /* storage unavailable */ }
-}
+// Panel width is owned by the shared hcDockedPanel directive (persisted
+// participant-local under `hc:docked-width:history-viewer`), exactly like
+// every other docked tool window — no viewer-local width store.
 
 @Component({
   selector: 'hc-history-viewer',
@@ -207,7 +189,7 @@ function saveCustomWidth(width: number | null): void {
   templateUrl: './history-viewer.component.html',
   styleUrls: ['./history-viewer.component.scss'],
 })
-export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit, PanelSizeOwner {
+export class HistoryViewerComponent implements OnInit, OnDestroy {
 
   #entries = signal<readonly LayerEntry[]>([])
   #contents = signal<ReadonlyMap<string, Content>>(new Map())
@@ -390,26 +372,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit,
   #loadSeq = 0
   readonly #el: ElementRef<HTMLElement> = inject(ElementRef)
 
-  // User-chosen width in px, sticky across locations. Null = auto (panel
-  // grows to fit content on first open). Persisted in localStorage so
-  // resizing once keeps the preference across reloads. Applied as an
-  // explicit inline style only when non-null so the CSS `width: max-content`
-  // default can still take over for users who've never resized.
-  #customWidth = signal<number | null>(loadCustomWidth())
-  readonly customWidth = this.#customWidth.asReadonly()
-  #resizing: { startX: number; startWidth: number } | null = null
-
-  // Content scale: as the user drags the panel narrower, the rows/header
-  // shrink (em-based, driven by `--hc-panel-scale`) to fit instead of just
-  // truncating. Null width (never resized) → full size. Capped at 1 — history
-  // gains nothing from growing, only from shrinking when cramped. The centered
-  // slice/merge modals are SIBLINGS of `.history-viewer`, so they're unaffected.
-  readonly contentScale = computed(() => {
-    const w = this.#customWidth()
-    if (w == null) return 1
-    return Math.min(1, Math.max(0.72, w / 420))
-  })
-
   constructor() {
     this.#viewUnsubs.push(
       EffectBus.on('history:view-open', () => this.#visible.set(true)),
@@ -420,12 +382,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit,
     // When the panel becomes visible, refresh entries + contents. Done
     // as an effect rather than a simple ngOnInit call so the panel
     // re-hydrates on re-activation (user hides then re-enters history).
-    // Also toggles the body-level `hc-history-mode` class — the global
-    // stylesheet (installed in ngAfterViewInit) uses that class to
-    // shift the canvas/main UI rightward so the viewer has a dedicated
-    // column on the left instead of overlapping the stage.
     effect(() => {
-      const body = document.body
       if (this.visible()) {
         // Reset filters every time the panel opens. A persisted
         // disabled set could silently hide rows that ARE in the bag,
@@ -440,10 +397,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit,
         // current code never writes this key. Wrap in try because
         // localStorage may be unavailable in some contexts.
         try { localStorage.removeItem('hc:history-filters') } catch { /* ignore */ }
-        body.classList.add('hc-history-mode')
         void this.#reload()
-      } else {
-        body.classList.remove('hc-history-mode')
       }
     })
 
@@ -461,19 +415,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit,
       })
     })
 
-  }
-
-  ngAfterViewInit(): void {
-    // Portal the host element directly to document.body. This escapes
-    // every ancestor stacking context in <app-root>'s subtree — the
-    // viewer must sit in the top-level stacking order regardless of
-    // how the rest of the app arranges its overlays. Done in
-    // ngAfterViewInit (not ngOnInit) so the host DOM node exists
-    // before we try to move it.
-    const host = this.#el.nativeElement as HTMLElement
-    if (host && host.parentNode !== document.body) {
-      document.body.appendChild(host)
-    }
   }
 
   ngOnInit(): void {
@@ -500,12 +441,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit,
   ngOnDestroy(): void {
     this.#unsub?.()
     for (const off of this.#viewUnsubs) off()
-    // Best-effort: if the host was portaled, remove it from body so we
-    // don't leave a dangling node behind after the component tears down.
-    const host = this.#el.nativeElement
-    if (host && host.parentNode === document.body) {
-      document.body.removeChild(host)
-    }
   }
 
   /**
@@ -822,56 +757,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit,
 
   readonly hide = (): void => {
     this.#visible.set(false)
-  }
-
-  /**
-   * Begin a drag-resize of the panel from its right edge. The handle
-   * captures the pointer so the drag follows even when the cursor
-   * leaves the handle bounds. Width is clamped to [MIN, viewport - 60]
-   * so a runaway drag can't hide the canvas entirely.
-   */
-  readonly startResize = (event: PointerEvent): void => {
-    event.preventDefault()
-    event.stopPropagation()
-    const aside = (event.currentTarget as HTMLElement).parentElement as HTMLElement | null
-    if (!aside) return
-    const startWidth = aside.offsetWidth
-    this.#resizing = { startX: event.clientX, startWidth }
-    const target = event.currentTarget as HTMLElement
-    try { target.setPointerCapture(event.pointerId) } catch { /* best effort */ }
-
-    const onMove = (e: PointerEvent): void => {
-      if (!this.#resizing) return
-      const dx = e.clientX - this.#resizing.startX
-      const next = Math.round(this.#resizing.startWidth + dx)
-      const max = Math.max(HISTORY_COLUMN_MIN, window.innerWidth - 60)
-      const clamped = Math.max(HISTORY_COLUMN_MIN, Math.min(max, next))
-      this.#customWidth.set(clamped)
-    }
-    const onUp = (e: PointerEvent): void => {
-      try { target.releasePointerCapture(e.pointerId) } catch { /* best effort */ }
-      target.removeEventListener('pointermove', onMove)
-      target.removeEventListener('pointerup', onUp)
-      target.removeEventListener('pointercancel', onUp)
-      // Persist only on release — not on every pixel of movement — so
-      // localStorage writes don't thrash during a drag.
-      saveCustomWidth(this.#customWidth())
-      this.#resizing = null
-    }
-    target.addEventListener('pointermove', onMove)
-    target.addEventListener('pointerup', onUp)
-    target.addEventListener('pointercancel', onUp)
-  }
-
-  // ── PanelSizeOwner ───────────────────────────────────────────────────
-  // What the window-group chrome reads and writes. Same clamp and same store
-  // as a drag of the resizer. Zero when the viewer is still at its CSS width —
-  // the chrome measures the element in that case rather than publishing it.
-  panelWidth(): number { return this.#customWidth() ?? 0 }
-  setPanelWidth(width: number): void {
-    const max = Math.max(HISTORY_COLUMN_MIN, window.innerWidth - 60)
-    this.#customWidth.set(Math.max(HISTORY_COLUMN_MIN, Math.min(max, Math.round(width))))
-    saveCustomWidth(this.#customWidth())
   }
 
   /**
@@ -1194,21 +1079,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit,
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/
-
-// ─────────────────────────────────────────────────────────────────────
-// Minimum panel width (px) for the drag-resize clamp.
-//
-// The history viewer floats OPAQUE *above* the full-bleed canvas — it
-// never resizes or moves #pixi-host. The canvas is sealed: only its
-// owner (the pixi worker) may size it, so no panel can collapse or
-// shift it. Tiles stay visible beside the panel because the canvas
-// renders full-width underneath and the panel only covers its left
-// edge. (Previously this injected a `body.hc-history-mode #pixi-host`
-// rule that reserved a column by resizing the canvas — the single
-// source of the "a widget moved/collapsed the canvas" class of bug.)
-// ─────────────────────────────────────────────────────────────────────
-
-const HISTORY_COLUMN_MIN = 240
 
 // ─────────────────────────────────────────────────────────────────────
 // Line-level diff for the slice inspector.

@@ -1,54 +1,39 @@
 @use '../toolwindow' as tw;
 
 :host {
-  // Host is portaled to document.body at runtime, so it lives in the
-  // top-level stacking context. Keeping the host itself as a simple
-  // block with no positioning — the inner <aside> is fixed-positioned.
-  display: block;
+  // Fixed full-viewport shell, transparent to input — the SAME pattern as
+  // the Portals entrance (collections-landing) and aggregate-index. The
+  // panel inside is the interactive surface.
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
 }
 
 .history-viewer {
-  position: fixed;
-  // Leave room for the command-line / header-bar above. Matches the
-  // notes-strip offset (`3rem * --hc-header-zoom + 14px`) so both side
-  // panels sit on the same horizontal line below the command line —
-  // tracking the active header size — and never overlap it.
-  top: max(calc(3rem * var(--hc-header-zoom, 1.0) + 14px), calc(var(--hc-header-anchor) + 0.17rem + 14px));
+  pointer-events: auto;
+  position: absolute;
+  // FLUSH with the left control rail, which is the thing this panel docks
+  // against. `--hc-controls-left-top` is the rail's live top edge (published
+  // by ControlsBar while it is docked left); the fallback is the plain
+  // header-bottom offset every other tool window uses, for when there is no
+  // left rail. The shared hcDockedPanel directive pins `left` inline to
+  // `var(--hc-controls-left)` so the panel sits BESIDE the rail, never over it.
+  top: var(--hc-controls-left-top, max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
   left: 0;
   bottom: 0;
-  width: max-content;
   min-width: 240px;
-  // Soft ceiling for the auto-grow (max-content) default: when the
-  // user hasn't dragged, long row summaries could blow the panel
-  // past the viewport on narrow screens. Cap at 80vw for this
-  // unconfigured case; the inline width binding (from a drag) wins
-  // when set since inline styles beat stylesheet max-width — this
-  // only affects the "never resized yet" default path.
-  max-width: 80vw;
-  // Opaque (not translucent): the panel now floats ABOVE the full-bleed
-  // canvas instead of sitting in a carved-out column, so a translucent
-  // bg would let live tiles bleed through and re-blur every frame. Solid
-  // bg = no paint-under, no per-frame backdrop-filter cost.
-  background: #0b0d13;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: tw.$radius-floating;
+  max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  color: rgba(235, 240, 250, 0.85);
+  @include tw.panel(#7eb6d6, left);
+  // Dense monospace identity. The shared directive drives `--hc-panel-scale`
+  // from the dragged width, so rows/header shrink to fit a narrowed panel
+  // instead of truncating. The centered slice/merge modals are SIBLINGS of
+  // this aside, so they keep their own fixed px sizing.
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  // Content-shrink: the drag-resized width drives `--hc-panel-scale` (set
-  // inline, clamped ≤1). Root font scales by it and the docked content below
-  // is sized in `em`, so rows/header shrink to fit a narrowed panel instead of
-  // truncating. Geometry (top/width/min/max/resizer) stays in px so docking
-  // and the resize math are unaffected; the centered slice/merge modals are
-  // SIBLINGS of this aside, so they keep their own fixed px sizing.
   font-size: calc(12px * var(--hc-panel-scale, 1));
-  // Above the sealed canvas (#pixi-host z 59989) so the panel renders on
-  // top and takes its own clicks; still below the header-bar (z 60000).
-  z-index: 59990;
-  pointer-events: auto;
-  isolation: isolate;
-  @include tw.floating-panel(#7eb6d6);
+  color: rgba(235, 240, 250, 0.85);
 }
 
 .history-viewer-header {
@@ -118,49 +103,6 @@
   background: rgba(110, 180, 255, 0.12);
   border-color: rgba(110, 180, 255, 0.35);
   opacity: 1;
-}
-
-// Drag-resize handle on the panel's right edge. 8px hit target —
-// wider than it looks so imprecise cursors still grab it — with a
-// 2px visible stripe centred. Always faintly visible so users
-// discover that the panel is resizable without a hover-to-reveal.
-.history-viewer-resizer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -4px;
-  width: 8px;
-  cursor: col-resize;
-  // Sit under the header's close button but above the rest of the
-  // panel so a drag from the handle takes priority over row clicks.
-  z-index: 1;
-  touch-action: none;
-  // Use a gradient so the visible bar is 2px centred inside the
-  // 8px hit target — keeps the affordance discoverable without
-  // visually chunky.
-  background: linear-gradient(
-    to right,
-    transparent 0,
-    transparent 3px,
-    rgba(110, 180, 255, 0.28) 3px,
-    rgba(110, 180, 255, 0.28) 5px,
-    transparent 5px,
-    transparent 8px
-  );
-  transition: background 80ms linear;
-}
-
-.history-viewer-resizer:hover,
-.history-viewer-resizer:active {
-  background: linear-gradient(
-    to right,
-    transparent 0,
-    transparent 2px,
-    rgba(110, 180, 255, 0.85) 2px,
-    rgba(110, 180, 255, 0.85) 6px,
-    transparent 6px,
-    transparent 8px
-  );
 }
 
 .rows {
@@ -241,6 +183,9 @@
 }
 
 .slice-backdrop {
+  // The :host shell is pointer-events: none, so the modal layer must
+  // re-enable input on itself.
+  pointer-events: auto;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
@@ -249,6 +194,7 @@
 }
 
 .slice-modal {
+  pointer-events: auto;
   position: fixed;
   top: 50%;
   left: 50%;
