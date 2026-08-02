@@ -323,6 +323,16 @@ export class ClaudeBridgeWorker extends Worker {
     const bytes = new TextEncoder().encode(req.text)
     const blob = new Blob([bytes as BlobPart])
     const sig = await store.putOptimization(blob)
+    // Announce it. A record written from OUTSIDE the hive is invisible to
+    // everything inside it until something polls — this lets a drone act on
+    // its OWN kind the moment it lands (OrganizeDrone applies an
+    // `organize-plan` this way) instead of every listener running a timer.
+    // Fire-and-forget: the write already succeeded, so a listener that throws
+    // must not turn into a failed bridge response.
+    try {
+      const kind = (JSON.parse(req.text) as { kind?: unknown })?.kind
+      EffectBus.emit('optimization:added', { sig, kind: typeof kind === 'string' ? kind : '' })
+    } catch { /* parse already validated above; a listener threw — not ours to report */ }
     return { id: req.id, ok: true, data: { sig, bytes: bytes.byteLength } }
   }
 

@@ -67,6 +67,13 @@ interface ControlItem {
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
   { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always' },
+  // Portals sit DIRECTLY after the installer: both are ways OUT of the current
+  // page — DCP into other domains, Portals into the collections index — so they
+  // read as one pair at the head of the rail, before the viewport controls.
+  // Navigates to the `sets/` layer, where each tile is a reference set (see
+  // documentation/entrances-and-sets.md). Not among the header aggregates — it
+  // manages referenced hives on different roots; it is not a launch group.
+  { id: 'pools',        label: 'collections-landing.title', action: 'openPools',      visibleWhen: 'always' },
   { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always' },
   { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always' },
   { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always' },
@@ -82,12 +89,6 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // 'notes' moved to the command-line header (the post-it toggle at the right
   // of the input) — notes ride along with every page, so their switch lives in
   // the top chrome now, not here.
-  // Pools of Meaning — the reference feature's portal (one-state, like DCP):
-  // navigates to the `sets/` layer, where each tile is a reference set (see
-  // documentation/entrances-and-sets.md). Lives HERE on the control bar, not
-  // among the header aggregates — it manages referenced hives on different
-  // roots; it is not a launch group.
-  { id: 'pools',        label: 'collections-landing.title', action: 'openPools',        visibleWhen: 'always' },
   { id: 'sequences',    label: 'sequence.library',          action: 'openSequences',    visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
   // (documentation/selection-tool-windows.md); one-shot verbs live here on the
@@ -351,53 +352,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
-  // Fit button has three states:
-  //  - 'off'    (white): regular click performs a one-shot fit; no pin
-  //  - 'global' (green): every layer auto-fits on navigation
-  //  - 'page'   (blue):  only the current page auto-fits; others untouched
-  // `#fitMode` is the global toggle; `#fitPinnedPages` stores the set of
-  // page keys (lineage path) that are page-pinned. The effective button
-  // state is derived from both signals + current navigation path.
+  // Fit button is a two-state switch:
+  //  - 'off'    (white): regular click performs a one-shot fit; nothing sticks
+  //  - 'global' (green): every layer auto-fits on navigation, everywhere,
+  //                      until it is turned off from this same button.
+  // While the switch is on, ARRIVING anywhere fits: every navigation fits the
+  // layer you land on, every time. Manually zooming/panning does NOT turn the
+  // switch off — it only suppresses the fit for the REST OF THIS VISIT
+  // (`#fitSuppressedHere`), so the view you dialled in isn't yanked back by a
+  // resize while you are looking at it. Walk away and return and the page fits
+  // again. Pinned pages (`#pinnedPages`) are exempt: a pin freezes that
+  // layer's viewport and global fit never touches it.
   #fitMode = signal<'off' | 'global'>(
     localStorage.getItem('hc:fit-mode') === 'global' || localStorage.getItem('hc:fit-locked') === '1'
       ? 'global'
       : 'off',
   )
-  #fitPinnedPages = signal<ReadonlySet<string>>(this.#restoreFitPinnedPages())
-  // Pages where global-fit is suppressed because the user manually adjusted
-  // the viewport there. Only meaningful while #fitMode === 'global'.
-  #fitDisabledPages = signal<ReadonlySet<string>>(this.#restoreFitDisabledPages())
+  // Set when the user adjusts the viewport by hand; cleared on every arrival.
+  #fitSuppressedHere = signal(false)
   #fitLockedSnapshot: { scale: number; cx: number; cy: number; dx: number; dy: number } | null = null
-
-  #restoreFitPinnedPages(): ReadonlySet<string> {
-    try {
-      const raw = localStorage.getItem('hc:fit-pinned-pages')
-      if (!raw) return new Set()
-      const arr = JSON.parse(raw)
-      return Array.isArray(arr) ? new Set(arr) : new Set()
-    } catch {
-      return new Set()
-    }
-  }
-
-  #persistFitPinnedPages(set: ReadonlySet<string>): void {
-    localStorage.setItem('hc:fit-pinned-pages', JSON.stringify([...set]))
-  }
-
-  #restoreFitDisabledPages(): ReadonlySet<string> {
-    try {
-      const raw = localStorage.getItem('hc:fit-disabled-pages')
-      if (!raw) return new Set()
-      const arr = JSON.parse(raw)
-      return Array.isArray(arr) ? new Set(arr) : new Set()
-    } catch {
-      return new Set()
-    }
-  }
-
-  #persistFitDisabledPages(set: ReadonlySet<string>): void {
-    localStorage.setItem('hc:fit-disabled-pages', JSON.stringify([...set]))
-  }
 
   #currentPageKey(): string {
     return this.navigation.segmentsRaw().join('/')
@@ -891,17 +864,22 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#persistPinnedPages(next)
   }
 
-  /** Effective button state — drives color: white/green/blue. */
-  readonly fitButtonState = computed<'off' | 'global' | 'page'>(() => {
+  /** Effective button state — drives color: white/green. The switch reads the
+   *  same on every page: a per-page exception suppresses the fit there, it does
+   *  not turn the switch off. */
+  readonly fitButtonState = computed<'off' | 'global'>(() => this.#fitMode())
+  /** True when the global fit switch is on. */
+  readonly fitLocked = computed(() => this.#fitMode() === 'global')
+  /** True when global fit should actually drive THIS page: the switch is on,
+   *  the viewport has not been hand-adjusted during this visit, and the page
+   *  is not pinned. */
+  readonly fitAppliesHere = computed(() => {
     // Track navigation so this recomputes when the user moves between layers.
     this.#moved$()
-    const key = this.#currentPageKey()
-    if (this.#fitPinnedPages().has(key)) return 'page'
-    if (this.#fitMode() === 'global' && !this.#fitDisabledPages().has(key)) return 'global'
-    return 'off'
+    if (this.#fitMode() !== 'global') return false
+    if (this.#fitSuppressedHere()) return false
+    return !this.#pinnedPages().has(this.#currentPageKey())
   })
-  /** True when any fit lock is active for the current page (global or page-pinned). */
-  readonly fitLocked = computed(() => this.fitButtonState() !== 'off')
   readonly mode = this.#mode.asReadonly()
   readonly utility = this.#utility.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
@@ -1173,7 +1151,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.addEventListener('touchend', this.#onSwipeEnd, { passive: true })
 
     this.#zoomManualUnsub = EffectBus.on('viewport:manual', () => {
-      if (this.fitLocked()) this.#disableFitLockedPreservingCurrent()
+      if (this.fitAppliesHere()) this.#disableFitLockedPreservingCurrent()
     })
 
     this.#clipboardAvailableUnsub = EffectBus.on<{ available: boolean }>('clipboard:available', (payload) => {
@@ -1297,11 +1275,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       EffectBus.emit('visibility:show-hidden', { active: true })
     }
 
-    // fit-locked: install the navigation listener if any fit pin exists.
-    // The listener handles suspend/resume per-page on each navigation.
-    if (this.#fitMode() === 'global' || this.#fitPinnedPages().size > 0) {
-      this.#enableFitLocked()
-    }
+    // fit-locked: install the navigation listener if the switch is on. The
+    // listener handles suspend/resume per-page on each navigation.
+    if (this.#fitMode() === 'global') this.#enableFitLocked()
   }
 
   ngAfterViewInit(): void {
@@ -1686,7 +1662,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    * Fit button click.
    * - Plain click: zoom-to-fit, persisted as a user gesture so the fit
    *   (fit:true) survives refresh and refits to the new viewport size.
-   * - Ctrl/Meta+click: cycle state off → global → page → off.
+   * - Ctrl/Meta+click: flip the global fit switch on ↔ off.
    */
   readonly fitOrCenter = (event: MouseEvent): void => {
     if (event.ctrlKey || event.metaKey) {
@@ -1700,135 +1676,102 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.zoom?.zoomToFit?.()
   }
 
-  /** Advance the fit button through its three states. */
+  /** Flip the global fit switch. */
   #cycleFitMode(): void {
-    const state = this.fitButtonState()
-    if (state === 'off') {
-      this.#enterGlobalFit()
-    } else if (state === 'global') {
-      this.#enterPageFit()
-    } else {
-      this.#clearFit()
-    }
+    if (this.#fitMode() === 'global') this.#clearFit()
+    else this.#enterGlobalFit()
   }
 
   #enterGlobalFit(): void {
     this.#fitLockedSnapshot = this.#captureViewport()
     this.#fitMode.set('global')
     localStorage.setItem('hc:fit-mode', 'global')
-    // Re-entering global fit clears any per-page exceptions.
-    if (this.#fitDisabledPages().size > 0) {
-      this.#fitDisabledPages.set(new Set())
-      this.#persistFitDisabledPages(new Set())
-    }
+    // Turning the switch on forgets a hand-adjustment made here, so this page
+    // fits the window too.
+    this.#fitSuppressedHere.set(false)
+    this.#enableFitLocked()
+    // A pinned page keeps its frozen viewport — the fit starts on the next
+    // page you walk to.
+    if (!this.fitAppliesHere()) return
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
     vp?.suspend?.()
     this.zoom?.zoomToFit?.()
-    this.#enableFitLocked()
-  }
-
-  #enterPageFit(): void {
-    // Leaving global: let per-layer persistence resume, then pin current page.
-    const wasGlobal = this.#fitMode() === 'global'
-    if (wasGlobal) {
-      this.#fitMode.set('off')
-      localStorage.setItem('hc:fit-mode', 'off')
-      // disabled-pages set is only meaningful under global — clear it.
-      if (this.#fitDisabledPages().size > 0) {
-        this.#fitDisabledPages.set(new Set())
-        this.#persistFitDisabledPages(new Set())
-      }
-      const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-      vp?.resume?.()
-    }
-    const key = this.#currentPageKey()
-    const next = new Set(this.#fitPinnedPages())
-    next.add(key)
-    this.#fitPinnedPages.set(next)
-    this.#persistFitPinnedPages(next)
-    this.zoom?.zoomToFit?.()
-    // Keep the navigation:guard-end listener installed so return visits fit.
-    this.#enableFitLocked()
   }
 
   #clearFit(): void {
-    const wasGlobal = this.#fitMode() === 'global'
     this.#fitMode.set('off')
     localStorage.setItem('hc:fit-mode', 'off')
-    // disabled-pages set is only meaningful under global — clear it.
-    if (wasGlobal && this.#fitDisabledPages().size > 0) {
-      this.#fitDisabledPages.set(new Set())
-      this.#persistFitDisabledPages(new Set())
-    }
-    // Remove current page from pin set if present.
-    const key = this.#currentPageKey()
-    if (this.#fitPinnedPages().has(key)) {
-      const next = new Set(this.#fitPinnedPages())
-      next.delete(key)
-      this.#fitPinnedPages.set(next)
-      this.#persistFitPinnedPages(next)
-    }
+    this.#fitSuppressedHere.set(false)
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-    if (wasGlobal) vp?.resume?.()
-    // If no page pins remain anywhere, tear down the listener.
-    if (this.#fitPinnedPages().size === 0 && this.#fitMode() === 'off') {
-      this.#fitLockedUnsub?.()
-      this.#fitLockedUnsub = null
-    }
-    if (wasGlobal) this.#restoreViewport()
+    vp?.resume?.()
+    this.#fitLockedUnsub?.()
+    this.#fitLockedUnsub = null
+    this.#restoreViewport()
   }
+
+  /** While a fit is armed, any paint signal that lands is an arrival worth
+   *  fitting. Cleared by time, not by the first hit, so a layer whose bounds
+   *  settle over several passes ends up fitted rather than fitted-to-the-first-
+   *  frame. */
+  #fitArmedUntil = 0
+  #FIT_ARM_MS = 1500
 
   #enableFitLocked(): void {
     if (this.#fitLockedUnsub) return
-    // navigation:guard-end fires after all tiles are positioned and layer is visible.
-    // Suspend persistence while auto-fitting so the fitted viewport doesn't
-    // overwrite the saved per-page viewport; resume on pages that are not
-    // auto-fitted so manual adjustments there persist normally.
-    const unsub = EffectBus.on('navigation:guard-end', () => {
+
+    // ARRIVING is what fits — and there is no single arrival event. The slow
+    // render path ends in `navigation:guard-end`, but the back-nav FAST path
+    // (a layer you have already visited) returns before that emit and only
+    // announces itself with `render:cell-count`. Listening to guard-end alone
+    // is why global fit did nothing on any revisited layer. So: navigation
+    // ARMS the fit (and forgets the previous page's hand-adjustment), and
+    // whichever paint signal lands while it is armed performs it.
+    //
+    // The arming window is what keeps this from firing on tile add/remove:
+    // `render:cell-count` fires there too, but nothing armed it.
+    const arm = (): void => {
+      this.#fitSuppressedHere.set(false)
+      this.#fitArmedUntil = performance.now() + this.#FIT_ARM_MS
+    }
+    const arrived = (): void => {
+      if (performance.now() > this.#fitArmedUntil) return
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-      if (this.fitLocked()) {
+      // Suspend persistence while auto-fitting so the fitted viewport doesn't
+      // overwrite the page's saved viewport; resume on pages that are not
+      // auto-fitted (pinned) so manual adjustments there persist normally.
+      if (this.fitAppliesHere()) {
         vp?.suspend?.()
         this.zoom?.zoomToFit?.(true)
       } else {
         vp?.resume?.()
       }
-    })
-    this.#fitLockedUnsub = unsub
+    }
+
+    window.addEventListener('navigate', arm)
+    const offGuard = EffectBus.on('navigation:guard-end', arrived)
+    const offCount = EffectBus.on('render:cell-count', arrived)
+    this.#fitLockedUnsub = (): void => {
+      window.removeEventListener('navigate', arm)
+      offGuard()
+      offCount()
+      this.#fitArmedUntil = 0
+    }
   }
 
   /**
-   * Manual zoom/pan on the current page turns off its fit-lock only.
-   * Other pages' pins (global or page-specific) stay intact.
+   * Manual zoom/pan holds the fit off for the rest of THIS visit, so a resize
+   * can't yank back the view you just dialled in. The switch stays on: walk
+   * anywhere (or come back here) and that layer fits again.
    */
   #disableFitLockedPreservingCurrent(): void {
-    const state = this.fitButtonState()
-    if (state === 'off') return
+    if (this.#fitMode() !== 'global') return
 
-    const key = this.#currentPageKey()
-    if (state === 'page') {
-      const next = new Set(this.#fitPinnedPages())
-      next.delete(key)
-      this.#fitPinnedPages.set(next)
-      this.#persistFitPinnedPages(next)
-    } else if (state === 'global') {
-      // Keep global on for other pages; record this page as an exception.
-      const next = new Set(this.#fitDisabledPages())
-      next.add(key)
-      this.#fitDisabledPages.set(next)
-      this.#persistFitDisabledPages(next)
-    }
-
+    this.#fitSuppressedHere.set(true)
     this.#fitLockedSnapshot = null
 
     // Resume persistence so the user's manual adjustment saves for this page.
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
     vp?.resume?.()
-
-    // If nothing is pinned anywhere, tear down the navigation listener.
-    if (this.#fitMode() === 'off' && this.#fitPinnedPages().size === 0) {
-      this.#fitLockedUnsub?.()
-      this.#fitLockedUnsub = null
-    }
   }
 
   #captureViewport(): { scale: number; cx: number; cy: number; dx: number; dy: number } | null {
@@ -1927,7 +1870,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /** Mobile center-button double-tap: cycle fit mode (same as ctrl+click). */
+  /** Mobile center-button double-tap: flip the fit switch (same as ctrl+click). */
   readonly lockFit = (): void => {
     this.#cycleFitMode()
   }

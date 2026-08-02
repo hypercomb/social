@@ -94,12 +94,22 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         : { bees: ScriptPreloader.readManifestBees(), dependencies: ScriptPreloader.#EMPTY_SIGS, resources: ScriptPreloader.#EMPTY_SIGS }
       const walkMs = performance.now() - tWalk
 
-      // Background cache warming — `preheatResource` is just `getResource`,
-      // so cold reads work fine. Awaiting these would scale first paint
-      // linearly with tile count; pulse must not wait on preloader work.
-      if (walked.resources.length) {
-        void Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
-      }
+      // Cache warming, AT IDLE AND IN SMALL BATCHES.
+      //
+      // Not awaiting is not the same as not costing. Measured on the native
+      // client (boot IO census, real hive): by first paint the shell had read
+      // 479 resources / 41.7 MB — to draw a page of NINE tiles. Every one of
+      // those reads is a real store round trip that the renderer's own reads
+      // then queue behind, and the whole flood is fired here, at the worst
+      // possible moment, for a package whose resources mostly belong to views
+      // the user has not opened.
+      //
+      // Preheating is a nice-to-have: `preheatResource` is just `getResource`,
+      // and every consumer already works cold. So it yields — `requestIdleCallback`
+      // hands us time only when the main thread has nothing better to do, which
+      // is exactly the priority this deserves, and a small batch keeps the
+      // transport free for reads someone is actually waiting on.
+      if (walked.resources.length) this.#preheatAtIdle(walked.resources)
 
       const tBees = performance.now()
       if (walked.bees.length) {
@@ -154,6 +164,36 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     this.#finding = run()
     try { return await this.#finding } finally { this.#finding = null }
   }
+
+  /** Resources already queued for preheat — the walk repeats across finds,
+   *  and re-reading what a previous pass already warmed is pure waste. */
+  readonly #preheated = new Set<string>()
+
+  /** Feed the preheat queue during idle time, `#PREHEAT_BATCH` at a time,
+   *  waiting for each batch before asking for the next slice. */
+  #preheatAtIdle = (sigs: readonly string[]): void => {
+    const queue = sigs.filter(sig => !this.#preheated.has(sig))
+    if (!queue.length) return
+    for (const sig of queue) this.#preheated.add(sig)
+
+    // No idle callback (older Safari, some workers) — a plain delay still
+    // gets the flood off the first-paint path, which is the whole point.
+    const whenIdle: (run: () => void) => void =
+      typeof (globalThis as any).requestIdleCallback === 'function'
+        ? run => (globalThis as any).requestIdleCallback(() => run())
+        : run => { setTimeout(run, ScriptPreloader.#PREHEAT_FALLBACK_MS) }
+
+    const pump = (): void => {
+      const batch = queue.splice(0, ScriptPreloader.#PREHEAT_BATCH)
+      if (!batch.length) return
+      void Promise.allSettled(batch.map(sig => this.store.preheatResource(sig)))
+        .then(() => { if (queue.length) whenIdle(pump) })
+    }
+    whenIdle(pump)
+  }
+
+  static readonly #PREHEAT_BATCH = 4
+  static readonly #PREHEAT_FALLBACK_MS = 1500
 
   // -------------------------------------------------
   // layer walk — layers are the source of truth

@@ -1,0 +1,7 @@
+const WebSocket = require('ws')
+const req = JSON.parse(process.argv[2])
+const ws = new WebSocket('ws://localhost:2401')
+const t = setTimeout(() => { console.error('timeout'); process.exit(1) }, 30000)
+ws.on('open', () => ws.send(JSON.stringify({ ...req, id: 'probe-' + Date.now() })))
+ws.on('message', m => { clearTimeout(t); console.log(String(m).slice(0, 4000)); ws.close(); process.exit(0) })
+ws.on('error', e => { console.error('ERR', e.message); process.exit(1) })

@@ -81,6 +81,22 @@ const PENDING_FOLDS_KEY = 'hc:pending-folds'
 const SYNC_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 
 const SIG_RE = /^[a-f0-9]{64}$/
+// The durable work-list behind a multi-tile adopt (AdoptQueueService).
+const ADOPT_QUEUE_KEY = '@diamondcoreprocessor.com/AdoptQueueService'
+
+/** The queue surface this drone drains. Structural, so an older bundle
+ *  without the service simply resolves undefined and the direct fold runs. */
+interface AdoptQueueLike {
+  enqueueAll: (
+    picks: readonly { sig: string; label: string; at: readonly string[]; domain?: string }[],
+    batch: string,
+  ) => unknown
+  next: () => { sig: string; label: string; at: string[]; domain?: string } | null
+  waitMs: () => number | null
+  complete: (sig: string, at: readonly string[]) => void
+  defer: (sig: string, at: readonly string[]) => void
+  remainingIn: (batch: string) => number
+}
 
 interface SwarmDroneLike {
   peerTilesAtCurrentSig: () => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
@@ -323,6 +339,13 @@ export class SwarmAdoptDrone extends Drone {
         this.#scheduleFoldRetry(f.sig, f.at, f.domain, f.mode === 'sync' ? 'sync' : 'fold')
       }
     } catch { /* best-effort — a manual re-adopt always works */ }
+
+    // ── resume the ADOPT QUEUE ────────────────────────────────────────
+    // A multi-tile adopt is owed until every signature in it has landed.
+    // The queue persists that debt, so a refresh mid-batch resumes the
+    // drain instead of quietly abandoning the tail (see AdoptQueueService).
+    try { void this.#drainAdoptQueue() }
+    catch { /* best-effort — the next adopt gesture restarts the drain */ }
   }
 
   #ioc = () => (window as { ioc?: { get: (k: string) => unknown } }).ioc
@@ -422,18 +445,155 @@ export class SwarmAdoptDrone extends Drone {
    *  last. Nothing lands ⇒ no panel, and the per-tile failure messages
    *  already said why. */
   #adoptMany = async (picks: readonly { label: string; pubkey?: string }[]): Promise<void> => {
-    let first: string | null = null
+    // ── SIGNATURES FIRST, FOLDS AFTER ─────────────────────────────────
+    // Resolve EVERY pick to its branch before folding ANY of them. The old
+    // loop resolved inside itself, off the live peer cache — but each fold
+    // commits and re-renders, which invalidates that cache, so the tail of a
+    // big selection resolved to null and was dropped in silence. That is the
+    // "it shows a bunch of tiles and adopts some of them" report.
+    //
+    // A signature is a permanent handle: captured here, while the peer
+    // entries are still warm, it stays fetchable from any host that serves
+    // it — through commits, navigation, and reloads. So we snapshot the whole
+    // gesture up front and never consult the peer cache again.
+    const resolved: { sig: string; label: string; at: string[]; domain?: string }[] = []
     for (const pick of picks) {
-      const ok = await this.#adoptInline(pick.label, pick.pubkey || undefined, { silent: true })
-      if (ok && !first) first = pick.label
+      const branch = this.#resolvePeerBranch(pick.label, pick.pubkey || undefined)
+      if (!branch) {
+        this.#rowOutcome(pick.label, undefined, false, `couldn't adopt "${pick.label}" — the peer's branch is no longer offered here`)
+        continue
+      }
+      resolved.push({ sig: branch.layerSig, label: branch.label, at: branch.at, domain: branch.domain })
     }
-    if (!first) return
-    const branch = this.#resolvePeerBranch(first)
-    // The tile is ours now, so the peer entry may already be gone from the
-    // cache — fall back to the location we are standing in.
-    const at = branch?.at ?? [...(this.#ioc()?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.explorerSegments?.() ?? []]
-    EffectBus.emit('features:outcome', { cell: first, kind: '', ok: true, message: '' })
-    EffectBus.emit('tile:action', { action: 'features', label: first, segments: [...at, first] })
+    if (resolved.length === 0) return
+
+    // One batch per gesture, so the behaviours hand-off can wait for the LAST
+    // tile rather than firing per fold (which re-targeted the panel N times).
+    const batch = `${Date.now()}-${resolved.length}`
+    const queue = this.#adoptQueue()
+    if (!queue) {
+      // No queue service (an older bundle) — fall back to the direct serial
+      // fold rather than dropping the gesture entirely. Behaviours still land
+      // once, at the end, on the first tile that actually made it in.
+      let first: string | null = null
+      for (const r of resolved) {
+        const ok = await this.#adoptInline(r.label, undefined, { silent: true })
+        if (ok && !first) first = r.label
+      }
+      if (first) this.#openBehaviours(first)
+      return
+    }
+    queue.enqueueAll(resolved, batch)
+    EffectBus.emit('activity:log', {
+      message: `adopting ${resolved.length} tile${resolved.length === 1 ? '' : 's'} — they keep arriving in the background`,
+      icon: '●',
+    })
+    void this.#drainAdoptQueue(batch, resolved[0].label)
+  }
+
+  #adoptQueue = (): AdoptQueueLike | undefined =>
+    this.#ioc()?.get?.(ADOPT_QUEUE_KEY) as AdoptQueueLike | undefined
+
+  /** BEHAVIOURS COME AFTER THE TILES — the Beehaviors panel lands ONCE, on
+   *  the first tile of the gesture, when the whole gesture is in. The panel
+   *  replaces its subject, so firing it per fold meant N wipes and
+   *  last-one-wins; firing it mid-drain would land it on a half-adopted set. */
+  #openBehaviours = (label: string): void => {
+    const at = [...(this.#ioc()?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.explorerSegments?.() ?? []]
+    EffectBus.emit('features:outcome', { cell: label, kind: '', ok: true, message: '' })
+    EffectBus.emit('tile:action', { action: 'features', label, segments: [...at, label] })
+  }
+
+  /** True while a drain is running — the queue is serial by construction so
+   *  commits land in ask order and never race the committer. */
+  #draining = false
+  #drainTimer: ReturnType<typeof setTimeout> | undefined
+
+  /** Work the persisted queue from first to last until nothing is owed.
+   *  Continuous: an entry that can't land yet backs off and STAYS owed, so
+   *  the drain keeps returning to it for as long as it takes. Nothing is ever
+   *  silently dropped — that is the whole point of the queue. */
+  #drainAdoptQueue = async (batch?: string, panelLabel?: string): Promise<void> => {
+    const queue = this.#adoptQueue()
+    if (!queue || this.#draining) return
+    this.#draining = true
+    try {
+      for (;;) {
+        const entry = queue.next()
+        if (!entry) break
+        const branch = { layerSig: entry.sig, at: entry.at, domain: entry.domain, label: entry.label }
+        let landed = false
+        try {
+          // A tile we already hold is ADDITIVE — add the children the peer
+          // publishes that we lack, never re-home (a shared tile stays one
+          // tile). Anything else folds whole through the normal gates.
+          if (await this.#isHeldHere(entry.at, entry.label)) {
+            await this.#additiveAdoptHeld(branch)
+            landed = true
+          } else {
+            const res = await this.adoptResolvedBranch(branch, { silent: true })
+            landed = res === 'committed' || res === 'exists'
+            // 'unavailable' means the bytes aren't reachable from any host we
+            // know — "they didn't find the file". That is the EGG case: put
+            // the tile in the hive now, empty, and let the queue keep trying
+            // until it hatches. 'rewound' is not a missing file (the cursor is
+            // in history) and must never lay one.
+            if (!landed && res === 'unavailable') await this.#layEgg(branch)
+          }
+        } catch (err) {
+          console.warn('[swarm-adopt] queued adopt threw', { sig: entry.sig.slice(0, 8), err })
+        }
+        if (landed) queue.complete(entry.sig, entry.at)
+        else queue.defer(entry.sig, entry.at)
+      }
+
+      // Behaviours come AFTER the tiles — once, when the gesture is fully
+      // landed, never interleaved with the folds.
+      if (batch && panelLabel && queue.remainingIn(batch) === 0) this.#openBehaviours(panelLabel)
+    } finally {
+      this.#draining = false
+    }
+
+    // Anything still owed is backing off — come back when the soonest is due.
+    const wait = queue.waitMs()
+    if (wait !== null) {
+      clearTimeout(this.#drainTimer)
+      this.#drainTimer = setTimeout(() => { void this.#drainAdoptQueue(batch, panelLabel) }, Math.max(wait, 1_000))
+    }
+  }
+
+  /** Lay an EGG: the tile enters the hive now, real and navigable, holding
+   *  its place while the content it names is still out of reach. It carries
+   *  no children — an egg is a tile whose branch hasn't hatched yet — and the
+   *  persisted queue is what remembers it is still owed. When the bytes turn
+   *  up, the ordinary fold re-homes the real subtree over it and the egg IS
+   *  the tile. Idempotent: an egg already laid here is left alone. */
+  #layEgg = async (branch: { layerSig: string; at: string[]; label: string }): Promise<void> => {
+    const ioc = this.#ioc()
+    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+    const committer = ioc?.get?.(COMMITTER_KEY) as CommitterLike | undefined
+    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+    if (!history || !committer?.importTree || !lineage) return
+    // The name rides untrusted peer content — the same guard the fold uses.
+    if (!branch.label || /[\\/\x00-\x1f]/.test(branch.label)) return
+    try {
+      const parent = await resolveLayerAt(history, lineage.domain, branch.at)
+      const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
+      // Never SET a children list we couldn't fully read — the same
+      // cold-sibling wipe guard the fold honours.
+      if (coldMiss || existing.includes(branch.label)) return
+      await committer.importTree([
+        { segments: branch.at, layer: { ...(parent ?? {}), children: [...existing, branch.label] } },
+        { segments: [...branch.at, branch.label], layer: { name: branch.label, children: [] } },
+      ])
+      EffectBus.emit('fs:changed', { segments: branch.at })
+      EffectBus.emit('activity:log', {
+        message: `"${branch.label}" isn't reachable yet — it's an egg in your hive until it hatches`,
+        icon: '○',
+      })
+    } catch (err) {
+      console.warn('[swarm-adopt] egg refused', { label: branch.label, err })
+    }
   }
 
   /** Fold one peer tile. `silent` suppresses this tile's own Beehaviors

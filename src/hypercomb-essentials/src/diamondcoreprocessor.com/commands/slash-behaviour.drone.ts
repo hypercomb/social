@@ -319,12 +319,28 @@ class MoveProvider implements SlashBehaviourProvider {
   }
 }
 
-class ExpandProvider implements SlashBehaviourProvider {
-  readonly name = 'expand-provider'
+// ATOMIZE — GO DEEPER. Breaks a tile into the pieces that compose it, on
+// Claude Haiku's advice, ASKED OVER THE BRIDGE (AtomizeDrone mints a
+// `task:'atomize'` ask — no API key; a bridge-connected session creates the
+// parts).
+//
+// The unit is always a TILE, applied foreach: selection → each selected tile;
+// no selection → each tile on the current layer that is still a leaf.
+//
+// Not `/atomize-ui`, which toggles the atomizer toolbar. Not `/organize`,
+// which goes the OTHER way — mints no leaves, inserts a level and re-homes
+// existing children into groups. `/expand` stays as an alias for the hands
+// that already know it.
+class AtomizeProvider implements SlashBehaviourProvider {
+  readonly name = 'atomize-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', descriptionKey: 'slash.expand',
-      examples: [{ input: '/expand', result: 'Expands each selected tile into child tiles' }] }
+    { name: 'atomize', aliases: ['expand'],
+      description: 'Break tiles into the pieces that compose them, via Claude Haiku', descriptionKey: 'slash.atomize',
+      examples: [
+        { input: '/atomize', result: 'With tiles selected: breaks down each selected tile' },
+        { input: '/atomize', result: 'With nothing selected: breaks down every leaf tile on this layer' },
+      ] }
   ]
 
   async execute(_behaviourName: string, _args: string): Promise<void> {
@@ -332,11 +348,41 @@ class ExpandProvider implements SlashBehaviourProvider {
       { selected: ReadonlySet<string> } | undefined
     const targets = selection ? Array.from(selection.selected) : []
 
-    if (targets.length === 0) return
-
-    for (const label of targets) {
-      EffectBus.emit('tile:action', { action: 'expand', label, q: 0, r: 0, index: 0 })
+    // No selection: the drone runs the foreach over the layer's leaves and
+    // owns the reporting (it knows what it skipped).
+    if (targets.length === 0) {
+      EffectBus.emit('atomize:layer', {})
+      return
     }
+
+    const drone = get('@diamondcoreprocessor.com/AtomizeDrone') as
+      { atomizeTile?: (label: string) => Promise<boolean> } | undefined
+    if (!drone?.atomizeTile) {
+      // Fallback to the quick-menu channel if the drone isn't up yet — it
+      // enforces the leaf rule on the same path.
+      for (const label of targets) {
+        EffectBus.emit('tile:action', { action: 'expand', label, q: 0, r: 0, index: 0 })
+      }
+      return
+    }
+
+    // FOREACH the selection — one ask per tile, each independently
+    // answerable and undoable. Mints are serialized inside the drone, and a
+    // tile that already has children is refused there, not here.
+    let queued = 0
+    for (const label of targets) {
+      if (await drone.atomizeTile(label)) queued++
+    }
+
+    const skipped = targets.length - queued
+    EffectBus.emit('toast:show', {
+      type: 'tip',
+      message: queued
+        ? `Atomizing ${queued} tile${queued === 1 ? '' : 's'}`
+          + (skipped ? ` (${skipped} already had children — skipped)` : '')
+          + ' — Haiku is working out the parts.'
+        : `Nothing atomized — ${skipped === 1 ? 'that tile already has' : 'those tiles already have'} children. Use /organize to group a crowded level.`,
+    })
   }
 }
 
@@ -406,6 +452,27 @@ class AtomizeUiProvider implements SlashBehaviourProvider {
   }
 }
 
+// ORGANIZE — the inverse of atomize. Mints no leaves: it inserts a level and
+// re-homes the layer's existing children into named groups, so a crowded page
+// becomes a handful of groups. Haiku plans the clusters over the bridge; the
+// hive performs the moves (OrganizeDrone.applyPlan) because a membership
+// rewrite is the one op that can lose a tile.
+class OrganizeProvider implements SlashBehaviourProvider {
+  readonly name = 'organize-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'organize',
+      description: 'Group a crowded layer into subfolders via Claude Haiku', descriptionKey: 'slash.organize',
+      examples: [
+        { input: '/organize', result: 'Haiku groups this layer\'s tiles; each group becomes a tile they move into' },
+      ] }
+  ]
+
+  execute(): void {
+    EffectBus.emit('organize:layer', {})
+  }
+}
+
 class DocsProvider implements SlashBehaviourProvider {
   readonly name = 'docs-provider'
   readonly priority = 100
@@ -467,7 +534,8 @@ _slashBehaviours.addProvider(new KeywordProvider())
 _slashBehaviours.addProvider(new RemoveProvider())
 _slashBehaviours.addProvider(new AccentProvider())
 _slashBehaviours.addProvider(new MoveProvider())
-_slashBehaviours.addProvider(new ExpandProvider())
+_slashBehaviours.addProvider(new AtomizeProvider())
+_slashBehaviours.addProvider(new OrganizeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
 _slashBehaviours.addProvider(new TextOnlyProvider())

@@ -38,7 +38,8 @@ Type `/` in the command line to access slash behaviours. These are pluggable com
 | `/opus` | `/o` | Send context to Claude Opus 4.6 |
 | `/sonnet` | `/s` | Send context to Claude Sonnet |
 | `/haiku` | `/h` | Send context to Claude Haiku |
-| `/expand` | `/atomize` | Expand selected tiles into constituent parts via Claude Haiku |
+| `/organize` | | **Insert a level.** The inverse of `/atomize` — mints no new meaning. Asks Claude Haiku **over the bridge** for a grouping plan for the current layer's tiles, then the hive re-homes them into the group tiles via `MoveDrone.commitMoveInto` (one marker per group, undoable). Only offers above 12 tiles; aims for 5–9 groups; anything Haiku can't place stays where it is. The responder never moves anything itself — a membership rewrite is the one op that can permanently lose a tile, so it returns a plan (`kind:'organize-plan'`) and the hive validates it against the live layer before applying. |
+| `/atomize` | `/expand` | **Go deeper.** Breaks a tile into the pieces that compose it — asks Claude Haiku **over the bridge** (a `task:'atomize'` ask, no API key) and a bridge-connected session creates the parts as child tiles. The unit is a tile, applied foreach: with a selection, each selected tile; with nothing selected, each tile on the current layer that is still a leaf (tiles that already have children are skipped and reported). **Atomize does nothing to a tile that has children** — that tile has been broken down; deepening there means atomizing *its* leaves, and thinning a crowded level is `/organize`'s job. Not `/atomize-ui`, which toggles the atomizer toolbar. |
 
 ---
 

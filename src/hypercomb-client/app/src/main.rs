@@ -280,7 +280,7 @@ const RENDERER_DIAGNOSTICS: &str = r#"
     console.log = (...args) => {
       original(...args);
       const first = String(args[0] ?? '');
-      if (/^\[(main|ensure-install|upgrade|install|sentinel|store|layer-install|dcp)/.test(first)) {
+      if (/^\[(main|ensure-install|upgrade|install|sentinel|store|layer-install|dcp|script-preloader|atlas|io)/.test(first)) {
         send('log', args.map(a => a?.stack ?? a?.message ?? a).join(' '));
       }
     };
@@ -471,6 +471,60 @@ fn main() {
             }
 
             Ok(())
+        })
+        // ---------------------------------------------------------------
+        // `hive://<sig>` — content off the IPC channel
+        //
+        // Content bytes are the heaviest thing the shell reads and the only
+        // thing it reads in bursts: one per visible tile the moment a view
+        // settles. Carrying them over IPC put every picture behind the one
+        // channel whose collapse is silent — measured on a real hive, the
+        // burst killed the custom protocol ("Failed to fetch"), the in-flight
+        // callbacks were dropped ("Couldn't find callback id"), and the
+        // promises never settled, so those tiles stayed picture-less for the
+        // rest of the session.
+        //
+        // A scheme handler is the right pipe: the webview's own transport,
+        // one request per resource, no callback table to lose. The response is
+        // marked `immutable` because that is simply true — content is
+        // addressed by the hash of its own bytes, so a signature's answer can
+        // never change and the webview may keep it forever.
+        //
+        // READ-ONLY BY CONSTRUCTION. The handler resolves a 64-hex signature
+        // and nothing else: no paths, no writes, no listing. It is not a
+        // widening of the IPC allowlist above — it is strictly less.
+        // ---------------------------------------------------------------
+        .register_uri_scheme_protocol("hive", |ctx, request| {
+            use tauri::http::{header, Response, StatusCode};
+
+            let reply = |status: StatusCode, body: Vec<u8>| {
+                Response::builder()
+                    .status(status)
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    // The page is served from another origin (tauri.localhost),
+                    // so without this the fetch is refused before it is read.
+                    .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                    .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+                    .body(body)
+                    .expect("a well-formed hive:// response")
+            };
+
+            let sig = request
+                .uri()
+                .path()
+                .trim_start_matches('/')
+                .to_string();
+
+            let Some(host) = ctx.app_handle().try_state::<Host>() else {
+                // The window can outlive a failed setup; answering beats hanging.
+                return reply(StatusCode::SERVICE_UNAVAILABLE, Vec::new());
+            };
+
+            match host.get(&sig) {
+                Ok(Some(bytes)) => reply(StatusCode::OK, bytes),
+                Ok(None) => reply(StatusCode::NOT_FOUND, Vec::new()),
+                Err(_) => reply(StatusCode::INTERNAL_SERVER_ERROR, Vec::new()),
+            }
         })
         .invoke_handler(tauri::generate_handler![
             content_put,

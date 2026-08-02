@@ -247,7 +247,6 @@
             } @else {
               <button class="ctl-btn fit-btn"
                       [class.fit-global]="fitButtonState() === 'global'"
-                      [class.fit-page]="fitButtonState() === 'page'"
                       (click)="fitOrCenter($event)" (dblclick)="lockFit()"
                       [attr.aria-label]="'controls.fit-content' | t">
                 <span class="mat-sym">center_focus_strong</span>
@@ -364,7 +363,6 @@
                       [class.clipboard-btn]="ctrl.id === 'clipboard'"
                       [class.fit-btn]="ctrl.id === 'fit'"
                       [class.fit-global]="ctrl.id === 'fit' && fitButtonState() === 'global'"
-                      [class.fit-page]="ctrl.id === 'fit' && fitButtonState() === 'page'"
                       [class.zoom-btn]="ctrl.id === 'zoom-in' || ctrl.id === 'zoom-out'"
                       [class.icon-jiggle]="iconEditOn()"
                       (click)="onCtrlClick(ctrl, $event)"

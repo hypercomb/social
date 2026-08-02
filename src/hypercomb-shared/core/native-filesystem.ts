@@ -79,9 +79,115 @@ export interface NativeBridge {
 export const nativeAvailable = (): boolean =>
   typeof (globalThis as any).__TAURI__?.core?.invoke === 'function'
 
+// ---------------------------------------------------------------------------
+// TRANSPORT DISCIPLINE
+//
+// WebView2's IPC dies under a burst, and a dead call is NEVER reported.
+//
+// Measured on a real hive (renderer.log, two restarts in three): moments after
+// the first tile paints, the image reads go out — `content_get_raw` per visible
+// tile, unbounded, tens of them, hundreds of KB each — and the channel
+// collapses:
+//
+//   IPC custom protocol failed, Tauri will now use the postMessage interface
+//   instead TypeError: Failed to fetch          at r.read → r.getFile
+//   [TAURI] Couldn't find callback id 1758429260
+//
+// The second line is the damage. A lost callback id is a promise that never
+// settles, so every tile waiting on one of those reads stays picture-less for
+// the WHOLE session — and `putPoolDoc` dies in the same burst, so the optimized
+// rendition is never minted and the next restart repeats it. "Empty pictures
+// on every restart" is exactly this.
+//
+// Two rules, both cheap:
+//
+//   1. BOUND THE BURST. At most `IN_FLIGHT_MAX` raw calls at once; the rest
+//      queue. The channel survives what it can actually carry, and total
+//      throughput is unchanged — the reads were serialized by the host anyway.
+//   2. NEVER WAIT FOREVER. A call that has not settled inside `TIMEOUT_MS` is
+//      treated as lost: retried if the command is safe to repeat, rejected
+//      otherwise. A rejection surfaces as a missing picture that the next
+//      render retries; a hang is permanent.
+//
+// Content reads prefer the `hive://` scheme (see `nativeContentUrl`) and never
+// reach this path at all — this is the floor under everything else.
+// ---------------------------------------------------------------------------
+
+const IN_FLIGHT_MAX = 6
+const TIMEOUT_MS = 15_000
+const RETRIES = 2
+
+/** Commands that may be repeated after a lost call.
+ *
+ *  Reads are trivially safe. The writes here are safe because every one of them
+ *  is addressed BY VALUE — content by its own signature, a marker at an
+ *  explicit index, a pool member under a caller-chosen key — so repeating one
+ *  writes the same bytes to the same address. An APPEND is not in this set and
+ *  never may be: repeating it would mint a second marker. */
+const REPEATABLE = new Set([
+  'content_get_raw', 'content_get', 'content_has',
+  'dir_get_raw', 'raw_dir_get', 'raw_dir_entries', 'raw_root_entries',
+  'pool_get', 'pool_list',
+  'content_put_raw', 'content_put', 'dir_put_raw', 'pool_put',
+])
+
+let inFlight = 0
+const queued: Array<() => void> = []
+
+const acquire = (): Promise<void> => {
+  if (inFlight < IN_FLIGHT_MAX) {
+    inFlight++
+    return Promise.resolve()
+  }
+  return new Promise<void>(resume => queued.push(() => { inFlight++; resume() }))
+}
+
+const release = (): void => {
+  inFlight--
+  queued.shift()?.()
+}
+
+/** A call that never settles, made visible. Distinct so callers can tell a lost
+ *  transport from a store that answered "no". */
+const lostCall = (command: string): Error =>
+  Object.assign(
+    new Error(`[hypercomb] native call '${command}' did not answer in ${TIMEOUT_MS}ms`),
+    { kind: 'Timeout' },
+  )
+
+const withTimeout = async (command: string, call: Promise<unknown>): Promise<unknown> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      call,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(lostCall(command)), TIMEOUT_MS) }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** Wrap the host's `invoke` in the two rules above. */
+const disciplined = (invoke: Invoke): Invoke => async (command, payload, options) => {
+  const attempts = REPEATABLE.has(command) ? RETRIES + 1 : 1
+  for (let attempt = 1; ; attempt++) {
+    await acquire()
+    try {
+      return await withTimeout(command, invoke(command, payload, options))
+    } catch (error) {
+      // Only a LOST call is retried. A store that answered — NotFound, a bad
+      // signature, a refusal — answered, and repeating it would just ask again.
+      if ((error as { kind?: string })?.kind !== 'Timeout' || attempt >= attempts) throw error
+      console.warn(`[hypercomb] native call '${command}' lost — retry ${attempt}/${attempts - 1}`)
+    } finally {
+      release()
+    }
+  }
+}
+
 /** The ambient bridge, when running inside the native window. */
 export const ambientBridge = (): NativeBridge | null =>
-  nativeAvailable() ? { invoke: (globalThis as any).__TAURI__.core.invoke } : null
+  nativeAvailable() ? { invoke: disciplined((globalThis as any).__TAURI__.core.invoke) } : null
 
 // ---------------------------------------------------------------------------
 // files
@@ -372,6 +478,60 @@ class NativeSigDirectory {
   }
 }
 
+// ---------------------------------------------------------------------------
+// CONTENT OVER `hive://`, NOT OVER IPC
+//
+// Content bytes are the heaviest thing the shell reads and the only thing it
+// reads in bursts — one per visible tile the moment a view settles. IPC is the
+// wrong pipe for them: every byte is marshalled through the one channel whose
+// collapse costs a picture (see TRANSPORT DISCIPLINE above).
+//
+// The host registers a `hive` URI scheme serving `<sig>` straight from the
+// store, so a content read is an ordinary fetch: WebView2's own transport,
+// streamed, off the IPC channel entirely, and cacheable — the response carries
+// `immutable`, which is simply TRUE of content addressed by its own hash.
+//
+// Tauri spells a custom scheme differently per platform (`http://hive.localhost`
+// on Windows and Android, `hive://localhost` elsewhere), so both are tried once
+// and the winner is remembered. If neither answers — an older host without the
+// scheme — `viaScheme` reports absence and the caller falls back to IPC. The
+// shim stays correct on any host it is dropped into.
+// ---------------------------------------------------------------------------
+
+const SCHEME_SHAPES = ['http://hive.localhost', 'hive://localhost'] as const
+
+/** The shape known to work here: undefined until proven, null once ruled out. */
+let schemeBase: string | null | undefined
+
+const viaScheme = async (sig: string): Promise<Uint8Array | null | 'unavailable'> => {
+  // Only the native host serves it. In a browser — including the packed store,
+  // which shares this reader — `hive.localhost` is a real network name and must
+  // never be dialled.
+  if (schemeBase === null || !nativeAvailable() || typeof fetch !== 'function') return 'unavailable'
+  const shapes = schemeBase ? [schemeBase] : SCHEME_SHAPES
+  for (const base of shapes) {
+    try {
+      const response = await fetch(`${base}/${sig}`)
+      // Said once, and worth saying: which pipe content is travelling on is the
+      // difference between a picture that arrives and a picture that hangs.
+      if (schemeBase !== base) console.log(`[store] content served over ${base} — off the IPC channel`)
+      schemeBase = base
+      if (response.status === 404) return null
+      if (!response.ok) return 'unavailable'
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      return bytes
+    } catch {
+      // This shape is not served here. Try the next; if none answer, the host
+      // has no scheme and IPC carries content as it always did.
+    }
+  }
+  if (!schemeBase) {
+    schemeBase = null
+    console.warn('[store] no hive:// scheme on this host — content falls back to IPC')
+  }
+  return 'unavailable'
+}
+
 /** The hive root. */
 export class NativeRootDirectory {
   readonly kind = 'directory' as const
@@ -386,13 +546,40 @@ export class NativeRootDirectory {
       // typed folder), and failing loudly beats inventing a file.
       throw notFound(name)
     }
+    // PROVE EXISTENCE BY READING, NOT BY ASKING.
+    //
+    // This used to answer "does it exist?" with its own `content_has` IPC
+    // call before the bytes were fetched over `hive://` — one extra IPC
+    // round trip per handle, fired once per visible tile the instant a view
+    // settles. That is the exact burst the transport discipline above exists
+    // to keep OFF the IPC channel: when it collapses, the in-flight callbacks
+    // are dropped and those promises NEVER settle, so the tile never mounts
+    // and its slot stays empty while its siblings render around the hole.
+    // Moving the bytes to the scheme while leaving the existence probe on IPC
+    // fixed the payload and kept the burst.
+    //
+    // The scheme already answers the question: 404 IS absence. So read once,
+    // and hand the bytes we just proved exist straight to the handle — the
+    // same "one round trip, no separate existence call" shape the packed
+    // store's facade was fixed into for this identical failure. Content is
+    // immutable, so a served answer can be reused for the handle's lifetime.
+    let served: Uint8Array | null | 'unavailable' = 'unavailable'
     if (!options?.create) {
-      const present = await this.bridge.invoke('content_has', { sig: name })
-      if (!present) throw notFound(name, 'root content')
+      served = await viaScheme(name)
+      if (served === null) throw notFound(name, 'root content')
+      if (served === 'unavailable') {
+        // No scheme on this host (an older client) — fall back to the IPC
+        // probe rather than inventing a file. One call, only off the fast path.
+        const present = await this.bridge.invoke('content_has', { sig: name })
+        if (!present) throw notFound(name, 'root content')
+      }
     }
     return new NativeFileHandle(
       name,
       async () => {
+        if (served !== 'unavailable') return served
+        const fetched = await viaScheme(name)
+        if (fetched !== 'unavailable') return fetched
         try {
           const buf = await this.bridge.invoke('content_get_raw', { sig: name })
           return new Uint8Array(buf as ArrayBuffer)
@@ -577,6 +764,10 @@ export const installSwBytesBridge = (bridge: NativeBridge): boolean => {
   const readFor = async (kind: string, dir: string, name: string): Promise<Uint8Array | null> => {
     const content = async (sig: string): Promise<Uint8Array | null> => {
       if (!SIG.test(sig)) return null
+      // Native serves content off the IPC channel; the packed store has no
+      // scheme and answers 'unavailable', falling through unchanged.
+      const served = await viaScheme(sig)
+      if (served !== 'unavailable') return served
       try {
         return asBytes(await bridge.invoke('content_get_raw', { sig }))
       } catch { return null }

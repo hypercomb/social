@@ -155,16 +155,34 @@ export class HistoryCursorService extends EventTarget {
     this.#emit()
   }
 
+  /** How many recent layers seed the warm walk. Undo steps BACKWARDS from the
+   *  head, so the layers next to it are the only ones anyone reaches without
+   *  first waiting; the rest warm on demand, which is a few ms each. */
+  static readonly #WARM_WINDOW = 12
+
+  /** Ceiling on signatures resolved per warm pass. A warm is a convenience —
+   *  it may never become a boot-length walk again. */
+  static readonly #WARM_BUDGET = 256
+
+  /** Concurrent resolves. Small on purpose: the transport this shares with the
+   *  renderer is the thing being protected. */
+  static readonly #WARM_CONCURRENCY = 4
+
   /**
-   * Walk every historical layer at the current location and warm every
-   * signature reachable through the layer graph — layer sigs, the
-   * propsSigs they reference, the image/layout sigs inside those
-   * propsSigs, and so on until fixed-point. Each resolve populates the
-   * Store's signature cache, so by the end every past state is in
-   * memory. Undo/redo never cold-loads.
+   * Warm the signatures undo/redo is about to need — the layers NEXT TO THE
+   * HEAD, not every layer ever.
    *
-   * Traversal is iterative BFS over distinct signatures — a signature
-   * is resolved at most once even if it appears in many layers.
+   * This walked the ENTIRE history of the location to fixed point: every past
+   * layer, every propsSig inside it, every image inside those. At the root —
+   * "every change ever" — that is the whole hive. Measured on the native
+   * client (boot IO census, real hive): 499 resources / 41.7 MB read within
+   * three seconds of launch, to paint NINE tiles, with the renderer's own
+   * reads queued behind it. Idle-deferring it was not enough; a walk that big
+   * runs long past the idle slice that started it.
+   *
+   * Now bounded three ways — a window of recent layers as roots, a total
+   * signature budget, and a small concurrency — and it yields between levels.
+   * Undo into a cold older layer costs one read, which is what a read costs.
    */
   async #warmupHistoricalResources(): Promise<void> {
     const store = get<{
@@ -174,15 +192,26 @@ export class HistoryCursorService extends EventTarget {
     if (!store?.resolve) return
 
     const visited = new Set<string>()
-    const frontier: string[] = this.#layers.map(entry => entry.layerSig)
+    const frontier: string[] = this.#layers
+      .slice(-HistoryCursorService.#WARM_WINDOW)
+      .map(entry => entry.layerSig)
 
-    while (frontier.length > 0) {
-      const batch = frontier.splice(0, frontier.length)
-      const fresh = batch.filter(signature => {
-        if (visited.has(signature)) return false
+    const yieldToIdle = (): Promise<void> => new Promise(resume => {
+      const ric = (globalThis as unknown as {
+        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void
+      }).requestIdleCallback
+      if (typeof ric === 'function') ric(() => resume(), { timeout: 2000 })
+      else setTimeout(resume, 50)
+    })
+
+    while (frontier.length > 0 && visited.size < HistoryCursorService.#WARM_BUDGET) {
+      const fresh: string[] = []
+      while (frontier.length && fresh.length < HistoryCursorService.#WARM_CONCURRENCY) {
+        const signature = frontier.shift()!
+        if (visited.has(signature)) continue
         visited.add(signature)
-        return true
-      })
+        fresh.push(signature)
+      }
       if (fresh.length === 0) continue
       const resolved = await Promise.all(
         // localOnly: warm from memory/OPFS only. A historical sig that isn't
@@ -200,6 +229,7 @@ export class HistoryCursorService extends EventTarget {
       for (const signature of nextSignatures) {
         if (!visited.has(signature)) frontier.push(signature)
       }
+      if (frontier.length) await yieldToIdle()
     }
   }
 

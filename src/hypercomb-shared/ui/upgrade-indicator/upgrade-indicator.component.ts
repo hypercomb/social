@@ -1,6 +1,7 @@
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { revisionName } from '../../core/revision-name'
 
 interface UpdateAvailablePayload {
   available?: boolean
@@ -11,9 +12,9 @@ interface UpdateAvailablePayload {
   label?: string
 }
 
-type UpdatePhase = 'idle' | 'available' | 'naming' | 'snapshotting' | 'applying' | 'complete' | 'error'
+type UpdatePhase = 'idle' | 'available' | 'snapshotting' | 'applying' | 'complete' | 'error'
 interface UpdateStatusPayload {
-  phase?: Exclude<UpdatePhase, 'idle' | 'available' | 'naming'>
+  phase?: Exclude<UpdatePhase, 'idle' | 'available'>
   message?: string
 }
 
@@ -40,21 +41,15 @@ const COMPLETE_VISIBLE_MS = 12_000
         </button>
 
         @if (phase() === 'available' && expanded()) {
-          <button class="upgrade-act adopt" type="button" (click)="beginAdopt()">{{ 'upgrade.adopt' | t }}</button>
+          <label class="restore-name">
+            <input type="text" [value]="restorePointName()"
+              [attr.aria-label]="'upgrade.revision' | t" [title]="'upgrade.revision' | t"
+              (input)="restorePointName.set($any($event.target).value)"
+              (keydown.enter)="adopt()" (keydown.escape)="collapse()" />
+          </label>
+          <button class="upgrade-act adopt" type="button" (click)="adopt()">{{ 'upgrade.adopt' | t }}</button>
           <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
           <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
-        }
-
-        @if (phase() === 'naming') {
-          <label class="restore-name">
-            <span>Restore point</span>
-            <input type="text" autofocus [value]="restorePointName()"
-              (input)="restorePointName.set($any($event.target).value)"
-              (keydown.enter)="adopt()" (keydown.escape)="cancelAdopt()" />
-          </label>
-          <button class="upgrade-act adopt" type="button" (click)="adopt()"
-            [disabled]="!restorePointName().trim()">Update</button>
-          <button class="upgrade-act save" type="button" (click)="cancelAdopt()">Cancel</button>
         }
 
         @if (phase() === 'error') {
@@ -70,7 +65,9 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   readonly newCount = signal(0)
   readonly phase = signal<UpdatePhase>('idle')
   readonly expanded = signal(false)
-  readonly restorePointName = signal('Default')
+  /** Written for the participant when the update is announced (see the
+   *  `update:available` subscription) — theirs to overwrite, never to supply. */
+  readonly restorePointName = signal('')
   readonly statusMessage = signal('')
 
   #packageSig = ''
@@ -89,6 +86,14 @@ export class UpgradeIndicatorComponent implements OnDestroy {
       this.#newBees = Array.isArray(payload?.newBees) ? payload.newBees.map(String) : []
       this.#previous = typeof payload?.previous === 'string' ? payload.previous : null
       this.#label = String(payload?.label ?? '').trim()
+      // The name is written the moment the update is announced — adopting is
+      // one click, and what the participant sees in the field is what the
+      // restore point will be called unless they type over it.
+      this.restorePointName.set(revisionName({
+        packageSig: sig,
+        label: this.#label,
+        locale: this.#locale(),
+      }))
       const suppressed = this.#inList(DISCARDED_KEY, sig, localStorage)
         || this.#inList(SNOOZE_KEY, sig, sessionStorage)
       this.available.set(!!payload?.available && !suppressed)
@@ -123,7 +128,6 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   readonly statusText = (): string => {
     if (this.statusMessage()) return this.statusMessage()
     switch (this.phase()) {
-      case 'naming': return 'Name the restore point first'
       case 'snapshotting': return 'Saving restore point…'
       case 'applying': return 'Updating…'
       case 'complete': return 'Everything is updated'
@@ -136,30 +140,30 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     if (this.phase() === 'available') this.expanded.update(value => !value)
   }
 
-  readonly beginAdopt = (): void => {
+  readonly collapse = (): void => { this.expanded.set(false) }
+
+  /** Adopt goes NOWHERE. It hands the shell the name and the package and waits
+   *  — `hypercomb:apply-update` snapshots, installs the newer files and
+   *  reloads. If the install has to go through DCP it does that off-screen
+   *  (the portal's headless iframe), so there is no screen to visit and
+   *  nothing to come back from. */
+  readonly adopt = (): void => {
+    const restorePointName = this.restorePointName().trim()
+      || revisionName({ packageSig: this.#packageSig, label: this.#label, locale: this.#locale() })
     this.expanded.set(false)
-    window.dispatchEvent(new CustomEvent('portal:open', {
+    window.dispatchEvent(new CustomEvent('hypercomb:apply-update', {
       detail: {
-        target: 'dcp',
-        label: this.#label,
-        upgrade: {
-          packageSig: this.#packageSig || null,
-          newBees: this.#newBees,
-          previous: this.#previous,
-        },
+        restorePointName,
+        packageSig: this.#packageSig || null,
+        newBees: this.#newBees,
+        previous: this.#previous,
       },
     }))
   }
 
-  readonly cancelAdopt = (): void => {
-    this.phase.set('available')
-    this.expanded.set(true)
-  }
-
-  readonly adopt = (): void => {
-    const restorePointName = this.restorePointName().trim()
-    if (!restorePointName) return
-    window.dispatchEvent(new CustomEvent('hypercomb:apply-update', { detail: { restorePointName } }))
+  #locale(): string {
+    const i18n = window.ioc?.get<{ locale?: string }>('@hypercomb.social/I18n')
+    return String(i18n?.locale ?? 'en')
   }
 
   readonly save = (): void => {

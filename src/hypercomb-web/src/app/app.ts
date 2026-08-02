@@ -3,6 +3,7 @@ import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
+import { revisionName } from '@hypercomb/shared/core/revision-name'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -243,7 +244,15 @@ export class App implements AfterViewInit {
     // by THIS origin from its own bundled `/content/` (upgradeFromBundled),
     // then the shell reloads so the freshly-installed bees take over.
     window.addEventListener('hypercomb:apply-update', event => {
-      const restorePointName = String((event as CustomEvent<{ restorePointName?: string }>).detail?.restorePointName ?? '').trim()
+      const detail = (event as CustomEvent<{ restorePointName?: string; packageSig?: string | null }>).detail
+      // The indicator writes the name before it dispatches. `/upgrade` (and any
+      // other door) may not, so mint one here rather than snapshotting under
+      // the empty string — every update this hive takes gets a name.
+      const restorePointName = String(detail?.restorePointName ?? '').trim()
+        || revisionName({
+          packageSig: detail?.packageSig,
+          locale: String(window.ioc?.get<{ locale?: string }>('@hypercomb.social/I18n')?.locale ?? 'en'),
+        })
       void this.upgradeFromBundledClicked(restorePointName, true)
     })
 

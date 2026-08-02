@@ -150,6 +150,12 @@ async function tick() {
       // DASHBOARD instead of forcing a note somewhere arbitrary (see the
       // bridge-listen skill). Without this field the responder can't tell.
       scope: it.payload?.scope ?? '',
+      // 'atomize' = the /atomize behaviour: this ask asks for STRUCTURE, not
+      // a note. The responder creates the parts as tiles (`existing` lists
+      // what is already there so nothing is duplicated) and retires without
+      // writing a note. Absent = a normal question.
+      task: it.payload?.task ?? '',
+      existing: it.payload?.existing ?? [],
       prompt: it.payload?.prompt ?? '',
       transcript: it.payload?.transcript ?? [],
       model: it.payload?.model ?? '',

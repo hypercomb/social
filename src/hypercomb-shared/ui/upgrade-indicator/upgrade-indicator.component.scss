@@ -109,5 +109,7 @@
 
 @media (max-width: 599px) {
   .upgrade-indicator { max-width: calc(100vw - 1rem); }
+  // No room for the field on a phone — and none needed: the revision is
+  // already named, so Adopt carries that name without it ever being shown.
   .restore-name { display: none; }
 }
