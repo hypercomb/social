@@ -40,10 +40,10 @@ type SubstrateLike = {
   listSources(): readonly { id: string; label?: string; builtin?: boolean }[]
   listImages(): { name: string; imageSig: string; enabled: boolean }[]
   activeSource: { id: string } | null
-  poolSigs: readonly string[]
+  defaultSigs: ReadonlySet<string>
   pinImage(token: string): { name: string } | null
   unpinImages(): void
-  restyle(labels: string[], ownedSigs: ReadonlySet<string>): Promise<string[]>
+  restyle(labels: string[], ownedSigs?: ReadonlySet<string>): Promise<string[]>
   allLabels(): Promise<string[]>
 }
 
@@ -185,10 +185,6 @@ export class BackgroundThemeService extends EventTarget {
       // A theme naming a source that isn't registered dresses what it can
       // rather than failing the whole change.
       if (substrate.listSources().some(s => s.id === theme.tiles)) {
-        // The pictures the OUTGOING group put on tiles, captured before the
-        // switch — after it, they are no longer in the pool and an overwrite
-        // could not tell them from the participant's own.
-        const owned = new Set<string>(reach === 'none' ? [] : substrate.poolSigs)
         await substrate.setActive(theme.tiles)
         await substrate.warmUp()
         dressed.push('tiles')
@@ -205,9 +201,12 @@ export class BackgroundThemeService extends EventTarget {
         }
 
         if (reach !== 'none') {
-          for (const sig of substrate.poolSigs) owned.add(sig)
+          // No signature set is passed: the substrate's own provenance ledger
+          // is the authority on what is a default. A picture placed by ANY
+          // earlier theme is replaced; a picture the participant put there is
+          // not, no matter which theme is arriving.
           const labels = reach === 'global' ? await substrate.allLabels() : await this.#layerLabels()
-          const redressed = await substrate.restyle(labels, owned)
+          const redressed = await substrate.restyle(labels)
           for (const cell of redressed) EffectBus.emit('substrate:rerolled', { cell })
           tail += ` · ${redressed.length} tile${redressed.length === 1 ? '' : 's'} re-dressed${reach === 'global' ? ' hive-wide' : ''}`
         }

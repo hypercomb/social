@@ -43,16 +43,19 @@ dressed tiles alone. To restyle tiles that already have one:
 | `/background ember.force` | every tile on the layer you are looking at |
 | `/background ember.force-global` | every tile in the hive |
 
-**A force never touches a picture the participant attached.** The test is
-whether the tile is wearing something a substrate pool put there: the outgoing
-group's signatures are captured *before* the switch (after it, they are no
-longer in the pool and could not be told apart from your own pictures) and
-unioned with the incoming group's. Anything outside that set is yours and is
-left exactly as it is, at any reach.
+**A force resets every DEFAULT and leaves every EXPLICIT picture.** A default is
+one the substrate placed. An explicit one is a picture you put there — attached,
+pasted, edited in. The difference cannot be recovered by looking at the picture
+afterwards: both end up as a signature in the same index, and the pool that
+supplied a default is gone the moment the theme changes. So provenance is
+**recorded at the moment of assignment** — every signature the substrate writes
+onto a tile is remembered, across themes and across sessions. A force replaces
+exactly that set.
 
-The safe direction is the default one: a picture from a theme *older* than the
-one currently active is not recognised as theme-owned, so it survives a force.
-Nothing custom is ever destroyed; at worst a stale theme picture stays.
+This means a picture placed by a theme you used *last month* is still a default
+and is reset; only what you chose yourself survives. Losing the ledger (cleared
+storage, a new browser) fails in the one safe direction: forgotten defaults are
+treated as explicit and survive. It never grows the set force may destroy.
 
 **`<picture>.force-global` is refused.** One picture stamped across an entire
 hive is not a look, and it is the one combination rerolling cannot undo. Pin a

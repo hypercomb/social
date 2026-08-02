@@ -115,6 +115,25 @@ const REFERENCES_SET_ID = 'builtin:references'
 const SETS_VERSION_LS = 'hc:substrate-sets-v'
 const SETS_VERSION = '3'
 
+// Provenance ledger — every props signature this service has ever ASSIGNED to a
+// tile, across themes and sessions. It is the record of which pictures are
+// DEFAULTS (ours to replace) as opposed to EXPLICIT (the participant's, never
+// to be touched). Participant-local; a picture's own bytes carry no such mark,
+// and the pool that supplied it is gone the moment the theme changes, so the
+// fact has to be written down when the assignment happens.
+const ASSIGNED_LS = 'hc:substrate-assigned'
+
+const readAssignedSigs = (): string[] => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(ASSIGNED_LS) ?? '[]')
+    return Array.isArray(raw) ? raw.filter((s): s is string => typeof s === 'string') : []
+  } catch { return [] }
+}
+
+const writeAssignedSigs = (sigs: ReadonlySet<string>): void => {
+  try { localStorage.setItem(ASSIGNED_LS, JSON.stringify([...sigs])) } catch { /* storage unavailable */ }
+}
+
 const BUILTIN_SETS: SubstrateSource[] = [
   { type: 'url', id: PHOTOS_SET_ID,             baseUrl: '/substrate/',                  label: 'Photos',    builtin: true },
   { type: 'url', id: 'builtin:theme-minimal',   baseUrl: '/substrate/theme-minimal/',    label: 'Minimal',   builtin: true },
@@ -947,12 +966,42 @@ export class SubstrateService extends EventTarget {
       ?? null
   }
 
-  /** The props signatures of every image in the CURRENT pool. This is the test
-   *  for "the picture on this tile is one a substrate pool put there" — a tile
-   *  wearing anything else is the participant's own and must never be
-   *  overwritten. Callers hold the OUTGOING pool's sigs across a source switch
-   *  so the picture the previous theme applied can be recognised. */
+  /** The props signatures of every image in the CURRENT pool. */
   get poolSigs(): readonly string[] { return this.#propsPool.map(p => p.propsSig) }
+
+  // ───────────── default provenance (the force ledger) ─────────────
+  //
+  // A DEFAULT is a picture this service chose for a tile. An EXPLICIT one is a
+  // picture the participant put there — attached, pasted, edited in. Only
+  // defaults may be replaced, and the difference cannot be recovered by looking
+  // at the picture afterwards: both end up as a props signature in the same
+  // index, and the pool that supplied a default is gone the moment the theme
+  // changes.
+  //
+  // So provenance is RECORDED AT THE MOMENT OF ASSIGNMENT. Every signature this
+  // service writes onto a tile is remembered here, across themes and across
+  // sessions. A force replaces exactly this set; anything else is the
+  // participant's and is never touched.
+  //
+  // Losing the ledger (cleared storage, a new browser) is safe in the only
+  // direction that matters: forgotten defaults are treated as explicit and
+  // survive. It never grows the set of things force may destroy.
+  #assigned = new Set<string>(readAssignedSigs())
+
+  /** Every signature the substrate has ever assigned, plus the current pool —
+   *  a picture in the live pool is a default even if it predates the ledger. */
+  get defaultSigs(): ReadonlySet<string> {
+    const out = new Set(this.#assigned)
+    for (const { propsSig } of this.#propsPool) out.add(propsSig)
+    return out
+  }
+
+  /** Remember that this signature was placed BY US, not by the participant. */
+  #recordAssigned(sig: string): void {
+    if (!sig || this.#assigned.has(sig)) return
+    this.#assigned.add(sig)
+    writeAssignedSigs(this.#assigned)
+  }
 
   /** Pin ONE image from the pool: every pick returns it, so a wall of tiles
    *  wears the same picture. Built on the same session-only enabled set as
@@ -971,13 +1020,19 @@ export class SubstrateService extends EventTarget {
   unpinImages(): void { this.#disabledImages.clear() }
 
   /**
-   * Re-dress tiles from the active pool, replacing ONLY pictures that a
-   * substrate pool put there. `ownedSigs` names which pools may be replaced
-   * (normally the outgoing pool plus the incoming one); a tile wearing anything
-   * else — a picture the participant attached, anything from outside a theme
-   * pack — keeps it. Returns the labels actually re-dressed.
+   * Re-dress tiles from the active pool, replacing every DEFAULT and no
+   * EXPLICIT picture. A default is one this service placed — recorded in the
+   * provenance ledger at the moment of assignment, so it stays recognisable
+   * after its theme is gone — or one still sitting in the live pool. Anything
+   * else is the participant's: attached, pasted, edited in. It is left exactly
+   * as it is, whatever the reach.
+   *
+   * `ownedSigs` overrides the ledger for callers that know better; the default
+   * is the whole ledger, which is what a force wants.
+   *
+   * Returns the labels actually re-dressed.
    */
-  async restyle(labels: string[], ownedSigs: ReadonlySet<string>): Promise<string[]> {
+  async restyle(labels: string[], ownedSigs: ReadonlySet<string> = this.defaultSigs): Promise<string[]> {
     if (labels.length === 0) return []
     const index = readTilePropsIndex()
     let cleared = 0
@@ -1124,6 +1179,7 @@ export class SubstrateService extends EventTarget {
     const entry = this.#pickBalanced()
     if (!entry) return false
     index[key || label] = entry.propsSig
+    this.#recordAssigned(entry.propsSig)
     writeTilePropsIndex(index)
     return true
   }
@@ -1149,6 +1205,7 @@ export class SubstrateService extends EventTarget {
       const entry = this.#pickBalanced(current)
       if (!entry) break
       index[key || label] = entry.propsSig
+      this.#recordAssigned(entry.propsSig)
       rerolled.push(label)
     }
     if (rerolled.length > 0) writeTilePropsIndex(index)
@@ -1181,6 +1238,7 @@ export class SubstrateService extends EventTarget {
       const entry = this.#pickBalanced()
       if (!entry) break
       index[key || label] = entry.propsSig
+      this.#recordAssigned(entry.propsSig)
       applied.push(label)
     }
     if (applied.length > 0) writeTilePropsIndex(index)
