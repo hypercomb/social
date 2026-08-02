@@ -461,6 +461,13 @@ $actions-corner: 12rem;
   // against, so it never slides inboard when a panel opens.
   left: 0;
   right: auto;
+  // Hug the rail: the floating pill's base `min-width: 60px` is slack here —
+  // the rail is $rail-width (3.4rem ≈ 54px) wide, and #measureControlsEdge
+  // publishes the stage's LAYOUT box as `--hc-controls-left`. With the base
+  // min-width the reservation overshot the visible rail by ~6px, so every
+  // left-docked toolwindow opened with a narrow canvas seam beside the rail.
+  min-width: 0;
+  width: $rail-width;
   // clears the header bottom at any size: 2.8rem × the active header zoom
   top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 0;
