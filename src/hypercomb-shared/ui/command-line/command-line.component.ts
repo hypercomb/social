@@ -13,7 +13,10 @@ import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/cor
 import { fromRuntime } from '../../core/from-runtime'
 // Folder-based tag persistence retired. TagOp type is local-only now.
 type TagOp = { label: string; tag: string; color?: string; remove: boolean }
-import { EffectBus, hypercomb, type I18nProvider } from '@hypercomb/core'
+import {
+  EffectBus, hypercomb, type I18nProvider,
+  commandRoot, completeCommandPath, commandMembersFor, type CommandObject,
+} from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
@@ -279,6 +282,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    */
   readonly descriptionMap = computed<ReadonlyMap<string, string>>(() => {
     const ctx = this.context()
+    // A member describes itself, in the same breath as its swatch — so the
+    // right-hand column needs no per-mode source once an object is walked.
+    const active = this.#activeRoot()
+    if (active) {
+      const map = new Map<string, string>()
+      for (const [key, member] of commandMembersFor(active.root, active.args)) {
+        if (member.description) map.set(key, member.description)
+      }
+      if (map.size) return map
+    }
     if (ctx.active && ctx.mode === 'slash') return this.slashDescriptionMap()
     if (ctx.active && ctx.mode === 'feature') {
       const map = new Map<string, string>()
@@ -1078,6 +1091,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const cmdArgMatch = ctx.head.match(/^\/(\S+?)[\s\[]/i)
       if (cmdArgMatch) {
         const cmdName = cmdArgMatch[1].toLowerCase()
+        // OBJECT FIRST. A behaviour that registered a command root describes its
+        // shape instead of parsing strings, and the walk happens here rather
+        // than thirty-three times over. Everything else falls through to the
+        // behaviour's own completer, so no un-migrated behaviour can regress.
+        const root = commandRoot(cmdName)
+        if (root) return completeCommandPath(root, this.#slashArgsOf(ctx, cmdArgMatch[0]))
         const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
           { complete?(name: string, args: string): readonly string[] } | undefined
         if (drone?.complete) {
@@ -1096,10 +1115,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return this.#featureMatches().map(m => m.view)
     }
 
-    // plain colon tag mode: suggest tag names from registry, most-used first.
+    // plain colon tag mode: the `tags` object's members — the tag pool's own
+    // contents, ranked by how many tiles carry each. Reading the tag list
+    // through the SAME protocol the slash args use is the point: one walk, and
+    // the vocabulary comes from the pool rather than from a list in here. The
+    // old inline read stays as the fallback for a shell with no root yet.
     if (ctx.mode === 'tag') {
+      // Depend on the registry signal so the dropdown still refreshes when the
+      // pool loads — the object itself reads through IoC and has no signal.
+      const known = this.tagNames$()
+      const root = commandRoot('tags')
+      if (root) return completeCommandPath(root, ctx.normalized)
       const metrics = get('@diamondcoreprocessor.com/OverlapMetrics') as { tagCount(name: string): number } | undefined
-      let allTags = [...this.tagNames$()]
+      let allTags = [...known]
       if (ctx.normalized) allTags = allTags.filter(n => n.toLowerCase().startsWith(ctx.normalized))
       // Overlap count = how many tiles carry the tag (popularity); alpha ties.
       return allTags.sort((a, b) => (metrics?.tagCount(b) ?? 0) - (metrics?.tagCount(a) ?? 0) || a.localeCompare(b))
@@ -1293,11 +1321,46 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return CommandLineComponent.ACCENT_COLOR_MAP
   })
 
-  /** True while the dropdown is completing `/background` — its swatches are
-   *  little pictures of a theme rather than colour dots, so they render wide. */
-  public readonly wideSwatches = computed<boolean>(() => {
+  /**
+   * The command object being walked right now, if any — the seam that lets one
+   * protocol serve every mode. Slash arguments resolve by command name; the tag
+   * modes resolve to the `tags` root. Anything with no root registered returns
+   * undefined and the caller keeps its existing behaviour.
+   */
+  #activeRoot(): { root: CommandObject; args: string } | undefined {
     const ctx = this.context()
-    return !!(ctx.active && ctx.mode === 'slash' && /^\/background\s/i.test(ctx.head))
+    if (!ctx.active) return undefined
+    if (ctx.mode === 'slash') {
+      const match = ctx.head.match(/^\/(\S+?)[\s\[]/i)
+      if (!match) return undefined
+      const root = commandRoot(match[1].toLowerCase())
+      return root ? { root, args: this.#slashArgsOf(ctx, match[0]) } : undefined
+    }
+    if (ctx.mode === 'tag' || (ctx.mode === 'select' && this.#selectPhase() === 'tag')) {
+      const root = commandRoot('tags')
+      return root ? { root, args: ctx.normalized } : undefined
+    }
+    return undefined
+  }
+
+  /** Rebuild the full argument string from the head and the fragment. */
+  #slashArgsOf(ctx: { head: string; raw: string }, cmdPrefix: string): string {
+    const headArgs = ctx.head.slice(cmdPrefix.length)
+    return ctx.head[cmdPrefix.length - 1] === '['
+      ? '[' + headArgs + ctx.raw
+      : headArgs + ctx.raw
+  }
+
+  /** Whether the swatches on offer are whole pictures rather than colour dots.
+   *  Asked of the members themselves — a gradient or an image needs a wide
+   *  chip, a flat colour does not — so no mode or command is named here. */
+  public readonly wideSwatches = computed<boolean>(() => {
+    const active = this.#activeRoot()
+    if (!active) return false
+    for (const member of commandMembersFor(active.root, active.args).values()) {
+      if (member.swatch && /gradient|url\(/i.test(member.swatch)) return true
+    }
+    return false
   })
 
   /** Colour swatches for the dropdown: accent presets in `/accent`, each tag's
@@ -1307,16 +1370,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public readonly dropdownColorMap = computed<ReadonlyMap<string, string>>(() => {
     const accent = this.accentColorMap()
     if (accent.size) return accent
-    if (this.wideSwatches()) {
-      const themes = get('@diamondcoreprocessor.com/BackgroundThemes') as
-        { swatch(name: string): string } | undefined
-      if (!themes?.swatch) return new Map()
+    // Members carry their own swatch — a whole backdrop, a tag's colour, an
+    // image — and the dropdown neither knows nor cares which it is drawing.
+    const active = this.#activeRoot()
+    if (active) {
       const map = new Map<string, string>()
-      for (const s of this.suggestions()) {
-        const css = themes.swatch(s)
-        if (css) map.set(s, css)
+      for (const [key, member] of commandMembersFor(active.root, active.args)) {
+        if (member.swatch) map.set(key, member.swatch)
       }
-      return map
+      if (map.size) return map
     }
     const ctx = this.context()
     const inTagMode = ctx.active && (ctx.mode === 'tag' || (ctx.mode === 'select' && this.#selectPhase() === 'tag'))
@@ -2570,6 +2632,30 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
       this.#collapseToSelect(labels)
       return
+    }
+
+    // ANY OTHER OP → the behaviour registry. The branches above exist only
+    // because they parse bespoke arguments (`/move(8)`, `/move[swap]`,
+    // `:tags`); everything else is a plain behaviour and must not need a
+    // branch here to be reachable.
+    //
+    // Without this the if-chain simply fell through to "no operation" and
+    // collapsed to a bare select — which is why `[item]/atomize` did NOTHING.
+    // The selection was made, the behaviour never ran, and nothing reported a
+    // problem. A hardcoded op list in the PARSER (SELECT_OPS, now isSelectOp)
+    // and a second one in the EXECUTOR both had to know a command's name; the
+    // registry is the only thing that actually does.
+    if (op) {
+      const slash = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+        { has?: (n: string) => boolean; execute?: (n: string, args: string) => unknown } | undefined
+      if (slash?.has?.(op) && slash.execute) {
+        // The tiles are already selected above, which is the contract a
+        // selection-driven behaviour reads (AtomizeProvider, etc.).
+        const args = afterBracket.slice(opMatch![0].length).trim()
+        await slash.execute(op, args)
+        this.#collapseToSelect(labels)
+        return
+      }
     }
 
     // No operation — just /select[tiles] → select and show in bar

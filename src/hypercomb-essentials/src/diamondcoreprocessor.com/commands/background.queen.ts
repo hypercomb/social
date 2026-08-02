@@ -29,11 +29,70 @@
 // There are no aliases. Every word means exactly itself; a second word for the
 // same thing is confusion nobody asked for, and naming is the participant's.
 
-import { QueenBee, EffectBus } from '@hypercomb/core'
+import {
+  QueenBee, EffectBus,
+  registerCommandRoot, completeCommandPath,
+  type CommandObject, type CommandMember,
+} from '@hypercomb/core'
 import type { BackgroundThemeService } from '../presentation/background/background-theme.service.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 const SVC = '@diamondcoreprocessor.com/BackgroundThemes'
+
+/**
+ * `/background` as an OBJECT — the first citizen of the command-object
+ * protocol. It no longer parses its own arguments: it says what its members
+ * are at each depth and the command line does the walking.
+ *
+ * Depth 0 — the themes (a code registry: they ship with their assets), each
+ *           carrying the swatch that draws it in the dropdown.
+ * Depth 1+ — this theme's own pictures, its group viewer, and the reaches.
+ *
+ * The refusal lives here rather than in a validator: once a picture is pinned,
+ * `force-global` simply STOPS BEING A MEMBER. An impossible combination that
+ * cannot be typed needs no error message.
+ */
+const backgroundObject: CommandObject = {
+  members(path: readonly string[]): readonly CommandMember[] {
+    const svc = get(SVC) as BackgroundThemeService | undefined
+    if (!svc) return []
+
+    if (path.length === 0) {
+      return svc.names.map(name => {
+        const theme = svc.theme(name)
+        return {
+          name,
+          description: theme
+            ? [theme.screen ? 'screen' : null, theme.tiles ? 'tiles' : null].filter(Boolean).join(' + ')
+            : 'bare surface',
+          swatch: svc.swatch(name) || undefined,
+          leaf: !theme,
+        }
+      })
+    }
+
+    const pictures = svc.items(path[0])
+    const walked = new Set(path.slice(1))
+    const pinned = path.slice(1).some(w => pictures.includes(w))
+    const out: CommandMember[] = []
+    // A picture is only offered while none is pinned — two pictures on one tile
+    // is not a thing, so it is not a member.
+    if (!pinned) {
+      for (const picture of pictures) {
+        if (!walked.has(picture)) out.push({ name: picture, description: 'one picture on every tile' })
+      }
+    }
+    if (!walked.has('items')) out.push({ name: 'items', description: 'show this group', leaf: true })
+    if (!walked.has('force')) out.push({ name: 'force', description: 're-dress this layer', leaf: true })
+    // One picture stamped across an entire hive is the combination rerolling
+    // cannot undo. Not a member once a picture is walked into.
+    if (!pinned && !walked.has('force-global')) {
+      out.push({ name: 'force-global', description: 're-dress every tile', leaf: true })
+    }
+    return out
+  },
+}
+registerCommandRoot('background', backgroundObject)
 
 export class BackgroundQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -47,35 +106,11 @@ export class BackgroundQueenBee extends QueenBee {
     { input: '/background ember.dots.force', result: 'One picture on every tile of this layer' },
   ]
 
+  // No argument parsing of its own — the walk is the protocol's, and this is
+  // the whole of what used to be twenty lines of hand-rolled dot splitting.
+  // Kept as the fallback path for shells that ask the behaviour directly.
   override slashComplete(args: string): readonly string[] {
-    const svc = get(SVC) as BackgroundThemeService | undefined
-    if (!svc) return []
-    // DOT SYNTAX — a theme is an object, its pictures are its members, and this
-    // completes the segment after the last dot exactly the way member
-    // completion does. `ember.` offers Ember's pictures; `ember.do` finishes to
-    // `ember.dots`. The words are unambiguous because their POSITION says what
-    // they are, which is what a flat row of space-separated words could not do.
-    const q = args.toLowerCase().replace(/^\s+/, '').replace(/\s+/g, '.')
-    const parts = q.split('.')
-    const last = parts[parts.length - 1]
-    const head = parts.slice(0, -1)
-
-    // First segment: the themes. After that: this theme's own pictures (only
-    // listable once its group is warm), the group viewer, and the reaches.
-    let options: string[]
-    if (head.length === 0) {
-      options = [...svc.names]
-    } else {
-      const pictures = svc.items(head[0])
-      const typed = new Set(head.slice(1))
-      const pinned = head.slice(1).some(w => pictures.includes(w))
-      options = [...(pinned ? [] : pictures), 'items', 'force', 'force-global']
-        .filter(o => !typed.has(o))
-      // One picture across a whole hive is refused, so never offer the pair.
-      if (pinned) options = options.filter(o => o !== 'force-global')
-    }
-    const matches = last ? options.filter(o => o.startsWith(last)) : options
-    return matches.map(o => (head.length ? `${head.join('.')}.${o}` : o))
+    return completeCommandPath(backgroundObject, args)
   }
 
   protected async execute(args: string): Promise<void> {

@@ -9,7 +9,7 @@
 // In-memory map populated on first load, mutated via add/remove,
 // persisted by writing a new resource blob and updating the pointer.
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, SignatureService, registerCommandRoot, type CommandMember } from '@hypercomb/core'
 
 type TagEntry = { color?: string; enabled?: boolean; accent?: string }
 type TagMap = Record<string, TagEntry>
@@ -192,3 +192,38 @@ export class TagRegistry extends EventTarget {
 }
 
 register('@hypercomb.social/TagRegistry', new TagRegistry())
+
+// ── the `tags` command object ────────────────────────────────────────
+//
+// The MARK-BACKED half of the command-object protocol, and the reason the
+// protocol allows two membership sources at all. These members are not a list
+// anyone wrote: they ARE the tag pool's contents, so minting a tag anywhere
+// grows this object with no code. Each member carries its own colour as the
+// swatch, which is the same channel a background theme fills with a whole
+// picture — the dropdown does not know or care which it is looking at.
+//
+// Ranking is popularity (how many tiles carry the tag) with alphabetical ties,
+// the ordering the tag modes already used. `members` is synchronous because the
+// registry is already in memory; a cold registry answers empty and this object
+// refreshes when it loads, exactly like every other consumer.
+registerCommandRoot('tags', {
+  members(path: readonly string[]): readonly CommandMember[] {
+    // Tags do not nest: a tag has no members, so anything walked into is a leaf.
+    if (path.length > 0) return []
+    const registry = (window as any).ioc?.get?.('@hypercomb.social/TagRegistry') as TagRegistry | undefined
+    const metrics = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OverlapMetrics') as
+      { tagCount(name: string): number } | undefined
+    const names = registry?.names ?? []
+    return [...names]
+      .sort((a, b) => (metrics?.tagCount(b) ?? 0) - (metrics?.tagCount(a) ?? 0) || a.localeCompare(b))
+      .map(name => {
+        const count = metrics?.tagCount(name) ?? 0
+        return {
+          name,
+          swatch: registry?.color(name) || undefined,
+          description: count ? `${count} tile${count === 1 ? '' : 's'}` : undefined,
+          leaf: true,
+        }
+      })
+  },
+})
