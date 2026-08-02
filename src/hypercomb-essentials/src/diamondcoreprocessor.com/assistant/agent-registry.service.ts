@@ -30,6 +30,23 @@
 // records into the ask it is answering (scripts/bridge/watch-asks.cjs). The
 // original record is never rewritten — content is immutable, so a follow-up
 // is a new record pointing at the first.
+//
+// ── Stopping ───────────────────────────────────────────────────────────
+//
+// Work that cannot finish must not sit in the hive forever. Two ways out:
+//
+//   • `stop(id)` — the participant's call, from the agent panel. It removes
+//     the ask record (and its context follow-ups) from the pool, so no
+//     responder can ever pick it up again, and mints a `mode:'stop'` marker
+//     so a responder ALREADY working on it learns to abort. The bee finishes
+//     and flies off like any other agent.
+//   • the watchdog — an agent nobody has said anything about for STALL_MS is
+//     marked stalled (the panel says so); one that is still silent at
+//     GIVE_UP_MS stops itself. Any progress report resets both clocks, so a
+//     long job that is genuinely working is never cut off.
+//
+// Stop markers are swept by the next `seed()` once they are older than an
+// hour — by then either a responder saw it or none was listening.
 
 import { EffectBus } from '@hypercomb/core'
 import { kindFor, type AgentKind } from '../presentation/avatars/agent-waggle.js'
@@ -74,6 +91,8 @@ export interface Agent {
   /** Progress, when the work reports it. */
   current?: number
   total?: number
+  /** Nothing reported for a long while — still running, but say so. */
+  stalled?: boolean
   startedAt: number
   updatedAt: number
 }
@@ -82,6 +101,7 @@ type StoreLike = {
   listOptimizations?: () => Promise<string[]>
   getOptimization?: (sig: string) => Promise<Blob | null>
   putOptimization?: (blob: Blob) => Promise<string>
+  removeOptimization?: (sig: string) => Promise<boolean>
 }
 
 const ioc = <T,>(key: string): T | undefined =>
@@ -97,6 +117,23 @@ const SEED_SCAN_LIMIT = 400
 
 const ACTIVITY_LIMIT = 40
 
+/** Silence after which an agent is called stalled — long enough that a real
+ *  job thinking hard is not accused of being stuck. */
+const STALL_MS = 10 * 60_000
+
+/** Silence after which it stops itself. A responder that is alive reports
+ *  through `agent:progress`, which resets the clock. */
+const GIVE_UP_MS = 45 * 60_000
+
+/** How often the watchdog looks. Cheap — it walks the live map only. */
+const WATCHDOG_MS = 30_000
+
+/** A stop marker outlives the ask only long enough for a mid-flight
+ *  responder to see it. */
+const STOP_MARKER_TTL_MS = 60 * 60_000
+
+const isSignature = (value: string): boolean => /^[0-9a-f]{64}$/.test(value)
+
 export class AgentRegistry extends EventTarget {
   readonly #agents = new Map<string, Agent>()
   readonly #expiry = new Map<string, ReturnType<typeof setTimeout>>()
@@ -104,6 +141,8 @@ export class AgentRegistry extends EventTarget {
 
   constructor() {
     super()
+
+    setInterval(() => this.#watchdog(), WATCHDOG_MS)
 
     // ── the ask lane ──
     EffectBus.on<{ sig: string; prompt: string; targets?: string[]; model?: string }>('ask:queued', p => {
@@ -161,6 +200,8 @@ export class AgentRegistry extends EventTarget {
             this.#note(agent, text)
           }
         }
+        // Anything reported is proof of life — the stall clock restarts.
+        agent.stalled = false
         agent.updatedAt = Date.now()
         this.#changed()
       },
@@ -240,6 +281,14 @@ export class AgentRegistry extends EventTarget {
       if (record?.kind !== 'ask') continue
       const mode = record?.payload?.mode
       if (mode === 'chat') continue // the ask screen's own conversation, not an agent
+      if (mode === 'stop') {
+        // A tombstone for an already-removed ask. It exists for a responder
+        // that was mid-flight; once it is old enough that nobody can still be
+        // working on that ask, it is litter.
+        const age = Date.now() - (Number(record?.payload?.askedAt) || 0)
+        if (age > STOP_MARKER_TTL_MS) { try { await store.removeOptimization?.(sig) } catch { /* next boot */ } }
+        continue
+      }
       if (mode === 'context') {
         const of = String(record?.payload?.askSig ?? '')
         if (of) contextByAsk.set(of, [...(contextByAsk.get(of) ?? []), String(record?.payload?.prompt ?? '')])
@@ -307,7 +356,88 @@ export class AgentRegistry extends EventTarget {
     return true
   }
 
+  /** Stop an agent. Nothing about work in flight is guaranteed to be
+   *  interruptible, so this does the two things that ARE in the hive's gift:
+   *  it takes the request out of the pool so no responder can start it, and
+   *  it leaves a marker so one already working on it can abort. Returns
+   *  false only when the id names no agent. */
+  async stop(id: string, reason = 'stopped'): Promise<boolean> {
+    const agent = this.#agents.get(id)
+    if (!agent) return false
+
+    // The generic lane — install/sync passes, workflow runners, any behaviour
+    // that raised a bee gets told to wind up.
+    EffectBus.emit('agent:stop', { id, reason })
+
+    // An ask's id IS its record signature; a sync/behaviour agent has no
+    // record to retire.
+    if (isSignature(id)) await this.#retireAsk(id, agent)
+
+    this.#finish(id, 'failed', reason)
+    return true
+  }
+
   // ── internals ──────────────────────────────────────────────────────
+
+  /** Take a stopped ask out of the pool: its context follow-ups first, then
+   *  the ask itself, then the marker that tells a mid-flight responder. */
+  async #retireAsk(id: string, agent: Agent): Promise<void> {
+    const store = ioc<StoreLike>('@hypercomb.social/Store')
+    if (!store?.removeOptimization) return
+
+    if (store.listOptimizations && store.getOptimization) {
+      try {
+        const sigs = await store.listOptimizations()
+        for (const sig of sigs.slice(0, SEED_SCAN_LIMIT)) {
+          try {
+            const blob = await store.getOptimization(sig)
+            if (!blob) continue
+            const record = JSON.parse(await blob.text())
+            if (record?.kind !== 'ask') continue
+            if (record?.payload?.mode !== 'context') continue
+            if (String(record?.payload?.askSig ?? '') !== id) continue
+            await store.removeOptimization(sig)
+          } catch { /* leave it; the ask is what matters */ }
+        }
+      } catch { /* unreadable pool — still retire the ask below */ }
+    }
+
+    try { await store.removeOptimization(id) } catch { /* nothing else to try */ }
+
+    if (store.putOptimization) {
+      const marker = {
+        kind: 'ask',
+        appliesTo: agent.targets.length ? agent.targets : agent.segments,
+        payload: { mode: 'stop', askSig: id, status: 'stopped', askedAt: Date.now() },
+        mark: 'persistent',
+      }
+      try {
+        await store.putOptimization(new Blob([JSON.stringify(marker)], { type: 'application/json' }))
+      } catch { /* the ask is already gone — the marker is a courtesy */ }
+    }
+
+    // The pending pill counts asks, and this one is no longer pending.
+    EffectBus.emit('ask:answered', { sig: id, appliesTo: agent.targets, stopped: true })
+  }
+
+  /** Nobody watches a bee for an hour. Say when one has gone quiet, and stop
+   *  it once the silence is long enough that it is never coming back. */
+  #watchdog(): void {
+    const now = Date.now()
+    for (const agent of [...this.#agents.values()]) {
+      if (agent.status === 'done' || agent.status === 'failed') continue
+      const silent = now - agent.updatedAt
+      if (silent > GIVE_UP_MS) {
+        void this.stop(agent.id, `gave up — nothing reported for ${Math.round(GIVE_UP_MS / 60_000)} minutes`)
+        continue
+      }
+      if (silent > STALL_MS && !agent.stalled) {
+        agent.stalled = true
+        this.#note(agent, `no word for ${Math.round(STALL_MS / 60_000)} minutes`)
+        this.#changed()
+      }
+    }
+  }
 
   #upsert(seed: Partial<Agent> & { id: string; behavior: string }): void {
     const now = Date.now()

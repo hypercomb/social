@@ -324,8 +324,10 @@ class MoveProvider implements SlashBehaviourProvider {
 // `task:'atomize'` ask — no API key; a bridge-connected session creates the
 // parts).
 //
-// The unit is always a TILE, applied foreach: selection → each selected tile;
-// no selection → each tile on the current layer that is still a leaf.
+// With no selection the drone first asks whether the LAYER is crowded: more
+// than a dozen tiles means the page needs a level inserted, so it routes to
+// /organize instead. Otherwise the unit is a TILE, applied foreach: selection
+// → each selected tile; no selection → each leaf on the current layer.
 //
 // Not `/atomize-ui`, which toggles the atomizer toolbar. Not `/organize`,
 // which goes the OTHER way — mints no leaves, inserts a level and re-homes
@@ -356,7 +358,7 @@ class AtomizeProvider implements SlashBehaviourProvider {
     }
 
     const drone = get('@diamondcoreprocessor.com/AtomizeDrone') as
-      { atomizeTile?: (label: string) => Promise<boolean> } | undefined
+      { atomizeTile?: (label: string) => Promise<string> } | undefined
     if (!drone?.atomizeTile) {
       // Fallback to the quick-menu channel if the drone isn't up yet — it
       // enforces the leaf rule on the same path.
@@ -367,21 +369,31 @@ class AtomizeProvider implements SlashBehaviourProvider {
     }
 
     // FOREACH the selection — one ask per tile, each independently
-    // answerable and undoable. Mints are serialized inside the drone, and a
-    // tile that already has children is refused there, not here.
-    let queued = 0
+    // answerable and undoable. Mints are serialized inside the drone, which
+    // also refuses a tile that already has children and one already queued.
+    // Report the REASON, not just the shortfall.
+    const tally: Record<string, number> = {}
     for (const label of targets) {
-      if (await drone.atomizeTile(label)) queued++
+      const outcome = await drone.atomizeTile(label)
+      tally[outcome] = (tally[outcome] ?? 0) + 1
     }
 
-    const skipped = targets.length - queued
+    const queued = tally['queued'] ?? 0
+    const skips = [
+      tally['has-children'] ? `${tally['has-children']} already had children` : '',
+      tally['already-queued'] ? `${tally['already-queued']} already queued` : '',
+      tally['ancestor-busy'] ? `${tally['ancestor-busy']} waiting on a parent already being reshaped` : '',
+      tally['failed'] ? `${tally['failed']} could not be read` : '',
+    ].filter(Boolean).join(', ')
+
     EffectBus.emit('toast:show', {
       type: 'tip',
       message: queued
         ? `Atomizing ${queued} tile${queued === 1 ? '' : 's'}`
-          + (skipped ? ` (${skipped} already had children — skipped)` : '')
+          + (skips ? ` (${skips})` : '')
           + ' — Haiku is working out the parts.'
-        : `Nothing atomized — ${skipped === 1 ? 'that tile already has' : 'those tiles already have'} children. Use /organize to group a crowded level.`,
+        : `Nothing atomized${skips ? ` — ${skips}` : ''}.`
+          + (tally['has-children'] ? ' Use /organize to group a crowded level.' : ''),
     })
   }
 }

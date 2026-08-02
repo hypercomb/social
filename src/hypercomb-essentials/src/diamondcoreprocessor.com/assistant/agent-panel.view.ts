@@ -40,6 +40,7 @@ export class AgentPanelView extends EventTarget {
   #id = ''
   #body: HTMLDivElement | null = null
   #input: HTMLTextAreaElement | null = null
+  #stopButton: HTMLButtonElement | null = null
   #registry: AgentRegistry | undefined
   #expandedActivity = new Set<string>()
   #fullscreen = false
@@ -137,6 +138,17 @@ export class AgentPanelView extends EventTarget {
     close.addEventListener('click', () => this.close())
     head.append(avatar, title, fullscreen, close)
 
+    // STOP — the way out for work that cannot finish. Closing the panel only
+    // hides it; this takes the request out of the pool so nothing picks it up
+    // again. Shown only while there is something left to stop.
+    const stop = document.createElement('button')
+    stop.type = 'button'
+    stop.className = 'hc-agent-btn hc-agent-stop'
+    stop.textContent = this.#t('agent.stop', 'Stop')
+    stop.title = this.#t('agent.stop-hint', 'Stop this work and clear it from the hive')
+    stop.addEventListener('click', () => { void this.#stop(stop) })
+    this.#stopButton = stop
+
     const body = document.createElement('div')
     body.className = 'hc-agent-body'
     this.#body = body
@@ -156,7 +168,7 @@ export class AgentPanelView extends EventTarget {
     input.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit() }
     })
-    row.append(input, send)
+    row.append(input, send, stop)
     this.#input = input
 
     panel.append(resize, head, body, row)
@@ -172,6 +184,8 @@ export class AgentPanelView extends EventTarget {
     const body = this.#body
     if (!body) return
     const agent = this.#registry?.get(this.#id)
+    const running = agent?.status === 'pending' || agent?.status === 'working'
+    if (this.#stopButton) this.#stopButton.hidden = !running
     if (!agent) {
       // The agent finished and its record has been retired — say so rather
       // than leaving a panel describing something that no longer exists.
@@ -202,8 +216,10 @@ export class AgentPanelView extends EventTarget {
     const row = document.createElement('div')
     row.className = 'hc-agent-status'
     const pill = document.createElement('span')
-    pill.className = `hc-agent-pill ${agent.status}`
-    pill.textContent = this.#t(`agent.status.${agent.status}`, agent.status)
+    pill.className = `hc-agent-pill ${agent.status}${agent.stalled ? ' stalled' : ''}`
+    pill.textContent = agent.stalled
+      ? this.#t('agent.status.stalled', 'stalled')
+      : this.#t(`agent.status.${agent.status}`, agent.status)
     row.appendChild(pill)
     if (agent.total) {
       const progress = document.createElement('span')
@@ -298,6 +314,18 @@ export class AgentPanelView extends EventTarget {
     }
   }
 
+  /** Stop the work this panel is showing. One click, no dialog: the record is
+   *  the participant's own request and stopping it destroys nothing they
+   *  wrote — an answer that already landed is a note, and notes stay. */
+  async #stop(button: HTMLButtonElement): Promise<void> {
+    button.disabled = true
+    const stopped = await this.#registry?.stop(this.#id, 'stopped by you')
+    button.disabled = false
+    EffectBus.emit('toast:show', stopped
+      ? { type: 'tip', message: this.#t('agent.stopped', 'Stopped — the request is out of the hive.') }
+      : { type: 'warning', message: this.#t('agent.stop-error', 'Could not stop it — try again.') })
+  }
+
   close(): void {
     this.#registry?.removeEventListener('change', this.#render)
     document.removeEventListener('keydown', this.#onKey, true)
@@ -307,6 +335,7 @@ export class AgentPanelView extends EventTarget {
     this.#panel = null
     this.#body = null
     this.#input = null
+    this.#stopButton = null
     this.#id = ''
     this.#expandedActivity.clear()
   }
@@ -366,6 +395,7 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-pill{padding:0.12rem 0.5rem;border-radius:999px;font-size:0.68rem;letter-spacing:0.08em;
   text-transform:uppercase;border:1px solid rgba(${STEEL},0.4);color:rgba(${STEEL},0.9);}
 .hc-agent-pill.working{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.16);}
+.hc-agent-pill.stalled{border-color:rgba(214,178,110,0.7);color:rgba(226,196,140,0.95);background:none;}
 .hc-agent-pill.done{border-color:rgba(126,196,142,0.7);color:rgba(150,214,164,0.95);}
 .hc-agent-pill.failed{border-color:rgba(226,75,74,0.7);color:rgba(232,124,123,0.95);}
 .hc-agent-dim{font-size:0.72rem;color:rgba(216,230,238,0.5);}
@@ -391,6 +421,10 @@ export class AgentPanelView extends EventTarget {
   background:none;color:rgba(235,242,248,0.85);font:inherit;font-size:0.86rem;cursor:pointer;}
 .hc-agent-ok{background:rgba(${STEEL},0.9);border-color:rgba(${STEEL},0.9);color:#0c1118;font-weight:700;}
 .hc-agent-ok:disabled{opacity:0.55;cursor:default;}
+.hc-agent-stop{flex:0 0 auto;border-color:rgba(226,75,74,0.5);color:rgba(232,140,139,0.95);}
+.hc-agent-stop:hover{border-color:rgba(226,75,74,0.9);background:rgba(226,75,74,0.14);}
+.hc-agent-stop:disabled{opacity:0.55;cursor:default;}
+.hc-agent-stop[hidden]{display:none;}
 `
     document.head.appendChild(style)
   }

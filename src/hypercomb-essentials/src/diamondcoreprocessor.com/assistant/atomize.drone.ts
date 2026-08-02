@@ -8,6 +8,13 @@
 // session drains it and CREATES the parts as tiles. The hive asks; the parked
 // session builds.
 //
+// ONE GESTURE, TWO OPERATIONS — the drone picks. Standing on a page of 80
+// tiles and thinking "this needs breaking up" is a single intent; the
+// participant should not have to know that thinning a level and deepening a
+// leaf are different acts. A CROWDED layer (> ORGANIZE_THRESHOLD children)
+// routes to /organize, which then cascades into its own groups until every
+// level is manageable. Only an uncrowded layer is atomized.
+//
 // THE UNIT IS A TILE, AND THE TILE MUST BE A LEAF. Atomize never runs against
 // "the page as a topic", and it DOES NOTHING to a tile that already has
 // children — that tile has been broken down, and re-atomizing it would widen
@@ -26,6 +33,9 @@
 // answer a question" (see .claude/skills/bridge-listen/SKILL.md).
 import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
 import { childSigsOf, resolveCurrentLayer, type PlacementHistory, type PlacementLayer } from '../history/layer-placement.js'
+import { PendingAskIndex } from './ask-scope.js'
+import { ORGANIZE_THRESHOLD } from './organize.drone.js'
+import { mintCreationId } from './creation.js'
 
 /** Upper bound on the parts a responder should mint for one tile. */
 const SUBTOPIC_COUNT = 7
@@ -48,6 +58,11 @@ type LineageLike = { explorerSegments?: () => readonly string[]; domain?: unknow
 /** One tile on the current layer, with enough to tell a leaf from a branch. */
 type LayerChild = { name: string; children: readonly string[] }
 
+/** Why a tile was or wasn't asked about. A caller reporting to the
+ *  participant needs the REASON — "3 of 8" with no explanation is the kind of
+ *  silent shortfall that reads as a bug. */
+export type AtomizeOutcome = 'queued' | 'has-children' | 'already-queued' | 'ancestor-busy' | 'failed'
+
 export class AtomizeDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
@@ -69,6 +84,11 @@ export class AtomizeDrone extends Drone {
    *  the first and discard the rest, which reads as "atomize only did one
    *  tile". Each mint chains onto the last. */
   #chain: Promise<unknown> = Promise.resolve()
+
+  /** One structural ask per branch. An atomize holds the subtree UNDER its
+   *  target, so siblings run together but a tile whose ancestor is already
+   *  being reshaped waits — that ancestor may move it. */
+  #pending = new PendingAskIndex()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -95,9 +115,9 @@ export class AtomizeDrone extends Drone {
    *  `isLeaf` short-circuits the lookup for callers that already walked the
    *  layer; everyone else pays one read so the rule holds at every door
    *  (slash, quick-menu, foreach). */
-  async atomizeTile(rawLabel: string, isLeaf?: boolean): Promise<boolean> {
+  async atomizeTile(rawLabel: string, isLeaf?: boolean): Promise<AtomizeOutcome> {
     const label = normalizeCell(rawLabel) || String(rawLabel ?? '').trim()
-    if (!label) return false
+    if (!label) return 'failed'
 
     const segments = this.#segments()
 
@@ -105,11 +125,11 @@ export class AtomizeDrone extends Drone {
       const own = await this.#currentChildren([...segments, label])
       if (own === null) {
         console.warn(`[atomize] could not read "${label}" — refusing rather than guessing it is a leaf`)
-        return false
+        return 'failed'
       }
       if (own.length > 0) {
         console.log(`[atomize] "${label}" already has ${own.length} children — nothing to do`)
-        return false
+        return 'has-children'
       }
     }
 
@@ -137,6 +157,22 @@ export class AtomizeDrone extends Drone {
       return 0
     }
 
+    // CROWDED LAYERS ORGANIZE THEMSELVES. Standing on a page of 80 tiles and
+    // thinking "this needs breaking up" is ONE intent, and the participant
+    // should not have to know that thinning a level and deepening a leaf are
+    // two different operations. Too many children means the layer needs a
+    // level inserted, not eighty leaves deepened — so route there and let the
+    // rest happen without them.
+    if (children.length > ORGANIZE_THRESHOLD) {
+      EffectBus.emit('toast:show', {
+        type: 'tip',
+        message: `${where} has ${children.length} tiles — grouping them first, then the groups can be broken down.`,
+      })
+      console.log(`[atomize] ${where} is crowded (${children.length}) — routing to organize`)
+      EffectBus.emit('organize:layer', {})
+      return 0
+    }
+
     const leaves = children.filter(c => c.children.length === 0)
     const branches = children.length - leaves.length
 
@@ -151,20 +187,34 @@ export class AtomizeDrone extends Drone {
     }
 
     let queued = 0
+    let alreadyQueued = 0
+    let ancestorBusy = 0
     for (const leaf of leaves) {
       // Leafness already established by the walk — skip the re-read.
-      if (await this.atomizeTile(leaf.name, true)) queued++
+      const outcome = await this.atomizeTile(leaf.name, true)
+      if (outcome === 'queued') queued++
+      else if (outcome === 'already-queued') alreadyQueued++
+      else if (outcome === 'ancestor-busy') ancestorBusy++
     }
 
-    // Say what was SKIPPED — a foreach that quietly covered less than the
-    // layer reads as "it did everything" when it didn't.
+    // Say what was SKIPPED, and WHY — a foreach that quietly covered less
+    // than the layer reads as "it did everything" when it didn't, and
+    // "already asked" is a different fact from "already has children".
+    const skips = [
+      branches ? `${branches} already had children` : '',
+      alreadyQueued ? `${alreadyQueued} already queued` : '',
+      ancestorBusy ? `${ancestorBusy} waiting on a parent already being reshaped` : '',
+    ].filter(Boolean).join(', ')
+
     EffectBus.emit('toast:show', {
       type: 'tip',
-      message: `Atomizing ${queued} tile${queued === 1 ? '' : 's'} on ${where}`
-        + (branches ? ` (${branches} already had children — skipped)` : '')
-        + ' — Haiku is working out the parts.',
+      message: queued
+        ? `Atomizing ${queued} tile${queued === 1 ? '' : 's'} on ${where}`
+          + (skips ? ` (${skips})` : '')
+          + ' — Haiku is working out the parts.'
+        : `Nothing new to atomize on ${where}${skips ? ` — ${skips}.` : '.'}`,
     })
-    console.log(`[atomize] layer ${where}: ${queued} queued, ${branches} skipped (already branches)`)
+    console.log(`[atomize] layer ${where}: ${queued} queued, ${branches} branches, ${alreadyQueued} already queued, ${ancestorBusy} ancestor-busy`)
     return queued
   }
 
@@ -177,14 +227,38 @@ export class AtomizeDrone extends Drone {
     prompt: string,
     targets: readonly string[],
     segments: readonly string[],
-  ): Promise<boolean> {
-    const run = this.#chain.then(async (): Promise<boolean> => {
+  ): Promise<AtomizeOutcome> {
+    // The subtree this ask reshapes: an atomize creates children UNDER its
+    // target, so the branch it holds is the target's own path. Siblings
+    // therefore never collide and a foreach over a layer runs in parallel.
+    const scopePath = targets.length ? [...segments, targets[0]] : [...segments]
+
+    const askedAt = Date.now()
+    const run = this.#chain.then(async (): Promise<AtomizeOutcome> => {
       try {
         const store = get<StoreLike>('@hypercomb.social/Store')
         if (!store?.putOptimization) {
           console.warn('[atomize] Store.putOptimization unavailable')
-          return false
+          return 'failed'
         }
+
+        const held = await this.#pending.conflict(scopePath)
+        if (held) {
+          const same = held.path.length === scopePath.length
+          console.log(
+            `[atomize] /${scopePath.join('/')} is held by a pending ${held.task}`
+            + ` at /${held.path.join('/')} — not asking`,
+          )
+          return same && held.task === ATOMIZE_TASK ? 'already-queued' : 'ancestor-busy'
+        }
+        // Claim BEFORE the write: a foreach runs faster than the pool scan
+        // it would otherwise re-read, and would double-mint the same branch.
+        this.#pending.claim(ATOMIZE_TASK, scopePath)
+
+        // One id for every part this act creates. Atomize's tiles are made by
+        // the RESPONDER over the bridge, so the id travels in the ask and the
+        // responder stamps with it — same batch identity either side.
+        const creationId = await mintCreationId(ATOMIZE_TASK, scopePath, askedAt)
 
         const record = {
           kind: ASK_KIND,
@@ -195,12 +269,16 @@ export class AtomizeDrone extends Drone {
             model: ATOMIZE_MODEL,
             targets: [...targets],
             segments: [...segments],
+            // The branch this ask holds — read by the conflict index so an
+            // ancestor being reshaped blocks it (see ask-scope.ts).
+            scopePath,
             // Always a leaf by the time an atomize is minted — stated so the
             // responder never has to wonder whether to merge with siblings.
             existing: [],
             count: SUBTOPIC_COUNT,
+            creationId,
             status: 'pending',
-            askedAt: Date.now(),
+            askedAt,
           },
           mark: 'persistent',
         }
@@ -213,10 +291,13 @@ export class AtomizeDrone extends Drone {
         // pill off ask:queued and drops it when the answer lands.
         EffectBus.emit('ask:queued', { sig, prompt, targets: [...targets], model: ATOMIZE_MODEL })
         console.log(`[atomize] queued (${ATOMIZE_MODEL}): ${targets.join(', ')}  [${sig.slice(0, 12)}…]`)
-        return true
+        return 'queued'
       } catch (err) {
+        // The claim named an ask that never landed — let the request through
+        // next time rather than blocking it until the cache expires.
+        this.#pending.release(scopePath)
         console.warn('[atomize] failed to queue:', err)
-        return false
+        return 'failed'
       }
     })
     // The chain must survive a rejected link, or one bad mint stalls every

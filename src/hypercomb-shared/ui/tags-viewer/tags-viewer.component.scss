@@ -96,6 +96,14 @@ $mint: #6fbf94;
   // here. The intro line above already says what pheromones are and that
   // filtering is the way in.
   .tags-foot { display: none; }
+
+  // Bouquets on a phone are a SELECTION verb or nothing. Loading one arms the
+  // brush, and the brush's surface is withheld here — so a bouquet with no
+  // tiles picked would be a control with nowhere to go. With a selection it is
+  // the best pheromone gesture touch has: pick tiles, tap the bouquet, and the
+  // whole group lands in one transaction (see loadBouquet).
+  .tags-bouquets-section { display: none; }
+  .tags-bouquets-section.has-selection { display: block; }
 }
 
 .tags-header {
@@ -573,6 +581,206 @@ $mint: #6fbf94;
     border-color: rgba($steel, 0.2);
     color: #8ea2b0;
   }
+}
+
+// ── bouquets — the brush's picked set, named ──────────────
+//
+// A bouquet is the same mint family as the painter (it IS the brush's load),
+// but calmer: the list is a shelf you take things off, not a live takeover.
+
+// The bouquet in hand, named or not. The signature is the point: it exists
+// before any name does.
+.bouquet-in-hand {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  margin: 0 0 0.45em;
+  padding: 0 1em;
+  font-size: 0.72em;
+  color: rgba($mint, 0.85);
+
+  .mat-sym { font-size: 1em; }
+}
+
+.bouquet-in-hand-label {
+  font-weight: 600;
+  color: #dff2e8;
+}
+
+.bouquet-in-hand-sig {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  color: rgba(214, 228, 238, 0.5);
+}
+
+// The offer to name what is picked. Dashed, like the other "there is more you
+// could do here" affordance in this panel (stage-selection).
+.bouquet-save-open {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  width: calc(100% - 2em);
+  margin: 0 1em 0.6em;
+  padding: 0.35em 0.6em;
+  background: none;
+  border: 1px dashed rgba($mint, 0.4);
+  border-radius: tw.$radius-card;
+  color: rgba(214, 238, 226, 0.85);
+  font: inherit;
+  font-size: 0.74em;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+
+  .mat-sym { font-size: 1.05em; color: $mint; }
+  &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: #eefaf4; }
+}
+
+.bouquet-name-form {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  margin: 0 1em 0.6em;
+}
+
+.bouquet-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.3em 0.5em;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba($mint, 0.45);
+  border-radius: 3px;
+  color: #eaf4ee;
+  font: inherit;
+  font-size: 0.76em;
+
+  &::placeholder { color: rgba(226, 235, 244, 0.4); }
+  &:focus { outline: none; border-color: rgba($mint, 0.8); }
+}
+
+.bouquet-name-commit,
+.bouquet-name-cancel {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid rgba($steel, 0.35);
+  border-radius: 3px;
+  color: #c6d5e0;
+  font: inherit;
+  font-size: 0.72em;
+  padding: 0.25em 0.6em;
+  cursor: pointer;
+
+  &:hover { background: rgba($steel, 0.16); color: #fff; }
+}
+
+.bouquet-name-commit {
+  border-color: rgba($mint, 0.6);
+  color: #cdead9;
+
+  &:hover { background: rgba($mint, 0.22); color: #fff; }
+}
+
+.tags-bouquets-section {
+  flex: 0 0 auto;
+  border-top: 1px solid rgba($steel, 0.18);
+}
+
+.bouquet-title { color: rgba($mint, 0.95); }
+
+.bouquet-hint {
+  margin: 0;
+  padding: 0 1em 0.5em;
+  font-size: 0.72em;
+  line-height: 1.45;
+  color: #8ea2b0;
+}
+
+.bouquet-list {
+  list-style: none;
+  margin: 0 0 0.6em;
+  padding: 0 1em;
+  max-height: 12em;
+  overflow-y: auto;
+}
+
+.bouquet-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3em;
+  padding: 0.15em 0;
+
+  // In hand: every tile click is landing this bouquet, so it reads as loud as
+  // the painter it armed.
+  &.loaded .bouquet-load {
+    border-color: rgba($mint, 0.6);
+    background: rgba($mint, 0.12);
+  }
+}
+
+.bouquet-load {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25em;
+  padding: 0.35em 0.5em;
+  background: none;
+  border: 1px solid rgba($steel, 0.25);
+  border-radius: tw.$radius-card;
+  color: #d6e4ee;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+
+  &:hover { background: rgba($mint, 0.08); border-color: rgba($mint, 0.45); }
+}
+
+.bouquet-name {
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+// The marks it holds, in the settled chip shape: swatch left, label right.
+.bouquet-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em;
+}
+
+.bouquet-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.1em 0.3em 0.1em 0.22em;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.68em;
+  color: rgba(214, 228, 238, 0.85);
+}
+
+.bouquet-mark-swatch {
+  flex: 0 0 auto;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+}
+
+.bouquet-forget {
+  flex: 0 0 auto;
+  align-self: center;
+  background: none;
+  border: none;
+  padding: 0 0.25em;
+  color: rgba(158, 179, 194, 0.6);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { color: #eaf0f4; }
 }
 
 .apply-title { color: rgba($mint, 0.95); }

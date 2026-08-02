@@ -27,17 +27,12 @@ export const CANVAS_BG_PALETTES = ['steel', 'daylight', 'indigo', 'teal', 'ember
 type Archetype = typeof CANVAS_BG_ARCHETYPES[number]
 type Palette = typeof CANVAS_BG_PALETTES[number]
 
-// User-typed token → canonical archetype. Friendly aliases so `/canvas hexdots`
-// and `/canvas rings` resolve.
-const ARCH_ALIASES: Record<string, Archetype> = {
-  depth: 'depth',
-  honeycomb: 'honeycomb', comb: 'honeycomb', hive: 'honeycomb',
-  sheen: 'sheen', brushed: 'sheen',
-  mesh: 'mesh', aurora: 'mesh',
-  dots: 'dots', hexdots: 'dots', 'hex-dots': 'dots',
-  contour: 'contour', rings: 'contour',
-  grid: 'grid', carbon: 'grid', carbongrid: 'grid', 'carbon-grid': 'grid',
-}
+// A token is an archetype only if it IS one. There are deliberately no built-in
+// synonyms: a second word for a thing that already has a word is confusion the
+// participant did not ask for, and it makes the vocabulary something you have to
+// learn rather than read. Aliases are the participant's to mint, never ours.
+const archetypeOf = (token: string): Archetype | null =>
+  CANVAS_BG_ARCHETYPES.includes(token as Archetype) ? token as Archetype : null
 
 const DEFAULT_ARCHETYPE: Archetype = 'contour'
 
@@ -113,30 +108,41 @@ const cssFor = (arch: string, p: Pal): Css => {
 // (body CSS, the animated #hc-glow / #hc-aurora elements, and the Pixi lattice
 // in GridLinesDrone), so a swatch cannot simply reuse `cssFor` — it has to
 // fold all three back into one `background` shorthand at chip scale.
+//
+// A swatch is a LEGIBLE MINIATURE, not a scale model. The live alphas (0.06 …
+// 0.18) are tuned for a whole screen, where a whisper of a pattern is still
+// thousands of pixels of it; in a 36×18 chip the same values are a flat dark
+// rectangle and every option looks identical. So the chip keeps the archetype's
+// SHAPE and its palette's colours, and pushes the contrast far enough that the
+// difference between two options is visible at a glance. The pattern pitch is
+// likewise fixed in chip pixels (4–5px, three to eight repeats across) rather
+// than inherited from the live backdrop.
 const swatchFor = (arch: string, p: Pal): string => {
   const a = (alpha: number) => (p.light ? `rgba(${p.accent2},${alpha})` : `rgba(${p.accent},${alpha})`)
-  const base = `linear-gradient(160deg, ${p.base} 0%, ${p.base2} 100%) ${p.base}`
-  const lit = `radial-gradient(120% 110% at 50% 0%, ${glowC(p, p.light ? 0.5 : 0.16)} 0%, transparent 70%) 0 0/cover no-repeat`
+  // base2 on top, base at the bottom — a visible ramp even with no pattern.
+  const base = `linear-gradient(160deg, ${p.base2} 0%, ${p.base} 100%) ${p.base}`
+  const lit = `radial-gradient(120% 120% at 50% -10%, ${glowC(p, p.light ? 0.65 : 0.42)} 0%, transparent 72%) 0 0/cover no-repeat`
   switch (arch) {
     case 'grid':
-      return `${lit}, linear-gradient(${a(0.4)} 1px, transparent 1px) 0 0/6px 6px,
-        linear-gradient(90deg, ${a(0.4)} 1px, transparent 1px) 0 0/6px 6px, ${base}`
+      return `${lit}, linear-gradient(${a(0.65)} 1px, transparent 1px) 0 0/5px 5px,
+        linear-gradient(90deg, ${a(0.65)} 1px, transparent 1px) 0 0/5px 5px, ${base}`
     case 'dots':
-      return `${lit}, radial-gradient(${a(0.55)} 1.1px, transparent 1.6px) 0 0/6px 6px, ${base}`
+      return `${lit}, radial-gradient(${a(0.95)} 1.2px, transparent 1.5px) 0 0/5px 5px, ${base}`
     case 'honeycomb':
-      return `${lit}, repeating-linear-gradient(60deg, ${a(0.34)} 0 1px, transparent 1px 6px) 0 0/cover,
-        repeating-linear-gradient(-60deg, ${a(0.34)} 0 1px, transparent 1px 6px) 0 0/cover,
-        repeating-linear-gradient(0deg, ${a(0.34)} 0 1px, transparent 1px 6px) 0 0/cover, ${base}`
+      return `${lit}, repeating-linear-gradient(60deg, ${a(0.6)} 0 1px, transparent 1px 5px) 0 0/cover,
+        repeating-linear-gradient(-60deg, ${a(0.6)} 0 1px, transparent 1px 5px) 0 0/cover,
+        repeating-linear-gradient(0deg, ${a(0.6)} 0 1px, transparent 1px 5px) 0 0/cover, ${base}`
     case 'sheen':
-      return `linear-gradient(135deg, transparent 28%, ${a(0.34)} 50%, transparent 72%) 0 0/cover no-repeat, ${base}`
+      return `linear-gradient(115deg, transparent 22%, ${a(0.75)} 48%, transparent 74%) 0 0/cover no-repeat, ${base}`
     case 'mesh':
-      return `radial-gradient(70% 70% at 22% 18%, ${a(0.5)} 0%, transparent 72%) 0 0/cover no-repeat,
-        radial-gradient(75% 75% at 82% 84%, rgba(${p.accent2},${p.light ? 0.5 : 0.7}) 0%, transparent 72%) 0 0/cover no-repeat, ${base}`
+      return `radial-gradient(80% 90% at 20% 10%, ${a(0.9)} 0%, transparent 70%) 0 0/cover no-repeat,
+        radial-gradient(85% 95% at 84% 90%, rgba(${p.accent2},${p.light ? 0.8 : 1}) 0%, transparent 70%) 0 0/cover no-repeat, ${base}`
     case 'contour':
-      return `radial-gradient(70% 70% at 50% 50%, ${glowC(p, p.light ? 0.45 : 0.12)} 0%, transparent 72%) 0 0/cover no-repeat,
-        repeating-radial-gradient(circle at 50% 50%, transparent 0 3px, ${a(0.38)} 3px 4px) 0 0/cover, ${base}`
-    default: // depth
-      return `${lit}, radial-gradient(150% 130% at 50% 50%, transparent 55%, rgba(${p.deep},${p.light ? 0.2 : 0.55}) 100%) 0 0/cover no-repeat, ${base}`
+      return `radial-gradient(60% 90% at 50% 50%, ${glowC(p, p.light ? 0.6 : 0.35)} 0%, transparent 74%) 0 0/cover no-repeat,
+        repeating-radial-gradient(circle at 50% 50%, transparent 0 2px, ${a(0.7)} 2px 3px) 0 0/cover, ${base}`
+    default: // depth — no pattern at all, so its identity IS the lit dome
+      return `radial-gradient(110% 130% at 50% -20%, ${glowC(p, p.light ? 0.75 : 0.6)} 0%, transparent 78%) 0 0/cover no-repeat,
+        radial-gradient(150% 130% at 50% 50%, transparent 40%, rgba(${p.deep},${p.light ? 0.35 : 0.9}) 100%) 0 0/cover no-repeat, ${base}`
   }
 }
 
@@ -198,8 +204,9 @@ export class CanvasBackgroundService extends EventTarget {
 
   /**
    * Apply one or more space-separated tokens: an archetype (depth, honeycomb,
-   * sheen, mesh, dots, contour — plus aliases), a palette (steel, daylight,
-   * indigo, teal, ember), or `off`. Unknown tokens are ignored. Returns a short
+   * sheen, mesh, dots, contour, grid), a palette (steel, daylight, indigo,
+   * teal, ember), or `off`/`on`. Each word means exactly itself — there are no
+   * synonyms. Unknown tokens are ignored. Returns a short
    * status describing the new state, or null when nothing matched.
    */
   set(input: string): string | null {
@@ -207,9 +214,9 @@ export class CanvasBackgroundService extends EventTarget {
     if (tokens.length === 0) return null
     let matched = false
     for (const tok of tokens) {
-      if (tok === 'off' || tok === 'none' || tok === 'hide') { this.#enabled = false; matched = true; continue }
-      if (tok === 'on' || tok === 'show') { this.#enabled = true; matched = true; continue }
-      const arch = ARCH_ALIASES[tok] ?? (CANVAS_BG_ARCHETYPES.includes(tok as Archetype) ? tok as Archetype : null)
+      if (tok === 'off') { this.#enabled = false; matched = true; continue }
+      if (tok === 'on') { this.#enabled = true; matched = true; continue }
+      const arch = archetypeOf(tok)
       if (arch) { this.#archetype = arch; this.#enabled = true; matched = true; continue }
       if (tok === 'auto') { this.#palette = null; matched = true; continue }
       if (CANVAS_BG_PALETTES.includes(tok as Palette)) { this.#palette = tok as Palette; matched = true; continue }
@@ -235,8 +242,8 @@ export class CanvasBackgroundService extends EventTarget {
     let pal: Palette = this.resolvedPalette()
     let known = false
     for (const tok of tokens) {
-      if (tok === 'off' || tok === 'none' || tok === 'hide') return ''
-      const a = ARCH_ALIASES[tok] ?? null
+      if (tok === 'off') return ''
+      const a = archetypeOf(tok)
       if (a) { arch = a; known = true; continue }
       if (tok === 'auto') { pal = this.#isLight() ? 'daylight' : 'steel'; known = true; continue }
       if (CANVAS_BG_PALETTES.includes(tok as Palette)) { pal = tok as Palette; known = true; continue }

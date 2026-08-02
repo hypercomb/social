@@ -21,7 +21,7 @@
       } @else {
         @for (place of draft(); track place.key) {
           <div class="place">
-            <span class="mat-sym">place</span><span>{{ place.label }}</span>
+            <span class="mat-sym">nearby</span><span>{{ place.label }}</span>
             <button type="button" (click)="removePlace(place.key)" [attr.aria-label]="'filter.remove-place' | t">×</button>
           </div>
         }

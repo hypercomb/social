@@ -121,6 +121,17 @@ const BUILTIN_SETS: SubstrateSource[] = [
   { type: 'url', id: 'builtin:theme-geometric', baseUrl: '/substrate/theme-geometric/',  label: 'Geometric', builtin: true },
   { type: 'url', id: 'builtin:theme-abstract',  baseUrl: '/substrate/theme-abstract/',   label: 'Abstract',  builtin: true },
   { type: 'url', id: 'builtin:theme-nature',    baseUrl: '/substrate/theme-nature/',     label: 'Nature',    builtin: true },
+  // The five palette sets. Their tile rasters shipped in `public/substrate/`
+  // but the sources had been dropped from this list, which orphaned them —
+  // nothing could select the images. A background theme names one of these as
+  // the tiles half of its look (see BackgroundThemeService). New builtins are
+  // merged on every load, so this needs no SETS_VERSION bump: the version only
+  // governs whether an UNCONFIGURED active source advances.
+  { type: 'url', id: 'builtin:steel',    baseUrl: '/substrate/steel/',    label: 'Steel',    builtin: true },
+  { type: 'url', id: 'builtin:daylight', baseUrl: '/substrate/daylight/', label: 'Daylight', builtin: true },
+  { type: 'url', id: 'builtin:indigo',   baseUrl: '/substrate/indigo/',   label: 'Indigo',   builtin: true },
+  { type: 'url', id: 'builtin:teal',     baseUrl: '/substrate/teal/',     label: 'Teal',     builtin: true },
+  { type: 'url', id: 'builtin:ember',    baseUrl: '/substrate/ember/',    label: 'Ember',    builtin: true },
   // The participant's own collection — resolves from the references pool,
   // no walk. LAST on purpose: `resolve()` falls back to the FIRST builtin,
   // and a reference set nothing has been copied into yet is empty, which would

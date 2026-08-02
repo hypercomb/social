@@ -1275,22 +1275,21 @@ export class ShowCellDrone extends Drone {
    *  resource so first paint finds them hot in the Store cache. Runs once
    *  after registration, before the first pulse. Best-effort. */
   /**
-   * WARM THE LABELS. NOTHING ELSE.
+   * WARM THE PROPS. LET THE IMAGES ARRIVE AT IDLE.
    *
-   * This used to walk `hc:tile-props-index` — an index of EVERY tile in the
-   * hive — preheating every props blob and then every `small.image` behind
-   * them. Measured on the native client (boot IO census, real hive): 468
-   * resources / 41.7 MB read before first paint, to draw a page of NINE
-   * tiles. It read essentially every blob in the store, every boot, and the
-   * renderer's own reads queued behind the flood.
+   * The props blobs stay warm and awaited: they are the map from a tile to its
+   * `small.image`, they are under a kilobyte each, and the render path is
+   * measurably NOT tolerant of finding them cold — gutting this warm entirely
+   * left tiles painting with no picture at all, which is the very complaint
+   * this work started from.
    *
-   * It was never needed. The render path reads the props and image of what it
-   * actually draws, `#prebakeClickTargets` warms the neighbours at idle once a
-   * view settles, and both work cold. Warming the whole hive to paint one page
-   * is the opposite of caching the current layer.
-   *
-   * What survives is the part that is genuinely free: the label list, which
-   * seeds the label atlas and reads nothing.
+   * The IMAGES are a different animal. Preheating every `small.image` in the
+   * hive read 41.7 MB before first paint (native boot IO census, real hive) to
+   * draw NINE tiles, and the renderer's own reads queued behind the flood. The
+   * bytes a visible tile needs are read by the render path itself; this warm
+   * only ever helped tiles the user had not navigated to. So it yields —
+   * `requestIdleCallback`, four at a time — and the first paint stops paying
+   * for pictures nobody is looking at yet.
    */
   public override async warmup(): Promise<void> {
     try {
@@ -1300,7 +1299,50 @@ export class ShowCellDrone extends Drone {
       // Full-lineage (sig) keys aren't labels — only legacy bare-label
       // entries can seed the atlas's label slots.
       this.#warmLabels = Object.keys(propsIndex).filter(k => !/^[0-9a-f]{64}$/.test(k))
+
+      const propsSigs = Object.values(propsIndex)
+        .filter((v): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/i.test(v))
+      if (!propsSigs.length) return
+
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+        { preheatResource?: (sig: string) => Promise<Blob | null> } | undefined
+      if (!store?.preheatResource) return
+
+      const propsBlobs = await Promise.all(
+        propsSigs.map(sig => store.preheatResource!(sig).catch(() => null))
+      )
+
+      const imageSigs = new Set<string>()
+      for (const blob of propsBlobs) {
+        if (!blob) continue
+        try {
+          const props = JSON.parse(await blob.text())
+          const sig = props?.small?.image
+          if (typeof sig === 'string' && /^[a-f0-9]{64}$/i.test(sig)) imageSigs.add(sig)
+        } catch { /* skip malformed */ }
+      }
+
+      if (imageSigs.size) this.#preheatImagesAtIdle([...imageSigs], store.preheatResource)
     } catch { /* best-effort */ }
+  }
+
+  /** Feed the image warm through idle time, a few at a time, so it can never
+   *  again be a first-paint tax. Best-effort throughout: a tile that needs one
+   *  of these reads it itself. */
+  #preheatImagesAtIdle = (sigs: string[], preheat: (sig: string) => Promise<Blob | null>): void => {
+    const queue = [...sigs]
+    const whenIdle = (run: () => void): void => {
+      const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback
+      if (typeof ric === 'function') ric(run)
+      else setTimeout(run, 1500)
+    }
+    const pump = (): void => {
+      const batch = queue.splice(0, 4)
+      if (!batch.length) return
+      void Promise.allSettled(batch.map(sig => preheat(sig).catch(() => null)))
+        .then(() => { if (queue.length) whenIdle(pump) })
+    }
+    whenIdle(pump)
   }
 
   #warmLabels: string[] = []

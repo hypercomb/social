@@ -114,7 +114,9 @@ const store = () => ioc()?.get('@hypercomb.social/Store') as StoreLike | undefin
 
 class CollectionsSource implements AggregateSource {
   readonly id = 'collections'
-  readonly icon = 'place'
+  // Not a map pin: a collection is a Portal — a way OUT of this page into
+  // another root. Same glyph the controls-bar rail uses for Portals.
+  readonly icon = 'nearby'
   readonly titleKey = 'collections-landing.title'
   readonly ledeKey = 'collections-landing.lede'
   readonly createKey = 'collections-landing.new'

@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/format/format.queen.ts
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
+import { cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt } from '../editor/tile-properties.js'
 
 type Store = {
   getResource: (signature: string) => Promise<Blob | null>
@@ -37,17 +37,25 @@ export class FormatQueenBee extends QueenBee {
     if (active) {
       const store = window.ioc.get<Store>('@hypercomb.social/Store')
       if (store) {
+        // Canonical slot first, derived index as a fast path — never let a
+        // cache miss report a formatted tile as empty.
+        const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+        const segments = lineage?.explorerSegments?.() ?? []
         try {
-          const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-          const segments = lineage?.explorerSegments?.() ?? []
-          const index = readTilePropsIndex()
-          const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, active), active)
-          if (!propsSig) throw new Error('no index entry')
-          const propsBlob = await store.getResource(propsSig)
-          if (!propsBlob) throw new Error('props blob missing')
-          properties = JSON.parse(await propsBlob.text())
+          const layerProps = await readTilePropertiesAt(segments, active)
+          if (Object.keys(layerProps).length === 0) throw new Error('no layer-slot properties')
+          properties = layerProps
         } catch {
-          // no properties — open with empty
+          try {
+            const index = readTilePropsIndex()
+            const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, active), active)
+            if (!propsSig) throw new Error('no index entry')
+            const propsBlob = await store.getResource(propsSig)
+            if (!propsBlob) throw new Error('props blob missing')
+            properties = JSON.parse(await propsBlob.text())
+          } catch {
+            // no properties — open with empty
+          }
         }
       }
     }

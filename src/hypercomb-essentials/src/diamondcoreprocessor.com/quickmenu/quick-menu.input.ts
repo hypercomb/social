@@ -65,6 +65,21 @@ const JITTER_PX = 12
 
 const OWNER = 'quick-menu'
 
+/**
+ * Drag-to-move's gate source. It CLAIMS the gate when its own hold matures at
+ * 300ms — on a finger that has not travelled and may never travel — expressly
+ * to reserve the gesture in case it becomes a drag. This summon lands 80ms
+ * later and used to refuse outright on a claimed gate, so on any tile you can
+ * move (which is all of your own) the ring was unreachable: the reservation
+ * for a drag that had not happened outranked the gesture actually being made.
+ *
+ * TRAVEL is what tells them apart, and it already does — travel past the
+ * jitter box cancels this summon, and stillness past this timer is not a drag.
+ * So a still-armed drag is not a competitor to be deferred to; it is the same
+ * press, and the ring takes the claim off it.
+ */
+const TOUCH_MOVE_SOURCE = 'touch-move'
+
 /** How far the drawn pointer may travel from the ring centre. Clamping the
  *  magnitude never changes the angle, so the slot you are on is unaffected —
  *  it only stops the pointer wandering off into empty screen while locked. */
@@ -73,7 +88,14 @@ const REACH = RING_DISTANCE + HEX_RADIUS * 1.1
 type SlashLike = { execute(name: string, args: string): unknown }
 type OverlayLike = { labelAtClient(x: number, y: number): string | null }
 type LineageLike = { explorerSegments?: () => readonly string[] }
-type GateLike = { lock(owner: string): void; unlock(owner: string): void; active?: boolean }
+type GateLike = {
+  lock(owner: string): void
+  unlock(owner: string): void
+  release?(source: string): void
+  active?: boolean
+  locked?: boolean
+  owner?: string | null
+}
 type StackLike = { push(mode: InputMode): void; pop(name: string): void }
 
 type Level = {
@@ -126,6 +148,8 @@ export class QuickMenuInput {
    * the gesture close itself no matter which pointer it was waiting for.
    */
   #touches = new Set<number>()
+  /** A tile drag is live — the finger already declared itself by travelling. */
+  #touchDragging = false
 
   /**
    * Where the DRAWN pointer is, in screen coordinates. The real cursor is
@@ -162,6 +186,10 @@ export class QuickMenuInput {
     // The keyboard trigger. KeymapService owns the keydown — it already knows
     // about focus suppression and user overrides — and hands us the raw event
     // so we can watch for the matching keyup and finish the gesture.
+    EffectBus.on<{ active?: boolean }>('touch:dragging', payload => {
+      this.#touchDragging = !!payload?.active
+    })
+
     EffectBus.on<{ cmd?: string; event?: KeyboardEvent }>('keymap:invoke', payload => {
       if (payload?.cmd !== 'ui.quickMenu') return
       this.#summonFromKey(payload.event)
@@ -297,7 +325,17 @@ export class QuickMenuInput {
         // way there is nothing left to summon from.
         if (!this.#touches.has(e.pointerId)) { this.#pointerId = null; return }
         if (isPointerConsumed(e.pointerId)) { this.#pointerId = null; return }
-        if (get<GateLike>('@diamondcoreprocessor.com/InputGate')?.active) { this.#pointerId = null; return }
+        // A drag that has actually STARTED owns the finger — travel decided it
+        // before this timer ran.
+        if (this.#touchDragging) { this.#pointerId = null; return }
+        const gate = get<GateLike>('@diamondcoreprocessor.com/InputGate')
+        // A modal lock is absolute: the ring must not open behind an editor.
+        if (gate?.locked) { this.#pointerId = null; return }
+        const owner = gate?.owner ?? null
+        if (owner && owner !== TOUCH_MOVE_SOURCE) { this.#pointerId = null; return }
+        // Take the still-armed drag's reservation, so a finger that moves from
+        // here aims the ring instead of also picking the tile up.
+        if (owner === TOUCH_MOVE_SOURCE) gate?.release?.(TOUCH_MOVE_SOURCE)
         try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
         // Resolve the tile from the press COORDINATES. A finger produces no
         // hover, so there is no remembered tile to read — only where it landed.

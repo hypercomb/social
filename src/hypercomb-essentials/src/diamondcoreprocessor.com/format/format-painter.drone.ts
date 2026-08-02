@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/format/format-painter.drone.ts
 import { EffectBus } from '@hypercomb/core'
 import type { FormatEntry, FormatProvider } from './format.provider.js'
-import { cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
+import { cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt } from '../editor/tile-properties.js'
 
 // ── built-in providers ──────────────────────────────────
 
@@ -74,18 +74,26 @@ export class FormatPainterDrone extends EventTarget {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return
 
+    // Canonical slot first, derived index as a fast path — a cache miss must
+    // never present the tile as unformatted (see #paint for why that matters).
     let properties: Record<string, unknown> = {}
+    const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const segments = lineage?.explorerSegments?.() ?? []
     try {
-      const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-      const segments = lineage?.explorerSegments?.() ?? []
-      const index = readTilePropsIndex()
-      const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, cell), cell)
-      if (!propsSig) throw new Error('no index entry')
-      const propsBlob = await store.getResource(propsSig)
-      if (!propsBlob) throw new Error('props blob missing')
-      properties = JSON.parse(await propsBlob.text())
+      const layerProps = await readTilePropertiesAt(segments, cell)
+      if (Object.keys(layerProps).length === 0) throw new Error('no layer-slot properties')
+      properties = layerProps
     } catch {
-      // no properties
+      try {
+        const index = readTilePropsIndex()
+        const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, cell), cell)
+        if (!propsSig) throw new Error('no index entry')
+        const propsBlob = await store.getResource(propsSig)
+        if (!propsBlob) throw new Error('props blob missing')
+        properties = JSON.parse(await propsBlob.text())
+      } catch {
+        // no properties
+      }
     }
 
     this.#openPainter(cell, properties)
@@ -180,16 +188,27 @@ export class FormatPainterDrone extends EventTarget {
       // entries are legacy fallback on read, never written.
       const cellKey = await cellLocationSig(segments, cell)
 
-      // 1. read current props (content-addressed → legacy 0000 fallback)
+      // 1. read current props — CANONICAL SLOT FIRST, index as a fast path.
+      // The index is a derived cache and must never be load-bearing: this
+      // path merges the painted entries into what it reads and writes the
+      // result back, so resolving through the cache alone meant an index
+      // miss silently REPLACED the layer's properties with just the painted
+      // ones. Same order as tile-editor.drone.ts.
       let props: Record<string, unknown> = {}
       try {
-        const propsSig = lookupTilePropsSig(index, cellKey, cell)
-        if (!propsSig) throw new Error('no index entry')
-        const propsBlob = await store.getResource(propsSig)
-        if (!propsBlob) throw new Error('props blob missing')
-        props = JSON.parse(await propsBlob.text())
+        const layerProps = await readTilePropertiesAt(segments, cell)
+        if (Object.keys(layerProps).length === 0) throw new Error('no layer-slot properties')
+        props = layerProps
       } catch {
-        // no existing props — start fresh
+        try {
+          const propsSig = lookupTilePropsSig(index, cellKey, cell)
+          if (!propsSig) throw new Error('no index entry')
+          const propsBlob = await store.getResource(propsSig)
+          if (!propsBlob) throw new Error('props blob missing')
+          props = JSON.parse(await propsBlob.text())
+        } catch {
+          // no existing props — start fresh
+        }
       }
 
       // 2. apply each enabled entry via its provider

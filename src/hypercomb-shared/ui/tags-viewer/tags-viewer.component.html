@@ -90,7 +90,7 @@
          tile" has a visible answer before anything is picked. -->
     @if (!painterOpen()) {
       <button class="tags-painter-open" type="button" (click)="openPainter()" [attr.title]="'tags.painter.open.hint' | t">
-        <span class="mat-sym">brush</span>{{ 'tags.painter.open' | t }}
+        <span class="mat-sym">air</span>{{ 'tags.painter.open' | t }}
       </button>
     }
 
@@ -105,6 +105,16 @@
         @if (selectedCount() === 0) {
           <p class="painter-empty">{{ 'tags.painter.none' | t }}</p>
         } @else {
+          <!-- What is in hand is a bouquet whether or not it is ever named, so
+               it shows its identity from the first mark. Two people who gather
+               the same marks see the same signature. -->
+          @if (bouquetShortSig(); as sig) {
+            <p class="bouquet-in-hand">
+              <span class="mat-sym" aria-hidden="true">local_florist</span>
+              <span class="bouquet-in-hand-label">{{ loadedBouquet() ?? ('tags.bouquet.unnamed' | t) }}</span>
+              <span class="bouquet-in-hand-sig">{{ sig }}</span>
+            </p>
+          }
           <ul class="painter-picked">
             @for (pick of selectedChips(); track pick.name) {
               <li class="painter-chip">
@@ -119,6 +129,31 @@
               </li>
             }
           </ul>
+        }
+
+        <!-- Name the picked set and it survives the session: a BOUQUET. The
+             offer only appears once something is picked, because a bouquet is
+             the brush's contents — there is nothing to name before then. -->
+        @if (selectedCount() > 0) {
+          @if (!naming()) {
+            <button class="bouquet-save-open" type="button" (click)="beginNaming()" [attr.title]="'tags.bouquet.save.hint' | t">
+              <span class="mat-sym" aria-hidden="true">bookmark_add</span>{{ 'tags.bouquet.save' | t }}
+            </button>
+          } @else {
+            <form class="bouquet-name-form" (submit)="$event.preventDefault(); saveBouquet(bouquetName.value); bouquetName.value = ''">
+              <input
+                #bouquetName
+                class="bouquet-name-input"
+                type="text"
+                autocomplete="off"
+                [value]="loadedBouquet() ?? ''"
+                [attr.placeholder]="'tags.bouquet.name.placeholder' | t"
+                [attr.aria-label]="'tags.bouquet.name.placeholder' | t"
+              />
+              <button class="bouquet-name-commit" type="submit">{{ 'tags.bouquet.name.commit' | t }}</button>
+              <button class="bouquet-name-cancel" type="button" (click)="cancelNaming()">{{ 'tags.painter.cancel' | t }}</button>
+            </form>
+          }
         }
 
         <!-- The tiles staged so far — the panel's half of "a visual cue to show
@@ -170,6 +205,46 @@
         <p class="active-none">{{ 'tags.active.none' | t }}</p>
       }
     </section>
+
+    <!-- Saved bouquets. Clicking one puts it in hand — the picked set becomes
+         its marks, which arms the brush exactly as picking them one by one
+         would; clicking the loaded one puts it down again. -->
+    @if (bouquets().length > 0) {
+      <section class="tags-bouquets-section" [class.has-selection]="canvasSelectionCount() > 0">
+        <h3 class="tags-section-title bouquet-title">{{ 'tags.bouquet.title' | t }}</h3>
+        <p class="bouquet-hint">{{ 'tags.bouquet.hint' | t }}</p>
+        <ul class="bouquet-list">
+          @for (bouquet of bouquets(); track bouquet.name) {
+            <li class="bouquet-row" [class.loaded]="loadedBouquet() === bouquet.name">
+              <button
+                class="bouquet-load"
+                type="button"
+                (click)="loadBouquet(bouquet)"
+                [attr.aria-pressed]="loadedBouquet() === bouquet.name"
+                [attr.title]="'tags.bouquet.load' | t: { name: bouquet.name }"
+              >
+                <span class="bouquet-name">{{ bouquet.name }}</span>
+                <span class="bouquet-marks">
+                  @for (chip of bouquet.chips; track chip.name) {
+                    <span class="bouquet-mark" [attr.title]="chip.name">
+                      <span class="bouquet-mark-swatch" [style.background]="chip.color" aria-hidden="true"></span>
+                      <span class="bouquet-mark-name">{{ chip.name }}</span>
+                    </span>
+                  }
+                </span>
+              </button>
+              <button
+                class="bouquet-forget"
+                type="button"
+                (click)="forgetBouquet(bouquet.name, $event)"
+                [attr.aria-label]="'tags.bouquet.forget' | t: { name: bouquet.name }"
+                [attr.title]="'tags.bouquet.forget' | t: { name: bouquet.name }"
+              >×</button>
+            </li>
+          }
+        </ul>
+      </section>
+    }
 
     @if (rows().length === 0) {
       <p class="tags-empty">{{ 'tags.empty' | t }}</p>

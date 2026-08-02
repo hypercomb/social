@@ -6,7 +6,7 @@ import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
 import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
 import { parseArrayItems } from '../../core/array-parser'
-import { SELECT_OPS } from './select-ops'
+import { isSelectOp } from './select-ops'
 
 /**
  * Enter with bracket-path syntax → copy items to a destination folder.
@@ -44,7 +44,7 @@ export class CutPasteBehavior implements CommandLineBehavior {
     const afterSlash = input.slice(close + 2)
     const nextSlash = afterSlash.indexOf('/')
     const firstSeg = (nextSlash === -1 ? afterSlash : afterSlash.slice(0, nextSlash)).toLowerCase().replace(/\(.*$/, '')
-    if (SELECT_OPS.has(firstSeg)) return false
+    if (isSelectOp(firstSeg)) return false
     return true
   }
 

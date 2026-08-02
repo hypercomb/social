@@ -25,7 +25,7 @@ import { GoParentBehavior } from './go-parent.behavior'
 import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
-import { SELECT_OPS } from './select-ops'
+import { isSelectOp } from './select-ops'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
@@ -110,7 +110,7 @@ function isSelectExecution(v: string): boolean {
   if (v[close + 1] === ':') return true
   if (v[close + 1] !== '/') return false
   const m = v.slice(close + 2).match(/^(\w+)/)
-  return !!m && SELECT_OPS.has(m[1].toLowerCase())
+  return !!m && isSelectOp(m[1])
 }
 
 /** Slash commands that DESTROY — never fired from a completion Enter accepted
@@ -1293,27 +1293,27 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return CommandLineComponent.ACCENT_COLOR_MAP
   })
 
-  /** True while the dropdown is completing `/canvas` — its swatches are little
-   *  pictures of a backdrop rather than colour dots, so they render wide. */
+  /** True while the dropdown is completing `/background` — its swatches are
+   *  little pictures of a theme rather than colour dots, so they render wide. */
   public readonly wideSwatches = computed<boolean>(() => {
     const ctx = this.context()
-    return !!(ctx.active && ctx.mode === 'slash' && /^\/(canvas|backdrop)[\s]/i.test(ctx.head))
+    return !!(ctx.active && ctx.mode === 'slash' && /^\/background\s/i.test(ctx.head))
   })
 
   /** Colour swatches for the dropdown: accent presets in `/accent`, each tag's
    *  own colour in the tag modes (`label:tag` and `[a,b]:tag`), and — for
-   *  `/canvas` — a miniature rendering of the backdrop each option would give,
-   *  so the choice is made by eye instead of by name. */
+   *  `/background` — a miniature of the look each theme would give, so the
+   *  choice is made by eye instead of by name. */
   public readonly dropdownColorMap = computed<ReadonlyMap<string, string>>(() => {
     const accent = this.accentColorMap()
     if (accent.size) return accent
     if (this.wideSwatches()) {
-      const canvas = get('@diamondcoreprocessor.com/CanvasBackground') as
-        { swatch(tokens: string): string } | undefined
-      if (!canvas?.swatch) return new Map()
+      const themes = get('@diamondcoreprocessor.com/BackgroundThemes') as
+        { swatch(name: string): string } | undefined
+      if (!themes?.swatch) return new Map()
       const map = new Map<string, string>()
       for (const s of this.suggestions()) {
-        const css = canvas.swatch(s)
+        const css = themes.swatch(s)
         if (css) map.set(s, css)
       }
       return map

@@ -67,7 +67,7 @@ interface ControlItem {
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
   { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always' },
-  // Portals sit DIRECTLY after the installer: both are ways OUT of the current
+  // Portals sits DIRECTLY after the installer: both are ways OUT of the current
   // page — DCP into other domains, Portals into the collections index — so they
   // read as one pair at the head of the rail, before the viewport controls.
   // Navigates to the `sets/` layer, where each tile is a reference set (see
@@ -576,7 +576,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'pin':          return 'push_pin'
       case 'fullscreen':   return 'fullscreen'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
-      case 'pools':        return 'place'
+      // Not a map pin: Portals is a way OUT of this page into another root,
+      // the same act as the installer beside it.
+      case 'pools':        return 'nearby'
       case 'sequences':    return 'schema'
       case 'promote-to-parent': return 'arrow_upward'
       case 'clipboard':    return 'content_paste'
@@ -1276,8 +1278,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     // fit-locked: install the navigation listener if the switch is on. The
-    // listener handles suspend/resume per-page on each navigation.
-    if (this.#fitMode() === 'global') this.#enableFitLocked()
+    // listener handles suspend/resume per-page on each navigation. Boot-arm it:
+    // the page the session opens on never emits `navigate`, so without this the
+    // first page of every session came up unfitted while the switch read green.
+    if (this.#fitMode() === 'global') this.#enableFitLocked(true)
   }
 
   ngAfterViewInit(): void {
@@ -1715,9 +1719,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  frame. */
   #fitArmedUntil = 0
   #FIT_ARM_MS = 1500
+  /** Boot arm: the FIRST page of a session gets no `navigate` event — the app
+   *  simply arrives there — so a time window opened at install would expire
+   *  before a cold boot finishes painting. This arms without a deadline and is
+   *  spent by the first arrival, which then opens the normal settling window. */
+  #fitBootArmed = false
 
-  #enableFitLocked(): void {
+  #enableFitLocked(bootArm = false): void {
     if (this.#fitLockedUnsub) return
+    this.#fitBootArmed = bootArm
 
     // ARRIVING is what fits — and there is no single arrival event. The slow
     // render path ends in `navigation:guard-end`, but the back-nav FAST path
@@ -1731,9 +1741,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // `render:cell-count` fires there too, but nothing armed it.
     const arm = (): void => {
       this.#fitSuppressedHere.set(false)
+      this.#fitBootArmed = false
       this.#fitArmedUntil = performance.now() + this.#FIT_ARM_MS
     }
     const arrived = (): void => {
+      if (this.#fitBootArmed) {
+        // Spend the boot arm and hand over to the normal settling window, so
+        // the first page keeps refitting as its bounds settle.
+        this.#fitBootArmed = false
+        this.#fitArmedUntil = performance.now() + this.#FIT_ARM_MS
+      }
       if (performance.now() > this.#fitArmedUntil) return
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
       // Suspend persistence while auto-fitting so the fitted viewport doesn't
@@ -1755,6 +1772,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       offGuard()
       offCount()
       this.#fitArmedUntil = 0
+      this.#fitBootArmed = false
     }
   }
 

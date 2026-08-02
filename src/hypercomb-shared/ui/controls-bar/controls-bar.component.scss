@@ -722,9 +722,15 @@ $actions-corner: 12rem;
   .rail-pin                            { order: -2; }
   .rail-home                           { order: -1; }
   .ctl-btn[data-ctrl-id='dcp']         { order: 1; }
-  .ctl-btn[data-ctrl-id='fit']         { order: 2; }
-  .ctl-btn[data-ctrl-id='zoom-in']     { order: 3; }
-  .ctl-btn[data-ctrl-id='zoom-out']    { order: 4; }
+  // Portals rides directly under the installer — both are ways OUT of this
+  // page. It needs its own rule: anything unlisted falls to the catch-all
+  // `order: 50` above and sinks to the bottom of the rail, which is where it
+  // sat while the registry said otherwise. Registry position alone does NOT
+  // decide the left dock's order.
+  .ctl-btn[data-ctrl-id='pools']       { order: 2; }
+  .ctl-btn[data-ctrl-id='fit']         { order: 3; }
+  .ctl-btn[data-ctrl-id='zoom-in']     { order: 4; }
+  .ctl-btn[data-ctrl-id='zoom-out']    { order: 5; }
   // no [data-ctrl-id='pin'] rule: railControls() drops the registry pin on the
   // left rail, so .rail-pin (order -2, above) is the only pin here — an
   // attribute selector for it would out-specify that and drag it back down.
