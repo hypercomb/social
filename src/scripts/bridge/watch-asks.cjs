@@ -22,6 +22,9 @@
 // Output contract (line-buffered, one JSON object per line):
 //   { "ask": "<sig>", "prompt": "...", "model": "opus|sonnet|haiku",
 //     "targets": [...], "segments": [...], "appliesTo": [...] }
+//   { "stopped": "<sig>" }              ← the participant stopped an ask this
+//                                          watcher announced: abort the work,
+//                                          write no note, retire nothing else
 //   { "watch": "bridge-unreachable" }   ← only after 3 consecutive bad ticks
 //   { "watch": "renderer-missing" }     ← only after 3 consecutive bad ticks
 //   { "watch": "recovered" }            ← once, after a REPORTED outage heals
@@ -123,9 +126,25 @@ async function tick() {
     contextByAsk.set(of, [...(contextByAsk.get(of) ?? []), String(it.payload?.prompt ?? '')])
   }
 
+  // STOP markers — the participant pressed Stop on the bee. The ask record is
+  // already gone, so a session that never announced it simply never sees it;
+  // one that IS working on it gets a wake-up line and should drop the work.
+  // A marker is announced once (an answered ask leaves no marker, so this
+  // never fires for work that finished normally).
+  for (const it of items) {
+    if (it.payload?.mode !== 'stop') continue
+    const of = String(it.payload?.askSig ?? '')
+    if (!of || !seen.has(of)) continue
+    const key = `stop:${of}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    console.log(JSON.stringify({ stopped: of }))
+  }
+
   for (const it of items) {
     const sig = String(it.sig || '')
     if (!sig) continue
+    if (it.payload?.mode === 'stop') continue
     if (it.payload?.mode === 'context') {
       if (seen.has(sig)) continue
       seen.add(sig)

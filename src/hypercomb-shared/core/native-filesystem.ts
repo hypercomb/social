@@ -53,6 +53,8 @@
 // `createSyncAccessHandle` (worker-only sync access) has no call sites in the
 // shell and no sane IPC analogue. It throws rather than silently misbehaving.
 
+import { poolMeanings } from '@hypercomb/core'
+
 type Invoke = (
   command: string,
   payload?: unknown,
@@ -66,6 +68,12 @@ interface RawEntry {
 
 const SIG = /^[0-9a-f]{64}$/i
 const MARKER = /^\d{8}$/
+
+/** The drain-era spelling of a pool: a meaning fenced in double underscores.
+ *  Matched as a SHAPE, never as a list of folder names — the fence is stripped
+ *  and the registry decides what the meaning is, so this file names no typed
+ *  folder and needs no edit when a pool is minted or a drain completes. */
+const FENCED = /^__([a-z][a-z0-9_-]*)__$/
 
 /** The bridge to the native host. Injected so this file stays testable and
  *  carries no Tauri import — the shell must not depend on the desktop runtime
@@ -723,9 +731,10 @@ export const nativeRoot = (): NativeRootDirectory | null => {
  * `hc:bytes-request` over a MessageChannel; this listener resolves it:
  *
  *   kind 'content'          → content by signature (layers, site resources)
- *   kind 'dir'  __bees__            → sign('bees') pool member
- *               __dependencies__    → sign('dependencies') pool member
- *               __layers__ <sig>.json → content by signature (frozen URL shape)
+ *   kind 'dir'  fenced meaning      → that pool's member, if the registry
+ *                                     knows the meaning; otherwise content by
+ *                                     the signature in `name` (layers, whose
+ *                                     `.json` suffix is the frozen URL shape)
  *               <64-hex>            → that sig-dir's member (bag or pool)
  *
  * No response in a plain browser (this never installs), so the SW's timeout
@@ -777,9 +786,17 @@ export const installSwBytesBridge = (bridge: NativeBridge): boolean => {
 
     if (kind === 'content') return content(dir)
     if (kind !== 'dir') return null
-    if (dir === '__bees__') return pool('bees', name)
-    if (dir === '__dependencies__') return pool('dependencies', name)
-    if (dir === '__layers__') return content(name.replace(/\.json$/, ''))
+    // A fenced legacy dir is the drain-era spelling of a pool meaning. Ask the
+    // registry rather than branching per name: a fence whose meaning is NOT a
+    // registered pool was never a pool at all (layers are content, addressed by
+    // the signature in `name` — the `.json` suffix is the frozen legacy URL
+    // shape), so the fallthrough is the correct answer, not a missing case.
+    const fenced = FENCED.exec(dir)?.[1]
+    if (fenced) {
+      const meanings = await poolMeanings()
+      const known = [...meanings.values()].includes(fenced)
+      return known ? pool(fenced, name) : content(name.replace(/\.json$/, ''))
+    }
     if (SIG.test(dir)) {
       try {
         return asBytes(await bridge.invoke('dir_get_raw', { sig: dir, name }))

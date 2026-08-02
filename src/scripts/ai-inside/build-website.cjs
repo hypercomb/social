@@ -62,39 +62,10 @@ function bgStyle(slug, brand, accent) {
 }
 
 // ---- chrome.css ----------------------------------------------------------
-const CHROME_CSS = `
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--ink:#e8eef6;--muted:#9fb0c4;--line:rgba(126,182,214,.18);--bg0:#070b12;--card:rgba(255,255,255,.035)}
-html,body{background:var(--bg0);color:var(--ink);font:16px/1.65 'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
-a{color:#7ec0ff;text-decoration:none}a:hover{text-decoration:underline}
-.wrap{max-width:1180px;margin:0 auto;padding:40px 28px 96px}
-.crumb{font-size:13px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-bottom:18px;display:flex;gap:8px;align-items:center}
-.crumb a{color:var(--muted)}
-.hero{position:relative;border:1px solid var(--line);border-radius:22px;padding:54px 44px;overflow:hidden;background:var(--card)}
-.hero::after{content:'';position:absolute;inset:0;background-size:cover;background-position:center;opacity:.9;z-index:-1}
-.eyebrow{font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
-h1{font-size:clamp(34px,6vw,62px);line-height:1.02;font-weight:800;letter-spacing:-.02em}
-h1 .dot{color:var(--accentc,#7ec0ff)}
-.lede{margin-top:18px;max-width:760px;color:#cdd9e8;font-size:18px}
-.sec-title{display:flex;align-items:center;gap:12px;margin:54px 4px 18px;font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
-.sec-title .ms,.chip .ms,.card h3 .ms{font-family:'Material Symbols Outlined';font-weight:normal;font-style:normal;font-size:20px;line-height:1;-webkit-font-feature-settings:'liga';}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(248px,1fr));gap:16px}
-.card{position:relative;border:1px solid var(--line);border-radius:16px;padding:20px 20px 22px;background:var(--card);overflow:hidden;transition:transform .15s ease,border-color .15s ease}
-.card:hover{transform:translateY(-3px);border-color:rgba(126,182,214,.45)}
-.card .bar{position:absolute;left:0;top:0;height:4px;width:100%;background:var(--bar,#5b8def)}
-.card h3{font-size:18px;font-weight:700;margin:6px 0 8px;display:flex;align-items:center;gap:8px}
-.card p{font-size:14px;color:var(--muted);line-height:1.55}
-.card .go{margin-top:14px;font-size:13px;color:#7ec0ff;display:inline-flex;align-items:center;gap:4px}
-.count{margin-left:auto;font-size:12px;color:var(--muted);letter-spacing:0}
-.panel{border:1px solid var(--line);border-radius:18px;padding:26px 28px;background:var(--card);margin-top:16px}
-.panel h3{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--accentc,#7ec0ff);margin-bottom:12px;display:flex;align-items:center;gap:10px}
-.panel p{color:#d6e1ee;font-size:16px}
-.refs{font-size:14px;color:#cdd9e8;line-height:1.9}
-.tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
-.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px}
-.foot{margin-top:64px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
-@media(max-width:640px){.wrap{padding:24px 16px 72px}.hero{padding:36px 22px}}
-`.trim()
+// Bytes live in `../bridge/_chrome-bytes.cjs` so every consumer (this
+// builder and the `_ai-privacy-*` bridge scripts) hashes the SAME bytes and
+// derives the same sig instead of copying a literal around.
+const { AI_INSIDE_CHROME_CSS: CHROME_CSS } = require('../bridge/_chrome-bytes.cjs')
 
 // ---- page templates ------------------------------------------------------
 const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">`

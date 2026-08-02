@@ -8,7 +8,7 @@ lessons organised into four courses.
 /tutorial                  the starter course — move, make, get home
 /tutorial beginner         the everyday verbs
 /tutorial intermediate     meaning: marks, filters, titles, references, filing, history
-/tutorial expert           paths, hives, views, the assistant, the swarm
+/tutorial expert           THE WINDOWS — one lesson per primary window
 /tutorial <lesson>         one lesson on its own (e.g. /tutorial go-in)
 /tutorial list             what is on offer
 /tutorial stop             end a running tour
@@ -68,6 +68,41 @@ Any module can contribute a lesson for its own behaviour:
 window.ioc.get('@diamondcoreprocessor.com/TutorialLessonRegistry')
   ?.register({ id: 'my-thing', level: 'expert', order: 50, /* … */ })
 ```
+
+## The expert course is the windows
+
+The advanced course is not a grab-bag of clever moves. It is **one lesson per
+primary window**, each carrying every behaviour that lives in that window:
+
+| Lesson | Window | Behaviours it carries |
+|---|---|---|
+| `window-command-line` | the command line | create, `[brackets]`, paths, `?` filter, every `/` behaviour |
+| `window-palette` | command palette | `ui.commandPalette` |
+| `window-help` | reference / docs reader | `/help`, `/docs` |
+| `window-editor` | tile editor | edit, cover, links, files-on-a-tile |
+| `window-notes` | notes strip + reading window | note capture, nesting, marks, reorder |
+| `window-files` | files viewer | `/files`, scope and reach |
+| `window-tags` | tags viewer | `/tags`, `/keyword`, arming, bouquets, drag-out collections |
+| `window-collections` | aggregate index | `/collections`, Add vs Move, `/hive` |
+| `window-filters` | filter configurations | `?` filter mode, saved filters, `/clear` |
+| `window-clipboard` | clipboard panel | copy, cut, place |
+| `window-sequence` | sequence viewer | `/sequence`, cycle, drop/paste targets |
+| `window-history` | history viewer | `/history`, `/revise`, marks |
+| `window-rewind` | rewind window | `/rewind` |
+| `window-views` | views viewer | `/views`, `/tree`, `/website`, `/present`, `/tutor` |
+| `window-features` | features viewer | enable, remove, download, cascade origin |
+| `window-assistant` | ask screen + bee | `/opus`, `/sonnet`, `/haiku`, `/atomize`, `/organize` |
+| `window-observe` | observe viewer | `/observe`, and `/host` / `/invite` narrated |
+
+Two gates, not one. `requires()` asks `hasBehaviour(name)` **and**
+`hasWindow('hc-…')` — the shell-surface registry (`shell-surfaces.md`) is the
+authority on whether the window is mounted in this build. A shell that never
+registered a surface loses that lesson rather than opening nothing and
+narrating over an empty screen.
+
+**Adding a window to the shell means adding a lesson here, in the same pass.**
+The roster and the interface are 1:1 by construction — the same rule the mirror
+applies to tiles and source files.
 
 ## The stage
 

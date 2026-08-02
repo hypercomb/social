@@ -446,12 +446,20 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     const bagDir = await parentDir.getDirectoryHandle(bagSig, { create: true })
     let written = 0
     await Promise.all(Array.from({ length: entryCount }, (_, i) => i).map(async (i) => {
-      const indexName = String(i).padStart(4, '0')
+      // 8 digits is the conformance marker width that builds now emit. The
+      // 4-digit name is a READ FALLBACK for dists deployed before the
+      // widening: the bag sig is derived from entry CONTENT, so an old dist
+      // presents the SAME bag sig under the old filenames — without this the
+      // fetch would 404 and install would silently write an empty bag.
+      const indexName = String(i).padStart(8, '0')
+      const legacyIndexName = String(i).padStart(4, '0')
       // Flat dist puts the bag dir at the content root; legacy dists
       // nested it inside the typed dir (URL-shape fallback only).
       const bytes = await fetchFirst([
         `/content/${bagSig}/${indexName}`,
         `${legacyContentPath}/${bagSig}/${indexName}`,
+        `/content/${bagSig}/${legacyIndexName}`,
+        `${legacyContentPath}/${bagSig}/${legacyIndexName}`,
       ])
       if (!bytes) return
       const handle = await bagDir.getFileHandle(indexName, { create: true })

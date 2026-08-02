@@ -54,6 +54,11 @@ append-only; optimization history is a disposable shadow: free to grow, free
 to prune, always regenerable. GC may drop any record; the only cost is one
 cold pass before the phase re-mints it.
 
+How that pruning could become an *evaluation* rather than a traversal —
+self-retiring records, cancellation of identity-net history segments, and
+statistical eviction gated on recoverability — is logged as a roadmap idea in
+[algebraic-elimination-gc.md](algebraic-elimination-gc.md). Not built.
+
 ## First implementation
 
 `history/manifest-optimizer.drone.ts` (essentials): queues layer sigs off the

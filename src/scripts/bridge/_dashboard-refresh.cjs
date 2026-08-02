@@ -89,10 +89,12 @@ async function withRenderer(req, attempts = 4) {
 
 // ─── chrome — reuse the existing Field Notes stylesheet ─────────────
 
-// Kept in sync with the chrome minted by `_dolphin-revision.cjs`. Same
-// content → same content-addressed sig, so when the dolphin generator
-// runs, the chrome sig only changes if its CSS actually changed.
-const CHROME_SIG = '2eda51ad62e1846e9811c2bf8319461d58104c5fe25e467c6986f3fecf8b877c'
+// The exact bytes `_dolphin-revision.cjs` mints, shared through
+// `_chrome-bytes.cjs`. The sig is DERIVED from those bytes at run time
+// (`dolphinChromeSig()`), never held as a literal — a literal drifts the
+// moment the CSS changes and every dashboard minted after that would link a
+// stylesheet resource that no longer exists.
+const { dolphinChromeSig } = require('./_chrome-bytes.cjs')
 
 const PAINT_SCRIPT = `
 (function(){try{var t=localStorage.getItem('hc:dolphin:theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(_){};})();
@@ -318,7 +320,7 @@ const TILE_ARROW_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 
 const HELP_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>'
 const DASHBOARD_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="5" rx="1.2"/><rect x="13" y="10" width="8" height="11" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/></svg>'
 
-function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPreview, labelToQId }) {
+function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPreview, labelToQId, chromeSig }) {
   // Each open Q becomes a Material 3 elevated tile card with an INLINE
   // answer composer — type, click Done, the answer commits to the
   // source cell's lineage and the qa entry disappears from the
@@ -384,7 +386,7 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block">
 <script>${PAINT_SCRIPT}</script>
-<link rel="stylesheet" href="resource:${CHROME_SIG}/chrome.css">
+<link rel="stylesheet" href="resource:${chromeSig}/chrome.css">
 <style>
 .dash-q-card { display: flex; cursor: pointer; transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease; }
 .dash-q-card:hover:not(.is-open):not(.dash-q-answered) { transform: translateY(-1px); }
@@ -487,6 +489,10 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
 // ─── main ───────────────────────────────────────────────────────────
 
 ;(async () => {
+  // Derive the chrome sig from the shared bytes — same bytes the dolphin
+  // generator put-resources, so the same content-addressed sig.
+  const chromeSig = await dolphinChromeSig()
+
   console.log('1) Listing open Q optimizations from __optimization__/...')
   const allItems = []
   const opts = await withRenderer({ op: 'optimization-list', kind: 'qa' })
@@ -549,7 +555,7 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
     schemaVersion: 1,
     kind: 'dashboard-intel',
     generatedAt: new Date().toISOString(),
-    chromeSig: CHROME_SIG,
+    chromeSig,
     totals: { open: openItems.length, answered: 0 },
     open: openItems.map(({ qId, question, path }) => ({ qId, path, question })),
     answered: [],
@@ -568,6 +574,7 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
     totalCount: allItems.length,
     manifestSigPreview: manifestSig.slice(0, 12),
     labelToQId,
+    chromeSig,
   })
   const htmlPut = await withRenderer({ op: 'put-resource', text: html })
   if (!htmlPut.ok) { console.log('   FAILED:', htmlPut.error); process.exit(1) }

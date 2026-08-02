@@ -70,7 +70,10 @@ function pendingAsks() {
     ws.on('message', raw => {
       try {
         const r = JSON.parse(String(raw))
-        done(r.ok ? (r.data?.items ?? []) : null)
+        // `mode:'stop'` records are tombstones for asks the participant
+        // stopped — never work to do. The ask they name is already gone.
+        const items = (r.data?.items ?? []).filter(it => it?.payload?.mode !== 'stop')
+        done(r.ok ? items : null)
       } catch { done(null) }
     })
     ws.on('error', () => done(null))

@@ -226,12 +226,16 @@ function is-content-addressed {
     [string]$RelativePath
   )
 
-  # Flat layout: bare 64-hex blob at the container root, or a path inside a
-  # 64-hex-named sigbag dir. The typed `__x__/` prefixes are LEGACY (kept so
-  # a stale mixed dist still deploys incrementally during the transition —
-  # new builds never emit them).
-  if ($RelativePath -match '^[0-9a-f]{64}(/|$)') { return $true }
-  return $RelativePath -match '^(__layers__|__bees__|__dependencies__)/'
+  # Flat layout, and the ONLY shape that is ever uploaded: a bare 64-hex blob
+  # at the container root, or a path inside a 64-hex-named sigbag dir.
+  #
+  # The typed `__x__/` prefixes used to be accepted here as transition safety
+  # for a stale mixed dist. They cannot occur: build-module.ts Phase 2 removes
+  # every dist entry except `.cache/` and `manifest.json` before a build, so a
+  # typed dir never survives to be enumerated. Reading blobs already deployed
+  # under those names stays supported forever (the fetchers fall back, and
+  # nothing on Azure is ever deleted or renamed) — but re-EMITTING them is not.
+  return $RelativePath -match '^[0-9a-f]{64}(/|$)'
 }
 
 if (-not (test-command -Name 'az')) {
@@ -275,16 +279,15 @@ $authArguments = get-auth-arguments
 
 # Flat delivery layout: content entries are 64-hex sig names at the dist root
 # (file = layer/bee/dependency bytes, dir = sigbag) plus manifest.json — see
-# build-module.ts. Never .cache/. The legacy typed dirs are still swept up
-# when a stale dist carries them (transition safety); new builds don't emit
-# them. Blobs already on Azure under the typed `__x__/` names are NEVER
-# deleted or renamed — old deployed clients keep resolving them forever.
+# build-module.ts. Never .cache/. Nothing else is enumerated: a build wipes
+# dist first, so no typed dir can survive to be re-emitted. Blobs already on
+# Azure under the old typed `__x__/` names are NEVER deleted or renamed — old
+# deployed clients keep resolving them forever.
 $sigNamePattern = '^[0-9a-f]{64}$'
-$legacyContentDirs = @('__layers__', '__bees__', '__dependencies__')
 $files = @()
 foreach ($entry in (Get-ChildItem -LiteralPath $resolvedSource | Sort-Object Name)) {
   if ($entry.PSIsContainer) {
-    if ($entry.Name -match $sigNamePattern -or $legacyContentDirs -contains $entry.Name) {
+    if ($entry.Name -match $sigNamePattern) {
       $files += @(Get-ChildItem -LiteralPath $entry.FullName -Recurse -File | Sort-Object FullName)
     }
   } elseif ($entry.Name -match $sigNamePattern -or $entry.Name -eq 'manifest.json') {

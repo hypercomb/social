@@ -63,7 +63,16 @@ async function fetchAsks() {
   if (!r.ok) { console.error('optimization-list failed:', r.error); process.exit(1) }
   const all = r.data?.items ?? []
   const contextByAsk = new Map()
+  // STOP markers — the participant pressed Stop in the agent panel. The ask
+  // record itself is already gone; this is what tells a responder that is
+  // mid-answer to drop the work instead of writing a note nobody wants.
+  const stopped = new Map()
   for (const it of all) {
+    if (it.payload?.mode === 'stop') {
+      const of = String(it.payload?.askSig ?? '')
+      if (of) stopped.set(of, it.sig)
+      continue
+    }
     if (it.payload?.mode !== 'context') continue
     const of = String(it.payload?.askSig ?? '')
     if (!of) continue
@@ -72,7 +81,8 @@ async function fetchAsks() {
     contextByAsk.set(of, bucket)
   }
   const asks = all
-    .filter(it => it.payload?.mode !== 'context')
+    .filter(it => it.payload?.mode !== 'context' && it.payload?.mode !== 'stop')
+    .filter(it => !stopped.has(String(it.sig)))
     .map(it => ({
       sig: it.sig,
       mode: it.payload?.mode ?? '',
@@ -84,7 +94,7 @@ async function fetchAsks() {
       askedAt: it.payload?.askedAt ?? 0,
       context: (contextByAsk.get(it.sig) ?? []).sort((a, b) => a.addedAt - b.addedAt),
     }))
-  return { asks, contextByAsk }
+  return { asks, contextByAsk, stopped }
 }
 
 async function list() {
@@ -123,10 +133,25 @@ async function answer(askSig, cellPath, text) {
   // provenance).
   let question = ''
   let contextRecords = []
+  let stopMarker = ''
   try {
-    const { asks, contextByAsk } = await fetchAsks()
+    const { asks, contextByAsk, stopped } = await fetchAsks()
     const found = asks.find(it => it.sig === askSig)
-    question = String(found?.prompt ?? '').trim()
+    stopMarker = stopped.get(askSig) ?? ''
+    // STOPPED, or gone from the pool while this answer was being written:
+    // either way nobody is waiting for it any more. Writing the note now
+    // would put an answer on a tile for a question the participant withdrew.
+    // (An unreadable pool throws instead, and the answer still lands — never
+    // lose an answer over a failed lookup.)
+    if (!found) {
+      if (stopMarker) {
+        const gone = await withRenderer({ op: 'optimization-remove', sig: stopMarker }, 2)
+        if (!gone.ok) console.error('stop marker not retired:', stopMarker, gone.error)
+      }
+      console.log(`[ask-drain] ${askSig.slice(0, 12)}… was ${stopMarker ? 'stopped' : 'already retired'} — no note written`)
+      return
+    }
+    question = String(found.prompt ?? '').trim()
     contextRecords = contextByAsk.get(askSig) ?? []
   } catch { /* unreadable — fall through to a bare answer */ }
   const added = contextRecords.map(c => c.text).filter(Boolean)

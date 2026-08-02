@@ -202,7 +202,7 @@ pub fn export_root(
         std::fs::create_dir_all(&bag_dir)?;
 
         for (index, marker) in &markers {
-            if write_if_different(&bag_dir.join(marker_filename(*index)), &marker.to_bytes())? {
+            if write_marker_union(&bag_dir.join(marker_filename(*index)), &marker.to_bytes())? {
                 moved.markers += 1;
             } else {
                 moved.markers_skipped += 1;
@@ -277,7 +277,7 @@ pub fn export(store: &impl ContentStore, target: impl AsRef<Path>) -> Result<Tra
         let dir = target.join(bag.to_hex());
         std::fs::create_dir_all(&dir)?;
         for (index, marker) in store.markers(bag)? {
-            if write_if_different(&dir.join(marker_filename(index)), &marker.to_bytes())? {
+            if write_marker_union(&dir.join(marker_filename(index)), &marker.to_bytes())? {
                 moved.markers += 1;
             } else {
                 moved.markers_skipped += 1;
@@ -309,6 +309,24 @@ fn write_if_different(path: &Path, bytes: &[u8]) -> Result<bool> {
         if existing == bytes {
             return Ok(false);
         }
+    }
+    std::fs::write(path, bytes)?;
+    Ok(true)
+}
+
+/// Write a marker into the export target, never over an occupied index.
+///
+/// Markers are NOT pool members. A pool member is a mutable record and the
+/// last writer wins; a marker is a revision, and overwriting index `n` with a
+/// different revision destroys history. Export unions into its target the same
+/// way `restore` unions into the store — and `restore` uses `put_marker_at`,
+/// which refuses an occupied index. This is that same rule on the filesystem
+/// side, so the two directions stay symmetric: first writer wins, and a second
+/// root disagreeing at the same bag+index is counted as skipped rather than
+/// silently overwriting what is already there.
+fn write_marker_union(path: &Path, bytes: &[u8]) -> Result<bool> {
+    if path.exists() {
+        return Ok(false);
     }
     std::fs::write(path, bytes)?;
     Ok(true)

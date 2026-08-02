@@ -12,9 +12,14 @@
 //     modulepreload, resolves.
 //   - Tauri's asset server guesses mime by extension, so the extension-less
 //     `/content/<sig>` files arrive as text/html — which module loading
-//     rejects outright. Baking copies each dependency to `<sig>.js`, making
-//     the mime correct by construction. (Bees are unaffected: they are
-//     imported from blob URLs built out of store bytes.)
+//     rejects outright. Baking copies each dependency to `modules/<sig>.js`,
+//     making the mime correct by construction. The twin is deliberately NOT
+//     written beside the content: `/content/` is the flat namespace where a
+//     name IS an address, and `<sig>.js` addresses nothing. (Bees are
+//     unaffected: they are imported from blob URLs built out of store bytes.)
+//     The twins exist only because mime is guessed from the extension; a
+//     scheme handler that served `/content/<sig>` as text/javascript would
+//     remove the need for them entirely.
 //
 // The bundled package is fixed at build time, so its import map is too —
 // baking is not a workaround, it is the honest shape of the thing: static
@@ -59,6 +64,9 @@ const imports = {
   'pixi.js': '/vendor/pixi.runtime.js',
 }
 
+// Serving twins live here, outside the content namespace — see the copy below.
+const modulesDir = join(out, 'modules')
+
 let aliased = 0
 for (const sig of pkg.dependencies ?? []) {
   const source = join(out, 'content', sig)
@@ -74,8 +82,16 @@ for (const sig of pkg.dependencies ?? []) {
 
   // Copy as .js so Tauri's extension-based mime guess yields JavaScript —
   // module loading hard-rejects text/html.
-  copyFileSync(source, `${source}.js`)
-  imports[alias] = `/content/${sig}.js`
+  //
+  // The twin lands in `modules/`, NOT beside the content. Inside the content
+  // namespace every name is an address, and `<sig>.js` is not the address of
+  // anything — it is a mime-driven serving artifact. Keeping it there put a
+  // non-addressed name in the one namespace whose whole invariant is that the
+  // name IS the hash. `modules/` is derived build output: wipe it and the next
+  // bake reproduces it exactly.
+  mkdirSync(modulesDir, { recursive: true })
+  copyFileSync(source, join(modulesDir, `${sig}.js`))
+  imports[alias] = `/modules/${sig}.js`
   aliased++
 }
 

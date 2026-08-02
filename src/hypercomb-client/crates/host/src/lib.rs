@@ -325,11 +325,36 @@ impl Host {
             Some(index) => {
                 let bag = hypercomb_protocol::BagAddr::from_sig(parsed);
                 let marker = Marker::parse(bytes);
-                // The shim writes at an explicit index (the caller chose the
-                // filename). Overwrite is allowed here, unlike restore.
-                self.store.remove_marker(bag, index)?;
-                self.store.put_marker_at(bag, index, &marker)?;
-                Ok(())
+                // Markers ADVANCE — truth is never overwritten in place. The
+                // shim picks the filename, so an occupied index is one of two
+                // things and they must not be conflated:
+                //
+                //   same marker  → the same revision arriving twice. Idempotent,
+                //                  so accept it and write nothing.
+                //   different    → a genuine conflict. Refuse. Writing would
+                //                  destroy a revision, and this was the ONLY
+                //                  path in the store that could.
+                //
+                // Deleting a revision stays possible, but only as the explicit
+                // operation that says so (`raw_dir_remove`) — never as a silent
+                // side effect of a write. The occupied lookup is O(bag) but is
+                // paid only on collision; the ordinary write is one insert.
+                if self.store.put_marker_at(bag, index, &marker)? {
+                    return Ok(());
+                }
+                let occupant = self
+                    .store
+                    .markers(bag)?
+                    .into_iter()
+                    .find(|(at, _)| *at == index)
+                    .map(|(_, existing)| existing);
+                match occupant {
+                    Some(existing) if existing == marker => Ok(()),
+                    _ => Err(HostError::Storage(format!(
+                        "marker {index} in bag {sig} is already written to a different revision; \
+                         remove it explicitly to replace it"
+                    ))),
+                }
             }
             None => Ok(self.store.pool_put(
                 hypercomb_protocol::PoolAddr::from_sig(parsed),
@@ -456,6 +481,43 @@ mod tests {
         assert_eq!(head.layer, second);
         assert!(!head.legacy);
         assert_eq!(host.markers(&here).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_shim_write_never_destroys_an_occupied_marker() {
+        // `raw_dir_put` was the one write path in the whole store that could
+        // overwrite a revision in place (it removed the marker, then wrote).
+        // Markers advance; replacing one is an explicit remove, never a silent
+        // side effect of a write.
+        let (_dir, host) = host();
+        let here = vec!["place".to_string()];
+        let elsewhere = vec!["other".to_string()];
+
+        host.append(&here, &Layer::empty("first").sig().to_hex()).unwrap();
+        host.append(&elsewhere, &Layer::empty("second").sig().to_hex()).unwrap();
+
+        let bag = host.bag_address(&here);
+        let occupant = host.raw_dir_get(&bag, "00000000").unwrap().unwrap();
+
+        // The same revision arriving twice is idempotent, not a conflict.
+        host.raw_dir_put(&bag, "00000000", &occupant).unwrap();
+        assert_eq!(host.raw_dir_get(&bag, "00000000").unwrap().unwrap(), occupant);
+
+        // A DIFFERENT revision at an occupied index is refused...
+        let rival = host
+            .raw_dir_get(&host.bag_address(&elsewhere), "00000000")
+            .unwrap()
+            .unwrap();
+        assert!(host.raw_dir_put(&bag, "00000000", &rival).is_err());
+
+        // ...and the revision that was there is untouched.
+        assert_eq!(host.raw_dir_get(&bag, "00000000").unwrap().unwrap(), occupant);
+        assert_eq!(host.head(&here).unwrap().unwrap().index, 0);
+
+        // Removing it explicitly still works — that is the sanctioned path.
+        assert!(host.raw_dir_remove(&bag, "00000000").unwrap());
+        host.raw_dir_put(&bag, "00000000", &rival).unwrap();
+        assert_eq!(host.raw_dir_get(&bag, "00000000").unwrap().unwrap(), rival);
     }
 
     #[test]

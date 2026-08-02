@@ -1052,6 +1052,9 @@ const main = async (): Promise<void> => {
   // sig-named dir, and scan-and-delete against a shared root is a
   // data-loss trap).
   type BagEntry = { sig: string; content: string }
+  /** Conformance-width marker filename. Kept as one expression so the width
+   *  lives in a single place on the emitting side. */
+  const markerFilename = (index: number): string => String(index).padStart(8, '0')
   const writeBag = async (parentDir: string, entries: BagEntry[]): Promise<string> => {
     const sorted = [...entries].sort((a, b) => a.sig.localeCompare(b.sig))
     const canonical = sorted.map(e => e.content).join('\0')
@@ -1059,7 +1062,15 @@ const main = async (): Promise<void> => {
     const bagDir = join(parentDir, bagSig)
     ensureDir(bagDir)
     sorted.forEach((entry, i) => {
-      writeFileSync(join(bagDir, String(i).padStart(4, '0')), entry.content, 'utf8')
+      // 8 digits — the marker filename width the conformance contract pins
+      // (`conformance/vectors.json` markerFilenameWidth, and protocol's
+      // `marker_index` rejects any other width). At 4 a conformant reader
+      // classified every entry in these bags as a POOL MEMBER, not a marker.
+      // The bag sig is derived from the entry CONTENT, so widening the
+      // filenames does not change it — which is exactly why the receiver in
+      // `ensure-install.ts` must keep reading the 4-digit names too: an
+      // already-deployed dist carries the same bag sig with the old names.
+      writeFileSync(join(bagDir, markerFilename(i)), entry.content, 'utf8')
     })
     return bagSig
   }
