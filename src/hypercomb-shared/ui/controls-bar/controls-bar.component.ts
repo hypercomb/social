@@ -1865,6 +1865,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.fitAppliesHere() || this.#fitHoldNow() === 'both') return
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
     vp?.suspend?.()
+    // Open the settle window too, so render passes right after the flip keep
+    // refitting while the page's bounds settle.
+    this.#fitArmedUntil = performance.now() + this.#FIT_ARM_MS
     this.zoom?.zoomToFit?.()
   }
 
@@ -1879,21 +1882,24 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#restoreViewport()
   }
 
-  /** While a fit is armed, any paint signal that lands is an arrival worth
-   *  fitting. Cleared by time, not by the first hit, so a layer whose bounds
-   *  settle over several passes ends up fitted rather than fitted-to-the-first-
-   *  frame. */
+  /** The arm is STICKY: set by navigation (or boot) and held until a fit
+   *  actually RUNS — not until a clock runs out. The old fixed 1500ms window
+   *  from `navigate` was a deadline, and every arrival whose first paint
+   *  landed later (cold OPFS load, a big layer, a website-mode render whose
+   *  hexagon fit bails, an empty layer that fills in) missed it and never
+   *  fitted — the "not always full everywhere" conditions. After the first
+   *  successful fit the sticky arm hands over to a ROLLING settle window:
+   *  each further fit inside it extends it, so bounds that settle over many
+   *  passes keep refitting no matter how long the whole settle takes. */
+  #fitArmedSticky = false
   #fitArmedUntil = 0
   #FIT_ARM_MS = 1500
-  /** Boot arm: the FIRST page of a session gets no `navigate` event — the app
-   *  simply arrives there — so a time window opened at install would expire
-   *  before a cold boot finishes painting. This arms without a deadline and is
-   *  spent by the first arrival, which then opens the normal settling window. */
-  #fitBootArmed = false
 
   #enableFitLocked(bootArm = false): void {
     if (this.#fitLockedUnsub) return
-    this.#fitBootArmed = bootArm
+    // Boot: the FIRST page of a session gets no `navigate` event — the app
+    // simply arrives — so enabling at install arms directly.
+    this.#fitArmedSticky = bootArm
 
     // ARRIVING is what fits — and there is no single arrival event. The slow
     // render path ends in `navigation:guard-end`, but the back-nav FAST path
@@ -1903,21 +1909,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // ARMS the fit (and forgets the previous page's hand-adjustment), and
     // whichever paint signal lands while it is armed performs it.
     //
-    // The arming window is what keeps this from firing on tile add/remove:
+    // The arm is what keeps this from firing on tile add/remove:
     // `render:cell-count` fires there too, but nothing armed it.
     const arm = (): void => {
       this.#fitSuppressedHere.set(false)
-      this.#fitBootArmed = false
-      this.#fitArmedUntil = performance.now() + this.#FIT_ARM_MS
+      this.#fitArmedSticky = true
+      this.#fitArmedUntil = 0
     }
     const arrived = (): void => {
-      if (this.#fitBootArmed) {
-        // Spend the boot arm and hand over to the normal settling window, so
-        // the first page keeps refitting as its bounds settle.
-        this.#fitBootArmed = false
-        this.#fitArmedUntil = performance.now() + this.#FIT_ARM_MS
-      }
-      if (performance.now() > this.#fitArmedUntil) return
+      const now = performance.now()
+      if (!this.#fitArmedSticky && now > this.#fitArmedUntil) return
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
       // Suspend persistence while auto-fitting so the fitted viewport doesn't
       // overwrite the page's saved viewport; resume on pages that are not
@@ -1925,22 +1926,49 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // Size + position both pinned = the whole viewport is the user's:
       // treat it like a full pin (persistence stays live, no fit).
       if (this.fitAppliesHere() && this.#fitHoldNow() !== 'both') {
+        // The fit performs: spend the sticky arm, extend the settle window.
+        this.#fitArmedSticky = false
+        this.#fitArmedUntil = now + this.#FIT_ARM_MS
         vp?.suspend?.()
         this.zoom?.zoomToFit?.(true)
       } else {
+        // Exempt page (pinned / hand-adjusted this visit) — disarm so a
+        // later tile add here can't surprise-fit, and let edits persist.
+        this.#fitArmedSticky = false
+        this.#fitArmedUntil = 0
         vp?.resume?.()
       }
     }
 
+    // While the switch drives this page, a viewport resize (window resize,
+    // fullscreen toggle, dock/undock) must refit too: the auto-fit is written
+    // with persistence SUSPENDED, so the saved snapshot never carries
+    // `fit:true` and the drone's own resize-refit path does not fire — one
+    // resize used to leave the page un-fitted until the next navigation.
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
+    const onResize = (): void => {
+      if (resizeTimer !== null) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null
+        if (!this.fitAppliesHere() || this.#fitHoldNow() === 'both') return
+        const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+        vp?.suspend?.()
+        this.zoom?.zoomToFit?.(true)
+      }, 150)
+    }
+
     window.addEventListener('navigate', arm)
+    window.addEventListener('resize', onResize)
     const offGuard = EffectBus.on('navigation:guard-end', arrived)
     const offCount = EffectBus.on('render:cell-count', arrived)
     this.#fitLockedUnsub = (): void => {
       window.removeEventListener('navigate', arm)
+      window.removeEventListener('resize', onResize)
+      if (resizeTimer !== null) { clearTimeout(resizeTimer); resizeTimer = null }
       offGuard()
       offCount()
       this.#fitArmedUntil = 0
-      this.#fitBootArmed = false
+      this.#fitArmedSticky = false
     }
   }
 
