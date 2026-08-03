@@ -28,6 +28,15 @@
 // pointerdown and paint. A gesture tool that can stall is not a gesture
 // tool.
 //
+// ── One exception: a phone, on a tile ─────────────────────────────────
+//
+// A long-press over a tile in mobile mode does NOT summon the ring. There,
+// the hold means the tile: let go without moving and its screen opens, pull
+// and drag-to-move takes it. Both of those are the same press, so the summon
+// stays out of the way entirely — it claims no gate, pushes no mode, takes no
+// pointer lock. See `#pendingView`. Everywhere else, and anywhere off a tile,
+// the ring is unchanged.
+//
 // ── Why it takes the input stack AND the gate ─────────────────────────
 //
 // InputModeStack suspends whatever mode is on top (the migrated systems);
@@ -150,6 +159,21 @@ export class QuickMenuInput {
   #touches = new Set<number>()
   /** A tile drag is live — the finger already declared itself by travelling. */
   #touchDragging = false
+  /**
+   * ON A PHONE, A HOLD ON A TILE IS THAT TILE'S SCREEN — the ring never opens
+   * over it. Held here from the moment the hold matures until the finger
+   * either travels (drag-to-move takes it) or lets go (the screen opens).
+   *
+   * Nothing is claimed while this is pending: no InputGate lock, no input-mode
+   * push, no pointer lock. That is the entire point. The ring's summon USED to
+   * take the gate off drag-to-move at 380ms on the theory that a still finger
+   * is not a drag — but on a phone the still finger has not finished deciding,
+   * and taking the reservation meant a pull that started late aimed a ring
+   * instead of moving the tile, with the gate left locked behind it. Leaving
+   * the reservation where it is makes the two gestures one press again: pull
+   * and it moves, let go and it opens.
+   */
+  #pendingView: { label: string; pointerId: number; x: number; y: number } | null = null
 
   /**
    * Where the DRAWN pointer is, in screen coordinates. The real cursor is
@@ -188,6 +212,9 @@ export class QuickMenuInput {
     // so we can watch for the matching keyup and finish the gesture.
     EffectBus.on<{ active?: boolean }>('touch:dragging', payload => {
       this.#touchDragging = !!payload?.active
+      // The pull won. The screen this hold would have opened is not what the
+      // hand is doing any more.
+      if (this.#touchDragging) this.#pendingView = null
     })
 
     EffectBus.on<{ cmd?: string; event?: KeyboardEvent }>('keymap:invoke', payload => {
@@ -311,8 +338,12 @@ export class QuickMenuInput {
         this.#clearTimers()
         this.#pointerId = null
         this.#touchDown = null
+        this.#pendingView = null
         return
       }
+      // A fresh first finger: whatever the last one was waiting to open, it is
+      // not what this press is about.
+      this.#pendingView = null
 
       this.#clearTimers()
       this.#pointerId = e.pointerId
@@ -333,15 +364,28 @@ export class QuickMenuInput {
         if (gate?.locked) { this.#pointerId = null; return }
         const owner = gate?.owner ?? null
         if (owner && owner !== TOUCH_MOVE_SOURCE) { this.#pointerId = null; return }
-        // Take the still-armed drag's reservation, so a finger that moves from
-        // here aims the ring instead of also picking the tile up.
-        if (owner === TOUCH_MOVE_SOURCE) gate?.release?.(TOUCH_MOVE_SOURCE)
-        try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
         // Resolve the tile from the press COORDINATES. A finger produces no
         // hover, so there is no remembered tile to read — only where it landed.
         const overlay = at
           ? get<OverlayLike>('@diamondcoreprocessor.com/TileOverlayDrone')?.labelAtClient(at.x, at.y) ?? null
           : null
+
+        // PHONE, ON A TILE: no ring at all. The hold is the tile's screen if
+        // the finger stays and a move if it pulls — and neither of those is
+        // the ring, so claiming nothing is what keeps both of them possible.
+        // The haptic still fires: the hand has to be told the hold landed,
+        // because from here a pull means something different than a drift.
+        if (overlay && at && this.#isMobile()) {
+          this.#pendingView = { label: overlay, pointerId: e.pointerId, x: at.x, y: at.y }
+          this.#pointerId = null
+          try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
+          return
+        }
+
+        // Take the still-armed drag's reservation, so a finger that moves from
+        // here aims the ring instead of also picking the tile up.
+        if (owner === TOUCH_MOVE_SOURCE) gate?.release?.(TOUCH_MOVE_SOURCE)
+        try { navigator.vibrate?.(30) } catch { /* no haptics, no matter */ }
         this.#begin(e.pointerId)
         this.#tileLabel = overlay
         this.#paint()
@@ -477,6 +521,13 @@ export class QuickMenuInput {
       return
     }
     if (!this.#armed) {
+      // A matured hold on a tile that starts to TRAVEL is a move, not a
+      // screen. Drag-to-move still holds its reservation, so letting go of
+      // this is all it takes for the pull to become the pick-up.
+      const pending = this.#pendingView
+      if (pending && e.pointerId === pending.pointerId) {
+        if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) > JITTER_PX) this.#pendingView = null
+      }
       // Un-armed touch press: drift past the jitter box means the finger was
       // panning, not summoning.
       if (this.#holdTimer && this.#touchDown && e.pointerId === this.#pointerId) {
@@ -616,6 +667,16 @@ export class QuickMenuInput {
   #onPointerUp = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') {
       this.#touches.delete(e.pointerId)
+      // HELD A TILE, NEVER MOVED, LET GO — the tile's own screen. Nothing was
+      // claimed on the way here, so nothing has to be given back.
+      const pending = this.#pendingView
+      if (pending && e.pointerId === pending.pointerId) {
+        this.#pendingView = null
+        if (!this.#touchDragging) {
+          this.#openTileView(pending.label)
+          return
+        }
+      }
       // Last finger up while armed on some OTHER pointer: the gesture has no
       // way left to end itself. Close it here rather than strand the lock.
       if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey
@@ -643,11 +704,15 @@ export class QuickMenuInput {
     const pointerId = e.detail?.pointerId
     if (typeof pointerId !== 'number') return
     this.#touches.delete(pointerId)
+    // Some other gesture consumed this finger — its release is not ours to
+    // read as "let go without moving".
+    if (this.#pendingView?.pointerId === pointerId) this.#pendingView = null
     if (pointerId === this.#pointerId) { this.#clearTimers(); this.#pointerId = null }
     if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) this.#end()
   }
 
   #onPointerCancel = (e: PointerEvent): void => {
+    if (this.#pendingView?.pointerId === e.pointerId) this.#pendingView = null
     if (e.pointerType === 'touch') {
       this.#touches.delete(e.pointerId)
       if (this.#touches.size === 0 && this.#armed && !this.#sticky && !this.#heldKey) {
@@ -680,10 +745,7 @@ export class QuickMenuInput {
     if (direction === 'centre' && this.#tileLabel && this.#levels.length === 1) {
       const label = this.#tileLabel
       this.#end()
-      EffectBus.emit('tile:view-open', {
-        label,
-        segments: get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [],
-      })
+      this.#openTileView(label)
       return
     }
 
@@ -797,6 +859,21 @@ export class QuickMenuInput {
     }
   }
 
+  /** Mobile mode per the single source of truth — the same one the overlay
+   *  reads, so a touch laptop keeps the ring and a phone gets the screen. */
+  #isMobile(): boolean {
+    return get<{ active?: boolean }>('@diamondcoreprocessor.com/MobileMode')?.active === true
+  }
+
+  /** The tile's own screen, for the current location. One door, so the ring's
+   *  zero-travel centre and the phone's plain hold open the same thing. */
+  #openTileView(label: string): void {
+    EffectBus.emit('tile:view-open', {
+      label,
+      segments: get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [],
+    })
+  }
+
   #clearTimers(): void {
     if (this.#bloomTimer) { clearTimeout(this.#bloomTimer); this.#bloomTimer = null }
     if (this.#holdTimer) { clearTimeout(this.#holdTimer); this.#holdTimer = null }
@@ -812,6 +889,7 @@ export class QuickMenuInput {
     this.#heldKey = null
     this.#touchDown = null
     this.#tileLabel = null
+    this.#pendingView = null
     this.#levels = []
     this.#current = 'centre'
     this.#leftDeadZone = false

@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
 import { Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService } from '@hypercomb/core'
+import { deliverTurn } from './chat-thread.js'
 import { readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -349,7 +350,13 @@ export class ClaudeBridgeWorker extends Worker {
     const text = typeof req.text === 'string' ? req.text.slice(0, 20_000) : ''
     if (!convoId) return { id: req.id, ok: false, error: 'chat-reply requires `cell` (the convoId)' }
     if (!text) return { id: req.id, ok: false, error: 'chat-reply requires `text`' }
-    EffectBus.emit('ask:chat-reply', { convoId, text })
+    // WRITE THE RECORD, THEN ANNOUNCE IT. This used to emit and return ok
+    // without storing anything: with the conversation window closed the reply
+    // went nowhere and the responder was told it had landed, so it retired the
+    // ask believing the answer was delivered. `ok` now reflects the WRITE, so
+    // an unstorable reply is a failed reply the responder can act on.
+    const stored = await deliverTurn(convoId, 'assistant', text)
+    if (!stored) return { id: req.id, ok: false, error: 'chat-reply could not be stored — reply NOT delivered' }
     return { id: req.id, ok: true }
   }
 

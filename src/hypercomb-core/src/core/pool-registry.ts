@@ -98,6 +98,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Reserved here so every root walker knows the address is a pool and never
   // mistakes it for a lineage bag, in packed mode or out of it.
   'store:packed',
+  // The changes repository — one append-only record per act that touched a
+  // group of tiles (see assistant/changes.ts). Colon-scoped so it can never
+  // collide with a tile slugged 'changes'.
+  'changes:log',
   'substrate:references',
   'substrate:sources',
   'tutorial:artifacts',

@@ -1374,9 +1374,15 @@ $actions-corner: 12rem;
     left: 0;
     right: 0;
     bottom: calc(100% + 0.7rem);
-    display: flex;
+    // FIVE TO A ROW, AND IT GROWS UPWARD. A grid rather than a flex row: the
+    // sixth control starts a second row, and because the block is anchored by
+    // its BOTTOM edge, that row appears above the first instead of pushing the
+    // bar down. Adding a control is one button in the template — nothing here
+    // changes, and the select pill's lift follows #viewRowCount.
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    justify-items: center;
     align-items: center;
-    justify-content: space-evenly;
     gap: 0.4rem;
     // Resting style IS the final state — the row is visible the moment it is
     // in the DOM. The animation only adds the rise, so reduced-motion (and a
@@ -1540,7 +1546,9 @@ $actions-corner: 12rem;
   // The rail is on the left edge, so the view row pops out to its RIGHT as a
   // column — the same relationship, rotated with everything else.
   .mobile-view-row {
-    flex-direction: column;
+    // One column beside the rail — the portrait grid's five-across turned on
+    // its side. However many controls there are, they stack.
+    grid-template-columns: 1fr;
     left: calc(100% + 0.7rem);
     right: auto;
     bottom: auto;
@@ -1633,6 +1641,13 @@ $actions-corner: 12rem;
   flex-direction: column;
   gap: 0.1rem;
 
+  // The picker is two levels now — a course row plus every lesson under it.
+  // The expanded course can be long (one lesson per window), so the menu
+  // scrolls rather than running off the bottom of the screen.
+  max-height: min(70vh, 620px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
   background: color-mix(in srgb, var(--md-surface-c-low) 92%, transparent);
   backdrop-filter: blur(12px);
   border: 1px solid var(--md-outline-variant);
@@ -1673,6 +1688,57 @@ $actions-corner: 12rem;
   &:hover {
     background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
     .mat-sym { color: #ffc65c; }
+  }
+}
+
+// A course row and its expand caret share one line; the caret is a separate
+// hit target so clicking the row still flies the whole course.
+.tour-group {
+  display: flex;
+  align-items: stretch;
+  gap: 0.1rem;
+}
+
+.tour-caret {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.05rem; }
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+    color: var(--md-on-surface);
+  }
+}
+
+// One lesson, startable on its own. Indented under its course, and quieter
+// than the course row so the two levels read apart at a glance.
+.tour-lesson {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.3rem 0.45rem 0.3rem 1.6rem;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--md-on-surface) 78%, transparent);
+  font: inherit;
+  font-size: 0.76rem;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+    color: var(--md-on-surface);
   }
 }
 

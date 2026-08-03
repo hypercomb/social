@@ -2,23 +2,29 @@
 //
 // THE DEFAULT FULLSCREEN TILE VIEW — the tile's own screen, on a phone.
 //
-// HOW IT OPENS: hold a tile and let go without moving. The touch long-press
-// summons the quick-menu ring, and when the press landed on a tile the ring's
-// zero-travel centre is this view — so the same gesture that reaches the
-// hive-wide verbs (flick to a neighbour) reaches the tile's own (just let go).
-// A plain TAP no longer opens it: a tap goes INTO the tile, everywhere.
+// HOW IT OPENS: hold a tile and let go without moving.
+//
+// One hold, three outcomes, decided by what the hand does next — tap and you
+// go INTO the tile; hold and PULL and you move it; hold and LET GO and this
+// opens. On a phone the ring never enters the picture over a tile at all (see
+// quick-menu.input's `#pendingView`), which is what leaves the pull free to be
+// a move. On desktop the same view is the ring's zero-travel centre.
+//
+// AND IT IS THE ONLY PER-TILE SURFACE ON A PHONE. The desktop hover band is
+// retired in mobile mode — it needs a pointer to rest on a tile before it
+// appears and a 7px-accurate press to use, neither of which a finger does — so
+// this screen carries the band's entire affordance set, asked for by label at
+// mount time (`#overlayChips`). Nothing is hand-listed: a bee that registers
+// an icon with the overlay appears here too.
 //
 // It is not one tile, either. The layer you were looking at is a row, and the
 // view walks it — swipe left/right, or the next/previous chips — without
 // closing and reopening.
 //
-// On desktop every per-tile action (edit, adopt, share, public/private) lives on
-// the HOVER action band. A stationary touch produces no hover, so on a phone
-// that band is structurally unreachable and a leaf tile is a dead end: its tap
-// emits `tile:action {action:'open'}`, which only link and contact tiles
-// consume — a plain content tile does literally nothing. This view is the touch
-// answer: tap a leaf tile, it opens full-screen with its picture, its name, its
-// notes, and a row of thumb-sized actions.
+// It opens full-screen with the tile's picture, its name, its notes, and its
+// actions as rows of thumb-sized icons — five to a row, growing downward with
+// no cap, because a screen (unlike the hexagon the band has to fit inside) has
+// room for however many a tile turns out to carry.
 //
 // LAST IN THE TAKEOVER ORDER. tile-overlay consults `#viewTakeoverFor(label)`
 // first, so a tile carrying a deck (`slides`) or a gallery (`lightbox`)
@@ -64,6 +70,11 @@ const HEX_RATIO = '0.866'
 /** Travel that makes a horizontal drag a step to the next tile. Roughly a
  *  thumb's width — under it, a finger resting and lifting is still a tap. */
 const SWIPE_PX = 56
+/** Icons per row. Five is what the desktop band chunks at, so a tile's set
+ *  breaks in the same places on both surfaces. UNLIKE the band there is no row
+ *  cap: a hexagon is only so tall, a screen is not, so the block simply keeps
+ *  adding rows downward and scrolls if it ever outgrows the panel. */
+const MENU_COLUMNS = 5
 
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
@@ -78,21 +89,40 @@ type NotesShape = { notesFor(cellLabel: string): Array<{ text?: unknown }> }
 
 type OpenPayload = { label?: unknown; segments?: unknown }
 
-/** One action chip in the bottom row. `when` decides whether it renders at all;
+/** One icon in the menu. `when` decides whether it renders at all;
  *  `backingKey` shades it inert while its bee is still registering (the same
  *  readiness rule the desktop band applies — a tap that silently no-ops during
- *  boot is worse than a visibly unavailable control). */
+ *  boot is worse than a visibly unavailable control).
+ *
+ *  `glyph` is a Material Symbols name; `svg` is raw markup, which is what the
+ *  overlay's registered affordances carry. Exactly one of the two. */
 type Chip = {
   action: string
-  glyph: string
+  glyph?: string
+  svg?: string
   labelKey: string
   fallback: string
   backingKey?: string
   when?: () => boolean
   accent?: boolean
-  /** Chips that aren't a plain `tile:action` — going inside, picking the tile
+  /** Icons that aren't a plain `tile:action` — going inside, picking the tile
    *  — carry what they do here instead. Default: emit `tile:action` and close. */
   run?: () => void
+}
+
+/** What the overlay lends us: the SAME affordance set the desktop hover band
+ *  draws, resolved for one tile. Structurally typed so this drone never has to
+ *  import the overlay (which would be a cycle — the overlay opens this view). */
+type OverlayActionsShape = {
+  actionsForTile(label: string): Array<{
+    name: string
+    svgMarkup: string
+    labelKey?: string
+    backingKey?: string
+    dangerRow?: boolean
+    featureRow?: boolean
+  }>
+  invokeActionForTile(name: string, label: string): void
 }
 
 export class TileViewDrone extends Drone {
@@ -346,6 +376,14 @@ export class TileViewDrone extends Drone {
     host.style.cssText =
       `position:fixed;inset:0;z-index:${TAKEOVER_Z};overflow:hidden;background:#05040f;` +
       'display:flex;align-items:center;justify-content:center;font-family:inherit;' +
+      // THE SIDEWAYS SWIPE IS OURS. Without this the browser claims a
+      // horizontal drag that starts near a screen edge as its own back
+      // gesture: the hive navigates out from under the view and the step to
+      // the next tile never happens. `touch-action:none` refuses that claim
+      // for the whole surface — the one place a scroll IS wanted (the menu,
+      // and the notes) re-grants itself `pan-y`. `overscroll-behavior` stops
+      // the same drag becoming a pull-to-refresh on the page behind.
+      'touch-action:none;overscroll-behavior:contain;' +
       'padding:max(0.9rem,env(safe-area-inset-top,0px)) max(0.9rem,env(safe-area-inset-right,0px)) ' +
       'max(0.9rem,env(safe-area-inset-bottom,0px)) max(0.9rem,env(safe-area-inset-left,0px));'
     host.setAttribute('data-consumes-wheel', '')
@@ -424,7 +462,8 @@ export class TileViewDrone extends Drone {
       noteEl.textContent = notes
       noteEl.style.cssText =
         `flex:0 1 auto;font-size:0.95rem;line-height:1.45;color:${DIM};` +
-        'overflow-y:auto;max-height:26vh;white-space:pre-wrap;'
+        'overflow-y:auto;max-height:26vh;white-space:pre-wrap;' +
+        'touch-action:pan-y;overscroll-behavior:contain;'
       panel.appendChild(noteEl)
     }
 
@@ -474,8 +513,11 @@ export class TileViewDrone extends Drone {
     section.appendChild(title)
 
     const row = document.createElement('div')
+    // The same grid as the action menu, so views read as one more block of
+    // icons under it rather than a differently-shaped strip.
     row.style.cssText =
-      'display:flex;align-items:center;justify-content:inherit;gap:0.5rem;flex-wrap:wrap;'
+      `display:grid;grid-template-columns:repeat(${MENU_COLUMNS},minmax(0,1fr));` +
+      'gap:0.35rem;width:100%;max-width:24rem;'
     for (const bee of bees) row.appendChild(this.#creationChip(bee, label))
     section.appendChild(row)
     return section
@@ -541,19 +583,32 @@ export class TileViewDrone extends Drone {
     }
   }
 
-  /** The action row — the touch equivalent of the hover band, and the answer
-   *  to "what else do I need to do with a tile I just picked out". Only chips
-   *  that can actually do something render: adopt appears solely on a peer
-   *  tile, public/private solely on one of your own, GO INSIDE solely on a
-   *  branch. */
+  /**
+   * THE MENU — the touch equivalent of the hover band, and now its
+   * REPLACEMENT: in mobile mode the band is retired outright (it needs a hover
+   * to appear and a 7px-accurate press to use), so this is where everything a
+   * tile can do has to be.
+   *
+   * Most of it is not written here. The overlay owns the affordance registry —
+   * every provider bee registers into it and nowhere else — so the menu ASKS
+   * it what this tile carries and renders the answer. A bee that adds an icon
+   * to the desktop band gets one here too, with no edit to this file. What is
+   * written here is only what the band cannot express: going inside, picking
+   * the tile, walking the row, and the way out.
+   *
+   * Rows of MENU_COLUMNS, growing DOWNWARD without a cap.
+   */
   #actionRow(label: string): HTMLElement {
     const row = document.createElement('div')
     row.dataset['role'] = 'actions'
     row.style.cssText =
-      'flex:0 0 auto;display:flex;align-items:center;justify-content:center;' +
-      'gap:0.6rem;flex-wrap:wrap;margin-top:0.4rem;'
+      `flex:0 1 auto;display:grid;grid-template-columns:repeat(${MENU_COLUMNS},minmax(0,1fr));` +
+      'gap:0.35rem;margin-top:0.4rem;width:100%;max-width:24rem;' +
+      // Past a few rows the block scrolls rather than pushing the hexagon off
+      // the screen. `pan-y` so this scroll is possible at all while the host
+      // holds every other touch action (see #mount).
+      'overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;'
 
-    const external = this.#external.has(label)
     const chips: Chip[] = [
       // GO INSIDE leads: a branch's whole point is what is under it, and the
       // close-up is reached by holding one. Emitted as a request rather than
@@ -572,37 +627,12 @@ export class TileViewDrone extends Drone {
           this.close()
         },
       },
-      {
-        action: 'adopt',
-        glyph: 'download',
-        labelKey: 'action.adopt',
-        fallback: 'make this yours',
-        backingKey: '@diamondcoreprocessor.com/SwarmAdoptDrone',
-        when: () => external,
-        accent: true,
-      },
-      // A peer's tile is not yours to rewrite — the desktop band drops `edit`
-      // on the public-external profile for the same reason, and offers `hide`
-      // in its place: dismiss it from view without taking ownership.
-      { action: 'edit', glyph: 'edit', labelKey: 'action.edit', fallback: 'edit', when: () => !external },
-      {
-        action: 'hide',
-        glyph: 'visibility_off',
-        labelKey: 'action.hide',
-        fallback: 'hide',
-        when: () => external,
-      },
-      {
-        action: 'make-public',
-        glyph: 'public',
-        labelKey: 'action.make-public',
-        fallback: 'share',
-        when: () => !external,
-      },
-      // What this tile CAN DO — the beehaviors panel, scoped to it. On a phone
-      // this is the only way in: the desktop route is the hover band's puzzle
-      // piece, which a finger never reaches.
-      { action: 'features', glyph: 'extension', labelKey: 'action.features', fallback: 'features' },
+      // EVERYTHING THE BAND CARRIES — edit, note, share, features, adopt,
+      // hide, block, files, invite, remove, the lot — resolved for THIS tile
+      // by the surface that owns them. These used to be a hand-written subset
+      // here, which meant a phone saw five of the twenty-odd affordances a
+      // tile can have and no bee could add to them.
+      ...this.#overlayChips(label),
       // PICK IT. The close-up is one tile; the picked set is how you act on
       // several, and every set verb (marking, removing, the clipboard, the
       // options ring) reads that one selection. Arming the picker on the way
@@ -646,28 +676,97 @@ export class TileViewDrone extends Drone {
     return row
   }
 
+  /**
+   * The overlay's affordances for this tile, as menu icons.
+   *
+   * Order is the band's own — main, then features, then danger — so `remove`
+   * lands in the last cell, furthest from the thumb's resting reach. The icon
+   * is the provider's raw SVG, which is already white-filled 24×24 markup, so
+   * it drops straight into the DOM.
+   *
+   * Silent when the overlay is absent or the tile is not on the current layer:
+   * an empty menu is the right answer there, not a broken one.
+   */
+  #overlayChips(label: string): Chip[] {
+    let actions: ReturnType<OverlayActionsShape['actionsForTile']> = []
+    try {
+      const overlay = window.ioc?.get?.('@diamondcoreprocessor.com/TileOverlayDrone') as
+        OverlayActionsShape | undefined
+      actions = overlay?.actionsForTile?.(label) ?? []
+    } catch { return [] }
+
+    return actions.map(action => ({
+      action: action.name,
+      svg: action.svgMarkup,
+      labelKey: action.labelKey ?? '',
+      fallback: action.name.replace(/-/g, ' '),
+      backingKey: action.backingKey,
+      // Through the overlay, not a bare emit: it owns the `tile:action`
+      // payload shape (q/r/index) and the one action that is not an emit at
+      // all (break-apart plays its shatter first).
+      run: () => {
+        const overlay = window.ioc?.get?.('@diamondcoreprocessor.com/TileOverlayDrone') as
+          OverlayActionsShape | undefined
+        overlay?.invokeActionForTile?.(action.name, label)
+        // Editing, sharing and the panels open their own surface over this
+        // one. `remove` takes the tile out from under it. Either way the
+        // close-up is done.
+        this.close()
+      },
+    }))
+  }
+
+  /**
+   * ONE MENU CELL: the icon, and its name under it in small type.
+   *
+   * Icon-first because a row of five words is unreadable at this width and a
+   * row of five icons is not — but the word stays, because an icon nobody
+   * recognises is a control nobody presses. The whole cell is the target, so
+   * the tap area is the full grid square rather than the glyph inside it.
+   */
   #chip(chip: Chip, label: string): HTMLElement {
     const btn = document.createElement('button')
     const inert = !!chip.backingKey && !window.ioc?.has?.(chip.backingKey)
+    const text = this.#t(chip.labelKey, chip.fallback)
     btn.type = 'button'
-    btn.setAttribute('aria-label', this.#t(chip.labelKey, chip.fallback))
+    btn.setAttribute('aria-label', text)
     btn.style.cssText =
-      `min-width:${TAP};min-height:${TAP};padding:0 1.05rem;border-radius:${TAP};` +
-      'display:inline-flex;align-items:center;gap:0.5rem;cursor:pointer;' +
+      `min-height:${TAP};padding:0.4rem 0.15rem;border-radius:0.85rem;width:100%;` +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'gap:0.25rem;cursor:pointer;' +
       `background:${chip.accent ? STEEL : 'rgba(20,26,34,0.9)'};` +
       `color:${chip.accent ? '#04121b' : 'rgba(245,245,245,0.9)'};` +
       `border:1px solid ${chip.accent ? 'transparent' : 'rgba(255,255,255,0.12)'};` +
-      `font-size:0.95rem;font-weight:600;opacity:${inert ? 0.4 : 1};` +
-      `pointer-events:${inert ? 'none' : 'auto'};`
+      `opacity:${inert ? 0.4 : 1};pointer-events:${inert ? 'none' : 'auto'};`
 
-    const glyph = document.createElement('span')
-    glyph.textContent = chip.glyph
-    glyph.style.cssText = "font-family:'Material Symbols Outlined';font-size:1.35rem;line-height:1;"
-    btn.appendChild(glyph)
+    const icon = document.createElement('span')
+    icon.style.cssText =
+      'display:flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;'
+    if (chip.svg) {
+      // Provider markup: 24×24, `fill="white"`. Sized down to the cell and
+      // recoloured through `currentColor` so an accent cell inverts with the
+      // rest of the button.
+      icon.innerHTML = chip.svg
+      const svg = icon.firstElementChild as SVGElement | null
+      if (svg) {
+        svg.setAttribute('width', '100%')
+        svg.setAttribute('height', '100%')
+        svg.setAttribute('fill', 'currentColor')
+      }
+    } else {
+      icon.textContent = chip.glyph ?? ''
+      icon.style.cssText += "font-family:'Material Symbols Outlined';font-size:1.4rem;line-height:1;"
+    }
+    btn.appendChild(icon)
 
-    const text = document.createElement('span')
-    text.textContent = this.#t(chip.labelKey, chip.fallback)
-    btn.appendChild(text)
+    const caption = document.createElement('span')
+    caption.textContent = text
+    // One line, clipped rather than wrapped: a two-line caption makes one cell
+    // taller than its neighbours and the whole row goes ragged.
+    caption.style.cssText =
+      'font-size:0.6rem;font-weight:600;line-height:1.1;max-width:100%;' +
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.85;'
+    btn.appendChild(caption)
 
     btn.addEventListener('click', () => {
       if (chip.run) { chip.run(); return }
@@ -682,21 +781,18 @@ export class TileViewDrone extends Drone {
     return btn
   }
 
+  /** The way out, as an ordinary cell — it belongs in the grid with everything
+   *  else rather than floating beside it at a different shape. */
   #exitChip(): HTMLElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.setAttribute('aria-label', this.#t('slides.exit', 'Back to the hive'))
-    btn.style.cssText =
-      `min-width:${TAP};min-height:${TAP};border-radius:50%;cursor:pointer;` +
-      'display:inline-flex;align-items:center;justify-content:center;' +
-      'background:rgba(20,26,34,0.9);border:1px solid rgba(255,255,255,0.12);' +
-      'color:rgba(245,245,245,0.9);'
-    const glyph = document.createElement('span')
-    glyph.textContent = 'grid_view'
-    glyph.style.cssText = "font-family:'Material Symbols Outlined';font-size:1.5rem;line-height:1;"
-    btn.appendChild(glyph)
-    btn.addEventListener('click', () => this.close())
-    return btn
+    return this.#chip({
+      action: 'exit',
+      glyph: 'grid_view',
+      // Its OWN key, not slides' — "Back to the hive" is the right thing for a
+      // deck's aria-label and far too long for a caption under an icon.
+      labelKey: 'tile-view.exit',
+      fallback: 'back',
+      run: () => this.close(),
+    }, '')
   }
 
   // ── content ────────────────────────────────────────────────

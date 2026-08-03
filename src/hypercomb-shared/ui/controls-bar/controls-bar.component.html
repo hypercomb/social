@@ -14,11 +14,29 @@
        [attr.aria-label]="'controls.tutorial.levels' | t">
     <div class="tour-menu-title">{{ 'controls.tutorial.levels' | t }}</div>
     @for (course of tourCourses(); track course.level) {
-      <button class="tour-row" role="menuitem" (click)="pickTour(course.level)">
-        <span class="mat-sym">emoji_nature</span>
-        <span class="tour-label">{{ course.label }}</span>
-        <span class="tour-count">{{ course.count }}</span>
-      </button>
+      <div class="tour-group">
+        <button class="tour-row" role="menuitem" (click)="pickTour(course.level)">
+          <span class="mat-sym">emoji_nature</span>
+          <span class="tour-label">{{ course.label }}</span>
+          <span class="tour-count">{{ course.count }}</span>
+        </button>
+        @if (course.lessons.length) {
+          <button class="tour-caret"
+                  type="button"
+                  [attr.aria-expanded]="isTourExpanded(course.level)"
+                  [attr.aria-label]="'controls.tutorial.lessons' | t"
+                  (click)="toggleTourCourse(course.level, $event)">
+            <span class="mat-sym">{{ isTourExpanded(course.level) ? 'expand_less' : 'expand_more' }}</span>
+          </button>
+        }
+      </div>
+      @if (isTourExpanded(course.level)) {
+        @for (lesson of course.lessons; track lesson.id) {
+          <button class="tour-lesson" role="menuitem" (click)="pickLesson(lesson.id)">
+            <span class="tour-label">{{ lesson.label }}</span>
+          </button>
+        }
+      }
     }
   </div>
 }
@@ -230,6 +248,19 @@
               <button class="ctl-btn pheromone-btn" (click)="openPheromones()"
                       [attr.aria-label]="'tags.panel.open' | t">
                 <span class="mat-sym">label</span>
+              </button>
+              <!-- PIN — the sixth control, and therefore the first on a second
+                   row. It had no mobile affordance at all: a pinned layer holds
+                   the InputGate, so the page stops answering a drag, and the
+                   only ways out were Escape, a slash command or a desktop. The
+                   state was reachable and the release was not. It is here
+                   rather than on the bottom row because that row is five slots
+                   with the camera dead centre, and because pinning is a
+                   how-you-see control like everything else up here. -->
+              <button class="ctl-btn pin-btn" [class.active]="pinnedHere()"
+                      (click)="togglePin()"
+                      [attr.aria-label]="'controls.pin' | t">
+                <span class="mat-sym" [class.filled]="pinnedHere()">push_pin</span>
               </button>
             </div>
           }

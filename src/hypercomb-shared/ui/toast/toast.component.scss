@@ -12,12 +12,19 @@ $types: (
 :host { display: contents; }
 
 // ── stack container ────────────────────────────────────
-// Top offset clears the page chrome (controls bar + share-intent input
-// across the top edge). Compact column of single-line strips, with a
-// readable gap between rows so each line is its own message.
+// Top offset clears the page chrome AND the breadcrumb that docks under
+// it — same anchor calc as `.breadcrumb-top` (controls-bar.component.scss)
+// plus the crumb's own line box, so a toast never lands on the crumb at
+// any header size. Compact column of single-line strips, with a readable
+// gap between rows so each line is its own message.
 .toast-stack {
   position: fixed;
-  top: 4rem;
+  top: calc(
+    max(
+      calc(3.25rem * var(--hc-header-zoom, 1.0)),
+      calc(var(--hc-header-bottom, 0px) + 0.35rem)
+    ) + 1.5rem
+  );
   right: 0.75rem;
   z-index: 100010;
   display: flex;
@@ -38,17 +45,20 @@ $types: (
   white-space: nowrap;
   overflow: hidden;
 
-  background: rgba(14, 18, 24, 0.9);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  // A dark translucent plate, not a solid chip: the hive still shows
+  // through, but nothing bright behind a toast bleeds into its type. The
+  // shadow doubles as a soft skirt so the strip separates from busy art.
+  background: rgba(6, 9, 14, 0.82);
+  backdrop-filter: blur(14px) saturate(0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-left-width: 2px;
   border-radius: 4px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
 
   font-family: var(--hc-mono);
   font-size: 0.7rem;
   line-height: 1.5;
-  color: rgba(245, 245, 245, 0.78);
+  color: rgba(245, 245, 245, 0.9);
 
   animation: toast-enter 220ms ease-out forwards;
   transition: opacity 200ms ease, transform 200ms ease;
@@ -89,7 +99,7 @@ $types: (
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: rgba(245, 245, 245, 0.65);
+  color: rgba(245, 245, 245, 0.82);
 }
 
 .toast-action {

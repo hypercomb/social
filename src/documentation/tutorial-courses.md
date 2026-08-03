@@ -17,6 +17,14 @@ lessons organised into four courses.
 The Help page (`/help`) leads with a **Guided Tours** island — one tile per
 course; clicking it sends the bee up.
 
+The rail's bee is the other way in. Plain click flies the starter tour;
+**Ctrl/⌘+click opens the picker**, which is two levels deep: the course row
+flies the whole course, and its caret opens **every lesson underneath, each
+startable on its own**. That is not a convenience — a lesson is an independent
+piece by construction, so "just show me the tags window" has to be one click,
+not a slash command you have to know the id for. The deepest course opens
+expanded, because that is the one whose lessons are looked for by name.
+
 ## A lesson is an independent piece
 
 `hypercomb-essentials/src/diamondcoreprocessor.com/tutorial/`

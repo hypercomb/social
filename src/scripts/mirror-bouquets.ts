@@ -57,7 +57,14 @@ const BEHAVIOR_NOTE =
   '"a group of pheromones" could mean — a set you are WATCHING for is a filter over marks, ' +
   'derived at read time, and keeps its own word (interest).\n\n' +
   'Gather a bouquet, then walk the tiles to SCENT them: each one you touch gets the whole blend. ' +
-  'The act is scenting, the record it leaves is a deposit.'
+  'The act is scenting, the record it leaves is a deposit.\n\n' +
+  'Its second role (pinned 2026-08-02): the LENS. The pheromone window groups the vocabulary by ' +
+  'bouquet instead of listing every mark flat, and filtering by theme is selecting bouquets — the ' +
+  'union of their members becomes the active filter. A bouquet is a TILE whose members happen to ' +
+  'be pheromones, so making one is making a tile and attaching a mark to it is the same operation ' +
+  'as marking anything. Bouquet = view, mark = fact: a pheromone may live in several bouquets, ' +
+  'bouquets overlap, marks never move. A mark in no bouquet is unsorted — visible and nagging to ' +
+  'be organized, same rule as tiles. Doctrine: documentation/piece-protocol.md'
 
 let counter = 0
 type BridgeRes = { id: string; ok: boolean; data?: any; error?: string }

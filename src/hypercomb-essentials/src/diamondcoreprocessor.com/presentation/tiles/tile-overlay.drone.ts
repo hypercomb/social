@@ -462,7 +462,7 @@ export class TileOverlayDrone extends Drone {
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
     'drop:dragging',
     'overlay:arrange-mode', 'overlay:pool-icons',
-    'bee:disposed', 'genotype:set-visible',
+    'bee:disposed', 'genotype:set-visible', 'mobile:mode',
     'substrate:applied', 'cell:removed', 'tile:saved',
     'tile:public-changed',
     'keymap:invoke',
@@ -860,6 +860,13 @@ export class TileOverlayDrone extends Drone {
         if (active && this.#overlay && !this.#arrangeMode) this.#overlay.visible = false
       })
 
+      // `/mobile on|off` flips which shell this is mid-session. The band is
+      // retired on the phone side, so the switch has to take effect at once
+      // rather than on whatever pointer event happens to come next.
+      this.onEffect<{ active?: boolean }>('mobile:mode', () => {
+        this.#updateVisibility()
+      })
+
       this.onEffect<{ active?: boolean }>('screensaver:active', (payload) => {
         this.#screensaverActive = payload?.active === true
         if (this.#screensaverActive) {
@@ -1250,6 +1257,91 @@ export class TileOverlayDrone extends Drone {
     return (notesService?.notesFor(cellLabel)?.length ?? 0) > 0
   }
 
+
+  // ── The tile's affordances, for a surface that is not the band ─────
+  //
+  // The band is a hover surface and a phone has no hover, so on mobile it is
+  // retired (see #updateVisibility) and the tile's own screen carries what it
+  // carried. That screen must show the SAME set — every provider bee registers
+  // here and nowhere else — so it asks for it by label rather than keeping a
+  // second, drifting list of what a tile can do.
+  //
+  // By LABEL, not by hover: the caller is asking about a tile it is showing
+  // full-screen, which is by definition not the one under the pointer.
+
+  /** The per-tile context `visibleWhen`/`tintWhen` are written against, built
+   *  for an arbitrary label. Null when the label is not on this layer. */
+  #tileContextFor(label: string): OverlayTileContext | null {
+    const index = this.#cellLabels.indexOf(label)
+    if (index < 0) return null
+    const coord = this.#cellCoords[index]
+    return {
+      label,
+      q: coord?.q ?? 0,
+      r: coord?.r ?? 0,
+      index,
+      noImage: this.#noImageLabels.has(label),
+      hasSubstrate: this.#substrateLabels.has(label),
+      isBranch: this.#branchLabels.has(label),
+      hasLink: this.#linkLabels.has(label),
+      isHidden: this.#hiddenLabels.has(label),
+      hasNotes: this.#hasNotesFor(label),
+    }
+  }
+
+  /**
+   * Every affordance this tile actually carries, in band order (main, then
+   * feature, then danger — `remove` last), already filtered by each one's own
+   * `visibleWhen`. NOT capped: the band stops at two rows because a hexagon is
+   * only so tall, which is a constraint of that surface and not of the tile.
+   */
+  public actionsForTile(label: string): OverlayActionDescriptor[] {
+    const ctx = this.#tileContextFor(label)
+    if (!ctx) return []
+    // This tile's profile, not the hovered tile's — a peer tile's adopt/hide
+    // set is decided by the tile being asked about.
+    const external = this.#externalLabels.has(label)
+    const profile: OverlayProfileKey = this.#worldMode
+      ? 'world'
+      : external ? 'public-external'
+      : this.#meshPublic ? 'public-own' : 'private'
+
+    const seen = new Set<string>()
+    const out: OverlayActionDescriptor[] = []
+    for (const name of this.#activeOrder.get(profile) ?? []) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      const desc = this.#registeredDescriptors.get(name)
+      if (!desc) continue
+      if (desc.genotype && this.#genotypeVisible.get(desc.genotype) === false) continue
+      if (desc.visibleWhen && !desc.visibleWhen(ctx)) continue
+      out.push(desc)
+    }
+    const rank = (d: OverlayActionDescriptor): number =>
+      d.name === 'remove' ? 3 : d.dangerRow ? 2 : d.featureRow ? 1 : 0
+    return out.sort((a, b) => rank(a) - rank(b))
+  }
+
+  /** Run one of them. Goes through here rather than through the caller so the
+   *  `tile:action` payload — and the one action that is not a plain emit — has
+   *  exactly one definition. */
+  public invokeActionForTile(name: string, label: string): void {
+    const ctx = this.#tileContextFor(label)
+    if (!ctx) return
+    if (name === 'break-apart') {
+      this.playShatterAnimation(ctx.q, ctx.r, label)
+      return
+    }
+    this.emitEffect('tile:action', { action: name, q: ctx.q, r: ctx.r, index: ctx.index, label })
+  }
+
+  /** The tile's current tint for an affordance, or null for the default —
+   *  the "this tile has notes" kind of signal the band shows by colouring. */
+  public actionTintForTile(desc: OverlayActionDescriptor, label: string): number | null {
+    const ctx = this.#tileContextFor(label)
+    if (!ctx || !desc.tintWhen) return null
+    return desc.tintWhen(ctx) ?? null
+  }
 
   // ── Profile resolution (now from registered descriptors) ───────────
 
@@ -3224,6 +3316,18 @@ export class TileOverlayDrone extends Drone {
     // Arrange mode: overlay stays visible
     if (this.#arrangeMode) {
       this.#overlay.visible = true
+      return
+    }
+
+    // RETIRED ON A PHONE. This band is a HOVER affordance — it needs a pointer
+    // resting on a tile to reveal itself and a second, accurate press to hit a
+    // 7px icon, and a finger supplies neither. Everything it carries lives on
+    // the tile's own screen instead, which one hold reaches and which sizes
+    // its icons for a thumb. Arrange mode is above this deliberately: laying
+    // the icons out is still how you choose what the band shows on desktop.
+    if (this.#mobileMode()) {
+      this.#overlay.visible = false
+      this.#hexBg?.hide()
       return
     }
 

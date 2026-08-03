@@ -64,6 +64,15 @@ interface ControlItem {
   visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection'
 }
 
+/** A row in the tour picker: the course, and the individual lessons under it.
+ *  Read from the tutorial's own registry over IoC — see #openTourMenu. */
+interface TourCourse {
+  level: string
+  label: string
+  count: number
+  lessons: { id: string; label: string }[]
+}
+
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
   { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always' },
@@ -259,13 +268,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  viewport at all. Published by SequenceCycleDrone on `lanes:changed`. */
   readonly laneCount = signal(3)
   readonly lanesActive = signal(false)
-  /** The five-icon view row above the bar (right of the rail in landscape). */
+  /** The icon rows above the bar (right of the rail in landscape). Five to a
+   *  row, and it WRAPS — a sixth control starts a second row above the first,
+   *  so the stack grows up from the bar and the bottom row never squeezes. */
   readonly viewRowOpen = signal(false)
+  /** Controls currently in the row. Five per row; the lift below follows it, so
+   *  adding a control here is the whole change — nothing else measures. */
+  readonly #viewRowCount = 6
   /** How far anything floating above the bar must lift to clear the view row.
    *  Published as a CSS variable so body-appended chrome (the select pill)
-   *  moves with it without a second event contract. */
+   *  moves with it without a second event contract. One row is 4.6rem; each
+   *  further row adds its own height plus the gap. */
   #setViewRowLift = (open: boolean): void => {
-    document.documentElement.style.setProperty('--hc-mobile-row-lift', open ? '4.6rem' : '0px')
+    const rows = Math.max(1, Math.ceil(this.#viewRowCount / 5))
+    const lift = open ? `${(4.6 + (rows - 1) * 3.4).toFixed(2)}rem` : '0px'
+    document.documentElement.style.setProperty('--hc-mobile-row-lift', lift)
   }
   #viewRowAway = (event: Event): void => {
     if (!this.viewRowOpen()) return
@@ -1549,11 +1566,20 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly tourMenuOpen = signal(false)
   readonly tourMenuPos = signal<{ x: number; y: number; flip: boolean }>({ x: 0, y: 0, flip: false })
-  readonly tourCourses = signal<{ level: string; label: string; count: number }[]>([])
+  readonly tourCourses = signal<TourCourse[]>([])
+
+  /** Which courses are showing their lessons. The picker is two levels: the
+   *  row flies the whole course, the caret opens the individual lessons — a
+   *  lesson is an independent piece and has to be startable on its own. The
+   *  deepest course opens EXPANDED, because that is the one whose lessons are
+   *  looked for by name (one per window). */
+  readonly tourExpanded = signal<readonly string[]>([])
 
   #openTourMenu(event: MouseEvent): void {
-    const registry = get<{ levels?: () => string[]; course?: (l: string) => unknown[] }>(
-      '@diamondcoreprocessor.com/TutorialLessonRegistry')
+    const registry = get<{
+      levels?: () => string[]
+      course?: (l: string) => { id: string; title: string }[]
+    }>('@diamondcoreprocessor.com/TutorialLessonRegistry')
     const levels = registry?.levels?.() ?? []
     if (levels.length === 0) {
       // No roster (the tutorial module isn't loaded) — fall back to the tour
@@ -1561,11 +1587,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       EffectBus.emit('tutorial:start', {})
       return
     }
-    this.tourCourses.set(levels.map(level => ({
-      level,
-      label: this.#tourLabel(level),
-      count: registry?.course?.(level)?.length ?? 0,
-    })))
+    this.tourCourses.set(levels.map(level => {
+      const lessons = registry?.course?.(level) ?? []
+      return {
+        level,
+        label: this.#tourLabel(level),
+        count: lessons.length,
+        lessons: lessons.map(l => ({ id: l.id, label: this.#lessonLabel(l) })),
+      }
+    }))
+    this.tourExpanded.set(levels.length ? [levels[levels.length - 1]] : [])
 
     // Fixed positioning off the button's own rect: the rail is a scrolling,
     // overflow-hidden box, so a menu rendered inside it would be clipped.
@@ -1573,9 +1604,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const width = 232
     const x = rect ? rect.right + 10 : 12
     const flip = x + width > window.innerWidth - 8
+    // Keep the whole menu on screen. It is two levels deep now, so its height
+    // is the CSS cap (min(70vh, 620px)) rather than a few rows — clamping to a
+    // fixed 260 would have let the expanded course run off the bottom.
+    const maxHeight = Math.min(window.innerHeight * 0.7, 620)
     this.tourMenuPos.set({
       x: flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x,
-      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - 260)),
+      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - maxHeight - 8)),
       flip,
     })
     this.tourMenuOpen.set(true)
@@ -1595,6 +1630,33 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly pickTour = (level: string): void => {
     this.closeTourMenu()
     EffectBus.emit('tutorial:start', { level })
+  }
+
+  /** Fly ONE lesson. Same effect `/tutorial <lesson>` raises — a lesson is
+   *  independent by construction (it makes whatever it needs on the practice
+   *  page), so starting it alone is a first-class way in, not a shortcut. */
+  readonly pickLesson = (id: string): void => {
+    this.closeTourMenu()
+    EffectBus.emit('tutorial:start', { lesson: id })
+  }
+
+  readonly toggleTourCourse = (level: string, event?: MouseEvent): void => {
+    event?.stopPropagation()
+    const open = this.tourExpanded()
+    this.tourExpanded.set(open.includes(level)
+      ? open.filter(l => l !== level)
+      : [...open, level])
+  }
+
+  readonly isTourExpanded = (level: string): boolean => this.tourExpanded().includes(level)
+
+  /** A lesson's own title, localized. `tutorial.lesson.<id>` if the catalog
+   *  carries it, otherwise the title the lesson declared in code. */
+  #lessonLabel(lesson: { id: string; title: string }): string {
+    const key = `tutorial.lesson.${lesson.id}`
+    const i18n = get<{ t?: (k: string) => string }>('@hypercomb.social/I18n')
+    const resolved = i18n?.t?.(key)
+    return resolved && resolved !== key ? resolved : lesson.title
   }
 
   #tourLabel(level: string): string {
