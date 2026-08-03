@@ -41,6 +41,58 @@
   </div>
 }
 
+<!-- FIT FLYOUT — right-click on the rail's fit button. The fit's second-order
+     controls: the global fit switch (was Ctrl+click only, invisible), this
+     page's pin-size / pin-position holds, and the step-zoom verbs the
+     magnifiers used to spend two rail slots on. Fixed position for the same
+     reason as the tour menu: the rail scrolls and clips. -->
+@if (fitMenuOpen()) {
+  <div class="fit-menu"
+       [style.left.px]="fitMenuPos().x"
+       [style.top.px]="fitMenuPos().y"
+       role="menu"
+       [attr.aria-label]="'controls.view-menu' | t">
+    <div class="tour-menu-title">{{ 'controls.view-menu' | t }}</div>
+    <button class="fit-row" role="menuitem" (click)="fitNow()">
+      <span class="mat-sym">center_focus_strong</span>
+      <span class="fit-label">{{ 'controls.fit-now' | t }}</span>
+    </button>
+    <button class="fit-row" role="menuitemcheckbox"
+            [attr.aria-checked]="fitLocked()" [class.on]="fitLocked()"
+            (click)="toggleGlobalFit()">
+      <span class="mat-sym">fit_screen</span>
+      <span class="fit-label">{{ 'controls.fit-global' | t }}</span>
+      @if (fitLocked()) { <span class="mat-sym fit-check">check</span> }
+    </button>
+    <button class="fit-row" role="menuitemcheckbox"
+            [attr.aria-checked]="pinnedSizeHere()" [class.on]="pinnedSizeHere()"
+            (click)="togglePinSize()">
+      <span class="mat-sym">aspect_ratio</span>
+      <span class="fit-label">{{ 'controls.pin-size' | t }}</span>
+      @if (pinnedSizeHere()) { <span class="mat-sym fit-check">check</span> }
+    </button>
+    <button class="fit-row" role="menuitemcheckbox"
+            [attr.aria-checked]="pinnedPositionHere()" [class.on]="pinnedPositionHere()"
+            (click)="togglePinPosition()">
+      <span class="mat-sym">my_location</span>
+      <span class="fit-label">{{ 'controls.pin-position' | t }}</span>
+      @if (pinnedPositionHere()) { <span class="mat-sym fit-check">check</span> }
+    </button>
+    <!-- Step zoom — the magnifiers' verbs, kept reachable here now that the
+         rail buttons default off. Stays open: stepping is repeated. -->
+    <div class="fit-zoom-row">
+      <button class="fit-zoom-btn" (click)="zoomOut()"
+              [attr.aria-label]="'controls.zoom-out' | t">
+        <span class="mat-sym">zoom_out</span>
+      </button>
+      <button class="fit-zoom-btn" (click)="zoomIn()"
+              [attr.aria-label]="'controls.zoom-in' | t">
+        <span class="mat-sym">zoom_in</span>
+      </button>
+    </div>
+  </div>
+}
+
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
   @if (meshPublic()) {
@@ -397,6 +449,7 @@
                       [class.zoom-btn]="ctrl.id === 'zoom-in' || ctrl.id === 'zoom-out'"
                       [class.icon-jiggle]="iconEditOn()"
                       (click)="onCtrlClick(ctrl, $event)"
+                      (contextmenu)="onCtrlContext(ctrl, $event)"
                       (pointerdown)="onIconPressDown()"
                       (pointerup)="onIconPressUp()"
                       (pointerleave)="onIconPressUp()"

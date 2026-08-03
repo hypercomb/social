@@ -32,6 +32,12 @@ const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
 /** Page keys (lineage paths) whose viewport is pinned. The pin is per LAYER. */
 const PINNED_PAGES_KEY = 'hc:pinned-pages'
+/** Partial pins — per-page exceptions the fit flyout sets. Size-pinned pages
+ *  keep their zoom when a fit runs (only recentre); position-pinned pages keep
+ *  their centre (only rescale). Both at once holds the whole viewport against
+ *  fits WITHOUT the full pin's input lock. */
+const PINNED_SIZE_PAGES_KEY = 'hc:pinned-size-pages'
+const PINNED_POSITION_PAGES_KEY = 'hc:pinned-position-pages'
 
 /** Owner token for the InputGate lock a pinned layer holds. */
 const PIN_OWNER = 'pin'
@@ -129,7 +135,9 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 // items the previous expand-row had become muted (grayed). Once a user toggles
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
-  'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
+  // The magnifiers default OFF: the wheel owns zoom, and their verbs live in
+  // the fit flyout now. Edit mode re-enables them for trackpad-less setups.
+  'back': true, 'dcp': true, 'fit': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
   'text-only': false,
   'pools': true,
   'sequences': false,
@@ -400,11 +408,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // it is still frozen — while every other page stays free. The set of pinned
   // page keys (lineage path, same key as the fit pins) is persisted; the
   // shared InputGate lock is derived from it on every navigation (#pinSync).
-  #pinnedPages = signal<ReadonlySet<string>>(this.#restorePinnedPages())
+  #pinnedPages = signal<ReadonlySet<string>>(this.#restorePageSet(PINNED_PAGES_KEY))
 
-  #restorePinnedPages(): ReadonlySet<string> {
+  // Partial pins (fit flyout): pages whose SIZE or POSITION is held against
+  // fits. Same per-page key model as the full pin, without the input lock.
+  #pinnedSizePages = signal<ReadonlySet<string>>(this.#restorePageSet(PINNED_SIZE_PAGES_KEY))
+  #pinnedPositionPages = signal<ReadonlySet<string>>(this.#restorePageSet(PINNED_POSITION_PAGES_KEY))
+
+  #restorePageSet(key: string): ReadonlySet<string> {
     try {
-      const raw = localStorage.getItem(PINNED_PAGES_KEY)
+      const raw = localStorage.getItem(key)
       if (!raw) return new Set()
       const arr = JSON.parse(raw)
       return Array.isArray(arr) ? new Set(arr) : new Set()
@@ -413,9 +426,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  #persistPinnedPages(set: ReadonlySet<string>): void {
+  #persistPageSet(key: string, set: ReadonlySet<string>): void {
     try {
-      localStorage.setItem(PINNED_PAGES_KEY, JSON.stringify([...set]))
+      localStorage.setItem(key, JSON.stringify([...set]))
     } catch { /* ignore */ }
   }
   #clipboardAvailable = signal(false)
@@ -854,6 +867,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.#pinnedPages().has(this.#currentPageKey())
   })
 
+  /** Partial pins for THIS layer — the fit flyout's pin-size / pin-position. */
+  readonly pinnedSizeHere = computed(() => {
+    this.#moved$()
+    return this.#pinnedSizePages().has(this.#currentPageKey())
+  })
+  readonly pinnedPositionHere = computed(() => {
+    this.#moved$()
+    return this.#pinnedPositionPages().has(this.#currentPageKey())
+  })
+
+  /** The hold every fit must respect on this page. Handed to the zoom drone
+   *  as its `fitHold` provider, so fits that originate inside the drone
+   *  (resize refits) honour the pins too. */
+  #fitHoldNow(): 'none' | 'scale' | 'position' | 'both' {
+    const size = this.pinnedSizeHere()
+    const position = this.pinnedPositionHere()
+    return size && position ? 'both' : size ? 'scale' : position ? 'position' : 'none'
+  }
+
   /** Whether `#pinSync` has actually taken the lock. Guards the reconciliation
    *  below from firing before the effect's first run (a gate change during
    *  boot would otherwise read as "someone dropped our lock"). */
@@ -880,7 +912,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const next = new Set(this.#pinnedPages())
     next.delete(key)
     this.#pinnedPages.set(next)
-    this.#persistPinnedPages(next)
+    this.#persistPageSet(PINNED_PAGES_KEY, next)
   }
 
   /** Effective button state — drives color: white/green. The switch reads the
@@ -1070,6 +1102,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // reaches an icon. On the host (not the list) because the list is
     // created and destroyed by the mode/dock branches.
     this.#installClickSwallow()
+
+    // Hand the zoom drone this page's partial-pin hold, so every fit path —
+    // including resize refits that originate inside the drone — respects
+    // pin-size / pin-position without threading the value per call.
+    ;(window as any).ioc?.whenReady?.('@diamondcoreprocessor.com/ZoomDrone', (zoom: any) => {
+      zoom.fitHold = (): 'none' | 'scale' | 'position' | 'both' => this.#fitHoldNow()
+    })
 
     // Pulse the pin button when a pan/zoom is rejected because input is
     // locked. Transient (no replay) so a fresh mount never bumps.
@@ -1428,9 +1467,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    // The picker's window listeners are capture-phase and live only while it
-    // is open — closing releases them.
+    // The pickers' window listeners are capture-phase and live only while
+    // open — closing releases them.
     this.closeTourMenu()
+    this.closeFitMenu()
     // Never leave the gate locked behind a torn-down bar — the pin would be
     // unreleasable (the only button that releases it went away with us).
     this.gate?.removeEventListener?.('change', this.#onGateChange)
@@ -1685,6 +1725,69 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.closeTourMenu()
   }
 
+  // ── fit flyout ────────────────────────────────────────
+  //
+  // Right-click on the rail's fit button. The fit's second-order controls —
+  // the global fit switch (previously Ctrl+click only, invisible), the
+  // per-page pin-size / pin-position holds, and the step-zoom verbs the
+  // magnifiers used to spend two rail slots on — live here, attached to the
+  // object they modify. Same fixed-position pattern as the tour menu: the
+  // rail scrolls and clips, so the menu renders outside it.
+
+  readonly fitMenuOpen = signal(false)
+  readonly fitMenuPos = signal<{ x: number; y: number }>({ x: 0, y: 0 })
+
+  readonly onCtrlContext = (ctrl: ControlItem, event: MouseEvent): void => {
+    if (ctrl.id !== 'fit' || this.#editMode()) return
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+    const width = 208
+    const height = 240
+    const x = rect ? rect.right + 10 : 12
+    const flip = x + width > window.innerWidth - 8
+    this.fitMenuPos.set({
+      x: flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x,
+      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - height - 8)),
+    })
+    this.fitMenuOpen.set(true)
+    window.addEventListener('pointerdown', this.#onFitMenuOutside, true)
+    window.addEventListener('keydown', this.#onFitMenuKey, true)
+  }
+
+  readonly closeFitMenu = (): void => {
+    if (!this.fitMenuOpen()) return
+    this.fitMenuOpen.set(false)
+    window.removeEventListener('pointerdown', this.#onFitMenuOutside, true)
+    window.removeEventListener('keydown', this.#onFitMenuKey, true)
+  }
+
+  readonly #onFitMenuOutside = (event: PointerEvent): void => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest?.('.fit-menu')) return
+    this.closeFitMenu()
+  }
+
+  readonly #onFitMenuKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return
+    event.stopPropagation()
+    event.preventDefault()
+    this.closeFitMenu()
+  }
+
+  /** One-shot fit from the flyout — same verb as a plain click on the button;
+   *  the drone's fitHold provider makes it respect this page's pins. */
+  readonly fitNow = (): void => {
+    this.closeFitMenu()
+    this.zoom?.zoomToFit?.(false, 'user')
+  }
+
+  /** The global fit switch, from the flyout. Stays open so the row's state
+   *  change (the green check) is visible where it was flipped. */
+  readonly toggleGlobalFit = (): void => {
+    this.#cycleFitMode()
+  }
+
   // ── view actions ──────────────────────────────────────
 
   readonly openDcp = (): void => {
@@ -1757,8 +1860,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#fitSuppressedHere.set(false)
     this.#enableFitLocked()
     // A pinned page keeps its frozen viewport — the fit starts on the next
-    // page you walk to.
-    if (!this.fitAppliesHere()) return
+    // page you walk to. Both partial pins together hold the whole viewport
+    // the same way.
+    if (!this.fitAppliesHere() || this.#fitHoldNow() === 'both') return
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
     vp?.suspend?.()
     this.zoom?.zoomToFit?.()
@@ -1818,7 +1922,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // Suspend persistence while auto-fitting so the fitted viewport doesn't
       // overwrite the page's saved viewport; resume on pages that are not
       // auto-fitted (pinned) so manual adjustments there persist normally.
-      if (this.fitAppliesHere()) {
+      // Size + position both pinned = the whole viewport is the user's:
+      // treat it like a full pin (persistence stays live, no fit).
+      if (this.fitAppliesHere() && this.#fitHoldNow() !== 'both') {
         vp?.suspend?.()
         this.zoom?.zoomToFit?.(true)
       } else {
@@ -1900,7 +2006,27 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (next.has(key)) next.delete(key)
     else next.add(key)
     this.#pinnedPages.set(next)
-    this.#persistPinnedPages(next)
+    this.#persistPageSet(PINNED_PAGES_KEY, next)
+  }
+
+  /** Partial-pin toggles (fit flyout). Per-page exceptions a fit respects —
+   *  no input lock, so the page stays fully interactive. */
+  readonly togglePinSize = (): void => {
+    const key = this.#currentPageKey()
+    const next = new Set(this.#pinnedSizePages())
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    this.#pinnedSizePages.set(next)
+    this.#persistPageSet(PINNED_SIZE_PAGES_KEY, next)
+  }
+
+  readonly togglePinPosition = (): void => {
+    const key = this.#currentPageKey()
+    const next = new Set(this.#pinnedPositionPages())
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    this.#pinnedPositionPages.set(next)
+    this.#persistPageSet(PINNED_POSITION_PAGES_KEY, next)
   }
 
   readonly zoomIn = (): void => {

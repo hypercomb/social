@@ -500,16 +500,36 @@ export class ZoomDrone extends Drone {
     this.adjustZoom(target, next, pivotClient, 'user')
   }
 
+  /** Assigned by the shell (controls-bar): reports the current page's
+   *  partial-pin hold — pin-size ('scale'), pin-position ('position'), both
+   *  pins ('both') — so EVERY fit path, including the resize refits that
+   *  originate inside this drone, respects the pins without each caller
+   *  threading the value. Null / absent shell means no holds. */
+  public fitHold: (() => 'none' | 'scale' | 'position' | 'both') | null = null
+
   /**
    * Zoom-to-fit: calculates the bounding box of all hex cells via the
    * mesh adapter and animates the viewport to center and fit all content.
+   *
+   * `hold` is the partial-pin contract (the fit flyout's pin-size /
+   * pin-position): 'scale' keeps the current zoom and only recentres the
+   * content; 'position' keeps the point currently at the safe-area centre
+   * where it is and only changes the zoom around it; 'both' makes the fit
+   * a no-op. Omitted, it resolves from `fitHold` — the shell's provider —
+   * so resize refits and every other caller respect the page's pins
+   * without threading the value through.
    */
   public zoomToFit = (
     snap = false,
     source: ViewportSource = 'auto',
     fitAxis: 'both' | 'x' | 'y' = 'both',
+    hold?: 'none' | 'scale' | 'position' | 'both',
   ): void => {
     if (!this.renderContainer || !this.renderer || !this.app) return
+
+    const resolvedHold = hold ?? this.fitHold?.() ?? 'none'
+    // Both axes pinned — the viewport is fully the user's; nothing to fit.
+    if (resolvedHold === 'both') return
 
     this.#cancelAnim()
 
@@ -579,6 +599,17 @@ export class ZoomDrone extends Drone {
 
     const stageScale = this.app.stage.scale.x || 1
 
+    // safe area center in screen coords
+    const safeMidX = (safeLeft + safeRight) / 2
+    const safeMidY = (safeTop + safeBottom) / 2
+
+    // A position-hold anchors on whatever content point sits at the safe-area
+    // centre right now — captured BEFORE the stage reset below rewrites the
+    // transform this mapping depends on.
+    const heldLocal = resolvedHold === 'position'
+      ? target.toLocal(new Point(safeMidX, safeMidY))
+      : null
+
     // reset stage to screen center and clear pan so that the fit position
     // is not relative to a stale pan offset — this keeps content centered
     // after viewport resizes (desktop ↔ mobile, orientation, fullscreen)
@@ -593,28 +624,35 @@ export class ZoomDrone extends Drone {
     const scaleY = availH / (bounds.height * stageScale)
     // Strip arrangements fit only their cross-axis. Their long axis remains
     // scrollable, so adding tiles never makes every tile smaller.
-    const fitScale = this.clamp(
-      fitAxis === 'x' ? scaleX : fitAxis === 'y' ? scaleY : Math.min(scaleX, scaleY),
-    )
+    // A scale-hold keeps the zoom the page already has and lets the fit
+    // only recentre.
+    const fitScale = resolvedHold === 'scale'
+      ? (target.scale.x || 1)
+      : this.clamp(
+          fitAxis === 'x' ? scaleX : fitAxis === 'y' ? scaleY : Math.min(scaleX, scaleY),
+        )
 
     // content center in local coords
     const centerX = bounds.x + bounds.width / 2
     const centerY = bounds.y + bounds.height / 2
 
-    // safe area center in screen coords
-    const safeMidX = (safeLeft + safeRight) / 2
-    const safeMidY = (safeTop + safeBottom) / 2
-
     // container position so that content center at fitScale lands at safe-area center
     // screen = stagePos + (containerPos + localPoint * containerScale) * stageScale
     // solve for containerPos:
     //   containerPos = (safeMid - stagePos) / stageScale - center * fitScale
-    const targetPosX = fitAxis === 'y'
-      ? (safeLeft - screenCx) / stageScale - bounds.x * fitScale
-      : (safeMidX - screenCx) / stageScale - centerX * fitScale
-    const targetPosY = fitAxis === 'x'
-      ? (safeTop - screenCy) / stageScale - bounds.y * fitScale
-      : (safeMidY - screenCy) / stageScale - centerY * fitScale
+    // A position-hold pins the captured local point back at the safe-area
+    // centre instead of the content centre, so the view stays where the user
+    // put it while the zoom changes around it.
+    const targetPosX = heldLocal
+      ? (safeMidX - screenCx) / stageScale - heldLocal.x * fitScale
+      : fitAxis === 'y'
+        ? (safeLeft - screenCx) / stageScale - bounds.x * fitScale
+        : (safeMidX - screenCx) / stageScale - centerX * fitScale
+    const targetPosY = heldLocal
+      ? (safeMidY - screenCy) / stageScale - heldLocal.y * fitScale
+      : fitAxis === 'x'
+        ? (safeTop - screenCy) / stageScale - bounds.y * fitScale
+        : (safeMidY - screenCy) / stageScale - centerY * fitScale
 
     if (snap) {
       target.scale.set(fitScale)
