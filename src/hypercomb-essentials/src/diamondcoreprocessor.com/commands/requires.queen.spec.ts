@@ -21,9 +21,12 @@ vi.hoisted(() => {
   }
 })
 
-import { buildReferencePayload, normalizeRequiredMarks } from './requires.queen.js'
+import {
+  buildReferencePayload, buildReferenceRecord, normalizeRequiredMarks,
+} from './requires.queen.js'
 
 const SIG = 'a'.repeat(64)
+const BOUQUET = 'b'.repeat(64)
 
 describe('required marks — normalization', () => {
   it('sorts, dedups and drops blanks so order of typing cannot fork the sig', () => {
@@ -88,5 +91,50 @@ describe('reference payload — the bytes are the identity', () => {
   it('drops a targetSig that is not a signature rather than carrying it', () => {
     const payload = buildReferencePayload({ targetSegments: ['a'], targetSig: 'not-a-sig' })
     expect('targetSig' in payload).toBe(false)
+  })
+})
+
+// A reference payload can hold TWO sigs and only one of them names bytes.
+// Getting this wrong is silent in both directions: declare the lineage sig and
+// every adopt 404s on a resource that has never existed; fail to declare the
+// bouquet and an adopted portal cannot expand its demand, so the requirement
+// narrows nothing and the portal admits EVERYTHING — a filter failing open.
+describe('reference record — only sigs that name bytes are declared', () => {
+  it('declares the demanded bouquet as the record’s resource closure', () => {
+    const record = buildReferenceRecord({
+      targetSegments: ['people'], targetSig: SIG, requiredBouquet: BOUQUET,
+    })
+    expect(record['refs']).toEqual([BOUQUET])
+  })
+
+  it('never declares targetSig — it is a lineage address, not resource bytes', () => {
+    const record = buildReferenceRecord({
+      targetSegments: ['people'], targetSig: SIG, requiredMarks: ['family'],
+    })
+    expect('refs' in record).toBe(false)
+  })
+
+  it('omits refs when there is no bouquet, so plain references still dedup', () => {
+    // The whole record, not just the payload, has to stay byte-identical to
+    // what `/reference` and the Organizer's drop write — `refs: []` would be
+    // different bytes and fork the sig for identical content.
+    const record = buildReferenceRecord({ targetSegments: ['people'], targetSig: SIG })
+    expect(JSON.stringify(record)).toBe(JSON.stringify({
+      kind: 'reference', appliesTo: [], payload: { targetSegments: ['people'], targetSig: SIG },
+    }))
+  })
+
+  it('mints one record for two references demanding the same bouquet', () => {
+    const a = buildReferenceRecord({ targetSegments: ['people'], requiredBouquet: BOUQUET })
+    const b = buildReferenceRecord({ targetSegments: ['people'], requiredBouquet: BOUQUET })
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+  })
+
+  it('ignores a malformed bouquet rather than declaring an unservable ref', () => {
+    const record = buildReferenceRecord({
+      targetSegments: ['people'], requiredBouquet: 'not-a-sig',
+    })
+    expect('refs' in record).toBe(false)
+    expect('requiredBouquet' in (record['payload'] as object)).toBe(false)
   })
 })

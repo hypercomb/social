@@ -41,6 +41,15 @@
 // declaring it would put a sig in the closure that no store can serve, and the
 // extra field would change the record's bytes so identical references written
 // by `/reference` and by `/requires` would stop deduplicating.
+//
+// So the closure is declared SELECTIVELY instead (`buildReferenceRecord`): a
+// reference's payload can hold two sigs and only ONE of them names bytes.
+// `targetSig` is a lineage address — never declared, it would 404 forever.
+// `requiredBouquet` IS a resource (the `{marks}` JSON the BouquetRegistry
+// wrote), so it MUST be declared, or a shared or adopted portal arrives with a
+// demand it cannot expand: the marks read as empty, the requirement narrows
+// nothing, and the portal silently admits everything — a filter that fails
+// OPEN, which is the one failure mode a requirement must never have.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { REFERENCE_DECORATION_KIND } from './decoration-kind-index.js'
@@ -94,6 +103,35 @@ export const buildReferencePayload = (opts: {
     payload['requiredBouquet'] = opts.requiredBouquet
   }
   return payload
+}
+
+/** Assemble the whole reference DECORATION RECORD — payload plus the resource
+ *  closure the push/adopt walk reads (`refs`).
+ *
+ *  Only sigs that name BYTES may be declared. A reference payload can carry
+ *  two, and they are opposites: `targetSig` is a lineage address (no store can
+ *  serve it — declaring it 404s the walk forever, the same reasoning that keeps
+ *  `group` decorations ref-less), while `requiredBouquet` names the `{marks}`
+ *  resource and must travel or the demand cannot be expanded on arrival.
+ *
+ *  `refs` is OMITTED when empty, so a reference with no bouquet is byte-for-byte
+ *  what `/reference` and the Organizer's drop have always written and keeps
+ *  deduplicating with them. Two references demanding the same bouquet declare
+ *  the same closure and so still share one sig. */
+export const buildReferenceRecord = (opts: {
+  targetSegments: readonly string[]
+  targetSig?: string
+  requiredMarks?: readonly string[]
+  requiredBouquet?: string
+}): Record<string, unknown> => {
+  const payload = buildReferencePayload(opts)
+  const refs = typeof payload['requiredBouquet'] === 'string' ? [payload['requiredBouquet']] : []
+  return {
+    kind: REFERENCE_DECORATION_KIND,
+    appliesTo: [],
+    payload,
+    ...(refs.length ? { refs } : {}),
+  }
 }
 
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -290,14 +328,15 @@ export class RequiresQueenBee extends QueenBee {
       : ''
 
     // Rebuilt in the same field order `/reference` and the Organizer's drop use,
-    // and with `requiredMarks` OMITTED when empty — same content must produce
-    // the same sig no matter which of the three wrote it.
-    const payload = buildReferencePayload({
+    // with `requiredMarks` OMITTED when empty — same content must produce the
+    // same sig no matter which of the three wrote it — and with the bouquet
+    // declared as the record's resource closure so the demand can still be
+    // expanded after a share or an adopt.
+    const record = buildReferenceRecord({
       targetSegments, targetSig, requiredMarks: marks, requiredBouquet: bouquet,
     })
 
     try {
-      const record = { kind: REFERENCE_DECORATION_KIND, appliesTo: [], payload }
       const sig = await store.putResource(
         new Blob([JSON.stringify(record)], { type: 'application/json' }))
 
