@@ -59,12 +59,24 @@
 // rebuilt, so what you just did is visible in it.
 //
 // Suspension is measured, not guessed. `#watch` asks what is actually on top
-// at the centre of the screen (`elementFromPoint`); while that is not us we
-// hand back the chrome and stop owning Escape/back, and the moment it is us
-// again we take both back and re-mount. Nothing has to announce that it
-// closed, so a bee that opens its own surface needs no cooperation from here —
-// and an action that opens nothing at all (a toggle) never even flickers,
-// because the chrome is only released once we are genuinely covered.
+// at the centre of the screen (`elementFromPoint`); while a real cover is
+// there we hand back the chrome, HIDE the card (one surface at a time — a
+// partial cover blending with the card underneath read as chaos, not layers),
+// and stop owning Escape/back. The moment the cover goes we take everything
+// back and re-mount. Nothing has to announce that it closed, so a bee that
+// opens its own surface needs no cooperation from here — and an action that
+// opens nothing at all (a toggle) never even flickers, because the chrome is
+// only released once we are genuinely covered.
+//
+// THE CANVAS IS THE FLOOR, NEVER A COVER. Releasing the chrome un-hides
+// #pixi-host, which sits at z 59989 — ABOVE this card — with a
+// pointer-events:auto canvas. A naive "is the centre still ours" hit-test
+// then returns the canvas forever: the release blinds the detector, the
+// card never resumes, and the LIVE HIVE paints over the close-up (the
+// "overlap and chaos" mobile bug). So cover-detection explicitly discounts
+// #pixi-host (and bare body/html): a centre owned by the canvas means
+// nothing app-level is over us, which is a reason to RESUME, not to stay
+// suspended.
 //
 // Only four verbs still close: going inside (you have left), picking the tile
 // (the picked set is a hive activity), the way out — and OPENING A VIEWER,
@@ -81,8 +93,16 @@ import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 
 const SIG = /^[0-9a-f]{64}$/
-/** Shared takeover z across the full-surface view drones (home/site/slides). */
-const TAKEOVER_Z = 59988
+/** ABOVE THE CANVAS FLOOR, deliberately — unlike the other takeovers' 59988.
+ *  #pixi-host reparents to <body> at z 59989; the mode-based takeovers sit
+ *  under it and rely on `view:active` hiding the canvas. This card cannot: it
+ *  SUSPENDS (releasing `view:active` while covered), and any beat where the
+ *  canvas is visible while the card is mounted painted the LIVE HIVE over the
+ *  close-up — the mobile "overlap and chaos" bug. At 59990 the card beats the
+ *  canvas even when the chrome is handed back. Still under the select pill
+ *  (59992), edit-actions (59995), the bars (59999+) and every suspend cover
+ *  (z ≥ 90000). */
+const TAKEOVER_Z = 59990
 const STEEL = 'rgba(126,182,214,0.92)'
 const DIM = 'rgba(207,226,238,0.62)'
 /** Thumb-target floor. The desktop band's 3rem circles are a cursor size. */
@@ -122,6 +142,13 @@ const RADIUS = '0.35rem'
 /** How often the suspended view asks whether it is back on top. Cheap (one
  *  hit-test), and it runs ONLY while suspended. */
 const WATCH_MS = 350
+/** How long a suspended view waits for the action's surface to actually
+ *  appear before concluding nothing is coming and resuming. A panel that
+ *  mounts async must not lose the race to the first watch tick; an action
+ *  that opened nothing must not leave the view suspended forever. While this
+ *  grace runs the chrome is still held and the card still shown, so waiting
+ *  costs nothing visible. */
+const COVER_GRACE_MS = 1600
 
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
@@ -212,6 +239,11 @@ export class TileViewDrone extends Drone {
   #suspended = false
   /** The suspended-state poll handle. Null whenever we are not suspended. */
   #watchTimer: number | null = null
+  /** Whether this suspension has actually seen its cover yet. Until it has,
+   *  the chrome stays held and the card stays visible — see COVER_GRACE_MS. */
+  #sawCover = false
+  /** When the current suspension began (performance.now()). */
+  #suspendedAt = 0
   /** Live orientation watch, bound only while the view is up. */
   #resizeObserver: ResizeObserver | null = null
 
@@ -364,17 +396,26 @@ export class TileViewDrone extends Drone {
   #suspend(): void {
     if (!this.#label || this.#suspended) return
     this.#suspended = true
+    this.#sawCover = false
+    this.#suspendedAt = performance.now()
     this.#startWatch()
   }
 
-  /** Is the middle of the screen still ours? The one question that decides
-   *  suspension, asked of the DOM rather than of the surfaces — nothing has to
-   *  tell us it opened, and nothing has to remember to tell us it closed. */
-  #onTop(): boolean {
+  /** Is something REAL over the middle of the screen? Asked of the DOM rather
+   *  than of the surfaces — nothing has to tell us it opened, and nothing has
+   *  to remember to tell us it closed. The canvas floor (#pixi-host, z 59989,
+   *  above this card) and bare body/html are explicitly NOT covers: they are
+   *  what the centre reads as when nothing app-level is up, and treating the
+   *  canvas as a cover is the self-blinding deadlock described in the header. */
+  #covered(): boolean {
     const host = this.#host
     if (!host) return false
     const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2)
-    return !!el && (el === host || host.contains(el))
+    if (!el || el === document.body || el === document.documentElement) return false
+    if (el === host || host.contains(el)) return false
+    const pixi = document.getElementById('pixi-host')
+    if (pixi && (el === pixi || pixi.contains(el))) return false
+    return true
   }
 
   #startWatch(): void {
@@ -388,18 +429,28 @@ export class TileViewDrone extends Drone {
     this.#watchTimer = null
   }
 
-  /** COVERED → give the chrome back, because whatever is on top may need it
-   *  (the docked panels measure themselves against the controls bar). CLEAR
-   *  AGAIN → take it back, take the keys back, and re-mount: the action just
-   *  taken is very often a note, a picture or a decoration ON THIS TILE, and
-   *  coming back to the close-up it changed still showing the old one is the
-   *  same bug in a quieter form. */
+  /** COVERED → give the chrome back (whatever is on top may need it — the
+   *  docked panels measure themselves against the controls bar) and HIDE the
+   *  card, so a partial cover never blends with it: one surface at a time.
+   *  CLEAR AGAIN → take the screen back, take the keys back, and re-mount:
+   *  the action just taken is very often a note, a picture or a decoration ON
+   *  THIS TILE, and coming back to the close-up it changed still showing the
+   *  old one is the same bug in a quieter form.
+   *
+   *  NOT YET COVERED → wait, with the chrome still held and the card still
+   *  visible. The action's surface may simply be mounting (a panel losing the
+   *  race to the first tick used to strand it over an unsuspended card); if
+   *  nothing appears within COVER_GRACE_MS the action opened nothing (a
+   *  toggle, a failed open) and the view resumes as if untouched. */
   #tickWatch = (): void => {
     if (!this.#label) { this.#stopWatch(); return }
-    if (!this.#onTop()) {
+    if (this.#covered()) {
+      this.#sawCover = true
       if (this.#viewActive) this.#setViewActive(false)
+      if (this.#host) this.#host.style.visibility = 'hidden'
       return
     }
+    if (!this.#sawCover && performance.now() - this.#suspendedAt < COVER_GRACE_MS) return
     this.#resume()
   }
 

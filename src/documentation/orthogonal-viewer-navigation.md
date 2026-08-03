@@ -50,6 +50,35 @@ landOnWalkTarget(view, target, () => closeMe())  // land — closeMe runs ONLY
 bias, so an ambiguous diagonal favours the viewer's own axis: turning a page by
 mistake costs one flick back, arriving on another tile costs your place.
 
+## The scroller — ↕ as real physics
+
+`presentation/tiles/viewer-scroller.ts` is the **within** axis implemented as
+the browser's own scrolling instead of a synthetic threshold-and-commit step:
+one full-viewport snap section per item, native momentum, `scroll-snap-stop:
+always` so a flick lands exactly one item on. It is generic — hand it sections
+(`{ key, title, resolve }`), listen for the index; nothing in it knows what a
+slide is — so **any** viewer whose vertical axis means "the next thing inside
+what I'm looking at" can become a scroller.
+
+The grammar survives untouched because the two implementations compose:
+`touch-action: pan-y` on the scroll container hands vertical drags to the
+browser (which cancels the pointer stream, so `bindAxes` never commits them)
+and lets horizontal drags through to the host, where `bindAxes(host,
+{ sideways })` still walks the row. ↕ scrolls, ↔ walks, and neither handler
+ever sees the other's gesture.
+
+Feed rules the scroller owns: content resolves lazily (about one viewport
+ahead), whatever plays pauses when its section scrolls away, and an iframe
+embed mounts on **tap** (placeholder card first) and unmounts on leave — a
+full-viewport iframe would swallow the scroll gesture and only stops playing
+when it leaves the DOM.
+
+First adopter: `slides-view.drone.ts`, which mounts the scroller **instead of
+the paged stage while the mobile experience is active** (MobileModeService) —
+tap a deck's view on a phone and you are in a vertical scroller; flick
+sideways and the next tile's deck scrolls under the same chrome. Desktop keeps
+the stage: a mouse steps, a thumb scrolls.
+
 ## Nothing is hand-listed
 
 A behaviour that registers with `VisualBeeRegistry` gets the sideways walk for

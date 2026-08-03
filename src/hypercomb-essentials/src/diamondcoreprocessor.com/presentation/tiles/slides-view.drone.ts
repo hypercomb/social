@@ -61,6 +61,18 @@
 // slide (`picturesToo`); a deck stays strict — a slide is something attached or
 // linked, never a tile's incidental picture.
 //
+// ── THE MOBILE SCROLLER ──────────────────────────────────────────────
+//
+// When the mobile experience is active (MobileModeService), the paged stage is
+// replaced by a NATIVE vertical scroller (viewer-scroller.ts): every slide is a
+// full-viewport snap section, ↕ is the browser's own momentum scrolling, and
+// the chrome (title/caption/counter/dots) follows the section the participant
+// lands on instead of driving it. The orthogonal grammar is unchanged — ↕ is
+// still "more of this deck", ↔ is still the tile walk (bindAxes binds ONLY
+// `sideways` here; `touch-action: pan-y` on the scroller lets a horizontal
+// drag through to it) — the vertical axis is simply real physics now. Desktop
+// keeps the stage: a mouse steps, a thumb scrolls.
+//
 // Uses lineage + ViewMode listeners, re-entrancy
 // guard, fixed host below the Pixi layer, `view:active` canvas/chrome hiding —
 // zero shell edits) and PhotoView's image fit (object-fit:contain, max vw/vh).
@@ -75,6 +87,8 @@ import { embedUrlFor, mediaKindForUrl, kindForMime, type PlayableKind } from '..
 import { TAG_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
 import { bindAxes, walkFrom, landOnWalkTarget } from './viewer-walk.js'
+import { mountViewerScroller, type ScrollerHandle, type ScrollerSection } from './viewer-scroller.js'
+import { MOBILE_MODE_IOC_KEY, MOBILE_MODE_EFFECT } from '../../preferences/mobile-pheromones.js'
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
@@ -130,6 +144,9 @@ type MountState = {
   deckKey: string
   slides: Slide[]
   stage: HTMLDivElement
+  /** Mounted INSTEAD of the stage when the mobile experience is active — the
+   *  native vertical scroller the deck plays in (see THE MOBILE SCROLLER). */
+  scroller: ScrollerHandle | null
   titleEl: HTMLElement
   captionEl: HTMLElement
   counterEl: HTMLElement
@@ -226,6 +243,13 @@ export class SlidesViewDrone extends Drone {
       // Hide / restore in the Beehaviors panel turns this behaviour off / back on.
       this.onEffect('feature:hidden', () => { void this.#reconcile() })
       this.onEffect('feature:restored', () => { void this.#reconcile() })
+      // Stage vs scroller is decided per-mount, so a mobile-mode flip while a
+      // deck is up (`/mobile on|off` testing) remounts it on the right surface.
+      // Last-value replay fires this once on subscribe too — harmless: nothing
+      // is mounted at first heartbeat.
+      this.onEffect(MOBILE_MODE_EFFECT, () => {
+        if (this.#mount) { this.#teardown(); void this.#reconcile() }
+      })
       // The mark filter changed — re-collect so the deck narrows (or reopens)
       // with it. Last-value replay means a filter set BEFORE the viewer opened
       // is picked up on subscribe, so playing into an active filter is filtered
@@ -365,6 +389,9 @@ export class SlidesViewDrone extends Drone {
       if (this.#mount && this.#mount.deckKey === deckKey) {
         // Same deck — refresh the slide set in place, keep position where we can.
         this.#mount.slides = slides
+        // Same key sequence = no-op inside, so an unchanged refresh never
+        // jolts the scroll position.
+        this.#mount.scroller?.setSections(this.#sectionsFor(slides))
         this.#show(this.#index)
         return
       }
@@ -767,6 +794,8 @@ export class SlidesViewDrone extends Drone {
 
   #mountDeck(deckKey: string, slides: Slide[], surface: Surface = SLIDES_VIEW): void {
     this.#teardown()
+    const scrolling = this.#scrollerMode()
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
 
     const host = document.createElement('div')
     host.id = 'hc-slides-view-host'
@@ -775,14 +804,15 @@ export class SlidesViewDrone extends Drone {
       'display:flex;align-items:center;justify-content:center;font-family:inherit;'
     // Opt out of the always-on hex wheel-zoom handler so wheel isn't swallowed.
     host.setAttribute('data-consumes-wheel', '')
-    // THE TWO AXES (viewer-walk.ts). Up/down turns the page — the deck is the
-    // scroller. Sideways leaves this tile for the next one along the row and
-    // stays in the deck if that tile has one. Purely additive: this viewer had
-    // no touch gesture at all before, so nothing is being taken away.
-    bindAxes(host, {
-      vertical: delta => this.#step(delta),
-      sideways: delta => this.#walk(delta),
-    })
+    // THE TWO AXES (viewer-walk.ts). Up/down moves inside the deck; sideways
+    // leaves this tile for the next one along the row and stays in the deck if
+    // that tile has one. In the SCROLLER the browser owns ↕ (native momentum;
+    // a vertical drag becomes a scroll and its pointer stream is cancelled, so
+    // bindAxes never commits it) — only ↔ is bound. The paged stage keeps both
+    // synthetic axes.
+    bindAxes(host, scrolling
+      ? { sideways: delta => this.#walk(delta) }
+      : { vertical: delta => this.#step(delta), sideways: delta => this.#walk(delta) })
     document.body.appendChild(host)
 
     // Stage — a definite-size box the slide's element mounts INTO. ONE stage,
@@ -794,24 +824,47 @@ export class SlidesViewDrone extends Drone {
     stage.style.cssText =
       'width:92vw;height:86vh;flex:0 0 auto;overflow:hidden;' +
       'display:flex;align-items:center;justify-content:center;'
-    host.appendChild(stage)
 
-    // Title (top) + caption (bottom).
+    // THE MOBILE SCROLLER — mounted INSTEAD of the stage. Sections resolve
+    // through the same #resolveSlide/#mediaElement pipeline the stage uses;
+    // the chrome below follows the index instead of driving it.
+    let scroller: ScrollerHandle | null = null
+    if (scrolling) {
+      scroller = mountViewerScroller({
+        onIndexChange: index => {
+          if (!this.#mount || this.#index === index) return
+          this.#index = index
+          this.#syncChrome()
+        },
+        tapHint: i18n?.t('slides.tap-to-play') ?? 'Tap to play',
+      })
+      scroller.setSections(this.#sectionsFor(slides))
+      host.appendChild(scroller.element)
+    } else {
+      host.appendChild(stage)
+    }
+
+    // Title (top) + caption (bottom). Phone-width padding when scrolling —
+    // the desktop 96px gutters would squeeze a title to a word a line.
+    const textPad = scrolling ? '0 16px' : '0 96px'
     const titleEl = document.createElement('div')
     titleEl.style.cssText =
       'position:absolute;top:18px;left:0;right:0;text-align:center;color:#eaf3f9;' +
-      'font-size:16px;font-weight:600;letter-spacing:.01em;pointer-events:none;padding:0 96px;'
+      `font-size:16px;font-weight:600;letter-spacing:.01em;pointer-events:none;padding:${textPad};`
     host.appendChild(titleEl)
 
     const captionEl = document.createElement('div')
     captionEl.style.cssText =
       `position:absolute;bottom:52px;left:0;right:0;text-align:center;color:${DIM};` +
-      'font-size:13px;line-height:1.5;pointer-events:none;padding:0 96px;'
+      `font-size:13px;line-height:1.5;pointer-events:none;padding:${textPad};`
     host.appendChild(captionEl)
 
-    // Prev / next chevrons.
-    host.appendChild(this.#chevron('‹', 'left', () => this.#step(-1)))
-    host.appendChild(this.#chevron('›', 'right', () => this.#step(1)))
+    // Prev / next chevrons — the stage's steppers. The scroller has no use for
+    // them (the flick IS the step) and on a phone they'd eat the picture.
+    if (!scrolling) {
+      host.appendChild(this.#chevron('‹', 'left', () => this.#step(-1)))
+      host.appendChild(this.#chevron('›', 'right', () => this.#step(1)))
+    }
 
     // Counter (top-right) + exit (bottom-right).
     const counterEl = document.createElement('div')
@@ -832,16 +885,37 @@ export class SlidesViewDrone extends Drone {
     // Empty-state guide (shown when the deck has no diagram tiles yet).
     const empty = document.createElement('div')
     empty.style.cssText = `color:${DIM};font-size:15px;line-height:1.6;text-align:center;max-width:34rem;padding:2rem;`
-    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
     empty.textContent = surface === LIGHTBOX_VIEW
       ? (i18n?.t('lightbox.empty') ?? 'No pictures here yet. Drop images on this tile or inside it, or run /lightbox add.')
       : (i18n?.t('slides.empty') ?? 'No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.')
     host.appendChild(empty)
 
-    this.#mount = { host, deckKey, slides, stage, titleEl, captionEl, counterEl, dots, empty, emptyDefault: empty.textContent ?? '' }
+    this.#mount = { host, deckKey, slides, stage, scroller, titleEl, captionEl, counterEl, dots, empty, emptyDefault: empty.textContent ?? '' }
     this.#index = 0
     this.#setViewActive(true)
     this.#show(0)
+  }
+
+  /** The scroller replaces the paged stage while the mobile experience is
+   *  active — the phone's native gesture owns ↕ (see THE MOBILE SCROLLER). */
+  #scrollerMode(): boolean {
+    return window.ioc?.get<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true
+  }
+
+  /** Project the slide set into scroller sections — same identity, same
+   *  resolution pipeline as the stage. An EMBED defers to tap: a full-viewport
+   *  iframe swallows the scroll gesture and only stops when it leaves the DOM,
+   *  so the scroller mounts it on demand and unmounts it on leave. */
+  #sectionsFor(slides: Slide[]): ScrollerSection[] {
+    return slides.map(slide => ({
+      key: `${slide.kind}:${slide.src}`,
+      title: slide.title,
+      deferToTap: slide.kind === 'embed',
+      resolve: async () => {
+        const res = await this.#resolveSlide(slide)
+        return res ? this.#mediaElement(res.kind, res.url) : null
+      },
+    }))
   }
 
   #chevron(glyph: string, side: 'left' | 'right', onClick: () => void): HTMLButtonElement {
@@ -910,17 +984,19 @@ export class SlidesViewDrone extends Drone {
   }
 
   /** Render slide `i` (clamped). Title / caption / counter / dots update
-   *  synchronously; the image bytes resolve asynchronously (store → object URL)
-   *  and are applied only if this remains the current slide. */
+   *  synchronously; on the stage the image bytes resolve asynchronously
+   *  (store → object URL) and are applied only if this remains the current
+   *  slide; on the scroller this is a smooth scroll to the section. */
   #show(i: number): void {
     const m = this.#mount
     if (!m) return
     const n = m.slides.length
 
-    // Empty deck — show the guide, hide the stage chrome.
+    // Empty deck — show the guide, hide the surface chrome.
     const hasSlides = n > 0
     m.empty.style.display = hasSlides ? 'none' : 'block'
-    m.stage.style.display = hasSlides ? 'flex' : 'none'
+    if (m.scroller) m.scroller.element.style.display = hasSlides ? 'block' : 'none'
+    else m.stage.style.display = hasSlides ? 'flex' : 'none'
     m.dots.style.display = hasSlides ? 'flex' : 'none'
     if (!hasSlides) {
       m.titleEl.textContent = ''
@@ -935,23 +1011,18 @@ export class SlidesViewDrone extends Drone {
       return
     }
 
-    const index = Math.max(0, Math.min(i, n - 1))
-    this.#index = index
-    const slide = m.slides[index]
+    this.#index = Math.max(0, Math.min(i, n - 1))
+    this.#syncChrome()
 
-    m.titleEl.textContent = slide.title
-    m.captionEl.textContent = slide.caption ?? ''
-    // Show WHAT is being filtered next to the count — "2 / 3" alone hides the
-    // fact that you are watching a narrowed deck.
-    m.counterEl.textContent = this.#filterTags.size > 0
-      ? `${index + 1} / ${n} · ${this.#markLabel()}`
-      : `${index + 1} / ${n}`
-    this.#renderDots(m, n, index)
+    // SCROLLER — the section already holds (or lazily resolves) its content;
+    // moving there is a scroll, and pause-on-leave is the scroller's own rule.
+    if (m.scroller) { m.scroller.show(this.#index); return }
 
     // Stop + drop whatever the PREVIOUS slide mounted before painting the next
     // one — a video must never keep playing off-screen behind a later slide.
     this.#clearStage(m)
 
+    const slide = m.slides[this.#index]
     const token = ++this.#showToken
     void this.#resolveSlide(slide).then(res => {
       if (token !== this.#showToken || this.#mount !== m) return // superseded / torn down
@@ -960,15 +1031,38 @@ export class SlidesViewDrone extends Drone {
     })
   }
 
+  /** Title / caption / counter / dot chrome for the CURRENT slide — shared by
+   *  the stage (where #show drives the index) and the scroller (where native
+   *  scrolling drives the index and the chrome follows it). */
+  #syncChrome(): void {
+    const m = this.#mount
+    if (!m) return
+    const n = m.slides.length
+    const slide = m.slides[this.#index]
+    if (!slide) return
+    m.titleEl.textContent = slide.title
+    m.captionEl.textContent = slide.caption ?? ''
+    // Show WHAT is being filtered next to the count — "2 / 3" alone hides the
+    // fact that you are watching a narrowed deck.
+    m.counterEl.textContent = this.#filterTags.size > 0
+      ? `${this.#index + 1} / ${n} · ${this.#markLabel()}`
+      : `${this.#index + 1} / ${n}`
+    this.#renderDots(m, n, this.#index)
+  }
+
   /** The active marks, rendered for display (`#alpha #beta`). */
   #markLabel(): string {
     return [...this.#filterTags].map(t => `#${t}`).join(' ')
   }
 
   /** The native player mounted on the CURRENT slide, when it has one. Drives
-   *  the spacebar's play/pause vs advance decision. */
+   *  the spacebar's play/pause vs advance decision. On the scroller, "current"
+   *  is the section the participant is standing on. */
   #stageMedia(): HTMLMediaElement | null {
-    return (this.#mount?.stage.querySelector('video, audio') as HTMLMediaElement | null) ?? null
+    const m = this.#mount
+    if (!m) return null
+    const within = m.scroller ? m.scroller.sectionElement(this.#index) : m.stage
+    return (within?.querySelector('video, audio') as HTMLMediaElement | null) ?? null
   }
 
   /** Empty the stage, stopping anything that was playing. Pausing + dropping
@@ -1057,8 +1151,10 @@ export class SlidesViewDrone extends Drone {
 
   #teardown(): void {
     if (this.#mount) {
-      // Stop anything playing before the host leaves the DOM.
+      // Stop anything playing before the host leaves the DOM — the stage's
+      // player and every section the scroller mounted alike.
       this.#clearStage(this.#mount)
+      this.#mount.scroller?.destroy()
       this.#mount.host.remove()
       this.#mount = null
     }
