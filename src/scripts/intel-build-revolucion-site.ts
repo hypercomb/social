@@ -3103,6 +3103,7 @@ function buildPages(
             <button type="button" class="vbtn" data-view="fire">the fire</button>
             <button type="button" class="vbtn" data-view="gallery">the wall</button>
             <button type="button" class="vbtn" data-view="humidor">the humidor</button>
+            <button type="button" class="vbtn" data-view="darts">the darts</button>
             <button type="button" class="vbtn" data-view="chair">your chair</button>
             <button type="button" class="vbtn open" id="lfOpen">walk in</button>
           </span>
@@ -3450,6 +3451,7 @@ function buildPages(
       { id: 'slot-accessories', label: 'Cutter, lighter, ashtray' },
       { id: 'slot-humidor',     label: 'Humidor cabinet' },
       { id: 'slot-frames',      label: 'Wall art' },
+      { id: 'slot-darts',       label: 'Dartboard' },
       { id: 'slot-shelf',       label: 'Shelves &amp; keepsakes' },
       { id: 'slot-plant',       label: 'Plant' },
       { id: 'slot-records',     label: 'Record console' }

@@ -551,7 +551,74 @@ const artMap: ArtPainter = (ctx, w, h) => {
   ctx.fillText('where the leaf comes from', w / 2, h * 0.94)
 }
 
-const ART_PAINTERS: ArtPainter[] = [artCigarBand, artLeaf, artWheel, artPoster, artMap]
+// artWheel is NOT in the rotation — the wheel hangs exactly once, as the
+// pinned clickable picker on the right wall. Duplicates read as a bug.
+const ART_PAINTERS: ArtPainter[] = [artCigarBand, artLeaf, artPoster, artMap]
+
+// ─── the dartboard face (painted, true ring geometry) ─────────────────────
+// Standard board ratios scaled to the face: playing field 170mm → 78.125% of
+// the radius. The scorer in buildRoom uses THE SAME fractions — keep in sync.
+const DART_NUMS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5]
+const DART_RINGS = {
+  dblOut: 0.78125, dblIn: 0.7445, trOut: 0.4917, trIn: 0.455, bull: 0.073, dbull: 0.0292,
+} as const
+
+const dartboardFace: ArtPainter = (ctx, w, h) => {
+  const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2
+  const seg = (Math.PI * 2) / 20
+  const dir = (a: number, r: number): [number, number] =>
+    [cx + Math.sin(a) * r * R, cy - Math.cos(a) * r * R]
+  ctx.fillStyle = '#141017'
+  ctx.fillRect(0, 0, w, h)
+  // rim (number ring bed)
+  ctx.beginPath()
+  ctx.arc(cx, cy, R * 0.985, 0, Math.PI * 2)
+  ctx.fillStyle = '#1a1218'
+  ctx.fill()
+  const ring = (i: number, rIn: number, rOut: number, fill: string): void => {
+    const a0 = i * seg - seg / 2, a1 = i * seg + seg / 2
+    ctx.beginPath()
+    ctx.arc(cx, cy, rOut * R, a0 - Math.PI / 2, a1 - Math.PI / 2)
+    ctx.arc(cx, cy, rIn * R, a1 - Math.PI / 2, a0 - Math.PI / 2, true)
+    ctx.closePath()
+    ctx.fillStyle = fill
+    ctx.fill()
+  }
+  for (let i = 0; i < 20; i++) {
+    const dark = i % 2 === 0
+    const bed = dark ? '#241a20' : '#e8dcc4'
+    const hot = dark ? '#b3542f' : '#2f4a35'
+    ring(i, DART_RINGS.bull, DART_RINGS.trIn, bed)
+    ring(i, DART_RINGS.trIn, DART_RINGS.trOut, hot)
+    ring(i, DART_RINGS.trOut, DART_RINGS.dblIn, bed)
+    ring(i, DART_RINGS.dblIn, DART_RINGS.dblOut, hot)
+    // upright numeral in the outer ring
+    const [nx, ny] = dir(i * seg, 0.885)
+    ctx.fillStyle = '#e0b578'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = `600 ${Math.round(R * 0.115)}px Georgia, serif`
+    ctx.fillText(String(DART_NUMS[i]), nx, ny)
+  }
+  // bull — green ring, ember eye
+  ctx.beginPath(); ctx.arc(cx, cy, DART_RINGS.bull * R, 0, Math.PI * 2)
+  ctx.fillStyle = '#2f4a35'; ctx.fill()
+  ctx.beginPath(); ctx.arc(cx, cy, DART_RINGS.dbull * R, 0, Math.PI * 2)
+  ctx.fillStyle = '#b3542f'; ctx.fill()
+  // wires
+  ctx.strokeStyle = 'rgba(200,151,90,.75)'
+  ctx.lineWidth = Math.max(1.5, R * 0.008)
+  for (const r of [DART_RINGS.dblOut, DART_RINGS.dblIn, DART_RINGS.trOut, DART_RINGS.trIn, DART_RINGS.bull, DART_RINGS.dbull]) {
+    ctx.beginPath(); ctx.arc(cx, cy, r * R, 0, Math.PI * 2); ctx.stroke()
+  }
+  for (let i = 0; i < 20; i++) {
+    const a = i * seg - seg / 2
+    const [x0, y0] = dir(a, DART_RINGS.bull)
+    const [x1, y1] = dir(a, DART_RINGS.dblOut)
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke()
+  }
+  ctx.beginPath(); ctx.arc(cx, cy, R * 0.985, 0, Math.PI * 2); ctx.stroke()
+}
 
 // ─── small builders ───────────────────────────────────────────────────────
 
@@ -593,6 +660,10 @@ export interface Room {
   pickables: THREE.Object3D[]
   attachCamera: (c: THREE.Camera) => void
   tick: (t: number, dt: number) => void
+  /** Stick a dart at a world-space point on the board face (marked
+   *  `userData.dart`) and chalk the score. Returns the scored throw, or
+   *  null when the click cleared a finished round instead. */
+  throwDart: (worldPoint: THREE.Vector3) => { label: string; points: number; count: number } | null
   dispose: () => void
 }
 
@@ -897,18 +968,205 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     }
   }
 
-  // gallery wall (left), flanking the fireplace (back), and one over the bar
+  // gallery wall (left), flanking the fireplace (back), and one over the bar.
+  // The old clickable wheel spot (left wall, z 0.85) sat squarely behind the
+  // wingback from the room view — the DARTBOARD hangs there now, and the
+  // flavor-wheel picker moved to the right-wall print that was already a
+  // second picture of it, in clear view beside the humidor.
   hangFrame(1.0, 1.3, -HALF_W + 0.09, 1.85, -1.9, Math.PI / 2, true)
   hangFrame(0.86, 0.86, -HALF_W + 0.09, 1.75, -0.55, Math.PI / 2, true)
-  // the flavor wheel hangs on the gallery wall and OPENS when you click it
-  hangFrame(0.86, 1.1, -HALF_W + 0.09, 1.82, 0.85, Math.PI / 2, false,
-    { painter: artWheel, pick: 'flavor-wheel' })
   hangFrame(0.72, 0.9, -HALF_W + 0.09, 1.8, 2.2, Math.PI / 2, false)
   hangFrame(1.15, 1.4, -2.55, 1.95, -HALF_D + 0.08, 0, true)
   hangFrame(1.15, 1.4, 2.55, 1.95, -HALF_D + 0.08, 0, true)
   // over the mantel, hung on the face of the chimney breast
   hangFrame(1.5, 1.05, 0, 2.42, -HALF_D + 0.42, 0, false)
-  hangFrame(0.9, 1.15, HALF_W - 0.09, 1.85, -2.2, -Math.PI / 2, false)
+  // the flavor wheel — the one picture of it, and it OPENS when clicked
+  hangFrame(0.9, 1.15, HALF_W - 0.09, 1.85, -2.2, -Math.PI / 2, false,
+    { painter: artWheel, pick: 'flavor-wheel' })
+
+  // ── dartboard (left wall, past the wingback) — click the board to throw ──
+  const dartsGroup = new THREE.Group()
+  dartsGroup.position.set(-HALF_W + 0.1, 1.72, 1.0)
+  dartsGroup.rotation.y = Math.PI / 2
+  scene.add(slot('slot-darts', dartsGroup))
+
+  // cabinet: back panel + two open doors, pub style
+  dartsGroup.add(box(0.8, 0.88, 0.035, darkWood, 0, 0, 0))
+  dartsGroup.add(box(0.4, 0.86, 0.02, darkWood, -0.6, 0, 0.006))
+  dartsGroup.add(box(0.4, 0.86, 0.02, darkWood, 0.6, 0, 0.006))
+  // chalk scoreboard on the left door — redrawn per throw
+  const chalkCv = document.createElement('canvas')
+  chalkCv.width = 220
+  chalkCv.height = 440
+  const chalkTex = track(new THREE.CanvasTexture(chalkCv))
+  chalkTex.colorSpace = THREE.SRGBColorSpace
+  type DartThrow = { label: string; points: number }
+  const dartThrows: DartThrow[] = []
+  const drawChalk = (): void => {
+    const ctx = chalkCv.getContext('2d')
+    if (!ctx) return
+    const w = chalkCv.width, h = chalkCv.height
+    ctx.fillStyle = '#20262c'
+    ctx.fillRect(0, 0, w, h)
+    ctx.strokeStyle = 'rgba(217,207,174,.4)'
+    ctx.lineWidth = 3
+    ctx.strokeRect(10, 10, w - 20, h - 20)
+    ctx.fillStyle = '#d9cfae'
+    ctx.textAlign = 'center'
+    ctx.font = '600 34px Georgia, serif'
+    ctx.fillText('D A R T S', w / 2, 62)
+    ctx.strokeStyle = 'rgba(217,207,174,.5)'
+    ctx.beginPath(); ctx.moveTo(34, 84); ctx.lineTo(w - 34, 84); ctx.stroke()
+    if (!dartThrows.length) {
+      ctx.font = 'italic 26px Georgia, serif'
+      ctx.fillStyle = 'rgba(217,207,174,.75)'
+      ctx.fillText('chalk up —', w / 2, 200)
+      ctx.fillText('click the board', w / 2, 240)
+    } else {
+      ctx.font = '32px Georgia, serif'
+      dartThrows.forEach((d, i) => {
+        const y = 140 + i * 56
+        ctx.textAlign = 'left'
+        ctx.fillStyle = '#d9cfae'
+        ctx.fillText(d.label, 34, y)
+        ctx.textAlign = 'right'
+        ctx.fillText(String(d.points), w - 34, y)
+      })
+      if (dartThrows.length >= 3) {
+        const total = dartThrows.reduce((n, d) => n + d.points, 0)
+        ctx.strokeStyle = 'rgba(217,207,174,.5)'
+        ctx.beginPath(); ctx.moveTo(34, 322); ctx.lineTo(w - 34, 322); ctx.stroke()
+        ctx.textAlign = 'center'
+        ctx.font = '600 46px Georgia, serif'
+        ctx.fillText(String(total), w / 2, 372)
+        ctx.font = 'italic 20px Georgia, serif'
+        ctx.fillStyle = 'rgba(217,207,174,.7)'
+        ctx.fillText('click to chalk a new round', w / 2, 408)
+      }
+    }
+    chalkTex.needsUpdate = true
+  }
+  drawChalk()
+  const chalkPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.34, 0.68),
+    std({ map: chalkTex, roughness: 0.95 }),
+  )
+  chalkPlane.position.set(-0.6, 0, 0.018)
+  dartsGroup.add(chalkPlane)
+  // spare darts on the right door
+  const spareTex = track(paint(220, 440, (ctx, w, h) => {
+    ctx.fillStyle = '#2a1d18'
+    ctx.fillRect(0, 0, w, h)
+    ctx.strokeStyle = 'rgba(200,151,90,.35)'
+    ctx.lineWidth = 3
+    ctx.strokeRect(10, 10, w - 20, h - 20)
+    for (let i = 0; i < 3; i++) {
+      const x = 60 + i * 50
+      ctx.strokeStyle = '#c8975a'
+      ctx.lineWidth = 5
+      ctx.beginPath(); ctx.moveTo(x, 120); ctx.lineTo(x, 250); ctx.stroke()
+      ctx.fillStyle = '#b3542f'
+      ctx.fillRect(x - 4, 250, 8, 44)
+      ctx.fillStyle = '#e8dcc4'
+      ctx.beginPath()
+      ctx.moveTo(x, 294); ctx.lineTo(x - 16, 330); ctx.lineTo(x, 322)
+      ctx.lineTo(x + 16, 330); ctx.closePath()
+      ctx.fill()
+    }
+  }))
+  const sparePlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.34, 0.68),
+    std({ map: spareTex, roughness: 0.9 }),
+  )
+  sparePlane.position.set(0.6, 0, 0.018)
+  dartsGroup.add(sparePlane)
+  // the board: sisal backing + painted face
+  const boardBack = cyl(0.27, 0.27, 0.05, 48, std({ color: 0x1a1218, roughness: 0.95 }), 0, 0, 0.043)
+  boardBack.rotation.x = Math.PI / 2
+  dartsGroup.add(boardBack)
+  const boardFace = new THREE.Mesh(
+    new THREE.CircleGeometry(0.27, 64),
+    std({ map: track(paint(640, 640, dartboardFace)), roughness: 0.85 }),
+  )
+  boardFace.position.z = 0.069
+  boardFace.userData.dart = true
+  pickables.push(boardFace)
+  dartsGroup.add(boardFace)
+  // warm halo + its own picture light: the room says "this one plays"
+  const dartHalo = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.5, 1.5),
+    new THREE.MeshBasicMaterial({
+      map: track(softDot()), color: 0xe0b578, transparent: true,
+      opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  )
+  dartHalo.position.z = -0.02
+  dartsGroup.add(dartHalo)
+  const dartHood = cyl(0.045, 0.055, 0.22, 10, brassGlow, 0, 0.56, 0.13)
+  dartHood.rotation.z = Math.PI / 2
+  dartsGroup.add(dartHood)
+  const dartSpot = new THREE.PointLight(0xffd9a0, 3.2, 2.6, 2)
+  dartSpot.position.set(0, 0.5, 0.3)
+  dartsGroup.add(dartSpot)
+
+  // thrown darts — shared geometry, three on the board at most
+  const stuck = new THREE.Group()
+  dartsGroup.add(stuck)
+  const dartNeedleGeo = track(new THREE.CylinderGeometry(0.0022, 0.0022, 0.045, 6))
+  const dartBarrelGeo = track(new THREE.CylinderGeometry(0.0055, 0.0045, 0.038, 8))
+  const dartShaftGeo = track(new THREE.CylinderGeometry(0.0032, 0.0032, 0.034, 6))
+  const dartFlightGeo = track(new THREE.PlaneGeometry(0.026, 0.034))
+  const dartShaftMat = std({ color: C.ember, roughness: 0.5 })
+  const dartFlightMat = std({ color: C.cream, roughness: 0.8, side: THREE.DoubleSide })
+  const throwDart = (world: THREE.Vector3): { label: string; points: number; count: number } | null => {
+    if (dartThrows.length >= 3) {
+      dartThrows.length = 0
+      stuck.clear()
+      drawChalk()
+      return null
+    }
+    const p = dartsGroup.worldToLocal(world.clone())
+    const r = Math.hypot(p.x, p.y) / 0.27 // fraction of the painted face
+    const seg = (Math.PI * 2) / 20
+    const idx = ((Math.round(Math.atan2(p.x, p.y) / seg) % 20) + 20) % 20
+    const n = DART_NUMS[idx]
+    let label = 'WIRE', points = 0
+    if (r < DART_RINGS.dbull) { label = 'D·BULL'; points = 50 }
+    else if (r < DART_RINGS.bull) { label = 'BULL'; points = 25 }
+    else if (r < DART_RINGS.trIn) { label = String(n); points = n }
+    else if (r < DART_RINGS.trOut) { label = 'T' + n; points = n * 3 }
+    else if (r < DART_RINGS.dblIn) { label = String(n); points = n }
+    else if (r < DART_RINGS.dblOut) { label = 'D' + n; points = n * 2 }
+    const i = dartThrows.length
+    dartThrows.push({ label, points })
+    drawChalk()
+    const d = new THREE.Group()
+    d.position.set(p.x, p.y, 0.069)
+    d.rotation.set(Math.sin(i * 7 + n) * 0.07, Math.cos(i * 3 + n) * 0.07, 0)
+    const needle = new THREE.Mesh(dartNeedleGeo, brassMat)
+    needle.rotation.x = Math.PI / 2
+    needle.position.z = 0.012
+    d.add(needle)
+    const barrel = new THREE.Mesh(dartBarrelGeo, brassMat)
+    barrel.rotation.x = Math.PI / 2
+    barrel.position.z = 0.052
+    d.add(barrel)
+    const shaft = new THREE.Mesh(dartShaftGeo, dartShaftMat)
+    shaft.rotation.x = Math.PI / 2
+    shaft.position.z = 0.088
+    d.add(shaft)
+    const f1 = new THREE.Mesh(dartFlightGeo, dartFlightMat)
+    f1.rotation.x = Math.PI / 2
+    f1.position.z = 0.108
+    d.add(f1)
+    const f2 = new THREE.Mesh(dartFlightGeo, dartFlightMat)
+    f2.rotation.x = Math.PI / 2
+    f2.rotation.y = Math.PI / 2
+    f2.position.z = 0.108
+    d.add(f2)
+    stuck.add(d)
+    return { label, points, count: dartThrows.length }
+  }
 
   // ── window (right wall) ────────────────────────────────────────────────
   const windowGroup = new THREE.Group()
@@ -1488,7 +1746,7 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   }
 
   // The camera is attached after construction so the flames can billboard.
-  return { scene, slots, pickables, attachCamera: c => { cameraRef = c }, tick, dispose }
+  return { scene, slots, pickables, attachCamera: c => { cameraRef = c }, tick, throwDart, dispose }
 }
 
 // ─── camera presets ───────────────────────────────────────────────────────
@@ -1500,6 +1758,8 @@ const VIEWS: Record<string, { pos: [number, number, number]; target: [number, nu
   humidor: { pos: [1.1, 1.5, -0.9], target: [5.4, 0.9, -1.6] },
   // seated, just in front of the left wingback, facing the hearth
   chair: { pos: [-0.72, 1.24, 2.75], target: [0.05, 0.85, -4.0] },
+  // at the oche — square to the board, close enough to aim
+  darts: { pos: [-2.6, 1.66, 1.0], target: [-5.5, 1.72, 1.0] },
 }
 
 // ─── boot ─────────────────────────────────────────────────────────────────
@@ -1546,13 +1806,12 @@ function boot(): boolean {
   // ── picking: a click (never a drag) on a marked print opens its panel ──
   const ray = new THREE.Raycaster()
   const ndc = new THREE.Vector2()
-  const hitAt = (e: PointerEvent): string | null => {
+  const hitAt = (e: PointerEvent): THREE.Intersection | null => {
     const r = canvas.getBoundingClientRect()
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
     ray.setFromCamera(ndc, camera)
     const hits = ray.intersectObjects(room.pickables, false)
-    const id = hits[0]?.object?.userData?.pick
-    return typeof id === 'string' ? id : null
+    return hits[0] ?? null
   }
   let press: { x: number; y: number; t: number } | null = null
   let hovering = false
@@ -1575,8 +1834,15 @@ function boot(): boolean {
     const quick = Date.now() - press.t < 400
     press = null
     if (moved > 6 || !quick || e.target !== canvas) return
-    const id = hitAt(e as PointerEvent)
-    if (id) host.dispatchEvent(new CustomEvent('lounge3d:pick', { detail: { id }, bubbles: true }))
+    const hit = hitAt(e as PointerEvent)
+    if (!hit) return
+    const pick = hit.object.userData.pick
+    if (typeof pick === 'string') {
+      host.dispatchEvent(new CustomEvent('lounge3d:pick', { detail: { id: pick }, bubbles: true }))
+    } else if (hit.object.userData.dart) {
+      const scored = room.throwDart(hit.point)
+      if (scored) host.dispatchEvent(new CustomEvent('lounge3d:dart', { detail: scored, bubbles: true }))
+    }
   })
 
   // Vertical FOV, clamped so a very wide stage (the walk-in fills the screen)
