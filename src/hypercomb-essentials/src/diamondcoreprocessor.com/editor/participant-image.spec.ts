@@ -3,7 +3,7 @@
 // below is a shape that reached a real hive and was mistaken for a default.
 
 import { describe, expect, it } from 'vitest'
-import { hasTileImage, isParticipantImage } from './tile-properties.js'
+import { hasTileImage, isParticipantImage, withoutSubstrateImage } from './tile-properties.js'
 
 const A = 'a'.repeat(64)
 const B = 'b'.repeat(64)
@@ -40,6 +40,37 @@ describe('picture ownership', () => {
       large: { image: B, x: -12, y: 40, scale: 1.4 },
       substrate: true,
     })).toBe(true)
+  })
+
+  // Filler must not travel. A participant receiving someone else's default
+  // sees it where their OWN default belongs, and it looks chosen.
+  describe('what goes on the wire', () => {
+    it('strips a default, keeping everything that is not the picture', () => {
+      const out = withoutSubstrateImage({
+        small: { image: A }, flat: { small: { image: B } }, substrate: true,
+        index: 4, tags: ['x'], link: 'https://e.com',
+      })
+      expect(out).toEqual({ index: 4, tags: ['x'], link: 'https://e.com', substrate: true })
+    })
+
+    it('leaves a chosen picture completely alone', () => {
+      const theirs = { small: { image: A }, flat: { small: { image: B } }, participant: true, index: 2 }
+      expect(withoutSubstrateImage(theirs)).toBe(theirs)
+      const preMark = { small: { image: A }, large: { image: B, x: 0, y: 0, scale: 1 }, substrate: true }
+      expect(withoutSubstrateImage(preMark)).toBe(preMark)
+    })
+
+    it('keeps a flat bag that holds more than the picture', () => {
+      const out = withoutSubstrateImage({
+        small: { image: A }, flat: { small: { image: B }, large: { x: 1, y: 2, scale: 1 } }, substrate: true,
+      })
+      expect(out).toEqual({ flat: { large: { x: 1, y: 2, scale: 1 } }, substrate: true })
+    })
+
+    it('passes a tile with no picture straight through', () => {
+      const bare = { index: 1, tags: [] }
+      expect(withoutSubstrateImage(bare)).toBe(bare)
+    })
   })
 
   it('junk in the picture keys is not a picture', () => {

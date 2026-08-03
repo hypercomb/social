@@ -27,7 +27,7 @@
 // arrives, so we don't need to dispatch a render signal ourselves.
 
 import { Drone, EffectBus, poolAddresses, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
@@ -2377,7 +2377,15 @@ export class SwarmDrone extends Drone {
       const base = layerSig ? { name, layerSig } : { name }
       let visual: ChildEntry = base
       try {
-        const props = await readTilePropertiesAt(segments, name)
+        // A SUBSTRATE DEFAULT DOES NOT TRAVEL. The fallback synthesis was
+        // removed for exactly this reason — only intentionally-placed
+        // images should be on the wire — but a default can reach canonical
+        // by another door: the re-dress restamps the canonical slot when it
+        // moves a default, and canonical is what publishes. So the filler
+        // is stripped HERE, where props become a visual. The receiver's own
+        // substrate dresses a pictureless tile with their own set, which is
+        // what a default is for: a fallback, per participant.
+        const props = withoutSubstrateImage(await readTilePropertiesAt(segments, name))
         if (props && Object.keys(props).length > 0) {
           // Canonicalize the merged shape so the whole visual entry
           // is deterministic, not just the props portion.
@@ -3321,7 +3329,8 @@ const payload: SwarmLayerPayload = myLabel
     const children: ChildEntry[] = await Promise.all(childEntries.map(async ({ name, layerSig }): Promise<ChildEntry> => {
       let visual: ChildEntry = { name, layerSig }
       try {
-        const props = await readTilePropertiesAt(segments, name)
+        // Same rule on the personal channel: filler stays home.
+        const props = withoutSubstrateImage(await readTilePropertiesAt(segments, name))
         if (props && Object.keys(props).length > 0) {
           visual = canonicaliseValue({ name, layerSig, ...props }) as ChildEntry
         }

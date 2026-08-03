@@ -160,6 +160,36 @@ export const hasTileImage = (props: unknown): boolean => imageSigsOf(props).leng
  * once-defaulted tile inherited `substrate: true` through the merge, and
  * the `large` is the proof of whose picture it actually is.
  */
+/**
+ * The same props with a SUBSTRATE DEFAULT's picture stripped out.
+ *
+ * A default is filler this app chose to stop a tile being blank. It is not a
+ * decision, and it must not travel: a participant receiving it would see the
+ * publisher's filler where their OWN filler belongs, and — worse — a picture
+ * that looks chosen. Their substrate fills a pictureless tile with their own
+ * set, which is what a default is for. It is a fallback, per receiver.
+ *
+ * A picture the participant chose is untouched and travels as it always did.
+ * Everything that is not the picture — index, tags, link, colours — travels
+ * either way; only the filler is dropped.
+ */
+export const withoutSubstrateImage = <T extends Record<string, unknown>>(props: T): T => {
+  if (!hasTileImage(props) || isParticipantImage(props)) return props
+  const out: Record<string, unknown> = { ...props }
+  delete out['small']
+  delete out['imageSig']
+  delete out['point']
+  delete out['large']
+  const flat = out['flat'] as Record<string, unknown> | undefined
+  if (flat && typeof flat === 'object') {
+    const rest = { ...flat }
+    delete rest['small']
+    if (Object.keys(rest).length > 0) out['flat'] = rest
+    else delete out['flat']
+  }
+  return out as T
+}
+
 export const isParticipantImage = (props: unknown): boolean => {
   const p = props as any
   if (p?.[PARTICIPANT_MARK] === true) return true
