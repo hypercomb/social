@@ -18,7 +18,10 @@ export class FitQueenBee extends QueenBee {
   protected execute(_args: string): void {
     const zoom = window.ioc.get<any>('@diamondcoreprocessor.com/ZoomDrone')
     if (zoom?.zoomToFit) {
-      zoom.zoomToFit()
+      // 'user' — /fit is an explicit gesture and must survive a reload, the
+      // same as the `0` / `r` keybindings and the control-bar fit button.
+      // Omitted, the source defaults to 'auto' and the fit was never stored.
+      zoom.zoomToFit(false, 'user')
     } else {
       console.warn('[fit] ZoomDrone not available')
     }

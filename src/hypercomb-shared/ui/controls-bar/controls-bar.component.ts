@@ -1926,11 +1926,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // Size + position both pinned = the whole viewport is the user's:
       // treat it like a full pin (persistence stays live, no fit).
       if (this.fitAppliesHere() && this.#fitHoldNow() !== 'both') {
-        // The fit performs: spend the sticky arm, extend the settle window.
-        this.#fitArmedSticky = false
-        this.#fitArmedUntil = now + this.#FIT_ARM_MS
+        // Spend the arm ONLY if the fit actually ran. zoomToFit bails (now
+        // reporting false) when the renderer/ZoomDrone isn't up yet, when the
+        // mesh has no bounds, or when the safe area is degenerate — and
+        // `this.zoom` is a live IoC lookup that is simply undefined before the
+        // drone registers. EffectBus.on replays the last value to a new
+        // subscriber, so on boot this handler fires the moment it subscribes,
+        // often before any of that is ready: spending the arm there left the
+        // switch reading pinned while the page was never fitted. Keeping the
+        // arm sticky means the next paint retries until one succeeds.
         vp?.suspend?.()
-        this.zoom?.zoomToFit?.(true)
+        const fitted = this.zoom?.zoomToFit?.(true) === true
+        if (fitted) {
+          this.#fitArmedSticky = false
+          this.#fitArmedUntil = now + this.#FIT_ARM_MS
+        } else {
+          // Nothing was fitted, so nothing can have overwritten the saved
+          // viewport — don't leave persistence suspended on the way out.
+          vp?.resume?.()
+        }
       } else {
         // Exempt page (pinned / hand-adjusted this visit) — disarm so a
         // later tile add here can't surprise-fit, and let edits persist.
@@ -1953,7 +1967,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
         if (!this.fitAppliesHere() || this.#fitHoldNow() === 'both') return
         const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
         vp?.suspend?.()
-        this.zoom?.zoomToFit?.(true)
+        // Same rule as `arrived`: a bailed fit overwrote nothing, so it must
+        // not leave persistence suspended behind it.
+        if (this.zoom?.zoomToFit?.(true) !== true) vp?.resume?.()
       }, 150)
     }
 
@@ -2018,10 +2034,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     container.position.set(snap.cx, snap.cy)
     app.stage.position.set(s.width * 0.5 + snap.dx, s.height * 0.5 + snap.dy)
 
-    // persist restored state
+    // persist restored state — 'user', or the default 'auto' leaves it in the
+    // in-memory mirror only and turning the switch off never actually saves
+    // the viewport it just put back.
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-    vp?.setZoom?.(snap.scale, snap.cx, snap.cy)
-    vp?.setPan?.(snap.dx, snap.dy)
+    vp?.setZoom?.(snap.scale, snap.cx, snap.cy, false, 'user')
+    vp?.setPan?.(snap.dx, snap.dy, 'user')
   }
 
   readonly togglePin = (): void => {

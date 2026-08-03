@@ -21,7 +21,7 @@ const ZOOM_DRONE_KEY = '@diamondcoreprocessor.com/ZoomDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SIGNATURE_STORE_KEY = '@hypercomb/SignatureStore'
 
-interface ZoomLike { zoomToFit?: (snap?: boolean) => void }
+interface ZoomLike { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto') => void }
 interface LineageLike {
   explorerSegments?: () => readonly string[]
   explorerDir?: () => Promise<FileSystemDirectoryHandle | null>
@@ -116,7 +116,12 @@ export class AutoFitFirstAddDrone extends Drone {
         .filter((x: string) => x.length > 0)
       if (liveSegs.join('/') !== key) return  // navigated away inside the delay
       const zoom = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(ZOOM_DRONE_KEY) as ZoomLike | undefined
-      zoom?.zoomToFit?.(true)
+      // 'user' so the framing STICKS. This fit is the sanctioned carve-out
+      // (first tile at a genuinely empty lineage) and is memoised per session
+      // by #fittedSigs, so persisting it cannot re-fire on later adds. Left at
+      // the default 'auto' it lived in memory only: the new page looked
+      // correctly framed until the first reload, which reset it to scale 1.
+      zoom?.zoomToFit?.(true, 'user')
     }, 80)
   }
 }

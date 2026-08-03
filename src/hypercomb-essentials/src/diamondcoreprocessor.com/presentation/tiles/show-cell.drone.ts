@@ -2686,6 +2686,14 @@ export class ShowCellDrone extends Drone {
         })
 
         this.#emitRenderTags(cached.cells)
+        // Stays AFTER applyGeometry deliberately. applyGeometry now publishes
+        // the count itself, ahead of its restore-refit, which is what fixes the
+        // ordering — but it early-returns before that emit on three paths (0
+        // cells, unchanged cells-key, missing atlas), and back-nav hits the
+        // unchanged-key bail routinely. This unconditional emit is the safety
+        // net for those. Moving it BEFORE applyGeometry is wrong: listeners
+        // that measure live bounds (the control bar's global-fit `arrived`)
+        // would then read the OUTGOING page's geometry.
         this.emitEffect('render:cell-count', this.#buildCellCountPayload(cached.cells))
 
         // Child preloading can reuse atlas slots that belonged to this parent.
@@ -4371,7 +4379,10 @@ export class ShowCellDrone extends Drone {
       // recomputing from current bounds (which would drift if cells
       // change shape — undo/redo, add/remove, etc.).
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-      vp?.setMeshOffset?.(newX, newY)
+      // 'user' — the default 'auto' updates the in-memory mirror only, which
+      // made the comment above a lie: back-nav kept the offset (via the cache
+      // patched below) while a RELOAD recomputed it from live bounds.
+      vp?.setMeshOffset?.(newX, newY, 'user')
       // Also patch the in-memory snapshot cache. Without this update,
       // next back-nav reads the old (empty) cached snap, sees no
       // meshOffset, and recomputes from bounds again — defeating the
@@ -4381,6 +4392,15 @@ export class ShowCellDrone extends Drone {
       else this.#layerViewportCache.set(this.renderedLocationKey, { meshOffset: { x: newX, y: newY } })
       if (final) this.#pendingRecenter = false  // consumed only on final batch
     }
+
+    // Publish the tile count BEFORE the refit below — it is an INPUT to it.
+    // zoomToFit's safe-area padding keys off `#cellCount` (a lone tile gets
+    // 75px of breathing room, anything larger 5px), and that field is fed
+    // only by this effect. Emitted after the refit, every restore-refit sized
+    // itself against the PREVIOUS page's count: the same layer re-framed to a
+    // different zoom depending on where you arrived from, and the first page
+    // after a reload always fitted at padding 5 (count still 0).
+    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
 
     // After mesh + recenter have settled on the final batch, refit if
     // the restored snapshot was a fit (snap.zoom.fit). The applied
@@ -4435,7 +4455,6 @@ export class ShowCellDrone extends Drone {
       : undefined
     this.shader.setBandRows(this.#bandRows)
     this.shader.setHoveredIndex(restoredHoverIndex ?? -1)
-    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
     this.#emitRenderTags(cells)
   }
 

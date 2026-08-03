@@ -86,7 +86,12 @@ export class ViewportPersistence extends EventTarget {
   #commitTimer: ReturnType<typeof setTimeout> | null = null
   #COMMIT_DEBOUNCE_MS = 200
 
-  /** Suspend persistence — viewport changes are applied visually but not saved. */
+  /** Suspend persistence — AUTOMATIC viewport changes are applied visually but
+   *  not saved. Explicit user gestures still persist: every caller suspends
+   *  purely to stop an auto-fit overwriting the page's saved viewport (the
+   *  global-fit switch does this on each arrival), and a blanket block also
+   *  swallowed real gestures. `r` / Ctrl+0 emit no `viewport:manual`, so they
+   *  never triggered the switch's resume and were silently discarded. */
   suspend = (): void => { this.#suspended = true }
   /** Resume persistence. */
   resume = (): void => { this.#suspended = false }
@@ -98,7 +103,7 @@ export class ViewportPersistence extends EventTarget {
   // debounced commit to the sig-keyed store.
 
   setZoom = (scale: number, cx: number, cy: number, fit = false, source: ViewportSource = 'auto'): void => {
-    if (this.#suspended) return
+    if (this.#suspended && source !== 'user') return
     // Strip `fit: false` from the stored snapshot to keep JSON minimal —
     // absence == not a fit. Only set the property when truly a fit.
     const zoom = fit ? { scale, cx, cy, fit: true } : { scale, cx, cy }
@@ -107,7 +112,7 @@ export class ViewportPersistence extends EventTarget {
   }
 
   setPan = (dx: number, dy: number, source: ViewportSource = 'auto'): void => {
-    if (this.#suspended) return
+    if (this.#suspended && source !== 'user') return
     const pan = { dx, dy }
     this.#lastRead = { ...this.#lastRead, pan }
     if (source === 'user') this.#scheduleStoreCommit()
@@ -118,7 +123,7 @@ export class ViewportPersistence extends EventTarget {
    *  navigation; never auto-changed by the renderer. Only updated when
    *  the user explicitly recenters via the navigation command. */
   setMeshOffset = (x: number, y: number, source: ViewportSource = 'auto'): void => {
-    if (this.#suspended) return
+    if (this.#suspended && source !== 'user') return
     const meshOffset = { x, y }
     this.#lastRead = { ...this.#lastRead, meshOffset }
     if (source === 'user') this.#scheduleStoreCommit()
@@ -524,12 +529,12 @@ export class ZoomDrone extends Drone {
     source: ViewportSource = 'auto',
     fitAxis: 'both' | 'x' | 'y' = 'both',
     hold?: 'none' | 'scale' | 'position' | 'both',
-  ): void => {
-    if (!this.renderContainer || !this.renderer || !this.app) return
+  ): boolean => {
+    if (!this.renderContainer || !this.renderer || !this.app) return false
 
     const resolvedHold = hold ?? this.fitHold?.() ?? 'none'
     // Both axes pinned — the viewport is fully the user's; nothing to fit.
-    if (resolvedHold === 'both') return
+    if (resolvedHold === 'both') return false
 
     this.#cancelAnim()
 
@@ -540,7 +545,7 @@ export class ZoomDrone extends Drone {
     // can inflate the union and cause fit-to-window to zoom out too far
     const contentLayer = this.#findContentLayer(target)
     const bounds = (contentLayer ?? target).getLocalBounds()
-    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return false
 
     // measure UI chrome to define the safe area. A view that is ONE lone
     // tile fits edge-to-edge and blows that tile up to fill the viewport —
@@ -595,7 +600,7 @@ export class ZoomDrone extends Drone {
     // runs again on the next hexagon-mode render / resize (header back on
     // top → availH positive). Guard placed before the stage/pan reset
     // below so an early return has zero side effects.
-    if (availW <= 0 || availH <= 0) return
+    if (availW <= 0 || availH <= 0) return false
 
     const stageScale = this.app.stage.scale.x || 1
 
@@ -663,7 +668,7 @@ export class ZoomDrone extends Drone {
       // moment's safeMidX/Y and would otherwise leave content shrunk
       // and off-center in the new viewport.
       this.#saveZoom(target, true, source)
-      return
+      return true
     }
 
     // animate to target (200ms ease-out). Tracked via #animFrameId so
@@ -704,6 +709,7 @@ export class ZoomDrone extends Drone {
     }
 
     this.#animFrameId = requestAnimationFrame(animate)
+    return true
   }
 
   // -------------------------------------------------
