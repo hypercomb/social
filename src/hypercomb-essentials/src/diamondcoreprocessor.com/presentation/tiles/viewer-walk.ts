@@ -112,18 +112,102 @@ export function walkFrom(label: string, view: string, delta: number): WalkTarget
  *  in-place views mount in place and navigating views navigate, exactly as
  *  they do when the icon on the tile is pressed. */
 export function openView(view: string, label: string): void {
+  // A step along the row inside a viewer moves the subject, not the door: the
+  // way back stays the close-up, now of the tile we stepped onto.
+  if (ENTRY && ENTRY.view === view) ENTRY.label = label
   EffectBus.emit('tile:action', { action: `view-enter:${view}`, label })
 }
 
 /** Open a tile's CLOSE-UP — the screen for choosing another option. */
-export function openTileMenu(label: string): void {
+export function openTileMenu(label: string, segments?: readonly string[]): void {
+  const at = segments ?? readLineage()
+  EffectBus.emit('tile:view-open', { label, segments: at })
+}
+
+function readLineage(): string[] {
   const lineage = window.ioc?.get?.<{ explorerSegments?: () => readonly string[] }>(
     '@hypercomb.social/Lineage',
   )
-  const segments = (lineage?.explorerSegments?.() ?? [])
-    .map(s => String(s ?? '').trim()).filter(Boolean)
-  EffectBus.emit('tile:view-open', { label, segments })
+  return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
 }
+
+// ── the way back out of a viewer ───────────────────────────
+
+/**
+ * THE CLOSE-UP IS WHERE A VIEWER WAS CHOSEN, SO IT IS WHERE CLOSING ONE RETURNS.
+ *
+ * Picking "open as …" is a question with several answers, and a viewer's X is
+ * very often "not that one". Landing on the hive instead means finding the tile
+ * again and holding it again just to see the same five chips — the choice is
+ * thrown away every time it is exercised.
+ *
+ * WHY REMEMBERED RATHER THAN MEASURED. The close-up used to stay mounted under
+ * whatever it opened and reveal itself again when the cover went (`#suspend`).
+ * That works for a panel or an editor; it cannot work for a viewer, because
+ * half of them NAVIGATE into the tile to open (`visual-bee-icons`
+ * `dispatchEnterAction`) and navigation tears the close-up down — closing then
+ * drops you on the tile's inside, one layer from where you started, with no
+ * close-up left to reveal. One recorded entry point survives both kinds.
+ *
+ * ONE ENTRY, CONSUMED ONCE. Armed only when the viewer we opened actually
+ * becomes the mode, and dropped on the first mode change after that — so a
+ * viewer left for ANOTHER viewer hands the return over to nobody, and a stale
+ * entry can never surprise a later close with a close-up nobody asked for.
+ */
+type CloseUpEntry = {
+  /** Follows a sideways step: after walking the row inside a viewer, the way
+   *  back is the close-up of the tile you are ACTUALLY looking at. */
+  label: string
+  readonly view: string
+  /** The layer the close-up was open ON — where the return has to land, which
+   *  for a navigating viewer is NOT where its close leaves the lineage. */
+  readonly segments: readonly string[]
+  armed: boolean
+}
+
+let ENTRY: CloseUpEntry | null = null
+
+/** Record that this viewer is being opened FROM a tile's close-up, so its
+ *  close comes back here. Called by the close-up as it hands over. */
+export function rememberCloseUpEntry(view: string, label: string, segments: readonly string[]): void {
+  if (!view || !label) return
+  ENTRY = { view, label, segments: [...segments], armed: false }
+}
+
+/** Forget the way back — the close-up was left by a door that is not a viewer. */
+export function forgetCloseUpEntry(): void { ENTRY = null }
+
+function returnToCloseUp(entry: CloseUpEntry): void {
+  // A navigating viewer went INTO the tile to open; the close-up belongs to the
+  // layer above it. Put the lineage back before the card is asked for, or it
+  // mounts for a tile the current layer no longer contains.
+  const here = readLineage()
+  const same = here.length === entry.segments.length
+    && here.every((segment, i) => segment === entry.segments[i])
+  if (!same) {
+    const nav = window.ioc?.get?.<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+    nav?.goRaw?.(entry.segments)
+  }
+  openTileMenu(entry.label, entry.segments)
+}
+
+type ViewModeLike = EventTarget & { mode: string }
+
+window.ioc?.whenReady?.<ViewModeLike>('@hypercomb.social/ViewMode', vm => {
+  vm.addEventListener('change', () => {
+    const entry = ENTRY
+    if (!entry) return
+    const mode = vm.mode
+    // The viewer we opened just came up — from here its next mode change is
+    // its close.
+    if (mode === entry.view) { entry.armed = true; return }
+    if (!entry.armed) return
+    ENTRY = null
+    // Left for the hive → hand back the screen that offered the choice. Left
+    // for another viewer → that one now owns where its own close goes.
+    if (mode === 'hexagons') returnToCloseUp(entry)
+  })
+})
 
 /**
  * Land on whichever one `walkFrom` chose — and the one rule that makes the
@@ -143,6 +227,10 @@ export function openTileMenu(label: string): void {
  */
 export function landOnWalkTarget(view: string, target: WalkTarget, closeViewer: () => void): void {
   if (target.kind === 'view') { openView(view, target.label); return }
+  // This path hands the close-up over itself, for the tile we stepped ONTO —
+  // so the remembered way back (the tile we started from) must not also fire
+  // when `closeViewer` flips the mode.
+  forgetCloseUpEntry()
   closeViewer()
   openTileMenu(target.label)
 }

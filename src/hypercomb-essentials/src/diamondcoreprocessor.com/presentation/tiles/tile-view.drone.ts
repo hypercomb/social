@@ -66,14 +66,18 @@
 // and an action that opens nothing at all (a toggle) never even flickers,
 // because the chrome is only released once we are genuinely covered.
 //
-// Only three verbs still close: going inside (you have left), picking the tile
-// (the picked set is a hive activity), and the way out.
+// Only four verbs still close: going inside (you have left), picking the tile
+// (the picked set is a hive activity), the way out — and OPENING A VIEWER,
+// which is a handover rather than a cover: the way back is recorded
+// (`rememberCloseUpEntry`) and the viewer's own close brings this screen back,
+// so "open as …" can be answered again without hunting the tile down and
+// holding it a second time.
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { sniffImageMime } from '../../link/photo.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
-import { nextTile, VIEW_ENTER_PREFIX } from './viewer-walk.js'
+import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 
 const SIG = /^[0-9a-f]{64}$/
@@ -262,7 +266,12 @@ export class TileViewDrone extends Drone {
   public get open_(): boolean { return this.#label !== null }
 
   public async open(label: string, segments: readonly string[]): Promise<void> {
-    if (this.#label === label) return
+    // Already open for this tile. If we are waiting under something, being
+    // asked for again IS the request to come back — don't sit there suspended.
+    if (this.#label === label) {
+      if (this.#suspended) this.#resume()
+      return
+    }
     this.close()
     this.#label = label
     this.#segments = [...segments]
@@ -902,6 +911,19 @@ export class TileViewDrone extends Drone {
       run: () => {
         const overlay = window.ioc?.get?.('@diamondcoreprocessor.com/TileOverlayDrone') as
           OverlayActionsShape | undefined
+        // OPENING A VIEWER IS A HANDOVER, NOT A COVER. Waiting underneath is
+        // right for an editor or a panel; it cannot work for a viewer, half of
+        // which navigate INTO the tile to open and tear this card down on the
+        // way (`navigation:guard-start`). So the way back is recorded instead,
+        // and the viewer's close brings this screen back — see
+        // `rememberCloseUpEntry`. Closing first also keeps a viewer that mounts
+        // below TAKEOVER_Z from being covered by our own suspended card.
+        if (action.name.startsWith(VIEW_ENTER_PREFIX)) {
+          rememberCloseUpEntry(action.name.slice(VIEW_ENTER_PREFIX.length), label, this.#segments)
+          this.close()
+          overlay?.invokeActionForTile?.(action.name, label)
+          return
+        }
         overlay?.invokeActionForTile?.(action.name, label)
         // Editing, sharing and the panels open their own surface OVER this one
         // and the close-up waits underneath for them (`#suspend`). `remove`
