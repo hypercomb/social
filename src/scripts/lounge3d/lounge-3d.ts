@@ -23,6 +23,11 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { Reflector } from 'three/addons/objects/Reflector.js'
+import {
+  DART_NUMS, DART_RINGS, bedCentre, checkout, pickShot, resolveThrow, scoreDart,
+  type DartHit,
+} from './darts-rules.js'
 
 interface LoungeConfig {
   mount?: string
@@ -556,12 +561,9 @@ const artMap: ArtPainter = (ctx, w, h) => {
 const ART_PAINTERS: ArtPainter[] = [artCigarBand, artLeaf, artPoster, artMap]
 
 // ─── the dartboard face (painted, true ring geometry) ─────────────────────
-// Standard board ratios scaled to the face: playing field 170mm → 78.125% of
-// the radius. The scorer in buildRoom uses THE SAME fractions — keep in sync.
-const DART_NUMS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5]
-const DART_RINGS = {
-  dblOut: 0.78125, dblIn: 0.7445, trOut: 0.4917, trIn: 0.455, bull: 0.073, dbull: 0.0292,
-} as const
+// The painter and the SCORER share one set of ring fractions, and they live
+// in darts-rules.ts — the rules of the game are testable on their own (see
+// darts-rules.spec.ts) and nothing about them needs a scene to be true.
 
 const dartboardFace: ArtPainter = (ctx, w, h) => {
   const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2
@@ -660,10 +662,17 @@ export interface Room {
   pickables: THREE.Object3D[]
   attachCamera: (c: THREE.Camera) => void
   tick: (t: number, dt: number) => void
-  /** Stick a dart at a world-space point on the board face (marked
-   *  `userData.dart`) and chalk the score. Returns the scored throw, or
-   *  null when the click cleared a finished round instead. */
-  throwDart: (worldPoint: THREE.Vector3) => { label: string; points: number; count: number } | null
+  /** THE OCHE. A press on the board face (marked `userData.dart`) starts an
+   *  aim, a drag re-points it, and the release throws — see the throw block in
+   *  buildRoom for why it is a hold and not a click. `beginAim` returns false
+   *  when it is not your throw, and the press falls through to orbiting the
+   *  room. */
+  darts: {
+    beginAim: (worldPoint: THREE.Vector3) => boolean
+    moveAim: (worldPoint: THREE.Vector3) => void
+    release: () => { label: string; points: number; mult: number } | null
+    cancel: () => void
+  }
   dispose: () => void
 }
 
@@ -978,8 +987,8 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   hangFrame(0.72, 0.9, -HALF_W + 0.09, 1.8, 2.2, Math.PI / 2, false)
   hangFrame(1.15, 1.4, -2.55, 1.95, -HALF_D + 0.08, 0, true)
   hangFrame(1.15, 1.4, 2.55, 1.95, -HALF_D + 0.08, 0, true)
-  // over the mantel, hung on the face of the chimney breast
-  hangFrame(1.5, 1.05, 0, 2.42, -HALF_D + 0.42, 0, false)
+  // (the mantel no longer carries a print — the looking glass hangs there,
+  // built in the inception section below)
   // the flavor wheel — the one picture of it, and it OPENS when clicked
   hangFrame(0.9, 1.15, HALF_W - 0.09, 1.85, -2.2, -Math.PI / 2, false,
     { painter: artWheel, pick: 'flavor-wheel' })
@@ -1000,8 +1009,20 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   chalkCv.height = 440
   const chalkTex = track(new THREE.CanvasTexture(chalkCv))
   chalkTex.colorSpace = THREE.SRGBColorSpace
-  type DartThrow = { label: string; points: number }
-  const dartThrows: DartThrow[] = []
+  /** The two seats at the oche. The Colonel is the house — he has been on that
+   *  board every night for thirty years and throws like it. */
+  type Seat = { name: string; score: number; legs: number }
+  const seats: Seat[] = [
+    { name: 'YOU', score: 501, legs: 0 },
+    { name: 'COLONEL', score: 501, legs: 0 },
+  ]
+  let turnSeat = 0
+  let turnDarts: DartHit[] = []
+  /** The score to REVERT to on a bust — darts thrown into a bust never
+   *  happened, which is the rule that makes the last hundred the hard part. */
+  let turnStart = 501
+  let chalkNote = 'hold the board · release on the tight ring'
+
   const drawChalk = (): void => {
     const ctx = chalkCv.getContext('2d')
     if (!ctx) return
@@ -1013,37 +1034,71 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     ctx.strokeRect(10, 10, w - 20, h - 20)
     ctx.fillStyle = '#d9cfae'
     ctx.textAlign = 'center'
-    ctx.font = '600 34px Georgia, serif'
-    ctx.fillText('D A R T S', w / 2, 62)
-    ctx.strokeStyle = 'rgba(217,207,174,.5)'
-    ctx.beginPath(); ctx.moveTo(34, 84); ctx.lineTo(w - 34, 84); ctx.stroke()
-    if (!dartThrows.length) {
-      ctx.font = 'italic 26px Georgia, serif'
-      ctx.fillStyle = 'rgba(217,207,174,.75)'
-      ctx.fillText('chalk up —', w / 2, 200)
-      ctx.fillText('click the board', w / 2, 240)
-    } else {
-      ctx.font = '32px Georgia, serif'
-      dartThrows.forEach((d, i) => {
-        const y = 140 + i * 56
+    ctx.font = '600 30px Georgia, serif'
+    ctx.fillText('5 0 1', w / 2, 50)
+    ctx.font = 'italic 15px Georgia, serif'
+    ctx.fillStyle = 'rgba(217,207,174,.6)'
+    ctx.fillText('double out', w / 2, 70)
+    const rule = (y: number): void => {
+      ctx.strokeStyle = 'rgba(217,207,174,.45)'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(26, y); ctx.lineTo(w - 26, y); ctx.stroke()
+    }
+    rule(84)
+
+    // THE TWO SCORES — the only numbers that matter, biggest on the board.
+    // The seat to throw carries the chalk mark, so whose turn it is is never
+    // a question you have to hold in your head.
+    seats.forEach((seat, i) => {
+      const y = 122 + i * 62
+      const live = i === turnSeat
+      ctx.textAlign = 'left'
+      ctx.font = `${live ? '600 ' : ''}19px Georgia, serif`
+      ctx.fillStyle = live ? '#e8dcc4' : 'rgba(217,207,174,.62)'
+      ctx.fillText(live ? '▸ ' + seat.name : '  ' + seat.name, 26, y - 22)
+      ctx.textAlign = 'right'
+      ctx.font = '600 42px Georgia, serif'
+      ctx.fillStyle = live ? '#e8dcc4' : 'rgba(217,207,174,.62)'
+      ctx.fillText(String(seat.score), w - 26, y)
+      if (seat.legs > 0) {
         ctx.textAlign = 'left'
-        ctx.fillStyle = '#d9cfae'
-        ctx.fillText(d.label, 34, y)
+        ctx.font = '15px Georgia, serif'
+        ctx.fillStyle = 'rgba(200,151,90,.9)'
+        ctx.fillText('legs ' + seat.legs, 26, y)
+      }
+    })
+    rule(258)
+
+    // THIS TURN — three lines, always three, so the empty ones read as darts
+    // still in the hand rather than as nothing happening.
+    ctx.font = '24px Georgia, serif'
+    for (let i = 0; i < 3; i++) {
+      const y = 292 + i * 34
+      const d = turnDarts[i]
+      ctx.textAlign = 'left'
+      ctx.fillStyle = d ? '#d9cfae' : 'rgba(217,207,174,.22)'
+      ctx.fillText(d ? d.label : '·', 30, y)
+      if (d) {
         ctx.textAlign = 'right'
-        ctx.fillText(String(d.points), w - 34, y)
-      })
-      if (dartThrows.length >= 3) {
-        const total = dartThrows.reduce((n, d) => n + d.points, 0)
-        ctx.strokeStyle = 'rgba(217,207,174,.5)'
-        ctx.beginPath(); ctx.moveTo(34, 322); ctx.lineTo(w - 34, 322); ctx.stroke()
-        ctx.textAlign = 'center'
-        ctx.font = '600 46px Georgia, serif'
-        ctx.fillText(String(total), w / 2, 372)
-        ctx.font = 'italic 20px Georgia, serif'
-        ctx.fillStyle = 'rgba(217,207,174,.7)'
-        ctx.fillText('click to chalk a new round', w / 2, 408)
+        ctx.fillText(String(d.points), w - 30, y)
       }
     }
+    rule(404)
+
+    // THE WAY OUT. A checkout hint is not a hint about the game, it IS the
+    // game — knowing that 96 is T20, D18 is the difference between a player
+    // and someone throwing at the big numbers.
+    const live = seats[turnSeat]
+    const out = checkout(live.score, 3 - turnDarts.length)
+    ctx.textAlign = 'center'
+    if (out) {
+      ctx.font = '600 19px Georgia, serif'
+      ctx.fillStyle = '#c8975a'
+      ctx.fillText(out.join('  '), w / 2, 400)
+    }
+    ctx.font = 'italic 15px Georgia, serif'
+    ctx.fillStyle = 'rgba(217,207,174,.72)'
+    ctx.fillText(chalkNote, w / 2, 426)
     chalkTex.needsUpdate = true
   }
   drawChalk()
@@ -1118,31 +1173,11 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   const dartFlightGeo = track(new THREE.PlaneGeometry(0.026, 0.034))
   const dartShaftMat = std({ color: C.ember, roughness: 0.5 })
   const dartFlightMat = std({ color: C.cream, roughness: 0.8, side: THREE.DoubleSide })
-  const throwDart = (world: THREE.Vector3): { label: string; points: number; count: number } | null => {
-    if (dartThrows.length >= 3) {
-      dartThrows.length = 0
-      stuck.clear()
-      drawChalk()
-      return null
-    }
-    const p = dartsGroup.worldToLocal(world.clone())
-    const r = Math.hypot(p.x, p.y) / 0.27 // fraction of the painted face
-    const seg = (Math.PI * 2) / 20
-    const idx = ((Math.round(Math.atan2(p.x, p.y) / seg) % 20) + 20) % 20
-    const n = DART_NUMS[idx]
-    let label = 'WIRE', points = 0
-    if (r < DART_RINGS.dbull) { label = 'D·BULL'; points = 50 }
-    else if (r < DART_RINGS.bull) { label = 'BULL'; points = 25 }
-    else if (r < DART_RINGS.trIn) { label = String(n); points = n }
-    else if (r < DART_RINGS.trOut) { label = 'T' + n; points = n * 3 }
-    else if (r < DART_RINGS.dblIn) { label = String(n); points = n }
-    else if (r < DART_RINGS.dblOut) { label = 'D' + n; points = n * 2 }
-    const i = dartThrows.length
-    dartThrows.push({ label, points })
-    drawChalk()
+  /** One dart, built where it is told. Shared by the flight and the landing —
+   *  the thing you watch fly IS the thing that ends up in the board. */
+  const buildDart = (seed: number): THREE.Group => {
     const d = new THREE.Group()
-    d.position.set(p.x, p.y, 0.069)
-    d.rotation.set(Math.sin(i * 7 + n) * 0.07, Math.cos(i * 3 + n) * 0.07, 0)
+    d.rotation.set(Math.sin(seed * 7) * 0.07, Math.cos(seed * 3) * 0.07, 0)
     const needle = new THREE.Mesh(dartNeedleGeo, brassMat)
     needle.rotation.x = Math.PI / 2
     needle.position.z = 0.012
@@ -1164,8 +1199,278 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     f2.rotation.y = Math.PI / 2
     f2.position.z = 0.108
     d.add(f2)
-    stuck.add(d)
-    return { label, points, count: dartThrows.length }
+    return d
+  }
+
+  // ── THE THROW — where the skill is ─────────────────────────────────────
+  //
+  // Clicking a spot and having the dart appear there is not a game; it is a
+  // scoring calculator with a 3D model attached. The board is not hard to
+  // point at. What is hard about darts is holding still and letting go at the
+  // right moment, so that is what this asks for and nothing else.
+  //
+  //   PRESS on the board   — you name your target. A brass bead starts to
+  //                          orbit it, and a ring shows how wide it is running.
+  //   HOLD                 — the orbit BREATHES: it winds all the way in to a
+  //                          point and back out again, about once a second.
+  //                          You may re-aim while holding, but the breath does
+  //                          not restart for you.
+  //   RELEASE              — the bead's offset AT THAT INSTANT is your error,
+  //                          near enough exactly. Let go on the tight ring and
+  //                          the dart goes where you pointed. Let go anywhere
+  //                          else and it goes where the bead was.
+  //
+  // One input, both axes, no meters to read: the error you are about to make
+  // is drawn on the board, at the size you are about to make it. That is a
+  // skill you can feel yourself getting better at inside three throws — and it
+  // is the same skill real darts asks for, which is the point.
+  //
+  // DITHERING COSTS. After `AIM_NERVE` seconds the whole orbit starts growing:
+  // stand there long enough and even the tight moment is not tight. There is
+  // no waiting for a perfect window, only taking the next one.
+
+  /** Seconds per breath — one tight window per pass. */
+  const AIM_PERIOD = 1.15
+  /** Widest wobble and the eye of the breath, in board-local units (r = 0.27). */
+  const AIM_MAX = 0.055
+  const AIM_MIN = 0.003
+  /** How fast the bead goes round. Fast enough that the tight moment is a
+   *  moment, slow enough to be a decision rather than a reflex. */
+  const AIM_SPIN = 5.1
+  /** Grace before nerves set in. */
+  const AIM_NERVE = 3.2
+
+  /** The bead's offset from the aim point after `held` seconds. */
+  const beadAt = (held: number): { x: number; y: number; r: number } => {
+    const breath = Math.pow(Math.abs(Math.cos((Math.PI * held) / AIM_PERIOD)), 1.5)
+    const nerve = 1 + Math.max(0, held - AIM_NERVE) * 0.6
+    const r = (AIM_MIN + (AIM_MAX - AIM_MIN) * breath) * nerve
+    // The spin drifts, so the tight moment is never in the same direction
+    // twice — you cannot learn one release and repeat it forever.
+    const a = held * AIM_SPIN + Math.sin(held * 0.7) * 1.2
+    return { x: Math.sin(a) * r, y: Math.cos(a) * r, r }
+  }
+
+  // The reticle: a ring at the current wobble radius and the bead riding it.
+  // Additive and depth-free so they read as light on the board rather than
+  // stickers on it.
+  const aimGroup = new THREE.Group()
+  aimGroup.position.z = 0.0715
+  aimGroup.visible = false
+  dartsGroup.add(aimGroup)
+  const aimRingGeo = track(new THREE.RingGeometry(0.94, 1, 56))
+  const aimRingMat = new THREE.MeshBasicMaterial({
+    color: 0xe0b578, transparent: true, opacity: 0.5,
+    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+  })
+  const aimRing = new THREE.Mesh(aimRingGeo, track(aimRingMat))
+  aimGroup.add(aimRing)
+  const aimCrossMat = track(new THREE.MeshBasicMaterial({
+    color: 0xe8dcc4, transparent: true, opacity: 0.35,
+    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+  }))
+  const aimCross = new THREE.Mesh(track(new THREE.CircleGeometry(0.0035, 12)), aimCrossMat)
+  aimGroup.add(aimCross)
+  const beadMat = new THREE.MeshBasicMaterial({
+    color: 0xffd9a0, transparent: true, opacity: 0.95,
+    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+  })
+  const bead = new THREE.Mesh(track(new THREE.CircleGeometry(0.007, 14)), track(beadMat))
+  aimGroup.add(bead)
+
+  /** The throw in progress: where you pointed, and how long you have held. */
+  let aim: { x: number; y: number; held: number } | null = null
+  /** Darts in the air. */
+  type Flight = { g: THREE.Group; from: THREE.Vector3; to: THREE.Vector3; t: number; hit: DartHit }
+  const flights: Flight[] = []
+  /** Deferred beats — the pause before the Colonel steps up, the pause on a
+   *  bust so you can read it. Ticked down with the room, so they stop when the
+   *  scene is off-screen instead of firing into a paused room. */
+  const beats: Array<{ t: number; fn: () => void }> = []
+  const after = (t: number, fn: () => void): void => { beats.push({ t, fn }) }
+  /** True while the Colonel has the darts — the board refuses yours. */
+  let houseThrowing = false
+
+  const FLIGHT_DUR = 0.26
+  /** Where a dart is released from, in board-local space: down and to the
+   *  right of the board, out toward the oche. */
+  const LAUNCH = new THREE.Vector3(0.22, -0.34, 1.15)
+
+  /** Send a dart to a landing point and score it when it arrives. */
+  const launch = (x: number, y: number): void => {
+    const hit = scoreDart(x, y)
+    const g = buildDart(flights.length + turnDarts.length + x * 31)
+    const to = new THREE.Vector3(x, y, 0.069)
+    g.position.copy(LAUNCH)
+    stuck.add(g)
+    flights.push({ g, from: LAUNCH.clone(), to, t: 0, hit })
+  }
+
+  /** 501, applied. Everything that makes the last hundred hard lives here. */
+  const applyHit = (hit: DartHit): void => {
+    const seat = seats[turnSeat]
+    turnDarts.push(hit)
+    const res = resolveThrow(seat.score, hit)
+    if (res.outcome === 'bust') {
+      // A bust gives the WHOLE turn back, not just this dart.
+      seat.score = turnStart
+      chalkNote = res.reason === 'no-double' ? 'not a double — bust'
+        : res.reason === 'left-one' ? 'left on one — bust'
+        : 'bust'
+      drawChalk()
+      after(1.1, () => nextTurn())
+      return
+    }
+    seat.score = res.score
+    if (res.outcome === 'leg') {
+      seat.legs += 1
+      chalkNote = `${seat.name.toLowerCase()} takes the leg`
+      drawChalk()
+      after(2.0, () => newLeg())
+      return
+    }
+    if (turnDarts.length >= 3) {
+      chalkNote = `${turnStart - seat.score} scored`
+      drawChalk()
+      after(1.1, () => nextTurn())
+      return
+    }
+    chalkNote = hit.points === 0 ? 'off the wire' : `${3 - turnDarts.length} in hand`
+    drawChalk()
+    if (houseThrowing) after(0.75, () => houseDart())
+  }
+
+  const clearBoard = (): void => { stuck.clear() }
+
+  const nextTurn = (): void => {
+    turnSeat = turnSeat === 0 ? 1 : 0
+    turnDarts = []
+    turnStart = seats[turnSeat].score
+    clearBoard()
+    if (turnSeat === 1) {
+      houseThrowing = true
+      chalkNote = 'the colonel steps up'
+      drawChalk()
+      after(0.9, () => houseDart())
+    } else {
+      houseThrowing = false
+      chalkNote = 'your throw'
+      drawChalk()
+    }
+  }
+
+  /** Alternate the throw each leg — the loser of a leg starts the next, which
+   *  is the only mercy the game offers. */
+  let legStarter = 0
+  const newLeg = (): void => {
+    seats[0].score = 501
+    seats[1].score = 501
+    legStarter = legStarter === 0 ? 1 : 0
+    turnSeat = legStarter
+    turnDarts = []
+    turnStart = 501
+    clearBoard()
+    houseThrowing = turnSeat === 1
+    chalkNote = houseThrowing ? 'the colonel throws first' : 'you throw first'
+    drawChalk()
+    if (houseThrowing) after(1.0, () => houseDart())
+  }
+
+  /** The Colonel's hand. Gaussian scatter about the bed he wants — good enough
+   *  to punish a loose leg, human enough to miss a double. He is beatable;
+   *  he is not a pushover. */
+  const houseDart = (): void => {
+    if (!houseThrowing) return
+    const seat = seats[1]
+    const shot = pickShot(seat.score, 3 - turnDarts.length)
+    const c = bedCentre(shot.n, shot.mult)
+    const g = (): number => {
+      // Box–Muller, so the miss is a scatter and not a square.
+      const u = Math.max(1e-6, Math.random())
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random())
+    }
+    const sigma = 0.0145
+    launch(c.x + g() * sigma, c.y + g() * sigma)
+  }
+
+  /** The board's whole input surface. Returns false when it is not your throw
+   *  — the press then falls through to the room's ordinary orbit. */
+  const beginAim = (world: THREE.Vector3): boolean => {
+    if (houseThrowing || flights.length > 0 || turnSeat !== 0) return false
+    const p = dartsGroup.worldToLocal(world.clone())
+    aim = { x: p.x, y: p.y, held: 0 }
+    aimGroup.visible = true
+    return true
+  }
+
+  const moveAim = (world: THREE.Vector3): void => {
+    if (!aim) return
+    const p = dartsGroup.worldToLocal(world.clone())
+    // Re-aiming is free; the breath is not. Moving your point does not buy you
+    // a fresh window, which is what stops "hold forever, slide onto the bull".
+    aim.x = p.x
+    aim.y = p.y
+  }
+
+  const releaseAim = (): DartHit | null => {
+    const a = aim
+    if (!a) return null
+    aim = null
+    aimGroup.visible = false
+    const b = beadAt(a.held)
+    // A whisper of luck on top of the bead, so an identical release is not an
+    // identical dart — enough to keep it alive, far too little to beat a
+    // steady hand.
+    const jitter = 0.0022
+    const x = a.x + b.x + (Math.random() - 0.5) * jitter
+    const y = a.y + b.y + (Math.random() - 0.5) * jitter
+    launch(x, y)
+    return scoreDart(x, y)
+  }
+
+  const cancelAim = (): void => { aim = null; aimGroup.visible = false }
+
+  /** Animate the aim bead and the darts in the air. Driven by the room's tick
+   *  so everything stops together when the scene leaves the screen. */
+  const tickDarts = (dt: number): void => {
+    for (let i = beats.length - 1; i >= 0; i--) {
+      const beat = beats[i]
+      beat.t -= dt
+      if (beat.t <= 0) { beats.splice(i, 1); beat.fn() }
+    }
+
+    if (aim) {
+      aim.held += dt
+      const b = beadAt(aim.held)
+      aimGroup.position.x = aim.x
+      aimGroup.position.y = aim.y
+      aimRing.scale.setScalar(Math.max(b.r, 0.0001))
+      bead.position.set(b.x, b.y, 0)
+      // THE TELL: the ring brightens as it closes. The whole skill is reading
+      // this one value, so it is the one thing on the board that changes
+      // colour — tight is warm and near-white, loose is a dim amber.
+      const tight = 1 - Math.min(1, (b.r - AIM_MIN) / (AIM_MAX - AIM_MIN))
+      aimRingMat.opacity = 0.32 + tight * 0.6
+      aimRingMat.color.setRGB(1, 0.72 + tight * 0.26, 0.42 + tight * 0.5)
+      beadMat.opacity = 0.6 + tight * 0.4
+    }
+
+    for (let i = flights.length - 1; i >= 0; i--) {
+      const f = flights[i]
+      f.t += dt / FLIGHT_DUR
+      if (f.t >= 1) {
+        f.g.position.copy(f.to)
+        f.g.rotation.set(Math.sin(f.to.x * 31) * 0.07, Math.cos(f.to.y * 23) * 0.07, 0)
+        flights.splice(i, 1)
+        applyHit(f.hit)
+        continue
+      }
+      const e = f.t
+      f.g.position.lerpVectors(f.from, f.to, e)
+      // A dart is thrown UP and drops in. Without the arc it reads as a laser.
+      f.g.position.y += Math.sin(e * Math.PI) * 0.055
+      f.g.rotation.z = (1 - e) * 0.5
+    }
   }
 
   // ── window (right wall) ────────────────────────────────────────────────
@@ -1675,6 +1980,130 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   doorway.add(box(1.1, 2.1, 0.06, std({ color: 0x0a0810, roughness: 1 }), 0, 1.06, 0.04, 0.01))
   doorway.add(box(1.44, 0.1, 0.14, trimWood, 0, 2.34, 0.02))
 
+  // ── inception ──────────────────────────────────────────────────────────
+  // Two devices, one idea: the room contains itself.
+  //
+  // 1. THE LOOKING GLASSES — a mirror over the mantel and a mirror on the
+  //    wall facing it. Each renders the real scene, and each reflection
+  //    contains the other mirror showing LAST frame's reflection — so the
+  //    corridor deepens one level per frame until it fades into the fog.
+  //    A shared lock keeps the two Reflectors from recursing inside a single
+  //    frame (stock three.js Reflectors would re-enter each other forever).
+  // 2. THE MINIATURE — a hand-carved model of this room on a pedestal by the
+  //    window: fireplace, wingbacks, rug, dartboard chip, mantel glass — and
+  //    on its tiny table, the model again, and again, three levels down.
+  //    Click it to put your eye at the little doorway. The miniature also
+  //    hangs in both mirrors, all the way down the corridor.
+
+  const mirrors = new THREE.Group()
+  scene.add(slot('slot-mirrors', mirrors))
+  let mirrorLock = false
+  const lookingGlass = (w: number, h: number, x: number, y: number, z: number, ry: number): void => {
+    const g = new THREE.Group()
+    g.position.set(x, y, z)
+    g.rotation.y = ry
+    mirrors.add(g)
+    const m = new Reflector(new THREE.PlaneGeometry(w - 0.16, h - 0.16), {
+      clipBias: 0.003,
+      textureWidth: 640,
+      textureHeight: 448,
+      color: 0xa89890, // smoked glass — each level of the corridor dims a little
+    })
+    m.position.z = 0.031
+    const orig = m.onBeforeRender.bind(m)
+    m.onBeforeRender = (renderer, sc, cam, geo, mat, grp): void => {
+      if (mirrorLock) return // the other mirror keeps last frame's image
+      mirrorLock = true
+      orig(renderer, sc, cam, geo, mat, grp)
+      mirrorLock = false
+    }
+    track({ dispose: () => m.dispose() })
+    g.add(m)
+    // the same gilt moulding the framed prints wear
+    const bar = 0.08
+    const frameMat = std({ color: C.brass, roughness: 0.42, metalness: 0.6 })
+    g.add(box(w, bar, 0.07, frameMat, 0, h / 2 - bar / 2, 0.02))
+    g.add(box(w, bar, 0.07, frameMat, 0, -h / 2 + bar / 2, 0.02))
+    g.add(box(bar, h - bar * 2, 0.07, frameMat, -w / 2 + bar / 2, 0, 0.02))
+    g.add(box(bar, h - bar * 2, 0.07, frameMat, w / 2 - bar / 2, 0, 0.02))
+    g.add(box(w - 0.14, h - 0.14, 0.02, std({ color: 0x0e0a12, roughness: 1 }), 0, 0, 0.01))
+  }
+  // over the mantel, on the chimney breast — where the print used to hang
+  lookingGlass(1.5, 1.05, 0, 2.42, -HALF_D + 0.42, 0)
+  // and its accomplice on the wall it faces
+  lookingGlass(1.15, 1.6, 0, 2.0, HALF_D - 0.05, Math.PI)
+
+  // the miniature — self-similar, three levels down
+  const miniWall = std({ color: C.wall, roughness: 0.95 })
+  const miniFloor = std({ color: C.floor, roughness: 0.8 })
+  const miniLeather = std({ color: C.leather, roughness: 0.62 })
+  const miniStone = std({ color: 0x2a2230, roughness: 0.92 })
+  const miniEmber = std({ color: C.ember, emissive: 0xff8a3c, emissiveIntensity: 1.6, roughness: 0.6 })
+  const miniRug = std({ color: 0x4a2330, roughness: 0.95 })
+  const miniCream = std({ color: C.cream, roughness: 0.85 })
+  const miniGlass = std({ color: 0xc8ccd4, roughness: 0.08, metalness: 0.9 })
+  const buildMini = (level: number): THREE.Group => {
+    const g = new THREE.Group()
+    g.add(box(0.5, 0.02, 0.42, darkWood, 0, 0.01, 0))       // plinth
+    g.add(box(0.46, 0.008, 0.38, miniFloor, 0, 0.024, 0))   // floor
+    g.add(box(0.46, 0.24, 0.01, miniWall, 0, 0.148, -0.185))// back wall
+    g.add(box(0.01, 0.24, 0.38, miniWall, -0.225, 0.148, 0))
+    g.add(box(0.01, 0.24, 0.38, miniWall, 0.225, 0.148, 0))
+    g.add(box(0.11, 0.13, 0.024, miniStone, 0, 0.093, -0.172)) // chimney breast
+    g.add(box(0.055, 0.045, 0.012, miniEmber, 0, 0.05, -0.166)) // the fire
+    g.add(box(0.13, 0.012, 0.03, trimWood, 0, 0.128, -0.164))   // mantel shelf
+    g.add(box(0.07, 0.05, 0.006, brassMat, 0, 0.185, -0.176))   // tiny looking glass
+    g.add(box(0.06, 0.04, 0.004, miniGlass, 0, 0.185, -0.171))
+    g.add(box(0.15, 0.004, 0.1, miniRug, 0, 0.028, 0.01))       // rug
+    for (const sx of [-1, 1]) {                                  // two wingbacks
+      const ch = new THREE.Group()
+      ch.position.set(sx * 0.075, 0.026, 0.03)
+      ch.rotation.y = -sx * 0.5
+      ch.add(box(0.05, 0.022, 0.045, miniLeather, 0, 0.011, 0))
+      ch.add(box(0.05, 0.06, 0.012, miniLeather, 0, 0.04, 0.026))
+      ch.add(box(0.012, 0.03, 0.04, miniLeather, -0.026, 0.032, 0.004))
+      ch.add(box(0.012, 0.03, 0.04, miniLeather, 0.026, 0.032, 0.004))
+      g.add(ch)
+    }
+    const chip = cyl(0.016, 0.016, 0.008, 12, miniCream, -0.217, 0.16, 0.07) // dartboard chip
+    chip.rotation.z = Math.PI / 2
+    g.add(chip)
+    const chipEye = cyl(0.0055, 0.0055, 0.01, 8, miniEmber, -0.216, 0.16, 0.07)
+    chipEye.rotation.z = Math.PI / 2
+    g.add(chipEye)
+    g.add(box(0.09, 0.008, 0.07, trimWood, 0.13, 0.062, 0.1))    // the low table…
+    g.add(box(0.01, 0.05, 0.01, darkWood, 0.13, 0.032, 0.1))
+    if (level < 3) {                                             // …and on it, the room again
+      const child = buildMini(level + 1)
+      child.scale.setScalar(0.14)
+      child.position.set(0.13, 0.066, 0.1)
+      g.add(child)
+    }
+    return g
+  }
+  const pedestal = new THREE.Group()
+  pedestal.position.set(4.35, 0, 2.15)
+  scene.add(slot('slot-miniature', pedestal))
+  pedestal.add(cyl(0.1, 0.13, 0.86, 12, darkWood, 0, 0.43, 0))
+  pedestal.add(cyl(0.24, 0.24, 0.03, 24, trimWood, 0, 0.875, 0))
+  const mini = buildMini(1)
+  mini.scale.setScalar(0.75)
+  mini.rotation.y = -2.1
+  mini.position.y = 0.89
+  pedestal.add(mini)
+  const miniLight = new THREE.PointLight(0xffd9a0, 1.6, 1.8, 2)
+  miniLight.position.set(0, 1.5, 0.3)
+  pedestal.add(miniLight)
+  // an invisible dome over the model: click it and the camera dives in
+  const miniPick = new THREE.Mesh(
+    new THREE.SphereGeometry(0.34, 12, 8),
+    std({ visible: false }),
+  )
+  miniPick.position.set(0, 1.05, 0)
+  miniPick.userData.view = 'miniature'
+  pickables.push(miniPick)
+  pedestal.add(miniPick)
+
   // ─── per-frame ─────────────────────────────────────────────────────────
   const smokeAttr = smokeGeo.getAttribute('position') as THREE.BufferAttribute
   const emberAttr = emberGeo.getAttribute('position') as THREE.BufferAttribute
@@ -1683,6 +2112,8 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   let cameraRef: THREE.Camera | null = null
 
   const tick = (t: number, dt: number): void => {
+    // the oche: the aim bead breathes, darts fly, the Colonel takes his turn
+    tickDarts(dt)
     // fire: flicker the flames and the light together
     const flick = 0.82 + Math.sin(t * 11.3) * 0.06 + Math.sin(t * 4.1) * 0.07 + Math.sin(t * 23.7) * 0.03
     fireLight.intensity = 22 * flick
@@ -1746,7 +2177,12 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   }
 
   // The camera is attached after construction so the flames can billboard.
-  return { scene, slots, pickables, attachCamera: c => { cameraRef = c }, tick, throwDart, dispose }
+  return {
+    scene, slots, pickables,
+    attachCamera: c => { cameraRef = c },
+    tick, dispose,
+    darts: { beginAim, moveAim, release: releaseAim, cancel: cancelAim },
+  }
 }
 
 // ─── camera presets ───────────────────────────────────────────────────────
@@ -1760,6 +2196,8 @@ const VIEWS: Record<string, { pos: [number, number, number]; target: [number, nu
   chair: { pos: [-0.72, 1.24, 2.75], target: [0.05, 0.85, -4.0] },
   // at the oche — square to the board, close enough to aim
   darts: { pos: [-2.6, 1.66, 1.0], target: [-5.5, 1.72, 1.0] },
+  // eye to the little doorway of the model on the pedestal
+  miniature: { pos: [3.45, 1.22, 1.5], target: [4.35, 0.97, 2.15] },
 }
 
 // ─── boot ─────────────────────────────────────────────────────────────────
@@ -1815,11 +2253,30 @@ function boot(): boolean {
   }
   let press: { x: number; y: number; t: number } | null = null
   let hovering = false
+  /** True while a throw is being aimed. The orbit is OFF for the duration —
+   *  a press on the board IS a throw, and a drag during it is re-aiming, not
+   *  turning the room around. Nothing else on the canvas changes. */
+  let aiming = false
   canvas.addEventListener('pointerdown', e => {
+    const hit = hitAt(e)
+    if (hit?.object.userData.dart && room.darts.beginAim(hit.point)) {
+      aiming = true
+      controls.enabled = false
+      canvas.style.cursor = 'crosshair'
+      canvas.setPointerCapture?.(e.pointerId)
+      return
+    }
     canvas.style.cursor = 'grabbing'
     press = { x: e.clientX, y: e.clientY, t: Date.now() }
   })
   canvas.addEventListener('pointermove', e => {
+    if (aiming) {
+      // Re-point mid-throw. Off the board face the aim simply HOLDS where it
+      // was — sliding onto the cabinet must not fling the dart at the ceiling.
+      const hit = hitAt(e)
+      if (hit?.object.userData.dart) room.darts.moveAim(hit.point)
+      return
+    }
     if (press) return
     const over = !!hitAt(e)
     if (over !== hovering) {
@@ -1828,6 +2285,14 @@ function boot(): boolean {
     }
   })
   window.addEventListener('pointerup', e => {
+    if (aiming) {
+      aiming = false
+      controls.enabled = true
+      canvas.style.cursor = hovering ? 'pointer' : 'grab'
+      const scored = room.darts.release()
+      if (scored) host.dispatchEvent(new CustomEvent('lounge3d:dart', { detail: scored, bubbles: true }))
+      return
+    }
     canvas.style.cursor = hovering ? 'pointer' : 'grab'
     if (!press) return
     const moved = Math.abs(e.clientX - press.x) + Math.abs(e.clientY - press.y)
@@ -1839,10 +2304,17 @@ function boot(): boolean {
     const pick = hit.object.userData.pick
     if (typeof pick === 'string') {
       host.dispatchEvent(new CustomEvent('lounge3d:pick', { detail: { id: pick }, bubbles: true }))
-    } else if (hit.object.userData.dart) {
-      const scored = room.throwDart(hit.point)
-      if (scored) host.dispatchEvent(new CustomEvent('lounge3d:dart', { detail: scored, bubbles: true }))
+    } else if (typeof hit.object.userData.view === 'string') {
+      view(hit.object.userData.view) // the miniature: click it and dive in
     }
+  })
+  // A throw the browser takes away (a tab switch, a gesture claimed by the OS)
+  // is no throw at all — it must not fire a dart on the way out.
+  window.addEventListener('pointercancel', () => {
+    if (!aiming) return
+    aiming = false
+    controls.enabled = true
+    room.darts.cancel()
   })
 
   // Vertical FOV, clamped so a very wide stage (the walk-in fills the screen)
