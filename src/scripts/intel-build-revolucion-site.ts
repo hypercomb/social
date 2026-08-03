@@ -148,6 +148,37 @@ blockquote cite{display:block;margin-top:.7rem;font-style:normal;font-size:.78re
 .dot{display:inline-block;width:.62rem;height:.62rem;border-radius:50%;margin-right:.5rem;
   vertical-align:baseline}
 
+/* ── detail components ── */
+.pips{display:inline-flex;gap:.3rem;vertical-align:middle}
+.pips i{width:.52rem;height:.88rem;background:var(--gold);opacity:.2;
+  clip-path:polygon(50% 0,100% 38%,78% 100%,22% 100%,0 38%)}
+.pips i.on{opacity:1}
+.meter{height:5px;background:rgba(200,151,90,.14);margin:.3rem 0 .85rem}
+.meter i{display:block;height:100%;background:var(--gold)}
+.meterrow{display:flex;align-items:baseline;gap:.8rem;font-size:.8rem;color:var(--cream-dim)}
+.meterrow .lbl{flex:0 0 7.5rem;letter-spacing:.1em;text-transform:uppercase;font-size:.68rem;color:var(--faint)}
+.meterrow .meter{flex:1;margin:0}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:1.1rem;margin:2rem 0}
+.step{border:1px solid var(--hairline);background:var(--coal);padding:1.2rem 1.25rem}
+.step .n{display:block;font-size:.68rem;letter-spacing:.28em;color:var(--gold);margin-bottom:.55rem}
+.step p{font-size:.92rem;color:var(--cream-dim)}
+.moment{border:1px solid var(--hairline);background:linear-gradient(160deg,var(--coal),var(--smoke));
+  padding:1.5rem 1.6rem}
+.moment .who{font-size:.68rem;letter-spacing:.26em;text-transform:uppercase;color:var(--gold);margin-bottom:.6rem}
+.moment .tale{font-style:italic;color:var(--cream);line-height:1.85;font-size:.98rem}
+.moment .tale b{font-style:normal;font-weight:400;color:var(--gold-bright);border-bottom:1px dotted var(--gold);padding-bottom:1px}
+.moment .after{margin-top:.85rem;font-size:.76rem;color:var(--faint);letter-spacing:.06em}
+.swatches{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:1px;
+  background:var(--hairline);border:1px solid var(--hairline);margin:1.8rem 0}
+.swatches div{background:var(--night);padding:.9rem .6rem .8rem;text-align:center}
+.swatches .sw{display:block;height:2.6rem;margin-bottom:.55rem;border:1px solid rgba(0,0,0,.35)}
+.swatches .t{font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--cream-dim)}
+.swatches .s{display:block;font-size:.64rem;color:var(--faint);margin-top:.15rem}
+.chart{border:1px solid var(--hairline);background:var(--coal);padding:1.2rem 1.2rem .9rem;margin:1.6rem 0}
+.chart figcaption{font-size:.68rem;letter-spacing:.24em;text-transform:uppercase;color:var(--faint);
+  padding-top:.7rem;text-align:center}
+.chart svg{display:block;width:100%;height:auto}
+
 /* ── artwork (sig-addressed hive art) ── */
 .heroart{float:right;width:min(300px,36vw);margin:.3rem 0 1.2rem 2rem}
 .heroart img{display:block;width:100%;aspect-ratio:1;object-fit:cover;border:1px solid var(--gold);
@@ -796,6 +827,109 @@ const familyCards = FAMILIES.map(f => `
       <p>${f.flavors.join(' · ')}</p>
     </div>`).join('')
 
+// ─── vitola silhouettes (drawn to scale from real dimensions) ────────
+
+function vitolaSvg(): string {
+  type V = { n: string; len: number; rg: number; shape: 'parejo' | 'torpedo' | 'belicoso' | 'perfecto'; note: string }
+  const VITOLAS: V[] = [
+    { n: 'Petit Corona', len: 4.5, rg: 42, shape: 'parejo', note: 'the lunch-hour classic' },
+    { n: 'Robusto', len: 5, rg: 50, shape: 'parejo', note: 'the modern standard' },
+    { n: 'Perfecto', len: 5, rg: 48, shape: 'perfecto', note: 'tapered both ends' },
+    { n: 'Corona', len: 5.5, rg: 42, shape: 'parejo', note: 'the old measuring stick' },
+    { n: 'Belicoso', len: 5.5, rg: 52, shape: 'belicoso', note: 'the blunt point' },
+    { n: 'Panatela', len: 6, rg: 38, shape: 'parejo', note: 'slender and quick' },
+    { n: 'Toro', len: 6, rg: 50, shape: 'parejo', note: 'the even hour' },
+    { n: 'Torpedo', len: 6, rg: 52, shape: 'torpedo', note: 'drawn to a point' },
+    { n: 'Gordo', len: 6, rg: 60, shape: 'parejo', note: 'the wide seat' },
+    { n: 'Lonsdale', len: 6.5, rg: 42, shape: 'parejo', note: 'elegant, unhurried' },
+    { n: 'Churchill', len: 7, rg: 48, shape: 'parejo', note: 'named for a long evening' },
+    { n: 'Lancero', len: 7.5, rg: 38, shape: 'parejo', note: 'the wrapper on display' },
+  ]
+  const S = 52            // px per inch of length
+  const X0 = 196          // silhouette left edge (label gutter)
+  const ROW = 62
+  const rows: string[] = []
+  VITOLAS.forEach((v, i) => {
+    const yc = i * ROW + ROW / 2 + 8
+    const h = (v.rg / 64) * S
+    const yt = yc - h / 2, yb = yc + h / 2
+    const x1 = X0 + v.len * S
+    const r = h / 2
+    let d = ''
+    if (v.shape === 'parejo')
+      d = `M${X0},${yt} L${x1 - r},${yt} A${r},${r} 0 0 1 ${x1 - r},${yb} L${X0},${yb} Z`
+    else if (v.shape === 'torpedo')
+      d = `M${X0},${yt} L${x1 - h * 1.5},${yt} Q${x1 - h * 0.3},${yt + h * 0.12} ${x1},${yc} Q${x1 - h * 0.3},${yb - h * 0.12} ${x1 - h * 1.5},${yb} L${X0},${yb} Z`
+    else if (v.shape === 'belicoso')
+      d = `M${X0},${yt} L${x1 - h * 0.9},${yt} Q${x1},${yt + h * 0.22} ${x1},${yc} Q${x1},${yb - h * 0.22} ${x1 - h * 0.9},${yb} L${X0},${yb} Z`
+    else // perfecto: narrow foot, gentle belly, tapered cap
+      d = `M${X0},${yc - h * 0.22} Q${X0 + h * 1.2},${yt} ${X0 + (x1 - X0) / 2},${yt} Q${x1 - h * 0.5},${yt} ${x1},${yc} Q${x1 - h * 0.5},${yb} ${X0 + (x1 - X0) / 2},${yb} Q${X0 + h * 1.2},${yb} ${X0},${yc + h * 0.22} Z`
+    rows.push(`<path d="${d}" fill="url(#vleaf)" stroke="rgba(200,151,90,.4)" stroke-width="1"/>`)
+    // the band, worn just shy of the cap
+    const bx = X0 + (x1 - X0) * 0.72
+    rows.push(`<rect x="${bx.toFixed(1)}" y="${(yt + 1.5).toFixed(1)}" width="9" height="${(h - 3).toFixed(1)}" fill="#c8975a" opacity=".85"/>`)
+    rows.push(`<text x="${X0 - 16}" y="${yc + 5}" text-anchor="end" font-size="16" fill="#f0e6d6" font-family="Georgia,serif">${v.n}</text>`)
+    rows.push(`<text x="${x1 + 16}" y="${yc - 3}" font-size="12" fill="#c9bba6" font-family="Georgia,serif">${v.len}&#8243; &#215; ${v.rg}</text>`)
+    rows.push(`<text x="${x1 + 16}" y="${yc + 13}" font-size="11.5" font-style="italic" fill="#8d7f6f" font-family="Georgia,serif">${v.note}</text>`)
+  })
+  const H = VITOLAS.length * ROW + 20
+  const RULER = X0 + 7.5 * S
+  const ticks: string[] = []
+  for (let inch = 0; inch <= 7; inch++) {
+    const x = X0 + inch * S
+    ticks.push(`<line x1="${x}" y1="${H - 12}" x2="${x}" y2="${H - 4}" stroke="rgba(200,151,90,.4)"/>`)
+    ticks.push(`<text x="${x}" y="${H + 12}" text-anchor="middle" font-size="10" fill="#8d7f6f" font-family="Georgia,serif">${inch}&#8243;</text>`)
+  }
+  return `<svg viewBox="0 0 ${RULER + 190} ${H + 20}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Twelve vitolas drawn to scale — length and ring gauge">
+  <defs><linearGradient id="vleaf" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#7c5433"/><stop offset="45%" stop-color="#5C3D2E"/><stop offset="100%" stop-color="#3a2417"/>
+  </linearGradient></defs>
+  <line x1="${X0}" y1="${H - 8}" x2="${RULER}" y2="${H - 8}" stroke="rgba(200,151,90,.4)"/>
+  ${ticks.join('\n  ')}
+  ${rows.join('\n  ')}
+</svg>`
+}
+
+// The nine wrapper shades, light to dark — swatch strip for the catalog page.
+const WRAPPERS: Array<[string, string, string]> = [
+  ['Claro', '#d9b380', 'shade-grown, silky'],
+  ['Connecticut', '#d2a86e', 'the gentle classic'],
+  ['Natural', '#b98a52', 'sun, but not too much'],
+  ['Sumatra', '#a4703c', 'sweet-spiced island leaf'],
+  ['Habano', '#96603a', 'Cuban-seed intensity'],
+  ['Colorado', '#8a4f2f', 'the reddish middle path'],
+  ['Colorado Maduro', '#6e3a22', 'deeper, richer'],
+  ['Maduro', '#4a2617', 'long-fermented, sweet-dark'],
+  ['Oscuro', '#2b1710', 'as dark as it goes'],
+]
+const wrapperSwatches = WRAPPERS.map(([n, c, s]) => `
+        <div><span class="sw" style="background:${c}"></span><span class="t">${n}</span><span class="s">${s}</span></div>`).join('')
+
+const STRENGTHS: Array<[string, number, string]> = [
+  ['Mild', 1, 'a first light — cream, hay, gentleness'],
+  ['Mild-Medium', 2, 'flavor arrives, the nicotine stays polite'],
+  ['Medium', 3, 'the broad middle of most evenings'],
+  ['Medium-Full', 4, 'leans in — after dinner, not before'],
+  ['Full', 5, 'demands a chair, a drink, and your attention'],
+]
+const strengthRows = STRENGTHS.map(([n, k, s]) => `
+        <div class="row" style="border-top:1px solid rgba(200,151,90,.1);display:flex;align-items:baseline;gap:.9rem;padding:.55rem .1rem">
+          <span style="flex:0 0 7.6rem;color:var(--cream)">${n}</span>
+          <span class="pips">${[1, 2, 3, 4, 5].map(p => `<i${p <= (k as number) ? ' class="on"' : ''}></i>`).join('')}</span>
+          <span class="muted" style="font-size:.85rem;font-style:italic">${s}</span>
+        </div>`).join('')
+
+// The starter humidor, showcased from the same CIGARS array the flavor
+// wheel matches against and the lounge concierge answers from.
+const starterCards = CIGARS.map(c => `
+        <div class="card">
+          <h3>${c.n}</h3>
+          <p style="font-size:.76rem;letter-spacing:.08em;color:var(--faint);margin-bottom:.5rem">${c.v} · ${c.w} · ${c.o}</p>
+          <p class="pips" style="margin-bottom:.6rem">${[1, 2, 3, 4, 5].map(p => `<i${p <= c.s ? ' class="on"' : ''}></i>`).join('')}</p>
+          <p style="font-size:.88rem">${c.f.join(' · ')}</p>
+          <p style="margin-top:.55rem;font-size:.82rem;font-style:italic;color:var(--gold-bright)">for ${c.m}</p>
+        </div>`).join('')
+
 // ─── pages ───────────────────────────────────────────────────────────
 
 function buildPages(
@@ -842,6 +976,18 @@ function buildPages(
     </section>
 
     <section class="section">
+      <div class="rule"><p class="kicker">by the numbers</p></div>
+      <div class="facts">
+        <div><span class="n">41</span><span class="t">spoken keywords</span></div>
+        <div><span class="n">63</span><span class="t">flavors on the wheel</span></div>
+        <div><span class="n">10</span><span class="t">flavor families</span></div>
+        <div><span class="n">6</span><span class="t">facets per entry</span></div>
+        <div><span class="n">14</span><span class="t">starter blends</span></div>
+        <div><span class="n">1</span><span class="t">circle, closed</span></div>
+      </div>
+    </section>
+
+    <section class="section">
       <div class="rule"><p class="kicker">the loop</p></div>
       <h2>Everything feeds everything.</h2>
       <div class="flow">
@@ -854,6 +1000,50 @@ function buildPages(
       </div>
       <p class="muted">One circle, no exit ramps to anywhere shallow. Every entry makes the
       recommendations truer, the vocabulary richer, and the next blend better.</p>
+      <figure class="chart" style="max-width:640px;margin-left:auto;margin-right:auto">
+        <svg viewBox="0 0 560 560" role="img" aria-label="The Revolución loop — six stations on one circle: journal, vocabulary, discovery, insight, blends, moments">
+          <circle cx="280" cy="280" r="182" fill="none" stroke="rgba(200,151,90,.3)" stroke-width="1.5" stroke-dasharray="3 9"/>
+          <g fill="none" stroke="#c8975a" stroke-width="1.5">
+            <path d="M370,124 l14,-4 -6,13" /><path d="M436,370 l4,14 -13,-6"/><path d="M124,436 l-14,4 6,-13"/>
+          </g>
+          <g font-family="Georgia,serif" text-anchor="middle">
+            <g transform="translate(280 98)"><polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23" fill="#1b1520" stroke="#c8975a" stroke-width="1.6"/><text y="-4" font-size="15" fill="#f0e6d6">a moment,</text><text y="15" font-size="15" fill="#f0e6d6">journaled</text></g>
+            <g transform="translate(438 189)"><polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23" fill="#1b1520" stroke="#c8975a" stroke-width="1.6"/><text y="-4" font-size="15" fill="#f0e6d6">a shared</text><text y="15" font-size="15" fill="#f0e6d6">vocabulary</text></g>
+            <g transform="translate(438 371)"><polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23" fill="#1b1520" stroke="#c8975a" stroke-width="1.6"/><text y="-4" font-size="15" fill="#f0e6d6">discovery &amp;</text><text y="15" font-size="15" fill="#f0e6d6">community</text></g>
+            <g transform="translate(280 462)"><polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23" fill="#1b1520" stroke="#c8975a" stroke-width="1.6"/><text y="-4" font-size="15" fill="#f0e6d6">insight for</text><text y="15" font-size="15" fill="#f0e6d6">the makers</text></g>
+            <g transform="translate(122 371)"><polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23" fill="#1b1520" stroke="#c8975a" stroke-width="1.6"/><text y="-4" font-size="15" fill="#f0e6d6">blends named</text><text y="15" font-size="15" fill="#f0e6d6">for moments</text></g>
+            <g transform="translate(122 189)"><polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23" fill="#1b1520" stroke="#c8975a" stroke-width="1.6"/><text y="-4" font-size="15" fill="#f0e6d6">richer</text><text y="15" font-size="15" fill="#f0e6d6">evenings</text></g>
+            <text x="280" y="268" font-size="13" letter-spacing="5" fill="#c8975a">REVOLUCIÓN</text>
+            <text x="280" y="296" font-size="19" font-style="italic" fill="#f0e6d6">the loop</text>
+          </g>
+        </svg>
+        <figcaption>six stations · one circle · nothing leaks out sideways</figcaption>
+      </figure>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">one evening, end to end</p></div>
+      <h2>Follow a single moment through the whole ecosystem.</h2>
+      <div class="steps">
+        <div class="step"><span class="n">I · the patio</span><p>Golden hour, crisp air, close friends,
+          a maduro and a glass of scotch. You press <b>speak</b> and tell it like it was — nine
+          keywords become nine tiles before the ash gets long.</p></div>
+        <div class="step"><span class="n">II · the journal</span><p>The entry keeps the whole scene:
+          cigar, flavors off the wheel, ratings, the scotch, the occasion, a photo of the band.
+          Not a review — a moment you can revisit.</p></div>
+        <div class="step"><span class="n">III · the vocabulary</span><p>Yours wasn't the only
+          <i>conversation</i> evening this month. The word starts to mean something across the
+          circle — spoken, not marketed.</p></div>
+        <div class="step"><span class="n">IV · discovery</span><p>Next October, when the crisp air
+          returns, discovery already knows what belongs in your hand — and who else's evenings
+          rhyme with yours.</p></div>
+        <div class="step"><span class="n">V · the makers</span><p>Aggregated and anonymized, a
+          thousand evenings like yours tell a blender the truth no focus group can:
+          what their cigar is <i>for</i>.</p></div>
+        <div class="step"><span class="n">VI · the blend</span><p>A year on, a cigar called
+          <i>Sobremesa — the conversation blend</i> arrives. It was named by evenings like the
+          one you journaled. The circle closes.</p></div>
+      </div>
     </section>
 
     <section class="section">
@@ -879,6 +1069,24 @@ function buildPages(
           <p>Conversation. Reflection. Celebration. Blends named for what they create.</p></a>
         <a class="card link" href="/revolucion/humidor"><span class="num">10</span>${thumb('humidor')}<h3>The Humidor</h3>
           <p>What you hold, what you hunt, and what rests in the dark getting better.</p></a>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">three voices</p></div>
+      <div class="cards">
+        <div class="moment"><span class="who">a newcomer</span>
+          <p class="tale">"I expected a test. I got a <b>welcome</b> — something mild, honest
+          about the pepper, and a journal that made my first evening feel worth keeping."</p>
+          <p class="after">first light · petit corona · coffee</p></div>
+        <div class="moment"><span class="who">a regular</span>
+          <p class="tale">"I used to say <b>medium-bodied Nicaraguan</b>. Now I say I want a
+          <b>reflection</b> evening — and the difference is the whole point."</p>
+          <p class="after">reflection · maduro · one chair, long view</p></div>
+        <div class="moment"><span class="who">a maker</span>
+          <p class="tale">"For twenty years I guessed what my cigars were for. Now a thousand
+          journaled evenings <b>tell me</b> — and nobody tells me what to make."</p>
+          <p class="after">insight · anonymized · consent-first</p></div>
       </div>
     </section>
 
@@ -1213,12 +1421,27 @@ function buildPages(
   </main>`)
 
   const experience = P('/revolucion/experience', 'The Experience', `
+  <style>
+    .composer{border:1px solid var(--gold);background:linear-gradient(160deg,var(--coal),var(--smoke));
+      padding:1.8rem 2rem;margin:2.2rem 0 0}
+    .composer .say{font-size:1.18rem;font-style:italic;line-height:2;min-height:4.2rem;color:var(--cream)}
+    .composer .say b{font-style:normal;font-weight:400;color:var(--gold-bright);
+      border-bottom:1px dotted var(--gold);padding-bottom:1px}
+    .composer .tally{margin-top:.9rem;font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;color:var(--faint)}
+    .composer .tally i{font-style:normal;color:var(--gold-bright)}
+    .pickzone .chip{cursor:pointer;user-select:none}
+    .pickzone .chip:hover{border-color:var(--gold)}
+    .catline{display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap}
+    .catline .count{font-size:.7rem;letter-spacing:.22em;color:var(--faint);text-transform:uppercase}
+  </style>
   <main class="wrap">
     <section class="hero">
       <p class="kicker">the experience · a spoken grammar</p>
       <h1>Say it, and it <i>appears</i>.</h1>
       <p class="lede">Forty-one keywords make up the language of moments. Each one is a tile
-      with a predefined look and behavior — a crafted world, not an automated one.</p>
+      with a predefined look and behavior — a crafted world, not an automated one. A
+      deterministic script listens for the words and sets the scene; no AI stands between
+      what you said and what appears.</p>
     </section>
 
     <div class="hexgallery">
@@ -1231,31 +1454,55 @@ function buildPages(
     </div>
 
     <section class="section">
-      <div class="rule"><p class="kicker">weather</p></div>
-      <p class="muted">Say it and the sky changes.</p>
-      <div class="chips"><span class="chip">sunny</span><span class="chip lit">cloudy</span><span class="chip">rain</span><span class="chip">breeze</span><span class="chip">crisp air</span><span class="chip">warm night</span></div>
+      <div class="rule"><p class="kicker">how a word becomes a tile</p></div>
+      <div class="flow">
+        <span>you speak</span><i>→</i>
+        <span>the grammar hears a keyword</span><i>→</i>
+        <span>its tile arrives in the scene</span><i>→</i>
+        <span>you nudge it until it's true</span><i>→</i>
+        <span>the entry is the scene</span>
+      </div>
+      <p class="muted">Say "cloudy" and the clouds drift in. Say "scotch" and the glass
+      arrives. The vague and the poetic can wait for help later — the scene itself stays
+      deterministic, crafted, and yours.</p>
     </section>
-    <section class="section">
-      <div class="rule"><p class="kicker">time</p></div>
-      <div class="chips"><span class="chip">morning</span><span class="chip">afternoon</span><span class="chip lit">golden hour</span><span class="chip">evening</span><span class="chip">late night</span></div>
-    </section>
-    <section class="section">
-      <div class="rule"><p class="kicker">setting</p></div>
-      <div class="chips"><span class="chip lit">patio</span><span class="chip">lounge</span><span class="chip">garden</span><span class="chip">beach</span><span class="chip">fireside</span><span class="chip">cabin</span><span class="chip">golf course</span><span class="chip">rooftop</span></div>
-    </section>
-    <section class="section">
-      <div class="rule"><p class="kicker">company</p></div>
-      <div class="chips"><span class="chip">solo</span><span class="chip lit">close friends</span><span class="chip">family</span><span class="chip">new faces</span><span class="chip">celebration crowd</span></div>
-    </section>
-    <section class="section">
-      <div class="rule"><p class="kicker">mood — the heart of the vocabulary</p></div>
-      <p class="muted">These words become the names people ask for.</p>
-      <div class="chips"><span class="chip lit">reflection</span><span class="chip lit">conversation</span><span class="chip lit">celebration</span><span class="chip">focus</span><span class="chip">unwind</span><span class="chip">gratitude</span><span class="chip">milestone</span></div>
-    </section>
-    <section class="section">
-      <div class="rule"><p class="kicker">drinks</p></div>
-      <p class="muted">Say "scotch" and the glass arrives in the scene.</p>
-      <div class="chips"><span class="chip">coffee</span><span class="chip">espresso</span><span class="chip">whiskey</span><span class="chip lit">scotch</span><span class="chip">rum</span><span class="chip">wine</span><span class="chip">beer</span><span class="chip">tea</span><span class="chip">hot chocolate</span><span class="chip">water</span></div>
+
+    <section class="section pickzone" id="pickzone">
+      <div class="rule"><p class="kicker">try the grammar — tap the words of your evening</p></div>
+
+      <div class="composer">
+        <p class="say" id="sayLine"></p>
+        <p class="tally" id="sayTally"></p>
+      </div>
+
+      <div class="section" style="padding-top:2.6rem">
+        <div class="catline"><h3>Weather</h3><span class="count">6 words · the sky obeys</span></div>
+        <p class="muted">The first thing the scene sets — light, cloud, and air.</p>
+        <div class="chips" data-cat="weather"><span class="chip">sunny</span><span class="chip">cloudy</span><span class="chip">rain</span><span class="chip">breeze</span><span class="chip lit">crisp air</span><span class="chip">warm night</span></div>
+      </div>
+      <div class="section">
+        <div class="catline"><h3>Time</h3><span class="count">5 words · the light angle</span></div>
+        <p class="muted">Morning coffee smoke and midnight smoke are different countries.</p>
+        <div class="chips" data-cat="time"><span class="chip">morning</span><span class="chip">afternoon</span><span class="chip lit">golden hour</span><span class="chip">evening</span><span class="chip">late night</span></div>
+      </div>
+      <div class="section">
+        <div class="catline"><h3>Setting</h3><span class="count">8 words · where the chair sits</span></div>
+        <div class="chips" data-cat="setting"><span class="chip lit">patio</span><span class="chip">lounge</span><span class="chip">garden</span><span class="chip">beach</span><span class="chip">fireside</span><span class="chip">cabin</span><span class="chip">golf course</span><span class="chip">rooftop</span></div>
+      </div>
+      <div class="section">
+        <div class="catline"><h3>Company</h3><span class="count">5 words · who shared the hour</span></div>
+        <div class="chips" data-cat="company"><span class="chip">solo</span><span class="chip lit">close friends</span><span class="chip">family</span><span class="chip">new faces</span><span class="chip">celebration crowd</span></div>
+      </div>
+      <div class="section">
+        <div class="catline"><h3>Mood</h3><span class="count">7 words · the heart of the vocabulary</span></div>
+        <p class="muted">These are the words that become the names people ask for —
+        <a href="/revolucion/collaborations">the named experiences</a> grow from here.</p>
+        <div class="chips" data-cat="mood"><span class="chip">reflection</span><span class="chip lit">conversation</span><span class="chip">celebration</span><span class="chip">focus</span><span class="chip">unwind</span><span class="chip">gratitude</span><span class="chip">milestone</span></div>
+      </div>
+      <div class="section">
+        <div class="catline"><h3>Drinks</h3><span class="count">10 words · what stood beside it</span></div>
+        <div class="chips" data-cat="drinks"><span class="chip">coffee</span><span class="chip">espresso</span><span class="chip">whiskey</span><span class="chip lit">scotch</span><span class="chip">rum</span><span class="chip">wine</span><span class="chip">beer</span><span class="chip">tea</span><span class="chip">hot chocolate</span><span class="chip">water</span></div>
+      </div>
     </section>
 
     <section class="section">
@@ -1265,9 +1512,64 @@ function buildPages(
       <span class="muted">"this person likes maduro"</span> — but "they like it on cool evenings,
       outdoors, with close friends and coffee." That is a richer truth than any star rating,
       and it belongs to the person who lived it.</p>
-      <div class="btns"><a class="btn" href="/revolucion/discovery">See what it unlocks</a></div>
+      <div class="btns"><a class="btn" href="/revolucion/discovery">See what it unlocks</a>
+      <a class="btn ghost" href="/revolucion/journal">Speak a real one</a></div>
     </section>
-  </main>`)
+  </main>
+  <script>
+  (function(){
+    var zone = document.getElementById('pickzone');
+    var line = document.getElementById('sayLine');
+    var tally = document.getElementById('sayTally');
+    if (!zone || !line || !tally) return;
+    function picked(cat){
+      var out = [];
+      var box = zone.querySelector('.chips[data-cat="' + cat + '"]');
+      if (!box) return out;
+      var lit = box.querySelectorAll('.chip.lit');
+      for (var i = 0; i < lit.length; i++) out.push('<b>' + lit[i].textContent + '</b>');
+      return out;
+    }
+    function join(ws){
+      if (ws.length <= 1) return ws.join('');
+      return ws.slice(0, -1).join(', ') + ' and ' + ws[ws.length - 1];
+    }
+    function render(){
+      var w = picked('weather'), t = picked('time'), s = picked('setting'),
+          c = picked('company'), m = picked('mood'), d = picked('drinks');
+      var n = w.length + t.length + s.length + c.length + m.length + d.length;
+      if (!n){
+        line.innerHTML = '&ldquo;&hellip;&rdquo; &mdash; tap the words below and the entry writes itself.';
+        tally.innerHTML = '<i>0</i> tiles in the scene';
+        return;
+      }
+      var parts = [];
+      if (t.length || s.length){
+        var open = join(t.length ? t : []);
+        if (s.length) open += (open ? ' on the ' : 'On the ') + join(s);
+        if (open) parts.push(open.charAt(0).toUpperCase() === open.charAt(0) ? open : open);
+      }
+      if (w.length) parts.push(join(w) + ' coming in');
+      var sent = parts.join(', ');
+      var tail = [];
+      function cap(str){ return str.replace(/^((?:<[^>]+>)*)(.)/, function(_, tags, ch){ return tags + ch.toUpperCase(); }); }
+      if (c.length) tail.push(join(c));
+      if (d.length) tail.push(join(d) + ' beside it');
+      if (tail.length) sent += (sent ? '. ' : '') + cap(tail.join(', '));
+      if (m.length) sent += (sent ? ' &mdash; ' : '') + 'a ' + join(m) + ' evening';
+      sent = cap(sent || join(w.concat(t, s, c, m, d)));
+      line.innerHTML = '&ldquo;' + sent + '.&rdquo;';
+      tally.innerHTML = '<i>' + n + '</i> tile' + (n === 1 ? '' : 's') + ' in the scene &mdash; before the ash gets long';
+    }
+    zone.addEventListener('click', function(ev){
+      var chip = ev.target.closest ? ev.target.closest('.chip') : null;
+      if (!chip || !zone.contains(chip)) return;
+      chip.classList.toggle('lit');
+      render();
+    });
+    render();
+  })();
+  </script>`)
 
   const cigars = P('/revolucion/cigars', 'The Catalog', `
   <main class="wrap">
@@ -1295,14 +1597,59 @@ function buildPages(
         <div><span class="n">5</span><span class="t">strengths</span></div>
         <div><span class="n">∞</span><span class="t">brands to come</span></div>
       </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">vitolas — drawn to scale</p></div>
+      <h2>The shape decides the hour.</h2>
+      <p class="muted" style="max-width:44rem">Length sets how long the evening runs; ring gauge sets
+      how much air moves through it. A lancero is a wrapper tasting; a gordo is a wide, cool seat.
+      Every silhouette below is drawn from its true dimensions.</p>
+      <figure class="chart"><div style="overflow-x:auto">${vitolaSvg()}</div>
+        <figcaption>twelve vitolas · true length &amp; ring gauge · the band sits shy of the cap</figcaption></figure>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">wrappers — light to dark</p></div>
+      <h2>The leaf you see is half the taste.</h2>
+      <p class="muted" style="max-width:44rem">The wrapper is a single leaf, and it can carry more than
+      half a cigar's flavor. Read the strip like a horizon at dusk — pale morning cream on the left,
+      long-fermented midnight on the right.</p>
+      <div class="swatches">${wrapperSwatches}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">strength — five honest steps</p></div>
+      <p class="muted" style="max-width:44rem">Strength is nicotine, not flavor — a full cigar can be
+      subtle and a mild one loud. We mark it in leaf pips so nobody gets ambushed.</p>
+      <div style="border:1px solid var(--hairline);background:var(--coal);padding:.6rem 1.1rem;margin:1.6rem 0;max-width:44rem">${strengthRows}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">origins — nine terroirs</p></div>
       <div class="cards">
-        <div class="card"><h3>Vitolas</h3><p>Robusto · Toro · Corona · Churchill · Lancero · Gordo ·
-          Belicoso · Torpedo · Perfecto · Petit Corona · Lonsdale · Panatela</p></div>
-        <div class="card"><h3>Wrappers</h3><p>Natural · Maduro · Oscuro · Claro · Colorado ·
-          Colorado Maduro · Connecticut · Habano · Sumatra</p></div>
-        <div class="card"><h3>Origins</h3><p>Cuba · Nicaragua · Dominican Republic · Honduras ·
-          Mexico · Ecuador · Brazil · Cameroon · United States</p></div>
-        <div class="card"><h3>Strength</h3><p>Mild · Mild-Medium · Medium · Medium-Full · Full</p></div>
+        <div class="card"><h3>Cuba</h3><p>The old country of the leaf — twang, cedar, and myth in equal measure.</p></div>
+        <div class="card"><h3>Nicaragua</h3><p>Volcanic soil, bold pepper-and-earth blends — the modern powerhouse.</p></div>
+        <div class="card"><h3>Dominican Republic</h3><p>Refinement and balance; the long, polite conversation of tobaccos.</p></div>
+        <div class="card"><h3>Honduras</h3><p>Rustic and hearty — leather, wood, and no apologies.</p></div>
+        <div class="card"><h3>Ecuador</h3><p>Cloud-grown wrapper country; the permanent shade makes silk.</p></div>
+        <div class="card"><h3>Mexico</h3><p>San Andrés maduro leaf — dark, mineral, quietly sweet.</p></div>
+        <div class="card"><h3>Brazil</h3><p>Mata Fina and Arapiraca — cocoa-dark leaves with a soft center.</p></div>
+        <div class="card"><h3>Cameroon</h3><p>The toothy African wrapper — spice and sweetness in a grainy coat.</p></div>
+        <div class="card"><h3>United States</h3><p>Connecticut shade and broadleaf — the river valley that wrapped a century.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">the starter humidor</p></div>
+      <h2>Fourteen blends, named for moments.</h2>
+      <p class="muted" style="max-width:46rem">An invented starter catalog — no real brands — shared by
+      <a href="/revolucion/flavor-wheel">the flavor wheel</a>'s matcher and
+      <a href="/revolucion/lounge">the lounge</a> concierge, so no two pages ever disagree about
+      what's resting in the humidor. Every one carries its flavors and the moment it was blended for.</p>
+      <div class="cards">${starterCards}
       </div>
     </section>
 
@@ -1895,14 +2242,108 @@ function buildPages(
     </section>
 
     <section class="section">
+      <div class="rule"><p class="kicker">the knowledge graph</p></div>
+      <h2>What a rating can't hold.</h2>
+      <p class="muted" style="max-width:44rem">A star collapses an evening into one digit. The graph
+      keeps the evening: the cigar sits at the center, and every facet of the moment — flavor,
+      weather, company, drink, mood — stays connected to it. Recommendations walk these edges.</p>
+      <figure class="chart" style="max-width:720px">
+        <svg viewBox="0 0 720 420" role="img" aria-label="A knowledge-graph constellation: one cigar linked to flavor, weather, company, pairing and mood nodes">
+          <g stroke="rgba(200,151,90,.35)" stroke-width="1.2">
+            <line x1="360" y1="210" x2="150" y2="90"/><line x1="360" y1="210" x2="565" y2="80"/>
+            <line x1="360" y1="210" x2="640" y2="235"/><line x1="360" y1="210" x2="545" y2="345"/>
+            <line x1="360" y1="210" x2="180" y2="330"/><line x1="360" y1="210" x2="90" y2="210"/>
+            <line x1="150" y1="90" x2="90" y2="210" stroke-dasharray="2 6"/>
+            <line x1="565" y1="80" x2="640" y2="235" stroke-dasharray="2 6"/>
+            <line x1="180" y1="330" x2="545" y2="345" stroke-dasharray="2 6"/>
+          </g>
+          <g font-family="Georgia,serif" text-anchor="middle">
+            <g transform="translate(360 210)"><polygon points="0,-52 45,-26 45,26 0,52 -45,26 -45,-26" fill="#1b1520" stroke="#c8975a" stroke-width="2"/>
+              <text y="-8" font-size="15" fill="#e0b578">the maduro</text><text y="12" font-size="12" font-style="italic" fill="#c9bba6">one cigar, kept whole</text></g>
+            <g transform="translate(150 90)"><polygon points="0,-34 29,-17 29,17 0,34 -29,17 -29,-17" fill="#241c2b" stroke="#5C3D2E" stroke-width="1.5"/>
+              <text y="-2" font-size="12" fill="#f0e6d6">dark</text><text y="12" font-size="12" fill="#f0e6d6">chocolate</text></g>
+            <g transform="translate(565 80)"><polygon points="0,-34 29,-17 29,17 0,34 -29,17 -29,-17" fill="#241c2b" stroke="#2C3E50" stroke-width="1.5"/>
+              <text y="-2" font-size="12" fill="#f0e6d6">crisp</text><text y="12" font-size="12" fill="#f0e6d6">air</text></g>
+            <g transform="translate(640 235)"><polygon points="0,-34 29,-17 29,17 0,34 -29,17 -29,-17" fill="#241c2b" stroke="#c8975a" stroke-width="1.5"/>
+              <text y="-2" font-size="12" fill="#f0e6d6">golden</text><text y="12" font-size="12" fill="#f0e6d6">hour</text></g>
+            <g transform="translate(545 345)"><polygon points="0,-34 29,-17 29,17 0,34 -29,17 -29,-17" fill="#241c2b" stroke="#b3542f" stroke-width="1.5"/>
+              <text y="-2" font-size="12" fill="#f0e6d6">close</text><text y="12" font-size="12" fill="#f0e6d6">friends</text></g>
+            <g transform="translate(180 330)"><polygon points="0,-34 29,-17 29,17 0,34 -29,17 -29,-17" fill="#241c2b" stroke="#8B6914" stroke-width="1.5"/>
+              <text y="4" font-size="12" fill="#f0e6d6">coffee</text></g>
+            <g transform="translate(90 210)"><polygon points="0,-34 29,-17 29,17 0,34 -29,17 -29,-17" fill="#241c2b" stroke="#e0b578" stroke-width="1.5"/>
+              <text y="4" font-size="12" fill="#f0e6d6">reflection</text></g>
+          </g>
+        </svg>
+        <figcaption>solid edges: this evening · dotted edges: patterns across many evenings</figcaption>
+      </figure>
+    </section>
+
+    <section class="section" id="kindred">
+      <div class="rule"><p class="kicker">try it — teach it three flavors</p></div>
+      <h2>A small taste of the matcher.</h2>
+      <p class="muted" style="max-width:44rem">Tap the flavors you love and watch the starter humidor
+      answer — the same Jaccard-scored matching the real discovery engine grows from, computed right
+      here on the page. Nothing leaves it.</p>
+      <div class="chips" id="kinChips" style="margin:1.6rem 0"></div>
+      <div id="kinOut" style="max-width:44rem"></div>
+    </section>
+
+    <section class="section">
       <div class="rule"><p class="kicker">an honest example</p></div>
       <blockquote>You like maduros. But more truly: you like them on cool evenings, outdoors,
       with close friends and coffee. So when the crisp air comes back in October —
       we'll know exactly what to put in your hand.
         <cite>— what discovery actually knows</cite></blockquote>
-      <div class="btns"><a class="btn" href="/revolucion/journal">Teach it your taste</a></div>
+      <div class="btns"><a class="btn" href="/revolucion/journal">Teach it your taste</a>
+      <a class="btn ghost" href="/revolucion/flavor-wheel">Open the full wheel</a></div>
     </section>
-  </main>`)
+  </main>
+  <script>
+  (function(){
+    var CIGARS = ${JSON.stringify(CIGARS)};
+    var POOL = ['Dark Chocolate','Cedar','Leather','Caramel','Black Pepper','Cream','Espresso','Campfire','Honey','Citrus','Fig','Toast','Grass','Molasses','Dried Fruit','Charcoal'];
+    var chips = document.getElementById('kinChips');
+    var out = document.getElementById('kinOut');
+    if (!chips || !out) return;
+    POOL.forEach(function(f){
+      var el = document.createElement('span');
+      el.className = 'chip'; el.textContent = f; el.style.cursor = 'pointer';
+      el.addEventListener('click', function(){ el.classList.toggle('lit'); render(); });
+      chips.appendChild(el);
+    });
+    function render(){
+      var sel = [];
+      var lit = chips.querySelectorAll('.chip.lit');
+      for (var i = 0; i < lit.length; i++) sel.push(lit[i].textContent);
+      if (!sel.length){
+        out.innerHTML = '<p class="muted" style="font-style:italic">The humidor is listening.</p>';
+        return;
+      }
+      var scored = CIGARS.map(function(c){
+        var hit = c.f.filter(function(f){ return sel.indexOf(f) >= 0; });
+        var union = {}; c.f.concat(sel).forEach(function(f){ union[f] = 1; });
+        return { c: c, hit: hit, score: hit.length / Object.keys(union).length };
+      }).filter(function(s){ return s.hit.length; })
+        .sort(function(a, b){ return b.score - a.score; }).slice(0, 3);
+      if (!scored.length){
+        out.innerHTML = '<p class="muted" style="font-style:italic">Nothing in the starter humidor carries those yet — the community catalog would.</p>';
+        return;
+      }
+      out.innerHTML = scored.map(function(s){
+        var fl = s.c.f.map(function(f){
+          return s.hit.indexOf(f) >= 0 ? '<b style="font-weight:400;color:var(--gold-bright)">' + f + '</b>' : f;
+        }).join(' · ');
+        return '<div style="border-left:2px solid var(--gold);padding:.6rem .9rem;margin:.6rem 0;background:rgba(27,21,32,.6)">'
+          + '<div style="color:var(--gold-bright)">' + s.c.n + '</div>'
+          + '<div style="font-size:.75rem;color:var(--faint);letter-spacing:.04em">' + s.c.v + ' · ' + s.c.w + ' · ' + s.c.o + ' — for ' + s.c.m + '</div>'
+          + '<div style="font-size:.86rem;color:var(--cream-dim);margin-top:.25rem">' + fl + '</div>'
+          + '<div class="meter" style="margin:.5rem 0 0"><i style="width:' + Math.round(s.score * 100) + '%"></i></div>'
+          + '</div>';
+      }).join('');
+    }
+    render();
+  })();
+  </script>`)
 
   const community = P('/revolucion/community', 'The Circle', `
   <main class="wrap">
@@ -1929,6 +2370,68 @@ function buildPages(
     </section>
 
     <section class="section">
+      <div class="rule"><p class="kicker">shared moments — scenes, not reviews</p></div>
+      <div class="cards">
+        <div class="moment"><span class="who">rooftop · golden hour · new faces</span>
+          <p class="tale">"Four strangers and a box of <b>coronas</b> at a wedding we almost skipped.
+          By the second third we were telling stories nobody at the tables downstairs would hear.
+          <b>Celebration crowd</b> undersells it."</p>
+          <p class="after">celebración nº 2 · habano · prosecco, then rum</p></div>
+        <div class="moment"><span class="who">cabin · rain · solo</span>
+          <p class="tale">"The rain kept everyone else inside, which was the point. One
+          <b>perfecto</b>, one pot of <b>coffee</b>, one problem I'd been carrying for a month —
+          and somewhere in the second hour it quietly solved itself."</p>
+          <p class="after">reflexión nº 1 · maduro · black coffee</p></div>
+        <div class="moment"><span class="who">patio · crisp air · close friends</span>
+          <p class="tale">"Nobody checked a phone. That's the whole review. <b>Crisp air</b>,
+          an open bottle of <b>scotch</b>, and a conversation that refused to end even after
+          the cigars did."</p>
+          <p class="after">sobremesa · habano · scotch, neat</p></div>
+      </div>
+      <p class="muted">Every shared moment is a journal entry its author chose to open. Nothing
+      is shared by default — the hive keeps your evenings private until you say otherwise.</p>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">the vocabulary, emerging</p></div>
+      <h2>Words weigh what they're lived.</h2>
+      <p class="muted" style="max-width:44rem">No committee writes this list. A word grows when
+      evenings keep reaching for it — the size below is how often the circle has spoken each one.</p>
+      <p style="line-height:2.6;max-width:46rem;margin:1.8rem 0">
+        <span class="chip lit" style="font-size:1.25rem">conversation</span>
+        <span class="chip lit" style="font-size:1.1rem">reflection</span>
+        <span class="chip" style="font-size:1.05rem">golden hour</span>
+        <span class="chip lit" style="font-size:.98rem">celebration</span>
+        <span class="chip" style="font-size:.95rem">crisp air</span>
+        <span class="chip" style="font-size:.9rem">unwind</span>
+        <span class="chip" style="font-size:.88rem">fireside</span>
+        <span class="chip" style="font-size:.85rem">gratitude</span>
+        <span class="chip" style="font-size:.82rem">first light</span>
+        <span class="chip" style="font-size:.8rem">sobremesa</span>
+        <span class="chip" style="font-size:.78rem">milestone</span>
+        <span class="chip" style="font-size:.76rem">late night</span>
+        <span class="chip" style="font-size:.74rem">a breeze outside</span>
+      </p>
+      <p class="muted" style="font-style:italic">When a word earns enough evenings, it can become a
+      <a href="/revolucion/collaborations">named experience</a> — a blend that arrives already meaning something.</p>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">circles — where it's spoken aloud</p></div>
+      <div class="cards">
+        <div class="card"><span class="num">monthly</span><h3>Herf Nights</h3>
+          <p>The open table. Bring what you're smoking, leave with three things you've never heard of
+          and one story you'll retell badly.</p></div>
+        <div class="card"><span class="num">seasonal</span><h3>Tasting Circles</h3>
+          <p>One blend, eight palates, the wheel open on the table. The fastest way to learn what
+          "cedar" actually tastes like is to hear someone else find it first.</p></div>
+        <div class="card"><span class="num">whenever</span><h3>Lounge Meetups</h3>
+          <p>The unscheduled kind. A <a href="/revolucion/lounge">lounge</a>, a few chairs, and whoever
+          shows up — the vocabulary's native habitat.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
       <div class="rule"><p class="kicker">first light — for newcomers</p></div>
       ${heroArt('community/first-light', 'first light — hive art')}
       <h2>Nobody should be intimidated by a leaf.</h2>
@@ -1936,7 +2439,18 @@ function buildPages(
       mild starts, and expectations set before the first draw. If the pepper surprises —
       we say so <i>before</i> it intimidates. Your first cigar should feel like a welcome,
       not a test.</p>
-      <div class="btns"><a class="btn" href="/revolucion/discovery">Find a gentle start</a></div>
+      <div class="steps">
+        <div class="step"><span class="n">I · begin mild</span><p>A petit corona in a Connecticut
+          wrapper — cream, hay, forty gentle minutes. Strength is a later chapter.</p></div>
+        <div class="step"><span class="n">II · hear the truth first</span><p>Before the first draw,
+          someone tells you exactly what to expect — including the pepper, if it's coming.</p></div>
+        <div class="step"><span class="n">III · no ceremony test</span><p>Cut it however works.
+          Relight without shame. The ritual is for pleasure, not gatekeeping.</p></div>
+        <div class="step"><span class="n">IV · journal the first one</span><p>Even three words.
+          Your first entry is the seed everything else — discovery, kindred, the wheel — grows from.</p></div>
+      </div>
+      <div class="btns"><a class="btn" href="/revolucion/discovery">Find a gentle start</a>
+      <a class="btn ghost" href="/revolucion/journal">Journal the first one</a></div>
     </section>
   </main>`)
 
@@ -1968,14 +2482,84 @@ function buildPages(
     </section>
 
     <section class="section">
+      <div class="rule"><p class="kicker">what the dashboard shows</p></div>
+      <h2>Evenings, in aggregate.</h2>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+        <figure class="chart" style="margin:0">
+          <svg viewBox="0 0 340 210" role="img" aria-label="Occasions this blend is chosen for — reflection leads">
+            <text x="12" y="20" font-size="11" letter-spacing="3" fill="#c8975a" font-family="Georgia,serif">OCCASIONS · ONE BLEND</text>
+            <g font-family="Georgia,serif" font-size="12" fill="#c9bba6">
+              <text x="12" y="52">reflection</text><rect x="110" y="40" width="196" height="15" fill="#c8975a"/>
+              <text x="12" y="82">unwind</text><rect x="110" y="70" width="122" height="15" fill="rgba(200,151,90,.55)"/>
+              <text x="12" y="112">conversation</text><rect x="110" y="100" width="84" height="15" fill="rgba(200,151,90,.4)"/>
+              <text x="12" y="142">focus</text><rect x="110" y="130" width="58" height="15" fill="rgba(200,151,90,.3)"/>
+              <text x="12" y="172">celebration</text><rect x="110" y="160" width="22" height="15" fill="rgba(200,151,90,.22)"/>
+            </g>
+            <text x="12" y="198" font-size="11" font-style="italic" fill="#8d7f6f" font-family="Georgia,serif">chosen for quiet evenings — market it that way</text>
+          </svg>
+        </figure>
+        <figure class="chart" style="margin:0">
+          <svg viewBox="0 0 340 210" role="img" aria-label="Pairing performance — exceeds expectations with coffee, underperforms with whisky">
+            <text x="12" y="20" font-size="11" letter-spacing="3" fill="#c8975a" font-family="Georgia,serif">PAIRING PERFORMANCE</text>
+            <line x1="170" y1="34" x2="170" y2="178" stroke="rgba(200,151,90,.35)"/>
+            <g font-family="Georgia,serif" font-size="12" fill="#c9bba6">
+              <rect x="170" y="44" width="118" height="15" fill="#c8975a"/><text x="164" y="56" text-anchor="end">coffee</text>
+              <rect x="170" y="74" width="66" height="15" fill="rgba(200,151,90,.55)"/><text x="164" y="86" text-anchor="end">rum</text>
+              <rect x="146" y="104" width="24" height="15" fill="rgba(179,84,47,.6)"/><text x="140" y="116" text-anchor="end">wine</text>
+              <rect x="96" y="134" width="74" height="15" fill="#b3542f"/><text x="90" y="146" text-anchor="end">whisky</text>
+            </g>
+            <text x="176" y="172" font-size="10" fill="#8d7f6f" font-family="Georgia,serif">exceeds →</text>
+            <text x="164" y="172" font-size="10" fill="#8d7f6f" text-anchor="end" font-family="Georgia,serif">← underperforms</text>
+            <text x="12" y="198" font-size="11" font-style="italic" fill="#8d7f6f" font-family="Georgia,serif">a tasting-room fix no focus group would surface</text>
+          </svg>
+        </figure>
+        <figure class="chart" style="margin:0">
+          <svg viewBox="0 0 340 210" role="img" aria-label="Seasonal strength drift — the circle reaches fuller as the year cools">
+            <text x="12" y="20" font-size="11" letter-spacing="3" fill="#c8975a" font-family="Georgia,serif">STRENGTH ACROSS THE YEAR</text>
+            <g stroke="rgba(200,151,90,.16)"><line x1="30" y1="60" x2="320" y2="60"/><line x1="30" y1="100" x2="320" y2="100"/><line x1="30" y1="140" x2="320" y2="140"/></g>
+            <g font-family="Georgia,serif" font-size="10" fill="#8d7f6f">
+              <text x="24" y="63" text-anchor="end">full</text><text x="24" y="103" text-anchor="end">med</text><text x="24" y="143" text-anchor="end">mild</text>
+              <text x="30" y="172">jan</text><text x="100" y="172">apr</text><text x="175" y="172">jul</text><text x="250" y="172">oct</text><text x="310" y="172">dec</text>
+            </g>
+            <path d="M30,84 C70,96 100,124 140,132 C185,140 215,120 250,92 C280,70 300,64 320,60" fill="none" stroke="#c8975a" stroke-width="2.5"/>
+            <circle cx="250" cy="92" r="4" fill="#e0b578"/>
+            <text x="12" y="198" font-size="11" font-style="italic" fill="#8d7f6f" font-family="Georgia,serif">when the crisp air returns, the circle reaches fuller</text>
+          </svg>
+        </figure>
+      </div>
+      <p class="muted" style="font-style:italic">Illustrative shapes — the real dashboard draws from
+      live journals, and only once an aggregate is wide enough that no single evening shows through.</p>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">how an insight is made</p></div>
+      <div class="flow">
+        <span>journals, with consent</span><i>→</i>
+        <span>identities stripped</span><i>→</i>
+        <span>aggregated across the circle</span><i>→</i>
+        <span>held until the crowd is wide enough</span><i>→</i>
+        <span>one honest insight</span>
+      </div>
+      <p class="muted" style="max-width:46rem">The threshold matters: an aggregate too small is a
+      disguise, not an anonymization. If only three people smoked a blend in October, the makers
+      wait until more evenings arrive — the insight is late, or it is safe, and we choose safe.</p>
+    </section>
+
+    <section class="section">
       <div class="rule"><p class="kicker">the position</p></div>
       <blockquote>Retailers move boxes. Revolución is the fulcrum where the people who smoke
       and the people who make meet — and both leave better off.
         <cite>— why makers pick up the phone</cite></blockquote>
       <div class="privacy">
         <h3>The privacy covenant</h3>
-        <p class="muted">Anonymized and aggregated, always. No individual journal ever leaves the
-        hive without its author's consent. The trust is the product — we do not spend it.</p>
+        <p class="muted"><b style="font-weight:400;color:var(--gold-bright)">Anonymized, always.</b>
+        No individual journal ever leaves the hive without its author's consent — not for makers,
+        not for partners, not for us.</p>
+        <p class="muted" style="margin-top:.7rem"><b style="font-weight:400;color:var(--gold-bright)">Aggregated, always.</b>
+        Insights are crowds, never people. Below the threshold, the insight simply waits.</p>
+        <p class="muted" style="margin-top:.7rem"><b style="font-weight:400;color:var(--gold-bright)">Consent-first, always.</b>
+        Sharing is a door you open per entry, and it swings both ways — close it and the entry
+        comes home. The trust is the product; we do not spend it.</p>
       </div>
       <div class="btns"><a class="btn" href="/revolucion/collaborations">See what we build together</a></div>
     </section>
@@ -1992,17 +2576,56 @@ function buildPages(
     </section>
 
     <section class="section">
-      <div class="rule"><p class="kicker">the first three</p></div>
-      <div class="cards">
+      <div class="rule"><p class="kicker">how a name is born</p></div>
+      <div class="steps">
+        <div class="step"><span class="n">I · the word is lived</span><p>Hundreds of journals reach
+          for the same word to hold the same kind of evening. Nobody planned it.</p></div>
+        <div class="step"><span class="n">II · the word is heard</span><p><a href="/revolucion/insights">The
+          insights</a> surface it — anonymized, aggregated: "this is what your smokers keep asking
+          their evenings to be."</p></div>
+        <div class="step"><span class="n">III · the blend is built</span><p>A maker blends <i>to the
+          word</i> — body, sweetness, and burn chosen for the moment, not the spec sheet.</p></div>
+        <div class="step"><span class="n">IV · the name comes true</span><p>The band says what the
+          evening already meant. It arrives pre-understood — no campaign required.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">the first three — dossiers</p></div>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(290px,1fr))">
         <div class="card"><span class="num">Nº 1</span><h3>Conversation</h3>
-          <p>For the table that will not stop talking. Medium body, long finish, forgiving burn —
-          a cigar that waits for you between stories.</p></div>
+          <p style="font-style:italic;color:var(--cream);margin-bottom:.9rem">"For the table that
+          will not stop talking."</p>
+          <div class="meterrow"><span class="lbl">body</span><div class="meter"><i style="width:55%"></i></div></div>
+          <div class="meterrow"><span class="lbl">sweetness</span><div class="meter"><i style="width:45%"></i></div></div>
+          <div class="meterrow"><span class="lbl">spice</span><div class="meter"><i style="width:38%"></i></div></div>
+          <div class="meterrow"><span class="lbl">burn patience</span><div class="meter"><i style="width:90%"></i></div></div>
+          <p style="margin-top:.9rem">Medium body, long finish, and a forgiving burn that waits for
+          you between stories. A corona that expects to be set down.</p>
+          <div class="chips"><span class="chip">Cedar</span><span class="chip">Caramel</span><span class="chip">Toast</span><span class="chip">Black Pepper</span></div>
+          <p style="margin-top:.7rem;font-size:.82rem;font-style:italic;color:var(--gold-bright)">pairs with: scotch, then whatever the table's drinking</p></div>
         <div class="card"><span class="num">Nº 2</span><h3>Reflection</h3>
-          <p>For the quiet evening that asks nothing of you. Cool-weather sweetness, coffee-friendly,
-          built for one chair and a long view.</p></div>
+          <p style="font-style:italic;color:var(--cream);margin-bottom:.9rem">"For the quiet evening
+          that asks nothing of you."</p>
+          <div class="meterrow"><span class="lbl">body</span><div class="meter"><i style="width:60%"></i></div></div>
+          <div class="meterrow"><span class="lbl">sweetness</span><div class="meter"><i style="width:70%"></i></div></div>
+          <div class="meterrow"><span class="lbl">spice</span><div class="meter"><i style="width:18%"></i></div></div>
+          <div class="meterrow"><span class="lbl">burn patience</span><div class="meter"><i style="width:75%"></i></div></div>
+          <p style="margin-top:.9rem">Cool-weather sweetness in a maduro coat, coffee-friendly, built
+          for one chair and a long view. It ends when you're finished, not before.</p>
+          <div class="chips"><span class="chip">Dark Chocolate</span><span class="chip">Molasses</span><span class="chip">Cedar</span><span class="chip">Leather</span></div>
+          <p style="margin-top:.7rem;font-size:.82rem;font-style:italic;color:var(--gold-bright)">pairs with: black coffee, silence</p></div>
         <div class="card"><span class="num">Nº 3</span><h3>Celebration</h3>
-          <p>For the milestone that deserves smoke rings. Bright, confident, a touch of spice —
-          made to be handed out.</p></div>
+          <p style="font-style:italic;color:var(--cream);margin-bottom:.9rem">"For the milestone that
+          deserves smoke rings."</p>
+          <div class="meterrow"><span class="lbl">body</span><div class="meter"><i style="width:78%"></i></div></div>
+          <div class="meterrow"><span class="lbl">sweetness</span><div class="meter"><i style="width:52%"></i></div></div>
+          <div class="meterrow"><span class="lbl">spice</span><div class="meter"><i style="width:68%"></i></div></div>
+          <div class="meterrow"><span class="lbl">burn patience</span><div class="meter"><i style="width:50%"></i></div></div>
+          <p style="margin-top:.9rem">Bright, confident, a touch of red pepper over brown sugar —
+          a torpedo made to be handed out by the fistful.</p>
+          <div class="chips"><span class="chip">Red Pepper</span><span class="chip">Brown Sugar</span><span class="chip">Cocoa</span><span class="chip">Oak</span></div>
+          <p style="margin-top:.7rem;font-size:.82rem;font-style:italic;color:var(--gold-bright)">pairs with: whatever's being toasted</p></div>
       </div>
       <p class="muted">The labels are not invented in a boardroom — they emerge from community
       data, so they arrive already meaning something. People asked for reflection evenings long
@@ -2010,13 +2633,30 @@ function buildPages(
     </section>
 
     <section class="section">
+      <div class="rule"><p class="kicker">beyond the leaf</p></div>
+      <h2>A reflection evening, assembled end to end.</h2>
+      <p class="lede" style="max-width:46rem">The vocabulary outgrows the cigar. When the word is
+      the product, anything true to the word can carry it — so one shelf, one evening, one name.</p>
+      <div class="cards">
+        <div class="card"><h3>The Chocolate</h3><p>A 72% single-origin bar blended dark and quiet —
+          made to sit beside <i>Reflection Nº 2</i>, not compete with it.</p></div>
+        <div class="card"><h3>The Coffee</h3><p>A roast profiled against the same wheel families —
+          cocoa and molasses forward, bright acids held back for the evening.</p></div>
+        <div class="card"><h3>The Spirit</h3><p>A cask picked for conversation: soft entry, long
+          patient finish, low proof enough to keep the stories straight.</p></div>
+        <div class="card"><h3>The Tea</h3><p>For the first-light shelf — a welcome that asks even
+          less than coffee does.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
       <div class="rule"><p class="kicker">with the makers</p></div>
       <h2>Partners, not vendors.</h2>
       <p class="lede" style="max-width:46rem">Manufacturers and distributors who build to the
-      vocabulary, guided by <a href="/revolucion/insights">the insights</a>. And the vocabulary
-      outgrows the leaf: chocolates, coffees, spirits — named to the same experiences, so a
-      <i>reflection</i> evening can be assembled end to end.</p>
-      <div class="btns"><a class="btn ghost" href="/revolucion/insights">For the makers</a></div>
+      vocabulary, guided by <a href="/revolucion/insights">the insights</a>. They keep their craft
+      and their soul; we bring the word and the people who already live it.</p>
+      <div class="btns"><a class="btn ghost" href="/revolucion/insights">For the makers</a>
+      <a class="btn" href="/revolucion/community">Meet the circle</a></div>
     </section>
   </main>`)
 
@@ -2031,15 +2671,80 @@ function buildPages(
     </section>
 
     <section class="section">
+      <div class="rule"><p class="kicker">the box, kept honest</p></div>
+      <figure class="chart" style="max-width:760px">
+        <svg viewBox="0 0 720 340" role="img" aria-label="A humidor in cross-section: cedar shelves, resting cigars, hygrometer at 68 percent">
+          <defs><linearGradient id="hcedar" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#8a5c33"/><stop offset="100%" stop-color="#5a3a1e"/>
+          </linearGradient></defs>
+          <rect x="60" y="40" width="600" height="260" rx="8" fill="#1b1520" stroke="#c8975a" stroke-width="2"/>
+          <rect x="74" y="54" width="572" height="232" fill="url(#hcedar)" opacity=".24"/>
+          <g stroke="#c8975a" stroke-width="1.4"><line x1="74" y1="132" x2="646" y2="132"/><line x1="74" y1="212" x2="646" y2="212"/></g>
+          <g fill="#6b4a2b" stroke="rgba(200,151,90,.5)">
+            <rect x="100" y="88" width="180" height="18" rx="9"/><rect x="100" y="64" width="180" height="18" rx="9"/>
+            <rect x="300" y="76" width="150" height="18" rx="9"/>
+            <rect x="100" y="166" width="210" height="18" rx="9"/><rect x="100" y="142" width="210" height="18" rx="9"/>
+            <rect x="330" y="154" width="130" height="18" rx="9"/>
+            <rect x="100" y="246" width="160" height="18" rx="9"/><rect x="100" y="222" width="160" height="18" rx="9"/>
+          </g>
+          <g fill="#c8975a" opacity=".85">
+            <rect x="236" y="66" width="7" height="14"/><rect x="236" y="90" width="7" height="14"/><rect x="412" y="78" width="7" height="14"/>
+            <rect x="258" y="144" width="7" height="14"/><rect x="258" y="168" width="7" height="14"/><rect x="428" y="156" width="7" height="14"/>
+            <rect x="220" y="224" width="7" height="14"/><rect x="220" y="248" width="7" height="14"/>
+          </g>
+          <g font-family="Georgia,serif" font-size="12" fill="#c9bba6">
+            <text x="480" y="98">this year's rotation</text>
+            <text x="490" y="176">resting · 8 months</text>
+            <text x="300" y="256" font-style="italic">the do-not-touch shelf</text>
+          </g>
+          <g transform="translate(576 236)">
+            <circle r="30" fill="#141017" stroke="#c8975a" stroke-width="1.6"/>
+            <path d="M0,0 L14,-16" stroke="#e0b578" stroke-width="2"/>
+            <text y="20" text-anchor="middle" font-size="11" fill="#e0b578" font-family="Georgia,serif">68%</text>
+          </g>
+          <rect x="290" y="30" width="140" height="10" rx="5" fill="#c8975a"/>
+          <text x="360" y="326" text-anchor="middle" font-size="12" font-style="italic" fill="#8d7f6f" font-family="Georgia,serif">spanish cedar · a well-seasoned quiet</text>
+        </svg>
+        <figcaption>65–70% humidity · 65–70&#176;F · rotate the shelves, not your patience</figcaption>
+      </figure>
+      <div class="facts" style="max-width:760px">
+        <div><span class="n">65–70%</span><span class="t">relative humidity</span></div>
+        <div><span class="n">65–70&#176;</span><span class="t">fahrenheit, steady</span></div>
+        <div><span class="n">2×</span><span class="t">seasonal rotations</span></div>
+        <div><span class="n">0</span><span class="t">peeks required</span></div>
+      </div>
+    </section>
+
+    <section class="section">
       <div class="rule"><p class="kicker">three shelves</p></div>
       <div class="cards">
         <div class="card">${thumb('humidor/my-collection')}<h3>My Collection</h3>
-          <p>What you hold now — counts, dates acquired, and the entries each cigar has already earned.</p></div>
+          <p>What you hold now — counts, dates acquired, and the entries each cigar has already
+          earned. Tap a stick and its whole journal history unfolds beneath it.</p></div>
         <div class="card">${thumb('humidor/wishlist')}<h3>Wishlist</h3>
-          <p>What <a href="/revolucion/discovery">discovery</a> has convinced you to try next.</p></div>
+          <p>What <a href="/revolucion/discovery">discovery</a> has convinced you to try next —
+          each with the reason it earned the spot: "because your crisp-air evenings keep asking
+          for it."</p></div>
         <div class="card">${thumb('humidor/aging')}<h3>Aging</h3>
-          <p>What rests, and how long it has rested. The humidor remembers so you can forget on purpose.</p></div>
+          <p>What rests, and how long it has rested. The humidor remembers so you can forget
+          on purpose — and taps you on the shoulder when a rest comes due.</p></div>
       </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">what time does in the dark</p></div>
+      <div class="steps">
+        <div class="step"><span class="n">3 months</span><p>The marriage. The wrapper, binder, and
+          filler stop being three tobaccos and start being one cigar. The ammonia of youth fades.</p></div>
+        <div class="step"><span class="n">1 year</span><p>The edges round. Pepper mellows into
+          warmth; the sweetness that was hiding steps forward. Most cigars peak somewhere here.</p></div>
+        <div class="step"><span class="n">3 years</span><p>The transformation. What survives is
+          subtler and stranger — leather where there was spice, honey where there was heat.
+          Not better, exactly. Older. Worth journaling against your own entry from year one.</p></div>
+      </div>
+      <p class="muted" style="max-width:46rem">The aging shelf pairs with
+      <a href="/revolucion/journal">the journal</a> deliberately: smoke one now, rest its twin,
+      and let your own two entries — a year apart — teach you what time actually did.</p>
       <div class="btns"><a class="btn" href="/revolucion/journal">Journal the next one</a></div>
     </section>
   </main>`)
@@ -2063,6 +2768,38 @@ function buildPages(
       we say so first.</p>
       <p>And the loop closes: better blends make richer moments, richer moments make
       truer journals, truer journals make everything <b>better</b>.</p>
+    </section>
+
+    <section class="section" style="max-width:46rem">
+      <div class="rule"><p class="kicker">the articles</p></div>
+      <div class="steps" style="grid-template-columns:1fr">
+        <div class="step"><span class="n">I · the moment is the product</span><p>A cigar is an hour
+          of one life. Everything we build must honor the hour, or it doesn't get built.</p></div>
+        <div class="step"><span class="n">II · the journal is the foundation</span><p>Not the store,
+          not the feed, not the algorithm. The lived entry comes first, and everything else is
+          grown from it or it is decoration.</p></div>
+        <div class="step"><span class="n">III · the vocabulary belongs to the circle</span><p>Words
+          earn their place by being lived. We may notice a word; we may never mint one.</p></div>
+        <div class="step"><span class="n">IV · insight flows back, never sideways</span><p>Makers
+          learn who they serve — anonymized, aggregated, consent-first. Nobody learns who you are.</p></div>
+        <div class="step"><span class="n">V · newcomers are met with honesty</span><p>If the pepper
+          surprises, we say so first. A welcome, never a test.</p></div>
+        <div class="step"><span class="n">VI · the trust is the treasury</span><p>Every decision is
+          weighed against the trust it spends or earns. We do not run a deficit.</p></div>
+      </div>
+    </section>
+
+    <section class="section" style="max-width:46rem">
+      <div class="rule"><p class="kicker">what we will never do</p></div>
+      <div class="privacy">
+        <p class="muted">Sell an individual journal, ever, to anyone.</p>
+        <p class="muted" style="margin-top:.6rem">Tell a maker what to make — we show them who they
+        serve and stop there.</p>
+        <p class="muted" style="margin-top:.6rem">Let a marketing deck name an experience the
+        community hasn't lived.</p>
+        <p class="muted" style="margin-top:.6rem">Score a person. We keep moments, not grades.</p>
+        <p class="muted" style="margin-top:.6rem">Rush an evening. Nothing here has a timer on it.</p>
+      </div>
       <div class="btns" style="margin-top:3.4rem">
         <a class="btn" href="/revolucion/journal">Begin with one moment</a>
         <a class="btn ghost" href="/revolucion">Back to the ecosystem</a>
@@ -2700,7 +3437,6 @@ async function bundleLounge(): Promise<string> {
     .find(existsSync)
   if (!entry) throw new Error('lounge-3d.ts not found — run from the monorepo root (src/)')
   const out = await esbuild.build({
-    entryPoints: [entry],
     entryPoints: [entry],
     bundle: true,
     format: 'iife',
