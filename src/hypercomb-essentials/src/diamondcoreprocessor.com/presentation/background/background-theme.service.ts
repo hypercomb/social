@@ -161,6 +161,13 @@ export class BackgroundThemeService extends EventTarget {
     for (const tok of tokens) {
       if (tok === 'force') { reach = 'layer'; continue }
       if (tok === 'force-global') { reach = 'global'; continue }
+      // `force.global` is the shape the dot syntax INVITES — force is an
+      // object and global is how far it reaches — and it used to parse as
+      // "force this layer, with a picture called global", which no theme has,
+      // so the whole command bailed with a message about a missing picture
+      // and the hive was never re-dressed. The reach is a word after `force`;
+      // the hyphenated spelling stays because it is what completion offers.
+      if (tok === 'global' && reach === 'layer') { reach = 'global'; continue }
       rest.push(tok)
     }
     const [name, item] = rest

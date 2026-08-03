@@ -83,10 +83,16 @@ const backgroundObject: CommandObject = {
       }
     }
     if (!walked.has('items')) out.push({ name: 'items', description: 'show this group', leaf: true })
-    if (!walked.has('force')) out.push({ name: 'force', description: 're-dress this layer', leaf: true })
+    // `force` is an OBJECT, not a leaf: its reach is a member. Walking into it
+    // offers `global`, which is the shape the dot syntax invites and which
+    // used to parse as a picture name and fail the whole command.
+    if (!walked.has('force')) out.push({ name: 'force', description: 're-dress this layer' })
     // One picture stamped across an entire hive is the combination rerolling
     // cannot undo. Not a member once a picture is walked into.
-    if (!pinned && !walked.has('force-global')) {
+    if (!pinned && walked.has('force') && !walked.has('global')) {
+      out.push({ name: 'global', description: 're-dress every tile in the hive', leaf: true })
+    }
+    if (!pinned && !walked.has('force') && !walked.has('force-global')) {
       out.push({ name: 'force-global', description: 're-dress every tile', leaf: true })
     }
     return out
