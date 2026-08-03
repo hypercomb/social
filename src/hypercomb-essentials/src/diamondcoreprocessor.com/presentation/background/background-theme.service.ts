@@ -43,7 +43,8 @@ type SubstrateLike = {
   defaultSigs: ReadonlySet<string>
   pinImage(token: string): { name: string } | null
   unpinImages(): void
-  restyle(labels: string[], ownedSigs?: ReadonlySet<string>): Promise<string[]>
+  restyle(labels: string[], ownedSigs?: ReadonlySet<string>, segments?: readonly string[]): Promise<string[]>
+  restyleEverywhere(): Promise<string[]>
   allLabels(): Promise<string[]>
 }
 
@@ -75,6 +76,9 @@ export type BackgroundTheme = {
 // is data, not doctrine — changing one changes the theme, and adding a new
 // entry here adds a theme with no other edit anywhere.
 export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
+  // Nature is the SHIP DEFAULT — twenty scenes, first in the list, and what an
+  // unchosen `active` reads as. Its tiles set is the substrate's default too.
+  { id: 'nature',    label: 'Nature',    tiles: 'builtin:theme-nature',    preview: '/substrate/theme-nature/1.png' },
   { id: 'steel',     label: 'Steel',     screen: { archetype: 'contour', palette: 'steel' },      tiles: 'builtin:steel' },
   { id: 'daylight',  label: 'Daylight',  screen: { archetype: 'honeycomb', palette: 'daylight' }, tiles: 'builtin:daylight' },
   { id: 'indigo',    label: 'Indigo',    screen: { archetype: 'mesh', palette: 'indigo' },        tiles: 'builtin:indigo' },
@@ -84,16 +88,20 @@ export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
   { id: 'minimal',   label: 'Minimal',   tiles: 'builtin:theme-minimal',   preview: '/substrate/theme-minimal/1.png' },
   { id: 'geometric', label: 'Geometric', tiles: 'builtin:theme-geometric', preview: '/substrate/theme-geometric/1.png' },
   { id: 'abstract',  label: 'Abstract',  tiles: 'builtin:theme-abstract',  preview: '/substrate/theme-abstract/1.png' },
-  { id: 'nature',    label: 'Nature',    tiles: 'builtin:theme-nature',    preview: '/substrate/theme-nature/1.png' },
 ]
+
+/** What `active` reads as before anyone has chosen — the ship default. */
+export const DEFAULT_BACKGROUND_THEME = 'nature'
 
 export class BackgroundThemeService extends EventTarget {
   #themes: BackgroundTheme[] = [...BACKGROUND_THEMES]
-  #active: string | null = null
+  #active: string | null = DEFAULT_BACKGROUND_THEME
 
   constructor() {
     super()
-    try { this.#active = localStorage.getItem(STORAGE_KEY) } catch { /* storage unavailable */ }
+    // A stored value — including the word `off` — is a choice and wins. Only the
+    // absence of one falls through to the default.
+    try { this.#active = localStorage.getItem(STORAGE_KEY) ?? DEFAULT_BACKGROUND_THEME } catch { /* storage unavailable */ }
   }
 
   get themes(): readonly BackgroundTheme[] { return this.#themes }
@@ -201,12 +209,19 @@ export class BackgroundThemeService extends EventTarget {
         }
 
         if (reach !== 'none') {
-          // No signature set is passed: the substrate's own provenance ledger
-          // is the authority on what is a default. A picture placed by ANY
-          // earlier theme is replaced; a picture the participant put there is
-          // not, no matter which theme is arriving.
-          const labels = reach === 'global' ? await substrate.allLabels() : await this.#layerLabels()
-          const redressed = await substrate.restyle(labels)
+          // No signature set is passed: the substrate is the authority on what
+          // is a default — its ledger, its live pool, and the `substrate: true`
+          // mark in the props record itself, which is what recognises a picture
+          // placed before the ledger existed. A picture placed by ANY earlier
+          // theme is replaced; a picture the participant put there is not, no
+          // matter which theme is arriving.
+          //
+          // Global goes through restyleEverywhere, NOT restyle(allLabels()):
+          // index entries are keyed by full lineage, so a flat list of names
+          // re-dressed against the current location misses every other page.
+          const redressed = reach === 'global'
+            ? await substrate.restyleEverywhere()
+            : await substrate.restyle(await this.#layerLabels())
           for (const cell of redressed) EffectBus.emit('substrate:rerolled', { cell })
           tail += ` · ${redressed.length} tile${redressed.length === 1 ? '' : 's'} re-dressed${reach === 'global' ? ' hive-wide' : ''}`
         }

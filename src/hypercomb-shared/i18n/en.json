@@ -590,6 +590,8 @@
   "features.review.pending": "Pending community verification",
   "features.review.readcode": "Read the code",
   "features.review.back": "Back",
+  "tile-view.open-as": "open as",
+  "tile-view.creations": "available creations",
   "tile-view.enter": "go inside",
   "tile-view.select": "select",
   "tile-view.previous": "previous",

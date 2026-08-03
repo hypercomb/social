@@ -48,11 +48,32 @@
 // button), this view owns every way out: the exit button, a backdrop tap,
 // Escape, right-click, and the hardware/browser BACK button — the one a phone
 // user reaches for first, and the one no other takeover handles.
+//
+// YOU DO THINGS *INSIDE* THE TILE — the view does NOT close when you use it.
+// Every verb here used to end in `close()`, so editing a note, opening the
+// features panel or starting a creation dropped you back on the hive and the
+// tile you were working on had to be found and held again. Now an action
+// SUSPENDS the view instead: the card stays mounted underneath (every one of
+// those surfaces sits at z ≥ 90000, well over TAKEOVER_Z), and when it goes
+// the close-up is simply revealed again — with its notes and its action set
+// rebuilt, so what you just did is visible in it.
+//
+// Suspension is measured, not guessed. `#watch` asks what is actually on top
+// at the centre of the screen (`elementFromPoint`); while that is not us we
+// hand back the chrome and stop owning Escape/back, and the moment it is us
+// again we take both back and re-mount. Nothing has to announce that it
+// closed, so a bee that opens its own surface needs no cooperation from here —
+// and an action that opens nothing at all (a toggle) never even flickers,
+// because the chrome is only released once we are genuinely covered.
+//
+// Only three verbs still close: going inside (you have left), picking the tile
+// (the picked set is a hive activity), and the way out.
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { sniffImageMime } from '../../link/photo.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
+import { nextTile, VIEW_ENTER_PREFIX } from './viewer-walk.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 
 const SIG = /^[0-9a-f]{64}$/
@@ -75,6 +96,28 @@ const SWIPE_PX = 56
  *  cap: a hexagon is only so tall, a screen is not, so the block simply keeps
  *  adding rows downward and scrolls if it ever outgrows the panel. */
 const MENU_COLUMNS = 5
+/** ONE COLUMN, ONE WIDTH. The hexagon, the name, the notes and every row of
+ *  icons are laid on the same axis at the same width — a close-up of a tile
+ *  reads as one object, not a stack of differently-sized blocks. (Before this
+ *  the hexagon was `min(66vw,19rem)` and the icon rows `24rem`: on a phone the
+ *  menu was visibly wider than the tile it belonged to.) */
+const COLUMN = 'min(100%, 23rem)'
+/** The hexagon inside that column — inset, so the column's edge is a margin
+ *  around the tile rather than a line the tile touches. */
+const HEX_PORTRAIT = 'min(68vw, 17rem)'
+/** THE VERTICAL RHYTHM, and the only source of it. Vertical space used to come
+ *  from a flex `gap` AND per-block `margin-top`s, which compounded at some
+ *  joins and not others and left the column visibly ragged. Blocks now carry
+ *  no margins at all: the panel's gap is the spacing, everywhere. */
+const STACK_GAP = '0.85rem'
+/** Between icons, and between an icon block and its own caption. */
+const TIGHT_GAP = '0.5rem'
+/** Corner rounding. Cold and nearly square — the hive's shape is the hexagon,
+ *  and a pill-shaped control beside one reads as borrowed from another app. */
+const RADIUS = '0.35rem'
+/** How often the suspended view asks whether it is back on top. Cheap (one
+ *  hit-test), and it runs ONLY while suspended. */
+const WATCH_MS = 350
 
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
@@ -151,12 +194,6 @@ export class TileViewDrone extends Drone {
    *  the verb the close-up would be a dead end for exactly the tiles that have
    *  somewhere to go. */
   #branches = new Set<string>()
-  /** Every tile the current render put on screen, in render order — the row
-   *  the next/previous verbs and the sideways swipe walk along. The close-up
-   *  is one tile at a time, but the LAYER is what you were looking at, so
-   *  leaving the view to reach the tile beside it is a round trip the hand
-   *  should never have to make. */
-  #siblings: string[] = []
   /** An in-flight horizontal swipe over the view. */
   #swipe: { pointerId: number; x: number; y: number } | null = null
   /** Set by a swipe that committed, so the trailing click never also fires the
@@ -164,6 +201,13 @@ export class TileViewDrone extends Drone {
   #swiped = false
   /** True while we hold the synthetic history entry that catches BACK. */
   #historyTrap = false
+  /** SUSPENDED: an action was taken from this view and something else may now
+   *  be over it. We stay mounted; we just stop claiming Escape, right-click,
+   *  BACK and the backdrop tap, and hand the chrome back once we are actually
+   *  covered. Cleared by `#watch` the moment the screen's centre is ours again. */
+  #suspended = false
+  /** The suspended-state poll handle. Null whenever we are not suspended. */
+  #watchTimer: number | null = null
   /** Live orientation watch, bound only while the view is up. */
   #resizeObserver: ResizeObserver | null = null
 
@@ -190,8 +234,8 @@ export class TileViewDrone extends Drone {
       this.#external = new Set(list.map(s => String(s)))
       const branches = Array.isArray(payload?.branchLabels) ? payload.branchLabels : []
       this.#branches = new Set(branches.map(s => String(s)))
-      const labels = Array.isArray(payload?.labels) ? payload.labels : []
-      this.#siblings = labels.map(s => String(s)).filter(Boolean)
+      // The ROW itself is tracked by viewer-walk.ts, from this same effect —
+      // one definition, shared with every viewer that walks it.
     })
 
     // The tile stopped existing under us (deleted, or navigated away from).
@@ -236,6 +280,8 @@ export class TileViewDrone extends Drone {
     if (!this.#label) return
     this.#label = null
     this.#segments = []
+    this.#stopWatch()
+    this.#suspended = false
     this.#teardownDom()
     if (this.#viewActive) this.#setViewActive(false)
     // Drop our synthetic entry so the history stack is exactly as we found it.
@@ -253,13 +299,10 @@ export class TileViewDrone extends Drone {
    *  Null when there is nowhere to go (one tile on the layer, or this tile is
    *  no longer in it — a delete under the view, say). */
   #sibling(delta: number): string | null {
-    const label = this.#label
-    if (!label || this.#siblings.length < 2) return null
-    const at = this.#siblings.indexOf(label)
-    if (at < 0) return null
-    const count = this.#siblings.length
-    const next = this.#siblings[(at + delta % count + count) % count]
-    return next && next !== label ? next : null
+    // The SAME row every viewer walks (viewer-walk.ts). The close-up's
+    // sideways step and a deck's sideways step have to agree about what "the
+    // next tile" is, or the grammar is two grammars.
+    return this.#label ? nextTile(this.#label, delta) : null
   }
 
   /** Move the close-up to another tile on the same layer WITHOUT closing: the
@@ -291,6 +334,78 @@ export class TileViewDrone extends Drone {
     this.#urls = []
   }
 
+  // ── staying in the tile ────────────────────────────────────
+
+  /**
+   * AN ACTION WAS TAKEN, AND THE VIEW STAYS.
+   *
+   * Whatever the verb opened — the editor, a panel, a viewer, a creation —
+   * comes up over this card rather than in place of it, so the way back is to
+   * do nothing at all. All that has to change is who OWNS the screen while
+   * that lasts: we stop answering Escape / right-click / BACK / a backdrop tap
+   * (the surface on top is what those now mean), and `#watch` hands the chrome
+   * over as soon as it can see that we really are covered.
+   *
+   * Deliberately NOT keyed to the action. A bee that registers an affordance
+   * with the overlay gets its icon here for free (see `#overlayChips`); it
+   * would not get a hand-listed "and this one opens a surface" entry, and the
+   * first bee to be forgotten would be the one that closes the hive out from
+   * under the user again.
+   */
+  #suspend(): void {
+    if (!this.#label || this.#suspended) return
+    this.#suspended = true
+    this.#startWatch()
+  }
+
+  /** Is the middle of the screen still ours? The one question that decides
+   *  suspension, asked of the DOM rather than of the surfaces — nothing has to
+   *  tell us it opened, and nothing has to remember to tell us it closed. */
+  #onTop(): boolean {
+    const host = this.#host
+    if (!host) return false
+    const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2)
+    return !!el && (el === host || host.contains(el))
+  }
+
+  #startWatch(): void {
+    if (this.#watchTimer !== null) return
+    this.#watchTimer = window.setInterval(this.#tickWatch, WATCH_MS)
+  }
+
+  #stopWatch(): void {
+    if (this.#watchTimer === null) return
+    window.clearInterval(this.#watchTimer)
+    this.#watchTimer = null
+  }
+
+  /** COVERED → give the chrome back, because whatever is on top may need it
+   *  (the docked panels measure themselves against the controls bar). CLEAR
+   *  AGAIN → take it back, take the keys back, and re-mount: the action just
+   *  taken is very often a note, a picture or a decoration ON THIS TILE, and
+   *  coming back to the close-up it changed still showing the old one is the
+   *  same bug in a quieter form. */
+  #tickWatch = (): void => {
+    if (!this.#label) { this.#stopWatch(); return }
+    if (!this.#onTop()) {
+      if (this.#viewActive) this.#setViewActive(false)
+      return
+    }
+    this.#resume()
+  }
+
+  /** Take the screen back. `#mount` re-enters `view:active`, so this is also
+   *  where the chrome goes away again. */
+  #resume(): void {
+    const label = this.#label
+    if (!label) return
+    this.#suspended = false
+    this.#stopWatch()
+    this.#teardownDom()
+    this.#mount()
+    void this.#paintPicture(label)
+  }
+
   /**
    * SWIPE SIDEWAYS TO CHANGE TILE. Bound on the host, so it works from
    * anywhere on the screen — including across the picture, which is the
@@ -310,6 +425,9 @@ export class TileViewDrone extends Drone {
     const finish = (e: PointerEvent): void => {
       const swipe = this.#swipe
       if (!swipe || swipe.pointerId !== e.pointerId) return
+      // Suspended: something is (or is about to be) over us. A tap that lands
+      // beside a small panel must not close the view underneath it.
+      if (this.#suspended) { this.#swipe = null; return }
       this.#swipe = null
       const dx = e.clientX - swipe.x
       const dy = e.clientY - swipe.y
@@ -338,13 +456,25 @@ export class TileViewDrone extends Drone {
 
   #onPopState = (): void => {
     if (!this.#label) return
-    // Our entry is already popped — closing must not pop again.
+    // Our entry is already popped — closing (or re-trapping) must not pop it.
     this.#historyTrap = false
+    // BACK OUT OF WHAT YOU OPENED, NOT OUT OF THE TILE. While suspended, back
+    // is the way out of the surface on top; landing on the close-up is exactly
+    // where a phone user expects to land, so we take the screen back and re-arm
+    // the trap. A second press — now unsuspended — leaves the view for real.
+    if (this.#suspended) {
+      this.#resume()
+      try {
+        window.history.pushState({ hcTileView: this.#label }, '')
+        this.#historyTrap = true
+      } catch { /* history unavailable — the other close paths still work */ }
+      return
+    }
     this.close()
   }
 
   #onKeyDown = (e: KeyboardEvent): void => {
-    if (!this.#label) return
+    if (!this.#label || this.#suspended) return
     // The arrows are the swipe, for a keyboard — same row, same order.
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       if (!this.#sibling(e.key === 'ArrowRight' ? 1 : -1)) return
@@ -360,7 +490,7 @@ export class TileViewDrone extends Drone {
   }
 
   #onContextMenu = (e: MouseEvent): void => {
-    if (!this.#label) return
+    if (!this.#label || this.#suspended) return
     e.preventDefault()
     this.close()
   }
@@ -384,8 +514,8 @@ export class TileViewDrone extends Drone {
       // and the notes) re-grants itself `pan-y`. `overscroll-behavior` stops
       // the same drag becoming a pull-to-refresh on the page behind.
       'touch-action:none;overscroll-behavior:contain;' +
-      'padding:max(0.9rem,env(safe-area-inset-top,0px)) max(0.9rem,env(safe-area-inset-right,0px)) ' +
-      'max(0.9rem,env(safe-area-inset-bottom,0px)) max(0.9rem,env(safe-area-inset-left,0px));'
+      'padding:max(1.1rem,env(safe-area-inset-top,0px)) max(1.1rem,env(safe-area-inset-right,0px)) ' +
+      'max(1.1rem,env(safe-area-inset-bottom,0px)) max(1.1rem,env(safe-area-inset-left,0px));'
     host.setAttribute('data-consumes-wheel', '')
     // A tap on the backdrop closes; taps inside the card do not (the card stops
     // the event). On the RELEASE, not the press — the backdrop is the widest
@@ -406,7 +536,7 @@ export class TileViewDrone extends Drone {
     const stage = document.createElement('div')
     stage.dataset['role'] = 'stage'
     stage.style.cssText =
-      'display:flex;align-items:center;justify-content:center;gap:1.2rem;' +
+      `display:flex;align-items:center;justify-content:center;gap:${STACK_GAP};` +
       'width:100%;max-width:56rem;max-height:100%;min-height:0;'
     host.appendChild(stage)
 
@@ -441,9 +571,12 @@ export class TileViewDrone extends Drone {
     // ── the column beside/below it ──
     const panel = document.createElement('div')
     panel.dataset['role'] = 'panel'
+    // THE COLUMN. Its `gap` is the entire vertical rhythm of the view — no
+    // block below it carries a margin, so every join is the same height and
+    // the column cannot go ragged when one of them happens to be absent.
     panel.style.cssText =
       'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-      'gap:0.55rem;min-width:0;min-height:0;'
+      `gap:${STACK_GAP};min-width:0;min-height:0;width:${COLUMN};max-width:100%;`
     stage.appendChild(panel)
 
     const name = document.createElement('div')
@@ -452,21 +585,33 @@ export class TileViewDrone extends Drone {
     // left beside it in landscape) — `#applyLayout` owns it, so neither of
     // these may pin its own.
     name.style.cssText =
-      'flex:0 0 auto;font-size:1.35rem;font-weight:600;' +
-      'color:rgba(245,245,245,0.94);word-break:break-word;'
+      'flex:0 0 auto;width:100%;font-size:1.3rem;font-weight:600;line-height:1.25;' +
+      'letter-spacing:0.01em;color:rgba(245,245,245,0.94);word-break:break-word;'
     panel.appendChild(name)
 
     const notes = this.#notesText(label)
     if (notes) {
       const noteEl = document.createElement('div')
       noteEl.textContent = notes
+      // A hairline over the notes rather than a box around them: it marks
+      // where the tile's own words start without adding a second rounded
+      // rectangle to a screen that is already a hexagon and a grid of cells.
       noteEl.style.cssText =
-        `flex:0 1 auto;font-size:0.95rem;line-height:1.45;color:${DIM};` +
-        'overflow-y:auto;max-height:26vh;white-space:pre-wrap;' +
+        `flex:0 1 auto;width:100%;font-size:0.95rem;line-height:1.5;color:${DIM};` +
+        'overflow-y:auto;max-height:24vh;white-space:pre-wrap;' +
+        'border-top:1px solid rgba(255,255,255,0.08);padding-top:0.75rem;' +
         'touch-action:pan-y;overscroll-behavior:contain;'
       panel.appendChild(noteEl)
     }
 
+    // THE OPTIONS FIRST. What this tile can be OPENED as is the reason most
+    // people are on this screen — a sideways step that arrives at a tile
+    // without the viewer you were in lands here, and the next thing that
+    // should happen is choosing another one. Buried among edit/note/share it
+    // was a needle; at the top of the column it is the answer to the question
+    // the arrival asked.
+    const viewers = this.#viewerRow(label)
+    if (viewers) panel.appendChild(viewers)
     const creations = this.#creationRow(label)
     if (creations) panel.appendChild(creations)
     panel.appendChild(this.#actionRow(label))
@@ -484,6 +629,39 @@ export class TileViewDrone extends Drone {
     // CHILDREN, so this can never observe its own writes.)
     this.#resizeObserver = new ResizeObserver(this.#onOrientation)
     this.#resizeObserver.observe(host)
+  }
+
+  /**
+   * WHAT THIS TILE CAN BE OPENED AS — its viewers, as a block of their own.
+   *
+   * Not a second list: exactly the overlay affordances whose action is a
+   * `view-enter:`, lifted out of the action grid so the two questions stop
+   * sharing one row. "Open it as a deck" and "delete it" are not the same kind
+   * of choice and should never be adjacent cells.
+   *
+   * Accented, because on arrival from a sideways step this is the live
+   * question. Absent entirely when the tile carries no viewer — an empty
+   * heading is worse than no heading.
+   */
+  #viewerRow(label: string): HTMLElement | null {
+    const chips = this.#overlayChips(label).filter(c => c.action.startsWith(VIEW_ENTER_PREFIX))
+    if (chips.length === 0) return null
+
+    const section = document.createElement('section')
+    section.style.cssText =
+      `display:flex;flex-direction:column;align-items:inherit;gap:${TIGHT_GAP};width:100%;`
+
+    const title = document.createElement('div')
+    title.textContent = this.#t('tile-view.open-as', 'open as')
+    title.style.cssText =
+      'font-size:0.68rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;' +
+      `color:${DIM};opacity:0.75;width:100%;`
+    section.appendChild(title)
+
+    const row = this.#iconGrid()
+    for (const chip of chips) row.appendChild(this.#chip({ ...chip, accent: true }, label))
+    section.appendChild(row)
+    return section
   }
 
   /** Creation behaviours belong to the tile they will decorate. On mobile the
@@ -504,23 +682,35 @@ export class TileViewDrone extends Drone {
 
     const section = document.createElement('section')
     section.style.cssText =
-      'display:flex;flex-direction:column;align-items:inherit;gap:0.45rem;margin-top:0.35rem;'
+      `display:flex;flex-direction:column;align-items:inherit;gap:${TIGHT_GAP};width:100%;`
 
     const title = document.createElement('div')
     title.textContent = this.#t('tile-view.creations', 'available creations')
     title.style.cssText =
-      `font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${DIM};`
+      'font-size:0.68rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;' +
+      `color:${DIM};opacity:0.75;width:100%;`
     section.appendChild(title)
 
-    const row = document.createElement('div')
-    // The same grid as the action menu, so views read as one more block of
-    // icons under it rather than a differently-shaped strip.
-    row.style.cssText =
-      `display:grid;grid-template-columns:repeat(${MENU_COLUMNS},minmax(0,1fr));` +
-      'gap:0.35rem;width:100%;max-width:24rem;'
+    const row = this.#iconGrid()
     for (const bee of bees) row.appendChild(this.#creationChip(bee, label))
     section.appendChild(row)
     return section
+  }
+
+  /**
+   * A BLOCK OF ICON CELLS, and the reason it is not a CSS grid.
+   *
+   * A five-column grid leaves a short last row ranged against the left edge,
+   * which on a centred column is the one thing that makes the whole screen
+   * look crooked. Wrapping flex items at a FIXED five-across basis gives cells
+   * of exactly the grid's size — same width on every row, aligned down the
+   * column — and centres whatever is left over on the last one.
+   */
+  #iconGrid(): HTMLDivElement {
+    const row = document.createElement('div')
+    row.style.cssText =
+      `display:flex;flex-wrap:wrap;gap:${TIGHT_GAP};justify-content:center;width:100%;`
+    return row
   }
 
   #creationChip(bee: VisualBeeDescriptor, label: string): HTMLElement {
@@ -567,19 +757,21 @@ export class TileViewDrone extends Drone {
       panel.style.flex = ''
       panel.style.alignItems = 'flex-start'
       panel.style.textAlign = 'left'
-      if (row) { row.style.justifyContent = 'flex-start'; row.style.marginTop = '0.6rem' }
+      if (row) row.style.justifyContent = 'flex-start'
     } else {
       stage.style.display = 'flex'
       stage.style.gridTemplateColumns = ''
       frame.style.gridColumn = ''
       panel.style.gridColumn = ''
       stage.style.flexDirection = 'column'
-      frame.style.width = 'min(66vw, 19rem)'
+      // Narrower than the column it sits in, so the tile is inset in its own
+      // screen instead of touching the same edge the icon rows do.
+      frame.style.width = HEX_PORTRAIT
       frame.style.height = 'auto'
       panel.style.flex = '0 1 auto'
       panel.style.alignItems = 'center'
       panel.style.textAlign = 'center'
-      if (row) { row.style.justifyContent = 'center'; row.style.marginTop = '0.4rem' }
+      if (row) row.style.justifyContent = 'center'
     }
   }
 
@@ -599,15 +791,16 @@ export class TileViewDrone extends Drone {
    * Rows of MENU_COLUMNS, growing DOWNWARD without a cap.
    */
   #actionRow(label: string): HTMLElement {
-    const row = document.createElement('div')
+    const row = this.#iconGrid()
     row.dataset['role'] = 'actions'
-    row.style.cssText =
-      `flex:0 1 auto;display:grid;grid-template-columns:repeat(${MENU_COLUMNS},minmax(0,1fr));` +
-      'gap:0.35rem;margin-top:0.4rem;width:100%;max-width:24rem;' +
-      // Past a few rows the block scrolls rather than pushing the hexagon off
-      // the screen. `pan-y` so this scroll is possible at all while the host
-      // holds every other touch action (see #mount).
-      'overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;'
+    row.style.flex = '0 1 auto'
+    // Past a few rows the block scrolls rather than pushing the hexagon off
+    // the screen. `pan-y` so this scroll is possible at all while the host
+    // holds every other touch action (see #mount).
+    row.style.overflowY = 'auto'
+    row.style.overscrollBehavior = 'contain'
+    row.style.touchAction = 'pan-y'
+    row.style.alignContent = 'flex-start'
 
     const chips: Chip[] = [
       // GO INSIDE leads: a branch's whole point is what is under it, and the
@@ -631,8 +824,10 @@ export class TileViewDrone extends Drone {
       // hide, block, files, invite, remove, the lot — resolved for THIS tile
       // by the surface that owns them. These used to be a hand-written subset
       // here, which meant a phone saw five of the twenty-odd affordances a
-      // tile can have and no bee could add to them.
-      ...this.#overlayChips(label),
+      // tile can have and no bee could add to them. Minus the viewers, which
+      // `#viewerRow` has already put at the top of the column as their own
+      // question.
+      ...this.#overlayChips(label).filter(c => !c.action.startsWith(VIEW_ENTER_PREFIX)),
       // PICK IT. The close-up is one tile; the picked set is how you act on
       // several, and every set verb (marking, removing, the clipboard, the
       // options ring) reads that one selection. Arming the picker on the way
@@ -708,10 +903,11 @@ export class TileViewDrone extends Drone {
         const overlay = window.ioc?.get?.('@diamondcoreprocessor.com/TileOverlayDrone') as
           OverlayActionsShape | undefined
         overlay?.invokeActionForTile?.(action.name, label)
-        // Editing, sharing and the panels open their own surface over this
-        // one. `remove` takes the tile out from under it. Either way the
-        // close-up is done.
-        this.close()
+        // Editing, sharing and the panels open their own surface OVER this one
+        // and the close-up waits underneath for them (`#suspend`). `remove`
+        // takes the tile out from under it — that one is closed by the
+        // `cell:removed` listener, which is the only correct judge of it.
+        this.#suspend()
       },
     }))
   }
@@ -730,10 +926,14 @@ export class TileViewDrone extends Drone {
     const text = this.#t(chip.labelKey, chip.fallback)
     btn.type = 'button'
     btn.setAttribute('aria-label', text)
+    // Five across, exactly: the basis subtracts the four gaps between them, so
+    // every cell in the block is the same width whatever row it lands on.
     btn.style.cssText =
-      `min-height:${TAP};padding:0.4rem 0.15rem;border-radius:0.85rem;width:100%;` +
+      `min-height:${TAP};padding:0.5rem 0.2rem;border-radius:${RADIUS};` +
+      `flex:0 0 calc((100% - ${MENU_COLUMNS - 1} * ${TIGHT_GAP}) / ${MENU_COLUMNS});` +
+      'box-sizing:border-box;' +
       'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-      'gap:0.25rem;cursor:pointer;' +
+      'gap:0.3rem;cursor:pointer;' +
       `background:${chip.accent ? STEEL : 'rgba(20,26,34,0.9)'};` +
       `color:${chip.accent ? '#04121b' : 'rgba(245,245,245,0.9)'};` +
       `border:1px solid ${chip.accent ? 'transparent' : 'rgba(255,255,255,0.12)'};` +
@@ -764,8 +964,8 @@ export class TileViewDrone extends Drone {
     // One line, clipped rather than wrapped: a two-line caption makes one cell
     // taller than its neighbours and the whole row goes ragged.
     caption.style.cssText =
-      'font-size:0.6rem;font-weight:600;line-height:1.1;max-width:100%;' +
-      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.85;'
+      'font-size:0.62rem;font-weight:600;line-height:1.1;max-width:100%;letter-spacing:0.01em;' +
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.82;'
     btn.appendChild(caption)
 
     btn.addEventListener('click', () => {
@@ -774,9 +974,11 @@ export class TileViewDrone extends Drone {
       // `name` and does NOT normalize, so a normalized label would silently
       // match nothing.
       this.emitEffect('tile:action', { action: chip.action, label })
-      // Editing and sharing open their own surface over this one; adopt is
-      // handled by its own adopt:done listener (it may route to a panel first).
-      if (chip.action !== 'adopt') this.close()
+      // Whatever this opened comes up over the close-up, which waits under it
+      // — see `#suspend`. Adopt is the exception in the other direction: its
+      // own `adopt:done` listener closes the view outright, because both
+      // shells snap back to hexagons on a non-silent adopt.
+      if (chip.action !== 'adopt') this.#suspend()
     })
     return btn
   }

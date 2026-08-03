@@ -743,12 +743,22 @@ export class ClaudeBridgeWorker extends Worker {
 
     const committer = get<{
       update?: (segments: readonly string[], layer: object) => Promise<string>
+      commitSlotSet?: (segments: readonly string[], slot: string, sigs: readonly string[]) => Promise<void>
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
 
     // Record locally-authored page sigs written to a page slot (parity with
     // #bagSet / #update / #decorationAdd) so the gate never quarantines them.
     markLayerAuthoredPageSigs({ [slot]: next })
+    // `children` is a NAME slot in committer.update — each entry would be
+    // resolved as a tile name, and a 64-hex sig "name" reads a cold bag that
+    // auto-mints a `{name:<sig>}` husk tile (the lineage-pool-printed-to-the-
+    // hive incident). Children carry sigs already: commit at the SIG level.
+    if (slot === 'children') {
+      if (!committer.commitSlotSet) return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
+      await committer.commitSlotSet(segments, slot, next)
+      return { id: req.id, ok: true, data: { slot, count: next.length, mode } }
+    }
     const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
     await committer.update(segments, nextLayer)
     return { id: req.id, ok: true, data: { slot, count: next.length, mode } }
@@ -782,6 +792,7 @@ export class ClaudeBridgeWorker extends Worker {
 
     const committer = get<{
       update?: (segments: readonly string[], layer: object) => Promise<string>
+      commitSlotSet?: (segments: readonly string[], slot: string, sigs: readonly string[]) => Promise<void>
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
 
@@ -789,6 +800,15 @@ export class ClaudeBridgeWorker extends Worker {
     // authored content — record its sigs so the gate treats your own pages as
     // own. One helper across every local slot-writer keeps coverage from drifting.
     markLayerAuthoredPageSigs({ [slot]: next })
+    // `children` is a NAME slot in committer.update — each entry would be
+    // resolved as a tile name, and a 64-hex sig "name" reads a cold bag that
+    // auto-mints a `{name:<sig>}` husk tile (the lineage-pool-printed-to-the-
+    // hive incident). Children carry sigs already: commit at the SIG level.
+    if (slot === 'children') {
+      if (!committer.commitSlotSet) return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
+      await committer.commitSlotSet(segments, slot, next)
+      return { id: req.id, ok: true, data: { slot, count: next.length } }
+    }
     const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
     await committer.update(segments, nextLayer)
     return { id: req.id, ok: true, data: { slot, count: next.length } }

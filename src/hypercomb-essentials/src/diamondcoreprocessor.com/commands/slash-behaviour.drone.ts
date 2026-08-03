@@ -333,13 +333,13 @@ class MoveProvider implements SlashBehaviourProvider {
 //
 // Not `/atomize-ui`, which toggles the atomizer toolbar. Not `/organize`,
 // which goes the OTHER way — mints no leaves, inserts a level and re-homes
-// existing children into groups. `/expand` stays as an alias for the hands
-// that already know it.
+// existing children into groups. Not `/expand`, which grows the CURRENT
+// layer sideways with new siblings instead of deepening a leaf.
 class AtomizeProvider implements SlashBehaviourProvider {
   readonly name = 'atomize-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'atomize', aliases: ['expand'],
+    { name: 'atomize',
       description: 'Break tiles into the pieces that compose them, via Claude Haiku', descriptionKey: 'slash.atomize',
       examples: [
         { input: '/atomize', result: 'With tiles selected: breaks down each selected tile' },
@@ -388,6 +388,29 @@ class AtomizeProvider implements SlashBehaviourProvider {
         + (r.landed ? ' — Haiku is working out the parts.'
            : r.skipped.has('has-children') ? ' Use /organize to group a crowded level.' : ''),
     })
+  }
+}
+
+// EXPAND — GO WIDER. The third structural verb next to atomize (deeper) and
+// organize (shallower): it asks Claude Haiku over the bridge (ExpandDrone
+// mints a `task:'expand'` ask — no API key) to look at what the CURRENT layer
+// already holds and CREATE the sibling tiles its subject is still missing.
+// The unit is the layer, never a single tile — deepening one tile is
+// /atomize. An optional argument narrows the direction of interest.
+class ExpandProvider implements SlashBehaviourProvider {
+  readonly name = 'expand-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'expand',
+      description: 'Grow this layer with new tiles that extend its subject, via Claude Haiku', descriptionKey: 'slash.expand',
+      examples: [
+        { input: '/expand', result: 'Haiku looks at this layer\'s tiles and adds the aspects the subject is missing' },
+        { input: '/expand growing techniques', result: 'Same, but steered toward the interest you named' },
+      ] }
+  ]
+
+  async execute(_behaviourName: string, args: string): Promise<void> {
+    EffectBus.emit('expand:layer', { focus: args.trim() })
   }
 }
 
@@ -559,6 +582,7 @@ _slashBehaviours.addProvider(new RemoveProvider())
 _slashBehaviours.addProvider(new AccentProvider())
 _slashBehaviours.addProvider(new MoveProvider())
 _slashBehaviours.addProvider(new AtomizeProvider())
+_slashBehaviours.addProvider(new ExpandProvider())
 _slashBehaviours.addProvider(new OrganizeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())

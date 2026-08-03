@@ -564,6 +564,8 @@
   "features.review.pending": "コミュニティの検証待ち",
   "features.review.readcode": "コードを読む",
   "features.review.back": "戻る",
+  "tile-view.open-as": "開く形式",
+  "tile-view.creations": "利用できる作成",
   "tile-view.enter": "中へ入る",
   "tile-view.select": "選択",
   "tile-view.previous": "前のタイル",

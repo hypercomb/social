@@ -35,6 +35,7 @@ import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
 
 type ShowCellLike = { snapshotCells?: () => Array<{ q: number; r: number; label: string }> }
+type LineageLike = { explorerSegments?: () => readonly string[] }
 
 /** One rendered agent. */
 interface BeeSprite {
@@ -206,7 +207,10 @@ export class AgentBeeDrone extends Drone {
     sprite.alpha = 0
     this.#layer.addChild(sprite)
 
-    const anchor = this.#anchorFor(agent)
+    // Born off its layer: the bee exists but waits, invisible, for the
+    // participant to arrive where its work is.
+    const resolved = this.#anchorFor(agent)
+    const anchor = resolved ?? { x: 0, y: 0 }
     const bee: BeeSprite = {
       id: agent.id,
       kind: agent.kind,
@@ -223,7 +227,7 @@ export class AgentBeeDrone extends Drone {
       seed: Math.random() * 6.28,
       danceTime: 0,
       alpha: 0,
-      fadeTarget: 1,
+      fadeTarget: resolved ? 1 : 0,
       facing: 1,
     }
     this.#bees.set(agent.id, bee)
@@ -248,16 +252,29 @@ export class AgentBeeDrone extends Drone {
     }
   }
 
-  /** Where an agent's bee belongs: over its target tile if that tile is on
-   *  screen, otherwise hovering in the upper third of the view so hive-wide
-   *  work is still visible wherever the participant has panned to. */
-  #anchorFor = (agent: Agent): { x: number; y: number } => {
+  /** Where an agent's bee belongs — and whether it belongs HERE at all.
+   *
+   *  Bees are local to their layer. A targeted bee sits over its tile when
+   *  that tile is painted on the current layer, and is simply not shown
+   *  anywhere else — it does not chase the participant across the hive. A
+   *  hive-wide bee (no tile targets) belongs to the ROOT layer only.
+   *  `null` means "not on this layer": the bee fades out and comes back when
+   *  the participant returns. */
+  #anchorFor = (agent: Agent): { x: number; y: number } | null => {
     const cells = ioc<ShowCellLike>('@diamondcoreprocessor.com/ShowCellDrone')?.snapshotCells?.() ?? []
     for (const label of agent.targets) {
       const cell = cells.find(c => c.label === label)
       if (cell) return this.#axialToPixel(cell.q, cell.r)
     }
-    return this.#viewAnchor(agent.id)
+    if (agent.targets.length) return null
+    return this.#atRoot() ? this.#viewAnchor(agent.id) : null
+  }
+
+  /** Is the participant on the root layer? Global work lives there. */
+  #atRoot = (): boolean => {
+    const lineage = ioc<LineageLike>('@hypercomb.social/Lineage')
+    const segments = lineage?.explorerSegments?.()
+    return !segments || segments.length === 0
   }
 
   /** A stable spot in the current view, spread per agent so several hive-wide
@@ -298,8 +315,21 @@ export class AgentBeeDrone extends Drone {
 
       if (reanchor && agent) {
         const anchor = this.#anchorFor(agent)
-        bee.anchorX = anchor.x
-        bee.anchorY = anchor.y
+        if (anchor) {
+          // Coming back into view after a navigation: the eased centre still
+          // points at the OLD layer's coordinates — arrive fresh, don't
+          // streak across the hive from wherever the dance last was.
+          if (bee.alpha < 0.02 && bee.fadeTarget === 0) {
+            bee.centreX = anchor.x + (Math.random() - 0.5) * 160
+            bee.centreY = anchor.y - 120
+          }
+          bee.anchorX = anchor.x
+          bee.anchorY = anchor.y
+          bee.fadeTarget = 1
+        } else {
+          // Not this layer's bee — it stays with its work, out of sight.
+          bee.fadeTarget = 0
+        }
         bee.kind = agent.kind
       }
       if (!agent) bee.fadeTarget = 0
@@ -332,7 +362,9 @@ export class AgentBeeDrone extends Drone {
       }
 
       bee.alpha += (bee.fadeTarget - bee.alpha) * 0.08
-      if (bee.fadeTarget === 0 && bee.alpha < 0.02) {
+      // A faded bee is only DESTROYED when its agent is gone. An off-layer
+      // bee just waits, invisible, for the participant to come back.
+      if (!agent && bee.fadeTarget === 0 && bee.alpha < 0.02) {
         bee.sprite.destroy()
         this.#bees.delete(id)
         if (this.#hovering === id) this.#setHover('')

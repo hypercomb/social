@@ -92,18 +92,21 @@ const SIG_NAME_RE = /^[0-9a-f]{64}$/
 
 // Built-in TILE background sets shipped with the app, seeded on first load.
 // Each set is a url source whose baseUrl hosts manifest.json + PNGs:
+//   • Nature   — twenty stylized vector scenes; the DEFAULT tile fill, and
+//                first in the list so the first-builtin fallback lands on it.
 //   • Photos   — the original photo bundle (the flat /substrate/ collection),
-//                kept under its ORIGINAL id so existing registries resolve. The
-//                default tile fill.
-//   • Minimal / Geometric / Abstract / Nature — themed per-tile artwork; switch
+//                kept under its ORIGINAL id so existing registries resolve.
+//   • Minimal / Geometric / Abstract — themed per-tile artwork; switch
 //                with `/substrate set <name>`.
 // (The steel/daylight/indigo/teal/ember gradient sets are CANVAS backgrounds
 // now — see CanvasBackgroundService + /canvas — not tile sources.) Origin-
 // absolute baseUrls so deep navigation paths don't break relative fetch.
 // DEFAULT_SET_ID is the LEGACY id of the brief v2 tile default (Steel) — kept
-// only so the one-time v3 migration can move those users back to Photos.
+// only so the one-time v3 migration can move those users off it. PHOTOS_SET_ID
+// was the v3 ship default and is likewise treated as unconfigured by v4.
 const DEFAULT_SET_ID = 'builtin:steel'
 const PHOTOS_SET_ID = 'builtin:defaults'
+const NATURE_SET_ID = 'builtin:theme-nature'
 // The participant's own references — the one source with no location to walk.
 const REFERENCES_SET_ID = 'builtin:references'
 // One-time migration marker: bumps when the shipped built-in set list changes
@@ -112,8 +115,22 @@ const REFERENCES_SET_ID = 'builtin:references'
 // back to the Photos collection; per-tile themed backgrounds are a separate
 // feature. The themed sets stay registered (selectable via /substrate set) but
 // are no longer the tile default.
+// v4: Nature (grown to twenty scenes) becomes the ship default tile fill. Both
+// earlier ship defaults — Steel (v2) and Photos (v3) — count as unconfigured
+// and advance; anything else was a deliberate choice and is left alone.
 const SETS_VERSION_LS = 'hc:substrate-sets-v'
-const SETS_VERSION = '3'
+const SETS_VERSION = '4'
+// The re-dress marker, deliberately SEPARATE from the sets marker. Advancing
+// the active source is one instant write; re-dressing the tiles that wear the
+// OLD default needs history and the new pool, neither of which is ready when
+// the registry loads. So the sets marker moves immediately and this one moves
+// only once the pass has actually re-dressed something — an unready boot
+// leaves it behind and the pass runs again next time.
+const REDRESS_LS = 'hc:substrate-redress-v'
+// Written when the advance moves a hive and cleared to SETS_VERSION when the
+// re-dress lands. It is what distinguishes "was moved and still owes a
+// re-dress" from "chose this set" — the second must never be re-rolled.
+const REDRESS_ARMED = `${SETS_VERSION}:pending`
 
 // Provenance ledger — every props signature this service has ever ASSIGNED to a
 // tile, across themes and sessions. It is the record of which pictures are
@@ -135,11 +152,13 @@ const writeAssignedSigs = (sigs: ReadonlySet<string>): void => {
 }
 
 const BUILTIN_SETS: SubstrateSource[] = [
+  // Nature FIRST: `resolve()` falls back to the first builtin, and that
+  // fallback should land on the same set the ship default names.
+  { type: 'url', id: NATURE_SET_ID,             baseUrl: '/substrate/theme-nature/',     label: 'Nature',    builtin: true },
   { type: 'url', id: PHOTOS_SET_ID,             baseUrl: '/substrate/',                  label: 'Photos',    builtin: true },
   { type: 'url', id: 'builtin:theme-minimal',   baseUrl: '/substrate/theme-minimal/',    label: 'Minimal',   builtin: true },
   { type: 'url', id: 'builtin:theme-geometric', baseUrl: '/substrate/theme-geometric/',  label: 'Geometric', builtin: true },
   { type: 'url', id: 'builtin:theme-abstract',  baseUrl: '/substrate/theme-abstract/',   label: 'Abstract',  builtin: true },
-  { type: 'url', id: 'builtin:theme-nature',    baseUrl: '/substrate/theme-nature/',     label: 'Nature',    builtin: true },
   // The five palette sets. Their tile rasters shipped in `public/substrate/`
   // but the sources had been dropped from this list, which orphaned them —
   // nothing could select the images. A background theme names one of these as
@@ -301,9 +320,11 @@ export class SubstrateService extends EventTarget {
     }
 
     if (!registry) {
-      // First-ever load — seed with all built-in sets, Photos active (the
-      // themed sets are now canvas backgrounds, not the tile default).
-      registry = { sources: [...BUILTIN_SETS], activeId: PHOTOS_SET_ID }
+      // First-ever load — seed with all built-in sets, Nature active. Nothing
+      // exists to re-dress, so the marker is settled here rather than leaving
+      // a pass armed to re-roll a hive that was never on an older default.
+      registry = { sources: [...BUILTIN_SETS], activeId: NATURE_SET_ID }
+      try { localStorage.setItem(REDRESS_LS, SETS_VERSION) } catch { /* ignore */ }
 
       // Migrate legacy substrate-global if present.
       try {
@@ -332,16 +353,23 @@ export class SubstrateService extends EventTarget {
     // behind. Copy-forward only and idempotent, so a partial run finishes on
     // the next boot and a failure costs nothing.
     void this.#drainRetiredReferences(store)
+
+    // Detached too, and later still: move the tiles that wear the OLD default
+    // onto the new one. Needs history and the new pool, so it waits for idle.
+    if (this.#redressPending) this.#scheduleDefaultRedress()
   }
 
   /**
    * Reconcile an existing registry with the current built-in set list:
    * ensure every built-in set is present with its canonical label/baseUrl,
-   * preserve user-added sources, and one-time reset an UNCONFIGURED active
-   * source back to the Photos default — undoing the brief v2 ship that made the
-   * Steel themed-set the tile default before those designs became canvas
-   * backgrounds. A deliberate later choice is left untouched because the
-   * version marker only fires once. Persists only when something changed.
+   * preserve user-added sources, and one-time advance an UNCONFIGURED active
+   * source to the current ship default (Nature). Unconfigured means it still
+   * holds an EARLIER ship default — Steel (v2) or Photos (v3) — or nothing at
+   * all. A deliberate later choice is left untouched because the version marker
+   * only fires once. Persists only when something changed.
+   *
+   * Advancing the source only changes what BLANK tiles will be given. The tiles
+   * already wearing the old default are moved by the re-dress pass this arms.
    */
   async #mergeBuiltinSets(registry: SubstrateRegistry): Promise<SubstrateRegistry> {
     const userSources = registry.sources.filter(s => !s.builtin)
@@ -351,17 +379,28 @@ export class SubstrateService extends EventTarget {
     let migrated = false
     try {
       if (localStorage.getItem(SETS_VERSION_LS) !== SETS_VERSION) {
-        if (activeId === DEFAULT_SET_ID || activeId === null) activeId = PHOTOS_SET_ID
+        if (activeId === DEFAULT_SET_ID || activeId === PHOTOS_SET_ID || activeId === null) {
+          activeId = NATURE_SET_ID
+          // Only the hive that was actually MOVED gets re-dressed. A deliberate
+          // choice keeps both its source and its pictures — including someone
+          // who had already picked Nature, who is not moved and so never armed.
+          this.#redressPending = true
+          localStorage.setItem(REDRESS_LS, REDRESS_ARMED)
+        }
         localStorage.setItem(SETS_VERSION_LS, SETS_VERSION)
         migrated = true
+      } else if (localStorage.getItem(REDRESS_LS) === REDRESS_ARMED) {
+        // The advance happened on an earlier boot but the re-dress never got
+        // its chance — history wasn't ready, or the tab closed first.
+        this.#redressPending = true
       }
     } catch { /* localStorage unavailable — skip the one-time reset */ }
 
     // Heal a dangling active source — e.g. a retired gradient set that's no
     // longer a built-in and was never a user source. Substrate must always
-    // resolve, so fall back to the Photos default.
+    // resolve, so fall back to the ship default.
     let healed = false
-    if (activeId && !sources.some(s => s.id === activeId)) { activeId = PHOTOS_SET_ID; healed = true }
+    if (activeId && !sources.some(s => s.id === activeId)) { activeId = NATURE_SET_ID; healed = true }
 
     const builtinsChanged = registry.sources.length !== sources.length
       || BUILTIN_SETS.some(b => {
@@ -775,6 +814,49 @@ export class SubstrateService extends EventTarget {
     else setTimeout(runReconcile, 5000)
   }
 
+  // ───────────── the one-time move onto the new default ─────────────
+  //
+  // Advancing the active source only decides what a BLANK tile will be given.
+  // A hive that has been used is not blank: its tiles already wear pictures
+  // from the set it is being moved off, and leaving them there would mean the
+  // new default is a promise about tiles that don't exist yet. So the tiles
+  // wearing the OLD default are moved too — each gets its own picture from the
+  // new pool, so the wall stays varied.
+  //
+  // What is moved is exactly what `force` moves: the provenance ledger's set —
+  // every signature this service has ever ASSIGNED — plus the live pool. A
+  // picture the participant attached, pasted or edited in is not in that set
+  // and is never touched, which is the whole point of keeping the ledger.
+  //
+  // (This is NOT the removed #migrateLegacySubstrateProps below. That one
+  // cleared index entries by FORMAT and left tiles with no entry at all;
+  // restyle() clears only owned entries and re-applies in the same call, so a
+  // tile is never without one.)
+  #redressPending = false
+
+  #scheduleDefaultRedress(): void {
+    if (!this.#redressPending) return
+    this.#redressPending = false
+    const run = (): void => { void this.#redressDefaultsOntoActive() }
+    // Idle, and well after first paint: it walks the layer tree and rewrites
+    // every default-dressed tile. Nothing about it is urgent — the tiles it
+    // moves are already showing a picture.
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 15000 })
+    else setTimeout(run, 8000)
+  }
+
+  async #redressDefaultsOntoActive(): Promise<void> {
+    try {
+      await this.warmUp()
+      if (this.#propsPool.length === 0) return          // pool not ready — retry next boot
+      const places = await this.allPlaces()
+      if (places.length === 0) return                   // history not ready — retry next boot
+      const redressed = await this.restyleEverywhere()
+      for (const cell of redressed) EffectBus.emit('substrate:rerolled', { cell })
+      try { localStorage.setItem(REDRESS_LS, SETS_VERSION) } catch { /* ignore */ }
+    } catch { /* left armed — the pass is idempotent and runs again next boot */ }
+  }
+
   // (Removed: #migrateLegacySubstrateProps — a one-time pass that DELETED
   // legacy-format substrate index entries so applyToAllBlanks would re-pick a
   // new random image. It violated both invariants at once: it CLEARED index
@@ -1019,43 +1101,152 @@ export class SubstrateService extends EventTarget {
   /** Undo a pin — the whole group is available again, so tiles vary. */
   unpinImages(): void { this.#disabledImages.clear() }
 
-  /**
-   * Re-dress tiles from the active pool, replacing every DEFAULT and no
-   * EXPLICIT picture. A default is one this service placed — recorded in the
-   * provenance ledger at the moment of assignment, so it stays recognisable
-   * after its theme is gone — or one still sitting in the live pool. Anything
-   * else is the participant's: attached, pasted, edited in. It is left exactly
-   * as it is, whatever the reach.
-   *
-   * `ownedSigs` overrides the ledger for callers that know better; the default
-   * is the whole ledger, which is what a force wants.
-   *
-   * Returns the labels actually re-dressed.
-   */
-  async restyle(labels: string[], ownedSigs: ReadonlySet<string> = this.defaultSigs): Promise<string[]> {
-    if (labels.length === 0) return []
-    const index = readTilePropsIndex()
-    let cleared = 0
-    for (const label of labels) {
-      const key = await this.#indexKeyFor(label)
-      const current = lookupTilePropsSig(index, key, label)
-      if (!current || !ownedSigs.has(current)) continue
-      this.#releaseUsage(current)
-      delete index[key || label]
-      if (index[label] === current) delete index[label]
-      cleared++
-    }
-    if (cleared > 0) writeTilePropsIndex(index)
-    return this.applyToAllBlanks(labels)
+  // props sig → does that record carry `substrate: true`. Memoised for the
+  // session: tiles share pool props heavily, so a whole-hive pass usually
+  // costs a handful of reads. The same test the canonical reconciler makes.
+  #substrateProps = new Map<string, boolean>()
+
+  /** Was this props record minted by the substrate? Unreadable ⇒ false. */
+  async #isSubstrateProps(propsSig: string): Promise<boolean> {
+    const memo = this.#substrateProps.get(propsSig)
+    if (memo !== undefined) return memo
+    let result = false
+    try {
+      const blob = await this.#store()?.getResource(propsSig)
+      if (blob) result = (JSON.parse(await blob.text()) as { substrate?: unknown })?.substrate === true
+    } catch { result = false }
+    this.#substrateProps.set(propsSig, result)
+    return result
   }
 
   /**
-   * Every tile label in the hive, from the LAYER tree — the same source the
-   * swarm publishes from. Tiles are layer state and many have no OPFS
-   * directory, so a directory walk misses them. Depth-capped like the stamp
-   * pass; returns an empty list when history is not ready.
+   * Re-dress tiles from the active pool, replacing every DEFAULT and no
+   * EXPLICIT picture. A default is recognised three ways, in cost order:
+   *
+   *   1. it is in the LIVE POOL — this pool put it there;
+   *   2. it is in the provenance LEDGER — recorded at the moment of
+   *      assignment, so it survives its theme being gone;
+   *   3. its props resource carries `substrate: true` — the mark the service
+   *      writes INTO every props record it mints.
+   *
+   * The third is what makes this work on a hive older than the ledger. The
+   * ledger is participant-local and only knows what THIS browser assigned
+   * since it existed; the mark is in the bytes, so a picture placed by any
+   * pool, on any device, at any time is still recognisable as ours — which is
+   * exactly the case when a theme switch has already emptied the pool that
+   * supplied it. Without it, "move the defaults onto the new theme" silently
+   * moved nothing on a hive dressed before the ledger.
+   *
+   * Anything else is the participant's: attached, pasted, edited in. It is
+   * left exactly as it is, whatever the reach. An unreadable props record is
+   * NOT a default — the error leans, as everywhere here, toward keeping a
+   * picture that might be theirs.
+   *
+   * `ownedSigs` overrides 1 and 2 for callers that know better; the mark is
+   * always consulted. `segments` is the location the labels live at, and must
+   * be passed for anything but the current one — index entries are keyed by
+   * full lineage, so labels from elsewhere silently resolve to nothing.
+   * Returns the labels actually re-dressed.
+   */
+  async restyle(
+    labels: string[],
+    ownedSigs: ReadonlySet<string> = this.defaultSigs,
+    segments?: readonly string[],
+  ): Promise<string[]> {
+    if (labels.length === 0) return []
+    const index = readTilePropsIndex()
+    const redressed: string[] = []
+    for (const label of labels) {
+      const key = await this.#indexKeyFor(label, segments)
+      const current = lookupTilePropsSig(index, key, label)
+      if (!current) continue
+      if (!ownedSigs.has(current) && !await this.#isSubstrateProps(current)) continue
+
+      // REPLACE IN PLACE — do not clear and hand the tile to the blank path.
+      // That was the bug that made every re-dress a no-op: applyToAllBlanks
+      // refuses a tile whose CANONICAL slot holds an image, and a default we
+      // placed earlier is exactly such an image, so the cleared entry was
+      // never refilled — and the reconciler then healed it straight back from
+      // canonical. The picture never moved, on any path, and the pass looked
+      // like it had done its work. A tile with no entry at all is still the
+      // blank path's job; this one already has a picture and is ours to swap.
+      const next = this.#pickBalanced(current)
+      if (!next) break
+      this.#releaseUsage(current)
+      delete index[key || label]
+      if (index[label] === current) delete index[label]
+      index[key || label] = next.propsSig
+      this.#recordAssigned(next.propsSig)
+      await this.#restampCanonicalDefault(label, next.propsSig, segments)
+      redressed.push(label)
+    }
+    if (redressed.length > 0) writeTilePropsIndex(index)
+    return [...redressed, ...await this.applyToAllBlanks(labels, segments)]
+  }
+
+  /**
+   * Move the CANONICAL slot onto the new default too, when what it holds is a
+   * default of ours (`substrate: true`). Index and canonical must not drift:
+   * the renderer resolves through the index, the editor reads canonical, and
+   * the reconciler heals a missing index entry FROM canonical — so a stale
+   * canonical default is a picture waiting to come back. An intentional
+   * canonical image is never touched, and neither is a tile whose canonical
+   * slot could not be read.
+   */
+  async #restampCanonicalDefault(label: string, propsSig: string, segments?: readonly string[]): Promise<void> {
+    const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+    try {
+      const canonical = await readTilePropertiesAt([...segs], label) as { substrate?: unknown } | null
+      if (canonical?.substrate !== true) return
+      const blob = await this.#store()?.getResource(propsSig)
+      if (!blob) return
+      const props = JSON.parse(await blob.text()) as { small?: { image?: string }; flat?: { small?: { image?: string } } }
+      await writeTilePropertiesAt([...segs], label, {
+        ...(props?.small?.image ? { small: { image: props.small.image } } : {}),
+        ...(props?.flat?.small?.image ? { flat: { small: { image: props.flat.small.image } } } : {}),
+        substrate: true,
+      })
+    } catch { /* canonical unreadable — the index pick still stands */ }
+  }
+
+  /**
+   * Re-dress the WHOLE hive — every location, each with its own segments.
+   *
+   * This is not `restyle(await allLabels())`. Index entries are keyed by full
+   * lineage, so a flat list of names re-dressed against the CURRENT location
+   * resolves only the tiles that happen to be on the page you are standing on
+   * and silently misses the rest of the tree. Walking places keeps each name
+   * with the location it was found at, which is the only key that finds it.
+   *
+   * Returns every label actually re-dressed.
+   */
+  async restyleEverywhere(): Promise<string[]> {
+    const places = await this.allPlaces()
+    const out: string[] = []
+    for (const place of places) {
+      out.push(...await this.restyle(place.names, this.defaultSigs, place.segments))
+    }
+    return out
+  }
+
+  /**
+   * Every tile label in the hive, FLAT — the names with their locations
+   * thrown away. Safe for counting and for callers that only need names;
+   * anything that has to touch the props index wants `allPlaces()` instead,
+   * because a name without its location cannot be keyed.
    */
   async allLabels(): Promise<string[]> {
+    return (await this.allPlaces()).flatMap(p => p.names)
+  }
+
+  /**
+   * Every tile in the hive AS PLACES — each location with the names found
+   * there. From the LAYER tree, the same source the swarm publishes from:
+   * tiles are layer state and many have no OPFS directory, so a directory
+   * walk misses them. Depth-capped like the stamp pass; returns an empty list
+   * when history is not ready.
+   */
+  async allPlaces(): Promise<{ segments: string[]; names: string[] }[]> {
     const history = get('@diamondcoreprocessor.com/HistoryService') as {
       sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
       currentLayerAt?: (sig: string) => Promise<unknown>
@@ -1078,13 +1269,13 @@ export class SubstrateService extends EventTarget {
       } catch { return [] }
     }
 
-    const out: string[] = []
+    const out: { segments: string[]; names: string[] }[] = []
     const walk = async (segments: string[]): Promise<void> => {
       if (segments.length > 8) return
-      for (const name of await childNamesAt(segments)) {
-        out.push(name)
-        await walk([...segments, name])
-      }
+      const names = await childNamesAt(segments)
+      if (names.length === 0) return
+      out.push({ segments, names })
+      for (const name of names) await walk([...segments, name])
     }
     await walk([])
     return out

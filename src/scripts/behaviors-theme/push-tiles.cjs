@@ -3,6 +3,8 @@
 // → put-resource(props) → bag-set properties → stamp (index sync + repaint).
 // Idempotent: skips cells whose props already point at the target image.
 // Progress checkpointed to push-progress.json.
+// The pass ends with ONE build-record over /behaviors, so a theme sweep is a
+// single restorable step (documentation/build-revisions.md).
 //
 // Usage: node push-tiles.cjs [maxDepth]   (maxDepth 3 = root+collections+behaviors)
 const WebSocket = require('ws')
@@ -98,5 +100,21 @@ async function main() {
     }
   }
   console.log(`DONE pushed=${done} skipped=${skipped} failed=${failed} of ${entries.length}`)
+
+  // One build revision for the whole pass (documentation/build-revisions.md).
+  // Every card minted above is a resource + a `properties` anchor on its own
+  // cell — many anchors, one intent. The record seals them as ONE restorable
+  // step. A pass that changed nothing (every cell already wearing its card)
+  // mints no revision; a partial pass still records what landed, so the
+  // restorable step matches what is actually in the hive.
+  if (!done) {
+    console.log('BUILD REV     skipped — nothing changed this pass')
+    return
+  }
+  const label = `behaviors theme sweep (${done} card${done === 1 ? '' : 's'}${failed ? `, ${failed} failed` : ''})`
+  const rev = await sendRetry({ op: 'build-record', segments: ['behaviors'], label })
+  console.log(rev.ok
+    ? `BUILD REV     ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `BUILD REV     FAILED: ${rev.error}`)
 }
 main().catch(e => { console.error('FATAL', e); process.exit(1) })

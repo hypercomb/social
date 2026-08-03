@@ -102,6 +102,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // group of tiles (see assistant/changes.ts). Colon-scoped so it can never
   // collide with a tile slugged 'changes'.
   'changes:log',
+  // The context basket — signatures gathered while browsing, handed to an ask
+  // as its closure root list (see assistant/context-basket.ts). Colon-scoped
+  // so neither can collide with a tile slugged 'context' or 'changes'.
+  'context:basket',
+  'context:draft',
   'substrate:references',
   'substrate:sources',
   'tutorial:artifacts',

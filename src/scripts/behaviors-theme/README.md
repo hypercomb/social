@@ -26,7 +26,7 @@ mints its card. Two ways to stay in sync:
 |---|---|
 | `walk.cjs` | Fresh census of the behaviors tree over the bridge (path-addressed `layer-at`; child names resolved via layer bytes — never trust `inflate` for fresh subtrees) → `census.json` |
 | `gen-behavior-tiles.mjs` | Renders 512×512 cards with playwright + the repo's local Material font (Google Fonts is unreachable from agent sandboxes) → `tiles/` |
-| `push-tiles.cjs` | Bridge pipeline per cell: `put-resource(png)` → merge props (`small.image`, `substrate:false`, keep `index`/`flat`) → `bag-set properties` → `stamp` (syncs `hc:tile-props-index` + repaint). Checkpointed in `push-progress.json`, idempotent by image sig |
+| `push-tiles.cjs` | Bridge pipeline per cell: `put-resource(png)` → merge props (`small.image`, `substrate:false`, keep `index`/`flat`) → `bag-set properties` → `stamp` (syncs `hc:tile-props-index` + repaint). Checkpointed in `push-progress.json`, idempotent by image sig. Ends the pass with one `build-record` over `/behaviors` so the whole sweep is a single restorable step (`documentation/build-revisions.md`) — a pass that changed nothing mints no revision |
 | `sweep.cjs` | walk → gen → push |
 
 Prereqs: broker up (`node scripts/bridge/run-bridge.cjs`), exactly **one**

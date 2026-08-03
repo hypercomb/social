@@ -75,9 +75,41 @@ the Ember screen.
 
 | Theme | Dresses |
 |---|---|
+| `nature` (**default**) `photos` `minimal` `geometric` `abstract` | tiles |
 | `steel` `daylight` `indigo` `teal` `ember` | screen + tiles |
-| `photos` `minimal` `geometric` `abstract` `nature` | tiles |
 | `off` | clears the screen |
+
+**Nature is the ship default** — twenty scenes (hills, waves, sunset, mountains,
+dunes, night sky, pine forest, birch woods, autumn maples, waterfall, lake,
+meadow, aurora, beach, canyon, winter pines, bamboo, misty valley, wheat,
+cherry blossom), the largest group by a distance, so a wall of tiles goes a long
+way before a picture repeats. It leads the list, an unchosen `active` reads as
+`nature`, and its picture set is the substrate's default tile fill. Anyone who
+had never chosen a set — the earlier Steel and Photos ship defaults — is moved
+onto it once, by the `hc:substrate-sets-v` marker; a deliberate choice is left
+alone.
+
+**The tiles move with the default.** Advancing the source only decides what a
+*blank* tile will be given, so the one-time advance also **re-dresses every tile
+wearing an old default** — each gets its own Nature picture, so the wall stays
+varied. What moves is exactly what `force` moves: the provenance ledger plus the
+live pool — **and the `substrate: true` mark written into every props record the
+service mints**, which is the only test that recognises a picture placed before
+the ledger existed. (Without it the move found nothing on a real hive: once the
+source switches, the old pool is gone and a later ledger never saw those
+pictures.) A picture you attached, pasted or edited in carries no mark and is
+never touched; an unreadable record is not a default either. A hive-wide
+re-dress walks **places**, not names — index entries are keyed by full lineage,
+so a flat list of labels only ever resolves the page you are standing on. And a
+re-dress **replaces in place**: it does not clear the tile and hand it to the
+blank path, which refuses any tile whose canonical slot holds an image — a
+default placed earlier is exactly such an image, so the cleared entry was never
+refilled and the reconciler healed the old picture straight back. Canonical is
+restamped alongside the index whenever what it holds is a default of ours. It runs at idle on its own marker (`hc:substrate-redress-v`),
+because re-dressing needs history and the new pool, which are not ready when the
+registry loads; a boot that finds them unready leaves the pass armed and it runs
+again next time. Someone who had chosen Nature themselves is never armed and
+never re-rolled. To do the same by hand at any time: `/background nature.force-global`.
 
 The autocomplete draws each one: a theme with a screen shows that backdrop
 rendered at chip size; a tiles-only theme shows one of its own pictures. The

@@ -18,10 +18,10 @@ import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 import type { SubstrateService } from './substrate.service.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
-// Tile-substrate default is the Photos collection. The themed sets (steel,
-// daylight, …) are still selectable here via `set`, but they're primarily
-// canvas/screen backgrounds now (see /canvas), not the tile default.
-const PHOTOS_SET_ID = 'builtin:defaults'
+// Tile-substrate default is the Nature collection (twenty vector scenes). The
+// gradient sets (steel, daylight, …) are still selectable here via `set`, but
+// they're primarily canvas/screen backgrounds now (see /background).
+const DEFAULT_TILES_SET_ID = 'builtin:theme-nature'
 
 export class SubstrateQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -119,7 +119,7 @@ export class SubstrateQueenBee extends QueenBee {
         const registry = service.registry
         const target = registry.sources.find(s => s.id === registry.activeId)
                     ?? registry.sources.find(s => !s.builtin)
-                    ?? registry.sources.find(s => s.id === PHOTOS_SET_ID)
+                    ?? registry.sources.find(s => s.id === DEFAULT_TILES_SET_ID)
         if (!target) { this.#toast('no substrate sources'); return }
         await service.setActive(target.id)
         await this.#refreshVisible(service)
@@ -130,9 +130,9 @@ export class SubstrateQueenBee extends QueenBee {
       case 'reset':
       case 'defaults': {
         await service.clearHive()
-        await service.setActive(PHOTOS_SET_ID)
+        await service.setActive(DEFAULT_TILES_SET_ID)
         await this.#refreshVisible(service)
-        this.#toast('substrate reset to Photos')
+        this.#toast('substrate reset to Nature')
         return
       }
 

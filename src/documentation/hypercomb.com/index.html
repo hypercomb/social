@@ -1,103 +1,168 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Hypercomb is a spatial home for ideas, files, and shared work—owned by you.">
-  <meta name="theme-color" content="#11161a">
-  <title>Hypercomb — Make a place for what matters</title>
-  <link rel="icon" href="assets/hypercomb.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Welcome to Hypercomb. Open the browser app and find the project downloads currently available to the community.">
+  <meta name="theme-color" content="#f7f0e5">
+  <meta property="og:title" content="Hypercomb — a place to think in">
+  <meta property="og:description" content="Open Hypercomb and find the project downloads available to the community.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://hypercomb.com/">
+  <meta property="og:image" content="https://hypercomb.com/assets/og.png">
+  <meta property="og:image:alt" content="A warm illustrated field of connected hexagonal places with a bee tracing a figure eight, beside the words A place to think in.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Hypercomb — a place to think in">
+  <meta name="twitter:description" content="Open Hypercomb and find the project downloads available to the community.">
+  <meta name="twitter:image" content="https://hypercomb.com/assets/og.png">
+  <title>Welcome to Hypercomb</title>
+  <link rel="icon" href="assets/hypercomb-mark.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/hypercomb.png">
   <link rel="stylesheet" href="styles.css">
+  <script>document.documentElement.className='js'</script>
 </head>
 <body>
-  <a class="skip" href="#main">Skip to content</a>
-  <header class="nav" aria-label="Main navigation">
-    <a class="brand" href="#top" aria-label="Hypercomb home"><span class="brand-mark">⬡</span> hypercomb</a>
-    <nav>
-      <a href="#why">Why Hypercomb</a>
+  <a class="skip-link" href="#main">Skip to downloads</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="#top" aria-label="Hypercomb home">
+      <img src="assets/hypercomb-outline.svg" alt="" width="25" height="22">
+      <span>hypercomb</span>
+    </a>
+    <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav">
+      <span class="sr-only">Open navigation</span><i></i><i></i>
+    </button>
+    <nav id="site-nav" aria-label="Page navigation">
+      <a href="https://diamondcoreprocessor.com">Use online</a>
       <a href="#downloads">Downloads</a>
-      <a href="../index.html">Documentation</a>
+      <a href="https://github.com/hypercomb/social/tree/main/documentation">Documentation</a>
+      <a href="https://github.com/hypercomb/social">Source</a>
     </nav>
-    <a class="nav-cta" href="#downloads">Get Hypercomb</a>
   </header>
 
   <main id="main">
-    <section class="hero" id="top">
-      <div class="hero-copy">
-        <p class="eyebrow"><span></span> A place for everything you’re thinking</p>
-        <h1>Make a place<br>for what <em>matters.</em></h1>
-        <p class="lede">Hypercomb turns notes, files, links, and conversations into a living landscape you can move through—private by default, connected when you choose.</p>
-        <div class="actions">
-          <a class="button primary" href="#downloads">Choose your download <span>↓</span></a>
-          <a class="button quiet" href="https://diamondcoreprocessor.com">Open in your browser <span>↗</span></a>
+    <section class="welcome" id="top">
+      <div class="welcome-copy">
+        <p class="eyebrow"><span></span> Welcome</p>
+        <h1>Hypercomb is here<br>for you to use.</h1>
+        <p class="lede">A live, spatial workspace for notes, files, links, and conversations. Open the hive in your browser, or take any of the small tools the project currently shares.</p>
+        <div class="welcome-actions">
+          <a class="button primary" href="https://diamondcoreprocessor.com">Open Hypercomb <span aria-hidden="true">↗</span></a>
+          <a class="button secondary" href="#downloads">Go to downloads <span aria-hidden="true">↓</span></a>
         </div>
-        <p class="micro">No account required to begin · Your hive stays yours</p>
+        <p class="trust-line">No account to begin <i>·</i> No central server <i>·</i> Publishing is explicit</p>
       </div>
-      <div class="hive-scene" aria-label="A spatial constellation of connected ideas">
-        <div class="glow"></div>
-        <div class="tile t1"><b>Ideas</b><small>12 thoughts</small></div>
-        <div class="tile t2"><b>Research</b><small>sources & notes</small></div>
-        <div class="tile t3 active"><span class="bee">◆</span><b>Your hive</b><small>everything connects</small></div>
-        <div class="tile t4"><b>People</b><small>shared with you</small></div>
-        <div class="tile t5"><b>Projects</b><small>work in motion</small></div>
-        <div class="tile t6"><b>Memory</b><small>never flattened</small></div>
-      </div>
-    </section>
 
-    <section class="principles" id="why">
-      <p class="section-kicker">A different shape for your digital life</p>
-      <h2>Not another feed. A place you can inhabit.</h2>
-      <div class="principle-grid">
-        <article><span>01</span><h3>See the relationships</h3><p>Your work lives in context. Arrange it spatially, follow connections, and understand the whole without losing the details.</p></article>
-        <article><span>02</span><h3>Keep your own memory</h3><p>Content is signature-addressed and histories are append-only. What you make remains verifiable, portable, and yours.</p></article>
-        <article><span>03</span><h3>Share by presence</h3><p>Invite people into the parts that matter. Collaborate without turning your private world into somebody else’s database.</p></article>
-      </div>
+      <aside class="quick-access" aria-label="Hypercomb available now">
+        <div class="quick-art" aria-hidden="true">
+          <div class="mini-cell c1"></div><div class="mini-cell c2"></div><div class="mini-cell c3"></div>
+          <div class="mini-cell c4"></div><div class="mini-cell c5"></div><div class="mini-cell c6"></div><div class="mini-cell c7"></div>
+          <div class="mini-bee">◆</div>
+        </div>
+        <div class="quick-content">
+          <p><span class="live-dot"></span> Available now</p>
+          <h2>Use Hypercomb in a browser</h2>
+          <span>Nothing to install. Works in a modern browser.</span>
+          <a href="https://diamondcoreprocessor.com">Enter the hive <b aria-hidden="true">↗</b></a>
+        </div>
+      </aside>
     </section>
 
     <section class="downloads" id="downloads">
-      <div class="download-heading">
-        <div><p class="section-kicker">Take your hive with you</p><h2>Hypercomb, wherever you work.</h2></div>
-        <p>Desktop apps are being prepared for their first public release. Use Hypercomb in the browser today, or explore the participant tools already available.</p>
-      </div>
-      <div class="platform-grid">
-        <article class="platform featured">
-          <div class="platform-top"><span class="os">⊞</span><span class="status">Coming next</span></div>
-          <h3>Windows</h3><p>A native hive with local storage and the full desktop experience.</p>
-          <button disabled>Windows installer soon</button><small>Planned: MSI and setup executable</small>
+      <header class="section-head">
+        <div><p class="eyebrow"><span></span> Downloads</p><h2>Files from the project</h2></div>
+        <p>Only files that actually exist are offered here. There are no installers hidden behind unavailable buttons.</p>
+      </header>
+
+      <section class="desktop" aria-labelledby="desktop-heading">
+        <div class="subhead">
+          <p class="overline">Desktop application</p>
+          <h3 id="desktop-heading">Not publicly released yet</h3>
+          <p>Windows, macOS, and Linux downloads will appear here after tested release artifacts are ready.</p>
+        </div>
+        <div class="platform-list" role="list" aria-label="Desktop release status">
+          <div class="platform" role="listitem">
+            <span class="platform-name"><i class="windows-icon" aria-hidden="true"></i>Windows</span>
+            <span class="status">Not released</span>
+            <small>Intended formats: MSI · setup executable</small>
+          </div>
+          <div class="platform" role="listitem">
+            <span class="platform-name"><i aria-hidden="true">●</i>macOS</span>
+            <span class="status">Not released</span>
+            <small>Intended formats: DMG · application bundle</small>
+          </div>
+          <div class="platform" role="listitem">
+            <span class="platform-name"><i aria-hidden="true">⌁</i>Linux</span>
+            <span class="status">Not released</span>
+            <small>Intended formats: AppImage · DEB</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="available" aria-labelledby="available-heading">
+        <div class="available-head">
+          <div><p class="overline">Available now</p><h3 id="available-heading">Browser utilities</h3></div>
+          <p>Optional Chrome and Edge extensions made alongside Hypercomb.</p>
+        </div>
+
+        <article class="file-row">
+          <div class="file-icon" aria-hidden="true"><span>↗</span><small>ZIP</small></div>
+          <div class="file-copy">
+            <p class="file-meta">Chrome / Edge · version 1.2.0</p>
+            <h4>Smart Autolinker</h4>
+            <p>Turns words and phrases you choose into links while writing in rich-text editors.</p>
+            <div class="file-details">
+              <details><summary>Install</summary><ol><li>Download and extract the ZIP.</li><li>Open the browser’s Extensions page.</li><li>Enable Developer mode and choose “Load unpacked.”</li><li>Select the extracted folder.</li></ol></details>
+              <details><summary>Permissions</summary><p>Uses browser storage and requests access to all sites and frames so it can work inside editors you enable. The source is included for inspection.</p></details>
+              <details><summary>Verify file</summary><div class="checksum"><code>54EBDFCB8028D7C0F1A0BDF863A85A3A721891EF20085BDE5EDB9F00A8628CB6</code><button type="button" data-copy="54EBDFCB8028D7C0F1A0BDF863A85A3A721891EF20085BDE5EDB9F00A8628CB6">Copy SHA-256</button></div></details>
+            </div>
+          </div>
+          <div class="file-action">
+            <span>ZIP · 12,515 bytes</span>
+            <a class="download-button" href="downloads/smart-autolinker.zip" download>Download <b aria-hidden="true">↓</b></a>
+            <a class="source-link" href="https://github.com/hypercomb/social/tree/main/hypercomb-extensions/smart-autolinker">View source <b aria-hidden="true">↗</b></a>
+          </div>
         </article>
-        <article class="platform">
-          <div class="platform-top"><span class="os">●</span><span class="status">In testing</span></div>
-          <h3>macOS</h3><p>The same hive, at home on Apple silicon and macOS.</p>
-          <button disabled>macOS download soon</button><small>Planned: signed and notarized DMG</small>
+
+        <article class="file-row">
+          <div class="file-icon" aria-hidden="true"><span>▶</span><small>ZIP</small></div>
+          <div class="file-copy">
+            <p class="file-meta">Chrome / Edge · version 1.0.0</p>
+            <h4>No YouTube Shorts</h4>
+            <p>Removes Shorts surfaces from YouTube and can be switched on or off from its toolbar popup.</p>
+            <div class="file-details">
+              <details><summary>Install</summary><ol><li>Download and extract the ZIP.</li><li>Open the browser’s Extensions page.</li><li>Enable Developer mode and choose “Load unpacked.”</li><li>Select the extracted folder.</li></ol></details>
+              <details><summary>Permissions</summary><p>Runs only on YouTube hosts and uses browser storage to remember whether it is enabled.</p></details>
+              <details><summary>Verify file</summary><div class="checksum"><code>69436F0BBBF88E1451CB0FF556C06802F4FE86B7134CCC44CA61FAABFD5C43C0</code><button type="button" data-copy="69436F0BBBF88E1451CB0FF556C06802F4FE86B7134CCC44CA61FAABFD5C43C0">Copy SHA-256</button></div></details>
+            </div>
+          </div>
+          <div class="file-action">
+            <span>ZIP · 3,313 bytes</span>
+            <a class="download-button" href="downloads/no-youtube-shorts.zip" download>Download <b aria-hidden="true">↓</b></a>
+            <a class="source-link" href="https://github.com/hypercomb/social/tree/main/hypercomb-extensions/no-youtube-shorts">View source <b aria-hidden="true">↗</b></a>
+          </div>
         </article>
-        <article class="platform">
-          <div class="platform-top"><span class="os">⌁</span><span class="status">Planned</span></div>
-          <h3>Linux</h3><p>A portable desktop build for the open platforms you choose.</p>
-          <button disabled>Linux download soon</button><small>Planned: AppImage and DEB</small>
-        </article>
-      </div>
-      <div class="browser-card">
-        <div><span class="live-dot"></span><p class="section-kicker">Available now</p><h3>Nothing to install</h3><p>Enter the living web version of Hypercomb from any modern browser.</p></div>
-        <a class="button primary" href="https://diamondcoreprocessor.com">Open Hypercomb <span>↗</span></a>
-      </div>
+      </section>
     </section>
 
-    <section class="tools" aria-labelledby="tools-title">
-      <div class="tools-intro"><p class="section-kicker">Useful little workers</p><h2 id="tools-title">Tools from around the hive.</h2><p>Optional Chrome and Edge extensions made alongside Hypercomb. Install only the ones useful to you.</p></div>
-      <div class="tool-list">
-        <article><div class="tool-icon">↗</div><div><h3>Smart Autolinker</h3><p>Turn the words and phrases you choose into links while writing in rich-text editors.</p><span>Chrome · Edge · Manifest V3</span></div><a href="downloads/smart-autolinker.zip" download>Download ZIP <span>↓</span></a></article>
-        <article><div class="tool-icon">▶</div><div><h3>No YouTube Shorts</h3><p>A small, quiet extension that removes Shorts from YouTube while you browse.</p><span>Chrome · Edge · Manifest V3</span></div><a href="downloads/no-youtube-shorts.zip" download>Download ZIP <span>↓</span></a></article>
-      </div>
-      <p class="install-note">Browser extensions are currently installed in Developer mode using “Load unpacked.” Instructions are included inside each download.</p>
-    </section>
-
-    <section class="closing">
-      <div class="closing-mark">⬡</div><p class="section-kicker">Begin anywhere</p><h2>Your ideas already belong together.</h2><p>Hypercomb gives them somewhere to meet.</p>
-      <div class="actions"><a class="button primary" href="https://diamondcoreprocessor.com">Enter Hypercomb <span>↗</span></a><a class="button quiet" href="../getting-started.md">Read the introduction</a></div>
+    <section class="help" aria-labelledby="help-heading">
+      <div><p class="eyebrow"><span></span> Need a hand?</p><h2 id="help-heading">Keep exploring</h2></div>
+      <nav aria-label="Project resources">
+        <a href="https://github.com/hypercomb/social/blob/main/documentation/getting-started.md"><span><small>Start here</small>Getting started</span><b aria-hidden="true">→</b></a>
+        <a href="https://github.com/hypercomb/social/tree/main/documentation"><span><small>Reference</small>Documentation</span><b aria-hidden="true">↗</b></a>
+        <a href="https://github.com/hypercomb/social"><span><small>Open source</small>Project repository</span><b aria-hidden="true">↗</b></a>
+        <a href="https://github.com/hypercomb/social/blob/main/documentation/licensing.md"><span><small>Reuse</small>Licensing</span><b aria-hidden="true">→</b></a>
+      </nav>
     </section>
   </main>
 
-  <footer><a class="brand" href="#top"><span class="brand-mark">⬡</span> hypercomb</a><p>Signature-addressed. Presence-based. Yours.</p><div><a href="../index.html">Docs</a><a href="../licensing.md">Licensing</a><a href="../security.md">Security</a></div><small>© <span id="year"></span> Hypercomb</small></footer>
+  <footer class="site-footer">
+    <a class="wordmark" href="#top"><img src="assets/hypercomb-outline.svg" alt="" width="25" height="22"><span>hypercomb</span></a>
+    <p>Made available to the community.</p>
+    <p>Code: AGPL-3.0-only<br>Documentation: CC BY-SA 4.0</p>
+    <small>© <span id="year"></span> Hypercomb</small>
+  </footer>
+
   <script src="script.js"></script>
 </body>
 </html>

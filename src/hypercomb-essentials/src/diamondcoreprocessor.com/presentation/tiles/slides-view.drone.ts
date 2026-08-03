@@ -74,6 +74,7 @@ import { isImageUrl, sniffImageMime } from '../../link/photo.js'
 import { embedUrlFor, mediaKindForUrl, kindForMime, type PlayableKind } from '../../link/media.js'
 import { TAG_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
+import { bindAxes, walkFrom, landOnWalkTarget } from './viewer-walk.js'
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
@@ -298,10 +299,20 @@ export class SlidesViewDrone extends Drone {
         else media.pause()
         return
       }
+      // SHIFT+sideways is the tile walk, for a keyboard. The bare arrows keep
+      // the presentation convention (either axis turns the page) — a deck that
+      // stopped advancing on → because a phone gesture was redesigned would be
+      // a worse deck. On touch the two axes are distinct; see #walk.
       case 'ArrowRight': case 'ArrowDown': case 'PageDown':
-        e.preventDefault(); e.stopImmediatePropagation(); this.#step(1); return
+        e.preventDefault(); e.stopImmediatePropagation()
+        if (e.shiftKey && e.key === 'ArrowRight') this.#walk(1)
+        else this.#step(1)
+        return
       case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
-        e.preventDefault(); e.stopImmediatePropagation(); this.#step(-1); return
+        e.preventDefault(); e.stopImmediatePropagation()
+        if (e.shiftKey && e.key === 'ArrowLeft') this.#walk(-1)
+        else this.#step(-1)
+        return
       case 'Home':
         e.preventDefault(); e.stopImmediatePropagation(); this.#show(0); return
       case 'End':
@@ -764,6 +775,14 @@ export class SlidesViewDrone extends Drone {
       'display:flex;align-items:center;justify-content:center;font-family:inherit;'
     // Opt out of the always-on hex wheel-zoom handler so wheel isn't swallowed.
     host.setAttribute('data-consumes-wheel', '')
+    // THE TWO AXES (viewer-walk.ts). Up/down turns the page — the deck is the
+    // scroller. Sideways leaves this tile for the next one along the row and
+    // stays in the deck if that tile has one. Purely additive: this viewer had
+    // no touch gesture at all before, so nothing is being taken away.
+    bindAxes(host, {
+      vertical: delta => this.#step(delta),
+      sideways: delta => this.#walk(delta),
+    })
     document.body.appendChild(host)
 
     // Stage — a definite-size box the slide's element mounts INTO. ONE stage,
@@ -863,6 +882,31 @@ export class SlidesViewDrone extends Drone {
   /** Move `delta` slides from the current index (clamped, no wrap). */
   #step(delta: number): void {
     this.#show(this.#index + delta)
+  }
+
+  /**
+   * SIDEWAYS — leave this tile for the next one along the row, and stay in the
+   * deck if it has one (`viewer-walk.ts` decides which).
+   *
+   * Only offered for a TARGETED deck: opened for a specific tile, the row is
+   * the layer that tile sits on and the walk is along it. A bare `/present` of
+   * wherever you are standing has no such row — you are INSIDE the deck cell,
+   * not beside it — and `walkFrom` returns null there anyway, because the
+   * label is not in the rendered row.
+   */
+  #walk(delta: number): void {
+    const surface = this.#surface()
+    const label = this.#targetSegments?.[this.#targetSegments.length - 1]
+    if (!surface || !label) return
+    const target = walkFrom(label, surface, delta)
+    if (!target) return
+    landOnWalkTarget(surface, target, () => {
+      // The way out of THIS viewer, and only used when the next tile has no
+      // deck of its own: drop the target so the next bare open is honest, then
+      // flip the surface off. The close-up mounts its own host over the hive.
+      this.#targetSegments = null
+      this.#vm()?.setMode('hexagons')
+    })
   }
 
   /** Render slide `i` (clamped). Title / caption / counter / dots update
