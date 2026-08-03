@@ -105,6 +105,68 @@ type LayerSlotRegistryLike = {
 export const isSignature = (value: unknown): boolean =>
   typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
 
+// ── Picture ownership: `participant: true` is IN STONE ───────────────
+//
+// A tile's picture comes from one of two places, and the difference has
+// to survive in the BYTES, because every other way of telling them apart
+// is participant-local and forgettable:
+//
+//   substrate: true   — a default this app placed from a theme's pool.
+//                       Themes may move it, `force` may replace it.
+//   participant: true — a picture a PERSON put there. Nothing automatic
+//                       ever touches it again. Not a theme change, not
+//                       `/background <theme>.force`, not force-global,
+//                       not a boot-time re-dress.
+//
+// The mark is written HERE, on the one canonical write path, rather than
+// by each of the twenty-odd callers that can set a picture (editor, file
+// drop, paste, link preview, peer image choice, the assistant). A caller
+// that means "this is a default" says so by passing `substrate: true`;
+// everyone else setting a picture is, by definition, a person doing it.
+//
+// This also closes the way the mark used to LEAK. `writeTilePropertiesAt`
+// merges over what is already there, so a tile that once wore a substrate
+// default carried `substrate: true` forward into every later edit — the
+// participant's own picture then looked like a default to the re-dress
+// pass and got overwritten hive-wide. Setting a picture now CLEARS the
+// substrate mark in the same merge that sets the participant one: the two
+// marks can never both be true, and the tile can never drift back.
+export const PARTICIPANT_MARK = 'participant'
+export const SUBSTRATE_MARK = 'substrate'
+
+/** The picture-bearing keys of a props bag. `large` is the editor's
+ *  full-resolution original — the substrate pool never writes one. */
+const imageSigsOf = (props: unknown): string[] => {
+  const p = props as any
+  return [p?.small?.image, p?.flat?.small?.image, p?.large?.image, p?.imageSig]
+    .filter(v => isSignature(v)) as string[]
+}
+
+/** Does this props bag carry a picture at all? */
+export const hasTileImage = (props: unknown): boolean => imageSigsOf(props).length > 0
+
+/**
+ * Is this tile's picture the PARTICIPANT'S — untouchable by any default,
+ * theme or force? Three ways to be theirs, and any one is enough:
+ *
+ *   1. the mark says so (`participant: true`) — every write from here on;
+ *   2. it has a `large` original — only the tile editor writes one, so a
+ *      hive edited before the mark existed still reads as theirs;
+ *   3. it has a picture and is NOT marked `substrate: true` — the pool
+ *      marks everything it mints, so an unmarked picture came from a
+ *      person.
+ *
+ * Rule 2 outranks the substrate mark deliberately: a pre-mark edit on a
+ * once-defaulted tile inherited `substrate: true` through the merge, and
+ * the `large` is the proof of whose picture it actually is.
+ */
+export const isParticipantImage = (props: unknown): boolean => {
+  const p = props as any
+  if (p?.[PARTICIPANT_MARK] === true) return true
+  if (isSignature(p?.large?.image)) return true
+  return hasTileImage(p) && p?.[SUBSTRATE_MARK] !== true
+}
+
 // ── Participant-local props index (`hc:tile-props-index`) ────────────
 //
 // A localStorage cache of tile → props-resource sig used by the render
@@ -478,6 +540,17 @@ export const writeTilePropertiesAt = async (
     // moment `history.sign` changes.
     const existing = await readTilePropertiesAt(parentSegments, cellName)
     const merged: Record<string, unknown> = { ...existing, ...updates }
+
+    // OWNERSHIP, decided in the merge. A write that SETS a picture and does
+    // not declare itself a substrate default is a person putting a picture
+    // on a tile: mark it theirs and drop any inherited substrate mark, so
+    // the two can never both be true and a later theme pass can never
+    // mistake their picture for one of its own. A write that touches no
+    // picture leaves both marks exactly as they were.
+    if (hasTileImage(updates) && updates[SUBSTRATE_MARK] !== true) {
+      delete merged[SUBSTRATE_MARK]
+      merged[PARTICIPANT_MARK] = true
+    }
 
     // Drop keys whose value is `undefined` — JSON.stringify would skip
     // them anyway, but dropping here keeps the merged object iterable

@@ -399,6 +399,7 @@
   "history.marked-empty": "no marked points yet",
   "history.group-step": "group step — undo/redo skips edits and jumps to the earliest tile add/remove",
   "slash.remove-builtin": "remove selected tiles",
+  "slash.heal": "Restore participant pictures a default overwrote",
   "slash.help": "Show reference",
   "slash.history": "Toggle the history panel",
   "slash.rewind": "Open the visual rewind window",

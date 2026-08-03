@@ -40,6 +40,9 @@ const GLYPHS = {
   meeting: 'groups',
   accent: 'colorize', border: 'border_style', canvas: 'texture',
   backgrounds: 'image', substrate: 'grid_on', reroll: 'casino', theme: 'palette',
+  heal: 'healing',
+  // the toolchain that renders these cards, mirrored under appearance
+  'behaviors-theme': 'auto_fix_high',
   header: 'web_asset', format: 'format_paint', 'text-only': 'text_fields',
   background: 'landscape',
   keyword: 'label', remove: 'delete', move: 'open_with', arrange: 'dashboard_customize',

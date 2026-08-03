@@ -44,7 +44,8 @@ import {
   readImagesFromHandle,
   isFolderAccessSupported,
 } from './folder-handles.js'
-import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, isParticipantImage, isSignature } from '../editor/tile-properties.js'
+import { renderTileSmall } from './tile-small-render.js'
 
 const PROPS_FILE = '0000'                    // legacy per-hive dir props (read-fallback)
 const HIVE_KEY = 'substrate'                 // per-hive override (path string)
@@ -245,6 +246,26 @@ async function renderToHexBox(blob: Blob, w: number, h: number): Promise<Blob> {
   } finally {
     bitmap.close()
   }
+}
+
+/** The framing a person chose, when one was saved. Zeroes are meaningful
+ *  (a centred picture), so only a missing `scale` means "no framing". */
+function framingOf(saved: unknown): { x: number; y: number; scale: number } | undefined {
+  const t = saved as { x?: unknown; y?: unknown; scale?: unknown } | undefined
+  if (typeof t?.scale !== 'number' || !(t.scale > 0)) return undefined
+  return {
+    x: typeof t.x === 'number' ? t.x : 0,
+    y: typeof t.y === 'number' ? t.y : 0,
+    scale: t.scale,
+  }
+}
+
+/** Did a person ever work on this tile's look? Used only to REPORT tiles
+ *  the healing pass cannot redraw — a substrate-marked tile carrying a
+ *  person's framing, link or colours but no original to draw from. */
+function hasParticipantTrace(props: unknown): boolean {
+  const p = props as any
+  return Boolean(p?.large || p?.border?.color || p?.background?.color || p?.link)
 }
 
 /**
@@ -1106,14 +1127,21 @@ export class SubstrateService extends EventTarget {
   // costs a handful of reads. The same test the canonical reconciler makes.
   #substrateProps = new Map<string, boolean>()
 
-  /** Was this props record minted by the substrate? Unreadable ⇒ false. */
+  /** Was this props record minted by the substrate? Unreadable ⇒ false.
+   *  A record the PARTICIPANT owns is never ours, whatever else it says —
+   *  a pre-mark edit on a once-defaulted tile inherited `substrate: true`
+   *  through the props merge, and its `large` original is the proof of
+   *  whose picture it really is. */
   async #isSubstrateProps(propsSig: string): Promise<boolean> {
     const memo = this.#substrateProps.get(propsSig)
     if (memo !== undefined) return memo
     let result = false
     try {
       const blob = await this.#store()?.getResource(propsSig)
-      if (blob) result = (JSON.parse(await blob.text()) as { substrate?: unknown })?.substrate === true
+      if (blob) {
+        const record = JSON.parse(await blob.text()) as { substrate?: unknown }
+        result = record?.substrate === true && !isParticipantImage(record)
+      }
     } catch { result = false }
     this.#substrateProps.set(propsSig, result)
     return result
@@ -1160,6 +1188,14 @@ export class SubstrateService extends EventTarget {
       const key = await this.#indexKeyFor(label, segments)
       const current = lookupTilePropsSig(index, key, label)
       if (!current) continue
+      // THE CANONICAL SLOT IS ASKED FIRST, and a "theirs" answer is final.
+      // The index is a participant-local cache that can hold a stale
+      // substrate sig long after a person put their own picture on the tile
+      // — reading only the index is how a hive-wide force overwrote
+      // hand-made tiles while the editor still showed the original.
+      // Canonical is where the participant's picture lives, so canonical
+      // decides ownership, and an unreadable canonical counts as theirs.
+      if (await this.#canonicalIsParticipants(label, segments)) continue
       if (!ownedSigs.has(current) && !await this.#isSubstrateProps(current)) continue
 
       // REPLACE IN PLACE — do not clear and hand the tile to the blank path.
@@ -1198,6 +1234,9 @@ export class SubstrateService extends EventTarget {
     try {
       const canonical = await readTilePropertiesAt([...segs], label) as { substrate?: unknown } | null
       if (canonical?.substrate !== true) return
+      // Marked ours AND owned by them — a pre-mark edit that inherited the
+      // substrate mark through the merge. Theirs wins; leave it alone.
+      if (isParticipantImage(canonical)) return
       const blob = await this.#store()?.getResource(propsSig)
       if (!blob) return
       const props = JSON.parse(await blob.text()) as { small?: { image?: string }; flat?: { small?: { image?: string } } }
@@ -1227,6 +1266,128 @@ export class SubstrateService extends EventTarget {
       out.push(...await this.restyle(place.names, this.defaultSigs, place.segments))
     }
     return out
+  }
+
+  // ───────────────────── healing participant pictures ─────────────────────
+  //
+  // A default was allowed to overwrite pictures people had made. The mark
+  // that says "this one is theirs" leaked through the props merge, so an
+  // edit on a once-defaulted tile still looked like a default, and a
+  // hive-wide re-dress replaced its small renders with pool pictures.
+  //
+  // The damage is REPAIRABLE, and the reason is the whole point of keeping
+  // the original: the re-dress only ever replaced the two SMALL renders.
+  // The participant's full-resolution `large` and the framing they chose
+  // were never touched — which is why the edit screen still shows the
+  // right picture on a tile whose hex shows a default. Drawing the small
+  // renders again from that original restores exactly what was there.
+  //
+  // The pass is idempotent, walks the whole hive, and touches nothing it
+  // cannot prove was damaged: a tile qualifies only when it is MARKED as a
+  // substrate default and yet holds a participant original underneath.
+  // Every tile it heals comes back marked `participant: true`, so it is in
+  // stone from then on.
+
+  /**
+   * Repair every tile whose picture a default overwrote. Returns what it
+   * found: healed labels, and the ones that look damaged but keep no
+   * original to redraw from (nothing is invented for those — they are
+   * reported so the participant knows where to look).
+   */
+  async healParticipantImages(
+    options: { dryRun?: boolean; onProgress?: (done: number, total: number) => void } = {},
+  ): Promise<{ healed: string[]; unrecoverable: string[]; scanned: number }> {
+    const { dryRun = false, onProgress } = options
+    const store = this.#store()
+    const settings = get('@diamondcoreprocessor.com/Settings') as
+      { hexWidth(o: 'point-top' | 'flat-top'): number; hexHeight(o: 'point-top' | 'flat-top'): number } | undefined
+    const healed: string[] = []
+    const unrecoverable: string[] = []
+    if (!store || !settings) return { healed, unrecoverable, scanned: 0 }
+
+    const places = await this.allPlaces()
+    const total = places.reduce((n, p) => n + p.names.length, 0)
+    let scanned = 0
+    const index = readTilePropsIndex()
+    let indexDirty = false
+
+    for (const place of places) {
+      for (const label of place.names) {
+        scanned++
+        onProgress?.(scanned, total)
+        let props: any
+        try {
+          const stats: { cold?: boolean } = {}
+          props = await readTilePropertiesAt([...place.segments], label, stats)
+          if (stats.cold) continue
+        } catch { continue }
+
+        // Damaged = wearing our mark while holding their original. A tile
+        // that is honestly ours (no original) is left alone, and so is one
+        // already marked theirs.
+        if (props?.substrate !== true) continue
+        const original = props?.large?.image
+        if (!isSignature(original)) {
+          if (props?.participant !== true && hasParticipantTrace(props)) unrecoverable.push(label)
+          continue
+        }
+
+        const blob = await store.getResource(original as string)
+        if (!blob) { unrecoverable.push(label); continue }
+        // The survey stops here: same tiles, same test, nothing written.
+        if (dryRun) { healed.push(label); continue }
+
+        try {
+          const point = await renderTileSmall(blob, {
+            width: Math.round(settings.hexWidth('point-top')),
+            height: Math.round(settings.hexHeight('point-top')),
+            orientation: 'point-top',
+            framing: framingOf(props?.large),
+            background: props?.background?.color,
+            border: props?.border?.color,
+          })
+          const flat = await renderTileSmall(blob, {
+            width: Math.round(settings.hexWidth('flat-top')),
+            height: Math.round(settings.hexHeight('flat-top')),
+            orientation: 'flat-top',
+            framing: framingOf(props?.flat?.large),
+            background: props?.background?.color,
+            border: props?.border?.color,
+          })
+          const pointSig = await store.putResource(point)
+          const flatSig = await store.putResource(flat)
+
+          // Canonical first — it is the truth, and `substrate: undefined`
+          // drops the mark in the merge while the picture keys earn the
+          // participant one. Then the local index, so this browser renders
+          // the healed picture without waiting for the reconciler.
+          await writeTilePropertiesAt([...place.segments], label, {
+            small: { image: pointSig },
+            flat: { ...(props?.flat ?? {}), small: { image: flatSig } },
+            substrate: undefined,
+          })
+          const healedSig = await readTilePropsSigAt([...place.segments], label)
+          if (healedSig) {
+            const key = await this.#indexKeyFor(label, place.segments)
+            this.#releaseUsage(lookupTilePropsSig(index, key, label))
+            index[key || label] = healedSig
+            if (key && index[label]) delete index[label]
+            indexDirty = true
+          }
+          healed.push(label)
+          EffectBus.emit('substrate:rerolled', { cell: label })
+        } catch { unrecoverable.push(label) }
+      }
+    }
+
+    if (indexDirty) writeTilePropsIndex(index)
+    return { healed, unrecoverable, scanned }
+  }
+
+  /** What `healParticipantImages` WOULD do — the same walk and the same
+   *  damage test, with every write skipped. */
+  async surveyParticipantImages(): Promise<{ healed: string[]; unrecoverable: string[]; scanned: number }> {
+    return await this.healParticipantImages({ dryRun: true })
   }
 
   /**
@@ -1357,6 +1518,25 @@ export class SubstrateService extends EventTarget {
       const img = props?.small?.image ?? props?.flat?.small?.image
       return typeof img === 'string' && /^[0-9a-f]{64}$/.test(img)
     } catch { return true }                // read threw — same reasoning
+  }
+
+  /**
+   * Does this tile's CANONICAL props say the picture is the participant's?
+   *
+   * The one question every overwrite path has to ask before it touches a
+   * tile. An unreadable or cold canonical answers YES — the error leans,
+   * as everywhere in this file, toward keeping a picture that might be
+   * theirs. A tile with no picture at all answers no; it is the blank
+   * path's job, not an overwrite.
+   */
+  async #canonicalIsParticipants(label: string, segments?: readonly string[]): Promise<boolean> {
+    const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+    const stats: { cold?: boolean } = {}
+    try {
+      const props = await readTilePropertiesAt([...segs], label, stats)
+      if (stats.cold) return true
+      return isParticipantImage(props)
+    } catch { return true }
   }
 
   async applyToCell(label: string, segments?: readonly string[]): Promise<boolean> {

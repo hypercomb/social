@@ -61,6 +61,49 @@ treated as explicit and survive. It never grows the set force may destroy.
 hive is not a look, and it is the one combination rerolling cannot undo. Pin a
 picture for a layer; never for the whole tree.
 
+### Ownership is a mark in the bytes, not a local ledger
+
+The ledger above is participant-local and forgettable, so the decisive test is a
+mark carried in the tile's own canonical properties:
+
+| Mark | Meaning |
+|---|---|
+| `substrate: true` | placed from a theme's pool — themes may move it |
+| `participant: true` | a person put it there — nothing automatic touches it, ever |
+
+The mark is written on the one canonical write path (`writeTilePropertiesAt`),
+not by the twenty-odd callers that can set a picture. A caller that means *this
+is a default* passes `substrate: true`; every other write that sets a picture is
+a person doing it, so it earns `participant: true` **and clears the substrate
+mark in the same merge**. The two can never both be true.
+
+A tile also reads as the participant's when it holds a `large` original (only
+the editor writes one) or when it has a picture and is not marked as a default —
+so a hive edited before the mark existed is still read correctly.
+
+**The regression this closes.** Properties are written by merging over what is
+already there, so a tile that had once worn a default carried `substrate: true`
+forward into every later edit. The participant's own picture then looked like a
+default, and `force-global` re-dressed hand-made tiles across the whole tree.
+
+### `/heal` — putting back what a default took
+
+A re-dress only ever replaces the two small hex renders; the full-resolution
+original and its framing are untouched, which is why the edit screen still shows
+the right picture on a tile whose hexagon shows a default.
+
+| | |
+|---|---|
+| `/heal` | redraw every overwritten picture from its original, hive-wide |
+| `/heal check` | the same walk, reporting only — nothing is written |
+
+The pass repairs only tiles marked as defaults that hold a participant original
+underneath, re-renders both orientations at the saved framing
+(`substrate/tile-small-render.ts` restates the editor's own capture geometry),
+and marks each healed tile as the participant's. Idempotent — a healed tile
+stops matching. Tiles that keep no original are named in the report rather than
+guessed at.
+
 ## What a theme is
 
 A theme is a named look that declares what it dresses:
