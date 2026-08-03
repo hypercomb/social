@@ -133,7 +133,12 @@ const SETS_VERSION = '4'
 // when a pass actually completes, so an unready boot leaves it armed and the
 // pass runs again next time. Bump the version to re-arm everyone.
 const HEAL_LS = 'hc:picture-heal-v'
-const HEAL_VERSION = '1'
+// v2 — the first pass only knew how to redraw a restamped small. It did not
+// know about the common damage: canonical still holding the participant's
+// picture while the local index points at a pool one, so a default is simply
+// TAKING PRECEDENCE over a picture that never went anywhere. Everyone is
+// re-armed for the pass that repairs that.
+const HEAL_VERSION = '2'
 
 const REDRESS_LS = 'hc:substrate-redress-v'
 // Written when the advance moves a hive and cleared to SETS_VERSION when the
@@ -1347,23 +1352,32 @@ export class SubstrateService extends EventTarget {
 
   // ───────────────────── healing participant pictures ─────────────────────
   //
-  // A default was allowed to overwrite pictures people had made. The mark
-  // that says "this one is theirs" leaked through the props merge, so an
-  // edit on a once-defaulted tile still looked like a default, and a
-  // hive-wide re-dress replaced its small renders with pool pictures.
+  // A default was allowed to take pictures people had made. The mark that
+  // says "this one is theirs" leaked through the props merge, so an edit on
+  // a once-defaulted tile still looked like a default and a hive-wide
+  // re-dress moved it.
   //
-  // The damage is REPAIRABLE, and the reason is the whole point of keeping
-  // the original: the re-dress only ever replaced the two SMALL renders.
-  // The participant's full-resolution `large` and the framing they chose
-  // were never touched — which is why the edit screen still shows the
-  // right picture on a tile whose hex shows a default. Drawing the small
-  // renders again from that original restores exactly what was there.
+  // NOTHING WAS DESTROYED, and the shape of the damage decides the repair.
+  // There are two kinds, and the first is by far the common one:
   //
-  // The pass is idempotent, walks the whole hive, and touches nothing it
-  // cannot prove was damaged: a tile qualifies only when it is MARKED as a
-  // substrate default and yet holds a participant original underneath.
-  // Every tile it heals comes back marked `participant: true`, so it is in
-  // stone from then on.
+  //   1. THE POINTER MOVED. The render resolves a tile through the
+  //      participant-local props index, and the re-dress pointed that entry
+  //      at a pool picture. The tile's canonical properties — the truth,
+  //      the thing that travels — still hold the participant's picture.
+  //      The default is merely taking precedence over it. Repair is to
+  //      point the index back at canonical: no redraw, no revision, no
+  //      bytes touched. Lossless and instant.
+  //
+  //   2. THE SMALL RENDERS WERE RESTAMPED. Where canonical carried the
+  //      leaked mark, the re-dress also wrote the pool picture into the
+  //      canonical small slots. The full-resolution original and the
+  //      framing chosen for it were never touched — which is why the edit
+  //      screen still shows the right picture on a tile whose hexagon shows
+  //      a default — so the smalls are drawn again from that original.
+  //
+  // The pass tries 1 first and falls to 2, is idempotent, and touches
+  // nothing it cannot prove was damaged. Every tile it repairs comes back
+  // marked as the participant's, so it is in stone from then on.
 
   /**
    * Repair every tile whose picture a default overwrote. Returns what it
@@ -1399,9 +1413,34 @@ export class SubstrateService extends EventTarget {
           if (stats.cold) continue
         } catch { continue }
 
-        // Damaged = wearing our mark while holding their original. A tile
-        // that is honestly ours (no original) is left alone, and so is one
-        // already marked theirs.
+        // ── 1. THE POINTER MOVED ──────────────────────────────────────
+        // Canonical holds the participant's picture and the index is
+        // pointing somewhere else, so a default is being drawn over a
+        // picture that is right there. Point the index back at canonical:
+        // no redraw, no revision, no byte written — the picture was never
+        // gone, only outranked.
+        if (isParticipantImage(props)) {
+          const key = await this.#indexKeyFor(label, place.segments)
+          const current = lookupTilePropsSig(index, key, label)
+          const canonicalSig = await readTilePropsSigAt([...place.segments], label)
+          if (!canonicalSig || current === canonicalSig) continue
+          // Only a pick of OURS may be displaced. Anything else in that slot
+          // is another participant-local choice and is not this pass's to
+          // overrule.
+          if (current && !this.defaultSigs.has(current) && !await this.#isSubstrateProps(current)) continue
+          healed.push(label)
+          if (dryRun) continue
+          this.#releaseUsage(current)
+          index[key || label] = canonicalSig
+          if (key && index[label]) delete index[label]
+          indexDirty = true
+          EffectBus.emit('substrate:rerolled', { cell: label })
+          continue
+        }
+
+        // ── 2. THE SMALL RENDERS WERE RESTAMPED ───────────────────────
+        // Wearing our mark while holding their original underneath. A tile
+        // that is honestly ours (no original) is left alone.
         if (props?.substrate !== true) continue
         const original = props?.large?.image
         if (!isSignature(original)) {
