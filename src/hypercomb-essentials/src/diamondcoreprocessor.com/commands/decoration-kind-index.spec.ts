@@ -398,3 +398,56 @@ describe('decoration index — a reference’s required marks', () => {
     expect(index.referenceMarksForLabel('notes')).toEqual([])
   })
 })
+
+// A reference may demand a BOUQUET — a named, sig-addressed set of marks —
+// instead of, or as well as, inline marks. The payload carries only the
+// bouquet's resource sig (`requiredBouquet`); the index expands it once
+// (content-addressed, so the expansion never invalidates) and unions it into
+// `referenceMarksForLabel`, so the requirement drone and show-cell's AND are
+// unchanged downstream.
+describe('decoration index — a reference’s demanded bouquet', () => {
+  /** A bouquet resource, exactly as BouquetRegistry writes one. */
+  const bouquetOf = (marks: unknown[]) => putResource({ marks })
+
+  const bouquetRequiringSig = (
+    targetSegments: string[], requiredBouquet: string, requiredMarks?: unknown[],
+  ) =>
+    putResource({
+      kind: 'reference',
+      appliesTo: [],
+      payload: requiredMarks
+        ? { targetSegments, requiredMarks, requiredBouquet }
+        : { targetSegments, requiredBouquet },
+    })
+
+  it('expands a demanded bouquet into its marks', async () => {
+    const bouquet = bouquetOf([' field ', 'notes', 'field', ''])
+    await decorate(['garden', 'people'], bouquetRequiringSig(['people'], bouquet))
+
+    goTo('garden')
+    await vi.waitFor(() =>
+      expect(index.referenceMarksForLabel('people')).toEqual(['field', 'notes']))
+    expect(index.referenceTargetForLabel('people')).toEqual(['people'])
+  })
+
+  it('unions the bouquet with inline marks, sorted', async () => {
+    const bouquet = bouquetOf(['work'])
+    await decorate(['office', 'people'], bouquetRequiringSig(['people'], bouquet, ['family']))
+
+    goTo('office')
+    await vi.waitFor(() =>
+      expect(index.referenceMarksForLabel('people')).toEqual(['family', 'work']))
+  })
+
+  it('reads a missing or malformed bouquet as no expansion, never a fault', async () => {
+    // A sig whose bytes this store cannot serve — the inline marks must
+    // still hold, and nothing may throw.
+    const absent = 'f'.repeat(64)
+    await decorate(['lost', 'people'], bouquetRequiringSig(['people'], absent, ['family']))
+
+    goTo('lost')
+    await vi.waitFor(() =>
+      expect(index.referenceMarksForLabel('people')).toEqual(['family']))
+    expect(index.referenceTargetForLabel('people')).toEqual(['people'])
+  })
+})

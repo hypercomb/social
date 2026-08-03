@@ -269,12 +269,61 @@ const referenceMarksByKey = new Map<string, readonly string[]>()
  *  something different of it. Living in the payload keeps them off the panel by
  *  construction rather than by a rule someone has to remember. */
 export function referenceMarksForLabel(label: string): readonly string[] {
-  return referenceMarksByKey.get(keyForLabel(label)) ?? EMPTY_MARKS
+  const key = keyForLabel(label)
+  const inline = referenceMarksByKey.get(key)
+  const bouquetSig = referenceBouquetByKey.get(key)
+  const bouquet = bouquetSig ? bouquetMarksBySig.get(bouquetSig) : undefined
+  if (!bouquet || bouquet.length === 0) return inline ?? EMPTY_MARKS
+  if (!inline || inline.length === 0) return bouquet
+  return [...new Set([...inline, ...bouquet])].sort()
 }
 
 /** Shared empty result — `referenceMarksForLabel` is called per visible cell,
  *  and the miss is the common case. */
 const EMPTY_MARKS: readonly string[] = Object.freeze([])
+
+/** Map<locationKey, bouquetSig> — a reference may demand a BOUQUET (a named,
+ *  sig-addressed set of pheromones) instead of, or as well as, inline marks.
+ *  The payload holds only the signature; the marks are expanded through
+ *  `bouquetMarksBySig` below and unioned into `referenceMarksForLabel`, so
+ *  every consumer downstream (the requirement drone, show-cell's AND) is
+ *  unchanged. */
+const referenceBouquetByKey = new Map<string, string>()
+
+/** Map<bouquetSig, marks> — the expansion cache. A bouquet resource is
+ *  content-addressed (`{ marks }` JSON, sorted set — see BouquetRegistry), so
+ *  an entry is immutable and never invalidates: changed marks are a different
+ *  sig. Shared across every reference demanding the same bouquet. */
+const bouquetMarksBySig = new Map<string, readonly string[]>()
+
+/** Sigs currently being fetched, so one bouquet demanded by many references
+ *  costs one read. */
+const bouquetHydrating = new Set<string>()
+
+/** Expand a bouquet sig into its marks. Fire-and-forget from `indexRecord` —
+ *  indexing happens at hydration/render time, long before a human can click
+ *  the portal, so the sync read in `referenceMarksForLabel` finds the marks
+ *  waiting. A transient miss leaves the sig un-cached so a later index pass
+ *  retries; an unreadable resource reads as no expansion rather than a fault. */
+async function hydrateBouquetMarks(sig: string): Promise<void> {
+  if (bouquetMarksBySig.has(sig) || bouquetHydrating.has(sig)) return
+  bouquetHydrating.add(sig)
+  try {
+    const store = window.ioc.get<StoreLike>('@hypercomb.social/Store')
+    if (!store?.getResource) return
+    const blob = await store.getResource(sig)
+    if (!blob) return
+    const parsed = JSON.parse(await blob.text()) as { marks?: unknown }
+    const raw = Array.isArray(parsed?.marks) ? parsed.marks : []
+    // Same defence as `requiredMarksOf`: entries must BE strings, never be
+    // coerced into one.
+    const marks = [...new Set(
+      raw.filter((m): m is string => typeof m === 'string').map(m => m.trim()).filter(Boolean),
+    )].sort()
+    bouquetMarksBySig.set(sig, Object.freeze(marks))
+  } catch { /* unreadable bouquet = no expansion */ }
+  finally { bouquetHydrating.delete(sig) }
+}
 
 // ── Reference FACE (resolve-through) ──────────────────────────────────
 //
@@ -599,6 +648,19 @@ function requiredMarksOf(record: DecorationShape): readonly string[] | null {
   return marks.length > 0 ? marks : null
 }
 
+/** Pull the demanded bouquet's resource sig out of a `reference` payload's
+ *  `{ requiredBouquet }`. A CONTENT hash this time (unlike `targetSig`): a
+ *  bouquet is a sorted set of marks, so freezing it is the point — editing the
+ *  named bouquet later must not silently re-scope every portal that demanded
+ *  the old set. Returns '' for absent/malformed, meaning "no bouquet". */
+function requiredBouquetOf(record: DecorationShape): string {
+  const payload = record.payload
+  const raw = payload && typeof payload === 'object'
+    ? (payload as { requiredBouquet?: unknown }).requiredBouquet
+    : undefined
+  return typeof raw === 'string' && /^[0-9a-f]{64}$/.test(raw) ? raw : ''
+}
+
 /** Pull the per-locale titles out of a `title` payload's `{ text }` map.
  *  Blank or whitespace-only entries are dropped rather than stored, so a
  *  cleared title falls back to the raw label — a tile must never draw as an
@@ -674,6 +736,11 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
     const marks = requiredMarksOf(record)
     if (marks) referenceMarksByKey.set(key, marks)
     else referenceMarksByKey.delete(key)
+    const bouquet = requiredBouquetOf(record)
+    if (bouquet) {
+      referenceBouquetByKey.set(key, bouquet)
+      void hydrateBouquetMarks(bouquet)
+    } else referenceBouquetByKey.delete(key)
   }
   if (kind === TITLE_DECORATION_KIND) {
     const text = textOf(record)
@@ -785,6 +852,9 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       referenceTargetByKey.delete(key)
       referenceSigByKey.delete(key)
       referenceMarksByKey.delete(key)
+      referenceBouquetByKey.delete(key)
+      // `bouquetMarksBySig` is kept — content-addressed and shared across
+      // cells, same reasoning as `nameBySig`/`kindBySig` above.
     }
     if (kind === TITLE_DECORATION_KIND) {
       titleByKey.delete(key)

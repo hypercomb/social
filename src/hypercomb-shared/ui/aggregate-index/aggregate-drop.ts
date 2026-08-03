@@ -89,6 +89,12 @@ type CommitterLike = {
  *  silently rewritten by painting the tile, and on-tile chips would mix filter
  *  marks with identity marks indistinguishably.
  *
+ *  `requiredBouquet` (written by `/requires <cell> = @<bouquet>`, not by this
+ *  drop) demands a BOUQUET: the resource sig of a named set of marks. The sig
+ *  freezes the set — editing the bouquet later never re-scopes existing
+ *  portals — and the decoration index expands it and unions it with
+ *  `requiredMarks` at read time.
+ *
  *  Every field but `targetSegments` is optional, and absent means exactly the
  *  shape `/reference` has always written — so existing references are untouched
  *  and every reader must tolerate their absence. */
@@ -96,6 +102,7 @@ export interface ReferencePayload {
   targetSegments: string[]
   targetSig?: string
   requiredMarks?: string[]
+  requiredBouquet?: string
 }
 
 /**

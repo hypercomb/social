@@ -12,10 +12,19 @@
 // Syntax (the cell is a reference tile living HERE):
 //   /requires <cell>              — show what it demands
 //   /requires <cell> = a, b       — demand exactly these
+//   /requires <cell> = @family    — demand a BOUQUET (a named set of marks)
 //   /requires <cell> + a          — add one
 //   /requires <cell> ~ a          — drop one (the `~` removal convention
 //                                   /keyword already uses)
+//   /requires <cell> ~ @family    — drop the bouquet
 //   /requires <cell> =            — demand nothing
+//
+// A `@name` token names a bouquet from the pheromone panel. It is stored as
+// the bouquet's resource SIG (`requiredBouquet`), not its marks and not its
+// name: the marks expand at read time in the decoration index, and the sig
+// freezes the set — renaming or editing the bouquet later never silently
+// re-scopes a portal that demanded the old set. One bouquet per reference;
+// inline marks and the bouquet's marks are unioned by the reader.
 //
 // EDITING IS RE-MINTING. A reference decoration is `appliesTo: []`, so its
 // payload IS its identity: changing the marks mints a NEW decoration sig and
@@ -75,21 +84,31 @@ export const buildReferencePayload = (opts: {
   targetSegments: readonly string[]
   targetSig?: string
   requiredMarks?: readonly string[]
+  requiredBouquet?: string
 }): Record<string, unknown> => {
   const payload: Record<string, unknown> = { targetSegments: [...opts.targetSegments] }
   if (opts.targetSig && /^[0-9a-f]{64}$/.test(opts.targetSig)) payload['targetSig'] = opts.targetSig
   const marks = normalizeRequiredMarks(opts.requiredMarks ?? [])
   if (marks.length > 0) payload['requiredMarks'] = marks
+  if (opts.requiredBouquet && /^[0-9a-f]{64}$/.test(opts.requiredBouquet)) {
+    payload['requiredBouquet'] = opts.requiredBouquet
+  }
   return payload
 }
 
 type LineageShape = { explorerSegments?: () => readonly string[] }
 type StoreShape = { putResource(blob: Blob, options?: { emit?: boolean }): Promise<string> }
 type TagRegistryShape = { names: string[]; ensureLoaded(): Promise<void> }
+type BouquetRegistryShape = {
+  ensureLoaded(): Promise<void>
+  sigOf(name: string): string | undefined
+  all: Array<{ name: string; sig: string }>
+}
 type ReferencePayloadShape = {
   targetSegments?: unknown
   targetSig?: unknown
   requiredMarks?: unknown
+  requiredBouquet?: unknown
 }
 
 export class RequiresQueenBee extends QueenBee {
@@ -98,10 +117,11 @@ export class RequiresQueenBee extends QueenBee {
   override readonly aliases = ['require']
   override description = 'Manage the pheromones a reference demands of what it shows'
   override descriptionKey = 'slash.requires'
-  override options = ['<cell>', '<cell> = <marks>', '<cell> + <mark>', '<cell> ~ <mark>']
+  override options = ['<cell>', '<cell> = <marks>', '<cell> = @<bouquet>', '<cell> + <mark>', '<cell> ~ <mark>']
   override examples = [
     { input: '/requires people', result: 'Shows what the "people" reference demands' },
     { input: '/requires people = family', result: 'That reference now shows only family' },
+    { input: '/requires people = @field-notes', result: 'That reference now demands the field-notes bouquet' },
     { input: '/requires people ~ family', result: 'Drops the family requirement' },
   ]
 
@@ -121,6 +141,9 @@ export class RequiresQueenBee extends QueenBee {
     const name = safeName(at === -1 ? raw : raw.slice(0, at))
     if (!name) { this.#log('Requires — needs a reference tile name'); return }
     const given = at === -1 ? [] : parseMarks(raw.slice(at + 1))
+    // `@name` tokens name a BOUQUET; everything else is an inline mark.
+    const bouquetNames = given.filter(t => t.startsWith('@')).map(t => t.slice(1)).filter(Boolean)
+    const plain = given.filter(t => !t.startsWith('@'))
 
     const here = (get<LineageShape>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
@@ -145,18 +168,37 @@ export class RequiresQueenBee extends QueenBee {
         ? current.requiredMarks.filter((m): m is string => typeof m === 'string')
         : [],
     )
+    const currentBouquet = typeof current.requiredBouquet === 'string'
+      && /^[0-9a-f]{64}$/.test(current.requiredBouquet)
+      ? current.requiredBouquet
+      : ''
 
     if (op === null) {
-      this.#log(currentMarks.length
-        ? `Requires — "${name}" demands ${currentMarks.join(', ')}`
-        : `Requires — "${name}" demands nothing`)
+      this.#log(`Requires — "${name}" demands ${await this.#describe(currentMarks, currentBouquet)}`)
       return
     }
 
     let next: string[]
-    if (op === '=') next = normalizeRequiredMarks(given)
-    else if (op === '+') next = normalizeRequiredMarks([...currentMarks, ...given])
-    else next = currentMarks.filter(m => !given.includes(m))
+    if (op === '=') next = normalizeRequiredMarks(plain)
+    else if (op === '+') next = normalizeRequiredMarks([...currentMarks, ...plain])
+    else next = currentMarks.filter(m => !plain.includes(m))
+
+    // The bouquet is a single slot. `=` demands exactly what was listed (no
+    // `@` token clears it); `+` swaps one in; `~ @anything` drops it — the
+    // token expresses "drop the bouquet", no name-match required, because a
+    // renamed bouquet would otherwise be undroppable.
+    let nextBouquet = op === '=' ? '' : currentBouquet
+    if (op === '~') {
+      if (bouquetNames.length > 0) nextBouquet = ''
+    } else if (bouquetNames.length > 0) {
+      const wanted = bouquetNames[bouquetNames.length - 1]
+      const resolved = await this.#bouquetSig(wanted)
+      if (!resolved) {
+        this.#log(`Requires — no such bouquet: @${wanted}`)
+        return
+      }
+      nextBouquet = resolved
+    }
 
     if (op !== '=' && given.length === 0) {
       this.#log(`Requires — needs a mark: /requires ${name} ${op} <mark>`)
@@ -165,21 +207,55 @@ export class RequiresQueenBee extends QueenBee {
 
     // Marks come from the DECLARED vocabulary, never minted on the fly — a
     // typo'd requirement matches nothing, which reads as "this collection is
-    // empty" rather than as a mistake.
+    // empty" rather than as a mistake. Bouquet marks were declared when the
+    // bouquet was gathered, so only the inline ones are checked here.
     if (op !== '~') {
-      const unknown = await this.#unknownMarks(given)
+      const unknown = await this.#unknownMarks(plain)
       if (unknown.length > 0) {
         this.#log(`Requires — no such pheromone: ${unknown.join(', ')}`)
         return
       }
     }
 
-    if (next.join(',') === currentMarks.join(',')) {
-      this.#log(`Requires — "${name}" already demands ${currentMarks.length ? currentMarks.join(', ') : 'nothing'}`)
+    if (next.join(',') === currentMarks.join(',') && nextBouquet === currentBouquet) {
+      this.#log(`Requires — "${name}" already demands ${await this.#describe(currentMarks, currentBouquet)}`)
       return
     }
 
-    await this.#rewrite(name, segments, priors.map(p => p.sig), current, next)
+    await this.#rewrite(name, segments, priors.map(p => p.sig), current, next, nextBouquet)
+  }
+
+  /** Human-readable demand: inline marks, the bouquet (by name when the
+   *  registry still knows the sig, short sig otherwise), or "nothing". */
+  async #describe(marks: readonly string[], bouquetSig: string): Promise<string> {
+    const parts: string[] = []
+    if (marks.length > 0) parts.push(marks.join(', '))
+    if (bouquetSig) parts.push(`bouquet "${await this.#bouquetName(bouquetSig)}"`)
+    return parts.length > 0 ? parts.join(' + ') : 'nothing'
+  }
+
+  /** Resolve a bouquet NAME to its marks-resource sig via the registry the
+   *  pheromone panel maintains. Loose IoC coupling, no import — the registry
+   *  lives in shared, and modules may not reach upstream at compile time. */
+  async #bouquetSig(name: string): Promise<string> {
+    const registry = get<BouquetRegistryShape>('@hypercomb.social/BouquetRegistry')
+    if (!registry) return ''
+    try { await registry.ensureLoaded() } catch { return '' }
+    return registry.sigOf?.(name) ?? ''
+  }
+
+  /** Resolve a bouquet sig back to its current name, falling back to the
+   *  short sig — a demanded bouquet outlives renames and deletions. */
+  async #bouquetName(sig: string): Promise<string> {
+    const registry = get<BouquetRegistryShape>('@hypercomb.social/BouquetRegistry')
+    if (registry) {
+      try {
+        await registry.ensureLoaded()
+        const hit = (registry.all ?? []).find(b => b.sig === sig)
+        if (hit) return hit.name
+      } catch { /* fall through to the short sig */ }
+    }
+    return sig.slice(0, 8)
   }
 
   /** Marks the hive has never heard of. An empty registry (not loaded, or a
@@ -201,6 +277,7 @@ export class RequiresQueenBee extends QueenBee {
     priorSigs: readonly string[],
     current: ReferencePayloadShape,
     marks: readonly string[],
+    bouquet: string,
   ): Promise<void> {
     const store = get<StoreShape>('@hypercomb.social/Store')
     if (!store?.putResource) { this.#log('Requires — unavailable'); return }
@@ -215,7 +292,9 @@ export class RequiresQueenBee extends QueenBee {
     // Rebuilt in the same field order `/reference` and the Organizer's drop use,
     // and with `requiredMarks` OMITTED when empty — same content must produce
     // the same sig no matter which of the three wrote it.
-    const payload = buildReferencePayload({ targetSegments, targetSig, requiredMarks: marks })
+    const payload = buildReferencePayload({
+      targetSegments, targetSig, requiredMarks: marks, requiredBouquet: bouquet,
+    })
 
     try {
       const record = { kind: REFERENCE_DECORATION_KIND, appliesTo: [], payload }
@@ -227,8 +306,8 @@ export class RequiresQueenBee extends QueenBee {
       }
       EffectBus.emit('decorations:changed', { segments, op: 'append', sig })
 
-      this.#log(marks.length
-        ? `Requires — "${name}" now demands ${marks.join(', ')}`
+      this.#log(marks.length || bouquet
+        ? `Requires — "${name}" now demands ${await this.#describe(marks, bouquet)}`
         : `Requires — "${name}" demands nothing`, '⇥')
     } catch (err) {
       console.warn('[/requires] failed', err)
