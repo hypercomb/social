@@ -26,6 +26,49 @@ vigilance; it falls out of two decisions:
 A second project would fork all three crates — three copies of the thing the
 conformance vectors are the contract for. Don't.
 
+## The native shell is its own update authority
+
+On the web, installs are **push-only**: DCP pushes, the participant clicks
+"Upgrade Hypercomb", and boot never decides. The native client deliberately
+skips DCP (the sentinel handshake does not know `tauri.localhost`), so on the
+desktop there is no pusher — and the bundled package is not a fallback there,
+it is *the version of the application you installed*.
+
+So `ensureInstall` compares the shipped `/content/manifest.json` package
+signature against the installed one and, on native only, adopts the shipped
+package and reloads once. Without it a hive keeps the bees from its FIRST
+launch forever: every later binary ships content that is never adopted, and
+each new feature reads as "broken on Windows" while working fine on the web.
+That is not hypothetical — measured on the real hive on 2026-08-03, the app
+shipped package `5d001713…` while the store still ran `e89773f1…`, several
+builds behind, which is why the Living Brief (and the website view before it)
+appeared to do nothing there.
+
+The comparison is a local asset read and the adopt happens at most once per
+installed version, so the ordinary launch pays nothing.
+
+## Nothing in the shell may navigate the document
+
+A native window has no address bar. Three behaviours were measured in
+WebView2 (2026-08-03) and together they make the ordinary web idioms unusable
+inside a view or a mounted site page:
+
+| Idiom | What it does natively |
+|---|---|
+| `<a href="https://…">` | navigates the WHOLE webview off `tauri.localhost` — the app is gone until relaunch |
+| `target="_blank"` / `window.open` | returns `null`, does nothing at all — external links are silently dead |
+| `<a href="#section">` | writes `location.hash`, which this shell reads back as a tile SELECTION (`Navigation.getSelections`) and then carries through every later navigation |
+
+The policy lives in
+`hypercomb-essentials/.../presentation/tiles/document-view-links.ts` and every
+document view and the site view route their anchors through it: in-page jumps
+scroll, internal links move reading position or lineage **in place**, and
+external links go to the OS through the `open_external` command in `main.rs`
+(scheme allowlist, no shell interpreter, URL passed as a single argument).
+
+A view is an overlay inside the running shell. Reloading it is not navigation,
+it is a reboot — drones unload, the store re-opens, every bee re-instantiates.
+
 ## What differs per platform
 
 | | Windows | macOS |

@@ -17,11 +17,13 @@ import {
   type ViewSourceScope,
 } from '../../commands/view-source-scope.js'
 import {
+  documentViewPathKey,
   filterDocumentViewItems,
   readDocumentViewItems,
   type DocumentViewItem,
 } from './document-view-source.js'
 import { openDocumentViewCurator } from './document-view-curator.js'
+import { bindDocumentLinks, jumpEntry } from './document-view-links.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type HistoryShape = {
@@ -42,6 +44,12 @@ export class LivingBriefViewDrone extends Drone {
   #host: HTMLElement | null = null
   #curator: HTMLElement | null = null
   #targetSegments: string[] | null = null
+  // Where the reader has descended FROM, oldest first, never including the
+  // scope being read. A brief that reads a hierarchy is itself a hierarchy of
+  // briefs: opening a section reads that tile as its own document, and this
+  // is the way back up. It is reading position, not hive state — no lineage
+  // move, no history entry, no URL.
+  #trail: string[][] = []
   #bound = false
   #active = false
   #busy = false
@@ -60,6 +68,7 @@ export class LivingBriefViewDrone extends Drone {
       this.onEffect('feature:restored', this.#refresh)
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
         if (payload?.view !== LIVING_BRIEF_VIEW) return
+        this.#trail = []
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
         this.#vm()?.setMode(LIVING_BRIEF_VIEW)
         void this.#reconcile()
@@ -87,6 +96,9 @@ export class LivingBriefViewDrone extends Drone {
       this.#curator = null
       return
     }
+    // Escape peels one level of reading depth before it leaves the document —
+    // the same cascade the rest of the shell uses.
+    if (this.#trail.length) { this.#ascendTo(this.#trail.length - 1); return }
     this.#vm()?.setMode('hexagons')
   }
   readonly #context = (event: MouseEvent): void => {
@@ -103,12 +115,17 @@ export class LivingBriefViewDrone extends Drone {
     if (this.#busy) { this.#again = true; return }
     this.#busy = true
     try {
-      if (this.#vm()?.mode !== LIVING_BRIEF_VIEW) { this.#targetSegments = null; this.#teardown(); return }
+      if (this.#vm()?.mode !== LIVING_BRIEF_VIEW) {
+        this.#targetSegments = null
+        this.#trail = []
+        this.#teardown()
+        return
+      }
       const lineage = window.ioc?.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
       const segments = this.#targetSegments
         ? [...this.#targetSegments]
         : [...(lineage?.explorerSegments?.() ?? [])]
-      if (await isFeatureHidden(segments, LIVING_BRIEF_KIND)) {
+      if (await isFeatureHidden(this.#trail[0] ?? segments, LIVING_BRIEF_KIND)) {
         // OFF means the ordinary hive owns the surface. Merely removing the
         // document host while leaving ViewMode on `living-brief` produces a
         // blank takeover and carries that non-tile mode through navigation.
@@ -155,13 +172,27 @@ export class LivingBriefViewDrone extends Drone {
     this.#teardown()
     const host = document.createElement('section')
     host.className = 'hc-living-brief'
-    const title = segments.length ? titleForLabel(segments.at(-1)!, navigator.language) || segments.at(-1)! : 'Living Brief'
+    const title = this.#label(segments, 'Living Brief')
     host.innerHTML = `<style>${CSS}</style>`
 
     const chrome = document.createElement('header')
     chrome.className = 'brief-chrome'
     const brand = document.createElement('span')
-    brand.textContent = 'LIVING BRIEF'
+    brand.className = 'brief-trail'
+    if (!this.#trail.length) brand.textContent = 'LIVING BRIEF'
+    else {
+      // Ancestry, not history: each step is a document you were reading, and
+      // clicking one re-reads it. Nothing here moves the hive.
+      this.#trail.forEach((step, index) => {
+        const crumb = document.createElement('button')
+        crumb.type = 'button'
+        crumb.className = 'brief-crumb'
+        crumb.textContent = this.#label(step, 'LIVING BRIEF')
+        crumb.onclick = () => this.#ascendTo(index)
+        brand.append(crumb, this.#el('span', 'brief-crumb-sep', '›'))
+      })
+      brand.append(this.#el('span', 'brief-crumb-here', this.#label(segments, 'Living Brief')))
+    }
     const reach = document.createElement('span')
     reach.className = 'brief-reach'
     reach.textContent = config.scope === 'hierarchy' ? 'WHOLE HIERARCHY' : 'CURRENT LAYER'
@@ -201,9 +232,14 @@ export class LivingBriefViewDrone extends Drone {
     contents.setAttribute('aria-label', 'Contents')
     contents.append(this.#el('strong', '', 'Contents'))
     sections.forEach((section, index) => {
-      const link = document.createElement('a')
-      link.href = `#brief-${index}`
-      link.textContent = `${String(index + 1).padStart(2, '0')}  ${section.source}`
+      // A jump inside the page, NOT an href — see document-view-links.ts:
+      // an anchor here would write the shell's URL hash, which this shell
+      // reads back as a tile selection.
+      const link = jumpEntry(
+        `${String(index + 1).padStart(2, '0')}  ${section.source}`,
+        `brief-${index}`,
+        host,
+      )
       link.style.paddingLeft = `${Math.min(section.depth, 5) * 14}px`
       contents.append(link)
     })
@@ -214,6 +250,13 @@ export class LivingBriefViewDrone extends Drone {
       paper.append(empty)
     }
     sections.forEach((section, index) => paper.append(this.#section(section, index)))
+    // Notes carry links this view did not write. External ones reach the OS,
+    // in-hive ones open as their own brief, and neither touches the document.
+    bindDocumentLinks(host, href => {
+      const path = href.replace(/^[./]+/, '').replace(/\/+$/, '').split('/').filter(Boolean)
+      if (!path.length) return
+      this.#descend(href.startsWith('/') ? path : [...segments, ...path])
+    })
     host.append(chrome, paper)
     document.body.appendChild(host)
     this.#host = host
@@ -228,7 +271,19 @@ export class LivingBriefViewDrone extends Drone {
     const number = this.#el('span', 'brief-number', String(index + 1).padStart(2, '0'))
     const heading = this.#el('h2', '', section.title)
     const head = document.createElement('header')
-    head.append(number, heading)
+    // A section that has children is itself a document. Opening it reads it
+    // as one — the brief goes deeper instead of the shell going anywhere.
+    if (section.childCount > 0) {
+      const open = document.createElement('button')
+      open.type = 'button'
+      open.className = 'brief-open'
+      open.title = `Read "${section.title}" as its own brief`
+      open.append(heading, this.#el('span', 'brief-open-cue', `${section.childCount} inside ›`))
+      open.onclick = () => this.#descend(section.segments)
+      head.append(number, open)
+    } else {
+      head.append(number, heading)
+    }
     if (section.depth > 0) {
       const source = this.#el('p', 'brief-source', section.source)
       head.append(source)
@@ -299,6 +354,39 @@ export class LivingBriefViewDrone extends Drone {
     })
   }
 
+  /** Descend into a sub-document. Reading position only — no lineage move, no
+   *  history entry, no URL write, and the drone/host stay exactly where they
+   *  are, so nothing reloads. */
+  #descend(segments: readonly string[]): void {
+    const next = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+    if (!next.length) return
+    const here = this.#currentSegments()
+    if (documentViewPathKey(next) === documentViewPathKey(here)) return
+    this.#trail = [...this.#trail, here]
+    this.#targetSegments = next
+    void this.#reconcile()
+  }
+
+  /** Return to the ancestor at `index`, dropping everything below it. */
+  #ascendTo(index: number): void {
+    const step = this.#trail[index]
+    if (!step) return
+    this.#trail = this.#trail.slice(0, index)
+    this.#targetSegments = [...step]
+    void this.#reconcile()
+  }
+
+  #currentSegments(): string[] {
+    if (this.#targetSegments) return [...this.#targetSegments]
+    const lineage = window.ioc?.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    return [...(lineage?.explorerSegments?.() ?? [])]
+  }
+
+  #label(segments: readonly string[], fallback: string): string {
+    const last = segments.at(-1)
+    return last ? titleForLabel(last, navigator.language) || last : fallback
+  }
+
   #el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text: string): HTMLElementTagNameMap[K] {
     const el = document.createElement(tag)
     if (className) el.className = className
@@ -329,7 +417,9 @@ const CSS = `
 .brief-paper{box-sizing:border-box;width:min(880px,calc(100% - 32px));min-height:calc(100vh - 92px);margin:40px auto 80px;padding:clamp(42px,8vw,96px);background:#fff;box-shadow:0 16px 60px rgba(28,31,30,.13)}
 .brief-mast{padding-bottom:46px;border-bottom:1px solid #c9ceca}.brief-kicker{margin:0;color:#57756c;text-transform:uppercase;letter-spacing:.19em;font-size:11px;font-weight:700}
 .brief-mast h1{max-width:700px;margin:14px 0;font:600 clamp(40px,7vw,72px)/.98 Georgia,serif;letter-spacing:-.045em}.brief-deck{color:#69706d}
-.brief-contents{display:grid;grid-template-columns:120px 1fr;gap:6px 22px;margin:42px 0 70px;padding:22px 0;border-block:1px solid #e1e4e1}.brief-contents strong{grid-row:1/99;text-transform:uppercase;letter-spacing:.14em;font-size:11px}.brief-contents a{color:#35423e;text-decoration:none}
+.brief-contents{display:grid;grid-template-columns:120px 1fr;gap:6px 22px;margin:42px 0 70px;padding:22px 0;border-block:1px solid #e1e4e1}.brief-contents strong{grid-row:1/99;text-transform:uppercase;letter-spacing:.14em;font-size:11px}.brief-contents .view-jump{border:0;background:none;color:#35423e;font:inherit;text-align:left;cursor:pointer}.brief-contents .view-jump:hover{color:#0f6f56}
+.brief-trail{display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden;white-space:nowrap}.brief-crumb{padding:0;border:0;background:none;color:#8fb3a7;font:inherit;letter-spacing:inherit;cursor:pointer}.brief-crumb:hover{color:#e6f2ed}.brief-crumb-sep{color:#5b7168}.brief-crumb-here{color:#dce5e1;overflow:hidden;text-overflow:ellipsis}
+.brief-open{display:block;width:100%;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}.brief-open h2{transition:color .12s}.brief-open:hover h2{color:#0f6f56}.brief-open-cue{display:block;margin-top:4px;color:#668277;font-size:11px;letter-spacing:.04em}
 .brief-section{scroll-margin-top:70px;margin:0 0 72px;padding-left:calc(var(--section-depth,0) * 14px)}.brief-section>header{display:grid;grid-template-columns:44px 1fr;align-items:start;border-top:3px solid #252c29;padding-top:14px}.brief-number{color:#668277;font-size:12px;font-weight:700}.brief-section h2{margin:0;font:600 32px/1.15 Georgia,serif}.brief-source{grid-column:2;margin:7px 0 0;color:#718078;font-size:11px}
 .brief-tags{grid-column:2;display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}.brief-tags span{padding:3px 9px;border:1px solid #bdcbc5;border-radius:999px;color:#4f6b61;font-size:11px}
 .brief-note{margin:24px 0 0 44px}.brief-note p{margin:0;white-space:pre-wrap}.brief-note-label{display:block;margin-bottom:5px;color:#527066;text-transform:uppercase;letter-spacing:.15em;font-size:10px;font-weight:800}

@@ -21,6 +21,7 @@ import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
+import { openExternalLink } from './document-view-links.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -697,19 +698,36 @@ export class SiteViewDrone extends Drone {
     runScripts(Array.from(parsed.head.querySelectorAll('script')))
     runScripts(Array.from(host.querySelectorAll('script')).filter(s => !scriptNodes.includes(s)))
 
-    // Internal-anchor click → lineage navigate. Bubbling listener on
-    // the host catches every click on an inflated <a>; external,
-    // hash, and resource: URLs pass through. Resolution is
+    // Anchor click → the site's own navigation. Bubbling listener on the host
+    // catches every click on an inflated <a>. Resolution for internal hrefs is
     // hierarchy-aware (see #resolveAndNavigate): an href is read against the
     // site's OWN position in the tree, not blindly from the hive root.
+    //
+    // Nothing here is allowed to reach the document. Letting these through
+    // used to mean, on the native client (verified in WebView2): an external
+    // href navigates the WHOLE webview off `tauri.localhost` with no address
+    // bar to come back from, `target="_blank"` and `window.open` silently do
+    // nothing at all, and a bare `#anchor` writes `location.hash` — which this
+    // shell reads back as a tile SELECTION and then carries forever.
     const onAnchorClick = (e: Event): void => {
       const target = e.target as Element | null
       const a = target?.closest?.('a')
       if (!a) return
       const href = a.getAttribute('href') ?? ''
-      if (!href || /^(https?:|mailto:|tel:|data:|\/\/|#)/i.test(href)) return
+      if (!href) return
       if (href.startsWith(RESOURCE_URL_PREFIX)) return
+      if (/^(data:|blob:|javascript:)/i.test(href)) return
+
       e.preventDefault()
+      if (href.startsWith('#')) {
+        host.querySelector(`#${CSS.escape(href.slice(1))}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+      if (/^(https?:|mailto:|tel:|\/\/)/i.test(href)) {
+        openExternalLink(href.startsWith('//') ? `https:${href}` : href)
+        return
+      }
       void this.#resolveAndNavigate(href, segments)
     }
     host.addEventListener('click', onAnchorClick, true)

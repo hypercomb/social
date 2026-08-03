@@ -118,6 +118,27 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     const beeDepsOk = [...beeDepSigs].every(sig => depNames.has(`${sig}.js`))
     const allDepsOk = (cachedManifest.dependencies ?? []).every(sig => depNames.has(`${sig}.js`))
     if (beeOk && beeDepsOk && allDepsOk) {
+      // THE NATIVE SHELL IS ITS OWN UPDATE AUTHORITY.
+      //
+      // Push-only is right for the web: DCP pushes, the user upgrades, boot
+      // never decides. But the native client deliberately skips DCP (the
+      // sentinel handshake does not know `tauri.localhost`), so on the desktop
+      // there is NO pusher — and the bundled package is not a fallback there,
+      // it is the version of the application you installed. Without this, a
+      // hive keeps the bees from its FIRST launch forever: every later binary
+      // ships new content that is never adopted, and each new feature looks
+      // "broken on Windows" while working on the web. Measured on the real
+      // hive: the app shipped package 5d001713… while the store still ran
+      // e89773f1…, several builds behind.
+      //
+      // A new binary means new bundled bytes, so the comparison is exact and
+      // free (a local asset read), and the adopt happens at most once per
+      // installed version.
+      if (await adoptNativeBundle()) {
+        console.log('[ensure-install] native bundle adopted — reloading into it')
+        location.reload()
+        return
+      }
       if (sentinel) {
         try {
           await resyncFromSentinel(sentinel)
@@ -295,6 +316,34 @@ export const upgradeFromBundled = async (): Promise<boolean> => {
     return true
   } finally {
     EffectBus.emit('install:sync', { active: false, source: 'bundled' })
+  }
+}
+
+/**
+ * Adopt the bundled package when the NATIVE shell is carrying one the store
+ * has not installed. No-op on the web (where push-only is the contract) and
+ * no-op when the store is already on the shipped package — so the ordinary
+ * cost is one local manifest read.
+ *
+ * Returns `true` when the store changed and the caller must reload; the sig is
+ * stamped by `installFromBundled` before that, so a failed reload cannot loop.
+ */
+const adoptNativeBundle = async (): Promise<boolean> => {
+  try {
+    const { nativeAvailable } = await import('@hypercomb/shared/core/native-filesystem')
+    if (!nativeAvailable()) return false
+    const bundled = await fetchBundledPackage()
+    if (!bundled) return false
+    if (localStorage.getItem(SYNC_SIG_KEY) === bundled.packageSig) return false
+    console.log(
+      `[ensure-install] native bundle ${bundled.packageSig.slice(0, 12)} ≠ installed ` +
+      `${(localStorage.getItem(SYNC_SIG_KEY) ?? 'none').slice(0, 12)} — adopting the shipped package`,
+    )
+    return await upgradeFromBundled()
+  } catch (err) {
+    // A hive that boots on yesterday's bees beats a hive that does not boot.
+    console.warn('[ensure-install] native bundle adopt failed; continuing on cached state', err)
+    return false
   }
 }
 

@@ -27,6 +27,10 @@ export type DocumentViewItem = {
   readonly depth: number
   readonly tags: string[]
   readonly notes: Note[]
+  /** Children this item has of its own. A view reads it to know whether the
+   *  item can be OPENED as a document in its own right — the hierarchy is
+   *  what a document view descends, so a leaf must not offer the affordance. */
+  readonly childCount: number
 }
 
 export const documentViewPathKey = (path: readonly string[]): string =>
@@ -112,6 +116,7 @@ export async function readDocumentViewItems(opts: {
         depth,
         tags: [...(opts.tagsForSegments?.(segments) ?? [])],
         notes: await opts.notes.getNotesAtSegments(segments),
+        childCount: childSigsOf((layer ?? stored) as PlacementLayer).length,
       })
 
       if (opts.scope === 'hierarchy' && layer) {

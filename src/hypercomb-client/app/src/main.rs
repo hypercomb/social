@@ -238,6 +238,45 @@ fn hive_root(host: State<'_, Host>) -> String {
 #[derive(Debug)]
 struct DiagnosticLog(std::path::PathBuf);
 
+/// Hand a link to the operating system.
+///
+/// A native window is not a browser: `window.open(url, '_blank')` returns null
+/// and does nothing, `target="_blank"` does nothing, and a plain `<a href>`
+/// navigates the WHOLE webview off `tauri.localhost` — with no address bar to
+/// come back from. So an external link either goes through here or it is dead
+/// on the desktop. (All three measured in WebView2, 2026-08-03.)
+///
+/// The renderer decides WHICH links are external; this decides what may leave
+/// the app. Hypercomb adopts content from strangers, so the scheme allowlist is
+/// the security boundary, not a formality: it is checked here, against the
+/// parsed URL, and no shell interpreter is involved on either platform — the
+/// URL is passed as a single argument to a program that expects exactly one.
+#[tauri::command]
+fn open_external(url: String) -> Result<()> {
+    let scheme_ok = ["http://", "https://", "mailto:", "tel:"]
+        .iter()
+        .any(|prefix| url.len() > prefix.len() && url[..prefix.len()].eq_ignore_ascii_case(prefix));
+    // A control character or a newline is how a single argument becomes two.
+    let clean = !url.chars().any(|c| c.is_control()) && url.len() <= 4096;
+    if !scheme_ok || !clean {
+        return Err(HostError::Storage(format!("refusing to open {url:?}")));
+    }
+
+    let spawned = if cfg!(target_os = "windows") {
+        // NOT `cmd /C start`: that one parses its argument as a command line.
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&url).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&url).spawn()
+    };
+    spawned
+        .map(|_| ())
+        .map_err(|err| HostError::Storage(format!("could not open {url:?}: {err}")))
+}
+
 /// Forward a renderer-side failure to the terminal AND to a file.
 ///
 /// A native window has no devtools you can read from a script, and a blank page
@@ -552,6 +591,7 @@ fn main() {
             hive_root,
             renderer_log,
             diagnostic_log_path,
+            open_external,
         ])
         .run(tauri::generate_context!())
         .expect("running the Hypercomb window");

@@ -12,6 +12,7 @@ const item = (segments: string[], depth: number): DocumentViewItem => ({
   depth,
   tags: [],
   notes: [note],
+  childCount: 0,
 })
 
 describe('document view curator', () => {
