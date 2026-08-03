@@ -97,6 +97,14 @@ the right picture on a tile whose hexagon shows a default.
 | `/heal` | redraw every overwritten picture from its original, hive-wide |
 | `/heal check` | the same walk, reporting only — nothing is written |
 
+**The repair also runs by itself, once.** Hives were already online when the
+re-dress took their pictures, and most participants will never learn there is a
+word for getting them back — so the same pass is armed for everyone
+(`hc:picture-heal-v`), runs on idle well past first paint, and reports what it
+restored. It is ordered ahead of the one-time re-dress (which awaits it), and
+the marker is written only when a pass completes, so an unready boot leaves it
+armed for next time. Bump `HEAL_VERSION` to re-arm everyone.
+
 The pass repairs only tiles marked as defaults that hold a participant original
 underneath, re-renders both orientations at the saved framing
 (`substrate/tile-small-render.ts` restates the editor's own capture geometry),

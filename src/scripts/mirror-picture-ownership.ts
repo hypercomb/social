@@ -114,6 +114,8 @@ const PARTS: Part[] = [
     '',
     'A tile with no original kept cannot be redrawn and nothing is invented for it. Those are counted and NAMED in the report, because a picture only the participant can put back is worth being told about rather than quietly skipped.',
     '',
+    'IT RUNS BY ITSELF, ONCE. The pictures were taken from hives that were already running, and most participants will never learn there is a word for getting them back — so the repair is armed for everyone, runs on idle well past first paint, and says what it restored rather than changing pictures silently. It is ordered ahead of the one-time re-dress, which waits for it: a damaged tile still carries the default\'s mark, and healing it is what teaches the re-dress to leave it alone. The marker is written only when a pass completes, so an unready boot leaves it armed for next time.',
+    '',
     `source: ${E}/substrate/substrate.service.ts`,
   ].join('\n')],
   ['tile-small-render', [

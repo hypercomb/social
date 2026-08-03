@@ -400,6 +400,7 @@
   "history.group-step": "group step — undo/redo skips edits and jumps to the earliest tile add/remove",
   "slash.remove-builtin": "remove selected tiles",
   "slash.heal": "Restore participant pictures a default overwrote",
+  "slash.images": "Open the room's pictures for a tile and choose one",
   "slash.help": "Show reference",
   "slash.history": "Toggle the history panel",
   "slash.rewind": "Open the visual rewind window",

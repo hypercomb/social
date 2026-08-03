@@ -397,6 +397,7 @@
   "history.group-step": "グループステップ — 元に戻す/やり直すで編集を飛ばし最も古いタイル追加・削除に移動",
   "slash.remove-builtin": "選択したタイルを削除",
   "slash.heal": "既定画像に上書きされた参加者の画像を復元",
+  "slash.images": "この場の参加者が持つ画像を開いて選ぶ",
   "slash.help": "リファレンスを表示",
   "slash.history": "履歴パネルの表示切替",
   "slash.rewind": "ビジュアル巻き戻しウィンドウを開く",

@@ -127,6 +127,14 @@ const SETS_VERSION = '4'
 // the registry loads. So the sets marker moves immediately and this one moves
 // only once the pass has actually re-dressed something — an unready boot
 // leaves it behind and the pass runs again next time.
+// THE REPAIR. Every participant already online is carrying tiles whose
+// pictures a re-dress took, so the repair cannot wait to be typed — it runs
+// once, by itself, on every hive that has not had it. The marker is set only
+// when a pass actually completes, so an unready boot leaves it armed and the
+// pass runs again next time. Bump the version to re-arm everyone.
+const HEAL_LS = 'hc:picture-heal-v'
+const HEAL_VERSION = '1'
+
 const REDRESS_LS = 'hc:substrate-redress-v'
 // Written when the advance moves a hive and cleared to SETS_VERSION when the
 // re-dress lands. It is what distinguishes "was moved and still owes a
@@ -374,6 +382,14 @@ export class SubstrateService extends EventTarget {
     // behind. Copy-forward only and idempotent, so a partial run finishes on
     // the next boot and a failure costs nothing.
     void this.#drainRetiredReferences(store)
+
+    // THE REPAIR RUNS FIRST, and unconditionally until it has run once. A
+    // re-dress took pictures people made, on hives that are already online, so
+    // putting them back is not something to wait for a command to ask for.
+    // It is ordered ahead of the re-dress deliberately: a damaged tile carries
+    // our mark, and healing it back to the participant's picture is what makes
+    // the re-dress leave it alone.
+    this.#scheduleHealPass()
 
     // Detached too, and later still: move the tiles that wear the OLD default
     // onto the new one. Needs history and the new pool, so it waits for idle.
@@ -853,6 +869,64 @@ export class SubstrateService extends EventTarget {
   // cleared index entries by FORMAT and left tiles with no entry at all;
   // restyle() clears only owned entries and re-applies in the same call, so a
   // tile is never without one.)
+  // ── the automatic repair ─────────────────────────────────────────────
+  //
+  // Healing is a behaviour anyone can type (`/heal`), but it must not DEPEND on
+  // being typed: the pictures were taken from hives that are already running,
+  // and most participants will never know there is a word for getting them
+  // back. So the same pass runs by itself, once, on every hive that has not
+  // had it — idle, well past first paint, and only where it can prove damage.
+  //
+  // It is safe to run unattended for the same reason `/heal` is safe to run
+  // twice: it touches only tiles that carry OUR mark while holding a
+  // participant's original underneath, and a healed tile stops matching. It
+  // writes nothing when there is nothing to repair.
+  #healRan = false
+  /** Resolves when the repair has had its turn — the re-dress waits on this so
+   *  the two passes can never race over the same tile. */
+  #healDone: Promise<void> = Promise.resolve()
+
+  #scheduleHealPass(): void {
+    if (this.#healRan) return
+    try { if (localStorage.getItem(HEAL_LS) === HEAL_VERSION) { this.#healRan = true; return } } catch { /* no storage — run it */ }
+    this.#healRan = true
+    this.#healDone = new Promise<void>(resolve => {
+      const run = (): void => { void this.#runHealPass().finally(resolve) }
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 12000 })
+      else setTimeout(run, 6000)
+    })
+  }
+
+  async #runHealPass(): Promise<void> {
+    try {
+      const places = await this.allPlaces()
+      if (places.length === 0) { this.#healRan = false; return }   // history not ready — try next boot
+      const result = await this.healParticipantImages()
+      if (result.healed.length > 0) {
+        // Say it. A hive quietly changing its own pictures — even back to the
+        // right ones — is exactly the kind of silent write that made this
+        // necessary in the first place.
+        EffectBus.emit('toast:show', {
+          type: 'info',
+          message: `${result.healed.length} picture${result.healed.length === 1 ? '' : 's'} restored — a background default had overwritten them`,
+        })
+        EffectBus.emit('activity:log', {
+          message: `restored ${result.healed.length} overwritten picture${result.healed.length === 1 ? '' : 's'}`,
+          icon: '◈',
+        })
+      }
+      if (result.unrecoverable.length > 0) {
+        EffectBus.emit('activity:log', {
+          message: `${result.unrecoverable.length} tile${result.unrecoverable.length === 1 ? '' : 's'} kept no original — /heal check names them`,
+          icon: '△',
+        })
+      }
+      try { localStorage.setItem(HEAL_LS, HEAL_VERSION) } catch { /* ignore */ }
+    } catch {
+      this.#healRan = false                    // left armed — the pass is idempotent
+    }
+  }
+
   #redressPending = false
 
   #scheduleDefaultRedress(): void {
@@ -868,6 +942,9 @@ export class SubstrateService extends EventTarget {
 
   async #redressDefaultsOntoActive(): Promise<void> {
     try {
+      // The repair goes first, always. A damaged tile still carries our mark,
+      // and healing it is what teaches this pass to leave it alone.
+      await this.#healDone
       await this.warmUp()
       if (this.#propsPool.length === 0) return          // pool not ready — retry next boot
       const places = await this.allPlaces()
