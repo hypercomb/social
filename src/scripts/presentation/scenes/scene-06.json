@@ -2,5 +2,17 @@
   "n": 6,
   "name": "dna",
   "chapter": "what is hypercomb",
+  "slug": "dna",
+  "eyebrow": "the substrate",
+  "headline": "The *DNA* of a hive",
+  "sub": "Distributed Network Artifacts — content-addressed, immutable, merkle-versioned, shareable.",
+  "visual": "hexes",
+  "visualData": [
+    "⬡ layers",
+    "🖼 resources",
+    "🐝 beehaviors",
+    "⛓ dependencies",
+    "✎ content"
+  ],
   "say": "Five kinds of artifact compose everything. Hypercomb calls them its D N A — Distributed Network Artifacts. Layers: the structure — each one an immutable snapshot linking to its children by signature. Resources: the content bytes — images, text, files. Bees — short for beehaviors — small modules of code that give the hive life. Dependencies: the libraries those bees rely on. And content: everything a tile carries. All five are content-addressed, immutable, merkle-versioned, and shareable across the network. Your entire hive is just these five kinds, combined."
 }

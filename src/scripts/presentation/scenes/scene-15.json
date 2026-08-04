@@ -2,5 +2,15 @@
   "n": 15,
   "name": "open source",
   "chapter": "why hypercomb",
+  "slug": "open-source",
+  "eyebrow": "reason four",
+  "headline": "*Open source*, as a promise",
+  "sub": "Code under AGPL, documentation under Creative Commons. Every module is signed — so a fork is verifiable.",
+  "visual": "hexes",
+  "visualData": [
+    "⌘ AGPL-3.0",
+    "✎ CC BY-SA",
+    "⑂ fork it"
+  ],
   "say": "Reason four: it's open source — and here that's a promise, not a marketing line. The code is A G P L: free to use, free to study, free to change, and any hosted version has to stay free too. The documentation is Creative Commons. Every module carries a signature, so a fork is verifiable — you can prove exactly what you're running, byte for byte. And if Hypercomb ever goes in a direction you don't like, you can take it in yours, and your hive still opens. That's what open actually has to mean."
 }

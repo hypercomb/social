@@ -2,5 +2,15 @@
   "n": 19,
   "name": "now",
   "chapter": "roadmap",
+  "slug": "now",
+  "eyebrow": "landing now",
+  "headline": "Roadmap · *now*",
+  "sub": "",
+  "visual": "road",
+  "visualData": [
+    "Mobile, usable-first — the hive as a native-feeling scroller — camera capture straight to tiles",
+    "Build revisions — every build of the software itself tracked as a named, adoptable revision",
+    "Example hives & tutorials — first boot lands somewhere alive; the hive teaches the hive"
+  ],
   "say": "So where is it going? What's landing now: the mobile experience — the hive as a native-feeling scroller, with camera capture straight to tiles. Build revisions — every build of the software itself tracked as a named, adoptable revision. Example hives on first boot, so a new participant lands somewhere alive. And tutorial courses — the hive teaching the hive."
 }

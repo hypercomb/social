@@ -2,5 +2,18 @@
   "n": 8,
   "name": "the language",
   "chapter": "what is hypercomb",
+  "slug": "the-language",
+  "eyebrow": "the vocabulary",
+  "headline": "The *language* of Hypercomb",
+  "sub": "The colony is an accurate model for a system with no central authority.",
+  "visual": "hexes",
+  "visualData": [
+    "⬡ hive",
+    "⬢ tile",
+    "▤ layer",
+    "# signature",
+    "🐝 bee",
+    "✽ pheromone"
+  ],
   "say": "Hypercomb has its own language, and it's worth learning, because the words are precise. A hive is one participant's whole tree. A tile is one hexagon of content. A layer is one immutable version of a place. A signature is the name computed from the content itself. A bee is a beehavior — a module that senses and acts. A pheromone is a mark you put on a tile saying what it is, so the software can behave accordingly without anyone hardcoding rules for it. Pollination is how work crosses between hives. Brooding and eclosion are how tiles are prepared, and then hatch onto your screen. The colony metaphor isn't decoration — it's a genuinely accurate model for a system that has no central authority."
 }

@@ -2,5 +2,16 @@
   "n": 23,
   "name": "the invitation",
   "chapter": "roadmap",
+  "slug": "the-invitation",
+  "eyebrow": "the invitation",
+  "headline": "*The hive is yours.*",
+  "sub": "Type a name. Press Enter. You have a hive.",
+  "visual": "film:create",
+  "visualData": [],
+  "media": "create",
+  "link": {
+    "href": "https://hypercomb.io",
+    "label": "start your hive · hypercomb.io ↗"
+  },
   "say": "Hypercomb is a bet that software can be shaped like nature instead of like a corporation. Small cells. Simple rules. Signatures instead of authority. History instead of amnesia. It's open source, it's built in the open, and it grows the way a colony grows — by everyone who joins it adding what they need, and sharing it back. You've seen the real thing running. The invitation is one gesture long: type a name, press Enter — and you have a hive. Hypercomb. The hive is yours."
 }

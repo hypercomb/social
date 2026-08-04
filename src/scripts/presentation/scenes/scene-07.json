@@ -2,5 +2,16 @@
   "n": 7,
   "name": "history is the data",
   "chapter": "what is hypercomb",
+  "slug": "history-is-the-data",
+  "eyebrow": "nothing is overwritten",
+  "headline": "History *is* the data structure",
+  "sub": "",
+  "visual": "stack",
+  "visualData": [
+    "0000 | first layer",
+    "0001 | added a tile",
+    "0002 | changed a picture",
+    "* 0003 | ← the newest marker IS the current state"
+  ],
   "say": "Every change you make becomes a new layer — nothing is ever overwritten. The history of a place is a bag of numbered markers, and the newest marker is the current state. That has a beautiful consequence: undo isn't a trick — it's just reading an older layer. You can rewind any page, restore any moment, name a revision, or snapshot the whole hive before an experiment. Your history is not a log about the data; it is the data. Deploying, backing up, and remembering become the same operation."
 }

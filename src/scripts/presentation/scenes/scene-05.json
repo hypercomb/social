@@ -2,5 +2,13 @@
   "n": 5,
   "name": "signatures",
   "chapter": "what is hypercomb",
+  "slug": "signatures",
+  "eyebrow": "the identity primitive",
+  "headline": "One kind of name: the *signature*",
+  "sub": "Sixty-four characters, computed from the bytes themselves. Same content → same name, on every machine, forever.",
+  "visual": "sig",
+  "visualData": [
+    "sign(content) → *e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855*"
+  ],
   "say": "Everything in Hypercomb has one kind of name: a signature — the SHA-256 hash of its content. Sixty-four characters that are the same on every machine, in every country, forever. Same content, same signature; change one byte and it's a different thing with a different name. This single idea does enormous work. Content can be verified — the name proves the bytes. It deduplicates itself — the same picture stored twice is stored once. It can be cached forever — a signature never goes stale. And it can be shared as a tiny string that any participant can resolve. Signatures aren't an implementation detail. They are the identity system, the reference system, and the trust system — all at once."
 }

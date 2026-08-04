@@ -2,5 +2,13 @@
   "n": 17,
   "name": "sharing without a middleman",
   "chapter": "why hypercomb",
+  "slug": "sharing-without-a-middleman",
+  "eyebrow": "reason six",
+  "headline": "Sharing without a *middleman*",
+  "sub": "Publishing a branch is one command. Visitors adopt your work as a named revision line — and can still rewind to exactly what you shipped.",
+  "visual": "sig",
+  "visualData": [
+    "your hive → *signed layers* → their hive — no account in between"
+  ],
   "say": "Reason six: sharing without a middleman. Publishing a branch is one command. Content travels over open relays and lands in the visitor's own hive as a named revision line — they can adopt your work, carry it forward, and still rewind to exactly what you shipped. Collaboration becomes two hives exchanging signed layers. No accounts to reconcile, no permissions matrix. Cryptography instead of bureaucracy."
 }

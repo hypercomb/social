@@ -2,5 +2,16 @@
   "n": 11,
   "name": "scriptable building blocks",
   "chapter": "what is hypercomb",
+  "slug": "scriptable-building-blocks",
+  "eyebrow": "composable by design",
+  "headline": "Scriptable *building blocks*",
+  "sub": "",
+  "visual": "stack",
+  "visualData": [
+    "type a name | a tile exists",
+    "/present | the tile becomes a slideshow",
+    "/website | the tile becomes a site",
+    "* write a bee, sign it, share it | → a new verb for everyone"
+  ],
   "say": "Everything is a scriptable building block. The command line is the primary interface: type a name to create, type a path to travel, and use slash commands as verbs — rewind a page, publish a website, open a game, ask an A.I. Behaviors attach to any tile, so the same tile becomes a slideshow, a website, a study deck, or a tree view depending on what you mark it with. And because behaviors are modules, the vocabulary itself is extensible: write a bee, sign it, share it — and it becomes a verb anyone can use. You're not filling in someone else's forms. You're composing your own blocks."
 }

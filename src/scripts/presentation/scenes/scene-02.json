@@ -2,5 +2,16 @@
   "n": 2,
   "name": "welcome",
   "chapter": "what is hypercomb",
+  "slug": "welcome",
+  "eyebrow": "welcome",
+  "headline": "Welcome to *Hypercomb*",
+  "sub": "An open software platform — open in every sense that matters.",
+  "visual": "hexes",
+  "visualData": [
+    "⌘ open source",
+    "⬡ open format",
+    "⚙ open platform",
+    "◈ open network"
+  ],
   "say": "Welcome to Hypercomb. Hypercomb is an open software platform — and open in every sense that matters. The source is open: it's free software, and the documentation is Creative Commons. The format is open: your content is plain, content-addressed bytes, not a proprietary database anyone else controls. The platform is open: every feature is a module you can write, fork, and share. And the network is open: participants exchange work directly over public relays, with no gatekeeper in the middle. It's built in the open, by a community, for people who want their tools to belong to them."
 }

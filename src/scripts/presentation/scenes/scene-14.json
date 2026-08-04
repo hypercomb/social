@@ -2,5 +2,11 @@
   "n": 14,
   "name": "time is a feature",
   "chapter": "why hypercomb",
+  "slug": "time-is-a-feature",
+  "eyebrow": "reason three",
+  "headline": "*Time* is a feature",
+  "sub": "Full undo across sessions · a visual rewind window · named revisions on adopt and upgrade · checkpoint snapshots before experiments.",
+  "visual": "none",
+  "visualData": [],
   "say": "Reason three: you get time as a feature. Full undo across sessions. A rewind window that visually scrubs through what a page used to look like. Named revisions when you adopt or upgrade someone's work. Checkpoint snapshots before risky experiments. Because every state is an immutable layer, the past is always one signature away — and it never rots."
 }

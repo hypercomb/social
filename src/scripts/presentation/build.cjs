@@ -61,12 +61,66 @@ async function ensureAudio() {
   }
 }
 
+// --- instructions → scene HTML ----------------------------------------------
+// The template is the shell: styles, chrome, and the player engine. Every scene
+// is compiled here from its instruction, so editing a tile's instruction and
+// recompiling is the whole authoring loop.
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// *asterisks* are the emphasis a participant types; they become the honey <b>
+const emph = (s, tag = 'b') => esc(s).replace(/\*([^*]+)\*/g, `<${tag}>$1</${tag}>`)
+const ACT_OF = { 'what is hypercomb': 'what', 'why hypercomb': 'why', roadmap: 'roadmap' }
+
+function visualHtml(s) {
+  const rows = s.visualData || []
+  switch ((s.visual || 'none').split(':')[0]) {
+    case 'film': {
+      const clip = (s.visual.split(':')[1] || '').trim()
+      const tag = { navigate: 'localhost hive', zoom: 'one hive, many worlds',
+                    create: 'your first tile', children: 'creating structure' }[clip] || 'live capture'
+      return `\n  <div class="filmwrap"><span class="filmtag">live capture · ${esc(tag)}</span>` +
+             `<video muted playsinline loop src="{{${clip}}}"></video></div>`
+    }
+    case 'hexes':
+      return `\n  <div class="hexrow">` + rows.map(r => {
+        const [glyph, ...rest] = String(r).trim().split(/\s+/)
+        return `<div class="hexb"><span class="g">${esc(glyph)}</span><span class="t">${esc(rest.join(' '))}</span></div>`
+      }).join('') + `</div>`
+    case 'stack':
+      return `\n  <div class="stack">` + rows.map(r => {
+        const head = /^\*\s/.test(r)
+        const [left, right] = String(r).replace(/^\*\s/, '').split('|').map(x => (x || '').trim())
+        const m = head ? ' class="m"' : ''
+        return `<div class="lay${head ? ' head' : ''}"><span${m}>${esc(left)}</span><span${m}>${esc(right)}</span></div>`
+      }).join('') + `</div>`
+    case 'road':
+      return `\n  <div class="road">` + rows.map(r => {
+        const [title, ...rest] = String(r).split('—')
+        return `<div class="mile"><div class="dot"></div><div><div class="mt">${esc(title.trim())}</div>` +
+               `<div class="md">${esc(rest.join('—').trim())}</div></div></div>`
+      }).join('') + `</div>`
+    case 'sig':
+      return rows.length ? `\n  <div class="sig">${emph(rows[0], 'em')}</div>` : ''
+    default: return ''
+  }
+}
+
+function sceneObject(s) {
+  const parts = [`\n  <h1>${emph(s.headline)}</h1>`]
+  const vis = visualHtml(s)
+  // a film sits under the headline; badge rows and diagrams sit under the sub line
+  if ((s.visual || '').startsWith('film')) parts.push(vis)
+  if (s.sub) parts.push(`\n  <p class="sub">${emph(s.sub)}</p>`)
+  if (vis && !(s.visual || '').startsWith('film')) parts.splice(1, 0, vis)
+  if (s.link) parts.push(`\n  <a class="golink" href="${esc(s.link.href)}" target="_blank" rel="noopener">${esc(s.link.label)}</a>`)
+  const o = { act: ACT_OF[s.chapter], name: s.name, eyebrow: s.eyebrow, html: parts.join('') }
+  if ((s.visual || '').startsWith('film')) o.media = s.visual.split(':')[1]
+  o.say = s.say
+  return o
+}
+
 function assemble() {
   let html = fs.readFileSync(path.join(ROOT, 'template.html'), 'utf8')
-  // narration source of truth is the scene chunks — inject over the template's say fields
-  let i = 0
-  html = html.replace(/say:`[^`]+`/g, () => 'say:`' + scenes[i++].say.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${') + '`')
-  if (i !== scenes.length) throw new Error(`template has ${i} say slots, ${scenes.length} scene chunks`)
+  html = html.replace('{{SCENES}}', JSON.stringify(scenes.map(sceneObject), null, 1))
   const vuri = f => 'data:video/mp4;base64,' + fs.readFileSync(path.join(ROOT, 'media', f)).toString('base64')
   const auri = s => 'data:audio/mpeg;base64,' + fs.readFileSync(cachePath(s.say)).toString('base64')
   html = html

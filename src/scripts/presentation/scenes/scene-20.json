@@ -2,5 +2,16 @@
   "n": 20,
   "name": "next",
   "chapter": "roadmap",
+  "slug": "next",
+  "eyebrow": "next",
+  "headline": "Roadmap · *next*",
+  "sub": "",
+  "visual": "road",
+  "visualData": [
+    "Workflow pulses — scheduled audits that walk your tree and file reports as tiles",
+    "Installer versioning & checkpoints — version chains surfaced, page-subtree checkpoints, file export",
+    "Contract fulfillment — remote participants ask your hive for work — and receive signed results",
+    "Native Windows client — held to the same protocol by conformance vectors — one contract, many shells"
+  ],
   "say": "Next: workflow pulses — scheduled audits that walk your tree and file their reports as tiles. Versioning and checkpoints for the desktop installer. Contract fulfillment — a protocol where remote participants can ask your hive for work and receive signed results. And the native Windows client, held to the same protocol by conformance vectors generated from the reference implementation. One contract, many shells."
 }
