@@ -107,6 +107,34 @@
   .golink:focus-visible{outline:2px solid var(--honey);outline-offset:3px}
   #splash .golink{font-size:clamp(10px,1.1vw,12px);padding:9px 18px;border-color:var(--line);color:var(--dim)}
   #splash .golink:hover{border-color:var(--honey-deep);color:var(--honey)}
+  /* ---------- pronunciation flags ---------- */
+  #annbtn{position:fixed;z-index:70;display:none;align-items:center;gap:7px;font-family:var(--mono);
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#0a0e15;background:var(--honey);
+    border:none;border-radius:6px;padding:8px 12px;cursor:pointer;box-shadow:0 8px 24px -8px rgba(0,0,0,.8)}
+  #annbtn.on{display:inline-flex}
+  #annform{position:fixed;z-index:71;display:none;flex-direction:column;gap:12px;width:min(420px,90vw);
+    background:var(--panel);border:1px solid var(--honey-deep);border-radius:10px;padding:18px;
+    box-shadow:0 30px 70px -20px rgba(0,0,0,.9)}
+  #annform.on{display:flex}
+  #annform .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--honey)}
+  #annform .heard{font-size:15px;color:var(--ink);line-height:1.4}
+  #annform input{background:#0a0e15;border:1px solid var(--line);border-radius:6px;padding:11px 12px;
+    color:var(--ink);font-family:var(--mono);font-size:13px;width:100%}
+  #annform input:focus{outline:none;border-color:var(--honey-deep)}
+  #annform .hint{font-size:12px;color:var(--faint);line-height:1.45}
+  #annform .row{display:flex;gap:9px;justify-content:flex-end}
+  #annpanel{position:fixed;right:16px;bottom:calc(8vh + 14px);z-index:72;display:none;flex-direction:column;gap:10px;
+    width:min(520px,92vw);max-height:62vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px;box-shadow:0 30px 70px -20px rgba(0,0,0,.9)}
+  #annpanel.on{display:flex}
+  #annlist{overflow-y:auto;display:flex;flex-direction:column;gap:9px}
+  .annrow{border-left:2px solid var(--honey-deep);padding:8px 0 8px 12px;font-size:13px;line-height:1.45}
+  .annrow .meta{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  .annrow .said{color:var(--ink)}
+  .annrow .fix{color:var(--honey);font-family:var(--mono);font-size:12px}
+  .annrow button{background:none;border:none;color:var(--faint);cursor:pointer;font-size:14px;float:right;padding:0 4px}
+  .annrow button:hover{color:#e5484d}
+  #anns.has{border-color:var(--honey-deep);color:var(--honey)}
   #endcard{display:none}
   @media (max-width:700px){
     #caption{bottom:9vh;font-size:13px}
@@ -133,7 +161,36 @@
   <button class="btn" id="next" title="next scene (→)">›</button>
   <div id="ticks"></div>
   <span id="actlbl"></span>
+  <button class="btn" id="anns" title="annotations on this presentation">⌁ 0</button>
   <button class="btn" id="voice" title="toggle narration voice">voice on</button>
+</div>
+
+<button id="annbtn">⌁ annotate</button>
+
+<div id="annform" role="dialog" aria-label="Add an annotation">
+  <div class="lbl" id="annsceneref"></div>
+  <div class="heard" id="annquote"></div>
+  <div class="lbl">what kind</div>
+  <div class="row" id="annkinds" style="justify-content:flex-start;flex-wrap:wrap"></div>
+  <div class="lbl" id="annfixlbl">how it should sound</div>
+  <input id="annfix" autocomplete="off" spellcheck="false">
+  <div class="hint" id="annhint"></div>
+  <div class="row">
+    <button class="btn" id="anncancel">cancel</button>
+    <button class="btn" id="annsave" style="border-color:var(--honey-deep);color:var(--honey)">save</button>
+  </div>
+</div>
+
+<div id="annpanel" role="dialog" aria-label="Annotations">
+  <div class="lbl" style="font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--honey)">annotations for the next revision</div>
+  <div id="annlist"></div>
+  <div class="hint" id="annempty" style="font-size:12px;color:var(--faint)">Highlight any narration or on-screen text, then choose <b>⌁ annotate</b>. Notes are kept in this browser until you export them.</div>
+  <div class="row">
+    <button class="btn" id="annclear">clear all</button>
+    <button class="btn" id="anncopy">copy json</button>
+    <button class="btn" id="anndownload" style="border-color:var(--honey-deep);color:var(--honey)">download</button>
+    <button class="btn" id="annclose">close</button>
+  </div>
 </div>
 
 <div id="splash">
@@ -374,6 +431,7 @@ function advance(myToken){ if(myToken!==token)return; if(idx<SCENES.length-1)got
 function goto(i,manual){
   token++; const myToken=token; clearTimeout(timer);
   if(voiceTrack)voiceTrack.pause();
+  const ab=document.getElementById('annbtn'); if(ab)ab.classList.remove('on');
   if(idx>=0){SCENES[idx].el.classList.remove('on');SCENES[idx].tick.classList.remove('now');}
   idx=i; const s=SCENES[i];
   s.el.classList.add('on');
@@ -406,6 +464,8 @@ document.getElementById('next').onclick=throttled(()=>{ if(idx<SCENES.length-1)g
 voiceBtn.onclick=()=>{ voiceOn=!voiceOn; voiceBtn.textContent=voiceOn?'voice on':'voice off';
   if(voiceTrack)voiceTrack.pause(); if(playing&&idx>=0)goto(idx,false); };
 addEventListener('keydown',e=>{
+  const typing=/^(INPUT|TEXTAREA)$/.test(e.target.tagName)||e.target.isContentEditable;
+  if(typing)return; /* the annotation box owns the keyboard while it is focused */
   if(e.code==='Space'){e.preventDefault();ppBtn.click();}
   if(e.key==='ArrowRight')document.getElementById('next').click();
   if(e.key==='ArrowLeft')document.getElementById('prev').click();
@@ -415,4 +475,120 @@ document.getElementById('enter').onclick=()=>{
   setPlayingSilent(true); goto(0,false); /* click is the user gesture that unlocks audio */
 };
 addEventListener('visibilitychange',()=>{ if(document.hidden&&playing)setPlaying(false); });
+
+/* ====================== annotations ======================
+   Highlight any narration or on-screen text and file a note against the
+   scene it belongs to. Notes live in this browser until exported; the
+   exported JSON is what the next revision reads — ingest-annotations.cjs
+   turns pronunciation notes into spoken-form rules the build applies, and
+   files the rest as notes on the scene's tile. */
+const KINDS=[
+  {k:'pronunciation', label:'pronunciation', lbl:'how it should sound',
+   hint:'Write it the way it should be said — "A-G-P-L" as "ay gee pee ell". The next build feeds this spelling to the voice while the caption keeps the real text.'},
+  {k:'wording', label:'wording', lbl:'what it should say',
+   hint:'A better line for this passage. Rewrites the narration and the caption together.'},
+  {k:'accuracy', label:'accuracy', lbl:'what is wrong',
+   hint:'Something stated here is not true, or not true any more.'},
+  {k:'pacing', label:'pacing', lbl:'what to change',
+   hint:'Too fast, too slow, too long, needs a pause.'},
+  {k:'visual', label:'visual', lbl:'what to change',
+   hint:'Something about how this scene looks — layout, a diagram, a clip.'},
+  {k:'note', label:'note', lbl:'your note', hint:'Anything else worth remembering.'},
+];
+const STORE='hc:presentation:annotations';
+const annBtn=document.getElementById('annbtn'), annForm=document.getElementById('annform'),
+      annPanel=document.getElementById('annpanel'), annList=document.getElementById('annlist'),
+      annCount=document.getElementById('anns'), annQuote=document.getElementById('annquote'),
+      annFix=document.getElementById('annfix'), annHint=document.getElementById('annhint'),
+      annFixLbl=document.getElementById('annfixlbl'), annKinds=document.getElementById('annkinds'),
+      annSceneRef=document.getElementById('annsceneref'), annEmpty=document.getElementById('annempty');
+let pending=null, kind='pronunciation';
+
+const load=()=>{ try{ return JSON.parse(localStorage.getItem(STORE)||'[]') }catch{ return [] } };
+const save=list=>{ try{ localStorage.setItem(STORE,JSON.stringify(list)) }catch{} ; paintCount(); };
+function paintCount(){ const n=load().length; annCount.textContent='⌁ '+n; annCount.classList.toggle('has',n>0); }
+
+KINDS.forEach(k=>{
+  const b=document.createElement('button'); b.className='btn'; b.textContent=k.label; b.dataset.k=k.k;
+  b.onclick=()=>setKind(k.k); annKinds.appendChild(b);
+});
+function setKind(k){
+  kind=k; const def=KINDS.find(x=>x.k===k);
+  annFixLbl.textContent=def.lbl; annHint.textContent=def.hint;
+  [...annKinds.children].forEach(b=>{
+    const on=b.dataset.k===k;
+    b.style.borderColor=on?'var(--honey-deep)':'var(--line)';
+    b.style.color=on?'var(--honey)':'var(--ink)';
+  });
+}
+
+document.addEventListener('mouseup',e=>{
+  if(annForm.classList.contains('on')||annPanel.contains(e.target))return;
+  setTimeout(()=>{
+    const sel=window.getSelection(); const text=String(sel).trim();
+    if(!text||text.length<2||document.getElementById('splash').classList.contains('gone')===false){ annBtn.classList.remove('on'); return }
+    const r=sel.getRangeAt(0).getBoundingClientRect();
+    annBtn.style.left=Math.max(12,Math.min(innerWidth-150,r.left+r.width/2-70))+'px';
+    annBtn.style.top=Math.max(12,r.top-46)+'px';
+    annBtn.classList.add('on');
+  },10);
+});
+
+annBtn.onclick=()=>{
+  const sel=window.getSelection(); const text=String(sel).trim(); if(!text)return;
+  const inCaption=cap.contains(sel.anchorNode)||cap.contains(sel.anchorNode?.parentElement);
+  pending={ scene:idx+1, sceneName:(SCENES[idx]&&SCENES[idx].name)||'', quote:text,
+            where:inCaption?'narration':'on-screen',
+            at:voiceTrack?Math.round(voiceTrack.currentTime*10)/10:null };
+  if(playing)setPlaying(false);
+  annBtn.classList.remove('on');
+  annSceneRef.textContent=`scene ${pending.scene} · ${pending.sceneName} · ${pending.where}`;
+  annQuote.textContent='“'+text+'”';
+  annFix.value=''; setKind('pronunciation');
+  annForm.style.left=Math.max(12,Math.min(innerWidth-440,(innerWidth-420)/2))+'px';
+  annForm.style.top=Math.max(12,Math.min(innerHeight-380,innerHeight/2-190))+'px';
+  annForm.classList.add('on'); annFix.focus();
+};
+document.getElementById('anncancel').onclick=()=>{ annForm.classList.remove('on'); pending=null };
+document.getElementById('annsave').onclick=()=>{
+  if(!pending)return;
+  const list=load();
+  list.push({...pending, kind, fix:annFix.value.trim(), stamp:new Date().toISOString()});
+  save(list); annForm.classList.remove('on'); pending=null;
+  window.getSelection().removeAllRanges();
+};
+annFix.addEventListener('keydown',e=>{ if(e.key==='Enter')document.getElementById('annsave').click();
+  if(e.key==='Escape')document.getElementById('anncancel').click(); });
+
+function paintList(){
+  const list=load(); annList.innerHTML='';
+  annEmpty.style.display=list.length?'none':'block';
+  list.forEach((a,i)=>{
+    const row=document.createElement('div'); row.className='annrow';
+    row.innerHTML=`<button title="remove">✕</button>
+      <div class="meta">scene ${a.scene} · ${a.sceneName} · ${a.kind}${a.at!=null?' · '+a.at+'s':''}</div>
+      <div class="said">“${a.quote}”</div>${a.fix?`<div class="fix">→ ${a.fix}</div>`:''}`;
+    row.querySelector('button').onclick=()=>{ const l=load(); l.splice(i,1); save(l); paintList() };
+    annList.appendChild(row);
+  });
+}
+annCount.onclick=()=>{ annPanel.classList.toggle('on'); if(annPanel.classList.contains('on')){ paintList(); if(playing)setPlaying(false) } };
+document.getElementById('annclose').onclick=()=>annPanel.classList.remove('on');
+document.getElementById('annclear').onclick=()=>{ if(confirm('Remove all annotations kept in this browser?')){ save([]); paintList() } };
+const exportJson=()=>JSON.stringify({ presentation:'hypercomb', scenes:SCENES.length,
+  exported:new Date().toISOString(), annotations:load() }, null, 2);
+document.getElementById('anncopy').onclick=async()=>{
+  const b=document.getElementById('anncopy');
+  try{ await navigator.clipboard.writeText(exportJson()); b.textContent='copied'; }
+  catch{ b.textContent='copy failed'; }
+  setTimeout(()=>b.textContent='copy json',1600);
+};
+document.getElementById('anndownload').onclick=()=>{
+  const blob=new Blob([exportJson()],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='presentation-annotations.json'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+};
+addEventListener('keydown',e=>{ if(e.key==='Escape'){ annForm.classList.remove('on'); annBtn.classList.remove('on') } });
+paintCount();
 </script>

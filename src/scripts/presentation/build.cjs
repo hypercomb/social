@@ -23,7 +23,15 @@ const RATE = '+2%'
 const scenes = fs.readdirSync(path.join(ROOT, 'scenes')).filter(f => f.endsWith('.json')).sort()
   .map(f => JSON.parse(fs.readFileSync(path.join(ROOT, 'scenes', f), 'utf8')))
 
-const hashOf = say => crypto.createHash('sha256').update(`${VOICE}|${RATE}|${say}`).digest('hex').slice(0, 16)
+// Pronunciation rules rewrite what the VOICE reads; captions keep the real text.
+// Because the cache key is the spoken form, fixing a pronunciation regenerates
+// exactly the scenes that say the word — and nothing else.
+const rulesPath = path.join(ROOT, 'pronunciations.json')
+const RULES = fs.existsSync(rulesPath) ? JSON.parse(fs.readFileSync(rulesPath, 'utf8')) : []
+const spokenOf = say => RULES.reduce((text, r) =>
+  r && r.match && r.say ? text.split(r.match).join(r.say) : text, say)
+
+const hashOf = say => crypto.createHash('sha256').update(`${VOICE}|${RATE}|${spokenOf(say)}`).digest('hex').slice(0, 16)
 
 const cachePath = say => {
   const p = path.join(ROOT, 'audio-cache', hashOf(say) + '.mp3')
@@ -44,7 +52,7 @@ async function ensureAudio() {
     const tts = new MsEdgeTTS()
     await tts.setMetadata(VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
     const pros = new ProsodyOptions(); pros.rate = RATE
-    const { audioStream } = await tts.toStream(s.say, pros)
+    const { audioStream } = await tts.toStream(spokenOf(s.say), pros)
     const chunks = []
     await new Promise((res, rej) => { audioStream.on('data', c => chunks.push(c)); audioStream.on('end', res); audioStream.on('error', rej) })
     fs.writeFileSync(path.join(ROOT, 'audio-cache', hashOf(s.say) + '.mp3'), Buffer.concat(chunks))

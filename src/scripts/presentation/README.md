@@ -31,6 +31,35 @@ node deploy-azure.cjs    # ship to Azure Static Web Apps
 node mirror-to-hive.cjs  # (bridge live) push scene tiles + narration notes into the hive
 ```
 
+## Annotations — highlight, then say what's wrong
+
+Watch the presentation and **highlight any text** — narration in the caption or
+anything on screen. A `⌁ annotate` chip appears; choose a kind, write the fix,
+save. The reel pauses while you type. The bar's `⌁ N` button opens the list,
+where you can remove entries, **copy json**, or **download** them.
+
+Kinds: `pronunciation` · `wording` · `accuracy` · `pacing` · `visual` · `note`.
+Each annotation records the scene, its name, the exact quote, whether it came
+from the narration or the screen, and how far into the narration you were.
+
+Annotations live in the viewer's own browser (`localStorage`) until exported —
+nothing is sent anywhere, so the page stays a static file with no backend.
+
+Feed an export back into the next revision:
+
+```bash
+node ingest-annotations.cjs ~/Downloads/presentation-annotations.json
+```
+
+- **pronunciation** annotations become rules in `pronunciations.json`. The build
+  applies them to what the *voice* reads while the caption keeps the real text —
+  and since the audio cache is keyed by the **spoken** form, only the scenes
+  that actually say the phrase regenerate. (Seeded with "A G P L" → "ay gee pee
+  ell"; adding it regenerated scene 15 alone.)
+- **everything else** lands in `notes/annotations.md`, grouped by scene, ready
+  for the next pass over the script. Add `--to-hive` to also file each one as a
+  note on that scene's tile.
+
 ## Deploy
 
 Azure Static Web App `pbs-hypercomb-com` — resource group
