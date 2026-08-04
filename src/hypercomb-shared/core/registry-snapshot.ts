@@ -40,7 +40,10 @@ export interface RegistrySnapshot {
    *  tiles) vs 'package' (functionality — refs join the logical install
    *  but NEVER mounts visuals). Absent on snapshots from older DCP
    *  builds → treated as 'content'. */
-  branches?: { domain: string; name: string; branchSig: string; at: string[]; enabled?: boolean; kind?: 'package' | 'content' }[]
+  /** `backup` = the participant's per-branch backup choice, made in the
+   *  installer. Absent = backed up (older DCP builds; nothing silently
+   *  stops being backed up). */
+  branches?: { domain: string; name: string; branchSig: string; at: string[]; enabled?: boolean; backup?: boolean; kind?: 'package' | 'content' }[]
   generatedAt: number
 }
 

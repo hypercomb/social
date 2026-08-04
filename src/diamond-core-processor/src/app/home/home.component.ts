@@ -17,7 +17,7 @@ import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
 import { RevisionListComponent, type RevisionRow } from '../revision-list/revision-list.component'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { defaultHostOrigin, devDefaultBootstrap } from '../core/default-host'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, revisionName, type I18nProvider } from '@hypercomb/core'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import { isCodeKind, defaultEnabled } from '../core/tree-node'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
@@ -1796,12 +1796,45 @@ export class HomeComponent implements OnDestroy {
     // enabled set (resyncFromSentinel adds/removes the package's files).
   }
 
-  /** Adopt: install + enable (live in the logical view now). */
+  // ── backup choice — "decide what we're going to back up", per branch ──────
+  // Participant-local decoration (settings sigbag), default INCLUDED. The
+  // choice rides the registry snapshot to the hive and gates backup exports;
+  // it never touches the branch's bytes or its enabled state.
+  readonly #backupVersion = signal(0)
+
+  isBackupOn(section: DomainSection): boolean {
+    this.#backupVersion()
+    return this.#domainStorage.isBackupEnabled(section.rootSig)
+  }
+
+  async toggleBackup(section: DomainSection): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(section.rootSig)) return
+    try {
+      await this.#domainStorage.setBackupEnabled(
+        section.rootSig, !this.#domainStorage.isBackupEnabled(section.rootSig))
+      this.#backupVersion.update(v => v + 1)
+      await this.#postRegistrySnapshot()
+    } catch (e) {
+      console.warn('[home] backup toggle failed', e)
+    }
+  }
+
+  /** Adopt: install + enable (live in the logical view now). The restore
+   *  point arrives already NAMED by the naming service — the same word-pair
+   *  the breadcrumb and the upgrade pill use, minted from the package
+   *  signature so one adoption reads as one name on every device. The field
+   *  stays the participant's to overwrite, never theirs to supply. */
   adoptPackage(section: DomainSection): void {
     if (this.packageState(section) === 'adopted') return
     this.adoptingPackageSig.set(section.rootSig)
     this.adoptRestorePointName.set(
-      this.homeRevisions().length === 0 ? 'Default' : `Before ${this.displayLabel(section)}`,
+      this.homeRevisions().length === 0
+        ? 'Default'
+        : revisionName({
+            packageSig: section.rootSig,
+            label: this.displayLabel(section),
+            locale: ((window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale,
+          }),
     )
     this.adoptRestorePointError.set('')
   }

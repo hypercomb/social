@@ -10,7 +10,7 @@
 // updated read as names instead of timestamps, and the participant can type
 // over it before adopting.
 
-import { secretTag } from '../ui/controls-bar/secret-words'
+import { secretTag } from './secret-words/index.js'
 
 export interface RevisionNameParts {
   /** The package signature being adopted — what makes the name deterministic. */

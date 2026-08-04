@@ -1,7 +1,7 @@
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { revisionName } from '../../core/revision-name'
+import { revisionName } from '@hypercomb/core'
 
 interface UpdateAvailablePayload {
   available?: boolean

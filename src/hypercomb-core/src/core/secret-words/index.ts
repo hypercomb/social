@@ -1,12 +1,12 @@
 // Deterministic two-word tag from a secret string, localized per caller-supplied locale.
 // Same secret + same locale → same two words, always. Unknown locales fall back to English.
 
-import { ADJECTIVES as EN_ADJ, NOUNS as EN_NOUN } from './en'
-import { ADJECTIVES as JA_ADJ, NOUNS as JA_NOUN } from './ja'
-import { ADJECTIVES as FR_ADJ, NOUNS as FR_NOUN } from './fr'
-import { ADJECTIVES as ES_ADJ, NOUNS as ES_NOUN } from './es'
-import { ADJECTIVES as DE_ADJ, NOUNS as DE_NOUN } from './de'
-import { ADJECTIVES as RU_ADJ, NOUNS as RU_NOUN } from './ru'
+import { ADJECTIVES as EN_ADJ, NOUNS as EN_NOUN } from './en.js'
+import { ADJECTIVES as JA_ADJ, NOUNS as JA_NOUN } from './ja.js'
+import { ADJECTIVES as FR_ADJ, NOUNS as FR_NOUN } from './fr.js'
+import { ADJECTIVES as ES_ADJ, NOUNS as ES_NOUN } from './es.js'
+import { ADJECTIVES as DE_ADJ, NOUNS as DE_NOUN } from './de.js'
+import { ADJECTIVES as RU_ADJ, NOUNS as RU_NOUN } from './ru.js'
 
 interface WordLists {
   adjectives: readonly string[]

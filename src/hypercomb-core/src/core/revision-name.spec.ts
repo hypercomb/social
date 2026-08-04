@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { revisionName } from './revision-name'
+import { revisionName } from './revision-name.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)

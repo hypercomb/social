@@ -565,7 +565,7 @@ export class DcpDomainStorage {
     logical: string[]
     logicalRootSig: string | null
     domains: { name: string; visible: boolean; branchCount: number }[]
-    branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean; kind: 'package' | 'content' }[]
+    branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean; backup: boolean; kind: 'package' | 'content' }[]
     generatedAt: number
   }> {
     await this.initialize()
@@ -582,7 +582,7 @@ export class DcpDomainStorage {
     // but a branch root (e.g. an adopted site's root layer) is fetchable
     // anywhere — it came from a host/relay in the first place. The hive
     // mounts each branch at its `at` location and walks the tree itself.
-    const branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean; kind: 'package' | 'content' }[] = []
+    const branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean; backup: boolean; kind: 'package' | 'content' }[] = []
     for (const d of hive) {
       try {
         for (const b of await this.loadDomainBranches(d.name)) {
@@ -601,7 +601,7 @@ export class DcpDomainStorage {
           // [], domainName)); everything else stays 'content' and the
           // per-domain eye toggle covers stragglers.
           const kind: 'package' | 'content' = b.kind ?? (b.name === d.name ? 'package' : 'content')
-          branches.push({ domain: d.name, name: b.name, branchSig: sig, at: b.at ?? [], enabled: this.isFeatureEnabled(sig), kind })
+          branches.push({ domain: d.name, name: b.name, branchSig: sig, at: b.at ?? [], enabled: this.isFeatureEnabled(sig), backup: this.isBackupEnabled(sig), kind })
         }
       } catch { /* one bad domain dir must not sink the snapshot */ }
     }
@@ -786,6 +786,56 @@ export class DcpDomainStorage {
     if (enabled) this.#settingsCache[`feature.${sig}`] = true     // explicit on
     else delete this.#settingsCache[`feature.${sig}`]             // absent = off (default)
     return this.#persistSettings()
+  }
+
+  // ── backup include/exclude (participant-local) ────────────────────────────
+  //
+  // "Decide what we're going to back up": the same participant-local
+  // decoration pattern as feature.<sig>, opposite polarity. Absent = INCLUDED
+  // (nothing silently stops being backed up); explicit `false` = excluded.
+  // Excluding a branch keeps its bytes on the hive — it only leaves the
+  // branch's exclusive refs out of backup exports.
+
+  /** Default INCLUDED — a branch is backed up unless the participant
+   *  explicitly opts it out (absent key = in; explicit `false` = out). */
+  isBackupEnabled(branchSig: string): boolean {
+    const sig = String(branchSig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(sig)) return false
+    return this.getSetting<boolean>(`backup.${sig}`, true) !== false
+  }
+
+  /** Set + persist a branch's backup flag (participant-local, sticky).
+   *  Settings sigbag only — never the domain lineage or content. */
+  setBackupEnabled(branchSig: string, backup: boolean): Promise<string | null> {
+    const sig = String(branchSig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(sig)) return Promise.resolve(null)
+    if (!this.#settingsCache) this.#settingsCache = {}
+    if (backup) delete this.#settingsCache[`backup.${sig}`]       // absent = in (default)
+    else this.#settingsCache[`backup.${sig}`] = false             // explicit out
+    return this.#persistSettings()
+  }
+
+  /** Content-sig refs a backup must SKIP: refs reachable only through
+   *  backup-excluded branches. Union semantics mirror the logical install —
+   *  a ref survives (stays backed up) iff ANY included silo references it,
+   *  and the default lineage (own base + own data) is always included. */
+  async backupExcludedRefs(): Promise<Set<string>> {
+    await this.initialize()
+    const included = await this.#collectRefs(DEFAULT_LINEAGE)
+    const excluded = new Set<string>()
+    const root = await this.#currentHiveRoot(DOMAINS_LINEAGE)
+    for (const tileSig of root.children) {
+      const tile = await this.#loadJson<TileLayer>(tileSig)
+      if (!tile) continue
+      for (const entrySig of tile.children) {
+        const entry = await this.#loadJson<BranchEntryLayer>(entrySig)
+        if (!entry) continue
+        const bucket = this.isBackupEnabled(entry.branchSig) ? included : excluded
+        for (const ref of (entry.refs ?? [])) bucket.add(ref)
+      }
+    }
+    for (const ref of included) excluded.delete(ref)
+    return excluded
   }
 
   /** The set of currently-enabled branch sigs across all domain silos —

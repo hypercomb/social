@@ -25,7 +25,7 @@
 // the installer's projected branches (RegistrySnapshot) — nothing enters
 // your tree without a participant action.
 
-import { Drone, EffectBus, hypercomb, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, requestConfirm, revisionName, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   childLayerOf,
   childNamesOfStrict,
@@ -1462,6 +1462,14 @@ export class SwarmAdoptDrone extends Drone {
       // Participant-local — never folded into the layer (see adopted-roots.ts).
       markAdoptedRoot([...at, name])
 
+      // A line item in the revision history for every adopt: the commit that
+      // folded this branch in gets a NAME, minted by the same word-pair
+      // service the breadcrumb and the upgrade pill use — two words from the
+      // branch signature (one adoption reads as one name on every device)
+      // plus what happened. Best-effort: a label that can't be written never
+      // un-adopts anything.
+      await this.#labelAdoptRevision(history, at, sig, name, mode)
+
       // Pre-warm the freshly-committed neighbourhood BEFORE the render fires, so
       // show-cell's COMPLETENESS GATE resolves every child on the FIRST paint
       // instead of holding the WHOLE canvas blank while cold bytes land — the
@@ -1548,6 +1556,46 @@ export class SwarmAdoptDrone extends Drone {
   }
 
   /**
+   * Name the marker an adopt just minted at the parent location — the line
+   * item Revision History shows for this adoption. The name is deterministic
+   * (revisionName over the BRANCH signature), so the same adoption carries
+   * the same two words on every device, and the participant can rename it
+   * later like any revision.
+   */
+  #labelAdoptRevision = async (
+    history: PlacementHistory,
+    at: readonly string[],
+    branchSig: string,
+    name: string,
+    mode: 'fold' | 'sync',
+  ): Promise<void> => {
+    try {
+      const h = history as unknown as {
+        sign?: (lineage: unknown) => Promise<string>
+        listMarkerFilenames?: (locationSig: string) => Promise<string[]>
+        setMarkerMeta?: (
+          locationSig: string,
+          filename: string,
+          meta: { label?: string; marked?: boolean; path?: readonly string[] },
+        ) => Promise<void>
+      }
+      if (!h.sign || !h.listMarkerFilenames || !h.setMarkerMeta) return
+      const locale = (this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale
+      const label = revisionName({
+        packageSig: branchSig,
+        label: mode === 'sync' ? `synced "${name}"` : `adopted "${name}"`,
+        locale,
+      })
+      const locationSig = await h.sign({ explorerSegments: () => [...at] })
+      const markers = await h.listMarkerFilenames(locationSig)
+      const latest = [...markers].sort().at(-1)
+      if (latest) await h.setMarkerMeta(locationSig, latest, { label, marked: true, path: [...at] })
+    } catch (err) {
+      console.warn('[swarm-adopt] adopt landed but its revision label could not be written', err)
+    }
+  }
+
+  /**
    * Auto-checkpoint BEFORE an incoming content fold changes the hive — the
    * same safety /restore takes before it rewinds. A fold appends markers at
    * many locations, so undo (per-location) is a poor way back; a named restore
@@ -1557,12 +1605,22 @@ export class SwarmAdoptDrone extends Drone {
    * same call restore.queen makes. Code/package updates are excluded from the
    * seal, so this only fires for real tile changes.
    */
-  #checkpointBeforeFold = async (changes: number): Promise<void> => {
+  #checkpointBeforeFold = async (sigs: readonly string[]): Promise<void> => {
     try {
       const queen = this.#ioc()?.get?.(SNAPSHOT_QUEEN_KEY) as { invoke?: (a: string) => Promise<void> } | undefined
       if (!queen?.invoke) return
       EffectBus.emit('activity:log', { message: 'saving a restore point before installing…', icon: '●' })
-      await queen.invoke(`before installing ${changes} change${changes === 1 ? '' : 's'}`)
+      // The restore point is NAMED by the naming service — two deterministic
+      // words from the set of branch sigs this burst installs (sorted, so
+      // the same install reads as the same name on every device), then what
+      // is about to happen.
+      const locale = (this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale
+      const n = sigs.length
+      await queen.invoke(revisionName({
+        packageSig: [...sigs].sort().join('+'),
+        label: `before installing ${n} change${n === 1 ? '' : 's'}`,
+        locale,
+      }))
     } catch (err) {
       console.warn('[swarm-adopt] pre-fold checkpoint skipped', err)
     }
@@ -1611,7 +1669,10 @@ export class SwarmAdoptDrone extends Drone {
     // blocks the fold on a snapshot failure.
     if (!this.#checkpointedThisFold) {
       this.#checkpointedThisFold = true
-      await this.#checkpointBeforeFold(adds.length + removes.length)
+      await this.#checkpointBeforeFold([
+        ...adds.map(b => b.branchSig.toLowerCase()),
+        ...removes.map(f => f.sig),
+      ])
     }
 
     // Next receipt begins as the still-desired folded entries.

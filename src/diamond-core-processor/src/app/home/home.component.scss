@@ -619,6 +619,24 @@ dcp-command-line {
   opacity: 0.8;
 }
 
+/* Backup choice per branch — rests dim like the secondary header actions,
+   but an EXCLUDED branch stays plainly visible: leaving something out of
+   your backups must never be a surprise. */
+.backup-toggle {
+  float: right;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--dcp-ink-3);
+  padding: 2px 4px;
+  border-radius: var(--dcp-radius-sm);
+  opacity: 0.4;
+  transition: opacity 0.15s ease, color 0.12s ease, background 0.12s ease;
+}
+.package-row:hover .backup-toggle { opacity: 1; }
+.backup-toggle:hover { color: var(--dcp-accent); background: var(--dcp-hover); }
+.backup-toggle.off { opacity: 1; color: var(--dcp-danger); }
+
 /* Per-version branch-name handle row at the top of each package-row. The
    deploy-time label is the placeholder; click to rename locally. Slim and
    cold to match the chrome. */

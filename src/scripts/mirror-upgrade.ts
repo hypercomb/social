@@ -20,6 +20,7 @@ const BRIDGE_PORT = 2401
 const TIMEOUT = 60_000
 
 const SHARED = 'hypercomb-shared'
+const CORE = 'hypercomb-core/src'
 const WEB = 'hypercomb-web/src'
 const ESSENTIALS = 'hypercomb-essentials/src/diamondcoreprocessor.com'
 
@@ -56,12 +57,12 @@ const PARTS: Part[] = [
   {
     name: 'revision-name',
     note: 'The naming service. Mints "Marsh Bridge · alpha 0.9.4" from the package signature using the same word-pair service the breadcrumb uses for its secret words — deterministic, so one build carries one name everywhere. The build\'s own label rides along, or the date when it has none.',
-    source: `${SHARED}/core/revision-name.ts`,
+    source: `${CORE}/core/revision-name.ts`,
   },
   {
     name: 'revision-name-proof',
     note: 'Proof the name is worth attaching to a revision: the same build always names the same, different builds name differently, and an update still gets a name when the package signature or the label is missing.',
-    source: `${SHARED}/core/revision-name.spec.ts`,
+    source: `${CORE}/core/revision-name.spec.ts`,
   },
   {
     name: 'upgrade-queen',

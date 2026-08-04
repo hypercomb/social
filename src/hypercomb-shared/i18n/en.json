@@ -987,6 +987,8 @@
   "dcp.toast-pushed-body": "Switch back to your Hypercomb tab — it will reload with the new modules.",
   "dcp.toast-dismiss": "Dismiss",
   "dcp.download-package": "Download package",
+  "dcp.backup-on": "Included in backups — click to leave this branch out",
+  "dcp.backup-off": "Left out of backups — click to include this branch",
   "dcp.version-name": "Version name",
   "dcp.overwrite": "Overwrite",
   "dcp.overwrite-hint": "Reuse this name as-is instead of auto-incrementing if it is already taken",

@@ -26,7 +26,7 @@ import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
-import { secretTag } from './secret-words'
+import { secretTag } from '@hypercomb/core'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'

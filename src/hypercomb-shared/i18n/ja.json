@@ -912,6 +912,8 @@
   "dcp.title": "インストーラー",
   "dcp.install": "インストール",
   "dcp.download-package": "パッケージをダウンロード",
+  "dcp.backup-on": "バックアップに含まれています — クリックでこのブランチを除外",
+  "dcp.backup-off": "バックアップから除外されています — クリックでこのブランチを含める",
   "dcp.version-name": "バージョン名",
   "dcp.overwrite": "上書き",
   "dcp.overwrite-hint": "既に使われている場合でも自動採番せず、この名前をそのまま使用します",

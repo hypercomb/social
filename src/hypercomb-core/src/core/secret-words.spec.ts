@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { secretTag } from './secret-words'
-import { ADJECTIVES as EN_ADJ, NOUNS as EN_NOUN } from './secret-words/en'
-import { ADJECTIVES as JA_ADJ, NOUNS as JA_NOUN } from './secret-words/ja'
+import { secretTag } from './secret-words/index.js'
+import { ADJECTIVES as EN_ADJ, NOUNS as EN_NOUN } from './secret-words/en.js'
+import { ADJECTIVES as JA_ADJ, NOUNS as JA_NOUN } from './secret-words/ja.js'
 
 describe('secretTag', () => {
   it('returns a two-word string', () => {

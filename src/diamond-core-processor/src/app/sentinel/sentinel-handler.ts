@@ -170,6 +170,12 @@ export class SentinelHandler {
   ): Promise<void> {
     try {
       await this.#store.initialize()
+      // The participant's backup choice (per-branch, made in the installer):
+      // refs reachable ONLY through backup-excluded branches stay home. A ref
+      // any included silo shares survives — same union semantics as the
+      // logical install. Best-effort: an unreadable choice backs up everything.
+      let excluded = new Set<string>()
+      try { excluded = await this.#domainStorage.backupExcludedRefs() } catch { /* back up everything */ }
       let files = 0
       let bytes = 0
       const walk = async (dir: FileSystemDirectoryHandle, prefix = ''): Promise<void> => {
@@ -180,6 +186,7 @@ export class SentinelHandler {
             await walk(handle as FileSystemDirectoryHandle, path)
             continue
           }
+          if (excluded.has(name.toLowerCase())) continue
           const data = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
           const sha256 = await SignatureService.sign(data)
           files++
