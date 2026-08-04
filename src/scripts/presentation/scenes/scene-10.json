@@ -1,6 +1,6 @@
 {
   "n": 10,
-  "name": "verifiable integrity",
-  "chapter": "why hypercomb",
-  "say": "Reason two: integrity you can verify instead of trust. When someone shares a branch of their hive, you receive signatures, and your machine verifies that every byte matches. Identical content collapses into one copy no matter how many people reference it, and the network becomes a global cache — if anyone near you already holds a resource, the signature finds it. Sharing a hash is sharing a proof."
+  "name": "type a name press enter",
+  "chapter": "what is hypercomb",
+  "say": "Creating is one gesture: type a name, press Enter — that's a tile. Type three more names — that's a structure. This is how everything gets built, including how Hypercomb documents itself: every feature gets a mirror in the hive — tiles for its parts, notes explaining them, pheromone marks classifying them. The hive isn't documentation about the system; the hive is the living specification of the system. In fact, the presentation tile you just watched being created is this very presentation, mirrored into the hive, with its three chapters as children."
 }

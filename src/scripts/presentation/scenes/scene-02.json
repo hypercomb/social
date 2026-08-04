@@ -1,6 +1,6 @@
 {
   "n": 2,
-  "name": "the hive",
+  "name": "welcome",
   "chapter": "what is hypercomb",
-  "say": "Hypercomb is a live, presence-based workspace. Your content lives on a hexagonal grid of cells — tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Click a tile and you travel into it — every tile can open into another full honeycomb of its own. That is the whole navigation model: the hive is a tree of honeycombs, and you fly through it. What you're watching is a real hive — a family archive, a cigar lounge, an A.I. research collection, a behaviors library — all tiles, all the way down."
+  "say": "Welcome to Hypercomb. Hypercomb is an open software platform — and open in every sense that matters. The source is open: it's free software, and the documentation is Creative Commons. The format is open: your content is plain, content-addressed bytes, not a proprietary database anyone else controls. The platform is open: every feature is a module you can write, fork, and share. And the network is open: participants exchange work directly over public relays, with no gatekeeper in the middle. It's built in the open, by a community, for people who want their tools to belong to them."
 }

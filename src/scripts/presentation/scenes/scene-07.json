@@ -1,6 +1,6 @@
 {
   "n": 7,
-  "name": "beehaviors",
+  "name": "history is the data",
   "chapter": "what is hypercomb",
-  "say": "Features aren't welded into the app. Every behavior — navigation, editing, games, the command line itself — is a bee — short for beehavior: a small self-contained module that senses when it's relevant and acts. Bees are signed like everything else, so they can be shared, forked, improved, and adopted from the community with cryptographic integrity. The shell is just a loader. If you want Hypercomb to do something new, you don't wait for a vendor — you add a bee."
+  "say": "Every change you make becomes a new layer — nothing is ever overwritten. The history of a place is a bag of numbered markers, and the newest marker is the current state. That has a beautiful consequence: undo isn't a trick — it's just reading an older layer. You can rewind any page, restore any moment, name a revision, or snapshot the whole hive before an experiment. Your history is not a log about the data; it is the data. Deploying, backing up, and remembering become the same operation."
 }

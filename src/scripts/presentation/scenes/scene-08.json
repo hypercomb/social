@@ -1,6 +1,6 @@
 {
   "n": 8,
-  "name": "type a name press enter",
+  "name": "the language",
   "chapter": "what is hypercomb",
-  "say": "Creating is one gesture: type a name, press Enter — that's a tile. Type three more names — that's a structure. This is how everything gets built, including how Hypercomb documents itself: every feature gets a mirror in the hive — tiles for its parts, notes explaining them, pheromone marks classifying them. The hive isn't documentation about the system; the hive is the living specification of the system. In fact, the presentation tile you just watched being created is this very presentation, mirrored into the hive, with its three chapters as children."
+  "say": "Hypercomb has its own language, and it's worth learning, because the words are precise. A hive is one participant's whole tree. A tile is one hexagon of content. A layer is one immutable version of a place. A signature is the name computed from the content itself. A bee is a beehavior — a module that senses and acts. A pheromone is a mark you put on a tile saying what it is, so the software can behave accordingly without anyone hardcoding rules for it. Pollination is how work crosses between hives. Brooding and eclosion are how tiles are prepared, and then hatch onto your screen. The colony metaphor isn't decoration — it's a genuinely accurate model for a system that has no central authority."
 }

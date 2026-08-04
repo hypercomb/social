@@ -21,7 +21,7 @@
   /* ---------- stage ---------- */
   #stage{position:fixed;inset:0;display:grid;place-items:center}
   .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:2.2vh;padding:4vh 6vw 16vh;opacity:0;visibility:hidden;transition:opacity .9s ease;text-align:center}
+    gap:2.2vh;padding:4vh 6vw 25vh;opacity:0;visibility:hidden;transition:opacity .9s ease;text-align:center}
   .scene.on{opacity:1;visibility:visible}
   .eyebrow{font-family:var(--mono);font-size:clamp(10px,1.2vw,13px);letter-spacing:.42em;text-transform:uppercase;color:var(--honey);opacity:.9}
   .scene h1{font-weight:200;font-size:clamp(34px,6.2vw,88px);line-height:1.04;margin:0;letter-spacing:-.01em;text-wrap:balance}
@@ -47,7 +47,7 @@
   .hexb::after{content:"";position:absolute;inset:1px;clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%);
     border:1px solid rgba(242,182,50,.25);pointer-events:none}
   .hexb .g{font-size:clamp(20px,2.6vw,34px);color:var(--honey)}
-  .hexb .t{font-family:var(--mono);font-size:clamp(9px,1vw,12px);letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+  .hexb .t{font-family:var(--mono);font-size:clamp(9px,1vw,12px);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);max-width:74%;text-align:center;line-height:1.35;word-break:break-word}
 
   /* layer stack diagram */
   .stack{display:flex;flex-direction:column-reverse;gap:8px;align-items:center}
@@ -66,7 +66,7 @@
   .mile .md{color:var(--dim);font-weight:300;font-size:clamp(13px,1.5vw,17px)}
 
   /* ---------- chrome ---------- */
-  #caption{position:fixed;left:50%;bottom:9vh;transform:translateX(-50%);width:min(940px,88vw);text-align:center;
+  #caption{position:fixed;left:50%;bottom:6.5vh;transform:translateX(-50%);width:min(940px,88vw);text-align:center;
     color:var(--ink);font-weight:300;font-size:clamp(13px,1.55vw,18px);line-height:1.55;
     background:rgba(9,12,18,.78);border:1px solid var(--line);border-radius:10px;padding:14px 22px;
     backdrop-filter:blur(6px);opacity:0;transition:opacity .6s;z-index:40}
@@ -102,8 +102,8 @@
 
   #endcard{display:none}
   @media (max-width:700px){
-    #caption{bottom:11vh;font-size:13px}
-    .scene{padding-bottom:22vh}
+    #caption{bottom:9vh;font-size:13px}
+    .scene{padding-bottom:30vh}
   }
 </style>
 
@@ -132,9 +132,9 @@
 <div id="splash">
   <svg id="hexmark" viewBox="-52 -52 104 104"><polygon points="50,0 25,43.3 -25,43.3 -50,0 -25,-43.3 25,-43.3" fill="none" stroke="#f2b632" stroke-width="2.5"/><polygon points="30,0 15,26 -15,26 -30,0 -15,-26 15,-26" fill="none" stroke="#f2b632" stroke-width="1.2" opacity=".5"/><circle r="4" fill="#f2b632"/></svg>
   <div class="word">hypercomb</div>
-  <div class="tag">A full presentation: what Hypercomb is, why you want it, and the road ahead — with live footage from a real hive.</div>
+  <div class="tag">An open software platform. What it is, why you want it, and the road ahead — with live footage from a real hive.</div>
   <button id="enter">▸ &nbsp;press play</button>
-  <div class="meta">≈ 15 minutes · 19 scenes · narrated, with captions · space = pause · ← → = skip</div>
+  <div class="meta">≈ 18 minutes · 23 scenes · narrated, with captions · space = pause · ← → = skip</div>
 </div>
 
 <script>
@@ -148,42 +148,53 @@ const V = {
 
 const SCENES = [
 /* ------------------------------- ACT I : WHAT ------------------------------- */
-{ act:"what", eyebrow:"a question first", html:`
+{ act:"what", name:"a question first", eyebrow:"a question first", html:`
   <h1>Where does your <b>work</b> actually live?</h1>
   <p class="sub">For most software the honest answer is: on someone else's computer, behind someone else's login, in someone else's format.</p>`,
-  say:`This is Hypercomb. Before we explain anything, one question. Where does your work actually live? For most software, the honest answer is: on someone else's computer, behind someone else's login, in someone else's format. Hypercomb starts from a different premise — your work lives with you. Everything you're about to see is a real, working application: every piece of footage in this presentation was recorded live from a real hive. Nineteen scenes from now, you'll know what Hypercomb is, why it exists, and where it's going.`},
+  say:`This is Hypercomb. Before we explain anything, one question. Where does your work actually live? For most software, the honest answer is: on someone else's computer, behind someone else's login, in someone else's format. Hypercomb starts from a different premise — your work lives with you. Everything you're about to see is a real, working application: every piece of footage in this presentation was recorded live from a real hive. By the end, you'll know what Hypercomb is, why it exists, and where it's going.`},
 
-{ act:"what", eyebrow:"what it is", html:`
+{ act:"what", name:"welcome", eyebrow:"welcome", html:`
+  <h1>Welcome to <b>Hypercomb</b></h1>
+  <p class="sub">An open software platform — open in every sense that matters.</p>
+  <div class="hexrow">
+    <div class="hexb"><span class="g">⌘</span><span class="t">open source</span></div>
+    <div class="hexb"><span class="g">⬡</span><span class="t">open format</span></div>
+    <div class="hexb"><span class="g">⚙</span><span class="t">open platform</span></div>
+    <div class="hexb"><span class="g">◈</span><span class="t">open network</span></div>
+  </div>`,
+  say:`Welcome to Hypercomb. Hypercomb is an open software platform — and open in every sense that matters. The source is open: it's free software, and the documentation is Creative Commons. The format is open: your content is plain, content-addressed bytes, not a proprietary database anyone else controls. The platform is open: every feature is a module you can write, fork, and share. And the network is open: participants exchange work directly over public relays, with no gatekeeper in the middle. It's built in the open, by a community, for people who want their tools to belong to them.`},
+
+{ act:"what", name:"the hive", eyebrow:"what it is", html:`
   <h1>The <b>hive</b>: a workspace made of cells</h1>
   <div class="filmwrap"><span class="filmtag">live capture · localhost hive</span><video muted playsinline loop src="{{navigate}}"></video></div>`,
   media:"navigate",
   say:`Hypercomb is a live, presence-based workspace. Your content lives on a hexagonal grid of cells — tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Click a tile and you travel into it — every tile can open into another full honeycomb of its own. That is the whole navigation model: the hive is a tree of honeycombs, and you fly through it. What you're watching is a real hive — a family archive, a cigar lounge, an A.I. research collection, a behaviors library — all tiles, all the way down.`},
 
-{ act:"what", eyebrow:"no server, no account", html:`
+{ act:"what", name:"presence is permission", eyebrow:"no server, no account", html:`
   <h1><b>Presence</b> is permission</h1>
   <p class="sub">The application runs entirely in your browser. Content is stored on your device, in the browser's private file system. Publishing is optional — and explicit.</p>
   <div class="sig">your device &nbsp;⬡&nbsp; your browser &nbsp;⬡&nbsp; your bytes — <em>nothing leaves until you say so</em></div>`,
   say:`Here's the part that sounds impossible: there is no server. No account. No sign-up. Hypercomb runs entirely in your browser, and your content is stored on your own device, in the browser's private file system. Presence is permission — the data exists where you are. Publishing is optional and explicit: nothing leaves your machine until you decide to share it. And when you do share, it travels peer to peer over open relays — not into a company's database.`},
 
-{ act:"what", eyebrow:"the identity primitive", html:`
+{ act:"what", name:"signatures", eyebrow:"the identity primitive", html:`
   <h1>One kind of name: the <b>signature</b></h1>
   <div class="sig">sign(content) → <em>e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</em></div>
   <p class="sub">Sixty-four characters, computed from the bytes themselves. Same content → same name, on every machine, forever.</p>`,
   say:`Everything in Hypercomb has one kind of name: a signature — the SHA-256 hash of its content. Sixty-four characters that are the same on every machine, in every country, forever. Same content, same signature; change one byte and it's a different thing with a different name. This single idea does enormous work. Content can be verified — the name proves the bytes. It deduplicates itself — the same picture stored twice is stored once. It can be cached forever — a signature never goes stale. And it can be shared as a tiny string that any participant can resolve. Signatures aren't an implementation detail. They are the identity system, the reference system, and the trust system — all at once.`},
 
-{ act:"what", eyebrow:"five letters", html:`
+{ act:"what", name:"dna", eyebrow:"the substrate", html:`
   <h1>The <b>DNA</b> of a hive</h1>
   <div class="hexrow">
     <div class="hexb"><span class="g">⬡</span><span class="t">layers</span></div>
     <div class="hexb"><span class="g">🖼</span><span class="t">resources</span></div>
-    <div class="hexb"><span class="g">🐝</span><span class="t">bees · beehaviors</span></div>
+    <div class="hexb"><span class="g">🐝</span><span class="t">beehaviors</span></div>
     <div class="hexb"><span class="g">⛓</span><span class="t">dependencies</span></div>
     <div class="hexb"><span class="g">✎</span><span class="t">content</span></div>
   </div>
   <p class="sub">Distributed Network Artifacts — content-addressed, immutable, merkle-versioned, shareable.</p>`,
   say:`Five kinds of artifact compose everything. Hypercomb calls them its D N A — Distributed Network Artifacts. Layers: the structure — each one an immutable snapshot linking to its children by signature. Resources: the content bytes — images, text, files. Bees — short for beehaviors — small modules of code that give the hive life. Dependencies: the libraries those bees rely on. And content: everything a tile carries. All five are content-addressed, immutable, merkle-versioned, and shareable across the network. Your entire hive is just these five kinds, combined.`},
 
-{ act:"what", eyebrow:"nothing is overwritten", html:`
+{ act:"what", name:"history is the data", eyebrow:"nothing is overwritten", html:`
   <h1>History <b>is</b> the data structure</h1>
   <div class="stack">
     <div class="lay"><span>0000</span><span>first layer</span></div>
@@ -193,54 +204,88 @@ const SCENES = [
   </div>`,
   say:`Every change you make becomes a new layer — nothing is ever overwritten. The history of a place is a bag of numbered markers, and the newest marker is the current state. That has a beautiful consequence: undo isn't a trick — it's just reading an older layer. You can rewind any page, restore any moment, name a revision, or snapshot the whole hive before an experiment. Your history is not a log about the data; it is the data. Deploying, backing up, and remembering become the same operation.`},
 
-{ act:"what", eyebrow:"features are modules", html:`
+{ act:"what", name:"the language", eyebrow:"the vocabulary", html:`
+  <h1>The <b>language</b> of Hypercomb</h1>
+  <div class="hexrow">
+    <div class="hexb"><span class="g">⬡</span><span class="t">hive</span></div>
+    <div class="hexb"><span class="g">⬢</span><span class="t">tile</span></div>
+    <div class="hexb"><span class="g">▤</span><span class="t">layer</span></div>
+    <div class="hexb"><span class="g">#</span><span class="t">signature</span></div>
+    <div class="hexb"><span class="g">🐝</span><span class="t">bee</span></div>
+    <div class="hexb"><span class="g">✽</span><span class="t">pheromone</span></div>
+  </div>
+  <p class="sub">The colony is an accurate model for a system with no central authority.</p>`,
+  say:`Hypercomb has its own language, and it's worth learning, because the words are precise. A hive is one participant's whole tree. A tile is one hexagon of content. A layer is one immutable version of a place. A signature is the name computed from the content itself. A bee is a beehavior — a module that senses and acts. A pheromone is a mark you put on a tile saying what it is, so the software can behave accordingly without anyone hardcoding rules for it. Pollination is how work crosses between hives. Brooding and eclosion are how tiles are prepared, and then hatch onto your screen. The colony metaphor isn't decoration — it's a genuinely accurate model for a system that has no central authority.`},
+
+{ act:"what", name:"beehaviors", eyebrow:"features are modules", html:`
   <h1>Everything alive is a <b>bee</b></h1>
   <p class="sub">Bee, short for <b style="color:var(--honey)">beehavior</b> — navigation, editing, games, the command line itself: each one a small signed module that senses when it's relevant and acts. The shell is just a loader.</p>
   <div class="sig">sense(grammar) → heartbeat(grammar) → <em>emit effects</em> — bees never call each other</div>`,
   say:`Features aren't welded into the app. Every behavior — navigation, editing, games, the command line itself — is a bee — short for beehavior: a small self-contained module that senses when it's relevant and acts. Bees are signed like everything else, so they can be shared, forked, improved, and adopted from the community with cryptographic integrity. The shell is just a loader. If you want Hypercomb to do something new, you don't wait for a vendor — you add a bee.`},
 
-{ act:"what", eyebrow:"creation, live", html:`
+{ act:"what", name:"type a name press enter", eyebrow:"creation, live", html:`
   <h1>Type a name. <b>Press Enter.</b></h1>
   <div class="filmwrap"><span class="filmtag">live capture · creating structure</span><video muted playsinline loop src="{{children}}"></video></div>`,
   media:"children",
   say:`Creating is one gesture: type a name, press Enter — that's a tile. Type three more names — that's a structure. This is how everything gets built, including how Hypercomb documents itself: every feature gets a mirror in the hive — tiles for its parts, notes explaining them, pheromone marks classifying them. The hive isn't documentation about the system; the hive is the living specification of the system. In fact, the presentation tile you just watched being created is this very presentation, mirrored into the hive, with its three chapters as children.`},
 
+{ act:"what", name:"scriptable building blocks", eyebrow:"composable by design", html:`
+  <h1>Scriptable <b>building blocks</b></h1>
+  <div class="stack">
+    <div class="lay"><span>type a name</span><span>a tile exists</span></div>
+    <div class="lay"><span>/present</span><span>the tile becomes a slideshow</span></div>
+    <div class="lay"><span>/website</span><span>the tile becomes a site</span></div>
+    <div class="lay head"><span class="m">write a bee, sign it, share it</span><span class="m">→ a new verb for everyone</span></div>
+  </div>`,
+  say:`Everything is a scriptable building block. The command line is the primary interface: type a name to create, type a path to travel, and use slash commands as verbs — rewind a page, publish a website, open a game, ask an A.I. Behaviors attach to any tile, so the same tile becomes a slideshow, a website, a study deck, or a tree view depending on what you mark it with. And because behaviors are modules, the vocabulary itself is extensible: write a bee, sign it, share it — and it becomes a verb anyone can use. You're not filling in someone else's forms. You're composing your own blocks.`},
+
 /* ------------------------------- ACT II : WHY ------------------------------- */
-{ act:"why", eyebrow:"reason one", html:`
+{ act:"why", name:"ownership", eyebrow:"reason one", html:`
   <h1><b>Ownership</b> that isn't a metaphor</h1>
   <p class="sub">Your hive is files on your device. It works on a plane. It works if the company disappears — because there is no company in the loop.</p>`,
   say:`So why would you want this? Reason one: ownership that isn't a metaphor. Your hive is files on your device. It works on a plane. It works if the company disappears — because there is no company in the loop. Export it, inspect it, move it: nothing is held hostage. Software you depend on should have an exit. Hypercomb's exit is built into its physics.`},
 
-{ act:"why", eyebrow:"reason two", html:`
+{ act:"why", name:"verifiable integrity", eyebrow:"reason two", html:`
   <h1>Integrity you can <b>verify</b></h1>
   <p class="sub">Share a branch, and the receiver's machine proves every byte. Identical content collapses to one copy across the whole network.</p>
   <div class="sig">receive(sig) → hash(bytes) ≟ sig → <em>proof, not trust</em></div>`,
   say:`Reason two: integrity you can verify instead of trust. When someone shares a branch of their hive, you receive signatures, and your machine verifies that every byte matches. Identical content collapses into one copy no matter how many people reference it, and the network becomes a global cache — if anyone near you already holds a resource, the signature finds it. Sharing a hash is sharing a proof.`},
 
-{ act:"why", eyebrow:"reason three", html:`
+{ act:"why", name:"time is a feature", eyebrow:"reason three", html:`
   <h1><b>Time</b> is a feature</h1>
   <p class="sub">Full undo across sessions · a visual rewind window · named revisions on adopt and upgrade · checkpoint snapshots before experiments.</p>`,
   say:`Reason three: you get time as a feature. Full undo across sessions. A rewind window that visually scrubs through what a page used to look like. Named revisions when you adopt or upgrade someone's work. Checkpoint snapshots before risky experiments. Because every state is an immutable layer, the past is always one signature away — and it never rots.`},
 
-{ act:"why", eyebrow:"reason four", html:`
+{ act:"why", name:"open source", eyebrow:"reason four", html:`
+  <h1><b>Open source</b>, as a promise</h1>
+  <div class="hexrow">
+    <div class="hexb"><span class="g">⌘</span><span class="t">AGPL-3.0</span></div>
+    <div class="hexb"><span class="g">✎</span><span class="t">CC BY-SA</span></div>
+    <div class="hexb"><span class="g">⑂</span><span class="t">fork it</span></div>
+  </div>
+  <p class="sub">Code under AGPL, documentation under Creative Commons. Every module is signed — so a fork is verifiable.</p>`,
+  say:`Reason four: it's open source — and here that's a promise, not a marketing line. The code is A G P L: free to use, free to study, free to change, and any hosted version has to stay free too. The documentation is Creative Commons. Every module carries a signature, so a fork is verifiable — you can prove exactly what you're running, byte for byte. And if Hypercomb ever goes in a direction you don't like, you can take it in yours, and your hive still opens. That's what open actually has to mean.`},
+
+{ act:"why", name:"community platform", eyebrow:"reason five", html:`
   <h1>A platform shaped like a <b>community</b></h1>
   <div class="filmwrap"><span class="filmtag">live capture · one hive, many worlds</span><video muted playsinline loop src="{{zoom}}"></video></div>`,
   media:"zoom",
-  say:`Reason four: it's a platform shaped like a community. Domains are modules: a cigar journal with a flavor wheel and a full 3D lounge. Arcade games. Tutorial courses. Embedded websites, published straight from tiles. All of them are bees and layers — which means all of them are forkable, shareable, and yours to remix. The distance between user and developer collapses to a signature.`},
+  say:`Reason five: it's a platform shaped like a community. Domains are modules: a cigar journal with a flavor wheel and a full 3D lounge. Arcade games. Tutorial courses. Embedded websites, published straight from tiles. All of them are bees and layers — which means all of them are forkable, shareable, and yours to remix. The distance between a user and a developer collapses to a signature.`},
 
-{ act:"why", eyebrow:"reason five", html:`
+{ act:"why", name:"sharing without a middleman", eyebrow:"reason six", html:`
+  <h1>Sharing without a <b>middleman</b></h1>
+  <p class="sub">Publishing a branch is one command. Visitors adopt your work as a named revision line — and can still rewind to exactly what you shipped.</p>
+  <div class="sig">your hive → <em>signed layers</em> → their hive — no account in between</div>`,
+  say:`Reason six: sharing without a middleman. Publishing a branch is one command. Content travels over open relays and lands in the visitor's own hive as a named revision line — they can adopt your work, carry it forward, and still rewind to exactly what you shipped. Collaboration becomes two hives exchanging signed layers. No accounts to reconcile, no permissions matrix. Cryptography instead of bureaucracy.`},
+
+{ act:"why", name:"ai on your terms", eyebrow:"reason seven", html:`
   <h1><b>AI</b>, on your terms</h1>
   <p class="sub">Ask from the command line; an AI session answers as a note pinned to your tile. It builds structures, study decks, websites — inside your hive, with history.</p>
   <div class="sig">/opus what is this place? → <em>answer lands as a note, on the tile, in history</em></div>`,
-  say:`Reason five: A.I. is a first-class citizen — on your terms. The bridge lets A.I. sessions work inside the hive. You ask a question from the command line, and an A.I. answers as a note pinned to the tile you asked about. It can build structures, generate study decks from your notes, assemble websites from your tiles, run feedback loops. The A.I. doesn't scrape your life through somebody's cloud — it walks into your hive through a door you open, and its work lands as content you own, with history.`},
-
-{ act:"why", eyebrow:"reason six", html:`
-  <h1>Sharing without a <b>middleman</b></h1>
-  <p class="sub">Publishing a branch is one command. Visitors adopt your work as a named revision line — and can still rewind to exactly what you shipped.</p>`,
-  say:`And reason six: sharing without a middleman. Publishing a branch is one command. Content travels over open relays and lands in the visitor's own hive as a named revision line — they can adopt your work, carry it forward, and still rewind to exactly what you shipped. Collaboration becomes two hives exchanging signed layers. No accounts to reconcile, no permissions matrix. Cryptography instead of bureaucracy.`},
+  say:`And reason seven: A.I. is a first-class citizen — on your terms. The bridge lets A.I. sessions work inside the hive. You ask a question from the command line, and an A.I. answers as a note pinned to the tile you asked about. It can build structures, generate study decks from your notes, assemble websites from your tiles, run feedback loops. The A.I. doesn't scrape your life through somebody's cloud — it walks into your hive through a door you open, and its work lands as content you own, with history.`},
 
 /* ----------------------------- ACT III : ROADMAP ----------------------------- */
-{ act:"roadmap", eyebrow:"landing now", html:`
+{ act:"roadmap", name:"now", eyebrow:"landing now", html:`
   <h1>Roadmap · <b>now</b></h1>
   <div class="road">
     <div class="mile"><div class="dot"></div><div><div class="mt">Mobile, usable-first</div><div class="md">the hive as a native-feeling scroller — camera capture straight to tiles</div></div></div>
@@ -249,7 +294,7 @@ const SCENES = [
   </div>`,
   say:`So where is it going? What's landing now: the mobile experience — the hive as a native-feeling scroller, with camera capture straight to tiles. Build revisions — every build of the software itself tracked as a named, adoptable revision. Example hives on first boot, so a new participant lands somewhere alive. And tutorial courses — the hive teaching the hive.`},
 
-{ act:"roadmap", eyebrow:"next", html:`
+{ act:"roadmap", name:"next", eyebrow:"next", html:`
   <h1>Roadmap · <b>next</b></h1>
   <div class="road">
     <div class="mile"><div class="dot"></div><div><div class="mt">Workflow pulses</div><div class="md">scheduled audits that walk your tree and file reports as tiles</div></div></div>
@@ -259,7 +304,7 @@ const SCENES = [
   </div>`,
   say:`Next: workflow pulses — scheduled audits that walk your tree and file their reports as tiles. Versioning and checkpoints for the desktop installer. Contract fulfillment — a protocol where remote participants can ask your hive for work and receive signed results. And the native Windows client, held to the same protocol by conformance vectors generated from the reference implementation. One contract, many shells.`},
 
-{ act:"roadmap", eyebrow:"the big arc", html:`
+{ act:"roadmap", name:"vision", eyebrow:"the big arc", html:`
   <h1>Roadmap · <b>vision</b></h1>
   <div class="road">
     <div class="mile"><div class="dot"></div><div><div class="mt">Superimposable trees</div><div class="md">parallel hives at the same addresses — views that stack and reconcile as layers</div></div></div>
@@ -268,18 +313,18 @@ const SCENES = [
   </div>`,
   say:`Further out: superimposable trees — parallel hives occupying the same addresses, so your view and my view of the same place can stack, and reconcile as layers. The participant stack — one hexagon with depth, where the mouse wheel rolls through everyone's version of a cell. And pheromones everywhere: ambient marks that classify meaning, so behavior follows from what things are — not from hardcoded rules.`},
 
-{ act:"roadmap", eyebrow:"the horizon", html:`
+{ act:"roadmap", name:"the hive is a computer", eyebrow:"the horizon", html:`
   <h1>The hive is a <b>computer</b></h1>
   <div class="sig">sign( sign(script) ++ sign(input) ) → <em>result</em> — computed once, <em>anywhere</em>, cached for everyone, forever</div>
   <p class="sub">Junctions become processors. The geometry of your hive becomes the program.</p>`,
   say:`And the horizon we're building toward: the hive as a computer. Every computation is content-addressed — script plus input equals a signed result. Compute something once, and the whole network never computes it again: a global memoization mesh. Junctions in the tree become processors; the geometry of your hive becomes the program. That's not a slogan — the primitives, signatures, layers, deterministic modules, are already in your hands. The roadmap is the staircase from here to there.`},
 
-{ act:"roadmap", eyebrow:"the invitation", html:`
+{ act:"roadmap", name:"the invitation", eyebrow:"the invitation", html:`
   <h1><b>The hive is yours.</b></h1>
   <div class="filmwrap"><span class="filmtag">live capture · your first tile</span><video muted playsinline loop src="{{create}}"></video></div>
   <p class="sub">Type a name. Press Enter. You have a hive.</p>`,
   media:"create",
-  say:`Hypercomb is a bet that software can be shaped like nature instead of like a corporation. Small cells. Simple rules. Signatures instead of authority. History instead of amnesia. You've seen the real thing running. The invitation is one word long: type a name, press Enter — and you have a hive. Hypercomb. The hive is yours.`},
+  say:`Hypercomb is a bet that software can be shaped like nature instead of like a corporation. Small cells. Simple rules. Signatures instead of authority. History instead of amnesia. It's open source, it's built in the open, and it grows the way a colony grows — by everyone who joins it adding what they need, and sharing it back. You've seen the real thing running. The invitation is one gesture long: type a name, press Enter — and you have a hive. Hypercomb. The hive is yours.`},
 ];
 
 /* ============================ engine ============================ */

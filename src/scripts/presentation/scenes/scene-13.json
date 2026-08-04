@@ -1,6 +1,6 @@
 {
   "n": 13,
-  "name": "ai on your terms",
+  "name": "verifiable integrity",
   "chapter": "why hypercomb",
-  "say": "Reason five: A.I. is a first-class citizen — on your terms. The bridge lets A.I. sessions work inside the hive. You ask a question from the command line, and an A.I. answers as a note pinned to the tile you asked about. It can build structures, generate study decks from your notes, assemble websites from your tiles, run feedback loops. The A.I. doesn't scrape your life through somebody's cloud — it walks into your hive through a door you open, and its work lands as content you own, with history."
+  "say": "Reason two: integrity you can verify instead of trust. When someone shares a branch of their hive, you receive signatures, and your machine verifies that every byte matches. Identical content collapses into one copy no matter how many people reference it, and the network becomes a global cache — if anyone near you already holds a resource, the signature finds it. Sharing a hash is sharing a proof."
 }

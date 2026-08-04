@@ -1,6 +1,6 @@
 {
   "n": 17,
-  "name": "vision",
-  "chapter": "roadmap",
-  "say": "Further out: superimposable trees — parallel hives occupying the same addresses, so your view and my view of the same place can stack, and reconcile as layers. The participant stack — one hexagon with depth, where the mouse wheel rolls through everyone's version of a cell. And pheromones everywhere: ambient marks that classify meaning, so behavior follows from what things are — not from hardcoded rules."
+  "name": "sharing without a middleman",
+  "chapter": "why hypercomb",
+  "say": "Reason six: sharing without a middleman. Publishing a branch is one command. Content travels over open relays and lands in the visitor's own hive as a named revision line — they can adopt your work, carry it forward, and still rewind to exactly what you shipped. Collaboration becomes two hives exchanging signed layers. No accounts to reconcile, no permissions matrix. Cryptography instead of bureaucracy."
 }

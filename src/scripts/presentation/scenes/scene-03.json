@@ -1,6 +1,6 @@
 {
   "n": 3,
-  "name": "presence is permission",
+  "name": "the hive",
   "chapter": "what is hypercomb",
-  "say": "Here's the part that sounds impossible: there is no server. No account. No sign-up. Hypercomb runs entirely in your browser, and your content is stored on your own device, in the browser's private file system. Presence is permission — the data exists where you are. Publishing is optional and explicit: nothing leaves your machine until you decide to share it. And when you do share, it travels peer to peer over open relays — not into a company's database."
+  "say": "Hypercomb is a live, presence-based workspace. Your content lives on a hexagonal grid of cells — tiles. A tile can hold anything: a picture, a note, a document, a game, a whole website. Click a tile and you travel into it — every tile can open into another full honeycomb of its own. That is the whole navigation model: the hive is a tree of honeycombs, and you fly through it. What you're watching is a real hive — a family archive, a cigar lounge, an A.I. research collection, a behaviors library — all tiles, all the way down."
 }

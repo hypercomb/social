@@ -1,6 +1,6 @@
 {
   "n": 11,
-  "name": "time is a feature",
-  "chapter": "why hypercomb",
-  "say": "Reason three: you get time as a feature. Full undo across sessions. A rewind window that visually scrubs through what a page used to look like. Named revisions when you adopt or upgrade someone's work. Checkpoint snapshots before risky experiments. Because every state is an immutable layer, the past is always one signature away — and it never rots."
+  "name": "scriptable building blocks",
+  "chapter": "what is hypercomb",
+  "say": "Everything is a scriptable building block. The command line is the primary interface: type a name to create, type a path to travel, and use slash commands as verbs — rewind a page, publish a website, open a game, ask an A.I. Behaviors attach to any tile, so the same tile becomes a slideshow, a website, a study deck, or a tree view depending on what you mark it with. And because behaviors are modules, the vocabulary itself is extensible: write a bee, sign it, share it — and it becomes a verb anyone can use. You're not filling in someone else's forms. You're composing your own blocks."
 }

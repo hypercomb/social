@@ -1,6 +1,6 @@
 {
   "n": 4,
-  "name": "signatures",
+  "name": "presence is permission",
   "chapter": "what is hypercomb",
-  "say": "Everything in Hypercomb has one kind of name: a signature — the SHA-256 hash of its content. Sixty-four characters that are the same on every machine, in every country, forever. Same content, same signature; change one byte and it's a different thing with a different name. This single idea does enormous work. Content can be verified — the name proves the bytes. It deduplicates itself — the same picture stored twice is stored once. It can be cached forever — a signature never goes stale. And it can be shared as a tiny string that any participant can resolve. Signatures aren't an implementation detail. They are the identity system, the reference system, and the trust system — all at once."
+  "say": "Here's the part that sounds impossible: there is no server. No account. No sign-up. Hypercomb runs entirely in your browser, and your content is stored on your own device, in the browser's private file system. Presence is permission — the data exists where you are. Publishing is optional and explicit: nothing leaves your machine until you decide to share it. And when you do share, it travels peer to peer over open relays — not into a company's database."
 }

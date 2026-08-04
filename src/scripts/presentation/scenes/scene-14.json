@@ -1,6 +1,6 @@
 {
   "n": 14,
-  "name": "sharing without a middleman",
+  "name": "time is a feature",
   "chapter": "why hypercomb",
-  "say": "And reason six: sharing without a middleman. Publishing a branch is one command. Content travels over open relays and lands in the visitor's own hive as a named revision line — they can adopt your work, carry it forward, and still rewind to exactly what you shipped. Collaboration becomes two hives exchanging signed layers. No accounts to reconcile, no permissions matrix. Cryptography instead of bureaucracy."
+  "say": "Reason three: you get time as a feature. Full undo across sessions. A rewind window that visually scrubs through what a page used to look like. Named revisions when you adopt or upgrade someone's work. Checkpoint snapshots before risky experiments. Because every state is an immutable layer, the past is always one signature away — and it never rots."
 }

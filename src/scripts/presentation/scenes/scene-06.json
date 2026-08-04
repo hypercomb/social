@@ -1,6 +1,6 @@
 {
   "n": 6,
-  "name": "history is the data",
+  "name": "dna",
   "chapter": "what is hypercomb",
-  "say": "Every change you make becomes a new layer — nothing is ever overwritten. The history of a place is a bag of numbered markers, and the newest marker is the current state. That has a beautiful consequence: undo isn't a trick — it's just reading an older layer. You can rewind any page, restore any moment, name a revision, or snapshot the whole hive before an experiment. Your history is not a log about the data; it is the data. Deploying, backing up, and remembering become the same operation."
+  "say": "Five kinds of artifact compose everything. Hypercomb calls them its D N A — Distributed Network Artifacts. Layers: the structure — each one an immutable snapshot linking to its children by signature. Resources: the content bytes — images, text, files. Bees — short for beehaviors — small modules of code that give the hive life. Dependencies: the libraries those bees rely on. And content: everything a tile carries. All five are content-addressed, immutable, merkle-versioned, and shareable across the network. Your entire hive is just these five kinds, combined."
 }
