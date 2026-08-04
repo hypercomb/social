@@ -100,6 +100,13 @@
   #splash .meta{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint)}
   #hexmark{width:clamp(64px,8vw,104px);filter:drop-shadow(0 0 30px var(--honey-glow))}
 
+  .golink{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:clamp(11px,1.3vw,14px);
+    letter-spacing:.22em;text-transform:uppercase;color:var(--honey);text-decoration:none;
+    border:1px solid var(--honey-deep);border-radius:8px;padding:13px 24px;transition:background .3s,box-shadow .3s}
+  .golink:hover{background:var(--honey-glow);box-shadow:0 0 50px -12px var(--honey-glow)}
+  .golink:focus-visible{outline:2px solid var(--honey);outline-offset:3px}
+  #splash .golink{font-size:clamp(10px,1.1vw,12px);padding:9px 18px;border-color:var(--line);color:var(--dim)}
+  #splash .golink:hover{border-color:var(--honey-deep);color:var(--honey)}
   #endcard{display:none}
   @media (max-width:700px){
     #caption{bottom:9vh;font-size:13px}
@@ -135,6 +142,7 @@
   <div class="tag">An open software platform. What it is, why you want it, and the road ahead — with live footage from a real hive.</div>
   <button id="enter">▸ &nbsp;press play</button>
   <div class="meta">≈ 18 minutes · 23 scenes · narrated, with captions · space = pause · ← → = skip</div>
+  <a class="golink" href="https://hypercomb.io" target="_blank" rel="noopener">skip the tour · open hypercomb.io ↗</a>
 </div>
 
 <script>
@@ -322,7 +330,8 @@ const SCENES = [
 { act:"roadmap", name:"the invitation", eyebrow:"the invitation", html:`
   <h1><b>The hive is yours.</b></h1>
   <div class="filmwrap"><span class="filmtag">live capture · your first tile</span><video muted playsinline loop src="{{create}}"></video></div>
-  <p class="sub">Type a name. Press Enter. You have a hive.</p>`,
+  <p class="sub">Type a name. Press Enter. You have a hive.</p>
+  <a class="golink" href="https://hypercomb.io" target="_blank" rel="noopener">start your hive · hypercomb.io ↗</a>`,
   media:"create",
   say:`Hypercomb is a bet that software can be shaped like nature instead of like a corporation. Small cells. Simple rules. Signatures instead of authority. History instead of amnesia. It's open source, it's built in the open, and it grows the way a colony grows — by everyone who joins it adding what they need, and sharing it back. You've seen the real thing running. The invitation is one gesture long: type a name, press Enter — and you have a hive. Hypercomb. The hive is yours.`},
 ];
