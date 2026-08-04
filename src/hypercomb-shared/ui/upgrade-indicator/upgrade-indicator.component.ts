@@ -1,7 +1,6 @@
 import { Component, signal, type OnDestroy } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { buildRevisionName, EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { revisionName } from '@hypercomb/core'
 
 interface UpdateAvailablePayload {
   available?: boolean
@@ -47,9 +46,17 @@ const COMPLETE_VISIBLE_MS = 12_000
               (input)="restorePointName.set($any($event.target).value)"
               (keydown.enter)="adopt()" (keydown.escape)="collapse()" />
           </label>
-          <button class="upgrade-act adopt" type="button" (click)="adopt()">{{ 'upgrade.adopt' | t }}</button>
-          <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
-          <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
+          @if (!confirming()) {
+            <button class="upgrade-act adopt" type="button" (click)="adopt()">{{ 'upgrade.adopt' | t }}</button>
+            <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
+            <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
+          } @else {
+            <!-- Adopt opened the DECISION: allow the package changes directly
+                 here, or step into the installer and review them first. -->
+            <button class="upgrade-act adopt" type="button" (click)="allow()">{{ 'upgrade.allow' | t }}</button>
+            <button class="upgrade-act save" type="button" (click)="reviewInInstaller()">{{ 'upgrade.installer' | t }}</button>
+            <button class="upgrade-act discard" type="button" (click)="confirming.set(false)">{{ 'upgrade.back' | t }}</button>
+          }
         }
 
         @if (phase() === 'error') {
@@ -65,6 +72,8 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   readonly newCount = signal(0)
   readonly phase = signal<UpdatePhase>('idle')
   readonly expanded = signal(false)
+  /** Adopt's second step: Allow here, or review in the installer. */
+  readonly confirming = signal(false)
   /** Written for the participant when the update is announced (see the
    *  `update:available` subscription) — theirs to overwrite, never to supply. */
   readonly restorePointName = signal('')
@@ -88,8 +97,10 @@ export class UpgradeIndicatorComponent implements OnDestroy {
       this.#label = String(payload?.label ?? '').trim()
       // The name is written the moment the update is announced — adopting is
       // one click, and what the participant sees in the field is what the
-      // restore point will be called unless they type over it.
-      this.restorePointName.set(revisionName({
+      // restore point will be called unless they type over it. The AUTHOR'S
+      // build name leads; date + time are the changing default, so every
+      // revision the hive takes reads as its own line in the list.
+      this.restorePointName.set(buildRevisionName({
         packageSig: sig,
         label: this.#label,
         locale: this.#locale(),
@@ -137,26 +148,56 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   }
 
   readonly toggleExpanded = (): void => {
-    if (this.phase() === 'available') this.expanded.update(value => !value)
+    if (this.phase() !== 'available') return
+    this.confirming.set(false)
+    this.expanded.update(value => !value)
   }
 
-  readonly collapse = (): void => { this.expanded.set(false) }
+  readonly collapse = (): void => {
+    this.confirming.set(false)
+    this.expanded.set(false)
+  }
 
-  /** Adopt goes NOWHERE. It hands the shell the name and the package and waits
+  /** Adopt opens the DECISION, it doesn't move yet: the participant chooses
+   *  whether the package changes land directly here (Allow) or get reviewed
+   *  in the installer first. Enter in the name field rides the same path. */
+  readonly adopt = (): void => {
+    if (!this.confirming()) { this.confirming.set(true); return }
+    this.allow()
+  }
+
+  /** Allow goes NOWHERE. It hands the shell the name and the package and waits
    *  — `hypercomb:apply-update` snapshots, installs the newer files and
    *  reloads. If the install has to go through DCP it does that off-screen
    *  (the portal's headless iframe), so there is no screen to visit and
    *  nothing to come back from. */
-  readonly adopt = (): void => {
+  readonly allow = (): void => {
     const restorePointName = this.restorePointName().trim()
-      || revisionName({ packageSig: this.#packageSig, label: this.#label, locale: this.#locale() })
-    this.expanded.set(false)
+      || buildRevisionName({ packageSig: this.#packageSig, label: this.#label, locale: this.#locale() })
+    this.collapse()
     window.dispatchEvent(new CustomEvent('hypercomb:apply-update', {
       detail: {
         restorePointName,
         packageSig: this.#packageSig || null,
         newBees: this.#newBees,
         previous: this.#previous,
+      },
+    }))
+  }
+
+  /** The other door: open the installer ON this package, changed items
+   *  marked for review — the portal's `upgrade:` handoff. Nothing installs
+   *  from here; the pill stays available for when they come back. */
+  readonly reviewInInstaller = (): void => {
+    this.collapse()
+    window.dispatchEvent(new CustomEvent('portal:open', {
+      detail: {
+        target: 'dcp',
+        upgrade: {
+          packageSig: this.#packageSig || null,
+          newBees: this.#newBees,
+          previous: this.#previous,
+        },
       },
     }))
   }

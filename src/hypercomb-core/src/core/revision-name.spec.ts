@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { revisionName } from './revision-name.js'
+import { buildRevisionName, revisionName } from './revision-name.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -44,5 +44,25 @@ describe('revisionName', () => {
     const en = revisionName({ packageSig: SIG_A, label: 'x', at: AT, locale: 'en' })
     const ja = revisionName({ packageSig: SIG_A, label: 'x', at: AT, locale: 'ja' })
     expect(en).not.toBe(ja)
+  })
+})
+
+describe('buildRevisionName', () => {
+  it("leads with the author's build name, date + time trailing", () => {
+    const name = buildRevisionName({ packageSig: SIG_A, label: 'alpha 0.9.4', at: AT, locale: 'en' })
+    expect(name.split(' · ')[0]).toBe('alpha 0.9.4')
+    expect(name.split(' · ')[1])
+      .toBe(AT.toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' }))
+  })
+
+  it('stands the word pair in when the build calls itself nothing', () => {
+    const name = buildRevisionName({ packageSig: SIG_A, at: AT, locale: 'en' })
+    expect(name.split(' · ')[0].split(' ')).toHaveLength(2)
+  })
+
+  it('separates two revisions of the same build by time', () => {
+    const later = new Date(AT.getTime() + 60_000)
+    expect(buildRevisionName({ packageSig: SIG_A, label: 'alpha', at: AT }))
+      .not.toBe(buildRevisionName({ packageSig: SIG_A, label: 'alpha', at: later }))
   })
 })

@@ -3,7 +3,7 @@ import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
-import { revisionName } from '@hypercomb/core'
+import { buildRevisionName } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -249,7 +249,7 @@ export class App implements AfterViewInit {
       // other door) may not, so mint one here rather than snapshotting under
       // the empty string — every update this hive takes gets a name.
       const restorePointName = String(detail?.restorePointName ?? '').trim()
-        || revisionName({
+        || buildRevisionName({
           packageSig: detail?.packageSig,
           locale: String(window.ioc?.get<{ locale?: string }>('@hypercomb.social/I18n')?.locale ?? 'en'),
         })
