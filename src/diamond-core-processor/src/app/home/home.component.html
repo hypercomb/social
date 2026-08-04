@@ -167,8 +167,17 @@
         [placeholder]="'dcp.install-placeholder' | t"
         [value]="domainInput()"
         (input)="domainInput.set($any($event.target).value)"
-        (keydown.enter)="addDomain()" />
-      <button class="btn" (click)="addDomain()">{{ 'dcp.install' | t }}</button>
+        (keydown.enter)="addDomain()"
+        (keydown.escape)="cancelInstall()" />
+      @if (!pendingInstallScope()) {
+        <button class="btn" (click)="addDomain()">{{ 'dcp.install' | t }}</button>
+      } @else {
+        <!-- Install opened the decision: nothing is trusted or fetched until
+             Allow. Cancel (or Escape) backs out with the field intact. -->
+        <span class="install-confirm-scope" [title]="pendingInstallScope()">{{ pendingInstallScope() }}</span>
+        <button class="btn" (click)="allowInstall()">{{ 'dcp.allow' | t }}</button>
+        <button class="btn install-cancel" (click)="cancelInstall()">{{ 'dcp.cancel' | t }}</button>
+      }
     </div>
 
     @if (!domainGrouped().length) {

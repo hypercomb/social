@@ -358,6 +358,22 @@
 .domain-input input::placeholder { color: var(--dcp-ink-4); }
 .domain-input input:focus { background: var(--dcp-surface-2); }
 
+/* Install's decision step — the held scope reads back exactly what Allow
+   will trust; Cancel stays visually quieter than Allow. */
+.install-confirm-scope {
+  display: flex;
+  align-items: center;
+  max-width: 18rem;
+  padding: 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 11px/1 var(--hc-mono);
+  color: var(--dcp-ink-3);
+  background: var(--dcp-surface-2);
+}
+.btn.install-cancel { color: var(--dcp-ink-3); }
+
 .btn {
   height: 46px;
   padding: 0 26px;

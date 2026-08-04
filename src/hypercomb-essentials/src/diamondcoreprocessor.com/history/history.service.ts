@@ -649,7 +649,7 @@ export class HistoryService {
     // mesh-layer concerns — they apply when sharing identity to peers,
     // not when naming the local bag. Including any of those here would
     // mean "the bag for this lineage moves when you switch room or
-    // secret," which is wrong: the bag is the data, the data doesn't
+    // secret," which is wrong: the bag IS the data, the data doesn't
     // move because you changed your mesh credentials.
     //
     // Discard `domain` parameter (still extracted for backward-compat

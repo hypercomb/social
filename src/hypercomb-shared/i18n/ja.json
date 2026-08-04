@@ -915,6 +915,8 @@
   "dcp.title": "インストーラー",
   "dcp.install": "インストール",
   "dcp.download-package": "パッケージをダウンロード",
+  "dcp.allow": "許可",
+  "dcp.cancel": "キャンセル",
   "dcp.backup-on": "バックアップに含まれています — クリックでこのブランチを除外",
   "dcp.backup-off": "バックアップから除外されています — クリックでこのブランチを含める",
   "dcp.version-name": "バージョン名",

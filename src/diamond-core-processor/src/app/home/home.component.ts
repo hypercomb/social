@@ -1702,7 +1702,15 @@ export class HomeComponent implements OnDestroy {
   }
 
   // domain management
+  /** Install opens the DECISION, it doesn't move: the typed domain is held
+   *  here until the participant clicks Allow (trust + fetch) or Cancel.
+   *  Nothing is trusted, stored, or fetched while this is pending. */
+  readonly pendingInstallScope = signal<string | null>(null)
+
   addDomain(): void {
+    // Enter rides the same path: first Enter opens the decision, the
+    // second one allows it.
+    if (this.pendingInstallScope()) { this.allowInstall(); return }
     const raw = this.domainInput().trim()
     if (!raw) return
 
@@ -1716,16 +1724,27 @@ export class HomeComponent implements OnDestroy {
         this.domainInput.set('')
         return
       }
-
-      const next = [...this.domains(), scope]
-      this.domains.set(next)
-      localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
-      this.domainInput.set('')
-      this.showInstallToast()
+      this.pendingInstallScope.set(scope)
     } catch {
       // ignore invalid urls
     }
   }
+
+  allowInstall(): void {
+    const scope = this.pendingInstallScope()
+    this.pendingInstallScope.set(null)
+    if (!scope || this.domains().includes(scope)) {
+      this.domainInput.set('')
+      return
+    }
+    const next = [...this.domains(), scope]
+    this.domains.set(next)
+    localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
+    this.domainInput.set('')
+    this.showInstallToast()
+  }
+
+  cancelInstall(): void { this.pendingInstallScope.set(null) }
 
   removeDomain(domain: string): void {
     const next = this.domains().filter(d => d !== domain)
