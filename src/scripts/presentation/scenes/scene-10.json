@@ -1,0 +1,6 @@
+{
+  "n": 10,
+  "name": "verifiable integrity",
+  "chapter": "why hypercomb",
+  "say": "Reason two: integrity you can verify instead of trust. When someone shares a branch of their hive, you receive signatures, and your machine verifies that every byte matches. Identical content collapses into one copy no matter how many people reference it, and the network becomes a global cache — if anyone near you already holds a resource, the signature finds it. Sharing a hash is sharing a proof."
+}

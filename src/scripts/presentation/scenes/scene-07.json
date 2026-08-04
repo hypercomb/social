@@ -1,0 +1,6 @@
+{
+  "n": 7,
+  "name": "beehaviors",
+  "chapter": "what is hypercomb",
+  "say": "Features aren't welded into the app. Every behavior — navigation, editing, games, the command line itself — is a bee — short for beehavior: a small self-contained module that senses when it's relevant and acts. Bees are signed like everything else, so they can be shared, forked, improved, and adopted from the community with cryptographic integrity. The shell is just a loader. If you want Hypercomb to do something new, you don't wait for a vendor — you add a bee."
+}

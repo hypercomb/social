@@ -1,0 +1,8 @@
+{
+  "name": "hypercomb-presentation-build",
+  "private": true,
+  "description": "Chunked builder for the Hypercomb video presentation",
+  "dependencies": {
+    "msedge-tts": "^2.0.7"
+  }
+}
