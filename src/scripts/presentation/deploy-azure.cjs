@@ -20,6 +20,8 @@ if (!fs.existsSync(dist)) throw new Error('run build.cjs first — dist/hypercom
 const stage = path.join(ROOT, 'deploy')
 fs.mkdirSync(stage, { recursive: true })
 fs.copyFileSync(dist, path.join(stage, 'index.html'))
+// the link card social platforms fetch when the URL is posted
+fs.copyFileSync(path.join(ROOT, 'og.png'), path.join(stage, 'og.png'))
 fs.writeFileSync(path.join(stage, 'staticwebapp.config.json'), JSON.stringify({
   navigationFallback: { rewrite: '/index.html' },
   globalHeaders: { 'cache-control': 'public, max-age=300, must-revalidate' },

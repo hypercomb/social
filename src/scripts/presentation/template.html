@@ -1,5 +1,18 @@
 <meta charset="utf-8">
 <title>Hypercomb — The Hive Is Yours</title>
+<meta name="description" content="An open software platform. What Hypercomb is, why you want it, and the road ahead - with live footage from a real hive.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Hypercomb - a new way to be">
+<meta property="og:description" content="No server. No account. Your work lives with you. A narrated tour of an open software platform, recorded live from a real hive.">
+<meta property="og:image" content="https://hypercomb.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://hypercomb.com/">
+<meta property="og:site_name" content="Hypercomb">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Hypercomb - a new way to be">
+<meta name="twitter:description" content="No server. No account. Your work lives with you.">
+<meta name="twitter:image" content="https://hypercomb.com/og.png">
 <style>
   :root{
     --bg:#0a0e15; --bg2:#0d131d; --panel:#101724; --line:#1f2a3a;
@@ -199,6 +212,7 @@
   <div class="tag">An open software platform. What it is, why you want it, and the road ahead — with live footage from a real hive.</div>
   <button id="enter">▸ &nbsp;press play</button>
   <div class="meta">≈ 19 minutes · 24 scenes · narrated, with captions · space = pause · ← → = skip</div>
+  <div class="meta" id="startnote" style="display:none"></div>
   <a class="golink" href="https://hypercomb.io" target="_blank" rel="noopener">skip the tour · open hypercomb.io ↗</a>
 </div>
 
@@ -220,6 +234,11 @@ const stage=document.getElementById('stage'), cap=document.getElementById('capti
       voiceBtn=document.getElementById('voice');
 const ACT={what:'I · what it is',why:'II · why you want it',roadmap:'III · the road ahead'};
 let idx=-1, playing=false, voiceOn=true, token=0, timer=null, chosenVoice=null;
+const startIndex=(()=>{ 
+  const q=new URLSearchParams(location.search).get('scene')||(location.hash.match(/^#s(d+)/)||[])[1];
+  const n=parseInt(q,10);
+  return Number.isFinite(n) && n>=1 ? Math.min(n,SCENES.length)-1 : 0;
+})();
 
 SCENES.forEach((s,i)=>{
   const d=document.createElement('div');d.className='scene';
@@ -292,7 +311,7 @@ addEventListener('keydown',e=>{
 });
 document.getElementById('enter').onclick=()=>{
   document.getElementById('splash').classList.add('gone'); bar.hidden=false;
-  setPlayingSilent(true); goto(0,false); /* click is the user gesture that unlocks audio */
+  setPlayingSilent(true); goto(startIndex,false); /* click is the user gesture that unlocks audio */
 };
 addEventListener('visibilitychange',()=>{ if(document.hidden&&playing)setPlaying(false); });
 
@@ -411,4 +430,5 @@ document.getElementById('anndownload').onclick=()=>{
 };
 addEventListener('keydown',e=>{ if(e.key==='Escape'){ annForm.classList.remove('on'); annBtn.classList.remove('on') } });
 paintCount();
+if(startIndex>0){const el=document.getElementById("startnote");el.style.display="block";el.innerHTML="starts at scene "+(startIndex+1)+" · <em style='color:var(--honey);font-style:normal'>"+SCENES[startIndex].name+"</em>";}
 </script>
