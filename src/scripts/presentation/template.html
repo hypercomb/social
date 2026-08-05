@@ -14,10 +14,16 @@
 <meta name="twitter:description" content="No server. No account. Your work lives with you.">
 <meta name="twitter:image" content="https://hypercomb.com/og.png">
 <style>
+  /* A deck, not a document: it commits to one ground. The accent is a DEEPER
+     honey than the dark build used — #f2b632 on white is about 1.9:1, which is
+     unreadable at caption size; #9a6408 carries the same colour at 5.6:1. The
+     bright honey survives only as a fill behind large glyphs. */
   :root{
-    --bg:#0a0e15; --bg2:#0d131d; --panel:#101724; --line:#1f2a3a;
-    --ink:#e9e4d4; --dim:#939dad; --faint:#5b6675;
-    --honey:#f2b632; --honey-deep:#b98413; --honey-glow:rgba(242,182,50,.14);
+    color-scheme: light;
+    --bg:#ffffff; --bg2:#faf9f6; --panel:#f7f6f2; --line:#e4e2dc;
+    --ink:#17191d; --dim:#585f68; --faint:#8a9099;
+    --honey:#9a6408; --honey-bright:#e0a520; --honey-deep:#7d5107;
+    --honey-glow:rgba(154,100,8,.13); --hexline:#eeece7;
     --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
     --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
   }
@@ -44,10 +50,10 @@
   .sig em{color:var(--honey);font-style:normal}
 
   .filmwrap{width:min(1100px,88vw);border:1px solid var(--line);border-radius:10px;overflow:hidden;
-    box-shadow:0 0 0 1px rgba(0,0,0,.5),0 30px 80px -30px rgba(0,0,0,.9),0 0 120px -40px var(--honey-glow);position:relative}
+    box-shadow:0 1px 2px rgba(23,25,29,.06),0 18px 50px -22px rgba(23,25,29,.35);position:relative}
   .filmwrap video{display:block;width:100%;height:auto}
   .filmtag{position:absolute;top:10px;left:12px;font-family:var(--mono);font-size:10px;letter-spacing:.3em;
-    text-transform:uppercase;color:var(--ink);background:rgba(10,14,21,.72);border:1px solid var(--line);
+    text-transform:uppercase;color:var(--ink);background:rgba(255,255,255,.86);border:1px solid var(--line);
     padding:5px 10px;border-radius:4px}
   .filmtag::before{content:"●";color:#e5484d;margin-right:8px;animation:blink 1.6s steps(1) infinite}
   @keyframes blink{50%{opacity:.25}}
@@ -56,25 +62,25 @@
   /* the scene is a flex column, so the plate is bounded by height and keeps its ratio — never cropped */
   .platewrap{flex:0 1 auto;aspect-ratio:580/596;max-height:48vh;max-width:min(520px,70vw);
     border:1px solid var(--line);border-radius:10px;overflow:hidden;
-    box-shadow:0 0 0 1px rgba(0,0,0,.5),0 30px 80px -30px rgba(0,0,0,.9),0 0 120px -40px var(--honey-glow);position:relative}
+    box-shadow:0 1px 2px rgba(23,25,29,.06),0 18px 50px -22px rgba(23,25,29,.35);position:relative}
   .platewrap svg{display:block;width:100%;height:100%}
   .platecap{position:absolute;bottom:10px;right:12px;font-family:var(--mono);font-size:10px;letter-spacing:.3em;
-    text-transform:uppercase;color:var(--dim);background:rgba(10,14,21,.72);border:1px solid var(--line);
+    text-transform:uppercase;color:var(--dim);background:rgba(255,255,255,.86);border:1px solid var(--line);
     padding:5px 10px;border-radius:4px}
 
   /* hex badge rows (DNA, reasons) */
   .hexrow{display:flex;gap:clamp(10px,2vw,26px);flex-wrap:wrap;justify-content:center}
   .hexb{width:clamp(96px,12vw,150px);aspect-ratio:1/1.08;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
     clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%);
-    background:linear-gradient(160deg,var(--panel),#0b1119);border:1px solid var(--line);position:relative}
+    background:linear-gradient(160deg,#fffdf8,var(--panel));border:1px solid var(--line);position:relative}
   .hexb::after{content:"";position:absolute;inset:1px;clip-path:polygon(25% 3%,75% 3%,99% 50%,75% 97%,25% 97%,1% 50%);
-    border:1px solid rgba(242,182,50,.25);pointer-events:none}
-  .hexb .g{font-size:clamp(20px,2.6vw,34px);color:var(--honey)}
+    border:1px solid rgba(154,100,8,.28);pointer-events:none}
+  .hexb .g{font-size:clamp(20px,2.6vw,34px);color:var(--honey-bright)}
   .hexb .t{font-family:var(--mono);font-size:clamp(9px,1vw,12px);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);max-width:74%;text-align:center;line-height:1.35;word-break:break-word}
 
   /* layer stack diagram */
   .stack{display:flex;flex-direction:column-reverse;gap:8px;align-items:center}
-  .lay{width:min(520px,70vw);border:1px solid var(--line);background:linear-gradient(90deg,var(--panel),#0b1119);
+  .lay{width:min(520px,70vw);border:1px solid var(--line);background:linear-gradient(90deg,#fffdf8,var(--panel));
     border-radius:6px;padding:10px 18px;font-family:var(--mono);font-size:clamp(10px,1.2vw,13px);color:var(--dim);
     display:flex;justify-content:space-between;letter-spacing:.08em}
   .lay.head{border-color:var(--honey-deep);color:var(--ink);box-shadow:0 0 40px -12px var(--honey-glow)}
@@ -91,13 +97,13 @@
   /* ---------- chrome ---------- */
   #caption{position:fixed;left:50%;bottom:6.5vh;transform:translateX(-50%);width:min(940px,88vw);text-align:center;
     color:var(--ink);font-weight:300;font-size:clamp(13px,1.55vw,18px);line-height:1.55;
-    background:rgba(9,12,18,.78);border:1px solid var(--line);border-radius:10px;padding:14px 22px;
+    background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:10px;padding:14px 22px;
     backdrop-filter:blur(6px);opacity:0;transition:opacity .6s;z-index:40}
   #caption.on{opacity:1}
   #caption .q{color:var(--honey)}
 
   #bar{position:fixed;left:0;right:0;bottom:0;height:8vh;min-height:52px;display:flex;align-items:center;gap:14px;
-    padding:0 20px;background:linear-gradient(180deg,transparent,rgba(6,9,14,.92) 35%);z-index:50}
+    padding:0 20px;background:linear-gradient(180deg,transparent,rgba(255,255,255,.94) 35%);z-index:50}
   #ticks{flex:1;display:flex;gap:4px;height:22px;align-items:center}
   .tick{flex:1;height:3px;background:var(--line);border-radius:2px;cursor:pointer;transition:background .3s,height .15s;position:relative}
   .tick:hover{height:6px}
@@ -112,7 +118,7 @@
 
   /* splash */
   #splash{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:3.4vh;background:radial-gradient(120vw 90vh at 50% 42%,#0e1626 0%,var(--bg) 62%);transition:opacity 1s;text-align:center;padding:0 6vw}
+    gap:3.4vh;background:radial-gradient(120vw 90vh at 50% 42%,var(--bg2) 0%,var(--bg) 62%);transition:opacity 1s;text-align:center;padding:0 6vw}
   #splash.gone{opacity:0;pointer-events:none}
   #splash .word{font-family:var(--mono);font-weight:600;font-size:clamp(26px,4.6vw,58px);letter-spacing:.58em;margin-left:.58em}
   #splash .tag{color:var(--dim);font-weight:300;font-size:clamp(14px,1.8vw,21px);max-width:52ch;text-wrap:balance}
@@ -132,23 +138,23 @@
   #splash .golink:hover{border-color:var(--honey-deep);color:var(--honey)}
   /* ---------- pronunciation flags ---------- */
   #annbtn{position:fixed;z-index:70;display:none;align-items:center;gap:7px;font-family:var(--mono);
-    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#0a0e15;background:var(--honey);
-    border:none;border-radius:6px;padding:8px 12px;cursor:pointer;box-shadow:0 8px 24px -8px rgba(0,0,0,.8)}
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#17191d;background:var(--honey-bright);
+    border:none;border-radius:6px;padding:8px 12px;cursor:pointer;box-shadow:0 8px 22px -8px rgba(23,25,29,.35)}
   #annbtn.on{display:inline-flex}
   #annform{position:fixed;z-index:71;display:none;flex-direction:column;gap:12px;width:min(420px,90vw);
     background:var(--panel);border:1px solid var(--honey-deep);border-radius:10px;padding:18px;
-    box-shadow:0 30px 70px -20px rgba(0,0,0,.9)}
+    box-shadow:0 18px 50px -18px rgba(23,25,29,.28)}
   #annform.on{display:flex}
   #annform .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--honey)}
   #annform .heard{font-size:15px;color:var(--ink);line-height:1.4}
-  #annform input{background:#0a0e15;border:1px solid var(--line);border-radius:6px;padding:11px 12px;
+  #annform input{background:#fff;border:1px solid var(--line);border-radius:6px;padding:11px 12px;
     color:var(--ink);font-family:var(--mono);font-size:13px;width:100%}
   #annform input:focus{outline:none;border-color:var(--honey-deep)}
   #annform .hint{font-size:12px;color:var(--faint);line-height:1.45}
   #annform .row{display:flex;gap:9px;justify-content:flex-end}
   #annpanel{position:fixed;right:16px;bottom:calc(8vh + 14px);z-index:72;display:none;flex-direction:column;gap:10px;
     width:min(520px,92vw);max-height:62vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;
-    padding:16px;box-shadow:0 30px 70px -20px rgba(0,0,0,.9)}
+    padding:16px;box-shadow:0 18px 50px -18px rgba(23,25,29,.28)}
   #annpanel.on{display:flex}
   #annlist{overflow-y:auto;display:flex;flex-direction:column;gap:9px}
   .annrow{border-left:2px solid var(--honey-deep);padding:8px 0 8px 12px;font-size:13px;line-height:1.45}
@@ -167,9 +173,9 @@
 
 <svg id="comb" aria-hidden="true"><defs>
   <pattern id="hexp" width="56" height="97" patternUnits="userSpaceOnUse" patternTransform="scale(1.6)">
-    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="#141d2b" stroke-width="1" transform="translate(0,0)"/>
-    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="#141d2b" stroke-width="1" transform="translate(28,48.5)"/>
-    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="#141d2b" stroke-width="1" transform="translate(-28,48.5)"/>
+    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(0,0)"/>
+    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(28,48.5)"/>
+    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(-28,48.5)"/>
   </pattern></defs>
   <rect width="120%" height="120%" fill="url(#hexp)"/>
 </svg>

@@ -5,3 +5,6 @@ notes/
 teaser/
 posts/
 record/
+full/
+.shots/
+.shots.cjs

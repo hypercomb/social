@@ -173,14 +173,14 @@ const pageFor = (b, captionOnly) => `<meta charset="utf-8"><style>${STYLE}
   .frame .lay{width:560px;font-size:14px} .frame .hexb{width:150px}
   #cap{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);width:1040px;text-align:center;
     color:var(--ink);font-weight:400;font-size:25px;line-height:1.45;
-    background:rgba(9,12,18,.86);border:1px solid var(--line);border-radius:12px;padding:20px 26px}
+    background:rgba(255,255,255,.94);box-shadow:0 10px 30px -14px rgba(23,25,29,.4);border:1px solid var(--line);border-radius:12px;padding:20px 26px}
   .golink{border-color:var(--honey-deep);color:var(--honey);font-size:15px}
 </style>
 ${captionOnly ? '' : `<svg id="comb"><defs>
   <pattern id="hexp" width="56" height="97" patternUnits="userSpaceOnUse" patternTransform="scale(1.6)">
-    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="#141d2b" stroke-width="1"/>
-    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="#141d2b" stroke-width="1" transform="translate(28,48.5)"/>
-    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="#141d2b" stroke-width="1" transform="translate(-28,48.5)"/>
+    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1"/>
+    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(28,48.5)"/>
+    <polygon points="28,0 56,16.2 56,48.5 28,64.7 0,48.5 0,16.2" fill="none" stroke="var(--hexline)" stroke-width="1" transform="translate(-28,48.5)"/>
   </pattern></defs><rect width="120%" height="120%" fill="url(#hexp)"/></svg>
 <div class="frame">${b.body}</div>`}
 <div id="cap">${esc(b.say)}</div>`
@@ -276,7 +276,7 @@ function linksFor(post, pi) {
         const overlay = shoot(pageFor(b, true), `${post.id}-${i}-cap.png`, true)
         ff('-stream_loop', '-1', '-i', path.join(ROOT, 'media', b.clip), '-i', overlay, '-i', audio, '-t', String(dur),
            '-filter_complex',
-           `[0:v]fps=30,scale=${W}:-2:flags=lanczos,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=#0a0e15[bg];` +
+           `[0:v]fps=30,scale=${W}:-2:flags=lanczos,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=white[bg];` +
            `[bg][1:v]overlay=0:0,format=yuv420p,fade=in:0:12,fade=out:${fadeOut}:12[v]`,
            '-map', '[v]', '-map', '2:a', '-c:v', 'libx264', '-crf', '20', '-preset', 'medium',
            '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2', '-shortest', seg)
