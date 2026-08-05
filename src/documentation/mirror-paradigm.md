@@ -42,6 +42,45 @@ pheromones — the hive is the living specification of the code.
    revise, and others — a subsystem earns its own mirror, it is not any one
    behaviour's internals).
 
+## The mirror queue
+
+Rule 1 says *same pass as the code*, and that is still the standard. But a
+mirror pass needs something a code change does not: a live renderer on the
+bridge. When the bridge is down, the dev server is mid-rebuild, or another
+session holds the hive, the pass cannot run — and a deferral that lives only
+in a chat reply is a deferral that gets lost.
+
+So a deferred mirror is **written down, not remembered**:
+
+```bash
+npm run mirror:queue -- list                 # what the hive still owes the code
+npm run mirror:queue -- add --id <slug> --title "…" [--run "<command>"] [--note "…"] [--commit <sha>]
+npm run mirror:queue:run                     # drain it
+npm run mirror:queue -- done <id>            # settled by hand
+```
+
+7. **A mirror is either run or queued — never neither.** If the pass cannot
+   run in the same change, the same change adds a queue entry naming what is
+   owed and how to run it. Shipping code with no mirror and no entry is the
+   only way the hive falls behind, and it is now the one thing that must not
+   happen. Say so in the commit.
+
+The queue is a **file in the repo** (`scripts/mirror-queue.json`) precisely
+because the blocked case is "no bridge": it must be writable with no
+renderer, no hive, and no network. The queue is the record; **the hive is
+still the truth.** An entry is a promise to run a pass, never a substitute
+for having run one — nothing reads the queue to decide how anything renders.
+
+`run` is idle-safe on purpose. It probes for a renderer first, and with none
+it reports what is still owed and exits 0 — a scheduled drain that fires
+while the hive is closed is a quiet no-op, not a failure. Entries run in
+order and a failure stops the drain, leaving that entry pending: later passes
+routinely need a collection an earlier one creates, and a half-applied mirror
+is worse than a queued one. An entry may carry `"run": null` when no script
+exists yet — it still counts as owed, it simply cannot drain unattended.
+
+After a drain, mint the cards: `node scripts/behaviors-theme/sweep.cjs`.
+
 ## The behaviors mirror (first instance)
 
 `behaviors` at the hive root holds one collection per category — `games`,

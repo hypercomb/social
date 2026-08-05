@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "participant-stack",
+      "title": "Participant stack — one hex with depth, wheel rolls LAYERS",
+      "run": null,
+      "note": "Built and shipped; no mirror pass was ever run. Verified absent from the warm 255-cell census (no `stack` cell anywhere under behaviors). Needs a scripts/mirror-participant-stack.ts before it can drain: collection under behaviors/swarm or behaviors/views, one part tile per source file.",
+      "created": "2026-08-04",
+      "status": "pending"
+    },
+    {
+      "id": "mobile-chrome",
+      "title": "Mobile chrome — rail under the command line, lane ladder, select pill",
+      "run": null,
+      "note": "Mirror was STAGED and never run. behaviors/views/mobile exists but covers mobile MODE only — no cell for the rail, the lane ladder, or the select pill. Needs a mirror script; extend behaviors/views/mobile rather than minting a second mobile collection.",
+      "created": "2026-08-04",
+      "status": "pending"
+    }
+  ]
+}

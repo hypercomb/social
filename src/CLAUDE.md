@@ -13,6 +13,8 @@ Minimalism. Small surface area. No unnecessary abstractions. Signatures (SHA-256
 - **Pheromones** — mark each tile for what it belongs to and what it is. Rendering and behaviour read the mark; nothing is hardcoded per-feature. Never mint keywords on the fly — use the declared vocabulary.
 - **Notes** — the explanation lives on the tile, not only in a markdown file.
 
+- **Run or queued, never neither.** A mirror pass needs a live renderer on the bridge, so it cannot always happen in the same change. When it cannot, the same change adds an entry to the **mirror queue** (`npm run mirror:queue -- add …`, drained by `npm run mirror:queue:run`) naming what is owed and how to run it — and the commit says so. Shipping code with no mirror *and* no entry is how the hive falls behind; that is the one thing that must not happen. The queue is a repo file because the blocked case is "no bridge"; the hive is still the truth.
+
 Consequence: features are **data-driven from pools of meaning and pheromones**. If a change would require editing code to change how something is classified, grouped, or rendered, that classification belongs on a tile as a pheromone instead. The mirror is not documentation-after-the-fact — it is created alongside the behaviour, in the same pass, so the hive is built as the code is built. Full doctrine: `src/documentation/mirror-paradigm.md`; first instance: `scripts/mirror-behaviors.ts` (the `behaviors` root mirror).
 
 ## Project Roles
