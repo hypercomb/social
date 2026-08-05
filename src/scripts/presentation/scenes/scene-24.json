@@ -1,0 +1,21 @@
+{
+  "n": 24,
+  "name": "how to bee",
+  "chapter": "roadmap",
+  "slug": "how-to-bee",
+  "eyebrow": "your first day",
+  "headline": "How to *bee*.",
+  "sub": "You are not dropped in cold. Type /help and you get a curriculum, not a manual.",
+  "visual": "stack",
+  "visualData": [
+    "basics | go in · go out · zoom · pan · select",
+    "everyday | create · edit · copy · paste · undo · fit",
+    "beyond | the palette, the command line, arranging, public mode",
+    "* /tutorial | a bee flies the whole thing with you"
+  ],
+  "link": {
+    "href": "https://hypercomb.io",
+    "label": "start your hive · hypercomb.io ↗"
+  },
+  "say": "One last thing — because a tool you can't get into isn't yours either. Type slash help and you get a curriculum, not a manual: six gestures to begin with, then the everyday verbs, then the rest of it when you're ready for it. Nothing is hidden from you; it just waits its turn. And if you'd rather be shown than told, type slash tutorial and a bee flies the whole thing with you. That's the last idea, and it's the same as the first one: this is a new way to be — so here is how to bee. The hive is yours."
+}
