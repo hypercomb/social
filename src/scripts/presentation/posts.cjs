@@ -54,7 +54,9 @@ I recorded the whole thing live from a real hive. This is the opening.`,
   {
     id: 'signatures', scene: 5,
     title: 'One kind of name for everything',
-    copy: `Every piece of content in Hypercomb is named by a signature — the SHA-256 of its own bytes. Sixty-four characters that are identical on every machine, forever.
+    copy: `Every piece of content in Hypercomb is named by a signature — the SHA-256 of its own bytes.
+
+Sixty-four characters, identical on every machine, forever.
 
 That one substitution does an enormous amount of work: content verifies itself, identical things store once, caches never go stale, and sharing a hash is sharing a proof.
 
@@ -244,12 +246,15 @@ function linksFor(post, pi) {
     'hive and narrated it. Nineteen minutes, twenty-four scenes, three acts: what',
     'it is, why you would want it, and where it goes next.',
     '',
-    'Over the next while I\'ll post one idea at a time. Each one links to its own',
-    'moment in the full piece, so you can go as deep as you like:',
+    'Over the next while I\'ll post one idea at a time — each linking to its own',
+    'moment in the full piece, so you can go as deep as you like.',
+    '',
+    'Every link is in the first comment.',
+    '',
+    '**First comment:**',
     '',
     ...POSTS.map(p => `▸ ${p.title} — ${SITE}/?scene=${p.scene}`),
-    '',
-    `▸ The whole presentation: ${SITE}`,
+    `▸ The whole presentation (~19 min, narrated): ${SITE}`,
     `▸ Hypercomb itself: ${APP}`,
     '',
     '---', '']
