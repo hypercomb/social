@@ -164,6 +164,21 @@ const PARTS: Part[] = [
    'the shading — where the silhouette sits in the stack (under the wash, over the void) and how far it is taken back: fill and stroke opacities per layer, and a radial mask so the honeycomb fades out at the frame instead of ending on a cut edge'],
 ]
 
+/** Append a note only if this exact text is not already on the cell — for
+ *  parts that GAINED behaviour without gaining a file. */
+async function noteOnce(segments: string[], text: string): Promise<'written' | 'present' | 'failed'> {
+  if ((await notes(segments)).includes(text)) return 'present'
+  return await note(segments, text) ? 'written' : 'failed'
+}
+
+/** Notes for changes that landed on parts already mirrored. */
+const AMENDMENTS: [cell: string, text: string][] = [
+  [norm('behaviors-deck-silhouette'),
+   'REVISED — the comb is lit PER TRIAD. Three mutually-touching hexes meet at exactly one shared vertex, and that trio is the honeycomb\'s real unit, so a light is placed at every such vertex (found by geometry: the centroid of three mutually-adjacent centres IS the vertex they share — eight of them across this deck). Every tile belongs to several triads, so it brightens on the sides facing them and sinks along the runs between; that is where each direction gets its own falloff. Depth from where the tiles ARE, not from one global gradient pretending the comb is flat.'],
+  [norm('example-hives-offer-component'),
+   'REVISED — the triad lights are painted through a mask cut to the tile BODIES, so light lands on tiles and never on the ground between them: the void stays void. Their strength lives here beside the other silhouette values (`.light-core` / `.light-mid` / `.light-edge`). Faint on purpose — a first pass at full radius turned the deck into a milky slab and washed the pheromone hues out from under it, so the sources die about a tile and a half out.'],
+]
+
 async function main(): Promise<void> {
   await ensureMember([ROOT, APPEARANCE], COLLECTION)
 
@@ -202,6 +217,12 @@ async function main(): Promise<void> {
     const okNote = await note(pseg, text)
     const okMark = await mark(pseg, PART_KEYWORD)
     if (okNote && okMark) { created++; console.log('ok') } else { failed++; console.log(`FAIL (note:${okNote} mark:${okMark})`) }
+  }
+
+  for (const [cell, text] of AMENDMENTS) {
+    const seg = [...SEGMENTS, cell]
+    process.stdout.write(`[amend] ${seg.join('/')} ... `)
+    console.log(await noteOnce(seg, text))
   }
 
   console.log(`\n[mirror] DONE — ${created} parts written, ${skipped} already present, ${failed} failed`)
