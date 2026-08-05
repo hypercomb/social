@@ -28,8 +28,15 @@ const scenes = fs.readdirSync(path.join(ROOT, 'scenes')).filter(f => f.endsWith(
 // exactly the scenes that say the word — and nothing else.
 const rulesPath = path.join(ROOT, 'pronunciations.json')
 const RULES = fs.existsSync(rulesPath) ? JSON.parse(fs.readFileSync(rulesPath, 'utf8')) : []
+// [pause] in a narration is DIRECTION, not text: the line is spoken either side
+// of it and the silence is cut in between, because the Edge voice endpoint
+// rejects SSML <break> and <mstts:silence> outright. [pause:1400] for a longer
+// one. The caption never shows the marker.
+const PAUSE = /\[pause(?::(\d+))?\]/g
 const spokenOf = say => RULES.reduce((text, r) =>
   r && r.match && r.say ? text.split(r.match).join(r.say) : text, say)
+/** what the viewer reads — the direction is stripped out */
+const captionOf = say => say.replace(PAUSE, ' ').replace(/\s{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim()
 
 const hashOf = say => crypto.createHash('sha256').update(`${VOICE}|${RATE}|${spokenOf(say)}`).digest('hex').slice(0, 16)
 
@@ -48,17 +55,52 @@ async function ensureAudio() {
   }
   if (!stale.length) return
   const { MsEdgeTTS, OUTPUT_FORMAT, ProsodyOptions } = require('msedge-tts')
-  for (const s of stale) {
+  const { execFileSync } = require('child_process')
+
+  const speak = async text => {
     const tts = new MsEdgeTTS()
     await tts.setMetadata(VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
     const pros = new ProsodyOptions(); pros.rate = RATE
-    const { audioStream } = await tts.toStream(spokenOf(s.say), pros)
+    const { audioStream } = await tts.toStream(text, pros)
     const chunks = []
     await new Promise((res, rej) => { audioStream.on('data', c => chunks.push(c)); audioStream.on('end', res); audioStream.on('error', rej) })
-    fs.writeFileSync(path.join(ROOT, 'audio-cache', hashOf(s.say) + '.mp3'), Buffer.concat(chunks))
     tts.close()
-    console.log(`regenerated audio: scene ${s.n} (${s.name})`)
+    return Buffer.concat(chunks)
   }
+
+  const tmp = path.join(ROOT, 'audio-cache', '.tmp')
+  fs.mkdirSync(tmp, { recursive: true })
+
+  for (const s of stale) {
+    const out = path.join(ROOT, 'audio-cache', hashOf(s.say) + '.mp3')
+    // split on the direction: odd entries are the pause lengths the regex captured
+    const parts = spokenOf(s.say).split(PAUSE)
+    if (parts.length === 1) {
+      fs.writeFileSync(out, await speak(parts[0]))
+    } else {
+      const pieces = []
+      for (const [i, part] of parts.entries()) {
+        const file = path.join(tmp, `p${i}.mp3`)
+        if (i % 2 === 0) {                                   // spoken text
+          if (!part.trim()) continue
+          fs.writeFileSync(file, await speak(part.trim()))
+        } else {                                             // the silence between
+          const secs = (Number(part) || 700) / 1000
+          execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi',
+            '-i', 'anullsrc=r=24000:cl=mono', '-t', String(secs),
+            '-c:a', 'libmp3lame', '-b:a', '48k', file], { stdio: 'ignore' })
+        }
+        pieces.push(file)
+      }
+      const list = path.join(tmp, 'list.txt')
+      fs.writeFileSync(list, pieces.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n'))
+      execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0',
+        '-i', list, '-c', 'copy', out], { stdio: 'ignore' })
+      for (const f of [...pieces, list]) { try { fs.unlinkSync(f) } catch {} }
+    }
+    console.log(`regenerated audio: scene ${s.n} (${s.name})${parts.length > 1 ? ` · ${Math.floor(parts.length / 2)} pause(s)` : ''}`)
+  }
+  try { fs.rmdirSync(tmp) } catch {}
 }
 
 // --- instructions → scene HTML ----------------------------------------------
@@ -121,7 +163,7 @@ function sceneObject(s) {
   if (s.link) parts.push(`\n  <a class="golink" href="${esc(s.link.href)}" target="_blank" rel="noopener">${esc(s.link.label)}</a>`)
   const o = { act: ACT_OF[s.chapter], name: s.name, eyebrow: s.eyebrow, html: parts.join('') }
   if ((s.visual || '').startsWith('film')) o.media = s.visual.split(':')[1]
-  o.say = s.say
+  o.say = captionOf(s.say)
   return o
 }
 

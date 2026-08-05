@@ -29,7 +29,7 @@ const STYLE = (shell.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || ''
 
 const BEATS = [
   { id: 'open', kind: 'still',
-    body: `<div class="eyebrow">hypercomb</div><h1>A new way to <b>be</b>.</h1>
+    body: `<div class="eyebrow">hypercomb</div><h1>A new way to <b>bee</b>.</h1>
            <p class="sub">Not a new place to keep your work — a different way of being present with it.</p>`,
     say: `Hypercomb. A new way to be.` },
 
