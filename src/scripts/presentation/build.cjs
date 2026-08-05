@@ -100,6 +100,13 @@ function visualHtml(s) {
       }).join('') + `</div>`
     case 'sig':
       return rows.length ? `\n  <div class="sig">${emph(rows[0], 'em')}</div>` : ''
+    // a drawn plate: the file is inlined, so it scales with the stage and carries no payload
+    case 'plate': {
+      const name = (s.visual.split(':')[1] || '').trim()
+      const svg = fs.readFileSync(path.join(ROOT, 'visuals', name + '.svg'), 'utf8').trim()
+      const cap = rows.length ? `<span class="platecap">${esc(rows[0])}</span>` : ''
+      return `\n  <div class="platewrap">${svg}${cap}</div>`
+    }
     default: return ''
   }
 }

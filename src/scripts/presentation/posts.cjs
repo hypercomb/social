@@ -17,8 +17,13 @@ const CACHE = path.join(ROOT, 'teaser', 'audio')   // shared with the teaser
 const VOICE = 'en-US-AndrewMultilingualNeural'
 const RATE = '+2%'
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
-const SITE = 'https://www.hypercomb.com'
+const SITE = 'https://www.hypercomb.com'   // the presentation
+const APP = 'https://hypercomb.io'         // the thing itself
 const W = 1280, H = 720
+
+// Fill this in once post 1 is up, then re-run with --copy-only: every later
+// post will carry a link back to the start of the series.
+const FIRST_POST_URL = process.env.FIRST_POST_URL || '<paste the URL of post 1 here>'
 
 for (const d of [OUT, FRAMES, CACHE]) fs.mkdirSync(d, { recursive: true })
 const shell = fs.readFileSync(path.join(ROOT, 'template.html'), 'utf8')
@@ -202,14 +207,56 @@ const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a], 
 const durationOf = f => parseFloat(execFileSync('ffprobe',
   ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f], { encoding: 'utf8' }).trim())
 
+// Where each post sends people. LinkedIn only unfurls one link and suppresses
+// it entirely when a video is attached, so the link block belongs in the first
+// comment — that is what the "first comment" line below is for.
+function linksFor(post, pi) {
+  const deep = `${SITE}/?scene=${post.scene}`
+  const lines = [
+    `▸ This bit in full: ${deep}`,
+    `▸ The whole presentation (~19 min, narrated): ${SITE}`,
+    `▸ Try Hypercomb itself: ${APP}`,
+  ]
+  if (pi > 0) lines.push(`▸ Start of the series: ${FIRST_POST_URL}`)
+  return lines
+}
+
 ;(async () => {
+  const copyOnly = process.argv.includes('--copy-only')
   const md = ['# Post series — one idea, one clip, one link', '',
-    'Each post is a standalone MP4 with the narration burned in (LinkedIn autoplays muted).',
-    'Every link drops the viewer at that idea inside the full presentation.', '']
+    'Each post is a standalone MP4 with the narration burned in (feeds autoplay muted).',
+    'Every link drops the viewer at that idea inside the full presentation.', '',
+    '**Posting note.** Attach the MP4 to the post and put the link block in the',
+    'FIRST COMMENT — LinkedIn suppresses link previews on video posts and damps',
+    'reach on posts with outbound links in the body. Once post 1 is live, put its',
+    'URL in `FIRST_POST_URL` and re-run `node posts.cjs --copy-only` so every later',
+    'post links back to the start.', '',
+    '---', '',
+    '## 0. The hub post — the series in one place', '',
+    `**video:** \`teaser/hypercomb-teaser.mp4\` · 38s`, '',
+    'I built a thing and then I built the tour of it.',
+    '',
+    'Hypercomb is an open software platform where your work lives on a hexagonal',
+    'grid on your own machine. No server. No account. Presence is permission —',
+    'your work is here because you are.',
+    '',
+    'Rather than write a manifesto, I recorded the whole thing live from a real',
+    'hive and narrated it. Nineteen minutes, twenty-four scenes, three acts: what',
+    'it is, why you would want it, and where it goes next.',
+    '',
+    'Over the next while I\'ll post one idea at a time. Each one links to its own',
+    'moment in the full piece, so you can go as deep as you like:',
+    '',
+    ...POSTS.map(p => `▸ ${p.title} — ${SITE}/?scene=${p.scene}`),
+    '',
+    `▸ The whole presentation: ${SITE}`,
+    `▸ Hypercomb itself: ${APP}`,
+    '',
+    '---', '']
   for (const [pi, post] of POSTS.entries()) {
-    await ensureAudio(post.beats)
+    if (!copyOnly) await ensureAudio(post.beats)
     const segs = []
-    post.beats.forEach((b, i) => {
+    if (!copyOnly) post.beats.forEach((b, i) => {
       const audio = audioPath(b.say)
       const dur = durationOf(audio) + 0.5
       const seg = path.join(OUT, `.seg-${pi}-${i}.mp4`)
@@ -231,19 +278,20 @@ const durationOf = f => parseFloat(execFileSync('ffprobe',
       }
       segs.push(seg)
     })
-    const list = path.join(OUT, `.list-${pi}.txt`)
-    fs.writeFileSync(list, segs.map(s => `file '${s.replace(/\\/g, '/')}'`).join('\n'))
     const file = path.join(OUT, `${String(pi + 1).padStart(2, '0')}-${post.id}.mp4`)
-    ff('-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', file)
-    for (const s of segs) { try { fs.unlinkSync(s) } catch {} }
-    try { fs.unlinkSync(list) } catch {}
-    const dur = durationOf(file)
-    const link = `${SITE}/?scene=${post.scene}`
-    console.log(`${path.basename(file)} · ${dur.toFixed(1)}s · ${(fs.statSync(file).size / 1e6).toFixed(1)} MB`)
+    if (!copyOnly) {
+      const list = path.join(OUT, `.list-${pi}.txt`)
+      fs.writeFileSync(list, segs.map(s => `file '${s.replace(/\\/g, '/')}'`).join('\n'))
+      ff('-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', file)
+      for (const s of segs) { try { fs.unlinkSync(s) } catch {} }
+      try { fs.unlinkSync(list) } catch {}
+    }
+    const dur = fs.existsSync(file) ? durationOf(file) : 0
+    console.log(`${path.basename(file)} · ${dur.toFixed(1)}s${copyOnly ? ' (copy only)' : ` · ${(fs.statSync(file).size / 1e6).toFixed(1)} MB`}`)
     md.push(`## ${pi + 1}. ${post.title}`, '',
       `**video:** \`posts/${path.basename(file)}\` · ${dur.toFixed(0)}s`, '',
-      `**link:** ${link}`, '', post.copy, '',
-      `Full presentation → ${SITE}`, '', '---', '')
+      post.copy, '',
+      '**First comment:**', '', ...linksFor(post, pi), '', '---', '')
   }
   fs.writeFileSync(path.join(OUT, 'posts.md'), md.join('\n'))
   console.log(`\n${path.join(OUT, 'posts.md')}`)

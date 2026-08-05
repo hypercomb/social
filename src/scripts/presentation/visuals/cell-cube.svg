@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="150 62 580 596" role="img" aria-label="one solid cell seated in an open lattice of cells">
+  <defs>
+    <pattern id="cc-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20,0 L0,0 L0,20" fill="none" stroke="#a9c0d2" stroke-width="0.7" opacity="0.45"/>
+    </pattern>
+    <pattern id="cc-gridMajor" width="100" height="100" patternUnits="userSpaceOnUse">
+      <path d="M100,0 L0,0 L0,100" fill="none" stroke="#8fabc2" stroke-width="1" opacity="0.5"/>
+    </pattern>
+
+    <filter id="cc-b6" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="cc-b10" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>
+    <filter id="cc-b3" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
+
+    <linearGradient id="cc-fTop" x1="0.05" y1="0" x2="0.95" y2="1">
+      <stop offset="0" stop-color="#8a82a6"/><stop offset="0.5" stop-color="#5f5878"/><stop offset="1" stop-color="#403a55"/>
+    </linearGradient>
+    <linearGradient id="cc-fLeft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#443d58"/><stop offset="0.6" stop-color="#2b2638"/><stop offset="1" stop-color="#1d1929"/>
+    </linearGradient>
+    <linearGradient id="cc-fRight" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#191524"/><stop offset="0.5" stop-color="#100d18"/><stop offset="1" stop-color="#08060d"/>
+    </linearGradient>
+    <linearGradient id="cc-bounce" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#6a35e8" stop-opacity="0.42"/><stop offset="1" stop-color="#6a35e8" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="cc-pool" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#000000" stop-opacity="0.7"/>
+      <stop offset="0.6" stop-color="#000000" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <clipPath id="cc-cTop"><path d="M353.397,320 L440,270 L526.603,320 L440,370 Z"/></clipPath>
+    <clipPath id="cc-cLeft"><path d="M353.397,320 L440,370 L440,470 L353.397,420 Z"/></clipPath>
+    <clipPath id="cc-cRight"><path d="M526.603,320 L440,370 L440,470 L526.603,420 Z"/></clipPath>
+
+    <g id="cc-lattice">
+      <path d="M440,270 L440,170 M526.603,120 L440,170 L353.397,120"/>
+      <path d="M526.603,320 L613.205,270 M699.808,320 L613.205,270 L613.205,170"/>
+      <path d="M526.603,420 L613.205,470 M613.205,570 L613.205,470 L699.808,420"/>
+      <path d="M440,470 L440,570 M353.397,620 L440,570 L526.603,620"/>
+      <path d="M353.397,420 L266.795,470 M180.192,420 L266.795,470 L266.795,570"/>
+      <path d="M353.397,320 L266.795,270 M266.795,170 L266.795,270 L180.192,320"/>
+    </g>
+    <path id="cc-hex" d="M440,270 L526.603,320 L526.603,420 L440,470 L353.397,420 L353.397,320 Z"/>
+
+    <!-- corner shading: one 120° angle, bisector along +x.
+         Occlusion hugs both walls and pools at the vertex, then fades outward. -->
+    <filter id="cc-bWall" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="11"/>
+    </filter>
+    <clipPath id="cc-wedgeClip"><path d="M0,0 L110,-190.53 L110,190.53 Z"/></clipPath>
+    <radialGradient id="cc-fadeG" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="96">
+      <stop offset="0" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="cc-fade">
+      <rect x="-20" y="-210" width="150" height="420" fill="url(#cc-fadeG)"/>
+    </mask>
+    <g id="cc-wedge" mask="url(#cc-fade)">
+      <g clip-path="url(#cc-wedgeClip)" filter="url(#cc-bWall)">
+        <path d="M0,0 L120,-207.85" fill="none" stroke="#170c30" stroke-width="36"/>
+        <path d="M0,0 L120,207.85" fill="none" stroke="#170c30" stroke-width="36"/>
+        <circle cx="0" cy="0" r="30" fill="#170c30"/>
+      </g>
+    </g>
+    <path id="cc-pTop" d="M353.397,320 L440,270 L526.603,320 L440,370 Z"/>
+    <path id="cc-pLeft" d="M353.397,320 L440,370 L440,470 L353.397,420 Z"/>
+    <path id="cc-pRight" d="M526.603,320 L440,370 L440,470 L526.603,420 Z"/>
+  </defs>
+
+  <rect width="880" height="740" fill="#f7f2e6"/>
+  <rect width="880" height="740" fill="url(#cc-grid)"/>
+  <rect width="880" height="740" fill="url(#cc-gridMajor)"/>
+
+  <!-- ── shading in the corners of the outer cells ────────────── -->
+  <!-- each junction: the three angles between its three directions -->
+  <g>
+    <g transform="translate(440,170)">
+      <use href="#cc-wedge" transform="rotate(-90)" opacity="0.147"/>
+      <use href="#cc-wedge" transform="rotate(30)"  opacity="0.415"/>
+      <use href="#cc-wedge" transform="rotate(150)" opacity="0.219"/>
+    </g>
+    <g transform="translate(613.205,270)">
+      <use href="#cc-wedge" transform="rotate(-30)" opacity="0.301"/>
+      <use href="#cc-wedge" transform="rotate(90)"  opacity="0.373"/>
+      <use href="#cc-wedge" transform="rotate(210)" opacity="0.105"/>
+    </g>
+    <g transform="translate(613.205,470)">
+      <use href="#cc-wedge" transform="rotate(30)"  opacity="0.415"/>
+      <use href="#cc-wedge" transform="rotate(150)" opacity="0.219"/>
+      <use href="#cc-wedge" transform="rotate(270)" opacity="0.147"/>
+    </g>
+    <g transform="translate(440,570)">
+      <use href="#cc-wedge" transform="rotate(90)"  opacity="0.373"/>
+      <use href="#cc-wedge" transform="rotate(210)" opacity="0.105"/>
+      <use href="#cc-wedge" transform="rotate(330)" opacity="0.301"/>
+    </g>
+    <g transform="translate(266.795,470)">
+      <use href="#cc-wedge" transform="rotate(150)" opacity="0.219"/>
+      <use href="#cc-wedge" transform="rotate(270)" opacity="0.147"/>
+      <use href="#cc-wedge" transform="rotate(30)"  opacity="0.415"/>
+    </g>
+    <g transform="translate(266.795,270)">
+      <use href="#cc-wedge" transform="rotate(210)" opacity="0.105"/>
+      <use href="#cc-wedge" transform="rotate(330)" opacity="0.301"/>
+      <use href="#cc-wedge" transform="rotate(90)"  opacity="0.373"/>
+    </g>
+  </g>
+  <!-- the same cells' corners where a spur meets the centre cell -->
+  <g>
+    <g transform="translate(440,270)">
+      <use href="#cc-wedge" transform="rotate(-30) scale(0.68)"  opacity="0.196"/>
+      <use href="#cc-wedge" transform="rotate(-150) scale(0.68)" opacity="0.068"/>
+    </g>
+    <g transform="translate(526.603,320)">
+      <use href="#cc-wedge" transform="rotate(30) scale(0.68)"  opacity="0.270"/>
+      <use href="#cc-wedge" transform="rotate(-90) scale(0.68)" opacity="0.096"/>
+    </g>
+    <g transform="translate(526.603,420)">
+      <use href="#cc-wedge" transform="rotate(90) scale(0.68)"  opacity="0.242"/>
+      <use href="#cc-wedge" transform="rotate(-30) scale(0.68)" opacity="0.196"/>
+    </g>
+    <g transform="translate(440,470)">
+      <use href="#cc-wedge" transform="rotate(150) scale(0.68)" opacity="0.142"/>
+      <use href="#cc-wedge" transform="rotate(30) scale(0.68)"  opacity="0.270"/>
+    </g>
+    <g transform="translate(353.397,420)">
+      <use href="#cc-wedge" transform="rotate(210) scale(0.68)" opacity="0.068"/>
+      <use href="#cc-wedge" transform="rotate(90) scale(0.68)"  opacity="0.242"/>
+    </g>
+    <g transform="translate(353.397,320)">
+      <use href="#cc-wedge" transform="rotate(270) scale(0.68)" opacity="0.096"/>
+      <use href="#cc-wedge" transform="rotate(150) scale(0.68)" opacity="0.142"/>
+    </g>
+  </g>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <use href="#cc-lattice" stroke="#4a0fd4" stroke-width="4.6"/>
+    <use href="#cc-lattice" stroke="#7b4ce8" stroke-width="1.5" opacity="0.4"/>
+  </g>
+
+  <!-- ── faces, each with the rim's shadow thrown inside it ───── -->
+  <g clip-path="url(#cc-cTop)">
+    <use href="#cc-pTop" fill="url(#cc-fTop)"/>
+    <!-- raised rim casts down-right: dark band hugging the upper-left inner edges -->
+    <use href="#cc-pTop" fill="none" stroke="#07050d" stroke-width="24" opacity="0.45"
+         transform="translate(15,9)" filter="url(#cc-b6)"/>
+    <!-- contact darkening along every inner edge -->
+    <use href="#cc-pTop" fill="none" stroke="#07050d" stroke-width="8" opacity="0.3" filter="url(#cc-b3)"/>
+  </g>
+  <g clip-path="url(#cc-cLeft)">
+    <use href="#cc-pLeft" fill="url(#cc-fLeft)"/>
+    <use href="#cc-pLeft" fill="url(#cc-bounce)"/>
+    <use href="#cc-pLeft" fill="none" stroke="#07050d" stroke-width="24" opacity="0.45"
+         transform="translate(15,9)" filter="url(#cc-b6)"/>
+    <use href="#cc-pLeft" fill="none" stroke="#07050d" stroke-width="8" opacity="0.3" filter="url(#cc-b3)"/>
+  </g>
+  <g clip-path="url(#cc-cRight)">
+    <use href="#cc-pRight" fill="url(#cc-fRight)"/>
+    <use href="#cc-pRight" fill="url(#cc-bounce)" opacity="0.55"/>
+    <use href="#cc-pRight" fill="none" stroke="#07050d" stroke-width="24" opacity="0.45"
+         transform="translate(15,9)" filter="url(#cc-b6)"/>
+    <use href="#cc-pRight" fill="none" stroke="#07050d" stroke-width="8" opacity="0.3" filter="url(#cc-b3)"/>
+  </g>
+
+  <!-- ── occlusion pooling in the three inner corners ─────────── -->
+  <g clip-path="url(#cc-cTop)">
+    <path d="M353.397,320 L440,370 L526.603,320" fill="none" stroke="#000" stroke-width="22"
+          opacity="0.5" filter="url(#cc-b10)"/>
+  </g>
+  <g clip-path="url(#cc-cLeft)">
+    <path d="M353.397,320 L440,370 L440,470" fill="none" stroke="#000" stroke-width="22"
+          opacity="0.5" filter="url(#cc-b10)"/>
+  </g>
+  <g clip-path="url(#cc-cRight)">
+    <path d="M526.603,320 L440,370 L440,470" fill="none" stroke="#000" stroke-width="22"
+          opacity="0.55" filter="url(#cc-b10)"/>
+  </g>
+  <ellipse cx="440" cy="378" rx="52" ry="46" fill="url(#cc-pool)"/>
+
+  <!-- ── lit seams, catching the key light on the near corner ── -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M353.397,320 L440,370 L526.603,320" stroke="#a97cf8" stroke-width="2" opacity="0.5"/>
+    <path d="M440,370 L440,470" stroke="#5b2fc0" stroke-width="2" opacity="0.4"/>
+  </g>
+
+  <!-- ── the rim itself ──────────────────────────────────────── -->
+  <g fill="none" stroke-linejoin="round">
+    <use href="#cc-hex" stroke="#4a0fd4" stroke-width="4.6"/>
+    <use href="#cc-hex" stroke="#9b6dfb" stroke-width="1.4" opacity="0.55"/>
+  </g>
+</svg>
