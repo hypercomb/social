@@ -49,9 +49,13 @@
   .sig{font-family:var(--mono);color:var(--faint);font-size:clamp(9px,1vw,12px);letter-spacing:.06em;word-break:break-all;max-width:70ch}
   .sig em{color:var(--honey);font-style:normal}
 
-  .filmwrap{width:min(1100px,88vw);border:1px solid var(--line);border-radius:10px;overflow:hidden;
+  /* Bounded by HEIGHT as well as width, the way the plates are. Sized only by
+     width, a 2.93:1 clip is 375px tall — which on a 720-tall stage runs past
+     the caption and under the control bar. Let it keep its ratio and give way. */
+  .filmwrap{flex:0 1 auto;aspect-ratio:960/328;max-height:40vh;max-width:min(1100px,88vw);width:auto;
+    border:1px solid var(--line);border-radius:10px;overflow:hidden;
     box-shadow:0 1px 2px rgba(23,25,29,.06),0 18px 50px -22px rgba(23,25,29,.35);position:relative}
-  .filmwrap video{display:block;width:100%;height:auto}
+  .filmwrap video{display:block;width:100%;height:100%;object-fit:cover}
   .filmtag{position:absolute;top:10px;left:12px;font-family:var(--mono);font-size:10px;letter-spacing:.3em;
     text-transform:uppercase;color:var(--ink);background:rgba(255,255,255,.86);border:1px solid var(--line);
     padding:5px 10px;border-radius:4px}
