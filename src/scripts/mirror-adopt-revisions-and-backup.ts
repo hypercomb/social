@@ -115,13 +115,31 @@ async function noteOnce(segments: string[], text: string): Promise<'written' | '
   return await note(segments, text) ? 'written' : 'failed'
 }
 
-/** Children a location actually LISTS. `inflate` is the only op that returns
- *  names (layer-at returns sigs), so it is the read — but it is merge-only
- *  input: never write a children array that drops a name we just read. */
+/** Authoritative child names: fresh sigs from `layer-at`, each resolved to a
+ *  name through its own layer bytes — the way walk.cjs does it.
+ *
+ *  NOT `inflate`. Inflate is the only op that hands back names directly, but
+ *  it UNDER-REPORTS when a location's child layers are cold: it returns an
+ *  EMPTY list for collections that really hold ten children. Merging
+ *  `[...inflate names, new]` into `children` is precisely how
+ *  `behaviors/structure/upgrade` got orphaned — still resolvable by path,
+ *  gone from the deck. Throw rather than return a short list: a name we
+ *  could not read is a name we must not drop. */
 async function childNames(segments: string[]): Promise<string[]> {
-  const inf = await send({ op: 'inflate', segments })
-  if (!inf.ok) throw new Error(`cannot read ${segments.join('/')}: ${inf.error}`)
-  return ((inf.data?.children ?? []) as any[]).map(c => String(c?.name ?? '')).filter(Boolean)
+  const at = await sendRetry({ op: 'layer-at', segments })
+  if (!at.ok) throw new Error(`layer-at ${segments.join('/')} failed: ${at.error}`)
+  const sigs: string[] = Array.isArray(at.data?.children) ? at.data.children.map(String) : []
+  const names: string[] = []
+  for (const sig of sigs) {
+    if (!/^[a-f0-9]{64}$/.test(sig)) { names.push(sig); continue }   // already a name
+    // `get-resource` answers `{ text }` — the layer's bytes, not the layer.
+    const r = await sendRetry({ op: 'get-resource', sig })
+    let name = ''
+    try { name = String(JSON.parse(String(r.data?.text ?? '')).name ?? '') } catch { name = '' }
+    if (!name) throw new Error(`child ${sig.slice(0, 8)} of ${segments.join('/')} would not resolve — refusing to rewrite children`)
+    names.push(name)
+  }
+  return names
 }
 
 async function ensureMember(parent: string[], child: string): Promise<void> {
