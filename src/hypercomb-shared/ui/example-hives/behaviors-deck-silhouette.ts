@@ -43,6 +43,9 @@ function hexPoints(cx: number, cy: number, r: number): string {
 export interface SilhouetteTile {
   name: string
   color: string
+  /** Centre, in viewBox units — what the triad lights are placed from. */
+  cx: number
+  cy: number
   /** The soft overspill that makes neighbours touch. */
   halo: string
   /** The tile itself. */
@@ -58,6 +61,8 @@ export const DECK_SILHOUETTE: readonly SilhouetteTile[] = DECK.flatMap((row, r) 
     return {
       name,
       color,
+      cx,
+      cy,
       halo: hexPoints(cx, cy, S * 1.16),
       body: hexPoints(cx, cy, S),
       ring: hexPoints(cx, cy, S * 0.62),
@@ -67,3 +72,60 @@ export const DECK_SILHOUETTE: readonly SilhouetteTile[] = DECK.flatMap((row, r) 
 /** Padded so `slice` crops empty space before it crops a tile: the deck
  *  occupies roughly x −87…520, y −100…400 inside this box. */
 export const DECK_VIEW_BOX = '-300 -280 1050 860'
+
+// ── a light per triad ───────────────────────────────────────────────
+//
+// Three mutually-touching hexes meet at ONE shared vertex, and that triad is
+// the comb's real unit — the honeycomb is nothing but triads sharing edges.
+// So the light is placed per SET OF THREE: one source at each shared vertex.
+//
+// Every tile belongs to several triads, so it is lit from several angles at
+// once and darkest along the runs between them. That is what gives each
+// direction its own falloff — depth built from where the tiles ARE, not from
+// one global gradient pretending the comb is flat, and no blur or
+// drop-shadow anywhere.
+//
+// Light is painted THROUGH a mask cut to the comb, so it lands on tiles and
+// never on the ground between them: the void must stay void.
+
+/** Centre-to-centre distance between touching tiles. */
+const PITCH = COL
+
+export interface TriadLight {
+  id: string
+  cx: string
+  cy: string
+  /** Reach, in viewBox units — a light dies about two tiles out. */
+  r: string
+}
+
+/** Shared vertices of every mutually-adjacent trio, de-duplicated. */
+export const DECK_TRIADS: readonly TriadLight[] = (() => {
+  const t = DECK_SILHOUETTE
+  const touches = (a: SilhouetteTile, b: SilhouetteTile): boolean =>
+    Math.hypot(a.cx - b.cx, a.cy - b.cy) < PITCH * 1.1
+  const seen = new Set<string>()
+  const out: TriadLight[] = []
+  for (let i = 0; i < t.length; i++) {
+    for (let j = i + 1; j < t.length; j++) {
+      if (!touches(t[i], t[j])) continue
+      for (let k = j + 1; k < t.length; k++) {
+        if (!touches(t[i], t[k]) || !touches(t[j], t[k])) continue
+        // The centroid of three mutually-touching centres IS the vertex
+        // all three share.
+        const cx = (t[i].cx + t[j].cx + t[k].cx) / 3
+        const cy = (t[i].cy + t[j].cy + t[k].cy) / 3
+        const key = `${cx.toFixed(1)}:${cy.toFixed(1)}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push({
+          id: `hc-triad-${out.length}`,
+          cx: cx.toFixed(1),
+          cy: cy.toFixed(1),
+          r: (PITCH * 1.55).toFixed(1),
+        })
+      }
+    }
+  }
+  return out
+})()

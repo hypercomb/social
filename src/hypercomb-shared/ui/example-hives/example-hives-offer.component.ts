@@ -17,7 +17,7 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, computed, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { DECK_SILHOUETTE, DECK_VIEW_BOX } from './behaviors-deck-silhouette'
+import { DECK_SILHOUETTE, DECK_TRIADS, DECK_VIEW_BOX } from './behaviors-deck-silhouette'
 
 interface ExampleEntry {
   name: string
@@ -45,7 +45,10 @@ export class ExampleHivesOfferComponent implements OnInit, OnDestroy {
   /** The silhouetted hive behind the card — static art, not hive data: on
    *  first boot there are no tiles to read. See behaviors-deck-silhouette.ts. */
   readonly deckTiles = DECK_SILHOUETTE
+  readonly deckTriads = DECK_TRIADS
   readonly deckViewBox = DECK_VIEW_BOX
+  /** The viewBox as x/y/width/height — the mask needs it in user space. */
+  readonly deckViewBoxParts = DECK_VIEW_BOX.split(' ')
 
   #unsubs: (() => void)[] = []
 

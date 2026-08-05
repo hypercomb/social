@@ -5,6 +5,26 @@
        darkening and blur are what shade it out. -->
   <div class="offer-hive" aria-hidden="true">
     <svg [attr.viewBox]="deckViewBox" preserveAspectRatio="xMidYMid slice" focusable="false">
+      <defs>
+        <!-- The comb itself, as a stencil: light lands on tiles, never on the
+             ground between them. -->
+        <mask id="hc-deck-comb" maskUnits="userSpaceOnUse" [attr.x]="deckViewBoxParts[0]"
+              [attr.y]="deckViewBoxParts[1]" [attr.width]="deckViewBoxParts[2]" [attr.height]="deckViewBoxParts[3]">
+          @for (tile of deckTiles; track tile.name) {
+            <polygon [attr.points]="tile.body" fill="#fff" />
+          }
+        </mask>
+        <!-- One source per triad. Strength lives in the stylesheet. -->
+        @for (light of deckTriads; track light.id) {
+          <radialGradient [attr.id]="light.id" gradientUnits="userSpaceOnUse"
+                          [attr.cx]="light.cx" [attr.cy]="light.cy" [attr.r]="light.r">
+            <stop class="light-core" offset="0%" />
+            <stop class="light-mid" offset="42%" />
+            <stop class="light-edge" offset="100%" />
+          </radialGradient>
+        }
+      </defs>
+
       @for (tile of deckTiles; track tile.name) {
         <g [attr.stroke]="tile.color" [attr.fill]="tile.color">
           <polygon class="halo" [attr.points]="tile.halo" stroke="none" />
@@ -12,6 +32,13 @@
           <polygon class="ring" [attr.points]="tile.ring" fill="none" />
         </g>
       }
+
+      <g class="lights" mask="url(#hc-deck-comb)">
+        @for (light of deckTriads; track light.id) {
+          <circle [attr.cx]="light.cx" [attr.cy]="light.cy" [attr.r]="light.r"
+                  [attr.fill]="'url(#' + light.id + ')'" />
+        }
+      </g>
     </svg>
   </div>
   <div class="offer-backdrop" aria-hidden="true"></div>

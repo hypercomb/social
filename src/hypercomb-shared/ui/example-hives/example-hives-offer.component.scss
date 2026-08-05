@@ -32,6 +32,14 @@
   .halo { fill-opacity: 0.08; }
   .body { fill-opacity: 0.12; stroke-opacity: 0.50; stroke-width: 2.5; }
   .ring { stroke-opacity: 0.55; stroke-width: 3; }
+
+  // One light per triad, masked to the tile bodies. Kept faint on purpose:
+  // enough that a tile is brighter on the side facing a shared vertex and
+  // sinks away between them, never enough to turn the comb into a slab or
+  // to wash the pheromone hues out from under it.
+  .light-core { stop-color: #cfe6f5; stop-opacity: 0.085; }
+  .light-mid  { stop-color: #9fc4dd; stop-opacity: 0.03; }
+  .light-edge { stop-color: #9fc4dd; stop-opacity: 0; }
 }
 
 .offer-backdrop {
