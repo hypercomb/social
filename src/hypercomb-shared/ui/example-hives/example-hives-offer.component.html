@@ -1,5 +1,19 @@
 <!-- First boot: a welcome surface with three honest ways forward. -->
 @if (visible()) {
+  <!-- The hive the card opens onto: the behaviors deck's nine collections,
+       silhouetted. Painted BEHIND the wash on purpose — the backdrop's own
+       darkening and blur are what shade it out. -->
+  <div class="offer-hive" aria-hidden="true">
+    <svg [attr.viewBox]="deckViewBox" preserveAspectRatio="xMidYMid slice" focusable="false">
+      @for (tile of deckTiles; track tile.name) {
+        <g [attr.stroke]="tile.color" [attr.fill]="tile.color">
+          <polygon class="halo" [attr.points]="tile.halo" stroke="none" />
+          <polygon class="body" [attr.points]="tile.body" />
+          <polygon class="ring" [attr.points]="tile.ring" fill="none" />
+        </g>
+      }
+    </svg>
+  </div>
   <div class="offer-backdrop" aria-hidden="true"></div>
   <div class="offer-card" role="dialog" aria-modal="true" aria-labelledby="example-hives-title">
     <header class="welcome">
