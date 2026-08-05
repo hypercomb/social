@@ -8,3 +8,10 @@ record/
 full/
 .shots/
 .shots.cjs
+# a reference recording is enough to clone the voice in it — publishing one is
+# a deliberate act, not a side effect of a commit. Raw takes are pre-master.
+voice/reference/
+voice/spoken/
+voice/lines.json
+*.log
+__pycache__/

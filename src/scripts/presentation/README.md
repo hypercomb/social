@@ -13,8 +13,8 @@ without touching the rest.
 | The recipe | `production.md`, mirrored onto the `presentation` tile | what a scene may contain |
 | Shell (styles, chrome, player) | `template.html` | the look and the controls, never a scene |
 | Live-capture clips | `media/*.mp4` | replace a clip, keep the filename |
-| Pronunciation rules | `pronunciations.json` | how the voice says a word |
-| Narration audio | `audio-cache/<h16>.mp3` | never by hand — derived cache |
+| Pronunciation rules | `pronunciations.json` | how a word is said (`say`) and heard (`hear`) |
+| Narration audio | `audio-cache/<h16>.mp3` | never by hand — `record.cjs` or `voice.cjs` |
 | Deliverable | `dist/hypercomb-presentation.html` | never by hand — build output |
 
 A scene instruction has these fields:
@@ -44,6 +44,21 @@ node build.cjs --check     # list scenes whose audio is stale (no network)
 node instructions.cjs      # re-derive scene instructions + production.md
 node instructions.cjs --push   # (bridge live) write instructions onto the hive tiles
 node deploy-azure.cjs      # ship to Azure Static Web Apps
+```
+
+## Narrating it yourself
+
+Two ways, one destination. `record.cjs` takes scenes you read into a microphone;
+`voice.cjs` clones a single take and speaks the lines you did not read. Both go
+through the same mastering chain (`master.cjs`) and both seed the *same* cache
+slot the neural narrator would have filled — so `build.cjs` and `teaser.cjs`
+simply find the audio already there. Setup and caveats: `voice/README.md`.
+
+```bash
+node record.cjs --script   # a teleprompter, then drop takes in record/
+node record.cjs            # master them and seed the cache
+node voice.cjs --reference "…\Recording.m4a" --from 24.6 --to 43.6
+node voice.cjs --teaser    # speak the teaser beats in that voice
 ```
 
 ## The hive is the authoring surface

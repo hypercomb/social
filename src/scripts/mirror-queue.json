@@ -42,6 +42,46 @@
       "commit": "b5d71d034",
       "created": "2026-08-05",
       "status": "pending"
+    },
+    {
+      "id": "notes-view-identity-plate",
+      "title": "Mirror the notes view's identity plate + navigator hover peek",
+      "run": null,
+      "note": "Two new parts of the notes strip need tiles under the notes-view creation: (1) the IDENTITY PLATE — the tile's own hexagon (picture via props -> small.image), name, explorer path and counts (notes / questions / answers / child tiles), with a compact form below 400px panel width and a masthead form in fullscreen; (2) the NAVIGATOR HOVER PEEK — hovering a tile chip lists that tile's notes in a card beside the rail, flipping side by available room. Mark each tile 'part'; both read state the panel already warms, so the notes explain WHY there is no extra read. Files: hypercomb-shared/ui/notes-strip/{notes-strip.component.ts,.html,.scss}.",
+      "created": "2026-08-05",
+      "status": "pending"
+    },
+    {
+      "id": "views-window-side-by-side",
+      "title": "Views window shows views beside itself; panels survive full-screen",
+      "run": null,
+      "note": "Behaviour changed, no mirror pass run (no live bridge this session). Owed under behaviors/views: (1) update the 'views' window cell's notes — clicking a row SHOWS that view in the container and the window stays open, one at a time, on-rows first with Active/Inactive filters; (2) a part tile for the inset contract — every full-screen view surface reads --hc-inset-left/--hc-inset-right (the CSS mirror of viewport:inset), so a docked toolwindow sits beside the view; (3) a note on the pheromones (tags) window cell: it now opens INSIDE a full-screen view — the dev shell's view-website sweep no longer hides hc-shell-surfaces, and the views panel moved to the shared toolwindow layer z 100002. Files: hypercomb-shared/ui/views-viewer/*, hypercomb-dev/src/app/app.scss, presentation/tiles/{tree,site,slides,living-brief,view-library}*.ts, tutorial/tutor-view.drone.ts, workflow/workflow-view.drone.ts.",
+      "created": "2026-08-05",
+      "status": "pending"
+    },
+    {
+      "id": "tags-panel-bouquet-grouping",
+      "title": "Mirror the bouquet-organised pheromone panel (bouquets > loose > namespaces)",
+      "run": "npx tsx scripts/mirror-bouquets.ts",
+      "note": "tags-viewer restructured so bouquets are the organising unit; new tag-grouping.ts holds the set-not-a-folder rule (gathered marks leave the loose list, namespaced marks never leave their namespace). mirror-bouquets.ts reconciles behaviors/views/tags/{bouquet-registry,tags-viewer.component} — its existing note is now stale, and tag-grouping.ts needs a new part tile. Bridge broker was up and a renderer was registered, but ops timed out (cold/unresponsive renderer tab).",
+      "created": "2026-08-05",
+      "status": "pending"
+    },
+    {
+      "id": "cell-page-artifact-css",
+      "title": "Cell pages are artifacts — page CSS scoped to its own host",
+      "run": null,
+      "note": "No mirror pass run (no live bridge). Owed under behaviors/views/website: a part tile for cell-page-css-scope.ts with a note explaining the artifact rule — a page carries its own CSS inside its host, page roots (html/body/:root) map onto the host, and class/data-theme are mirrored onto the host so in-page theme toggles keep working; external <link> sheets stay in head and are the one thing that cannot travel. Ties to the standing doctrine 'every render is an artifact — displayable alone or together'. Files: presentation/tiles/cell-page-css-scope.ts (+ .spec.ts), presentation/tiles/site-view.drone.ts, documentation/embedded-sites.md.",
+      "created": "2026-08-05",
+      "status": "pending"
+    },
+    {
+      "id": "presentation-voice-clone",
+      "title": "presentation: your own voice on lines you never read",
+      "run": null,
+      "note": "Mirror the voice-clone half of the narration pipeline: a tile per part (voice.cjs driver, master.cjs shared broadcast chain, voice/clone.py, voice/shim/numba, voice/README.md) under a collection beside the existing presentation mirror; pheromone-mark them as parts of the presentation production; note on each explaining that a spoken line is seeded into the same cache slot a recorded take would occupy, so the build needs no flag. Also mint a behaviors-deck card for it.",
+      "created": "2026-08-05",
+      "status": "pending"
     }
   ]
 }

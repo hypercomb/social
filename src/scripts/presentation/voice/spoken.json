@@ -1,0 +1,50 @@
+{
+  "teaser:open": {
+    "slot": "78499dbd459393ec",
+    "similarity": 0.8721,
+    "wer": 0,
+    "seconds": 1.88,
+    "at": "2026-08-05",
+    "text": "Hypercomb. A new way to be."
+  },
+  "teaser:hive": {
+    "slot": "e91f43257e28f9c5",
+    "similarity": 0.953,
+    "wer": 0,
+    "seconds": 8.16,
+    "at": "2026-08-05",
+    "text": "Your work lives on a grid of hexagons, on your own machine. Click a tile and you travel into it."
+  },
+  "teaser:presence": {
+    "slot": "d8677373575eb44c",
+    "similarity": 0.9265,
+    "wer": 0,
+    "seconds": 6.71,
+    "at": "2026-08-05",
+    "text": "There is no server and no account. It runs in your browser, and nothing leaves until you say so."
+  },
+  "teaser:signature": {
+    "slot": "36b1a0df4c2c42a8",
+    "similarity": 0.9479,
+    "wer": 0,
+    "seconds": 15.45,
+    "at": "2026-08-05",
+    "text": "Everything has one kind of name: a signature, computed from the content itself. Same content, same name, on every machine. You verify instead of trusting."
+  },
+  "teaser:open-source": {
+    "slot": "34681c456fc120bb",
+    "similarity": 0.9432,
+    "wer": 0,
+    "seconds": 7.24,
+    "at": "2026-08-05",
+    "text": "It is open source, and every feature is a signed module — so a fork is something you can prove."
+  },
+  "teaser:close": {
+    "slot": "f4d57d869c480678",
+    "similarity": 0.9329,
+    "wer": 0,
+    "seconds": 6.68,
+    "at": "2026-08-05",
+    "text": "Type a name, press Enter, and you have a hive. Hypercomb — the hive is yours."
+  }
+}
