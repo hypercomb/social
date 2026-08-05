@@ -16,6 +16,32 @@
       "note": "Mirror was STAGED and never run. behaviors/views/mobile exists but covers mobile MODE only — no cell for the rail, the lane ladder, or the select pill. Needs a mirror script; extend behaviors/views/mobile rather than minting a second mobile collection.",
       "created": "2026-08-04",
       "status": "pending"
+    },
+    {
+      "id": "nature-scene-roster",
+      "title": "Nature scene roster — moon and conifers replaced",
+      "run": "npx tsx scripts/mirror-nature-default.ts default",
+      "note": "Scenes 6/7/16 changed from night sky, pine forest and winter pines to drifting clouds, mossy river stones and snowfall over drifts (hard silhouettes and a near-black field do not work behind tile content). The behaviors/appearance/background 'default' note still lists the old three by name. Note-add is ADDITIVE, so the stale note must be removed on the tile before re-sending, or the roster lands twice.",
+      "created": "2026-08-05",
+      "status": "pending"
+    },
+    {
+      "id": "presentation-scene-24",
+      "title": "Presentation scene 24 (how to bee) — tile and instruction note never landed",
+      "run": "node scripts/presentation/instructions.cjs --push",
+      "note": "23 of 24 scene tiles exist under presentation/{what-is-hypercomb,why-hypercomb,roadmap} with instruction notes; scene 24 'how to bee' was added after the bridge renderer dropped, so its tile under presentation/roadmap is MISSING. instructions.cjs --push is additive and re-sends ALL 24 instruction notes, so either delete the prior instruction notes first or accept duplicates. Addressing is slugified (how-to-bee) and note-list resolves by full path, not cell.",
+      "commit": "e4c038534",
+      "created": "2026-08-05",
+      "status": "pending"
+    },
+    {
+      "id": "presentation-outcomes",
+      "title": "Presentation outcomes toolchain — annotations, pronunciations, teaser, posts, publisher",
+      "run": null,
+      "note": "Shipped this session with NO mirror: the annotation feature (highlight text -> file a note against a scene), pronunciations.json as spoken-form rules, [pause] as narration direction, the teaser and post-series cutters, the LinkedIn feed preview, and publish-linkedin.cjs. Wants a collection under behaviors (or a new 'outcomes' root) with one part tile per source file, plus notes explaining the chunk model: instructions on tiles compile to a page, audio cached by spoken form, an idea branch carries outcomes as decorations. This is also the design seed for the visual:outcome:linkedin view behaviour Jaime asked for -- mirror it before building it.",
+      "commit": "b5d71d034",
+      "created": "2026-08-05",
+      "status": "pending"
     }
   ]
 }
