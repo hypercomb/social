@@ -46,17 +46,14 @@ const COMPLETE_VISIBLE_MS = 12_000
               (input)="restorePointName.set($any($event.target).value)"
               (keydown.enter)="adopt()" (keydown.escape)="collapse()" />
           </label>
-          @if (!confirming()) {
-            <button class="upgrade-act adopt" type="button" (click)="adopt()">{{ 'upgrade.adopt' | t }}</button>
-            <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
-            <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
-          } @else {
-            <!-- Adopt opened the DECISION: allow the package changes directly
-                 here, or step into the installer and review them first. -->
-            <button class="upgrade-act adopt" type="button" (click)="allow()">{{ 'upgrade.allow' | t }}</button>
-            <button class="upgrade-act save" type="button" (click)="reviewInInstaller()">{{ 'upgrade.installer' | t }}</button>
-            <button class="upgrade-act discard" type="button" (click)="confirming.set(false)">{{ 'upgrade.back' | t }}</button>
-          }
+          <!-- Adopt installs SILENTLY: snapshot under the shown name, apply,
+               reload back to this exact spot. No screen to visit. The
+               installer review is the OVERRIDE, not a gate on the way. -->
+          <button class="upgrade-act adopt" type="button" (click)="adopt()">{{ 'upgrade.adopt' | t }}</button>
+          <button class="upgrade-act review" type="button" (click)="reviewInInstaller()"
+            [title]="'upgrade.installer-hint' | t">{{ 'upgrade.installer' | t }}</button>
+          <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
+          <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
         }
 
         @if (phase() === 'error') {
@@ -72,8 +69,6 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   readonly newCount = signal(0)
   readonly phase = signal<UpdatePhase>('idle')
   readonly expanded = signal(false)
-  /** Adopt's second step: Allow here, or review in the installer. */
-  readonly confirming = signal(false)
   /** Written for the participant when the update is announced (see the
    *  `update:available` subscription) — theirs to overwrite, never to supply. */
   readonly restorePointName = signal('')
@@ -149,29 +144,23 @@ export class UpgradeIndicatorComponent implements OnDestroy {
 
   readonly toggleExpanded = (): void => {
     if (this.phase() !== 'available') return
-    this.confirming.set(false)
     this.expanded.update(value => !value)
   }
 
   readonly collapse = (): void => {
-    this.confirming.set(false)
     this.expanded.set(false)
   }
 
-  /** Adopt opens the DECISION, it doesn't move yet: the participant chooses
-   *  whether the package changes land directly here (Allow) or get reviewed
-   *  in the installer first. Enter in the name field rides the same path. */
+  /** Adopt goes NOWHERE — updates are installed, never visited. One click
+   *  hands the shell the name and the package and waits:
+   *  `hypercomb:apply-update` snapshots under that name, installs the newer
+   *  files and reloads — the URL is untouched, so the participant lands
+   *  exactly where they were, with the restore point already saved. If the
+   *  install has to go through DCP it does that off-screen (the portal's
+   *  headless iframe). Reviewing in the installer is the OVERRIDE, its own
+   *  button — never a step on the silent path. Enter in the name field
+   *  rides the same path. */
   readonly adopt = (): void => {
-    if (!this.confirming()) { this.confirming.set(true); return }
-    this.allow()
-  }
-
-  /** Allow goes NOWHERE. It hands the shell the name and the package and waits
-   *  — `hypercomb:apply-update` snapshots, installs the newer files and
-   *  reloads. If the install has to go through DCP it does that off-screen
-   *  (the portal's headless iframe), so there is no screen to visit and
-   *  nothing to come back from. */
-  readonly allow = (): void => {
     const restorePointName = this.restorePointName().trim()
       || buildRevisionName({ packageSig: this.#packageSig, label: this.#label, locale: this.#locale() })
     this.collapse()

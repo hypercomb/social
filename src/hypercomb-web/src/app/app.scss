@@ -13,6 +13,18 @@
   pointer-events: none;
 
   > * { pointer-events: auto; }
+
+  // On a phone the centered transform let the pill + sync row run off
+  // BOTH viewport edges (the Discard verb was unreachable). Pin the dock
+  // to the viewport instead and let the row wrap — every verb stays
+  // tappable, whatever the row's natural width.
+  @media (max-width: 599px) {
+    left: 0.5rem;
+    right: 0.5rem;
+    transform: none;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
 }
 
 // ── view-mode: website ──────────────────────────────────────

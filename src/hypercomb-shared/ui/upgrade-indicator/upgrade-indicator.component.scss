@@ -108,7 +108,9 @@
 }
 
 @media (max-width: 599px) {
-  .upgrade-indicator { max-width: calc(100vw - 1rem); }
+  // All four verbs must stay TAPPABLE on a phone — the row wraps rather
+  // than letting Discard run off the right edge of the viewport.
+  .upgrade-indicator { max-width: calc(100vw - 1rem); flex-wrap: wrap; }
   // No room for the field on a phone — and none needed: the revision is
   // already named, so Adopt carries that name without it ever being shown.
   .restore-name { display: none; }

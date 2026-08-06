@@ -129,6 +129,16 @@
       "unattended": false,
       "created": "2026-08-06",
       "status": "pending"
+    },
+    {
+      "id": "installer-loadable-revisions",
+      "title": "Mirror: loadable installer revisions + one-click silent update pill",
+      "run": null,
+      "note": "behaviors/structure: extend the upgrade + adopt-revisions collections. New notes owed on: dcp-domain-storage-service (enabled set frozen into saves as refs, flags-driven restoreEnabledSet, refs undefined vs [] distinction, pre-logical self-heal), home-component (row-click restore prefers frozen set; legacy Default = base), upgrade-pill (Adopt = one silent click, installer review is the override, mobile dock wraps). Commit e33fd9db2. note-add is additive — run attended.",
+      "commit": "e33fd9db2",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
     }
   ]
 }

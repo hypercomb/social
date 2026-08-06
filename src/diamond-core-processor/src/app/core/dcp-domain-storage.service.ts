@@ -425,10 +425,23 @@ export class DcpDomainStorage {
       const existing = await this.#findTile(root, key)
       const tile: TileLayer = existing?.layer ?? { name: key, children: [] }
 
+      // undefined = the caller had no refs to state (adopt/install paths) —
+      // never disagrees, never erases. An ARRAY — even an EMPTY one — is a
+      // stated set: home revisions freeze the enabled flags here, and
+      // "nothing enabled" is a real, distinct state, not an omission.
+      const cleanRefs = Array.isArray(refs)
+        ? refs.map(r => String(r ?? '').trim().toLowerCase()).filter(r => SIG_RE.test(r))
+        : undefined
+
       const kept: string[] = []
       for (const entrySig of tile.children) {
         const entry = await this.#loadJson<BranchEntryLayer>(entrySig)
-        if (entry && entry.branchSig === sig && JSON.stringify(entry.at) === JSON.stringify(at)) {
+        if (entry && entry.branchSig === sig && JSON.stringify(entry.at) === JSON.stringify(at)
+            // Idempotent ONLY when the refs agree. A re-record of the same
+            // branch with DIFFERENT refs advances the entry: two saves of
+            // the same union under different flag sets are distinct rows.
+            && (cleanRefs === undefined
+              || JSON.stringify(entry.refs ?? []) === JSON.stringify(cleanRefs))) {
           return this.currentRootSig(lineage)  // idempotent
         }
         // RE-ADOPT advances the pointer: the same tile name at the same
@@ -440,13 +453,12 @@ export class DcpDomainStorage {
         if (entry && label && entry.name === label && JSON.stringify(entry.at) === JSON.stringify(at)) continue
         kept.push(entrySig)
       }
-
-      const cleanRefs = Array.isArray(refs)
-        ? refs.map(r => String(r ?? '').trim().toLowerCase()).filter(r => SIG_RE.test(r))
-        : []
       const entrySig = await this.#signJson({
         name: label || sig.slice(0, 8), branchSig: sig, at: Array.isArray(at) ? at : [],
-        ...(cleanRefs.length ? { refs: cleanRefs } : {}),
+        // A stated set persists even when EMPTY — reading `refs: []` back
+        // is what distinguishes "restore to nothing enabled" from a
+        // legacy pointer-only entry (no refs field at all).
+        ...(cleanRefs !== undefined ? { refs: cleanRefs } : {}),
         ...(kind ? { kind } : {}),
       } as BranchEntryLayer)
       const newTileSig = await this.#signJson({ name: key, children: [...kept, entrySig] })
@@ -616,15 +628,33 @@ export class DcpDomainStorage {
   // root the new logical HEAD via Make-HEAD append (forward, linear,
   // never truncates — per the append-only history model).
 
-  /** Save the current logical HEAD under a name. Returns the home root sig. */
+  /** Save the current logical HEAD under a name. Returns the home root sig.
+   *
+   *  The entry freezes BOTH halves of "current": the logical root
+   *  (branchSig) AND the enabled branch set (refs). The flags are the
+   *  truth — the hive mounts by them and every recompute reads them — so
+   *  a revision that only froze the logical pointer could not actually be
+   *  LOADED later: restoring the pointer left the flags stale, and the
+   *  next toggle recomputed the union straight back from them. */
   async saveBranch(name: string): Promise<string | null> {
     await this.initialize()
-    const logicalRoot = await this.currentRootSig(LOGICAL_LINEAGE)
+    // Self-heal: an install can predate the logical lineage (adopted
+    // domains, no recompute ever ran). A missing HEAD is not "nothing to
+    // save" — it is a head that was never materialized; materialize it,
+    // or the FIRST adopt on such an install fails its restore point.
+    let logicalRoot = await this.currentRootSig(LOGICAL_LINEAGE)
+    if (!logicalRoot) logicalRoot = (await this.recomputeLogical()).rootSig
     if (!logicalRoot) return null
     const count = await this.markerCount(HOME_LINEAGE)
     const label = String(name ?? '').trim() || `save-${count + 1}`
+    // Freeze the flags THEMSELVES, not a domains-lineage walk: a package
+    // installed outside that lineage (standalone manifest install) still
+    // carries a flag, and the flags are what the hive mounts by. A
+    // lineage walk froze [] on such installs, which then collided with
+    // the previous save's [] and the named row silently deduped away.
+    const enabled = await this.enabledFlagSigs()
     // The home entry's branchSig = the frozen logical root sig (the snapshot).
-    return this.addBranch(HOME_LINEAGE, HOME_LINEAGE, logicalRoot, [], label)
+    return this.addBranch(HOME_LINEAGE, HOME_LINEAGE, logicalRoot, [], label, enabled)
   }
 
   /**
@@ -656,19 +686,67 @@ export class DcpDomainStorage {
   }
 
   /** The home revision history: named branch saves, in save order.
-   *  (`default` is the implicit base; restoreDefault() returns to it.) */
-  async loadHomeHistory(): Promise<{ name: string; logicalRootSig: string }[]> {
+   *  (`default` is the implicit base; restoreDefault() returns to it.)
+   *  `enabledBranchSigs` = the frozen enabled set (absent on legacy saves
+   *  that predate it — those restore the logical pointer only). */
+  async loadHomeHistory(): Promise<{ name: string; logicalRootSig: string; enabledBranchSigs?: string[] }[]> {
     const branches = await this.loadTileBranches(HOME_LINEAGE, HOME_LINEAGE)
-    return branches.map(b => ({ name: b.name, logicalRootSig: b.branchSig }))
+    return branches.map(b => ({
+      name: b.name,
+      logicalRootSig: b.branchSig,
+      ...(Array.isArray(b.refs) ? { enabledBranchSigs: b.refs } : {}),
+    }))
   }
 
   /** Restore: make a saved logical root the current logical HEAD via
-   *  Make-HEAD append (the saved state becomes current; history preserved). */
+   *  Make-HEAD append (the saved state becomes current; history preserved).
+   *  LEGACY path — a pointer-only restore holds exactly until the next
+   *  recompute reads the (unrestored) flags. Saves made since the enabled
+   *  set was frozen restore through restoreEnabledSet instead. */
   async restoreLogicalRoot(logicalRootSig: string): Promise<void> {
     const sig = String(logicalRootSig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(sig)) return
     await this.initialize()
     await this.#appendMarker(LOGICAL_LINEAGE, sig)
+  }
+
+  /** Every branch sig the participant has explicitly enabled — read from
+   *  the FLAGS themselves (settings cache), never a domains-lineage walk.
+   *  The lineage records only branches that went through an adopt/sentinel
+   *  handoff; a standalone manifest install carries a flag with no lineage
+   *  entry, and the revision system must see it all the same. Sorted for
+   *  deterministic refs. */
+  async enabledFlagSigs(): Promise<string[]> {
+    await this.initialize()
+    if (!this.#settingsCache) await this.loadSettingsCache()
+    return Object.entries(this.#settingsCache!)
+      .filter(([k, v]) => k.startsWith('feature.') && v === true)
+      .map(([k]) => k.slice('feature.'.length))
+      .filter(s => SIG_RE.test(s))
+      .sort()
+  }
+
+  /** Restore the participant's enabled set to EXACTLY `enabled` — one
+   *  settings marker for the whole flip — then recompute the logical union
+   *  from it. This is what makes a saved revision truly loadable: the
+   *  flags are what the hive mounts by and what every later recompute
+   *  reads, so they are the thing that must be restored. Flags-driven,
+   *  never a lineage walk (see enabledFlagSigs): every current flag not
+   *  in the frozen set drops — a branch adopted after the save restores
+   *  to OFF, absent = off being the flags' own default. */
+  async restoreEnabledSet(enabled: Set<string>): Promise<{ refs: string[]; rootSig: string | null }> {
+    await this.initialize()
+    if (!this.#settingsCache) await this.loadSettingsCache()
+    for (const k of Object.keys(this.#settingsCache!)) {
+      if (k.startsWith('feature.') && !enabled.has(k.slice('feature.'.length))) {
+        delete this.#settingsCache![k]
+      }
+    }
+    for (const sig of enabled) {
+      if (SIG_RE.test(sig)) this.#settingsCache![`feature.${sig.toLowerCase()}`] = true
+    }
+    await this.#persistSettings()
+    return this.recomputeLogical()
   }
 
   /** Restore to the base: recompute the logical with NO domains enabled, so
@@ -684,9 +762,12 @@ export class DcpDomainStorage {
    *  or whenever the participant wants to pin "this is my known-good base".
    *  Idempotent on the same logical (addDefaultBranch dedups by sig). */
   async captureLogicalAsDefault(): Promise<string | null> {
-    const refs = await this.loadLogical()
-    const logicalRoot = await this.currentRootSig(LOGICAL_LINEAGE)
+    // Same self-heal as saveBranch: materialize a never-computed head
+    // rather than refusing to pin the baseline.
+    let logicalRoot = await this.currentRootSig(LOGICAL_LINEAGE)
+    if (!logicalRoot) logicalRoot = (await this.recomputeLogical()).rootSig
     if (!logicalRoot) return null
+    const refs = await this.loadLogical()
     return this.addDefaultBranch(logicalRoot, [], 'baseline', refs)
   }
 
@@ -838,34 +919,16 @@ export class DcpDomainStorage {
     return excluded
   }
 
-  /** The set of currently-enabled branch sigs across all domain silos —
-   *  derived from the participant-local feature flags. Feeds the logical
-   *  recompute. (Adopted branches are OFF until explicitly enabled, so this
-   *  is empty right after adoption — features opt in one at a time.) */
-  async enabledBranchSigs(): Promise<Set<string>> {
-    await this.initialize()
-    const set = new Set<string>()
-    const root = await this.#currentHiveRoot(DOMAINS_LINEAGE)
-    for (const tileSig of root.children) {
-      const tile = await this.#loadJson<TileLayer>(tileSig)
-      if (!tile) continue
-      for (const entrySig of tile.children) {
-        const entry = await this.#loadJson<BranchEntryLayer>(entrySig)
-        if (!entry) continue
-        if (this.isFeatureEnabled(entry.branchSig)) set.add(entry.branchSig)
-      }
-    }
-    return set
-  }
-
   /** Recompute the logical install from the CURRENT participant-local
    *  enabled set. Call after any toggle/adopt. This is the bridge from
    *  "feature on/off" to "logical reflects it" — union-recompute, never a
    *  differential. The domain lineage + content layers are untouched; only
    *  the `logical` lineage advances (the recompute) and the `settings`
-   *  lineage holds the flags. */
+   *  lineage holds the flags. The flags feed the filter directly
+   *  (enabledFlagSigs — ONE model of "what is on"); a flag with no
+   *  lineage entry simply matches nothing in the union walk. */
   async recomputeLogical(): Promise<{ refs: string[]; rootSig: string | null }> {
-    return this.computeLogicalInstall(await this.enabledBranchSigs())
+    return this.computeLogicalInstall(new Set(await this.enabledFlagSigs()))
   }
 
   // ── self-cleaning drains — legacy `__x__` → signed pools ──────────────────

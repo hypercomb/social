@@ -191,8 +191,10 @@ export class HomeComponent implements OnDestroy {
   readonly #logicalVersion = signal(0)
 
   // DCP's own install-state revision history. "Default" is always the first
-  // visible baseline; named saves point at immutable logical roots.
-  readonly homeRevisions = signal<{ name: string; logicalRootSig: string }[]>([])
+  // visible baseline; named saves point at immutable logical roots and
+  // (since the enabled set was frozen into saves) carry the flag set that
+  // makes a row truly loadable.
+  readonly homeRevisions = signal<{ name: string; logicalRootSig: string; enabledBranchSigs?: string[] }[]>([])
   readonly currentLogicalRootSig = signal<string | null>(null)
   readonly revisionsExpanded = signal(false)
   readonly revisionStatus = signal<'idle' | 'saving' | 'restoring' | 'saved' | 'error'>('idle')
@@ -1921,11 +1923,25 @@ export class HomeComponent implements OnDestroy {
     }
   }
 
-  async restoreHomeRevision(revision: { name: string; logicalRootSig: string }): Promise<void> {
+  /** Load a saved revision by clicking its row. A save that froze its
+   *  enabled set restores THAT (flags → recompute → the union follows and
+   *  STAYS — the next toggle reads restored flags, not stale ones); a
+   *  legacy pointer-only save falls back to the Make-HEAD append. */
+  async restoreHomeRevision(revision: { name: string; logicalRootSig: string; enabledBranchSigs?: string[] }): Promise<void> {
     if (!revision.logicalRootSig || this.revisionStatus() === 'restoring') return
     this.revisionStatus.set('restoring')
     try {
-      await this.#domainStorage.restoreLogicalRoot(revision.logicalRootSig)
+      if (revision.enabledBranchSigs) {
+        await this.#domainStorage.restoreEnabledSet(new Set(revision.enabledBranchSigs))
+      } else if (revision.name.trim().toLowerCase() === 'default') {
+        // A legacy Default row (saved before the enabled set was frozen
+        // into saves) has no set to read — but Default's MEANING is the
+        // base: nothing adopted enabled. Restore that set rather than the
+        // pointer-only fallback that leaves the flags standing.
+        await this.#domainStorage.restoreEnabledSet(new Set())
+      } else {
+        await this.#domainStorage.restoreLogicalRoot(revision.logicalRootSig)
+      }
       this.#logicalVersion.update(v => v + 1)
       await Promise.all([this.#postRegistrySnapshot(), this.#refreshHomeRevisions()])
       this.#toggleState.notifyChanged()
