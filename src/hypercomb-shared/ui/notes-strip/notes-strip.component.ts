@@ -658,6 +658,16 @@ export class NotesStripComponent implements OnDestroy {
     this.open(noteId, cellLabel)
   }
 
+  /** Open the READER on the active tile. Two surfaces, two jobs: this strip
+   *  authors (dense tree, edit in place), the reader reads (one note at a
+   *  time, big, its hierarchy around it). Nothing else emits `notes:open`,
+   *  so this is how the reader is reached. */
+  openReader(): void {
+    const cellLabel = this.cell()
+    if (!cellLabel) return
+    EffectBus.emit('notes:open', { cellLabel })
+  }
+
   // ── Panel drag-to-reposition ─────────────────────────────
   // Translate delta from the natural centered baseline. {0,0} = the
   // CSS-default position; any non-zero delta is a user drag we persist.

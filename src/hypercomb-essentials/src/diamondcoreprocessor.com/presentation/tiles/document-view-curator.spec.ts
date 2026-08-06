@@ -3,7 +3,7 @@ import type { Note } from '../../notes/notes.drone.js'
 import { openDocumentViewCurator } from './document-view-curator.js'
 import type { DocumentViewItem } from './document-view-source.js'
 
-const note: Note = { id: 'n', text: '', shape: null, mark: null, children: [] }
+const note: Note = { id: 'n', text: '', shape: null, mark: null, tags: [], children: [] }
 const item = (segments: string[], depth: number): DocumentViewItem => ({
   name: segments.at(-1)!,
   title: segments.at(-1)!,

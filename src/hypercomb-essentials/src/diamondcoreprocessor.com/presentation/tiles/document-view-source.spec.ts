@@ -42,6 +42,7 @@ describe('readDocumentViewItems', () => {
       text: segments.at(-1) ?? '',
       shape: null,
       mark: null,
+      tags: [],
       children: [],
     }],
   }

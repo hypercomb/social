@@ -8,6 +8,9 @@ const note = (id: string, text: string, extra: Partial<Note> = {}): Note => ({
   mark: null,
   children: [],
   ...extra,
+  // `extra` is a Partial, so an explicit `tags: undefined` would punch a hole
+  // in a required field. Assert the default after the spread.
+  tags: extra.tags ?? [],
 })
 
 describe('splitInTree', () => {

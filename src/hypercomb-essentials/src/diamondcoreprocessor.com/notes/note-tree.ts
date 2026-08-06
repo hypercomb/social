@@ -53,12 +53,52 @@ export function normalizeMark(value: unknown): string | null {
   return MARK_RE.test(clean) ? clean : null
 }
 
-/** Storage shape on disk — the canonical JSON every note blob holds. */
+/** A note's PHEROMONES. Tile decorations keep tag names free-form, so this
+ *  matches them rather than inventing a stricter vocabulary — a keyword must
+ *  mean one thing wherever it lands. The only guard is structural: one line,
+ *  bounded length. */
+const TAG_RE = /^[^\r\n\t]{1,48}$/
+
+export const MAX_NOTE_TAGS = 24
+
+/** Whether a value could be a pheromone name. Exported so the drone can
+ *  reject a bad one before it reaches a note layer. */
+export const isNoteTag = (v: unknown): v is string =>
+  typeof v === 'string' && TAG_RE.test(v.trim())
+
+/**
+ * Validate + canonicalise a note's pheromone list. The value comes off disk
+ * (or a peer's hive), so nothing is trusted: non-strings are dropped,
+ * duplicates collapse, and the result is SORTED — two notes carrying the same
+ * set must materialize to the same bytes, which is the whole point of a
+ * content-addressed layer.
+ */
+export function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const clean = item.trim()
+    if (!TAG_RE.test(clean) || seen.has(clean)) continue
+    seen.add(clean)
+    if (seen.size >= MAX_NOTE_TAGS) break
+  }
+  return [...seen].sort()
+}
+
+/** Storage shape on disk — the canonical JSON every note blob holds.
+ *
+ *  `tags` is OPTIONAL and omitted entirely when empty. That is deliberate:
+ *  an untagged note must serialize to exactly the bytes it did before
+ *  pheromones existed, so re-materializing an untouched subtree (every nest /
+ *  mark / split / delete does this) still dedups back to its existing sig
+ *  instead of re-signing the whole tree. */
 export type NoteLayer = {
   note: string
   shape: ShapeId | null
   mark: string | null
   children: string[]
+  tags?: string[]
 }
 
 /**
@@ -74,6 +114,9 @@ export type Note = {
   text: string
   shape: ShapeId | null
   mark: string | null
+  /** Pheromones the participant put on this note. Always an array here
+   *  (empty when the layer omits the slot) so consumers never branch. */
+  tags: string[]
   children: Note[]
 }
 
@@ -222,6 +265,61 @@ export function setMarkInTree(
 }
 
 /**
+ * Return a new tree with `tag` added to (or removed from) the first
+ * occurrence of `noteId` — the pheromone counterpart of `setMarkInTree`,
+ * and immutable in the same reference-preserving way.
+ *
+ * `changed` is false when the node isn't in the tree or already sits in the
+ * requested state, so re-dropping a keyword a note already carries is a true
+ * no-op rather than a fresh revision. The DIRECTION is the caller's to
+ * decide: a second drop must never silently un-tag.
+ */
+export function setTagInTree(
+  tree: readonly Note[],
+  noteId: string,
+  tag: string,
+  add: boolean,
+): { tree: readonly Note[]; changed: boolean } {
+  let changed = false
+  let found = false
+  const walk = (nodes: readonly Note[]): readonly Note[] => {
+    let mutated = false
+    const next: Note[] = []
+    for (const n of nodes) {
+      if (found) {
+        next.push(n)
+        continue
+      }
+      if (n.id === noteId) {
+        found = true
+        const has = n.tags.includes(tag)
+        if (has === add) {
+          next.push(n)
+        } else {
+          changed = true
+          mutated = true
+          next.push({
+            ...n,
+            tags: add ? normalizeTags([...n.tags, tag]) : n.tags.filter(t => t !== tag),
+          })
+        }
+        continue
+      }
+      const newChildren = walk(n.children)
+      if (newChildren !== n.children) {
+        mutated = true
+        next.push({ ...n, children: newChildren as Note[] })
+      } else {
+        next.push(n)
+      }
+    }
+    return mutated ? next : nodes
+  }
+  const nextTree = walk(tree)
+  return { tree: nextTree, changed }
+}
+
+/**
  * Break the first occurrence of `noteId` into a one-line head plus one
  * sub-note per part, IN PLACE.
  *
@@ -265,6 +363,10 @@ export function splitInTree(
       text,
       shape: null,
       mark: normalizeMark(raw?.mark),
+      // Parts start unpheromoned. The HEAD keeps whatever the note carried
+      // (it is spread below, so its tags travel) — the head IS the note
+      // continuing, while a part is new material nobody has marked yet.
+      tags: [],
       children: [],
     })
   }

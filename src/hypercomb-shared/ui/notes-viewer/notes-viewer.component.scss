@@ -1,97 +1,82 @@
 // hypercomb-shared/ui/notes-viewer/notes-viewer.component.scss
 //
-// Centred modal that shows a single note in full. Backdrop dims the rest
-// of the surface so the focus stays on this note. Gold accent matches the
-// note icon and the command line capture state.
-@use '../../styles/notes-shapes';
+// THE NOTES READER. One tile's notes, read as hexagons.
+//
+// Three bands inside one card:
+//   rail  | the FOCUS   (one big hexagon + the note, with room to read)
+//         | the CYCLE   (prev · position · next)
+//         | the OUTLINE (every note in the hierarchy, hexagon point items)
+//
+// The hexagon is the point item everywhere — rail tab, big focus, outline
+// bullet — at three sizes off one shape. That is the whole visual idea: the
+// hive is hexagons, so a note's place in a tree should look like one too.
 @use '../toolwindow' as tw;
 
 $accent: #ffe14a;
 
-// ── Outline rows ────────────────────────────────────────────
-// The viewer body renders the active note as the root row (larger
-// type) followed by every descendant recursively, indented by depth.
-// Each row carries its own .hc-shape-X class so the shape glyph at
-// row-left is painted by the cascaded rules in _notes-shapes.scss.
-// Children are clickable — clicking opens a new viewer tab.
-.viewer-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: tw.$radius-card;
+// The hive's hexagon. Same polygon the shared shape glyphs use, so a
+// hexagon here and a hexagon in the strip are the same hexagon.
+$hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+
+// ── The hexagon point item ──────────────────────────────────
+// One element, three sizes. `.hexdot-face` is the clipped shape; the mark
+// icon rides ON TOP of it un-clipped (clipping the glyph would shave its
+// corners off). A note with no mark is just the shape.
+.hexdot {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
 
-  // Indentation guide line at depth 1+. Sits in the left padding
-  // gutter to telegraph the parent-child relationship.
-  &:not(.viewer-row-root)::before {
-    content: "";
-    position: absolute;
-    left: -2px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: rgba(255, 255, 255, 0.12);
-    pointer-events: none;
+.hexdot-face {
+  position: absolute;
+  inset: 0;
+  clip-path: $hex;
+  background: color-mix(in srgb, var(--md-secondary) 55%, transparent);
+}
+
+.hexdot-icon {
+  position: relative;
+  font-size: 10px;
+  line-height: 1;
+  color: #0e0e16;
+}
+
+// Legacy shapes still paint. A note written before marks existed carries a
+// `shape`, and the reader must not silently redraw it as something else —
+// so the face takes that shape's outline instead of the hexagon.
+.hexdot.hc-shape-circle   .hexdot-face { clip-path: none; border-radius: 50%; }
+.hexdot.hc-shape-square   .hexdot-face { clip-path: none; border-radius: 2px; }
+.hexdot.hc-shape-triangle .hexdot-face { clip-path: polygon(50% 8%, 96% 92%, 4% 92%); }
+.hexdot.hc-shape-diamond  .hexdot-face { clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+.hexdot.hc-shape-star     .hexdot-face {
+  clip-path: polygon(
+    50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%,
+    50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%
+  );
+}
+
+// The big one — the focused note's hexagon. Sized so a mark inside it reads
+// as an icon rather than a speck.
+.hexdot-big {
+  width: 72px;
+  height: 72px;
+
+  .hexdot-face {
+    background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--md-secondary) 92%, white 8%),
+      color-mix(in srgb, var(--md-secondary) 62%, transparent)
+    );
   }
+  .hexdot-icon { font-size: 34px; }
 }
 
-// Root row — larger, no hover affordance (it's the focused note).
-.viewer-row-root {
-  padding: 0 0 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  margin-bottom: 8px;
-  .viewer-row-text {
-    font-size: 1rem;
-    line-height: 1.5;
-  }
-}
-
-// Descendant rows — slightly smaller, hover affordance, click cursor.
-.viewer-row:not(.viewer-row-root) {
-  cursor: pointer;
-  .viewer-row-text {
-    font-size: 0.92rem;
-    line-height: 1.45;
-    color: rgba(255, 255, 255, 0.86);
-  }
-  &:hover {
-    background: rgba(255, 255, 255, 0.04);
-  }
-}
-
-// A note's MARK — the icon from the participant's palette. Takes the
-// glyph slot the legacy shape used, so a marked note reads the same here
-// as it does in the strip's tree.
-.viewer-row-mark {
-  font-size: 16px;
-  margin-top: 2px;
-  flex-shrink: 0;
-  color: color-mix(in srgb, var(--md-on-surface) 65%, transparent);
-}
-.viewer-row-root .viewer-row-mark {
-  font-size: 19px;
-  color: var(--md-secondary);
-}
-.viewer-row-shape {
-  width: 14px;
-  height: 14px;
-  margin-top: 4px;
-  flex-shrink: 0;
-}
-.viewer-row:not(.hc-shape-circle):not(.hc-shape-square):not(.hc-shape-triangle):not(.hc-shape-diamond):not(.hc-shape-star):not(.hc-shape-hexagon) .viewer-row-shape {
-  display: none;
-}
-
-.viewer-row-text {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: #f3f3f3;
-  flex: 1;
-  min-width: 0;
-}
-
+// ── Host + backdrop ─────────────────────────────────────────
 // display:contents — the host generates no box, so nothing blankets the
 // hex canvas when the viewer is closed. The full-surface fixed layer lives
 // on .viewer-backdrop, which only renders inside the open-state @if. Same
@@ -101,11 +86,12 @@ $accent: #ffe14a;
   display: contents;
 }
 
-// Non-modal: the "backdrop" no longer blocks clicks. The user can keep
-// the viewer open and click another note in the strip behind it to
-// stack a new tab. Only the viewer card itself catches pointer events.
-// Closing happens via ×, ESC, or per-tab dismissal — never via a
-// click-outside.
+// POINTER-TRANSPARENT, and it must stay that way. Two reasons now: the user
+// can still reach the strip behind the reader, AND the Pheromones panel
+// docks to the right edge — dragging a keyword out of it onto a row is the
+// tagging gesture, which a click-blocking backdrop would make impossible.
+// Only the card itself catches pointer events. Closing happens via ×, ESC
+// or a click on the (transparent) backdrop.
 .viewer-backdrop {
   pointer-events: none;
   position: fixed;
@@ -120,227 +106,372 @@ $accent: #ffe14a;
 .viewer-card {
   @include tw.floating-panel($accent);
   pointer-events: auto;
-  width: min(560px, calc(100vw - 2rem));
-  // Cap well short of the viewport so a long note scrolls inside
-  // `.viewer-body` (flex:1 + overflow-y:auto) instead of stretching the
-  // centred card up the whole screen.
-  max-height: min(70vh, 34rem);
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 2rem));
+  // Cap well short of the viewport so a long hierarchy scrolls inside the
+  // outline rather than growing the card off-screen.
+  max-height: min(78vh, 720px);
+  overflow: hidden;
+  transition: transform 140ms ease;
+}
+
+// Pheromones panel open → step left of its 320px dock so the two surfaces
+// sit side by side and the drag has somewhere to start and somewhere to land.
+.viewer-card.is-shifted {
+  transform: translateX(-168px);
+}
+
+// Too narrow to sit beside the dock — the panel overlays instead, and
+// shoving the card left would only push it off the other edge.
+@media (max-width: 900px) {
+  .viewer-card.is-shifted { transform: none; }
+}
+
+// ── Header ──────────────────────────────────────────────────
+.viewer-header {
+  @include tw.header;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba($accent, 0.22);
+}
+
+.viewer-cell {
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--md-on-surface) 78%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.viewer-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: tw.$radius-control;
+  color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
+  cursor: pointer;
+
+  .mat-sym { font-size: 16px; }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--md-on-surface);
+  }
+
+  // The pheromone toggle reads ON so it's obvious the panel next door
+  // belongs to this reader.
+  &.is-on {
+    border-color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
+    background: color-mix(in srgb, var(--md-secondary) 18%, transparent);
+    color: var(--md-on-surface);
+  }
+}
+
+// ── Split: rail | main ──────────────────────────────────────
+.viewer-split {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+// One tab per HIERARCHY (a root note plus everything under it). The rail
+// only renders when there is more than one — a single hierarchy needs no
+// chooser, and an always-on rail of one would just eat width.
+.viewer-rail {
+  flex: 0 0 auto;
+  width: 172px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 6px;
+  overflow-y: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.viewer-rail-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: tw.$radius-card;
+  color: color-mix(in srgb, var(--md-on-surface) 72%, transparent);
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover { background: rgba(255, 255, 255, 0.05); }
+
+  &.is-active {
+    background: color-mix(in srgb, var(--md-secondary) 14%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 45%, transparent);
+    color: var(--md-on-surface);
+  }
+}
+
+.viewer-rail-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-rail-count {
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+}
+
+.viewer-main {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
 
-.viewer-header {
-  @include tw.header;
-  justify-content: space-between;
-  border-bottom: 1px solid rgba($accent, 0.25);
-}
-
-.viewer-cell {
-  font-size: 0.9rem;
-  letter-spacing: 0.05em;
-  color: rgba($accent, 0.95);
-}
-
-// ── tabs ─────────────────────────────────────────────────
-// Each open note gets a button-tab in the header. Active tab carries
-// the accent; inactive tabs are muted. Per-tab × peels one note off
-// without dismissing the rest.
-.viewer-tabs {
+// ── The focused note ────────────────────────────────────────
+.viewer-focus {
   display: flex;
-  flex: 1;
-  gap: 4px;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px 18px 12px;
+}
+
+.viewer-focus-detail {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.viewer-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px 4px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: tw.$radius-control;
-  color: rgba(255, 255, 255, 0.72);
-  font-family: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
-  max-width: 200px;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff;
-  }
-
-  &.is-active {
-    background: rgba($accent, 0.16);
-    border-color: rgba($accent, 0.55);
-    color: $accent;
-  }
+.viewer-focus-depth {
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--md-on-surface) 42%, transparent);
+  margin-bottom: 4px;
 }
 
-.viewer-tab-cell {
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
-.viewer-tab-preview {
-  opacity: 0.6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 120px;
-}
-
-.viewer-tab-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 3px;
-  font-size: 1rem;
-  line-height: 1;
-  color: rgba(255, 255, 255, 0.55);
-  cursor: pointer;
-  margin-left: 2px;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-  }
-}
-
-.viewer-close {
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 1.4rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0.25rem;
-
-  &:hover { color: $accent; }
-}
-
-.viewer-body {
-  padding: 1.25rem 1rem;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-  overscroll-behavior: contain;
-}
-
-.viewer-text {
+// Readable, not cramped: this is the one place a note gets room.
+.viewer-focus-text {
   margin: 0;
+  font-size: 1.06rem;
+  line-height: 1.55;
+  color: #eef2f5;
   white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 1rem;
-  line-height: 1.5;
-  color: #f3f3f3;
+  overflow-wrap: anywhere;
 }
 
+// ── Pheromone chips on the focused note ─────────────────────
 .viewer-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  padding: 0 1rem 0.75rem;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  min-height: 20px;
 }
 
-.tag-chip {
+.viewer-tag {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.2rem 0.55rem;
-  background: rgba($accent, 0.1);
-  border: 1px solid rgba($accent, 0.4);
-  border-radius: tw.$radius-card;
-  color: rgba($accent, 0.95);
-  font-family: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
-
-  &:hover { background: rgba($accent, 0.22); color: #fff; }
-
-  &.add {
-    border-style: dashed;
-  }
+  gap: 4px;
+  padding: 1px 3px 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--md-secondary) 45%, transparent);
+  border-radius: tw.$radius-pill;
+  background: color-mix(in srgb, var(--md-secondary) 13%, transparent);
+  font-size: 0.68rem;
+  color: var(--md-on-surface);
 }
 
-.tag-x {
-  opacity: 0.65;
-  font-size: 0.95rem;
+.viewer-tag-off {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  font: inherit;
   line-height: 1;
-}
-
-.tag-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  padding: 0 1rem 0.75rem;
-}
-
-.tag-picker-empty {
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.45);
-  padding: 0.25rem 0;
-}
-
-.tag-option {
-  padding: 0.2rem 0.55rem;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: tw.$radius-card;
-  color: rgba(255, 255, 255, 0.85);
-  font-family: inherit;
-  font-size: 0.8rem;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 
   &:hover {
-    background: rgba($accent, 0.18);
-    border-color: rgba($accent, 0.6);
-    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--md-on-surface);
   }
 }
 
-.viewer-footer {
+.viewer-tags-hint {
+  font-size: 0.66rem;
+  color: color-mix(in srgb, var(--md-on-surface) 34%, transparent);
+}
+
+// ── The cycle ───────────────────────────────────────────────
+// Prev and next are never disabled. The cycle wraps, so there is no end to
+// run into — styling one of them dead would be a lie about the behaviour.
+.viewer-cycle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid rgba($accent, 0.25);
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 18px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.viewer-meta {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.45);
+.viewer-cycle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: tw.$radius-control;
+  color: color-mix(in srgb, var(--md-on-surface) 78%, transparent);
+  cursor: pointer;
+
+  .mat-sym { font-size: 17px; }
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-secondary) 16%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 45%, transparent);
+    color: var(--md-on-surface);
+  }
 }
 
-.viewer-actions {
+.viewer-cycle-pos {
+  min-width: 72px;
+  text-align: center;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  color: color-mix(in srgb, var(--md-on-surface) 52%, transparent);
+}
+
+// ── The outline ─────────────────────────────────────────────
+.viewer-outline {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 12px 12px 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.viewer-point {
   display: flex;
-  gap: 0.5rem;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-right: 8px;
+  border-radius: tw.$radius-card;
+  font-size: 0.83rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
+  cursor: pointer;
+
+  &:hover { background: rgba(255, 255, 255, 0.045); }
+
+  // The row the big hexagon is currently showing.
+  &.is-focused {
+    background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+    color: var(--md-on-surface);
+  }
+
+  .hexdot { align-self: flex-start; margin-top: 3px; }
+}
+
+.viewer-point-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.viewer-point-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.viewer-point-tag {
+  padding: 0 5px;
+  border-radius: tw.$radius-pill;
+  background: color-mix(in srgb, var(--md-secondary) 15%, transparent);
+  font-size: 0.62rem;
+  color: color-mix(in srgb, var(--md-on-surface) 72%, transparent);
+}
+
+// ── Footer ──────────────────────────────────────────────────
+.viewer-footer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .action {
-  padding: 0.4rem 0.85rem;
-  background: rgba($accent, 0.12);
-  border: 1px solid rgba($accent, 0.5);
-  border-radius: 4px;
-  color: $accent;
-  font-family: inherit;
-  font-size: 0.85rem;
+  padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: tw.$radius-control;
+  color: color-mix(in srgb, var(--md-on-surface) 82%, transparent);
+  font: inherit;
+  font-size: 0.74rem;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 
   &:hover {
-    background: rgba($accent, 0.25);
-    color: #fff;
-    border-color: $accent;
+    background: color-mix(in srgb, var(--md-secondary) 16%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 45%, transparent);
+    color: var(--md-on-surface);
   }
+}
+
+// ── Phone ───────────────────────────────────────────────────
+// The rail becomes a scrolling row above the reader — a 172px column would
+// leave nothing for the note itself.
+@media (max-width: 599px) {
+  .viewer-card { width: calc(100vw - 1rem); max-height: 86vh; }
+
+  .viewer-split { flex-direction: column; }
+
+  .viewer-rail {
+    width: auto;
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .viewer-rail-tab { width: auto; flex: 0 0 auto; max-width: 168px; }
+
+  .hexdot-big {
+    width: 52px;
+    height: 52px;
+    .hexdot-icon { font-size: 24px; }
+  }
+
+  .viewer-focus { gap: 12px; padding: 12px; }
+  .viewer-focus-text { font-size: 0.98rem; }
 }

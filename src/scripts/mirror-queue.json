@@ -192,6 +192,14 @@
       "unattended": false,
       "created": "2026-08-06",
       "status": "pending"
+    },
+    {
+      "id": "notes-reader",
+      "title": "Notes reader — hexagon point items, hierarchy tabs, wrapping cycle, pheromones on notes",
+      "run": "npx tsx scripts/mirror-notes-reader.ts",
+      "note": "Script written and ready to drain. Needs a live renderer (open the hive with ?claudeBridge=1) and behaviors/tool-windows to already exist from mirror-window-chrome.ts. Adds notes-reader to that collection with six part cells. Union-merges the collection's children; note/mark writes check presence first, so a re-run is safe.",
+      "created": "2026-08-05",
+      "status": "pending"
     }
   ]
 }

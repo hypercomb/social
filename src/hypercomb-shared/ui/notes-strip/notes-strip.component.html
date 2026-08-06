@@ -30,6 +30,16 @@
         <span>{{ cell() || ('notes.strip.title' | t) }}</span>
       </span>
       <span class="cv2-dragbar-spacer"></span>
+      <!-- Open the READER on this tile. The strip is for authoring — a dense
+           tree you edit in place; the reader is for reading one note at a
+           time, big, with the hierarchy around it. Only offered when a tile
+           is active, since there is nothing to read otherwise. -->
+      @if (cell()) {
+        <button type="button" class="cv2-mini-btn" (click)="openReader()"
+                [attr.aria-label]="'notes.read' | t" [title]="'notes.read' | t">
+          <span class="mat-sym">menu_book</span>
+        </button>
+      }
       <button type="button" class="cv2-mini-btn" (click)="toggleFullscreen()"
               [title]="(isFullscreen() ? 'notes.exitFullscreen' : 'notes.fullscreen') | t">
         <span class="mat-sym">{{ isFullscreen() ? 'close_fullscreen' : 'open_in_full' }}</span>
@@ -423,14 +433,6 @@
       <footer class="cv2-foot">
         <span>{{ 'notes.footerCount' | t: { count: notes().length } }} <code>{{ cell() }}</code></span>
       </footer>
-
-      <!-- Mark drag ghost — the icon riding the pointer between the rail and
-           the row it will land on. Fixed to the viewport, pointer-events
-           none, so it never becomes its own hit target. -->
-      @if (markDragIcon(); as icon) {
-        <span class="cv2-mark-ghost mat-sym" aria-hidden="true"
-              [style.left.px]="markGhostX()" [style.top.px]="markGhostY()">{{ icon }}</span>
-      }
     } @else {
       <!-- No active tile — prompt the user to find one in the tile list. -->
       <div class="cv2-empty-hint">{{ 'notes.pickTile' | t }}</div>
@@ -504,6 +506,19 @@
           (pointerdown)="onResizeStart($event, 'corner')"
           aria-hidden="true"></span>
   </div>
+
+  <!-- Mark drag ghost — the icon riding the pointer between the rail and
+       the row it will land on. Its coordinates are raw viewport pointer
+       coords, so it MUST live outside .notes-strip: that panel's
+       backdrop-filter makes it the containing block for fixed-position
+       descendants, which would resolve the ghost against the panel's box
+       and offset it by the panel's top-left. The host has no
+       transform/filter/backdrop-filter, so fixed resolves to the viewport
+       here. pointer-events none, so it never becomes its own hit target. -->
+  @if (markDragIcon(); as icon) {
+    <span class="cv2-mark-ghost mat-sym" aria-hidden="true"
+          [style.left.px]="markGhostX()" [style.top.px]="markGhostY()">{{ icon }}</span>
+  }
 
   <!-- Tile hover card — a peek at another tile's notes while you keep working
        on this one. Opens on whichever side of the hovered chip has room (left

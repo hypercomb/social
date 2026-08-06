@@ -499,6 +499,22 @@ export class TagsViewerComponent implements OnDestroy {
     // label is routinely stale-null at exactly the moment we need it. The drone
     // resolves the point against the hex map (TileOverlayDrone.labelAtClient).
     const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+
+    // A NOTE landed under the pointer — the notes reader advertises each of
+    // its rows with `data-pheromone-note`. Checked FIRST because the reader
+    // floats over the hive: falling through to the hex map would put the
+    // keyword on whatever tile happens to sit behind the card. Notes carry
+    // their own `tags` slot, so this is a different write, not a tile one.
+    const noteRow = el?.closest?.('[data-pheromone-note]') as HTMLElement | null
+    if (noteRow) {
+      const noteId = noteRow.getAttribute('data-pheromone-note') ?? ''
+      const cellLabel = noteRow.getAttribute('data-pheromone-note-cell') ?? ''
+      if (noteId && cellLabel) {
+        EffectBus.emit('note:tag', { cellLabel, noteId, tag: p.name, add: true })
+        return
+      }
+    }
+
     const card = el?.closest?.('[data-pheromone-tile]') as HTMLElement | null
     const label = card?.getAttribute('data-pheromone-tile') || this.#hoverLabel || undefined
     EffectBus.emit('pheromone:drop', { label, tag: p.name, x: event.clientX, y: event.clientY })

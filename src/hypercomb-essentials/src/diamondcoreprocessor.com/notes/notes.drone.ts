@@ -32,10 +32,13 @@
 import { EffectBus } from '@hypercomb/core'
 import {
   insertAsChild,
+  isNoteTag,
   normalizeMark,
   normalizeShape,
+  normalizeTags,
   removeFromTree,
   setMarkInTree,
+  setTagInTree,
   splitInTree,
   subtreeContains,
   type Note,
@@ -239,6 +242,27 @@ export class NotesService {
       },
     )
 
+    // Drop a PHEROMONE from the Pheromones panel onto a note in the reader.
+    // Same tree-rewrite shape as `note:mark` and for the same reason: the
+    // node can be at any depth and must keep its children and its position.
+    // `add` is the direction — omit it (or send true) to put the keyword on,
+    // send false to take it off. Toggling is the CALLER's decision, so a
+    // second drop of the same keyword is an idempotent no-op rather than a
+    // surprise removal.
+    EffectBus.on<{ cellLabel: string; noteId: string; tag: string; add?: boolean }>(
+      'note:tag',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.noteId) return
+        if (!isNoteTag(payload.tag)) return
+        void this.#tagNote(
+          payload.cellLabel,
+          payload.noteId,
+          String(payload.tag).trim(),
+          payload.add !== false,
+        )
+      },
+    )
+
     // Break one note into a one-line head plus a sub-note per part, in
     // place. The note keeps its position, its mark and any children it
     // already had. One layer for the whole split — see `splitAtSegments`.
@@ -431,6 +455,32 @@ export class NotesService {
   }
 
   /**
+   * Put a pheromone on (or take it off) `noteId` at an explicit cell
+   * location. Works at any depth and preserves the note's text, mark,
+   * children and position. Headless equivalent of the `note:tag` handler.
+   */
+  public async tagAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteId: string,
+    tag: string,
+    add = true,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedSig = String(noteId ?? '').trim()
+    if (!cleanedLabel || !cleanedSig || !isNoteTag(tag)) return
+    await this.#tagNoteAtSegments(
+      [...cleanedParents, cleanedLabel],
+      cleanedSig,
+      String(tag).trim(),
+      add,
+    )
+  }
+
+  /**
    * Break `noteId` into a one-line head plus one sub-note per part, at an
    * explicit cell location. Headless equivalent of the `note:split`
    * EffectBus handler, and the call a bulk breakdown pass makes.
@@ -469,7 +519,17 @@ export class NotesService {
       return
     }
     const { segments } = resolved
-    const newSig = await this.#writeNoteLayer(text, shape, mark, [])
+    // An edit REPLACES the note's bytes, so anything the old bytes carried
+    // has to be carried over explicitly or it is dropped. Pheromones travel:
+    // the participant put them on this note, and re-typing its text is not a
+    // request to strip them. (Children still don't survive an edit — this
+    // path writes a childless layer into the TOP-LEVEL slot, which is the
+    // same limitation `note:mark` and `note:split` were built to route
+    // around, and is unchanged here.)
+    const priorTags = editId && SIG_REGEX.test(editId)
+      ? normalizeTags((await this.#loadNoteLayer(editId))?.tags)
+      : []
+    const newSig = await this.#writeNoteLayer(text, shape, mark, [], priorTags)
     if (editId && SIG_REGEX.test(editId)) {
       await this.#commitCellNotes(segments, (prior) => prior.map(s => s === editId ? newSig : s))
     } else {
@@ -590,6 +650,35 @@ export class NotesService {
     await this.#commitCellNotes(segments, () => rootSigs)
   }
 
+  async #tagNote(cellLabel: string, noteId: string, tag: string, add: boolean): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#tagNoteAtSegments(resolved.segments, noteId, tag, add)
+  }
+
+  /**
+   * Put one pheromone on (or take it off) a single node in the cell's tree.
+   * Text, mark, legacy shape, children and position all travel unchanged —
+   * the same guarantee `#markNoteAtSegments` gives, and for the same reason:
+   * a tagged parent must keep its subtree.
+   */
+  async #tagNoteAtSegments(
+    segments: readonly string[],
+    noteId: string,
+    tag: string,
+    add: boolean,
+  ): Promise<void> {
+    const locSig = await this.#locSig(segments)
+    const tree = await this.#readAtLocation(locSig)
+    const { tree: nextTree, changed } = setTagInTree(tree, noteId, tag, add)
+    if (!changed) return  // node not in this cell, or already in that state
+    const rootSigs: string[] = []
+    for (const node of nextTree) {
+      rootSigs.push(await this.#materializeNote(node))
+    }
+    await this.#commitCellNotes(segments, () => rootSigs)
+  }
+
   async #splitNote(
     cellLabel: string,
     noteId: string,
@@ -635,7 +724,7 @@ export class NotesService {
     for (const child of note.children) {
       childSigs.push(await this.#materializeNote(child))
     }
-    return await this.#writeNoteLayer(note.text, note.shape, note.mark, childSigs)
+    return await this.#writeNoteLayer(note.text, note.shape, note.mark, childSigs, note.tags)
   }
 
   /** Resolve a segments array to its locationSig. Used by tree-mutating
@@ -693,10 +782,22 @@ export class NotesService {
 
   // ── Internal: note layer write ────────────────────────────────────
 
-  async #writeNoteLayer(text: string, shape: ShapeId | null, mark: string | null, children: readonly string[]): Promise<string> {
+  async #writeNoteLayer(
+    text: string,
+    shape: ShapeId | null,
+    mark: string | null,
+    children: readonly string[],
+    tags: readonly string[] = [],
+  ): Promise<string> {
     const store = get<StoreLike>('@hypercomb.social/Store')
     if (!store) throw new Error('[notes] Store missing on ioc')
-    const layer: NoteLayer = { children: children.slice(), mark, note: text, shape }
+    const clean = normalizeTags(tags)
+    // `tags` is spread in ONLY when non-empty — see the NoteLayer comment in
+    // note-tree.ts. An untagged note must sign to the same bytes it always
+    // did, or every re-materialization would re-sign the whole tree.
+    const layer: NoteLayer = clean.length
+      ? { children: children.slice(), mark, note: text, shape, tags: clean }
+      : { children: children.slice(), mark, note: text, shape }
     const json = canonicalJSON(layer)
     const sig = await store.putResource(new Blob([json], { type: 'application/json' }))
     this.#cache.set(sig, layer)
@@ -746,7 +847,14 @@ export class NotesService {
       const child = await this.#hydrateAsync(childSig)
       if (child) children.push(child)
     }
-    return { id: sig, text: layer.note, shape: layer.shape, mark: layer.mark, children }
+    return {
+      id: sig,
+      text: layer.note,
+      shape: layer.shape,
+      mark: layer.mark,
+      tags: normalizeTags(layer.tags),
+      children,
+    }
   }
 
   async #loadNoteLayer(sig: string): Promise<NoteLayer | null> {
@@ -760,12 +868,17 @@ export class NotesService {
     // Legacy resources without `shape`/`mark` parse as null for both.
     const parsed = await store.resolve<unknown>(sig)
     if (parsed && typeof parsed === 'object') {
-      const p = parsed as { note?: unknown; shape?: unknown; mark?: unknown; children?: unknown }
+      const p = parsed as { note?: unknown; shape?: unknown; mark?: unknown; children?: unknown; tags?: unknown }
       if (typeof p.note === 'string') {
         const children = Array.isArray(p.children)
           ? p.children.filter((c): c is string => typeof c === 'string' && SIG_REGEX.test(c))
           : []
-        const layer: NoteLayer = { children, mark: normalizeMark(p.mark), note: p.note, shape: normalizeShape(p.shape) }
+        // Keep the slot ABSENT when the note carries no pheromones, so the
+        // cached layer round-trips to the same bytes it was read from.
+        const tags = normalizeTags(p.tags)
+        const layer: NoteLayer = tags.length
+          ? { children, mark: normalizeMark(p.mark), note: p.note, shape: normalizeShape(p.shape), tags }
+          : { children, mark: normalizeMark(p.mark), note: p.note, shape: normalizeShape(p.shape) }
         this.#cache.set(sig, layer)
         return layer
       }
@@ -801,7 +914,14 @@ export class NotesService {
       const cached = this.#cache.get(childSig)
       if (cached) children.push(this.#hydrate(childSig, cached))
     }
-    return { id: sig, text: layer.note, shape: layer.shape, mark: layer.mark, children }
+    return {
+      id: sig,
+      text: layer.note,
+      shape: layer.shape,
+      mark: layer.mark,
+      tags: normalizeTags(layer.tags),
+      children,
+    }
   }
 
   // ── Internal: cell-location resolution ────────────────────────────

@@ -1,82 +1,187 @@
-@if (visible() && note(); as n) {
+@if (visible()) {
   <div
     class="viewer-backdrop"
     (click)="onBackdrop($event)"
     (keydown)="onKey($event)"
     tabindex="-1"
     role="dialog"
-    aria-modal="true"
+    aria-modal="false"
     [attr.aria-label]="'notes.viewer.aria' | t"
   >
-    <div class="viewer-card" data-consumes-wheel hcWidget="notes-viewer" anchor="center">
+    <!-- `aria-modal=false` and a pointer-transparent backdrop are deliberate:
+         the Pheromones panel docks to the right edge and must stay reachable
+         while this is open, because dragging a keyword OUT of it and onto a
+         row is the whole tagging gesture. `is-shifted` slides the card clear
+         of that dock so neither surface covers the other. -->
+    <div class="viewer-card"
+         [class.is-shifted]="pheromonesOpen()"
+         data-consumes-wheel
+         hcWidget="notes-viewer" anchor="center">
+
       <header class="viewer-header">
-        @if (openTabs().length > 1) {
-          <!-- Tab strip — one button per open note. Active tab is
-               highlighted; each tab has its own × so the user can
-               peel notes off one at a time. -->
-          <div class="viewer-tabs" role="tablist">
-            @for (label of tabLabels(); track trackByTab($index, openTabs()[$index])) {
-              <button type="button"
-                      class="viewer-tab"
-                      role="tab"
-                      [class.is-active]="$index === activeIndex()"
-                      [attr.aria-selected]="$index === activeIndex()"
-                      [title]="label.cellLabel + ' · ' + label.preview"
-                      (click)="setActive($index)">
-                <span class="viewer-tab-cell">{{ label.cellLabel }}</span>
-                <span class="viewer-tab-preview">{{ label.preview }}</span>
-                <span class="viewer-tab-close" (click)="closeTab($index, $event)"
-                      [attr.aria-label]="'notes.close-tab' | t: { cell: label.cellLabel }">×</span>
-              </button>
-            }
-          </div>
-        } @else {
-          <span class="viewer-cell">{{ activeTab()?.cellLabel }}</span>
-        }
-        <button class="viewer-close" type="button" (click)="close()" [attr.aria-label]="'notes.close' | t">×</button>
+        <span class="viewer-cell">{{ cell() }}</span>
+        <div class="viewer-header-actions">
+          <button type="button"
+                  class="viewer-icon-btn"
+                  [class.is-on]="pheromonesOpen()"
+                  (click)="togglePheromones()"
+                  [title]="'notes.viewer.pheromones' | t"
+                  [attr.aria-pressed]="pheromonesOpen()"
+                  [attr.aria-label]="'notes.viewer.pheromones' | t">
+            <span class="mat-sym" aria-hidden="true">blur_on</span>
+          </button>
+          <button class="viewer-icon-btn" type="button" (click)="close()"
+                  [attr.aria-label]="'notes.close' | t" [title]="'notes.close' | t">
+            <span class="mat-sym" aria-hidden="true">close</span>
+          </button>
+        </div>
       </header>
 
-      <!-- Recursive outline row template. The viewer always renders
-           the active note at depth 0; if the note has children they
-           render indented below as a read-only tree (clicking a child
-           opens its own viewer tab). The root row is styled larger
-           than its descendants to keep the focused note prominent. -->
-      <ng-template #viewerRowTpl let-note="note" let-depth="depth">
-        <div class="viewer-row"
-             [class.viewer-row-root]="depth === 0"
-             [style.paddingLeft.px]="depth * 20"
-             [class.hc-shape-circle]="note.shape === 'circle'"
-             [class.hc-shape-square]="note.shape === 'square'"
-             [class.hc-shape-triangle]="note.shape === 'triangle'"
-             [class.hc-shape-diamond]="note.shape === 'diamond'"
-             [class.hc-shape-star]="note.shape === 'star'"
-             [class.hc-shape-hexagon]="note.shape === 'hexagon'"
-             (click)="depth > 0 ? openChild(note.id, $event) : null"
-             [attr.role]="depth > 0 ? 'button' : null"
-             [attr.tabindex]="depth > 0 ? 0 : null">
-          <!-- Mark icon when the note carries one (validated to /^[a-z0-9_]+$/
-               before it can reach a note layer), else the legacy shape glyph. -->
-          @if (note.mark) {
-            <span class="mat-sym viewer-row-mark" aria-hidden="true">{{ note.mark }}</span>
-          } @else {
-            <span class="hc-shape-glyph viewer-row-shape" aria-hidden="true"></span>
-          }
-          <p class="viewer-row-text">{{ note.text }}</p>
-        </div>
-        @for (child of note.children; track child.id) {
-          <ng-container *ngTemplateOutlet="viewerRowTpl; context: { note: child, depth: depth + 1 }"></ng-container>
-        }
-      </ng-template>
+      <div class="viewer-split">
 
-      <article class="viewer-body">
-        <ng-container *ngTemplateOutlet="viewerRowTpl; context: { note: n, depth: 0 }"></ng-container>
-      </article>
+        <!-- ── Side rail: one tab per HIERARCHY ──────────────────────
+             A hierarchy is a root note plus everything nested under it.
+             The tab shows that root's hexagon, its opening words, and how
+             many notes the whole hierarchy holds. -->
+        @if (tabs().length > 1) {
+          <nav class="viewer-rail" role="tablist"
+               [attr.aria-label]="'notes.viewer.hierarchies' | t">
+            @for (tab of tabs(); track $index) {
+              <button type="button"
+                      class="viewer-rail-tab"
+                      role="tab"
+                      [class.is-active]="$index === hierarchyIndex()"
+                      [attr.aria-selected]="$index === hierarchyIndex()"
+                      [title]="tab.preview"
+                      (click)="selectHierarchy($index)">
+                <span class="hexdot"
+                      [class.hc-shape-circle]="tab.shape === 'circle'"
+                      [class.hc-shape-square]="tab.shape === 'square'"
+                      [class.hc-shape-triangle]="tab.shape === 'triangle'"
+                      [class.hc-shape-diamond]="tab.shape === 'diamond'"
+                      [class.hc-shape-star]="tab.shape === 'star'"
+                      [class.hc-shape-hexagon]="tab.shape === 'hexagon'"
+                      aria-hidden="true">
+                  <span class="hexdot-face"></span>
+                  @if (tab.mark) {
+                    <span class="mat-sym hexdot-icon">{{ tab.mark }}</span>
+                  }
+                </span>
+                <span class="viewer-rail-text">{{ tab.preview }}</span>
+                <span class="viewer-rail-count" aria-hidden="true">{{ tab.count }}</span>
+              </button>
+            }
+          </nav>
+        }
+
+        <div class="viewer-main">
+
+          <!-- ── The focused note, large ──────────────────────────── -->
+          @if (focused(); as row) {
+            <section class="viewer-focus"
+                     [attr.data-pheromone-note]="row.note.id"
+                     [attr.data-pheromone-note-cell]="cell()">
+              <div class="hexdot hexdot-big"
+                   [class.hc-shape-circle]="row.note.shape === 'circle'"
+                   [class.hc-shape-square]="row.note.shape === 'square'"
+                   [class.hc-shape-triangle]="row.note.shape === 'triangle'"
+                   [class.hc-shape-diamond]="row.note.shape === 'diamond'"
+                   [class.hc-shape-star]="row.note.shape === 'star'"
+                   [class.hc-shape-hexagon]="row.note.shape === 'hexagon'"
+                   aria-hidden="true">
+                <span class="hexdot-face"></span>
+                @if (row.note.mark) {
+                  <span class="mat-sym hexdot-icon">{{ row.note.mark }}</span>
+                }
+              </div>
+
+              <div class="viewer-focus-detail">
+                @if (row.depth > 0) {
+                  <div class="viewer-focus-depth">
+                    {{ 'notes.viewer.depth' | t: { depth: row.depth } }}
+                  </div>
+                }
+                <p class="viewer-focus-text">{{ row.note.text }}</p>
+
+                <!-- Pheromones ON THIS NOTE. Dropped here from the panel;
+                     each chip's × takes it back off. -->
+                <div class="viewer-tags">
+                  @for (tag of tagsOf(row.note); track tag) {
+                    <span class="viewer-tag">
+                      <span class="viewer-tag-name">{{ tag }}</span>
+                      <button type="button" class="viewer-tag-off"
+                              (click)="removeTag(tag, $event)"
+                              [attr.aria-label]="'notes.viewer.untag' | t: { tag: tag }">×</button>
+                    </span>
+                  } @empty {
+                    <span class="viewer-tags-hint">{{ 'notes.viewer.dropHint' | t }}</span>
+                  }
+                </div>
+              </div>
+            </section>
+          }
+
+          <!-- ── The cycle: prev / position / next ─────────────────
+               Neither button is ever disabled — the cycle wraps, so
+               there is no first note and no last one. -->
+          <div class="viewer-cycle">
+            <button type="button" class="viewer-cycle-btn" (click)="prev()"
+                    [title]="'notes.viewer.prev' | t"
+                    [attr.aria-label]="'notes.viewer.prev' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_left</span>
+            </button>
+            <span class="viewer-cycle-pos" aria-live="polite">
+              {{ 'notes.viewer.position' | t: { at: focusPosition(), of: rows().length } }}
+            </span>
+            <button type="button" class="viewer-cycle-btn" (click)="next()"
+                    [title]="'notes.viewer.next' | t"
+                    [attr.aria-label]="'notes.viewer.next' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_right</span>
+            </button>
+          </div>
+
+          <!-- ── The hierarchy, as hexagon point items ──────────────
+               Every note in the selected hierarchy, indented by depth.
+               Each row IS a drop target for a pheromone drag, and
+               clicking one moves the big hexagon to it. -->
+          <ol class="viewer-outline thin-scroll">
+            @for (row of rows(); track trackByRow($index, row)) {
+              <li class="viewer-point"
+                  [class.is-focused]="$index === focusPosition() - 1"
+                  [style.paddingLeft.px]="8 + row.depth * 18"
+                  [attr.data-pheromone-note]="row.note.id"
+                  [attr.data-pheromone-note-cell]="cell()"
+                  (click)="focusRow($index)">
+                <span class="hexdot"
+                      [class.hc-shape-circle]="row.note.shape === 'circle'"
+                      [class.hc-shape-square]="row.note.shape === 'square'"
+                      [class.hc-shape-triangle]="row.note.shape === 'triangle'"
+                      [class.hc-shape-diamond]="row.note.shape === 'diamond'"
+                      [class.hc-shape-star]="row.note.shape === 'star'"
+                      [class.hc-shape-hexagon]="row.note.shape === 'hexagon'"
+                      aria-hidden="true">
+                  <span class="hexdot-face"></span>
+                  @if (row.note.mark) {
+                    <span class="mat-sym hexdot-icon">{{ row.note.mark }}</span>
+                  }
+                </span>
+                <span class="viewer-point-text">{{ row.note.text }}</span>
+                @if (tagsOf(row.note).length) {
+                  <span class="viewer-point-tags" aria-hidden="true">
+                    @for (tag of tagsOf(row.note); track tag) {
+                      <span class="viewer-point-tag">{{ tag }}</span>
+                    }
+                  </span>
+                }
+              </li>
+            }
+          </ol>
+        </div>
+      </div>
 
       <footer class="viewer-footer">
-        <div class="viewer-actions">
-          <button class="action edit" type="button" (click)="edit()">{{ 'notes.edit' | t }}</button>
-          <button class="action add" type="button" (click)="addAnother()">{{ 'notes.add.another' | t }}</button>
-        </div>
+        <button class="action edit" type="button" (click)="edit()">{{ 'notes.edit' | t }}</button>
+        <button class="action add" type="button" (click)="addAnother()">{{ 'notes.add.another' | t }}</button>
       </footer>
     </div>
   </div>
