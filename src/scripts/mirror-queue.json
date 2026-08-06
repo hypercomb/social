@@ -23,7 +23,8 @@
       "run": "npx tsx scripts/mirror-nature-default.ts default",
       "note": "Scenes 6/7/16 changed from night sky, pine forest and winter pines to drifting clouds, mossy river stones and snowfall over drifts (hard silhouettes and a near-black field do not work behind tile content). The behaviors/appearance/background 'default' note still lists the old three by name. Note-add is ADDITIVE, so the stale note must be removed on the tile before re-sending, or the roster lands twice.",
       "created": "2026-08-05",
-      "status": "pending"
+      "status": "pending",
+      "unattended": false
     },
     {
       "id": "presentation-scene-24",
@@ -32,7 +33,8 @@
       "note": "23 of 24 scene tiles exist under presentation/{what-is-hypercomb,why-hypercomb,roadmap} with instruction notes; scene 24 'how to bee' was added after the bridge renderer dropped, so its tile under presentation/roadmap is MISSING. instructions.cjs --push is additive and re-sends ALL 24 instruction notes, so either delete the prior instruction notes first or accept duplicates. Addressing is slugified (how-to-bee) and note-list resolves by full path, not cell.",
       "commit": "e4c038534",
       "created": "2026-08-05",
-      "status": "pending"
+      "status": "pending",
+      "unattended": false
     },
     {
       "id": "presentation-outcomes",
@@ -65,7 +67,8 @@
       "run": "npx tsx scripts/mirror-bouquets.ts",
       "note": "tags-viewer restructured so bouquets are the organising unit; new tag-grouping.ts holds the set-not-a-folder rule (gathered marks leave the loose list, namespaced marks never leave their namespace). mirror-bouquets.ts reconciles behaviors/views/tags/{bouquet-registry,tags-viewer.component} — its existing note is now stale, and tag-grouping.ts needs a new part tile. Bridge broker was up and a renderer was registered, but ops timed out (cold/unresponsive renderer tab).",
       "created": "2026-08-05",
-      "status": "pending"
+      "status": "done",
+      "completed": "2026-08-06"
     },
     {
       "id": "cell-page-artifact-css",
@@ -83,6 +86,14 @@
       "created": "2026-08-05",
       "status": "done",
       "completed": "2026-08-06"
+    },
+    {
+      "id": "pheromone-window-owns-the-hive",
+      "title": "Pheromone window stands the tile band down; the card carries its own pin",
+      "run": null,
+      "note": "TileOverlayDrone now hides the hover band for as long as the Pheromones window is open (tags:view-state), replacing the two armed-takeover visibility checks. The window-gated 'pheromones' overlay icon is gone (it could never appear again) and the peek card grew its own pin control. Mirror: update the behaviors-deck cards for the pheromone painter + tile hover band to say the band stands down, and drop the on-tile pheromone icon from the icon-band tile.",
+      "created": "2026-08-06",
+      "status": "pending"
     }
   ]
 }

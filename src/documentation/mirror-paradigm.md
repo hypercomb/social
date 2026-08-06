@@ -81,6 +81,33 @@ exists yet — it still counts as owed, it simply cannot drain unattended.
 
 After a drain, mint the cards: `node scripts/behaviors-theme/sweep.cjs`.
 
+### Draining on idle
+
+`scripts/mirror-queue-idle.cmd` is registered with Windows Task Scheduler as
+**`hypercomb-mirror-queue`**, triggered after 10 minutes of idle. It runs
+`mirror:queue:run -- --unattended` and logs to
+`%LOCALAPPDATA%\hypercomb\mirror-queue.log`. Remove it with
+`schtasks /Delete /TN hypercomb-mirror-queue /F`.
+
+It drains only when a renderer happens to be on the bridge, which is the
+point: the hive catches up on its own while you are away from the keyboard,
+and does nothing at all when it cannot.
+
+8. **Not every pass may run unattended.** A mirror script is only safe for
+   the idle drain if re-running it is harmless. `note-add` is ADDITIVE — a
+   re-sent note lands a second copy — so a pass that rewrites an existing
+   note must first remove the stale one. Until it does, mark the entry
+   `"unattended": false` (`--manual` on `add`); it shows as `[hands-on]` in
+   the listing, the idle drain skips it and says why, and a human runs it
+   deliberately. Prefer making the pass idempotent — guard writes on
+   `note-list` — over leaving it hands-on forever.
+
+**This is not the AI-request path.** The mirror queue holds work the *code*
+owes the hive and drains with no model in the loop. Questions raised *from*
+the hive — the ask screen, `/opus`, `/sonnet`, the feedback window — are
+records in the hive itself, answered by a live session on the bridge
+(`bridge-listen`). Two queues, two owners; do not fold one into the other.
+
 ## The behaviors mirror (first instance)
 
 `behaviors` at the hive root holds one collection per category — `games`,

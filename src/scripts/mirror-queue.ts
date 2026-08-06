@@ -42,6 +42,13 @@ interface Entry {
   run: string | null
   /** Why it is owed / what the mirror must cover. */
   note?: string
+  /** May an UNATTENDED drain run this? Default true.
+   *
+   *  False marks a pass that is not safely repeatable on its own — most
+   *  often because `note-add` is additive, so a re-send lands the same note
+   *  twice unless a stale one is removed first. Those need a human at the
+   *  keyboard; the idle drain skips them and says so. */
+  unattended?: boolean
   /** The commit whose code this mirror belongs to, when known. */
   commit?: string
   created: string
@@ -92,7 +99,7 @@ function list(q: Queue): void {
   const done = q.entries.filter(e => e.status === 'done')
   if (!pending.length) console.log('[mirror-queue] nothing owed — the hive is level with the code')
   for (const e of pending) {
-    console.log(`  ○ ${e.id} — ${e.title}`)
+    console.log(`  ○ ${e.id} — ${e.title}${e.unattended === false ? '   [hands-on]' : ''}`)
     if (e.commit) console.log(`      commit ${e.commit}  queued ${e.created}`)
     console.log(`      ${e.run ? `run: ${e.run}` : 'run: (no script yet — needs a mirror pass written)'}`)
     if (e.note) console.log(`      ${e.note}`)
@@ -127,6 +134,8 @@ async function main(): Promise<void> {
       run: arg('--run') ?? null,
       note: arg('--note'),
       commit: arg('--commit'),
+      // `--manual` = not safely repeatable; keep it out of the idle drain.
+      ...(process.argv.includes('--manual') ? { unattended: false } : {}),
       created: today(),
       status: 'pending',
     })
@@ -158,11 +167,20 @@ async function main(): Promise<void> {
       return
     }
 
-    let ran = 0, blocked = 0
+    // The idle drain is the unattended caller. A pass that is not safely
+    // repeatable waits for a human rather than landing a note twice.
+    const unattended = process.argv.includes('--unattended')
+
+    let ran = 0, scriptless = 0, handsOn = 0
     for (const e of pending) {
       if (!e.run) {
-        blocked++
+        scriptless++
         console.log(`  ⊘ ${e.id} — no script yet, still owed`)
+        continue
+      }
+      if (unattended && e.unattended === false) {
+        handsOn++
+        console.log(`  ⊘ ${e.id} — hands-on (not safely repeatable), skipped by the idle drain`)
         continue
       }
       console.log(`\n  ▸ ${e.id} — ${e.title}`)
@@ -181,7 +199,9 @@ async function main(): Promise<void> {
       ran++
       save(q)
     }
-    console.log(`\n[mirror-queue] ${ran} run, ${blocked} still owed (no script)`)
+    console.log(`\n[mirror-queue] ${ran} run`
+      + `, ${scriptless} owed with no script`
+      + (handsOn ? `, ${handsOn} waiting for a human` : ''))
     if (ran > 0) console.log('[mirror-queue] NEXT: node scripts/behaviors-theme/sweep.cjs — mint cards for the new cells')
     return
   }
