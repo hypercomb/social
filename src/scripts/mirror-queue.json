@@ -81,7 +81,8 @@
       "run": null,
       "note": "Mirror the voice-clone half of the narration pipeline: a tile per part (voice.cjs driver, master.cjs shared broadcast chain, voice/clone.py, voice/shim/numba, voice/README.md) under a collection beside the existing presentation mirror; pheromone-mark them as parts of the presentation production; note on each explaining that a spoken line is seeded into the same cache slot a recorded take would occupy, so the build needs no flag. Also mint a behaviors-deck card for it.",
       "created": "2026-08-05",
-      "status": "pending"
+      "status": "done",
+      "completed": "2026-08-06"
     }
   ]
 }
