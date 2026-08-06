@@ -116,7 +116,7 @@
       "id": "post-protocol",
       "title": "Post six - Hypercomb is a protocol - video plus copy",
       "run": null,
-      "note": "Sixth post in the series (posts.cjs id 'protocol', deep link scene 6): three beats say the protocol out loud - under the app sits a protocol; implementations meet at exactly three places (signatures, storage layout, mesh events); the contract is executable vectors, never hand-written. Narrated by the voice clone into the shared teaser/audio cache; posts/06-protocol.mp4 is the cut and posts/posts.md carries the copy. Owed on the hive: a tile for this post beside the other presentation outcomes (see pending entry presentation-outcomes) with the three say lines and the post copy as notes, pheromone-marked as part of the presentation production, pointing at the dna scene tile under presentation/what-is-hypercomb. Claim verified before publishing: cargo test on hypercomb-client crates/protocol passes 46 tests against conformance vectors.json. note-add is additive - keep this out of the idle drain.",
+      "note": "Sixth post in the series (posts.cjs id 'protocol', deep link scene 6): three beats say the protocol out loud - under the app sits a protocol; implementations meet at exactly three places (signatures, storage layout, mesh events); the contract is executable vectors, never hand-written. Narrated by Jaime's own reads (Recording-Sample.m4a, 2026-08-06) cut per line and mastered into the shared teaser/audio cache; the same recording is now the 19.4s clone reference; posts/06-protocol.mp4 is the cut and posts/posts.md carries the copy. Owed on the hive: a tile for this post beside the other presentation outcomes (see pending entry presentation-outcomes) with the three say lines and the post copy as notes, pheromone-marked as part of the presentation production, pointing at the dna scene tile under presentation/what-is-hypercomb. Claim verified before publishing: cargo test on hypercomb-client crates/protocol passes 46 tests against conformance vectors.json. note-add is additive - keep this out of the idle drain.",
       "unattended": false,
       "created": "2026-08-06",
       "status": "pending"
@@ -137,6 +137,14 @@
       "note": "behaviors/structure: extend the upgrade + adopt-revisions collections. New notes owed on: dcp-domain-storage-service (enabled set frozen into saves as refs, flags-driven restoreEnabledSet, refs undefined vs [] distinction, pre-logical self-heal), home-component (row-click restore prefers frozen set; legacy Default = base), upgrade-pill (Adopt = one silent click, installer review is the override, mobile dock wraps). Commit e3b6583c1. note-add is additive — run attended.",
       "commit": "e3b6583c1",
       "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "carry-apply-references",
+      "title": "Mirror carry→travel→apply + drag-names-the-reference",
+      "run": "npx tsx scripts/mirror-behavior-parts.ts",
+      "note": "Organizer/Portals panel gained a CARRY basket that survives navigation (opposite direction of travel from the staged tray, which still clears on every hop) and an Apply that mints one reference per carried item at the current page, scented with the bouquet in hand. Drag-onto-hive no longer writes: it composes '/reference <name> = <path>' into the command line with the name selected. Needs tiles for: carry basket, apply, drag-names-the-reference, and the name-is-an-address collision refusal.",
       "created": "2026-08-06",
       "status": "pending"
     }

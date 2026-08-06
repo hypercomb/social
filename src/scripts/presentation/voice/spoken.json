@@ -46,29 +46,5 @@
     "seconds": 6.68,
     "at": "2026-08-05",
     "text": "Type a name, press Enter, and you have a hive. Hypercomb — the hive is yours."
-  },
-  "post:protocol-0": {
-    "slot": "9fca4f0507ee5af2",
-    "similarity": 0.9183,
-    "wer": 0,
-    "seconds": 6.71,
-    "at": "2026-08-06",
-    "text": "Hypercomb looks like an app. It isn't — it's a protocol, and the app is just the first implementation."
-  },
-  "post:protocol-1": {
-    "slot": "08cdd9603dbd918d",
-    "similarity": 0.9582,
-    "wer": 0,
-    "seconds": 12.2,
-    "at": "2026-08-06",
-    "text": "Two implementations meet at exactly three places: how content is named, how it rests on disk, and how it travels between hives. Everything else is free."
-  },
-  "post:protocol-2": {
-    "slot": "a9e708912763992b",
-    "similarity": 0.957,
-    "wer": 0.0345,
-    "seconds": 13.84,
-    "at": "2026-08-06",
-    "text": "The contract isn't prose you trust — it's test vectors you run, generated from the living code. Any software that passes them opens your hive. That's what makes it yours."
   }
 }
