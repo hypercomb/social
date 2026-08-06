@@ -223,6 +223,14 @@ class WebsitesGroup extends LaunchGroupBase {
       // existed; duplicate appends no-op at the layer machine.
       for (const m of this.#members) void this.#ensureWebsitePheromone(m.segments)
       groupRegistry.notifyChanged()
+    } catch (err) {
+      // A throw here (a seed-walk read, a commit riding a busy FIFO) used to
+      // reject the void'd promise and leave #members EMPTY for the rest of the
+      // session — the icon and the rail count came back, but the menu had no
+      // members. RETRY instead: the scan is idempotent and the seed is
+      // sentinel-gated, so re-running costs nothing once it succeeds.
+      console.warn('[websites] scan failed — retrying', err)
+      this.#scheduleScan(1500)
     } finally {
       this.#scanning = false
     }

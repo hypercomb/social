@@ -206,6 +206,26 @@ describe('aggregation-layer — curated menu membership as a layer', () => {
     expect((await mod.listAggregationAtCursor('websites')).map(m => m.label)).toEqual(['Susan', 'Howard'])
   })
 
+  it('a launcher TILE carries its own target: memberAtLauncherCell resolves [g, label] alone', async () => {
+    await mod.enableAggregation('websites', ['humanity-centres'], { label: 'Humanity Centres', icon: 'web' })
+
+    // The click route reads the pressed cell directly — no parent children
+    // read, no in-memory member projection. This is what makes a tile click
+    // work on a cold reload straight into /websites.
+    const m = await mod.memberAtLauncherCell('websites', 'Humanity Centres')
+    expect(m).toMatchObject({ segments: ['humanity-centres'], label: 'Humanity Centres', icon: 'web' })
+
+    // …even when the parent's children set is empty (a stale/absent menu read
+    // must not make the tile under the pointer un-openable).
+    await model.committer.commitSlotSet(['websites'], 'children', [])
+    expect(await mod.listAggregation('websites')).toHaveLength(0)
+    expect((await mod.memberAtLauncherCell('websites', 'Humanity Centres'))?.segments)
+      .toEqual(['humanity-centres'])
+
+    // An unknown cell resolves to null — the click is dropped, not guessed.
+    expect(await mod.memberAtLauncherCell('websites', 'Nothing Here')).toBeNull()
+  })
+
   it('is generic across groups — the same primitive drives any curated menu', async () => {
     await mod.enableAggregation('collections', ['sets', 'favorites'], { label: 'Favorites' })
     const members = await mod.listAggregation('collections')

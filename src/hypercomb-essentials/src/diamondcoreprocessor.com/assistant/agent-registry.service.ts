@@ -52,7 +52,16 @@ import { EffectBus } from '@hypercomb/core'
 import { kindFor, type AgentKind } from '../presentation/avatars/agent-waggle.js'
 import { identifyModel } from '../presentation/avatars/agent-model.js'
 
-export type AgentStatus = 'pending' | 'working' | 'done' | 'failed'
+// ── Blocked — "waiting on you" ─────────────────────────────────────────
+//
+// `blocked` is DECLARED by the agent (`agent:progress` with
+// `status:'blocked'`), never inferred from silence — silence already means
+// stalled and the two must not collide. A blocked agent is exempt from the
+// stall clock for as long as it is blocked: an agent that asked a question
+// and is waiting politely must not be stopped FOR waiting. The clock
+// restarts from zero the moment anything is reported again.
+
+export type AgentStatus = 'pending' | 'working' | 'blocked' | 'done' | 'failed'
 export type { AgentKind }
 
 export interface AgentActivity {
@@ -93,6 +102,13 @@ export interface Agent {
   total?: number
   /** Nothing reported for a long while — still running, but say so. */
   stalled?: boolean
+  /** What the agent is waiting to be told, set when it declares `blocked`.
+   *  This is the text the badge and the panel put in front of the
+   *  participant — the question, not a status word. */
+  needs?: string
+  /** When it started waiting. The stall clock does not run while this is
+   *  set; this is how long the PERSON has been the hold-up. */
+  blockedSince?: number
   startedAt: number
   updatedAt: number
 }
@@ -182,7 +198,7 @@ export class AgentRegistry extends EventTarget {
       })
     })
 
-    EffectBus.on<{ id?: string; sig?: string; activity?: string; latest?: boolean; status?: AgentStatus; current?: number; total?: number }>(
+    EffectBus.on<{ id?: string; sig?: string; activity?: string; latest?: boolean; status?: AgentStatus; needs?: string; current?: number; total?: number }>(
       'agent:progress',
       p => {
         const id = String(p?.id || p?.sig || '')
@@ -190,6 +206,17 @@ export class AgentRegistry extends EventTarget {
         if (!agent) return
         if (p?.status && p.status !== agent.status) agent.status = p.status
         else if (agent.status === 'pending') agent.status = 'working'
+        // Blocked is a declared state with a question attached. Entering it
+        // starts the "waiting on you" clock; leaving it clears the question,
+        // and the generic `updatedAt` bump below restarts the stall clock
+        // from zero — the wait is never counted as silence.
+        if (agent.status === 'blocked') {
+          if (p?.needs) agent.needs = String(p.needs)
+          agent.blockedSince ??= Date.now()
+        } else if (agent.blockedSince !== undefined) {
+          agent.blockedSince = undefined
+          agent.needs = undefined
+        }
         if (typeof p?.current === 'number') agent.current = p.current
         if (typeof p?.total === 'number') agent.total = p.total
         if (p?.activity) {
@@ -426,6 +453,10 @@ export class AgentRegistry extends EventTarget {
     const now = Date.now()
     for (const agent of [...this.#agents.values()]) {
       if (agent.status === 'done' || agent.status === 'failed') continue
+      // WAITING IS NOT SILENCE. An agent that declared itself blocked is
+      // waiting on the participant, and stopping it for that would throw
+      // away work whose only fault was asking a question.
+      if (agent.status === 'blocked') continue
       const silent = now - agent.updatedAt
       if (silent > GIVE_UP_MS) {
         void this.stop(agent.id, `gave up — nothing reported for ${Math.round(GIVE_UP_MS / 60_000)} minutes`)

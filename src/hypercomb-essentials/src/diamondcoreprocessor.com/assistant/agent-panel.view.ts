@@ -16,6 +16,10 @@
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { Agent, AgentRegistry } from './agent-registry.service.js'
+// TYPE-ONLY, deliberately. Importing a value from the orchestrator drone would
+// inline it into this bundle and mint a second IoC registration for it; the
+// panel reaches it structurally through IoC instead.
+import type { OrchestratorFinding, OrchestratorSummary } from './orchestrator.drone.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/agent-avatar.js'
 
 const STYLE_ID = 'hc-agent-panel-styles'
@@ -26,6 +30,21 @@ const MIN_WIDTH = 320
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
+
+/** What the panel needs of the orchestrator, described where it is used. */
+type OrchestratorLike = {
+  summary?: () => OrchestratorSummary
+  readonly held?: OrchestratorFinding
+  hold?: (key: string) => OrchestratorFinding | undefined
+  release?: () => void
+  complete?: () => Promise<string>
+}
+
+const orchestratorDrone = (): OrchestratorLike | undefined =>
+  ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')
+
+const navigation = (): { goRaw?: (segments: readonly string[]) => void } | undefined =>
+  ioc<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
 
 const elapsed = (since: number): string => {
   const seconds = Math.max(0, Math.round((Date.now() - since) / 1000))
@@ -45,6 +64,14 @@ export class AgentPanelView extends EventTarget {
   #expandedActivity = new Set<string>()
   #fullscreen = false
   #resizeCleanup: (() => void) | null = null
+  /** Where "back" goes — the agent this panel was opened FROM, when the
+   *  participant stepped into one agent's log out of the orchestrator's
+   *  report. '' when the panel was opened directly from a bee. */
+  #returnTo = ''
+  /** True while swapping subject between agents. The panel is not closing, so
+   *  it must not announce that it is: `agent:closed` puts the perched bee down
+   *  and clears the audit view, and stepping into a log is not leaving. */
+  #swapping = false
 
   #onKey = (event: KeyboardEvent): void => {
     if (event.key === 'Escape' && this.#panel) { event.stopPropagation(); this.close() }
@@ -55,6 +82,19 @@ export class AgentPanelView extends EventTarget {
     EffectBus.on<{ id?: string }>('agent:open', payload => {
       const id = String(payload?.id ?? '')
       if (id) this.open(id)
+    })
+    // Closed from outside — pressing a perched bee a second time puts its
+    // panel down the same way its × would.
+    EffectBus.on<{ id?: string }>('agent:close', payload => {
+      const id = String(payload?.id ?? '')
+      if (id && this.#id === id) this.close()
+    })
+    // The report is live. Findings clear on their own when work recovers, and
+    // the orchestrator's running commentary lands on its own clock — neither
+    // touches the agent registry, so without this the open panel would sit
+    // there showing a state that has already passed.
+    EffectBus.on('orchestrator:findings', () => {
+      if (this.#panel && this.#registry?.get(this.#id)?.kind === 'orchestrator') this.#render()
     })
   }
 
@@ -94,6 +134,21 @@ export class AgentPanelView extends EventTarget {
 
     const head = document.createElement('div')
     head.className = 'hc-agent-head'
+    // Stepping into an agent's log from the report is a trip you can come back
+    // from. Without this the only way out is closing the panel, which also
+    // puts the perch and the audit view down — losing the audit you were
+    // halfway through reading.
+    if (this.#returnTo && this.#returnTo !== id) {
+      const back = document.createElement('button')
+      back.type = 'button'
+      back.className = 'hc-agent-back'
+      back.textContent = '‹'
+      const label = this.#t('agent.back', 'Back to the orchestrator')
+      back.title = label
+      back.setAttribute('aria-label', label)
+      back.addEventListener('click', () => this.#swap(this.#returnTo))
+      head.appendChild(back)
+    }
     const avatar = document.createElement('img')
     avatar.className = 'hc-agent-avatar'
     avatar.alt = ''
@@ -184,7 +239,7 @@ export class AgentPanelView extends EventTarget {
     const body = this.#body
     if (!body) return
     const agent = this.#registry?.get(this.#id)
-    const running = agent?.status === 'pending' || agent?.status === 'working'
+    const running = agent?.status === 'pending' || agent?.status === 'working' || agent?.status === 'blocked'
     if (this.#stopButton) this.#stopButton.hidden = !running
     if (!agent) {
       // The agent finished and its record has been retired — say so rather
@@ -198,12 +253,19 @@ export class AgentPanelView extends EventTarget {
     }
 
     body.textContent = ''
-    body.append(
-      this.#statusRow(agent),
-      this.#whereRow(agent),
-      this.#section(this.#t('agent.request', 'The request'), agent.request || '—'),
-      this.#activity(agent),
-    )
+    body.append(this.#statusRow(agent))
+    // The orchestrator's panel is a REPORT, not a request. Its own "where" is
+    // the whole hive and its own "request" is a sentence nobody needs twice —
+    // what belongs at the top is the state of everything it watches.
+    const overview = agent.kind === 'orchestrator' ? this.#overview() : null
+    if (overview) body.appendChild(overview)
+    else {
+      body.append(
+        this.#whereRow(agent),
+        this.#section(this.#t('agent.request', 'The request'), agent.request || '—'),
+      )
+    }
+    body.appendChild(this.#activity(agent))
     if (agent.context.length) {
       body.appendChild(this.#section(
         this.#t('agent.context-added', 'Context you added'),
@@ -212,15 +274,276 @@ export class AgentPanelView extends EventTarget {
     }
   }
 
+  /** THE HIVE, IN ONE READ — what the orchestrator has to say when you open it.
+   *  A headline that answers "is everything going smoothly?", the counts under
+   *  it, who is running, and the tiles being worked (each one a way in, since
+   *  the audit view behind this panel is showing exactly the same set).
+   *
+   *  Null when the orchestrator drone is not loaded — the panel then falls back
+   *  to the ordinary agent shape rather than showing an empty report. */
+  #overview(): HTMLElement | null {
+    const orchestrator = orchestratorDrone()
+    const summary = orchestrator?.summary?.()
+    if (!orchestrator || !summary) return null
+
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-agent-section'
+
+    // The carried operation comes FIRST, above even the headline: it is the
+    // one thing on this panel the participant has already committed to, and
+    // they arrived back here to finish it.
+    const carrying = this.#carrying(orchestrator)
+    if (carrying) wrap.appendChild(carrying)
+
+    const headline = document.createElement('div')
+    headline.className = `hc-agent-headline ${summary.healthy ? 'ok' : 'attention'}`
+    headline.textContent = summary.headline
+    wrap.appendChild(headline)
+
+    const counts: Array<[string, number]> = [
+      [this.#t('agent.status.blocked', 'waiting on you'), summary.blocked],
+      [this.#t('agent.status.working', 'working'), summary.working],
+      [this.#t('agent.status.pending', 'pending'), summary.pending],
+      [this.#t('agent.status.stalled', 'stalled'), summary.stalled],
+      [this.#t('agent.status.failed', 'failed'), summary.failed],
+    ]
+    const row = document.createElement('div')
+    row.className = 'hc-agent-counts'
+    for (const [label, value] of counts) {
+      if (!value) continue
+      const pill = document.createElement('span')
+      pill.className = 'hc-agent-pill'
+      pill.textContent = `${value} ${label}`
+      row.appendChild(pill)
+    }
+    if (row.childElementCount) wrap.appendChild(row)
+
+    if (summary.vendors.length) {
+      wrap.appendChild(this.#section(
+        this.#t('orchestrator.models', 'Models running'),
+        summary.vendors.map(v => `${v.vendor} ×${v.count}`).join(' · '),
+      ))
+    }
+
+    const running = this.#running()
+    if (running) wrap.appendChild(running)
+
+    if (summary.tiles.length) {
+      const tiles = document.createElement('div')
+      tiles.className = 'hc-agent-section'
+      const head = document.createElement('div')
+      head.className = 'hc-agent-label'
+      head.textContent = this.#t('orchestrator.tiles', 'Tiles being worked')
+      tiles.appendChild(head)
+      const list = document.createElement('div')
+      list.className = 'hc-agent-log'
+      for (const tile of summary.tiles) {
+        const line = document.createElement('button')
+        line.type = 'button'
+        line.className = 'hc-agent-logline'
+        const name = document.createElement('span')
+        name.className = 'hc-agent-logtext'
+        name.textContent = tile.label
+        const count = document.createElement('span')
+        count.className = 'hc-agent-dim'
+        count.textContent = tile.agents > 1 ? `${tile.agents} agents` : '1 agent'
+        line.append(name, count)
+        // Straight there. The audit view behind this panel holds the same
+        // tiles, so this is the second way in, not the only one.
+        line.addEventListener('click', () => {
+          ioc<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')?.goRaw?.(tile.path)
+        })
+        list.appendChild(line)
+      }
+      tiles.appendChild(list)
+      wrap.appendChild(tiles)
+    }
+
+    if (summary.findings.length) {
+      const findings = document.createElement('div')
+      findings.className = 'hc-agent-section'
+      const head = document.createElement('div')
+      head.className = 'hc-agent-label'
+      head.textContent = this.#t('orchestrator.findings', 'Worth a look')
+      findings.appendChild(head)
+      for (const finding of summary.findings) {
+        const line = document.createElement('div')
+        line.className = 'hc-agent-finding'
+        const kind = document.createElement('span')
+        kind.className = 'hc-agent-pill stalled'
+        kind.textContent = this.#t(`orchestrator.kind.${finding.kind}`, finding.kind)
+        const text = document.createElement('span')
+        text.className = 'hc-agent-text'
+        text.textContent = finding.text
+        line.append(kind, text)
+        // GO AND LOOK — travel to where the trouble is, carrying the finding.
+        // Picking it up is what makes the completion button waiting at the
+        // other end refer to THIS finding and not to whatever the sweep has
+        // since decided is most urgent.
+        if (finding.path?.length) {
+          const go = document.createElement('button')
+          go.type = 'button'
+          go.className = 'hc-agent-go'
+          go.textContent = this.#t('orchestrator.go', 'Go')
+          go.title = this.#t('orchestrator.go-hint', 'Go there, keeping this ready to complete')
+          go.addEventListener('click', () => {
+            orchestrator.hold?.(finding.key)
+            navigation()?.goRaw?.(finding.path ?? [])
+            this.#render()
+          })
+          line.appendChild(go)
+        }
+        findings.appendChild(line)
+      }
+      wrap.appendChild(findings)
+    }
+
+    return wrap
+  }
+
+  /** THE OPERATION IN HAND. Shown while the participant is carrying a finding:
+   *  what they picked up, and the two ways it can end. This is the second half
+   *  of "go and look" — they pressed go, the hive navigated, and this is what
+   *  is waiting for them when they get there. */
+  #carrying(orchestrator: OrchestratorLike): HTMLElement | null {
+    const held = orchestrator.held
+    if (!held) return null
+
+    const bar = document.createElement('div')
+    bar.className = 'hc-agent-carry'
+
+    const label = document.createElement('div')
+    label.className = 'hc-agent-label'
+    label.textContent = this.#t('orchestrator.carrying', 'Carrying')
+    const text = document.createElement('div')
+    text.className = 'hc-agent-text'
+    text.textContent = held.text
+
+    const actions = document.createElement('div')
+    actions.className = 'hc-agent-carry-actions'
+
+    const complete = document.createElement('button')
+    complete.type = 'button'
+    complete.className = 'hc-agent-btn hc-agent-ok'
+    complete.textContent = this.#t('orchestrator.complete', 'Complete it')
+    complete.title = this.#t(
+      'orchestrator.complete-hint',
+      'Carry out this operation on the hive — the agents it names are stopped',
+    )
+    complete.addEventListener('click', () => {
+      complete.disabled = true
+      void orchestrator.complete?.().then(did => {
+        EffectBus.emit('toast:show', { type: 'tip', message: did ? `Done — ${did}.` : 'Nothing left to do.' })
+        this.#render()
+      })
+    })
+
+    const drop = document.createElement('button')
+    drop.type = 'button'
+    drop.className = 'hc-agent-btn'
+    drop.textContent = this.#t('orchestrator.drop', 'Put it down')
+    drop.addEventListener('click', () => { orchestrator.release?.(); this.#render() })
+
+    actions.append(complete, drop)
+    bar.append(label, text, actions)
+    return bar
+  }
+
+  /** WHO IS RUNNING, one row each — the way into an individual agent's log.
+   *  The report answers "how is the hive doing"; this answers "and what is
+   *  THAT one actually doing", which needs the agent's own activity log, so
+   *  every row is a way into it.
+   *
+   *  Two destinations per row, because they are genuinely different places:
+   *  the row opens the LOG, and the ◎ flies to the BEE — the layer the bee is
+   *  dancing on, where you can watch it work. */
+  #running(): HTMLElement | null {
+    const agents = (this.#registry?.list() ?? [])
+      .filter(a => a.kind !== 'orchestrator')
+      .filter(a => a.status === 'working' || a.status === 'pending' || a.status === 'blocked')
+    if (!agents.length) return null
+
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-agent-section'
+    const head = document.createElement('div')
+    head.className = 'hc-agent-label'
+    head.textContent = this.#t('orchestrator.running', 'Running now — open a log')
+    wrap.appendChild(head)
+
+    const list = document.createElement('div')
+    list.className = 'hc-agent-log'
+    for (const agent of agents) {
+      const row = document.createElement('div')
+      row.className = 'hc-agent-run'
+
+      const main = document.createElement('button')
+      main.type = 'button'
+      main.className = 'hc-agent-runmain'
+      main.title = this.#t('orchestrator.open-log', 'Open this agent’s log')
+
+      const top = document.createElement('span')
+      top.className = 'hc-agent-runtop'
+      const who = document.createElement('span')
+      who.className = 'hc-agent-runwho'
+      who.textContent = agent.kind === 'model' ? (agent.model ?? agent.behavior) : agent.behavior
+      const when = document.createElement('span')
+      when.className = 'hc-agent-dim'
+      when.textContent = elapsed(agent.startedAt) + (agent.stalled ? ' · quiet' : '')
+      top.append(who, when)
+
+      // The last thing it said. The single most useful line about a running
+      // agent, and the reason to open the log rather than guess.
+      const latest = document.createElement('span')
+      latest.className = 'hc-agent-runlatest'
+      latest.textContent = agent.activity[agent.activity.length - 1]?.text ?? agent.status
+      main.append(top, latest)
+      main.addEventListener('click', () => this.#swap(agent.id))
+
+      const bee = document.createElement('button')
+      bee.type = 'button'
+      bee.className = 'hc-agent-runbee'
+      bee.textContent = '◎'
+      const beeLabel = this.#t('orchestrator.go-to-bee', 'Go to the layer its bee is flying on')
+      bee.title = beeLabel
+      bee.setAttribute('aria-label', beeLabel)
+      bee.addEventListener('click', () => this.#goToBee(agent))
+
+      row.append(main, bee)
+      list.appendChild(row)
+    }
+    wrap.appendChild(list)
+    return wrap
+  }
+
+  /** Go and WATCH one. A bee flies over its tile on that tile's PARENT layer,
+   *  so this navigates to the parent, not into the tile — entering the tile
+   *  would land the participant inside the work, on a layer where the bee they
+   *  were looking for is not drawn. An agent with no tile is hive-wide, and
+   *  those bees live at the root. */
+  #goToBee(agent: Agent): void {
+    navigation()?.goRaw?.(agent.targets.length ? agent.segments : [])
+  }
+
   #statusRow(agent: Agent): HTMLElement {
     const row = document.createElement('div')
     row.className = 'hc-agent-status'
     const pill = document.createElement('span')
-    pill.className = `hc-agent-pill ${agent.status}${agent.stalled ? ' stalled' : ''}`
-    pill.textContent = agent.stalled
-      ? this.#t('agent.status.stalled', 'stalled')
-      : this.#t(`agent.status.${agent.status}`, agent.status)
+    // Blocked outranks stalled in the pill: an agent waiting on a person is
+    // not quiet by accident, and calling it stalled would send the
+    // participant looking for a fault instead of answering the question.
+    pill.className = `hc-agent-pill ${agent.status}${agent.stalled && agent.status !== 'blocked' ? ' stalled' : ''}`
+    pill.textContent = agent.status === 'blocked'
+      ? this.#t('agent.status.blocked', 'waiting on you')
+      : agent.stalled
+        ? this.#t('agent.status.stalled', 'stalled')
+        : this.#t(`agent.status.${agent.status}`, agent.status)
     row.appendChild(pill)
+    if (agent.status === 'blocked' && agent.needs) {
+      const needs = document.createElement('span')
+      needs.className = 'hc-agent-needs'
+      needs.textContent = agent.needs
+      row.appendChild(needs)
+    }
     if (agent.total) {
       const progress = document.createElement('span')
       progress.className = 'hc-agent-dim'
@@ -326,9 +649,29 @@ export class AgentPanelView extends EventTarget {
       : { type: 'warning', message: this.#t('agent.stop-error', 'Could not stop it — try again.') })
   }
 
+  /** Change which agent the panel is showing, WITHOUT closing it. Remembers
+   *  where it came from so the head can offer the way back. */
+  #swap(id: string): void {
+    if (!id || id === this.#id) return
+    const from = this.#id
+    this.#swapping = true
+    // Going back to where we came from ends the trip; going deeper keeps the
+    // origin, so "back" always means the report, never a chain to unwind.
+    this.#returnTo = id === this.#returnTo ? '' : from
+    try { this.open(id) } finally { this.#swapping = false }
+  }
+
   close(): void {
+    const was = this.#id
     this.#registry?.removeEventListener('change', this.#render)
     document.removeEventListener('keydown', this.#onKey, true)
+    // Say so: a perched bee and a gathered audit view are both "this panel is
+    // open" made visible, and they have to be put down with it. A SWAP is not
+    // a close — the panel is staying open on another agent.
+    if (was && !this.#swapping) {
+      EffectBus.emit('agent:closed', { id: was })
+      this.#returnTo = ''
+    }
     this.#resizeCleanup?.()
     this.#resizeCleanup = null
     this.#panel?.remove()
@@ -386,6 +729,33 @@ export class AgentPanelView extends EventTarget {
   letter-spacing:0.1em;text-transform:uppercase;color:rgba(${STEEL},0.95);}
 .hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;
   color:rgba(216,230,238,0.45);}
+.hc-agent-back{width:1.7rem;height:2rem;flex:0 0 auto;border:none;background:none;
+  color:rgba(${STEEL},0.75);font-size:1.5rem;line-height:1;cursor:pointer;border-radius:6px;}
+.hc-agent-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
+.hc-agent-carry{display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.6rem;
+  padding:0.55rem 0.6rem;border:1px solid rgba(214,178,110,0.45);border-radius:8px;
+  background:rgba(214,178,110,0.08);}
+.hc-agent-carry .hc-agent-label{color:rgba(226,196,140,0.85);margin:0;}
+.hc-agent-carry-actions{display:flex;gap:0.4rem;margin-top:0.15rem;}
+.hc-agent-carry-actions .hc-agent-btn{min-height:2rem;padding:0 0.7rem;font-size:0.78rem;}
+.hc-agent-run{display:flex;align-items:stretch;gap:0.25rem;}
+.hc-agent-runmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:0.1rem;
+  padding:0.28rem 0.35rem;border:0;background:none;text-align:left;font:inherit;cursor:pointer;
+  border-radius:5px;}
+.hc-agent-runmain:hover,.hc-agent-runmain:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
+.hc-agent-runtop{display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;}
+.hc-agent-runwho{font-size:0.8rem;color:rgba(238,244,250,0.92);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-runlatest{font-size:0.73rem;color:rgba(216,230,238,0.55);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-runbee{flex:0 0 auto;width:2rem;border:1px solid rgba(${STEEL},0.22);border-radius:5px;
+  background:none;color:rgba(${STEEL},0.8);font-size:0.9rem;line-height:1;cursor:pointer;}
+.hc-agent-runbee:hover{border-color:rgba(${STEEL},0.7);background:rgba(${STEEL},0.12);color:whitesmoke;}
+.hc-agent-go{flex:0 0 auto;align-self:flex-start;margin-left:auto;padding:0.1rem 0.55rem;
+  border:1px solid rgba(${STEEL},0.4);border-radius:999px;background:none;
+  color:rgba(${STEEL},0.9);font:inherit;font-size:0.7rem;letter-spacing:0.06em;
+  text-transform:uppercase;cursor:pointer;}
+.hc-agent-go:hover{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.14);color:whitesmoke;}
 .hc-agent-close,.hc-agent-window{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
   font-size:1.3rem;line-height:1;cursor:pointer;border-radius:6px;}
 .hc-agent-window{font-size:1rem;}
@@ -396,9 +766,18 @@ export class AgentPanelView extends EventTarget {
   text-transform:uppercase;border:1px solid rgba(${STEEL},0.4);color:rgba(${STEEL},0.9);}
 .hc-agent-pill.working{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.16);}
 .hc-agent-pill.stalled{border-color:rgba(214,178,110,0.7);color:rgba(226,196,140,0.95);background:none;}
+.hc-agent-pill.blocked{border-color:rgba(126,182,214,0.85);color:rgba(196,226,246,0.98);background:rgba(126,182,214,0.12);}
+.hc-agent-needs{font-size:0.76rem;line-height:1.35;color:rgba(196,226,246,0.9);}
 .hc-agent-pill.done{border-color:rgba(126,196,142,0.7);color:rgba(150,214,164,0.95);}
 .hc-agent-pill.failed{border-color:rgba(226,75,74,0.7);color:rgba(232,124,123,0.95);}
 .hc-agent-dim{font-size:0.72rem;color:rgba(216,230,238,0.5);}
+.hc-agent-headline{font-size:0.92rem;line-height:1.4;color:rgba(238,244,250,0.95);margin-bottom:0.5rem;}
+.hc-agent-headline.ok{color:rgba(150,214,164,0.95);}
+.hc-agent-headline.attention{color:rgba(226,196,140,0.98);}
+.hc-agent-counts{display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.35rem;}
+.hc-agent-finding{display:flex;align-items:flex-start;gap:0.5rem;padding:0.25rem 0;}
+.hc-agent-finding .hc-agent-pill{flex:0 0 auto;}
+.hc-agent-finding .hc-agent-text{flex:1 1 auto;min-width:0;font-size:0.8rem;}
 .hc-agent-label{font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;
   color:rgba(${STEEL},0.6);margin-bottom:0.2rem;}
 .hc-agent-text{font-size:0.85rem;line-height:1.45;color:rgba(238,244,250,0.9);white-space:pre-wrap;

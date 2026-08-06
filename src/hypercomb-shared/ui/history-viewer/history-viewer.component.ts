@@ -16,7 +16,7 @@ import { IconComponent } from '../icon/icon.component'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // Full docked-panel chrome — resize grip, width persistence, `--hc-panel-scale`,
 // control-bar pinning and the settings gear — the SAME shared code the Portals
-// entrance (collections-landing) and aggregate-index panels ride. The viewer
+// entrance (the aggregate index) and its sibling panels ride. The viewer
 // owns no sizing of its own.
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 

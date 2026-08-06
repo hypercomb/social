@@ -94,6 +94,23 @@
       "note": "TileOverlayDrone now hides the hover band for as long as the Pheromones window is open (tags:view-state), replacing the two armed-takeover visibility checks. The window-gated 'pheromones' overlay icon is gone (it could never appear again) and the peek card grew its own pin control. Mirror: update the behaviors-deck cards for the pheromone painter + tile hover band to say the band stands down, and drop the on-tile pheromone icon from the icon-band tile.",
       "created": "2026-08-06",
       "status": "pending"
+    },
+    {
+      "id": "toolwindow-overlap-audit",
+      "title": "Landings deleted; record the aggregate-index absorption in the hive",
+      "run": null,
+      "note": "collections-landing/ (1475 lines) and website-landing/ (644) were orphaned — registered but absent from shell-surfaces.barrel.ts, so never mounted. Deleted 2026-08-06. Mirror: the behaviors-deck cards for Collections and Websites should say the ONE aggregate index renders both via sources; drop any tile that still names a per-aggregate landing.",
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "verbs-reel",
+      "title": "The three structural verbs reel — atomize, organize, expand in one cut",
+      "run": null,
+      "note": "scripts/presentation/verbs.cjs draws the three verbs as real animations (children fanning out, a crowded level folding into groups, a row spreading to make room), narrated by the same voice as the full cut and encoded to verbs/hypercomb-verbs.mp4 (50.7s). Owed under the presentation mirror: a 'verbs' chapter tile beside what-is-hypercomb/why-hypercomb/roadmap holding one part tile per beat (open, atomize, organize, expand, bridge, close) with its say line as the note, plus a note on the presentation tile recording the filmstrip technique — many frames per headless launch, cut apart with ffmpeg untile, because the launch and not the drawing is what costs. The behaviors-deck cards for /atomize, /organize and /expand should gain a note pointing at this cut as the thing that shows all three side by side. Hands-on: note-add is additive, so remove any prior verbs notes before re-sending.",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
     }
   ]
 }

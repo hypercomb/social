@@ -16,13 +16,40 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { fromRuntime } from '../../core/from-runtime'
-import { NOTE_MARKS_IOC_KEY, isMarkIcon, type MarkRole, type NoteMarksStore } from '../../core/note-marks.store'
+import {
+  NOTE_MARKS_IOC_KEY,
+  isMarkIcon,
+  kindOfRole,
+  type MarkKind,
+  type MarkRole,
+  type NoteMark,
+  type NoteMarksStore,
+} from '../../core/note-marks.store'
 import { requestIconPick } from '../../core/icon-pick'
 
 // Correlation token for this window's requests to the shared icon chooser
 // (see core/icon-pick.ts). The chooser also serves the tile-icon override
 // flow, whose ids are real element ids, so every requester names itself.
 const MARK_PICK_ID = 'notes:mark-palette'
+
+// Participant-local render index: locationSig (or bare label) -> props-resource
+// sig, written by the renderer for every tile it paints. Read-only here, and
+// O(1) — the identity plate never triggers a cold tree walk to find a picture.
+const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
+const SIG_RE = /^[0-9a-f]{64}$/i
+
+// Panel width (px) at which the identity plate earns its large form: the
+// hexagon grows and the tile's details sit beside it. Below it the plate stays
+// a single compact line — a narrow dock has no room for a picture.
+const PLATE_WIDE_AT = 400
+
+// Hover-list dwell (ms). Long enough that sweeping the pointer across the tile
+// navigator doesn't strobe cards, short enough to feel like a peek.
+const HOVER_OPEN_DELAY = 180
+const HOVER_CLOSE_DELAY = 120
+
+// Rows the navigator's hover list shows before it truncates to "+N more".
+const HOVER_LIST_MAX = 10
 
 
 
@@ -90,11 +117,23 @@ type QaItem = {
 
 type HistoryServiceLike = {
   sign(lineageLike: { explorerSegments?: () => readonly string[] }): Promise<string>
-  currentLayerAt(locationSig: string): Promise<{ qa?: unknown } | null>
+  currentLayerAt(locationSig: string): Promise<{ qa?: unknown; children?: unknown; properties?: unknown } | null>
 }
 
 type StoreLike = {
   resolve<T = unknown>(value: unknown): Promise<T>
+  getResource?(sig: string): Promise<Blob | null | undefined>
+}
+
+/** What one read of a cell's head layer yields beyond its notes: the open
+ *  questions, how many child tiles it holds, and the canonical props-resource
+ *  sig (hop one of two to the tile's picture). Gathered in ONE `currentLayerAt`
+ *  call — the same call the qa slot already needed — so the identity plate and
+ *  the navigator's hover list cost no extra layer reads. */
+type CellFacts = {
+  qa: readonly QaItem[]
+  childCount: number
+  propsSig: string | null
 }
 
 type LineageLike = {
@@ -160,6 +199,11 @@ export class NotesStripComponent implements OnDestroy {
   // and the qa slot is cleared by the editor's submit path — Claude
   // sees the answer-note on its next walk and updates its model.
   readonly #qaByCell = signal<ReadonlyMap<string, readonly QaItem[]>>(new Map())
+
+  // Per-cell facts read off the same head layer as the qa slot — child count
+  // and canonical props sig. Feeds the identity plate (which tile am I writing
+  // on, what does it look like, what does it hold).
+  readonly #factsByCell = signal<ReadonlyMap<string, { childCount: number; propsSig: string | null }>>(new Map())
 
   // Master open/closed state for the strip. The strip NEVER auto-opens on
   // selection anymore — it shows only when the user explicitly turns it on
@@ -239,6 +283,40 @@ export class NotesStripComponent implements OnDestroy {
   /** Live palette. Empty when the store is absent (marks simply don't
    *  render) or before the pool read settles. */
   readonly marks = fromRuntime(this.#markStore, () => this.#markStore?.marks ?? [])
+
+  /** The rail, split into its two KINDS — points (the constrained roles,
+   *  `heading` and `list`) and notes (the `prose` role).
+   *
+   *  The grouping is derived from each mark's role, never from a list of
+   *  icon names here: the user can re-role any icon at any time and the rail
+   *  has to follow. An empty group is dropped rather than rendered as a bare
+   *  label, so a palette with no prose mark looks exactly as it did before
+   *  the kind existed. */
+  readonly markGroups = computed(() => {
+    const all = this.marks()
+    const groups: { kind: MarkKind; marks: NoteMark[] }[] = [
+      { kind: 'point', marks: [] },
+      { kind: 'note', marks: [] },
+    ]
+    for (const m of all) {
+      const kind = kindOfRole(m.role)
+      groups[kind === 'point' ? 0 : 1].marks.push(m)
+    }
+    return groups.filter(g => g.marks.length > 0)
+  })
+
+  /** True once BOTH kinds are present. The kind labels only earn their space
+   *  when there is something to tell apart — with one kind in the palette the
+   *  rail stays the flat strip of icons it has always been. */
+  readonly showKindLabels = computed(() => this.markGroups().length > 1)
+
+  /** The kind a note row currently reads as, for the row's own styling.
+   *  Resolves through the palette, so an unmarked row (or one whose mark was
+   *  deleted) reads as a point — the constrained default. */
+  kindOfNote(note: Note): MarkKind {
+    const role = this.#markStore?.roleOf(note.mark)
+    return role ? kindOfRole(role) : 'point'
+  }
 
   /** The rail's current pick — the mark the next commit writes onto the
    *  note. Null = no mark. Staged to the drone via `notes:active-mark` as
@@ -554,6 +632,9 @@ export class NotesStripComponent implements OnDestroy {
   toggleFullscreen(): void {
     this.isFullscreen.update(v => !v)
     EffectBus.emit('notes:expand-to-index', { cellLabel: this.cell(), fullscreen: this.isFullscreen() })
+    // Fullscreen changes the panel width by the largest jump there is —
+    // re-measure once the class has landed so the plate follows immediately.
+    queueMicrotask(() => this.#measurePanel())
   }
 
   // Every tile in the current layer, sourced from CellSuggestionProvider (the
@@ -876,6 +957,9 @@ export class NotesStripComponent implements OnDestroy {
     h = Math.max(minH, Math.min(maxH, h))
     if (edge !== 'bottom') el.style.width = `${Math.round(w)}px`
     if (edge !== 'left') el.style.height = `${Math.round(h)}px`
+    // Publish the new width as the drag happens, so the identity plate grows
+    // and shrinks under the user's hand rather than a frame later.
+    this.#measurePanel()
   }
 
   #onResizeEnd = (event: PointerEvent): void => {
@@ -1253,6 +1337,234 @@ export class NotesStripComponent implements OnDestroy {
    */
   readonly cell = computed<string | null>(() => this.#capturingFor() ?? this.#activeCell())
 
+  // ── Identity plate (which tile am I writing on) ───────────
+  // A panel of notes with nothing but a name at the top reads as anonymous —
+  // the user has to remember which tile the list belongs to. The plate answers
+  // it visually: the tile's own hexagon (its picture, the same bytes the canvas
+  // paints), its name, where it sits, and what it holds. Below PLATE_WIDE_AT
+  // it collapses to one compact line so a narrow dock loses no list space.
+
+  /** Live panel width. Fed by the panel's ResizeObserver, and ALSO measured
+   *  directly at every moment the width can change by hand (edge drag,
+   *  fullscreen toggle, viewport resize) — the observer is the general case,
+   *  but it only delivers while the document is rendering, so the plate must
+   *  not depend on it exclusively. Seeded from the panel's own box. */
+  readonly #panelWidth = signal<number>(500)
+
+  /** Measure the panel now and publish it. Cheap (one layout read) and safe to
+   *  call from any of the width-changing paths. */
+  #measurePanel(): void {
+    const el = this.panel()?.nativeElement
+    if (!el) return
+    const w = Math.round(el.getBoundingClientRect().width)
+    if (w > 0 && w !== this.#panelWidth()) this.#panelWidth.set(w)
+  }
+
+  /** Does the plate get its large form? Panel width is the honest measure —
+   *  the strip can be a 260px rail on a 4K screen or a full-screen sheet on a
+   *  laptop, and it's the PANEL the plate has to fit inside. */
+  readonly plateWide = computed<boolean>(() => this.#panelWidth() >= PLATE_WIDE_AT)
+
+  /** Where the active tile sits, as the explorer reads it. Empty at the root
+   *  (the plate simply drops the line). */
+  readonly platePath = computed<readonly string[]>(() => {
+    this.#version()   // re-read after navigation
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    return lineage?.explorerSegments?.() ?? []
+  })
+
+  /** Object-URL of the active tile's picture, or null (glyph fallback). */
+  readonly plateImage = signal<string | null>(null)
+  #plateImageUrl: string | null = null
+  #plateImageCell: string | null = null
+  #plateToken = 0
+
+  /** First letter of the tile's name — what the hexagon carries when the tile
+   *  has no picture. A blank hexagon reads as "broken"; an initial reads as
+   *  "this tile, no picture yet". */
+  readonly plateInitial = computed<string>(() => (this.cell() ?? '').trim().charAt(0).toUpperCase() || '·')
+
+  /** The active tile's full entry list — UNFILTERED, unlike notes(). The
+   *  plate's counts describe the tile, not the current filter. */
+  #allForCell(cell: string | null): readonly Note[] {
+    if (!cell) return []
+    return this.#mergeQaWithNotes(this.#qaByCell().get(cell) ?? [], this.#notesByCell().get(cell) ?? [])
+  }
+
+  /** Counts for the plate: notes / open questions / answers / child tiles.
+   *  Questions and answers are only surfaced when non-zero (the template
+   *  drops the pill), so an ordinary tile shows two numbers, not four. */
+  readonly plateCounts = computed<{ notes: number; questions: number; answers: number; children: number }>(() => {
+    const cell = this.cell()
+    const all = this.#allForCell(cell)
+    let notes = 0, questions = 0, answers = 0
+    const countIn = (list: readonly Note[]): void => {
+      for (const n of list) {
+        const kind = this.noteKind(n)
+        if (kind === 'q') questions++
+        else if (kind === 'a') answers++
+        else notes++
+        countIn(n.children)
+      }
+    }
+    countIn(all)
+    return { notes, questions, answers, children: (cell && this.#factsByCell().get(cell)?.childCount) || 0 }
+  })
+
+  /** Resolve the active tile's picture the same way the renderer does:
+   *  props sig → props blob → `small.image` sig → bytes → object URL. The
+   *  canonical sig from the head layer is preferred (it is correct even for a
+   *  tile this client has never painted); the participant-local render index
+   *  is the fallback. A miss is normal — the hexagon shows the initial. */
+  async #syncPlateImage(cell: string | null): Promise<void> {
+    if (cell === this.#plateImageCell) return
+    const token = ++this.#plateToken
+    this.#plateImageCell = cell
+    this.#revokePlateImage()
+    if (!cell) return
+    const url = await this.#resolveTileImage(cell).catch(() => null)
+    if (token !== this.#plateToken) { if (url) URL.revokeObjectURL(url); return }
+    this.#plateImageUrl = url
+    this.plateImage.set(url)
+  }
+
+  async #resolveTileImage(cell: string): Promise<string | null> {
+    const store = window.ioc?.get<StoreLike>('@hypercomb.social/Store')
+    if (!store?.getResource) return null
+    let propsSig = this.#factsByCell().get(cell)?.propsSig ?? null
+    if (!propsSig) propsSig = await this.#indexedPropsSig(cell)
+    if (!propsSig) return null
+    const propsBlob = await store.getResource(propsSig)
+    if (!propsBlob) return null
+    let props: { small?: { image?: unknown }; flat?: { small?: { image?: unknown } } }
+    try { props = JSON.parse(await propsBlob.text()) } catch { return null }
+    const raw = props?.small?.image ?? props?.flat?.small?.image
+    if (typeof raw !== 'string' || !SIG_RE.test(raw)) return null
+    const bytes = await store.getResource(raw)
+    return bytes ? URL.createObjectURL(bytes) : null
+  }
+
+  /** Props sig from the participant-local render index — O(1) localStorage,
+   *  keyed by locationSig with a bare-label fallback. Never a tree walk. */
+  async #indexedPropsSig(cell: string): Promise<string | null> {
+    let locSig = ''
+    const history = window.ioc?.get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    const lineage = window.ioc?.get<LineageLike>('@hypercomb.social/Lineage')
+    if (history?.sign) {
+      const segments = [...(lineage?.explorerSegments?.() ?? []), cell]
+      try { locSig = await history.sign({ explorerSegments: () => segments }) } catch { /* cold */ }
+    }
+    try {
+      const idx = JSON.parse(localStorage.getItem(TILE_PROPS_INDEX_KEY) ?? '{}') as Record<string, string>
+      const v = (locSig && idx[locSig]) || idx[cell]
+      return (typeof v === 'string' && SIG_RE.test(v)) ? v : null
+    } catch { return null }
+  }
+
+  #revokePlateImage(): void {
+    if (this.#plateImageUrl) URL.revokeObjectURL(this.#plateImageUrl)
+    this.#plateImageUrl = null
+    this.plateImage.set(null)
+  }
+
+  // ── Navigator hover list ──────────────────────────────────
+  // Hovering a tile in the navigator peeks at what's written on it, without
+  // leaving the tile you're working on. The notes are already in hand — the
+  // warmup effect resolves every tile in the layer — so the card is a pure
+  // read of state that's already there: no fetch, no spinner.
+
+  /** Tile whose hover card is showing, or null. */
+  readonly hoverCell = signal<string | null>(null)
+  /** Viewport anchor of the card. Exactly ONE of left/right is set (the other
+   *  is null, which removes the binding): the card opens on whichever side of
+   *  the hovered chip has room, so it never covers the navigator row the
+   *  pointer is on — docked right it swings left, and in fullscreen (where the
+   *  navigator is the left column) it swings right. */
+  readonly hoverLeft = signal<number | null>(null)
+  readonly hoverRight = signal<number | null>(null)
+  readonly hoverTop = signal(0)
+
+  /** Card width used for the fits-on-this-side test. Mirrors the SCSS
+   *  `width: min(360px, 46vw)`. */
+  #peekWidth(): number { return Math.min(360, window.innerWidth * 0.46) }
+
+  #hoverOpenTimer: ReturnType<typeof setTimeout> | null = null
+  #hoverCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Flattened preview of a hovered tile's entries, depth-tagged so nesting
+   *  still reads, capped at HOVER_LIST_MAX rows. */
+  readonly hoverNotes = computed<readonly { id: string; text: string; kind: 'q' | 'a' | 'note'; mark: string | null; depth: number }[]>(() => {
+    const cell = this.hoverCell()
+    if (!cell) return []
+    const out: { id: string; text: string; kind: 'q' | 'a' | 'note'; mark: string | null; depth: number }[] = []
+    const walk = (list: readonly Note[], depth: number): void => {
+      for (const n of list) {
+        out.push({ id: n.id, text: this.noteDisplayText(n), kind: this.noteKind(n), mark: n.mark, depth })
+        walk(n.children, depth + 1)
+      }
+    }
+    walk(this.#allForCell(cell), 0)
+    return out
+  })
+
+  /** Rows actually rendered, and how many were left off. */
+  readonly hoverVisible = computed(() => this.hoverNotes().slice(0, HOVER_LIST_MAX))
+  readonly hoverOverflow = computed(() => Math.max(0, this.hoverNotes().length - HOVER_LIST_MAX))
+
+  /** Has the hovered tile been read yet? An unwarmed tile shows "reading…"
+   *  rather than an empty card that lies about the tile being empty. */
+  readonly hoverWarmed = computed<boolean>(() => {
+    const cell = this.hoverCell()
+    return !!cell && this.#warmed().has(cell)
+  })
+
+  onChipEnter(cell: string, event: PointerEvent): void {
+    // Touch/pen taps activate the tile — a hover card would just sit in the
+    // way with no pointer to dismiss it.
+    if (event.pointerType && event.pointerType !== 'mouse') return
+    this.#clearHoverTimers()
+    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+    this.#hoverOpenTimer = setTimeout(() => {
+      if (rect) {
+        // Side: prefer left of the chip (the strip docks right), but flip to
+        // the right when there isn't room — that's the fullscreen layout,
+        // where the navigator is the left column.
+        const width = this.#peekWidth()
+        if (rect.left - width - 10 >= 8) {
+          this.hoverRight.set(Math.round(window.innerWidth - rect.left + 10))
+          this.hoverLeft.set(null)
+        } else {
+          this.hoverLeft.set(Math.round(Math.min(rect.right + 10, window.innerWidth - width - 8)))
+          this.hoverRight.set(null)
+        }
+        // Anchor to the chip's row, then lift the card so a long list stays
+        // on screen instead of running off the bottom. Counts the FLATTENED
+        // tree — nested notes are rows in the card too.
+        const rows = Math.min(this.#flatCount(this.#allForCell(cell)), HOVER_LIST_MAX)
+        const estimated = 52 + rows * 22
+        this.hoverTop.set(Math.round(Math.max(8, Math.min(rect.top - 6, window.innerHeight - estimated - 12))))
+      }
+      this.hoverCell.set(cell)
+    }, HOVER_OPEN_DELAY)
+  }
+
+  onChipLeave(): void {
+    this.#clearHoverTimers()
+    this.#hoverCloseTimer = setTimeout(() => this.hoverCell.set(null), HOVER_CLOSE_DELAY)
+  }
+
+  /** Rows a note tree renders as — every node at every depth. */
+  #flatCount(list: readonly Note[]): number {
+    let n = 0
+    for (const note of list) n += 1 + this.#flatCount(note.children)
+    return n
+  }
+
+  #clearHoverTimers(): void {
+    if (this.#hoverOpenTimer) { clearTimeout(this.#hoverOpenTimer); this.#hoverOpenTimer = null }
+    if (this.#hoverCloseTimer) { clearTimeout(this.#hoverCloseTimer); this.#hoverCloseTimer = null }
+  }
+
   /**
    * Visible whenever the strip is explicitly open (via the control-bar Notes
    * toggle) or the user is authoring a note (capture mode). It NEVER opens on
@@ -1302,6 +1614,8 @@ export class NotesStripComponent implements OnDestroy {
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
+        this.#factsByCell.set(new Map())
+        this.hoverCell.set(null)
         // The active cell / capture target belong to the layer we just LEFT —
         // the same label resolves to a different location (or nothing) here.
         // Keeping them would pin the editor to a stale context and make the
@@ -1328,6 +1642,16 @@ export class NotesStripComponent implements OnDestroy {
     const onSync = (): void => this.#refreshLayerCellLabels()
     window.addEventListener('synchronize', onSync)
     this.#cleanups.push(() => window.removeEventListener('synchronize', onSync))
+
+    // A viewport resize moves the panel's own box (max-width, and fullscreen
+    // where it IS the viewport) — re-measure so the plate's form follows, and
+    // drop any open hover card, whose viewport anchor is now stale.
+    const onViewportResize = (): void => {
+      this.#measurePanel()
+      if (this.hoverCell()) { this.#clearHoverTimers(); this.hoverCell.set(null) }
+    }
+    window.addEventListener('resize', onViewportResize)
+    this.#cleanups.push(() => window.removeEventListener('resize', onViewportResize))
 
     // The polls above race the provider: CellSuggestionProvider refreshes its
     // names ASYNCHRONOUSLY after the same lineage-change / synchronize events,
@@ -1384,6 +1708,21 @@ export class NotesStripComponent implements OnDestroy {
         this.#notesServiceReady.set(true)
       })
     }
+
+    // The identity plate's picture follows the active tile. Tracks the facts
+    // map too, so a tile whose canonical props sig lands AFTER the switch
+    // (the warmup read is async) gets its hexagon filled in when it arrives
+    // rather than staying on the initial forever.
+    effect(() => {
+      const cell = this.cell()
+      const propsSig = cell ? (this.#factsByCell().get(cell)?.propsSig ?? null) : null
+      untracked(() => {
+        // A fresh props sig for the SAME cell (the tile's picture changed, or
+        // the first read landed) has to re-resolve, so drop the memo first.
+        if (cell === this.#plateImageCell && propsSig && !this.plateImage()) this.#plateImageCell = null
+        void this.#syncPlateImage(cell)
+      })
+    })
 
     // Reset Comb v2 transient state whenever the active cell switches.
     // The popovers are cell-scoped — letting them persist across navigation
@@ -1443,9 +1782,9 @@ export class NotesStripComponent implements OnDestroy {
         : ''
       const svc = this.#notes
       if (svc && cellLabel) {
-        const [fresh, qa] = await Promise.all([
+        const [fresh, facts] = await Promise.all([
           svc.getNotes(cellLabel),
-          this.#loadQaFor(cellLabel),
+          this.#loadCellFacts(cellLabel),
         ])
         this.#notesByCell.update(prev => {
           const next = new Map(prev)
@@ -1454,9 +1793,10 @@ export class NotesStripComponent implements OnDestroy {
         })
         this.#qaByCell.update(prev => {
           const next = new Map(prev)
-          next.set(cellLabel, qa)
+          next.set(cellLabel, facts.qa)
           return next
         })
+        this.#rememberFacts(cellLabel, facts)
         this.#warmed.update(prev => {
           if (prev.has(cellLabel)) return prev
           const next = new Set(prev)
@@ -1578,8 +1918,8 @@ export class NotesStripComponent implements OnDestroy {
         // render pass, not two.
         void Promise.all([
           svc.getNotes(target),
-          this.#loadQaFor(target),
-        ]).then(([notes, qa]) => {
+          this.#loadCellFacts(target),
+        ]).then(([notes, facts]) => {
           this.#notesByCell.update(prev => {
             const next = new Map(prev)
             next.set(target, notes.slice())
@@ -1587,9 +1927,10 @@ export class NotesStripComponent implements OnDestroy {
           })
           this.#qaByCell.update(prev => {
             const next = new Map(prev)
-            next.set(target, qa)
+            next.set(target, facts.qa)
             return next
           })
+          this.#rememberFacts(target, facts)
           this.#warmed.update(prev => {
             if (prev.has(target)) return prev
             const next = new Set(prev)
@@ -1611,18 +1952,37 @@ export class NotesStripComponent implements OnDestroy {
    *  JSON; inflate returns the parsed object for sig values. Failures
    *  silently return `[]` — the strip degrades to showing notes only
    *  rather than throwing on a missing service. */
-  async #loadQaFor(cell: string): Promise<readonly QaItem[]> {
+  /** Store the structural half of a facts read (the qa half goes to its own
+   *  map, which the merge path already owns). */
+  #rememberFacts(cell: string, facts: CellFacts): void {
+    this.#factsByCell.update(prev => {
+      const next = new Map(prev)
+      next.set(cell, { childCount: facts.childCount, propsSig: facts.propsSig })
+      return next
+    })
+  }
+
+  async #loadCellFacts(cell: string): Promise<CellFacts> {
+    const empty: CellFacts = { qa: [], childCount: 0, propsSig: null }
     const history = window.ioc?.get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
     const store = window.ioc?.get<StoreLike>('@hypercomb.social/Store')
-    if (!history || !store) return []
+    if (!history || !store) return empty
     const lineage = window.ioc?.get<LineageLike>('@hypercomb.social/Lineage')
     const parent = lineage?.explorerSegments?.() ?? []
     const segments = [...parent, cell]
     try {
       const locSig = await history.sign({ explorerSegments: () => segments })
       const layer = await history.currentLayerAt(locSig)
-      const raw = layer && (layer as { qa?: unknown }).qa
-      if (!Array.isArray(raw)) return []
+      if (!layer) return empty
+      // Structure + picture, straight off the layer already in hand.
+      const children = (layer as { children?: unknown }).children
+      const childCount = Array.isArray(children) ? children.length : 0
+      const properties = (layer as { properties?: unknown }).properties
+      const head = Array.isArray(properties) ? properties[0] : undefined
+      const propsSig = (typeof head === 'string' && SIG_RE.test(head)) ? head : null
+
+      const raw = (layer as { qa?: unknown }).qa
+      if (!Array.isArray(raw)) return { qa: [], childCount, propsSig }
       const items: QaItem[] = []
       for (const sig of raw) {
         if (typeof sig !== 'string') continue
@@ -1636,15 +1996,21 @@ export class NotesStripComponent implements OnDestroy {
           }
         } catch { /* skip bad resource */ }
       }
-      return items
+      return { qa: items, childCount, propsSig }
     } catch {
-      return []
+      return empty
     }
   }
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#selectionListener?.()
+    // Object-URLs and pending hover timers are ours to release — a remount
+    // otherwise leaks a blob per tile visited and can pop a card into a
+    // torn-down view.
+    this.#plateToken++
+    this.#revokePlateImage()
+    this.#clearHoverTimers()
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = null
     this.#observingEl = null
@@ -1691,6 +2057,9 @@ export class NotesStripComponent implements OnDestroy {
     this.#resizeObserver?.disconnect()
     this.#observingEl = el!
     this.#applyStoredDimensions(el!)
+    // Seed the width before the first observer callback so the plate's first
+    // paint is measured, not guessed.
+    this.#measurePanel()
     this.#observePanelResize(el!)
   }
 
@@ -1712,6 +2081,12 @@ export class NotesStripComponent implements OnDestroy {
   #observePanelResize(el: HTMLElement): void {
     let savePending = false
     this.#resizeObserver = new ResizeObserver((entries) => {
+      // Width tracking runs BEFORE every persistence guard below: the identity
+      // plate has to follow the panel even while dimensions are being applied
+      // and while fullscreen (where the panel is widest and the plate matters
+      // most, but nothing may be written to the user's stored size).
+      const last = entries[entries.length - 1]
+      if (last) this.#panelWidth.set(Math.round(last.contentRect.width))
       if (this.#applyingDimensions) return
       // Never persist while fullscreen — the size is forced by the
       // !important rules, not the user's docked preference, and

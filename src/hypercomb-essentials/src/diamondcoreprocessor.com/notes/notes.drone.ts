@@ -30,6 +30,25 @@
 // propagates to root via the standard merkle cascade.
 
 import { EffectBus } from '@hypercomb/core'
+import {
+  insertAsChild,
+  normalizeMark,
+  normalizeShape,
+  removeFromTree,
+  setMarkInTree,
+  splitInTree,
+  subtreeContains,
+  type Note,
+  type NoteLayer,
+  type NotePart,
+  type ShapeId,
+} from './note-tree.js'
+
+// Re-exported so consumers keep importing the note shapes from the module
+// that owns the service. The definitions live in note-tree.ts because the
+// tree algebra needs them and must stay importable without booting
+// NotesService (this module registers into window.ioc at import time).
+export type { Note, NotePart, ShapeId } from './note-tree.js'
 
 const NOTES_TRIGGER = 'notes:changed'
 const NOTES_SLOT = 'notes'
@@ -63,60 +82,6 @@ type LayerCommitterLike = {
 
 type LayerSlotRegistryLike = {
   register: (slot: { slot: string; triggers: readonly string[] }) => void
-}
-
-/** Allowed shape tag values. Used as a presentation hint by the strip
- *  and viewer; null means "no tag, render as plain text only".
- *  Names are deliberately concrete (no `kind` / `category`) — they map
- *  1:1 to the CSS-drawn shape classes that paint the glyph. */
-export type ShapeId = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'hexagon'
-
-const SHAPE_IDS: ReadonlySet<string> = new Set<string>([
-  'circle', 'square', 'triangle', 'diamond', 'star', 'hexagon',
-])
-
-function normalizeShape(value: unknown): ShapeId | null {
-  return typeof value === 'string' && SHAPE_IDS.has(value) ? (value as ShapeId) : null
-}
-
-/** A note's MARK — a Material icon name from the participant's own mark
- *  palette (the sign('notes:marks') pool). The note stores only the icon
- *  name; what it MEANS, and whether it makes the row a heading or a list
- *  item, lives on the palette entry, so re-roling an icon restyles every
- *  note carrying it.
- *
- *  Supersedes `shape` (the fixed six-glyph set) for new notes. `shape` is
- *  kept on the layer so notes written before marks existed still paint. */
-const MARK_RE = /^[a-z0-9_]{1,48}$/
-
-function normalizeMark(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const clean = value.trim()
-  return MARK_RE.test(clean) ? clean : null
-}
-
-/** Storage shape on disk — the canonical JSON every note blob holds. */
-type NoteLayer = {
-  note: string
-  shape: ShapeId | null
-  mark: string | null
-  children: string[]
-}
-
-/**
- * Consumer-facing note shape (notes-strip, notes-viewer, etc).
- *
- * `id` is the note's layer signature — stable for the lifetime of those
- * exact bytes. Edit the text → new layer → new sig → consumers will see
- * a different `id` for the edited version. There is no separate
- * "identity across edits" concept; each version is its own entity.
- */
-export type Note = {
-  id: string
-  text: string
-  shape: ShapeId | null
-  mark: string | null
-  children: Note[]
 }
 
 /**
@@ -271,6 +236,23 @@ export class NotesService {
       (payload) => {
         if (!payload?.cellLabel || !payload?.noteId) return
         void this.#markNote(payload.cellLabel, payload.noteId, normalizeMark(payload.mark))
+      },
+    )
+
+    // Break one note into a one-line head plus a sub-note per part, in
+    // place. The note keeps its position, its mark and any children it
+    // already had. One layer for the whole split — see `splitAtSegments`.
+    EffectBus.on<{ cellLabel: string; noteId: string; head: string; parts?: unknown }>(
+      'note:split',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.noteId) return
+        if (!Array.isArray(payload.parts)) return
+        void this.#splitNote(
+          payload.cellLabel,
+          payload.noteId,
+          payload.head,
+          payload.parts as readonly (string | NotePart)[],
+        )
       },
     )
   }
@@ -448,6 +430,36 @@ export class NotesService {
     await this.#markNoteAtSegments([...cleanedParents, cleanedLabel], cleanedSig, normalizeMark(mark))
   }
 
+  /**
+   * Break `noteId` into a one-line head plus one sub-note per part, at an
+   * explicit cell location. Headless equivalent of the `note:split`
+   * EffectBus handler, and the call a bulk breakdown pass makes.
+   *
+   * The note is replaced IN PLACE: it keeps its slot position, its mark,
+   * its legacy shape, and every child it already had (the parts land
+   * ahead of them). One awaited cascade, so a split is ONE layer in
+   * history no matter how many parts it produced.
+   *
+   * No-op when the note isn't in this cell, when `head` is blank, or
+   * when no part survives trimming — see `splitInTree` for why each of
+   * those refuses rather than guesses.
+   */
+  public async splitAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteId: string,
+    head: string,
+    parts: readonly (string | NotePart)[],
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedSig = String(noteId ?? '').trim()
+    if (!cleanedLabel || !cleanedSig) return
+    await this.#splitNoteAtSegments([...cleanedParents, cleanedLabel], cleanedSig, head, parts)
+  }
+
   // ── Internal: commit + delete + tree-move flows ──────────────────
 
   async #commit(cellLabel: string, text: string, shape: ShapeId | null, mark: string | null, editId?: string): Promise<void> {
@@ -571,6 +583,40 @@ export class NotesService {
     const tree = await this.#readAtLocation(locSig)
     const { tree: nextTree, changed } = setMarkInTree(tree, noteId, mark)
     if (!changed) return  // node not in this cell, or already carries that mark
+    const rootSigs: string[] = []
+    for (const node of nextTree) {
+      rootSigs.push(await this.#materializeNote(node))
+    }
+    await this.#commitCellNotes(segments, () => rootSigs)
+  }
+
+  async #splitNote(
+    cellLabel: string,
+    noteId: string,
+    head: string,
+    parts: readonly (string | NotePart)[],
+  ): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#splitNoteAtSegments(resolved.segments, noteId, head, parts)
+  }
+
+  /**
+   * Split one node of the cell's tree. Same shape as `#markNoteAtSegments`:
+   * read the tree, transform it purely, re-materialize from leaves up so
+   * every untouched subtree dedups back to its existing sig, commit once.
+   * Only the split node's branch mints new bytes.
+   */
+  async #splitNoteAtSegments(
+    segments: readonly string[],
+    noteId: string,
+    head: string,
+    parts: readonly (string | NotePart)[],
+  ): Promise<void> {
+    const locSig = await this.#locSig(segments)
+    const tree = await this.#readAtLocation(locSig)
+    const { tree: nextTree, changed } = splitInTree(tree, noteId, head, parts)
+    if (!changed) return  // node not in this cell, blank head, or no usable parts
     const rootSigs: string[] = []
     for (const node of nextTree) {
       rootSigs.push(await this.#materializeNote(node))
@@ -798,135 +844,6 @@ export class NotesService {
       localStorage.removeItem(key)
     }
   }
-}
-
-/**
- * Walk `tree` and return a new tree without the first occurrence of
- * `noteId`, alongside the removed node (if any). Operates immutably —
- * input arrays / objects are untouched. Used by tree-mutating flows
- * that re-materialize the modified tree afterwards.
- */
-function removeFromTree(
-  tree: readonly Note[],
-  noteId: string,
-): { tree: readonly Note[]; removed: Note | null } {
-  let removed: Note | null = null
-  const walk = (nodes: readonly Note[]): readonly Note[] => {
-    const next: Note[] = []
-    for (const n of nodes) {
-      if (removed) {
-        // Already found the target this walk; just copy the rest.
-        next.push(n)
-        continue
-      }
-      if (n.id === noteId) {
-        removed = n
-        continue  // drop this node
-      }
-      const newChildren = walk(n.children)
-      if (newChildren !== n.children) {
-        next.push({ ...n, children: newChildren as Note[] })
-      } else {
-        next.push(n)
-      }
-    }
-    return next
-  }
-  const nextTree = walk(tree)
-  return { tree: nextTree, removed }
-}
-
-/**
- * Insert `node` as the last child of the first occurrence of
- * `targetParentId` in `tree`. Returns the new tree and a flag
- * indicating whether the parent was found. Immutable — input arrays /
- * objects untouched.
- */
-function insertAsChild(
-  tree: readonly Note[],
-  targetParentId: string,
-  node: Note,
-): { tree: readonly Note[]; placed: boolean } {
-  let placed = false
-  const walk = (nodes: readonly Note[]): readonly Note[] => {
-    const next: Note[] = []
-    for (const n of nodes) {
-      if (placed) {
-        next.push(n)
-        continue
-      }
-      if (n.id === targetParentId) {
-        placed = true
-        next.push({ ...n, children: [...n.children, node] })
-        continue
-      }
-      const newChildren = walk(n.children)
-      if (newChildren !== n.children) {
-        next.push({ ...n, children: newChildren as Note[] })
-      } else {
-        next.push(n)
-      }
-    }
-    return next
-  }
-  const nextTree = walk(tree)
-  return { tree: nextTree, placed }
-}
-
-/**
- * Return a new tree with the first occurrence of `noteId` carrying
- * `mark` (null clears it). `changed` is false when the node isn't in the
- * tree or already carries exactly that mark — the caller skips the commit
- * so a no-op drag doesn't mint a history entry. Immutable.
- */
-function setMarkInTree(
-  tree: readonly Note[],
-  noteId: string,
-  mark: string | null,
-): { tree: readonly Note[]; changed: boolean } {
-  let changed = false
-  let found = false
-  const walk = (nodes: readonly Note[]): readonly Note[] => {
-    const next: Note[] = []
-    for (const n of nodes) {
-      if (found) {
-        next.push(n)
-        continue
-      }
-      if (n.id === noteId) {
-        found = true
-        if (n.mark === mark) {
-          next.push(n)
-        } else {
-          changed = true
-          next.push({ ...n, mark })
-        }
-        continue
-      }
-      const newChildren = walk(n.children)
-      if (newChildren !== n.children) {
-        next.push({ ...n, children: newChildren as Note[] })
-      } else {
-        next.push(n)
-      }
-    }
-    return next
-  }
-  const nextTree = walk(tree)
-  return { tree: nextTree, changed }
-}
-
-/**
- * Whether `node` or any of its descendants has id `targetId`. Used to
- * reject nest operations that would create a cycle (moving a parent
- * underneath one of its own descendants).
- */
-function subtreeContains(node: Note, targetId: string): boolean {
-  if (node.id === targetId) return true
-  for (const child of node.children) {
-    if (subtreeContains(child, targetId)) return true
-  }
-  return false
 }
 
 function canonicalJSON(value: unknown): string {

@@ -201,7 +201,12 @@ export class TutorViewDrone extends Drone {
 
     const host = document.createElement('div')
     host.id = 'hc-tutor-view-host'
-    host.style.cssText = 'position:fixed;inset:0;z-index:59988;overflow:hidden;background:#05040f;'
+    // Inset by any docked panel's reservation (`--hc-inset-<side>`) so the Views
+    // window can stay open beside the study surface.
+    host.style.cssText =
+      'position:fixed;top:0;bottom:0;' +
+      'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
+      'z-index:59988;overflow:hidden;background:#05040f;'
     // Opt out of the always-on hex wheel-zoom handler — the shell owns its
     // own surface; without this the zoom handler preventDefaults wheel events.
     host.setAttribute('data-consumes-wheel', '')

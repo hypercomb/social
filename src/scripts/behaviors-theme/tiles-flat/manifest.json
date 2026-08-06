@@ -1,0 +1,2750 @@
+{
+ "behaviors": {
+  "file": "behaviors.png",
+  "tier": "root",
+  "color": "#d9a514",
+  "glyph": "hive"
+ },
+ "behaviors/games": {
+  "file": "behaviors__games.png",
+  "tier": "collection",
+  "color": "#c05b4d",
+  "glyph": "sports_esports"
+ },
+ "behaviors/games/arkanoid": {
+  "file": "behaviors__games__arkanoid.png",
+  "tier": "behavior",
+  "color": "#c05b4d",
+  "glyph": "apps"
+ },
+ "behaviors/games/arkanoid/arkanoid-drone": {
+  "file": "behaviors__games__arkanoid__arkanoid-drone.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/engine": {
+  "file": "behaviors__games__arkanoid__engine.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/renderer": {
+  "file": "behaviors__games__arkanoid__renderer.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/overlay": {
+  "file": "behaviors__games__arkanoid__overlay.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/levels": {
+  "file": "behaviors__games__arkanoid__levels.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/designer": {
+  "file": "behaviors__games__arkanoid__designer.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/selftest": {
+  "file": "behaviors__games__arkanoid__selftest.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/theme": {
+  "file": "behaviors__games__arkanoid__theme.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/register-themes": {
+  "file": "behaviors__games__arkanoid__register-themes.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/neon-grid": {
+  "file": "behaviors__games__arkanoid__neon-grid.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/haunted-keep": {
+  "file": "behaviors__games__arkanoid__haunted-keep.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/arkanoid/space-madness": {
+  "file": "behaviors__games__arkanoid__space-madness.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/bubble": {
+  "file": "behaviors__games__bubble.png",
+  "tier": "behavior",
+  "color": "#c05b4d",
+  "glyph": "bubble_chart"
+ },
+ "behaviors/games/bubble/bubble-drone": {
+  "file": "behaviors__games__bubble__bubble-drone.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/bubble/engine": {
+  "file": "behaviors__games__bubble__engine.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/bubble/renderer": {
+  "file": "behaviors__games__bubble__renderer.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/bubble/overlay": {
+  "file": "behaviors__games__bubble__overlay.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/bubble/levels": {
+  "file": "behaviors__games__bubble__levels.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/bubble/designer": {
+  "file": "behaviors__games__bubble__designer.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/bubble/selftest": {
+  "file": "behaviors__games__bubble__selftest.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/roper": {
+  "file": "behaviors__games__roper.png",
+  "tier": "behavior",
+  "color": "#c05b4d",
+  "glyph": "gesture"
+ },
+ "behaviors/games/roper/roper-drone": {
+  "file": "behaviors__games__roper__roper-drone.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/roper/engine": {
+  "file": "behaviors__games__roper__engine.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/roper/renderer": {
+  "file": "behaviors__games__roper__renderer.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/roper/overlay": {
+  "file": "behaviors__games__roper__overlay.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon": {
+  "file": "behaviors__games__solomon.png",
+  "tier": "behavior",
+  "color": "#c05b4d",
+  "glyph": "castle"
+ },
+ "behaviors/games/solomon/solomon-drone": {
+  "file": "behaviors__games__solomon__solomon-drone.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon/engine": {
+  "file": "behaviors__games__solomon__engine.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon/renderer": {
+  "file": "behaviors__games__solomon__renderer.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon/overlay": {
+  "file": "behaviors__games__solomon__overlay.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon/levels": {
+  "file": "behaviors__games__solomon__levels.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon/designer": {
+  "file": "behaviors__games__solomon__designer.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon/overworld": {
+  "file": "behaviors__games__solomon__overworld.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/games/solomon/selftest": {
+  "file": "behaviors__games__solomon__selftest.png",
+  "tier": "part",
+  "color": "#c05b4d",
+  "glyph": "data_object"
+ },
+ "behaviors/views": {
+  "file": "behaviors__views.png",
+  "tier": "collection",
+  "color": "#4d7fae",
+  "glyph": "visibility"
+ },
+ "behaviors/views/tree": {
+  "file": "behaviors__views__tree.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "account_tree"
+ },
+ "behaviors/views/tree/tree-view-drone": {
+  "file": "behaviors__views__tree__tree-view-drone.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tree/tree-walk": {
+  "file": "behaviors__views__tree__tree-walk.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/present": {
+  "file": "behaviors__views__present.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "slideshow"
+ },
+ "behaviors/views/website": {
+  "file": "behaviors__views__website.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "web"
+ },
+ "behaviors/views/website/website-instances": {
+  "file": "behaviors__views__website__website-instances.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/website/website-archive-queen": {
+  "file": "behaviors__views__website__website-archive-queen.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/view": {
+  "file": "behaviors__views__view.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "visibility"
+ },
+ "behaviors/views/home": {
+  "file": "behaviors__views__home.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "home"
+ },
+ "behaviors/views/lightbox": {
+  "file": "behaviors__views__lightbox.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "photo_library"
+ },
+ "behaviors/views/tutor": {
+  "file": "behaviors__views__tutor.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "school"
+ },
+ "behaviors/views/tutor/deck": {
+  "file": "behaviors__views__tutor__deck.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tutor/recall-item": {
+  "file": "behaviors__views__tutor__recall-item.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tutor/scope-walk": {
+  "file": "behaviors__views__tutor__scope-walk.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tutor/deck-mark": {
+  "file": "behaviors__views__tutor__deck-mark.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tutor/study-session": {
+  "file": "behaviors__views__tutor__study-session.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tutor/spaced-repetition": {
+  "file": "behaviors__views__tutor__spaced-repetition.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tutor/ask-gate": {
+  "file": "behaviors__views__tutor__ask-gate.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/mobile": {
+  "file": "behaviors__views__mobile.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "smartphone"
+ },
+ "behaviors/views/mobile/mobile-mode-service": {
+  "file": "behaviors__views__mobile__mobile-mode-service.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/mobile/mobile-pheromones": {
+  "file": "behaviors__views__mobile__mobile-pheromones.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/mobile/mobile-roots": {
+  "file": "behaviors__views__mobile__mobile-roots.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver": {
+  "file": "behaviors__views__screensaver.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "wallpaper"
+ },
+ "behaviors/views/screensaver/screensaver-drone": {
+  "file": "behaviors__views__screensaver__screensaver-drone.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/styles": {
+  "file": "behaviors__views__screensaver__styles.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/hexagon-style": {
+  "file": "behaviors__views__screensaver__hexagon-style.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/circle-style": {
+  "file": "behaviors__views__screensaver__circle-style.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/thought-style": {
+  "file": "behaviors__views__screensaver__thought-style.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/bubble-style": {
+  "file": "behaviors__views__screensaver__bubble-style.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/motions": {
+  "file": "behaviors__views__screensaver__motions.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/motion": {
+  "file": "behaviors__views__screensaver__motion.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/bounce-motion": {
+  "file": "behaviors__views__screensaver__bounce-motion.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/screensaver/shooting-stars-motion": {
+  "file": "behaviors__views__screensaver__shooting-stars-motion.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tags": {
+  "file": "behaviors__views__tags.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "sell"
+ },
+ "behaviors/views/tags/bouquet-registry": {
+  "file": "behaviors__views__tags__bouquet-registry.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/tags/tags-viewer.component": {
+  "file": "behaviors__views__tags__tags-viewer.component.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/history": {
+  "file": "behaviors__views__history.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "history"
+ },
+ "behaviors/views/revise": {
+  "file": "behaviors__views__revise.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "edit_note"
+ },
+ "behaviors/views/versions": {
+  "file": "behaviors__views__versions.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "layers"
+ },
+ "behaviors/views/branch-scope": {
+  "file": "behaviors__views__branch-scope.png",
+  "tier": "behavior",
+  "color": "#4d7fae",
+  "glyph": "visibility"
+ },
+ "behaviors/views/branch-scope/visual-bee-registry": {
+  "file": "behaviors__views__branch-scope__visual-bee-registry.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/branch-scope/view-bee": {
+  "file": "behaviors__views__branch-scope__view-bee.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/branch-scope/tree-queen": {
+  "file": "behaviors__views__branch-scope__tree-queen.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/branch-scope/website-queen": {
+  "file": "behaviors__views__branch-scope__website-queen.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/views/branch-scope/command-shell-component": {
+  "file": "behaviors__views__branch-scope__command-shell-component.png",
+  "tier": "part",
+  "color": "#4d7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant": {
+  "file": "behaviors__assistant.png",
+  "tier": "collection",
+  "color": "#8a63c9",
+  "glyph": "smart_toy"
+ },
+ "behaviors/assistant/opus": {
+  "file": "behaviors__assistant__opus.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "auto_awesome"
+ },
+ "behaviors/assistant/sonnet": {
+  "file": "behaviors__assistant__sonnet.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "bolt"
+ },
+ "behaviors/assistant/haiku": {
+  "file": "behaviors__assistant__haiku.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "spa"
+ },
+ "behaviors/assistant/fable": {
+  "file": "behaviors__assistant__fable.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "auto_stories"
+ },
+ "behaviors/assistant/ask": {
+  "file": "behaviors__assistant__ask.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "help"
+ },
+ "behaviors/assistant/ask/host-ai-service": {
+  "file": "behaviors__assistant__ask__host-ai-service.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/chat": {
+  "file": "behaviors__assistant__chat.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "chat"
+ },
+ "behaviors/assistant/expand": {
+  "file": "behaviors__assistant__expand.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "unfold_more"
+ },
+ "behaviors/assistant/record": {
+  "file": "behaviors__assistant__record.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "mic"
+ },
+ "behaviors/assistant/record/recording-drone": {
+  "file": "behaviors__assistant__record__recording-drone.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/record/recording-types": {
+  "file": "behaviors__assistant__record__recording-types.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/record/transcription-provider": {
+  "file": "behaviors__assistant__record__transcription-provider.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/translate-sweep": {
+  "file": "behaviors__assistant__translate-sweep.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "translate"
+ },
+ "behaviors/assistant/workflow": {
+  "file": "behaviors__assistant__workflow.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "smart_toy"
+ },
+ "behaviors/assistant/workflow/workflow-author-drone": {
+  "file": "behaviors__assistant__workflow__workflow-author-drone.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/workflow/workflow-runner-drone": {
+  "file": "behaviors__assistant__workflow__workflow-runner-drone.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/workflow/workflow-view-drone": {
+  "file": "behaviors__assistant__workflow__workflow-view-drone.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/workflow/workflow-step": {
+  "file": "behaviors__assistant__workflow__workflow-step.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/workflow/workflow-step-registry": {
+  "file": "behaviors__assistant__workflow__workflow-step-registry.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/workflow/workflow-slot": {
+  "file": "behaviors__assistant__workflow__workflow-slot.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/workflow/workflow-ask": {
+  "file": "behaviors__assistant__workflow__workflow-ask.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents": {
+  "file": "behaviors__assistant__agents.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "smart_toy"
+ },
+ "behaviors/assistant/agents/agent-waggle": {
+  "file": "behaviors__assistant__agents__agent-waggle.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents/agent-model": {
+  "file": "behaviors__assistant__agents__agent-model.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents/agent-emblem": {
+  "file": "behaviors__assistant__agents__agent-emblem.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents/agent-registry": {
+  "file": "behaviors__assistant__agents__agent-registry.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents/agent-avatar": {
+  "file": "behaviors__assistant__agents__agent-avatar.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents/agent-bee": {
+  "file": "behaviors__assistant__agents__agent-bee.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents/agent-panel": {
+  "file": "behaviors__assistant__agents__agent-panel.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/agents/agent-progress-op": {
+  "file": "behaviors__assistant__agents__agent-progress-op.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/orchestrator": {
+  "file": "behaviors__assistant__orchestrator.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "smart_toy"
+ },
+ "behaviors/assistant/orchestrator/orchestrator-drone": {
+  "file": "behaviors__assistant__orchestrator__orchestrator-drone.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/orchestrator/orchestrator-sweep": {
+  "file": "behaviors__assistant__orchestrator__orchestrator-sweep.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills": {
+  "file": "behaviors__assistant__skills.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "smart_toy"
+ },
+ "behaviors/assistant/skills/hive-skills": {
+  "file": "behaviors__assistant__skills__hive-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/hive-skills/bridge-listen": {
+  "file": "behaviors__assistant__skills__hive-skills__bridge-listen.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/hive-skills/feedback-loop": {
+  "file": "behaviors__assistant__skills__hive-skills__feedback-loop.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/hive-skills/tutor-build": {
+  "file": "behaviors__assistant__skills__hive-skills__tutor-build.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/hive-skills/website-build": {
+  "file": "behaviors__assistant__skills__hive-skills__website-build.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills": {
+  "file": "behaviors__assistant__skills__anthropic-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/docx": {
+  "file": "behaviors__assistant__skills__anthropic-skills__docx.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/pdf": {
+  "file": "behaviors__assistant__skills__anthropic-skills__pdf.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/pptx": {
+  "file": "behaviors__assistant__skills__anthropic-skills__pptx.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/xlsx": {
+  "file": "behaviors__assistant__skills__anthropic-skills__xlsx.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/dataviz": {
+  "file": "behaviors__assistant__skills__anthropic-skills__dataviz.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/artifact-design": {
+  "file": "behaviors__assistant__skills__anthropic-skills__artifact-design.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/artifact-capabilities": {
+  "file": "behaviors__assistant__skills__anthropic-skills__artifact-capabilities.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/skill-creator": {
+  "file": "behaviors__assistant__skills__anthropic-skills__skill-creator.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/algorithmic-art": {
+  "file": "behaviors__assistant__skills__anthropic-skills__algorithmic-art.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/consolidate-memory": {
+  "file": "behaviors__assistant__skills__anthropic-skills__consolidate-memory.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/morning": {
+  "file": "behaviors__assistant__skills__anthropic-skills__morning.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/schedule": {
+  "file": "behaviors__assistant__skills__anthropic-skills__schedule.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/anthropic-skills/setup-cowork": {
+  "file": "behaviors__assistant__skills__anthropic-skills__setup-cowork.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills": {
+  "file": "behaviors__assistant__skills__harness-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/loop": {
+  "file": "behaviors__assistant__skills__harness-skills__loop.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/run": {
+  "file": "behaviors__assistant__skills__harness-skills__run.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/init": {
+  "file": "behaviors__assistant__skills__harness-skills__init.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/review": {
+  "file": "behaviors__assistant__skills__harness-skills__review.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/security-review": {
+  "file": "behaviors__assistant__skills__harness-skills__security-review.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/simplify": {
+  "file": "behaviors__assistant__skills__harness-skills__simplify.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/claude-api": {
+  "file": "behaviors__assistant__skills__harness-skills__claude-api.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/update-config": {
+  "file": "behaviors__assistant__skills__harness-skills__update-config.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/keybindings-help": {
+  "file": "behaviors__assistant__skills__harness-skills__keybindings-help.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/fewer-permission-prompts": {
+  "file": "behaviors__assistant__skills__harness-skills__fewer-permission-prompts.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/harness-skills/automation-recommender": {
+  "file": "behaviors__assistant__skills__harness-skills__automation-recommender.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills": {
+  "file": "behaviors__assistant__skills__community-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/superpowers": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__superpowers.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/karpathy-guard": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__karpathy-guard.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/test-driven-development": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__test-driven-development.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/subagent-driven-development": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__subagent-driven-development.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/get-shit-done": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__get-shit-done.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/brainstorming": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__brainstorming.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/software-architecture": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__software-architecture.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/root-cause-tracing": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__root-cause-tracing.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/using-git-worktrees": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__using-git-worktrees.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/finishing-a-development-branch": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__finishing-a-development-branch.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/review-implementing": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__review-implementing.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/test-fixing": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__test-fixing.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/kaizen": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__kaizen.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/truth-first": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__truth-first.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/codex-grade-coding": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__codex-grade-coding.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/engineering-method/overkill": {
+  "file": "behaviors__assistant__skills__community-skills__engineering-method__overkill.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/code-reviewer": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__code-reviewer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/git-commit-writer": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__git-commit-writer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/pr-description-writer": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__pr-description-writer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/changelog-generator": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__changelog-generator.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/readme-generator": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__readme-generator.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/env-doctor": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__env-doctor.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/git-pushing": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__git-pushing.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/code-workflow/prompt-engineer": {
+  "file": "behaviors__assistant__skills__community-skills__code-workflow__prompt-engineer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/frontend-design": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__frontend-design.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/web-artifacts-builder": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__web-artifacts-builder.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/ui-ux-pro-max": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__ui-ux-pro-max.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/anydesign": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__anydesign.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/shadcn-ui": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__shadcn-ui.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/canvas-design": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__canvas-design.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/theme-factory": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__theme-factory.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/web-asset-generator": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__web-asset-generator.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/d3js-visualization": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__d3js-visualization.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/frontend-slides": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__frontend-slides.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/swiftui-design": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__swiftui-design.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/design-frontend/brand-guidelines": {
+  "file": "behaviors__assistant__skills__community-skills__design-frontend__brand-guidelines.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation/playwright-automation": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation__playwright-automation.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation/webapp-testing": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation__webapp-testing.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation/ios-simulator": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation__ios-simulator.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation/expo-skills": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation__expo-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation/chrome-relay": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation__chrome-relay.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation/full-page-screenshot": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation__full-page-screenshot.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/testing-automation/pypict-test-cases": {
+  "file": "behaviors__assistant__skills__community-skills__testing-automation__pypict-test-cases.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/security": {
+  "file": "behaviors__assistant__skills__community-skills__security.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/security/trail-of-bits-security": {
+  "file": "behaviors__assistant__skills__community-skills__security__trail-of-bits-security.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/security/ffuf-web-fuzzing": {
+  "file": "behaviors__assistant__skills__community-skills__security__ffuf-web-fuzzing.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/security/threat-hunting-sigma": {
+  "file": "behaviors__assistant__skills__community-skills__security__threat-hunting-sigma.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/security/computer-forensics": {
+  "file": "behaviors__assistant__skills__community-skills__security__computer-forensics.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/security/metadata-extraction": {
+  "file": "behaviors__assistant__skills__community-skills__security__metadata-extraction.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data": {
+  "file": "behaviors__assistant__skills__community-skills__research-data.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/deep-research": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__deep-research.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/recursive-research": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__recursive-research.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/scientific-skills": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__scientific-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/csv-summarizer": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__csv-summarizer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/postgres-readonly": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__postgres-readonly.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/tapestry": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__tapestry.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/notebooklm-integration": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__notebooklm-integration.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/langsmith-fetch": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__langsmith-fetch.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/article-extractor": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__article-extractor.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/youtube-transcript": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__youtube-transcript.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/research-data/reddit-fetch": {
+  "file": "behaviors__assistant__skills__community-skills__research-data__reddit-fetch.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/claude-seo": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__claude-seo.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/humanize-writing": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__humanize-writing.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/seo-optimizer": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__seo-optimizer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/content-research-writer": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__content-research-writer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/building-blog": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__building-blog.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/twitter-optimizer": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__twitter-optimizer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/internal-comms": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__internal-comms.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/content-seo/markdown-to-epub": {
+  "file": "behaviors__assistant__skills__community-skills__content-seo__markdown-to-epub.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/lead-research-assistant": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__lead-research-assistant.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/competitive-ads-extractor": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__competitive-ads-extractor.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/brand-build-library": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__brand-build-library.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/domain-brainstormer": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__domain-brainstormer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/tailored-resume": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__tailored-resume.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/invoice-organizer": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__invoice-organizer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/meeting-insights": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__meeting-insights.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/file-organizer": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__file-organizer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/solo-skills": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__solo-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/master-legal": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__master-legal.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/business-ops/ship-learn-next": {
+  "file": "behaviors__assistant__skills__community-skills__business-ops__ship-learn-next.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/media-creative": {
+  "file": "behaviors__assistant__skills__community-skills__media-creative.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/media-creative/imagen-generation": {
+  "file": "behaviors__assistant__skills__community-skills__media-creative__imagen-generation.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/media-creative/image-enhancer": {
+  "file": "behaviors__assistant__skills__community-skills__media-creative__image-enhancer.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/media-creative/pixelbin-media": {
+  "file": "behaviors__assistant__skills__community-skills__media-creative__pixelbin-media.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/media-creative/video-downloader": {
+  "file": "behaviors__assistant__skills__community-skills__media-creative__video-downloader.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/media-creative/slack-gif-creator": {
+  "file": "behaviors__assistant__skills__community-skills__media-creative__slack-gif-creator.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/composio-connect": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__composio-connect.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/mcp-builder": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__mcp-builder.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/skill-seekers": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__skill-seekers.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/n8n-skills": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__n8n-skills.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/google-workspace": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__google-workspace.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/openweb": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__openweb.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/jules-delegation": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__jules-delegation.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/outline-wiki": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__outline-wiki.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/loki-mode": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__loki-mode.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/great-cto": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__great-cto.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/septim-agents": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__septim-agents.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/community-skills/integration-orchestration/lean-ctx": {
+  "file": "behaviors__assistant__skills__community-skills__integration-orchestration__lean-ctx.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/skills/skills-window": {
+  "file": "behaviors__assistant__skills__skills-window.png",
+  "tier": "part",
+  "color": "#8a63c9",
+  "glyph": "data_object"
+ },
+ "behaviors/assistant/atomize": {
+  "file": "behaviors__assistant__atomize.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "smart_toy"
+ },
+ "behaviors/assistant/organize": {
+  "file": "behaviors__assistant__organize.png",
+  "tier": "behavior",
+  "color": "#8a63c9",
+  "glyph": "smart_toy"
+ },
+ "behaviors/swarm": {
+  "file": "behaviors__swarm.png",
+  "tier": "collection",
+  "color": "#4f9d6e",
+  "glyph": "hub"
+ },
+ "behaviors/swarm/observe": {
+  "file": "behaviors__swarm__observe.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "travel_explore"
+ },
+ "behaviors/swarm/domain": {
+  "file": "behaviors__swarm__domain.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "dns"
+ },
+ "behaviors/swarm/block-peer": {
+  "file": "behaviors__swarm__block-peer.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "block"
+ },
+ "behaviors/swarm/clear-mesh": {
+  "file": "behaviors__swarm__clear-mesh.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "wifi_off"
+ },
+ "behaviors/swarm/repush": {
+  "file": "behaviors__swarm__repush.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "sync"
+ },
+ "behaviors/swarm/host": {
+  "file": "behaviors__swarm__host.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "router"
+ },
+ "behaviors/swarm/invite": {
+  "file": "behaviors__swarm__invite.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "person_add"
+ },
+ "behaviors/swarm/meeting": {
+  "file": "behaviors__swarm__meeting.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "groups"
+ },
+ "behaviors/swarm/meeting/meeting-drone": {
+  "file": "behaviors__swarm__meeting__meeting-drone.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/meeting/hive-meeting-drone": {
+  "file": "behaviors__swarm__meeting__hive-meeting-drone.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/meeting/meeting-peer": {
+  "file": "behaviors__swarm__meeting__meeting-peer.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/meeting/meeting-signaling": {
+  "file": "behaviors__swarm__meeting__meeting-signaling.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/meeting/meeting-audio": {
+  "file": "behaviors__swarm__meeting__meeting-audio.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/meeting/meeting-video-drone": {
+  "file": "behaviors__swarm__meeting__meeting-video-drone.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/meeting/meeting-controls-worker": {
+  "file": "behaviors__swarm__meeting__meeting-controls-worker.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/peer-images": {
+  "file": "behaviors__swarm__peer-images.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "hub"
+ },
+ "behaviors/swarm/peer-images/peer-images": {
+  "file": "behaviors__swarm__peer-images__peer-images.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/peer-images/image-choice-drone": {
+  "file": "behaviors__swarm__peer-images__image-choice-drone.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/peer-images/tile-images-drone": {
+  "file": "behaviors__swarm__peer-images__tile-images-drone.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/peer-images/i18n-catalogs": {
+  "file": "behaviors__swarm__peer-images__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/example-hives": {
+  "file": "behaviors__swarm__example-hives.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "hub"
+ },
+ "behaviors/swarm/example-hives/example-hives-worker": {
+  "file": "behaviors__swarm__example-hives__example-hives-worker.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/example-hives/offer-card": {
+  "file": "behaviors__swarm__example-hives__offer-card.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/example-hives/example-hives-roster": {
+  "file": "behaviors__swarm__example-hives__example-hives-roster.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/example-hives/i18n-catalogs": {
+  "file": "behaviors__swarm__example-hives__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/example-hives/empty-hive-prompt": {
+  "file": "behaviors__swarm__example-hives__empty-hive-prompt.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/example-hives/splash-handoff": {
+  "file": "behaviors__swarm__example-hives__splash-handoff.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/participant-filter": {
+  "file": "behaviors__swarm__participant-filter.png",
+  "tier": "behavior",
+  "color": "#4f9d6e",
+  "glyph": "hub"
+ },
+ "behaviors/swarm/participant-filter/swarm-filter-service": {
+  "file": "behaviors__swarm__participant-filter__swarm-filter-service.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/participant-filter/source-filter": {
+  "file": "behaviors__swarm__participant-filter__source-filter.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/participant-filter/render-guard": {
+  "file": "behaviors__swarm__participant-filter__render-guard.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/participant-filter/presence-badges": {
+  "file": "behaviors__swarm__participant-filter__presence-badges.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/swarm/participant-filter/i18n-catalogs": {
+  "file": "behaviors__swarm__participant-filter__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#4f9d6e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance": {
+  "file": "behaviors__appearance.png",
+  "tier": "collection",
+  "color": "#b06a9e",
+  "glyph": "palette"
+ },
+ "behaviors/appearance/accent": {
+  "file": "behaviors__appearance__accent.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "colorize"
+ },
+ "behaviors/appearance/canvas": {
+  "file": "behaviors__appearance__canvas.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "texture"
+ },
+ "behaviors/appearance/canvas/canvas-queen": {
+  "file": "behaviors__appearance__canvas__canvas-queen.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/canvas/canvas-background-service": {
+  "file": "behaviors__appearance__canvas__canvas-background-service.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/canvas/grid-lines-drone": {
+  "file": "behaviors__appearance__canvas__grid-lines-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/canvas/dropdown-swatch-map": {
+  "file": "behaviors__appearance__canvas__dropdown-swatch-map.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/canvas/dropdown-swatch-chip": {
+  "file": "behaviors__appearance__canvas__dropdown-swatch-chip.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/backgrounds": {
+  "file": "behaviors__appearance__backgrounds.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "image"
+ },
+ "behaviors/appearance/substrate": {
+  "file": "behaviors__appearance__substrate.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "grid_on"
+ },
+ "behaviors/appearance/substrate/substrate-organizer-drone": {
+  "file": "behaviors__appearance__substrate__substrate-organizer-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/substrate/substrate-service": {
+  "file": "behaviors__appearance__substrate__substrate-service.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/substrate/substrate-types": {
+  "file": "behaviors__appearance__substrate__substrate-types.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/substrate/pool-registry": {
+  "file": "behaviors__appearance__substrate__pool-registry.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/reroll": {
+  "file": "behaviors__appearance__reroll.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "casino"
+ },
+ "behaviors/appearance/theme": {
+  "file": "behaviors__appearance__theme.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "palette"
+ },
+ "behaviors/appearance/header": {
+  "file": "behaviors__appearance__header.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "web_asset"
+ },
+ "behaviors/appearance/format": {
+  "file": "behaviors__appearance__format.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "format_paint"
+ },
+ "behaviors/appearance/format/format-painter-drone": {
+  "file": "behaviors__appearance__format__format-painter-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/format/format-provider": {
+  "file": "behaviors__appearance__format__format-provider.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/text-only": {
+  "file": "behaviors__appearance__text-only.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "text_fields"
+ },
+ "behaviors/appearance/tile-icon-band": {
+  "file": "behaviors__appearance__tile-icon-band.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "palette"
+ },
+ "behaviors/appearance/tile-icon-band/hex-sdf-shader": {
+  "file": "behaviors__appearance__tile-icon-band__hex-sdf-shader.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/tile-icon-band/tile-overlay-drone": {
+  "file": "behaviors__appearance__tile-icon-band__tile-overlay-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/tile-icon-band/tile-actions-drone": {
+  "file": "behaviors__appearance__tile-icon-band__tile-actions-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/tile-icon-band/i18n-catalogs": {
+  "file": "behaviors__appearance__tile-icon-band__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/tile-icon-band/show-cell-drone": {
+  "file": "behaviors__appearance__tile-icon-band__show-cell-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/readiness-shade": {
+  "file": "behaviors__appearance__readiness-shade.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "palette"
+ },
+ "behaviors/appearance/readiness-shade/show-cell-drone": {
+  "file": "behaviors__appearance__readiness-shade__show-cell-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/readiness-shade/tile-overlay-drone": {
+  "file": "behaviors__appearance__readiness-shade__tile-overlay-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/readiness-shade/usage-tracker": {
+  "file": "behaviors__appearance__readiness-shade__usage-tracker.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/readiness-shade/usage-types": {
+  "file": "behaviors__appearance__readiness-shade__usage-types.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/readiness-shade/history-service": {
+  "file": "behaviors__appearance__readiness-shade__history-service.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/background": {
+  "file": "behaviors__appearance__background.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "landscape"
+ },
+ "behaviors/appearance/background/background-queen": {
+  "file": "behaviors__appearance__background__background-queen.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/background/background-theme-service": {
+  "file": "behaviors__appearance__background__background-theme-service.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/background/canvas-background-service": {
+  "file": "behaviors__appearance__background__canvas-background-service.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/background/grid-lines-drone": {
+  "file": "behaviors__appearance__background__grid-lines-drone.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/background/substrate-service": {
+  "file": "behaviors__appearance__background__substrate-service.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/background/dropdown-swatch-map": {
+  "file": "behaviors__appearance__background__dropdown-swatch-map.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/background/dropdown-swatch-chip": {
+  "file": "behaviors__appearance__background__dropdown-swatch-chip.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/behaviors-theme": {
+  "file": "behaviors__appearance__behaviors-theme.png",
+  "tier": "behavior",
+  "color": "#b06a9e",
+  "glyph": "auto_fix_high"
+ },
+ "behaviors/appearance/behaviors-theme/sweep": {
+  "file": "behaviors__appearance__behaviors-theme__sweep.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/behaviors-theme/walk": {
+  "file": "behaviors__appearance__behaviors-theme__walk.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/behaviors-theme/gen-behavior-tiles": {
+  "file": "behaviors__appearance__behaviors-theme__gen-behavior-tiles.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/behaviors-theme/push-tiles": {
+  "file": "behaviors__appearance__behaviors-theme__push-tiles.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/appearance/behaviors-theme/readme": {
+  "file": "behaviors__appearance__behaviors-theme__readme.png",
+  "tier": "part",
+  "color": "#b06a9e",
+  "glyph": "data_object"
+ },
+ "behaviors/structure": {
+  "file": "behaviors__structure.png",
+  "tier": "collection",
+  "color": "#8b909a",
+  "glyph": "account_tree"
+ },
+ "behaviors/structure/keyword": {
+  "file": "behaviors__structure__keyword.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "label"
+ },
+ "behaviors/structure/remove": {
+  "file": "behaviors__structure__remove.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "delete"
+ },
+ "behaviors/structure/move": {
+  "file": "behaviors__structure__move.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "open_with"
+ },
+ "behaviors/structure/move/move-drone": {
+  "file": "behaviors__structure__move__move-drone.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/move/desktop-move-input": {
+  "file": "behaviors__structure__move__desktop-move-input.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/move/touch-move-input": {
+  "file": "behaviors__structure__move__touch-move-input.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/move/layer-transfer-service": {
+  "file": "behaviors__structure__move__layer-transfer-service.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/arrange": {
+  "file": "behaviors__structure__arrange.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "dashboard_customize"
+ },
+ "behaviors/structure/swirl": {
+  "file": "behaviors__structure__swirl.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "cyclone"
+ },
+ "behaviors/structure/sequence": {
+  "file": "behaviors__structure__sequence.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "linear_scale"
+ },
+ "behaviors/structure/sequence/sequence-service": {
+  "file": "behaviors__structure__sequence__sequence-service.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/sequence/sequence-cycle-drone": {
+  "file": "behaviors__structure__sequence__sequence-cycle-drone.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/sequence/sequence-editor-bee": {
+  "file": "behaviors__structure__sequence__sequence-editor-bee.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/sequence/sequence-target": {
+  "file": "behaviors__structure__sequence__sequence-target.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/sequence/arrangements": {
+  "file": "behaviors__structure__sequence__arrangements.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/layout": {
+  "file": "behaviors__structure__layout.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "view_quilt"
+ },
+ "behaviors/structure/layout/layout-service": {
+  "file": "behaviors__structure__layout__layout-service.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/title": {
+  "file": "behaviors__structure__title.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "format_size"
+ },
+ "behaviors/structure/reference": {
+  "file": "behaviors__structure__reference.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "link"
+ },
+ "behaviors/structure/branch": {
+  "file": "behaviors__structure__branch.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "call_split"
+ },
+ "behaviors/structure/snapshot": {
+  "file": "behaviors__structure__snapshot.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "photo_camera"
+ },
+ "behaviors/structure/restore": {
+  "file": "behaviors__structure__restore.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "settings_backup_restore"
+ },
+ "behaviors/structure/dropbox": {
+  "file": "behaviors__structure__dropbox.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "inbox"
+ },
+ "behaviors/structure/contact": {
+  "file": "behaviors__structure__contact.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "contact_page"
+ },
+ "behaviors/structure/contact/contact-drone": {
+  "file": "behaviors__structure__contact__contact-drone.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/contact/contact-card": {
+  "file": "behaviors__structure__contact__contact-card.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/contact/contact-service": {
+  "file": "behaviors__structure__contact__contact-service.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/files": {
+  "file": "behaviors__structure__files.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "folder"
+ },
+ "behaviors/structure/clear": {
+  "file": "behaviors__structure__clear.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "clear_all"
+ },
+ "behaviors/structure/hive": {
+  "file": "behaviors__structure__hive.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "hive"
+ },
+ "behaviors/structure/builds": {
+  "file": "behaviors__structure__builds.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "account_tree"
+ },
+ "behaviors/structure/builds/builds-slot": {
+  "file": "behaviors__structure__builds__builds-slot.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/builds/seal-restore": {
+  "file": "behaviors__structure__builds__seal-restore.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/builds/builds-queen": {
+  "file": "behaviors__structure__builds__builds-queen.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/builds/claude-bridge-worker": {
+  "file": "behaviors__structure__builds__claude-bridge-worker.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/builds/build-revisions": {
+  "file": "behaviors__structure__builds__build-revisions.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/builds/audit-atomicity-cjs": {
+  "file": "behaviors__structure__builds__audit-atomicity-cjs.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/builds/doctrine-spec": {
+  "file": "behaviors__structure__builds__doctrine-spec.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/install-revisions": {
+  "file": "behaviors__structure__install-revisions.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "account_tree"
+ },
+ "behaviors/structure/install-revisions/revision-identity": {
+  "file": "behaviors__structure__install-revisions__revision-identity.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/install-revisions/tree-collapse": {
+  "file": "behaviors__structure__install-revisions__tree-collapse.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/install-revisions/section-collapse": {
+  "file": "behaviors__structure__install-revisions__section-collapse.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/install-revisions/sync-collapse": {
+  "file": "behaviors__structure__install-revisions__sync-collapse.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/install-revisions/identity-spec": {
+  "file": "behaviors__structure__install-revisions__identity-spec.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/install-revisions/dependency-naming": {
+  "file": "behaviors__structure__install-revisions__dependency-naming.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/folder-sync": {
+  "file": "behaviors__structure__folder-sync.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "account_tree"
+ },
+ "behaviors/structure/folder-sync/folder-sync-queen": {
+  "file": "behaviors__structure__folder-sync__folder-sync-queen.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/folder-sync/folder-sync-service": {
+  "file": "behaviors__structure__folder-sync__folder-sync-service.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/folder-sync/folder-sync-view": {
+  "file": "behaviors__structure__folder-sync__folder-sync-view.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/folder-sync/folder-sync-spec": {
+  "file": "behaviors__structure__folder-sync__folder-sync-spec.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/folder-sync/folder-sync-drain-spec": {
+  "file": "behaviors__structure__folder-sync__folder-sync-drain-spec.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/folder-sync/folder-sync-closure-spec": {
+  "file": "behaviors__structure__folder-sync__folder-sync-closure-spec.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/upgrade": {
+  "file": "behaviors__structure__upgrade.png",
+  "tier": "behavior",
+  "color": "#8b909a",
+  "glyph": "account_tree"
+ },
+ "behaviors/structure/upgrade/upgrade-pill": {
+  "file": "behaviors__structure__upgrade__upgrade-pill.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/upgrade/revision-name": {
+  "file": "behaviors__structure__upgrade__revision-name.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/upgrade/revision-name-proof": {
+  "file": "behaviors__structure__upgrade__revision-name-proof.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/upgrade/upgrade-queen": {
+  "file": "behaviors__structure__upgrade__upgrade-queen.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/upgrade/apply-update": {
+  "file": "behaviors__structure__upgrade__apply-update.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/structure/upgrade/update-check": {
+  "file": "behaviors__structure__upgrade__update-check.png",
+  "tier": "part",
+  "color": "#8b909a",
+  "glyph": "data_object"
+ },
+ "behaviors/input": {
+  "file": "behaviors__input.png",
+  "tier": "collection",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/voice": {
+  "file": "behaviors__input__voice.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "record_voice_over"
+ },
+ "behaviors/input/push-to-talk": {
+  "file": "behaviors__input__push-to-talk.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "mic"
+ },
+ "behaviors/input/language": {
+  "file": "behaviors__input__language.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "language"
+ },
+ "behaviors/input/i18n-override": {
+  "file": "behaviors__input__i18n-override.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "g_translate"
+ },
+ "behaviors/input/hold-to-enter": {
+  "file": "behaviors__input__hold-to-enter.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/hold-to-enter/tile-overlay-drone": {
+  "file": "behaviors__input__hold-to-enter__tile-overlay-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/hold-to-enter/collection-empty-prompt-drone": {
+  "file": "behaviors__input__hold-to-enter__collection-empty-prompt-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/hold-to-enter/i18n-catalogs": {
+  "file": "behaviors__input__hold-to-enter__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/quick-menu": {
+  "file": "behaviors__input__quick-menu.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/quick-menu/quick-menu-types": {
+  "file": "behaviors__input__quick-menu__quick-menu-types.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/quick-menu/quick-menu-registry-service": {
+  "file": "behaviors__input__quick-menu__quick-menu-registry-service.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/quick-menu/quick-menu-overlay": {
+  "file": "behaviors__input__quick-menu__quick-menu-overlay.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/quick-menu/quick-menu-input": {
+  "file": "behaviors__input__quick-menu__quick-menu-input.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/quick-menu/quickmenu-queen": {
+  "file": "behaviors__input__quick-menu__quickmenu-queen.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/quick-menu/i18n-catalogs": {
+  "file": "behaviors__input__quick-menu__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/camera": {
+  "file": "behaviors__input__camera.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/camera/camera-capture-component-html": {
+  "file": "behaviors__input__camera__camera-capture-component-html.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/camera/camera-capture-component-scss": {
+  "file": "behaviors__input__camera__camera-capture-component-scss.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/lane-ladder": {
+  "file": "behaviors__input__lane-ladder.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/lane-ladder/arrangements": {
+  "file": "behaviors__input__lane-ladder__arrangements.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/lane-ladder/lane-viewport-mode": {
+  "file": "behaviors__input__lane-ladder__lane-viewport-mode.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/lane-ladder/sequence-cycle-drone": {
+  "file": "behaviors__input__lane-ladder__sequence-cycle-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/lane-ladder/pinch-zoom-input": {
+  "file": "behaviors__input__lane-ladder__pinch-zoom-input.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/lane-ladder/lanes-queen": {
+  "file": "behaviors__input__lane-ladder__lanes-queen.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/view-row": {
+  "file": "behaviors__input__view-row.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/view-row/controls-bar": {
+  "file": "behaviors__input__view-row__controls-bar.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/view-row/select-mode-drone": {
+  "file": "behaviors__input__view-row__select-mode-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/view-row/i18n-catalogs": {
+  "file": "behaviors__input__view-row__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/touch-grammar": {
+  "file": "behaviors__input__touch-grammar.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/touch-grammar/tile-overlay-drone": {
+  "file": "behaviors__input__touch-grammar__tile-overlay-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/touch-grammar/quick-menu-input": {
+  "file": "behaviors__input__touch-grammar__quick-menu-input.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/touch-grammar/quick-menu-overlay": {
+  "file": "behaviors__input__touch-grammar__quick-menu-overlay.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/touch-grammar/tile-view-drone": {
+  "file": "behaviors__input__touch-grammar__tile-view-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/touch-grammar/i18n-catalogs": {
+  "file": "behaviors__input__touch-grammar__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/mobile-tile-menu": {
+  "file": "behaviors__input__mobile-tile-menu.png",
+  "tier": "behavior",
+  "color": "#579fa5",
+  "glyph": "keyboard"
+ },
+ "behaviors/input/mobile-tile-menu/tile-overlay-drone": {
+  "file": "behaviors__input__mobile-tile-menu__tile-overlay-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/mobile-tile-menu/tile-view-drone": {
+  "file": "behaviors__input__mobile-tile-menu__tile-view-drone.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/mobile-tile-menu/quick-menu-input": {
+  "file": "behaviors__input__mobile-tile-menu__quick-menu-input.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/mobile-tile-menu/controls-bar-component": {
+  "file": "behaviors__input__mobile-tile-menu__controls-bar-component.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/input/mobile-tile-menu/i18n-catalogs": {
+  "file": "behaviors__input__mobile-tile-menu__i18n-catalogs.png",
+  "tier": "part",
+  "color": "#579fa5",
+  "glyph": "data_object"
+ },
+ "behaviors/guidance": {
+  "file": "behaviors__guidance.png",
+  "tier": "collection",
+  "color": "#c98f2f",
+  "glyph": "school"
+ },
+ "behaviors/guidance/help": {
+  "file": "behaviors__guidance__help.png",
+  "tier": "behavior",
+  "color": "#c98f2f",
+  "glyph": "help_center"
+ },
+ "behaviors/guidance/docs": {
+  "file": "behaviors__guidance__docs.png",
+  "tier": "behavior",
+  "color": "#c98f2f",
+  "glyph": "menu_book"
+ },
+ "behaviors/guidance/tutorial": {
+  "file": "behaviors__guidance__tutorial.png",
+  "tier": "behavior",
+  "color": "#c98f2f",
+  "glyph": "flag"
+ },
+ "behaviors/guidance/debug": {
+  "file": "behaviors__guidance__debug.png",
+  "tier": "behavior",
+  "color": "#c98f2f",
+  "glyph": "bug_report"
+ },
+ "behaviors/guidance/atomize-ui": {
+  "file": "behaviors__guidance__atomize-ui.png",
+  "tier": "behavior",
+  "color": "#c98f2f",
+  "glyph": "science"
+ },
+ "behaviors/tool-windows": {
+  "file": "behaviors__tool-windows.png",
+  "tier": "collection",
+  "color": "#6b7fae",
+  "glyph": "web_asset"
+ },
+ "behaviors/tool-windows/window-settings": {
+  "file": "behaviors__tool-windows__window-settings.png",
+  "tier": "behavior",
+  "color": "#6b7fae",
+  "glyph": "web_asset"
+ },
+ "behaviors/tool-windows/window-settings/hc-docked-panel": {
+  "file": "behaviors__tool-windows__window-settings__hc-docked-panel.png",
+  "tier": "part",
+  "color": "#6b7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/tool-windows/window-settings/toolwindow": {
+  "file": "behaviors__tool-windows__window-settings__toolwindow.png",
+  "tier": "part",
+  "color": "#6b7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/tool-windows/window-group": {
+  "file": "behaviors__tool-windows__window-group.png",
+  "tier": "behavior",
+  "color": "#6b7fae",
+  "glyph": "web_asset"
+ },
+ "behaviors/tool-windows/window-group/panel-groups": {
+  "file": "behaviors__tool-windows__window-group__panel-groups.png",
+  "tier": "part",
+  "color": "#6b7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/tool-windows/notes": {
+  "file": "behaviors__tool-windows__notes.png",
+  "tier": "behavior",
+  "color": "#6b7fae",
+  "glyph": "web_asset"
+ },
+ "behaviors/tool-windows/clipboard": {
+  "file": "behaviors__tool-windows__clipboard.png",
+  "tier": "behavior",
+  "color": "#6b7fae",
+  "glyph": "web_asset"
+ },
+ "behaviors/tool-windows/drag-to-reanchor": {
+  "file": "behaviors__tool-windows__drag-to-reanchor.png",
+  "tier": "behavior",
+  "color": "#6b7fae",
+  "glyph": "web_asset"
+ },
+ "behaviors/tool-windows/drag-to-reanchor/notes-strip-component": {
+  "file": "behaviors__tool-windows__drag-to-reanchor__notes-strip-component.png",
+  "tier": "part",
+  "color": "#6b7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/tool-windows/drag-to-reanchor/notes-strip-template": {
+  "file": "behaviors__tool-windows__drag-to-reanchor__notes-strip-template.png",
+  "tier": "part",
+  "color": "#6b7fae",
+  "glyph": "data_object"
+ },
+ "behaviors/tool-windows/drag-to-reanchor/notes-strip-styles": {
+  "file": "behaviors__tool-windows__drag-to-reanchor__notes-strip-styles.png",
+  "tier": "part",
+  "color": "#6b7fae",
+  "glyph": "data_object"
+ }
+}

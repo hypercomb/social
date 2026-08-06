@@ -609,7 +609,13 @@ export class TreeViewDrone extends Drone {
 
   #mountShell(): void {
     const host = div(
-      `position:fixed;inset:0;z-index:${Z_BASE};overflow:auto;background:${INK};` +
+      // Sit BESIDE an open toolwindow instead of under it: the shell mirrors
+      // every docked panel's reservation into `--hc-inset-<side>` (see
+      // shared/core/viewport-inset-vars.ts), so the Views window can stay open
+      // while you flip between views. Both vars default to 0px = full screen.
+      'position:fixed;top:0;bottom:0;' +
+      'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
+      `z-index:${Z_BASE};overflow:auto;background:${INK};` +
       `color:${TEXT};font-family:inherit;overscroll-behavior:contain;`,
     )
     host.id = 'hc-tree-view-host'

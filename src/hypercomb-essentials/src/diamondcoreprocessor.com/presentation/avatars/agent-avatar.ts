@@ -26,7 +26,7 @@
 import { Rectangle, Texture } from 'pixi.js'
 import { AB_PALETTE, bakeBeeAtlas, beeImageUrl, type BeeEmblem, type BeePalette } from './bee-ab-atlas.js'
 import type { AgentKind } from './agent-waggle.js'
-import { identifyModel, isModelName, modelPalette } from './agent-model.js'
+import { brandToken, identifyModel, isModelName, modelPalette } from './agent-model.js'
 
 /** What a behaviour's avatar IS. Every field optional — an empty spec is a
  *  legitimate "just derive it from my name". */
@@ -84,7 +84,11 @@ export const avatarKeyOf = (agent: { behavior: string; model?: string; kind?: st
   (agent.kind === 'model' && agent.model) ? agent.model : agent.behavior
 
 const FRAMES = 8
-const CELL_PX = 96
+/** Baked cell size. Bigger than the swarm's 96 because an agent bee carries
+ *  its NAME on its abdomen: the livery is ~10% of the bee's height, so the
+ *  bake has to hold enough texture for those few pixels to survive being drawn
+ *  down to bee size. */
+const CELL_PX = 128
 
 type VisualBeeLike = { get?: (view: string) => { avatar?: AgentAvatarSpec } | undefined }
 type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
@@ -164,6 +168,19 @@ export class AgentAvatarRegistry extends EventTarget {
     return this.spec(behavior).emblem ?? (kind ? KIND_EMBLEM[kind] : 'none') ?? 'none'
   }
 
+  /** THE NAME THIS BEE WEARS, on its own abdomen. Branding is never a caption
+   *  beside the bee — a caption can be read against the wrong bee, and two
+   *  bees dancing near each other is the normal case, not the edge one. What
+   *  is painted on the creature cannot be mismatched to it.
+   *
+   *  A participant who has handed a behaviour a picture of its own
+   *  (`imageSig`) has said what it looks like, and this does not overrule
+   *  that: the livery is part of the drawing, so an avatar that is not the
+   *  drawing does not get one. */
+  brand(behavior: string): string {
+    return brandToken(behavior)
+  }
+
   /** The colours a behaviour's bee is drawn in. */
   palette(behavior: string): BeePalette {
     const spec = this.spec(behavior)
@@ -178,7 +195,7 @@ export class AgentAvatarRegistry extends EventTarget {
 
   /** A still of this behaviour's bee as a data URL, for DOM chrome. */
   imageUrl(behavior: string, px = 64, kind?: AgentKind): string {
-    return beeImageUrl(this.palette(behavior), px, this.emblem(behavior, kind))
+    return beeImageUrl(this.palette(behavior), px, this.emblem(behavior, kind), this.brand(behavior))
   }
 
   /** The flap frames to render for a behaviour. A behaviour carrying an
@@ -196,10 +213,11 @@ export class AgentAvatarRegistry extends EventTarget {
   #beeFrames(behavior: string, kind?: AgentKind): Promise<Texture[] | null> {
     const palette = this.palette(behavior)
     const emblem = this.emblem(behavior, kind)
-    const key = `${palette.body}|${palette.stripe}|${palette.head}|${palette.wing}|${emblem}`
+    const name = this.brand(behavior)
+    const key = `${palette.body}|${palette.stripe}|${palette.head}|${palette.wing}|${emblem}|${name}`
     let baked = this.#frames.get(key)
     if (!baked) {
-      baked = bakeBeeAtlas(FRAMES, CELL_PX, palette, emblem).then(atlas => {
+      baked = bakeBeeAtlas(FRAMES, CELL_PX, palette, emblem, name).then(atlas => {
         if (!atlas) return null
         const frames: Texture[] = []
         for (let i = 0; i < atlas.frames; i++) {

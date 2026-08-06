@@ -55,9 +55,9 @@ const SEG = ['behaviors', 'appearance', 'background']
 
 const SCENES = [
   'rolling hills', 'ocean waves', 'sunset', 'mountains', 'desert dunes',
-  'night sky', 'pine forest', 'birch woods', 'autumn maples', 'waterfall',
+  'drifting clouds', 'mossy river stones', 'birch woods', 'autumn maples', 'waterfall',
   'lake reflection', 'meadow flowers', 'aurora', 'tropical beach', 'canyon',
-  'winter pines', 'bamboo grove', 'misty valley', 'wheat field', 'cherry blossom',
+  'snowfall over drifts', 'bamboo grove', 'misty valley', 'wheat field', 'cherry blossom',
 ]
 
 // Each note carries an id so a later addition can be sent on its own —

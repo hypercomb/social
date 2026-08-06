@@ -383,9 +383,17 @@ export class TileOverlayDrone extends Drone {
   /** Either picking mode is armed: a press must not navigate and the trailing
    *  tap is an ADD-TO-SET toggle. The one thing both modes mean. */
   get #picking(): boolean { return this.#sampling || this.#selectMode }
+  /** The Pheromones window is open. While it is, the hive belongs to it: hover
+   *  pops that tile's keyword card, a dragged pheromone lands on the tile under
+   *  the release, and the brush paints. The hover band would sit on top of all
+   *  three, so it stands down for as long as the window is up — not just while
+   *  a takeover is armed. This one flag REPLACES a per-takeover visibility
+   *  check: closing the window disarms both takeovers (tags-viewer `close()`),
+   *  so "window open" already contains "removal armed" and "brush armed". */
+  #pheromoneWindowOpen = false
   /** A pheromone removal is armed (TagRemovalDrone): tile clicks stage and
-   *  unstage tiles instead of entering or opening them, and the icon overlay
-   *  stays out of the way. Cleared when the removal commits or is cancelled. */
+   *  unstage tiles instead of entering or opening them. Cleared when the
+   *  removal commits or is cancelled. */
   #tagRemovalArmed = false
   /** A pheromone APPLY brush is armed (PheromoneTilesDrone): the painter picked
    *  a keyword set to paint on. Same takeover as removal, but it is a BRUSH:
@@ -467,7 +475,7 @@ export class TileOverlayDrone extends Drone {
     'tile:public-changed',
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
-    'tags:removal-pending', 'tags:apply-pending',
+    'tags:view-state', 'tags:removal-pending', 'tags:apply-pending',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
   ]
@@ -981,11 +989,20 @@ export class TileOverlayDrone extends Drone {
         if (label) this.#navigateInto(label)
       })
 
+      // The Pheromones window claims the hive for as long as it is open — see
+      // #pheromoneWindowOpen. Nothing else here changes: clicks still route
+      // through the armed-takeover checks below, which are narrower.
+      this.onEffect<{ open?: boolean }>('tags:view-state', (payload) => {
+        this.#pheromoneWindowOpen = payload?.open === true
+        this.#updateVisibility()
+        this.#updatePerTileVisibility()
+      })
+
       // A staged pheromone removal takes over tile clicks: while it is armed,
       // clicking a tile stages/unstages it rather than entering or opening it.
       // Same shape as the selection takeover — presses stop navigating and the
       // click becomes a toggle — so the gesture is one the participant already
-      // knows. The overlay hides too: none of its actions apply mid-staging.
+      // knows. (The overlay is already down — the window is open.)
       this.onEffect<{ active?: boolean }>('tags:removal-pending', (payload) => {
         this.#tagRemovalArmed = payload?.active === true
         this.#updateVisibility()
@@ -994,9 +1011,9 @@ export class TileOverlayDrone extends Drone {
 
       // The apply brush is the additive twin of the removal takeover: while a
       // keyword set is armed, pressing/dragging over tiles STAGES them (see
-      // #beginApplyStroke / #onPointerMove) instead of navigating, the overlay
-      // steps aside, and the hive wears a paint cursor. `cells` is the staged
-      // set, mirrored so a press knows whether it is painting or lifting.
+      // #beginApplyStroke / #onPointerMove) instead of navigating, and the hive
+      // wears a paint cursor. `cells` is the staged set, mirrored so a press
+      // knows whether it is painting or lifting.
       this.onEffect<{ active?: boolean; cells?: string[] }>('tags:apply-pending', (payload) => {
         this.#tagApplyArmed = payload?.active === true
         this.#tagApplyStaged = new Set(Array.isArray(payload?.cells) ? payload!.cells : [])
@@ -3309,9 +3326,11 @@ export class TileOverlayDrone extends Drone {
     // at is on screen. Released when the hive comes back.
     if (this.#hiveHidden) { this.#overlay.visible = false; return }
 
-    // An armed pheromone removal / apply brush owns tile clicks — every icon
-    // here would be unreachable, so show none of them rather than dead ones.
-    if (this.#tagRemovalArmed || this.#tagApplyArmed) { this.#overlay.visible = false; return }
+    // The Pheromones window owns the hive while it is up — hover pops that
+    // tile's keyword card, and a drag or the brush lands on the tile under the
+    // pointer. The band would cover the card and eat the press, so it stands
+    // down for the whole session rather than only while a takeover is armed.
+    if (this.#pheromoneWindowOpen) { this.#overlay.visible = false; return }
 
     // Arrange mode: overlay stays visible
     if (this.#arrangeMode) {

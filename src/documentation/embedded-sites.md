@@ -78,10 +78,33 @@ There is no ancestor walk and no `manifest.pages[...]` lookup. The page
 resolves from the current cell's head layer; the decoration scan reads
 the website bee's declared `decorationKind` (`visual:website:page`) via
 `VisualBeeRegistry`. The renderer mounts the HTML inline in the live
-document (not a Shadow DOM): `<style>` and `<link rel="stylesheet">`
-nodes are lifted into `<head>` (tagged so unmount lifts exactly those),
-`<script>` nodes are recreated as live elements so they execute, and the
-`<body>` content is dropped into a fixed-position host div.
+document (not a Shadow DOM), as an **artifact**: it carries its own CSS,
+so it renders alone or beside another surface without either bleeding
+into the hive chrome or fighting the other page.
+
+- `<style>` blocks are rewritten by `scopeCellPageCss` (see
+  `presentation/tiles/cell-page-css-scope.ts`) so every rule is confined
+  to the page's host, and mounted INSIDE that host — not in `<head>`.
+  The page's own roots become the host, because inside the artifact the
+  host is the page root: `body { … }` → `#hc-site-view-host { … }`,
+  `html.dark body { … }` → `#hc-site-view-host.dark { … }`, everything
+  else is prefixed. `@media` / `@supports` / `@container` / `@layer`
+  bodies are recursed into; `@keyframes`, `@font-face`, `@property`,
+  `@import` and friends pass through untouched.
+- A page states its theme by writing on its root
+  (`documentElement.classList.add('dark')`, `<html data-theme>`), so the
+  mount mirrors `class` and `data-theme` from `<html>`/`<body>` onto the
+  host with a `MutationObserver`. The page's authored root classes ride
+  on the host too. Without the mirror, scoping would silently break
+  every in-page theme toggle.
+- `<link rel="stylesheet">` is still hoisted into `<head>` — an external
+  sheet is fetched, so its text can't be rewritten. A page that wants to
+  travel as an artifact should inline its styles.
+- `<script>` nodes are recreated as live elements so they execute, and
+  the `<body>` content is dropped into a fixed-position host div. The
+  host is inset by `--hc-inset-left` / `--hc-inset-right` (the CSS mirror
+  of the `viewport:inset` contract), so an open toolwindow sits beside
+  the page rather than over it.
 
 The resource service worker (`hypercomb.worker.js`) serves
 `/@resource/<sig>` from the OPFS root `<sig>` file (legacy `__hive__/`

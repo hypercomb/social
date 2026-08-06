@@ -213,6 +213,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'note-add':     return this.#noteAdd(req)
       case 'note-list':    return this.#noteList(req)
       case 'note-delete':  return this.#noteDelete(req)
+      case 'note-split':   return this.#noteSplit(req)
       case 'notes-digest': return this.#notesDigest(req)
       case 'list-at':      return this.#listAt(req)
       case 'inflate':      return this.#inflate(req)
@@ -1051,6 +1052,12 @@ export class ClaudeBridgeWorker extends Worker {
   // Append a note to a cell at explicit segments. Calls
   // NotesService.addAtSegments — same upsert path as user-typed notes.
   // Headless: no dependency on the current navigation lineage.
+  //
+  // `mark` is the icon from the participant's own palette, and it is what
+  // decides whether the row reads as a POINT (a constrained line carrying
+  // structure) or a NOTE (prose) — the role lives on the palette entry, not
+  // here, so this passes the icon through and classifies nothing itself.
+  // Optional: without it the row is unmarked, exactly as before.
   async #noteAdd(req: BridgeRequest): Promise<BridgeResponse> {
     const cell = req.cell
     const text = req.text
@@ -1061,14 +1068,78 @@ export class ClaudeBridgeWorker extends Worker {
     if (typeof text !== 'string' || !text) {
       return { id: req.id, ok: false, error: 'missing note text' }
     }
+    const mark = typeof (req as { mark?: unknown }).mark === 'string'
+      ? (req as { mark: string }).mark
+      : null
     const notes = get<{
-      addAtSegments?: (s: readonly string[], c: string, t: string) => Promise<void>
+      addAtSegments?: (
+        s: readonly string[], c: string, t: string,
+        shape?: unknown, mark?: string | null,
+      ) => Promise<void>
     }>('@diamondcoreprocessor.com/NotesService')
     if (!notes?.addAtSegments) {
       return { id: req.id, ok: false, error: 'NotesService.addAtSegments not available' }
     }
-    await notes.addAtSegments(segments, cell, text)
+    // NotesService normalizes the icon name and drops anything malformed, so
+    // a bad mark degrades to an unmarked note rather than failing the write.
+    await notes.addAtSegments(segments, cell, text, null, mark)
     return { id: req.id, ok: true }
+  }
+
+  // Break one note into a one-line head plus a sub-note per part, IN PLACE —
+  // the note keeps its slot position, its mark and any children it already
+  // had, and the whole split is ONE layer no matter how many parts it makes.
+  // This is how a LIST gets authored over the bridge: the head is the point,
+  // the parts are the points and prose notes hanging under it.
+  //
+  //   { op: 'note-split', cell, segments, sig: <noteId>, head: '…',
+  //     parts: [ 'plain text', { text: '…', mark: 'notes' } ] }
+  //
+  // Purely additive: it never deletes a note. A note that shouldn't be split
+  // is simply never passed here, and a split that can't be honoured (blank
+  // head, no usable parts, unknown note) leaves the tree untouched and mints
+  // no layer — see NotesService.splitAtSegments.
+  async #noteSplit(req: BridgeRequest): Promise<BridgeResponse> {
+    const cell = req.cell
+    const segments = req.segments ?? []
+    const noteId = typeof req.sig === 'string' ? req.sig.trim() : ''
+    const rawHead = (req as unknown as { head?: unknown }).head
+    const head = typeof rawHead === 'string' ? rawHead : ''
+    const parts = (req as { parts?: unknown }).parts
+    if (typeof cell !== 'string' || !cell) {
+      return { id: req.id, ok: false, error: 'missing cell label' }
+    }
+    if (!noteId) {
+      return { id: req.id, ok: false, error: 'missing noteId (pass via `sig` field)' }
+    }
+    if (!Array.isArray(parts)) {
+      return { id: req.id, ok: false, error: 'missing parts (array of strings or {text, mark})' }
+    }
+    const notes = get<{
+      splitAtSegments?: (
+        s: readonly string[], c: string, id: string, head: string,
+        parts: readonly (string | { text: string; mark?: string | null })[],
+      ) => Promise<void>
+      getNotesAtSegments?: (s: readonly string[]) => Promise<unknown[]>
+    }>('@diamondcoreprocessor.com/NotesService')
+    if (!notes?.splitAtSegments) {
+      return { id: req.id, ok: false, error: 'NotesService.splitAtSegments not available' }
+    }
+    await notes.splitAtSegments(
+      segments, cell, noteId, head,
+      parts as readonly (string | { text: string; mark?: string | null })[],
+    )
+    // Report the note's NEW sig — the split rewrote its bytes, so the caller's
+    // noteId is stale the moment this resolves. Without this a caller walking
+    // a list would have to re-read the whole cell to keep going.
+    let sig: string | null = null
+    try {
+      const after = await notes.getNotesAtSegments?.([...segments, cell]) ?? []
+      const hit = (after as { id?: string; text?: string }[])
+        .find(n => n.text === head.trim())
+      sig = hit?.id ?? null
+    } catch { /* the split landed; reporting the new sig is best-effort */ }
+    return { id: req.id, ok: true, data: { cell, sig } }
   }
 
   // Remove a note by id from a cell at explicit segments. Calls

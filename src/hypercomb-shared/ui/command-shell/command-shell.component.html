@@ -38,10 +38,23 @@
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
-          [placeholder]="placeholder()"
+          [placeholder]="effectivePlaceholder()"
           (keydown)="onKeyDown($event)"
           (input)="onInput()"
         />
+
+        <!-- HOVER ECHO — the tile currently under the pointer, printed live
+             in the line just right of whatever is typed. Always the same
+             style, parenthesised, whether the line is empty or not, so it
+             reads as a name being reported rather than text being offered.
+             `.echo-pad` is the typed (or ghosted) text repeated invisibly:
+             identical font and padding to the input, so the echo lands
+             exactly at the caret's column without measuring anything. -->
+        @if (hoverEcho()) {
+          <span class="hover-echo" aria-hidden="true"
+            ><span class="echo-pad">{{ echoPad() }}</span
+            ><span class="echo-name">({{ hoverEcho() }})</span></span>
+        }
       </div>
 
       @if (lockedFlash()) {

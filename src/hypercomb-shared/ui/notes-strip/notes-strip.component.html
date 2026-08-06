@@ -50,6 +50,53 @@
          the canvas or picked from the list). Without one, the list alone
          shows so the user can find and pick a tile. -->
     @if (cell()) {
+      <!-- ── Identity plate ───────────────────────────────────────
+           WHICH tile these notes are on, said visually. The tile's own
+           hexagon (the picture the canvas paints, resolved through the
+           props → small.image hop) sits beside its name, where it lives,
+           and what it holds. Wide panels get the large hexagon and the
+           full detail column; narrow ones collapse to a single line so
+           the dock loses no room for the list itself. -->
+      <section class="cv2-plate" [class.is-wide]="plateWide()">
+        <div class="cv2-plate-hex" aria-hidden="true">
+          @if (plateImage(); as url) {
+            <img class="cv2-plate-img" [src]="url" alt="" />
+          } @else {
+            <span class="cv2-plate-initial">{{ plateInitial() }}</span>
+          }
+        </div>
+        <div class="cv2-plate-meta">
+          <div class="cv2-plate-name" [title]="cell()">{{ cell() }}</div>
+          @if (plateWide() && platePath().length > 0) {
+            <div class="cv2-plate-path" [title]="platePath().join(' / ')">
+              @for (seg of platePath(); track $index) {
+                <span class="cv2-plate-seg">{{ seg }}</span>
+              }
+            </div>
+          }
+          <div class="cv2-plate-stats">
+            <span class="cv2-plate-stat">
+              <span class="dot n"></span>{{ 'notes.plateNotes' | t: { count: plateCounts().notes } }}
+            </span>
+            @if (plateCounts().questions > 0) {
+              <span class="cv2-plate-stat is-q">
+                <span class="dot q"></span>{{ 'notes.plateQuestions' | t: { count: plateCounts().questions } }}
+              </span>
+            }
+            @if (plateCounts().answers > 0) {
+              <span class="cv2-plate-stat is-a">
+                <span class="dot a"></span>{{ 'notes.plateAnswers' | t: { count: plateCounts().answers } }}
+              </span>
+            }
+            @if (plateCounts().children > 0) {
+              <span class="cv2-plate-stat">
+                <span class="cv2-plate-stat-hex" aria-hidden="true"></span>{{ 'notes.plateChildren' | t: { count: plateCounts().children } }}
+              </span>
+            }
+          </div>
+        </div>
+      </section>
+
       <!-- ── Mark rail ────────────────────────────────────────────
            The participant's own icons, each carrying the meaning THEY gave
            it. Clicking one marks the note being written; DRAGGING one onto a
@@ -61,18 +108,32 @@
            remove. -->
       <div class="cv2-rail" [class.is-editing]="paletteEditing()">
         @if (!paletteEditing()) {
+          <!-- Grouped by KIND: points (the constrained roles) then notes
+               (prose). The labels only appear once both kinds are in the
+               palette — with one kind the rail is the flat icon strip it
+               has always been. -->
           <div class="cv2-rail-marks" role="group" [attr.aria-label]="'notes.markRail' | t">
-            @for (m of marks(); track m.icon) {
-              <button type="button" class="cv2-rail-mark"
-                      [class.is-active]="draftMark() === m.icon"
-                      [class.is-heading]="m.role === 'heading'"
-                      [class.is-dragging]="markDragIcon() === m.icon"
-                      (pointerdown)="onMarkPointerDown(m.icon, $event)"
-                      (click)="pickMark(m.icon)"
-                      [attr.aria-pressed]="draftMark() === m.icon"
-                      [title]="markLabel(m.icon) + ' — ' + ('notes.markDragHint' | t)">
-                <span class="mat-sym">{{ m.icon }}</span>
-              </button>
+            @for (g of markGroups(); track g.kind) {
+              <div class="cv2-rail-kind" [class.is-note]="g.kind === 'note'">
+                @if (showKindLabels()) {
+                  <span class="cv2-rail-kind-label" aria-hidden="true">
+                    {{ (g.kind === 'point' ? 'notes.kindPoints' : 'notes.kindNotes') | t }}
+                  </span>
+                }
+                @for (m of g.marks; track m.icon) {
+                  <button type="button" class="cv2-rail-mark"
+                          [class.is-active]="draftMark() === m.icon"
+                          [class.is-heading]="m.role === 'heading'"
+                          [class.is-prose]="m.role === 'prose'"
+                          [class.is-dragging]="markDragIcon() === m.icon"
+                          (pointerdown)="onMarkPointerDown(m.icon, $event)"
+                          (click)="pickMark(m.icon)"
+                          [attr.aria-pressed]="draftMark() === m.icon"
+                          [title]="markLabel(m.icon) + ' — ' + ('notes.markDragHint' | t)">
+                    <span class="mat-sym">{{ m.icon }}</span>
+                  </button>
+                }
+              </div>
             }
             <button type="button" class="cv2-rail-btn" (click)="addMarkIcon()"
                     [attr.aria-label]="'notes.addMark' | t" [title]="'notes.addMark' | t">
@@ -102,11 +163,15 @@
                        (input)="renameMark(m.icon, $event)"
                        [attr.placeholder]="'notes.markMeaning' | t"
                        [attr.aria-label]="'notes.markMeaning' | t" />
+                <!-- The three roles, grouped as the user reads them: the two
+                     constrained roles make a POINT, prose makes a NOTE. -->
                 <div class="cv2-mark-roles" role="group">
                   <button type="button" [class.is-on]="m.role === 'heading'"
                           (click)="setMarkRole(m.icon, 'heading')">{{ 'notes.markHeading' | t }}</button>
                   <button type="button" [class.is-on]="m.role === 'list'"
                           (click)="setMarkRole(m.icon, 'list')">{{ 'notes.markList' | t }}</button>
+                  <button type="button" [class.is-on]="m.role === 'prose'"
+                          (click)="setMarkRole(m.icon, 'prose')">{{ 'notes.markProse' | t }}</button>
                 </div>
                 <button type="button" class="cv2-mark-remove" (click)="removeMark(m.icon)"
                         [attr.aria-label]="'notes.markRemove' | t" [title]="'notes.markRemove' | t">
@@ -402,11 +467,17 @@
       <div class="cv2-tilecloud thin-scroll" role="listbox"
            [attr.aria-label]="'notes.filterPlaceholder' | t">
         @for (t of tileList(); track t.cell) {
+          <!-- Hovering a chip peeks at what's written on that tile (see the
+               hover card at the end of the panel) — the notes are already
+               warmed for every tile in the layer, so the peek costs nothing. -->
           <button type="button" class="cv2-tilechip"
                   role="option"
                   [attr.aria-selected]="t.cell === cell()"
                   [class.is-active]="t.cell === cell()"
+                  [class.is-peeked]="t.cell === hoverCell()"
                   [style.fontSize.rem]="t.size"
+                  (pointerenter)="onChipEnter(t.cell, $event)"
+                  (pointerleave)="onChipLeave()"
                   (click)="activateCell(t.cell)" [title]="t.cell">
             <span class="cv2-tilechip-name">{{ t.cell }}</span>
             @if (t.count > 0) {
@@ -433,4 +504,50 @@
           (pointerdown)="onResizeStart($event, 'corner')"
           aria-hidden="true"></span>
   </div>
+
+  <!-- Tile hover card — a peek at another tile's notes while you keep working
+       on this one. Opens on whichever side of the hovered chip has room (left
+       of the docked rail; right of the fullscreen navigator column) so it
+       never covers the row the pointer is on. Read-only and pointer-
+       transparent: it is a look, not a target.
+
+       Deliberately a SIBLING of .notes-strip, not a child: the panel carries
+       `backdrop-filter`, which makes it the containing block for fixed
+       descendants — a card inside it would resolve its viewport coordinates
+       against the panel's box and drift down the screen. -->
+  @if (hoverCell(); as peeked) {
+    <div class="cv2-peek" role="tooltip"
+         [style.left.px]="hoverLeft()" [style.right.px]="hoverRight()"
+         [style.top.px]="hoverTop()">
+      <div class="cv2-peek-head">
+        <span class="hex-mark" aria-hidden="true"></span>
+        <span class="cv2-peek-name">{{ peeked }}</span>
+      </div>
+      @if (hoverVisible().length > 0) {
+        <ul class="cv2-peek-list">
+          @for (row of hoverVisible(); track row.id) {
+            <li class="cv2-peek-row"
+                [class.is-q]="row.kind === 'q'"
+                [class.is-a]="row.kind === 'a'"
+                [style.paddingLeft.px]="row.depth * 10">
+              @if (row.mark) {
+                <span class="mat-sym cv2-peek-mark" aria-hidden="true">{{ row.mark }}</span>
+              } @else {
+                <span class="dot" [class.q]="row.kind === 'q'" [class.a]="row.kind === 'a'"
+                      [class.n]="row.kind === 'note'"></span>
+              }
+              <span class="cv2-peek-text">{{ row.text }}</span>
+            </li>
+          }
+        </ul>
+        @if (hoverOverflow() > 0) {
+          <div class="cv2-peek-more">{{ 'notes.peekMore' | t: { count: hoverOverflow() } }}</div>
+        }
+      } @else {
+        <div class="cv2-peek-empty">
+          {{ (hoverWarmed() ? 'notes.peekEmpty' : 'notes.peekReading') | t }}
+        </div>
+      }
+    </div>
+  }
 }

@@ -611,6 +611,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return t?.t('command-line.placeholder.default') ?? 'share intent...'
   })
 
+  // ── hover echo ────────────────────────────────────────
+  //
+  // The tile under the pointer, reported live in the line. Sourced from the
+  // overlay's `tile:hover` — the same broadcast the reveal-on-hover label and
+  // the pheromone card ride, including its `{label:null}` "pointer left the
+  // grid" clear, so the echo can never stick to a tile you already left.
+  readonly #hoverEcho = signal('')
+  readonly hoverEcho = this.#hoverEcho.asReadonly()
+
   // ── status indicators ─────────────────────────────────
 
   readonly #indicators = signal<Map<string, {
@@ -752,6 +761,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         'view-toggles:changed',
         (p) => this.#viewToggles.set(Array.isArray(p?.toggles) ? p!.toggles : []),
       ),
+      // Hovered tile — echoed in the line as the pointer moves.
+      EffectBus.on<{ label?: string | null }>('tile:hover', (p) => {
+        this.#hoverEcho.set(p?.label ?? '')
+      }),
       // Pan/zoom attempted while input is locked — flash the lock icon.
       // Transient (no replay), so a fresh mount never flashes spuriously.
       EffectBus.on('input:locked-attempt', () => this.#flashLocked()),

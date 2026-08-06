@@ -35,7 +35,7 @@ type LineageLike = { domain?: () => string }
 type HistoryLike = {
   sign(l: { domain?: () => string; explorerSegments: () => readonly string[] }): Promise<string>
   commitLayer(locationSig: string, layer: { name?: string; [slot: string]: unknown }): Promise<string>
-  currentLayerAt(locationSig: string): Promise<{ children?: unknown } | null>
+  currentLayerAt(locationSig: string): Promise<{ children?: unknown; decorations?: unknown; name?: unknown } | null>
   getLayerBySig(sig: string): Promise<{ decorations?: unknown; name?: unknown } | null>
   latestMarkerSigFor(locationSig: string, name: string): Promise<string>
 }
@@ -97,6 +97,15 @@ async function decodeMember(
 ): Promise<AggregationMember | null> {
   const layer = await history.getLayerBySig(childSig).catch(() => null)
   if (!layer) return null
+  return decodeFromLayer(store, layer, childSig)
+}
+
+/** Decode a launcher cell's `launch:target` from an already-read layer. */
+async function decodeFromLayer(
+  store: StoreLike,
+  layer: { decorations?: unknown; name?: unknown },
+  childSig: string,
+): Promise<AggregationMember | null> {
   const decos = Array.isArray(layer.decorations) ? (layer.decorations as unknown[]) : []
   for (const entry of decos) {
     const sig = String(entry ?? '').trim()
@@ -117,6 +126,30 @@ async function decodeMember(
     } catch { /* malformed decoration — skip */ }
   }
   return null
+}
+
+/** The launcher cell at `[g, label]` decoded from ITS OWN layer — the tile the
+ *  participant pressed carries its target in its `launch:target` decoration, so
+ *  a CLICK never has to consult an in-memory projection. Truth-first: works on a
+ *  cold reload straight into /<g>, before (or without) any group scan, and for
+ *  derived groups (games, help) whose cells MixedGroupBag wrote the same way.
+ *  Null when the cell is absent or carries no launch target. */
+export async function memberAtLauncherCell(
+  groupId: string,
+  label: string,
+): Promise<AggregationMember | null> {
+  const name = String(label ?? '').trim()
+  if (!groupId || !name) return null
+  const history = get<HistoryLike>(HISTORY_KEY)
+  const store = get<StoreLike>(STORE_KEY)
+  if (!history || !store?.getResource) return null
+  const locSig = await history
+    .sign({ domain: domainOf(), explorerSegments: () => [groupId, name] })
+    .catch(() => '')
+  if (!locSig) return null
+  const layer = await history.currentLayerAt(locSig).catch(() => null)
+  if (!layer) return null
+  return decodeFromLayer(store, layer, '')
 }
 
 /** Every member of a group's menu, decoded from `[g]`'s layer children. */

@@ -45,12 +45,14 @@
 // so a freshly-opened panel hydrates immediately.
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
+import { NgTemplateOutlet } from '@angular/common'
 import { ChangeDetectorRef, Component, computed, ElementRef, inject, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { looseMarks, namespaceGroupsOf } from './tag-grouping'
 
 interface TagRow {
   name: string
@@ -73,8 +75,24 @@ interface BouquetRow {
   name: string
   sig: string
   marks: string[]
-  /** The marks as swatch+name pairs, so a bouquet reads like everything else. */
-  chips: { name: string; color: string }[]
+  /** Its marks as full rows, so an opened bouquet offers exactly what the loose
+   *  list offers — same swatch, count, gather and remove controls. A bouquet is
+   *  a way of ORGANISING the vocabulary, not a second, weaker view of it. */
+  rows: TagRow[]
+}
+
+/** A namespace group — every mark whose name is prefixed `<namespace>:`.
+ *
+ *  These are NOT bouquets and must never be confused with them. A bouquet is
+ *  gathered on purpose and carries a name someone chose; a namespace is
+ *  DERIVED from the mark's own spelling (`visual:website:page` → `visual`) and
+ *  nobody curates it. Behaviours mint these to say what a tile IS, so they
+ *  group themselves — which is precisely why they are collapsed by default and
+ *  kept out of the loose list: hand-filing them would be curating a set the
+ *  system already names. */
+interface NamespaceGroup {
+  name: string
+  rows: TagRow[]
 }
 
 type TagEntry = { color?: string; enabled?: boolean; accent?: string }
@@ -98,7 +116,7 @@ type BouquetRegistryLike = {
 @Component({
   selector: 'hc-tags-viewer',
   standalone: true,
-  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
+  imports: [NgTemplateOutlet, TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './tags-viewer.component.html',
   styleUrls: ['./tags-viewer.component.scss'],
 })
@@ -177,13 +195,17 @@ export class TagsViewerComponent implements OnDestroy {
    *  proof that a bouquet exists before it has a name — and because two people
    *  who gather the same marks will see the same one. */
   readonly bouquetShortSig = computed(() => this.#bouquetSig()?.slice(0, 8) ?? '')
-  /** The bouquets as rows, each mark carrying its own colour. */
+  /** The bouquets as rows, each mark carrying its own colour and count. */
   readonly bouquets = computed<BouquetRow[]>(() => {
-    this.#registryVersion()
+    const byName = new Map(this.rows().map(r => [r.name, r]))
     const registry = this.#registry()
     return this.#bouquets().map(b => ({
       ...b,
-      chips: b.marks.map(name => ({ name, color: this.#colorOf(name, registry) })),
+      // A mark can sit in a bouquet without being on any tile yet (or without
+      // being in the registry at all), so a missing row is synthesised at zero
+      // rather than dropped — a bouquet must show everything it holds.
+      rows: b.marks.map(name => byName.get(name)
+        ?? { name, color: this.#colorOf(name, registry), count: 0 }),
     }))
   })
   /** Is the picked set exactly this bouquet? Marks the row that is loaded, and
@@ -221,6 +243,54 @@ export class TagsViewerComponent implements OnDestroy {
   })
 
   readonly totalTags = computed(() => this.rows().length)
+
+  // ── how the vocabulary is ORGANISED ─────────────────────────────────────────
+  //
+  // One flat alphabetical list stopped being readable the moment marks started
+  // arriving from three different places: ones you gathered, ones you typed
+  // once, and ones behaviours mint to say what a tile IS. The rule for which
+  // part a mark lands in lives in tag-grouping.ts — it is a doctrine, not a
+  // layout detail, and it is tested there without an Angular harness.
+
+  /** Every mark held by at least one saved bouquet. */
+  readonly #gathered = computed(() => {
+    const held = new Set<string>()
+    for (const b of this.#bouquets()) for (const m of b.marks) held.add(m)
+    return held
+  })
+
+  /** Plain keywords nobody has gathered yet — the fallback list. */
+  readonly looseRows = computed(() => looseMarks(this.rows(), this.#gathered()))
+
+  /** Namespaced marks, grouped by their prefix. Complete by construction: a
+   *  namespaced mark appears here whether or not it is also in a bouquet. */
+  readonly namespaceGroups = computed<NamespaceGroup[]>(() => namespaceGroupsOf(this.rows()))
+
+  /** Which bouquets are opened to show their marks, and which namespace groups
+   *  are unfolded. Both view state, both closed by default — the panel opens as
+   *  a short list of names, and you unfold what you came for. */
+  readonly #openBouquets = signal<Set<string>>(new Set())
+  readonly #openNamespaces = signal<Set<string>>(new Set())
+
+  isBouquetOpen(name: string): boolean { return this.#openBouquets().has(name) }
+  isNamespaceOpen(name: string): boolean { return this.#openNamespaces().has(name) }
+
+  toggleBouquetOpen(name: string, event?: Event): void {
+    event?.stopPropagation()
+    this.#openBouquets.update(s => {
+      const next = new Set(s)
+      if (!next.delete(name)) next.add(name)
+      return next
+    })
+  }
+
+  toggleNamespaceOpen(name: string): void {
+    this.#openNamespaces.update(s => {
+      const next = new Set(s)
+      if (!next.delete(name)) next.add(name)
+      return next
+    })
+  }
 
   /** Canvas-selection response (documentation/selection-tool-windows.md) —
    *  distinct from `#selected`, which is this panel's own picked keywords.

@@ -153,6 +153,72 @@ kinds). Build on those; add nothing structural:
   can render "pending → fulfilled" — the phone shows the pill exactly
   like the command line does today off `ask:queued`.
 
+## Agent presence — ask, forget, get badged
+
+The experience this serves: query the AI, point it at a tile, forget about
+it; when it needs you, something visible says so; results arrive as work
+items, not homework. Most of it already ships in
+`assistant/agent-registry.service.ts` and is **reused unchanged** — a
+remote ask is just an agent whose fulfiller happens to be elsewhere:
+
+- **Asks ARE the agents.** No parallel store: the `kind:'ask'` records
+  are the registry's population, which is why a queued ask survives a
+  reload with its bee still flying.
+- **A bee per unit of work**, drawn over the tiles it is working on,
+  avatar derived from the behaviour name unless decorated
+  (`presentation/avatars/agent-avatar.ts`).
+- **A panel** to read what it is doing and hand it more context —
+  `addContext` mints a new `mode:'context'` record pointing at the
+  original, never rewriting it (content is immutable).
+- **Live activity** through `agent:start` / `agent:progress` /
+  `agent:end` and the `agent-progress` bridge op; the remote fulfiller
+  reports through the same lane by announcing progress alongside the
+  fulfillment.
+- **Stop and watchdog** — the participant's `stop(id)`, or stalled →
+  given-up after silence.
+
+### The gap: a `blocked` status (and the watchdog trap)
+
+`AgentStatus` is `pending | working | done | failed`. There is no
+**"waiting on you"**, and that absence is not cosmetic:
+
+1. A bee blocked on a human question looks exactly like a slow one.
+2. The watchdog **kills it**. Silence past `GIVE_UP_MS` stops the agent —
+   so an agent that asked you something and is waiting politely gets
+   garbage-collected *for waiting*.
+
+So the fifth status must do two things: raise the badge on the bee, and
+**exempt that agent from the stall clock** for as long as it is blocked.
+The clock resumes the moment the answer lands. Blocked is a state the
+agent declares (`agent:progress` with `status:'blocked'`, or a
+fulfillment that returns `needs` instead of `result`), never one the UI
+infers from silence — silence already means stalled and the two must not
+collide.
+
+### Results become work items
+
+This is the second argument for `contractSig`, and the stronger one.
+A contract-shaped result can be **rendered** as work items mechanically —
+the hive knows the shape, so it mints the tiles or the checklist without
+anyone reading prose and transcribing it. An unstructured answer is
+homework. Fire-and-forget only works if the return trip is
+machine-shaped; that is what the contract buys, over and above the
+safety gate.
+
+### The mirror is an agent too
+
+Mirroring a creation into the hive (tiles 1:1 with source resources, a
+collection gathering them, pheromones from the declared vocabulary,
+notes on the tile) is itself contract-shaped work. Expressed as a
+contract it becomes **watchable** — a mirror bee you can open and follow
+— and, more usefully, **checkable**: the contract states what a complete
+mirror is, so "done" stops being a judgement call.
+
+**Guardrail:** a mirror agent must be spawned *by* the completing work,
+in the same pass — never queued for later. A mirror that can be deferred
+is a backlog, and same-pass is the whole point of the doctrine. The
+agent makes the mirror observable; it must not make it optional.
+
 ## Safeguards
 
 - **Allowlist first.** The host accepts `ask` records only from pubkeys
@@ -193,9 +259,12 @@ have one; do not let schemaless work onto the remote path.
    a `contractSig` branch). Loopback only; proves the validation gate.
 2. **Heap lane** — asks/fulfillments as host-heap content, polled by
    both ends. First remote ask from a phone lands here.
-3. **Brood proposals** — `delivery: "layer"`, the adopt/decline surface
+3. **`blocked` status + badge** — the fifth `AgentStatus`, the watchdog
+   exemption, and the bee badge. Independent of everything above and
+   useful the day it lands, including for today's loopback asks.
+4. **Brood proposals** — `delivery: "layer"`, the adopt/decline surface
    in the app (the share-availability gate pattern already fits).
-4. **Channel verbs** — fold `ask`/`fulfil` into the paired-channel
+5. **Channel verbs** — fold `ask`/`fulfil` into the paired-channel
    vocabulary when that spec builds, inheriting `admit`/`revoke`/audit
    for free.
 

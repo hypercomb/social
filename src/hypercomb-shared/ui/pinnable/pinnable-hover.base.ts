@@ -194,6 +194,11 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   protected updateData(id: number, data: T): void { this.#update(id, data) }
   /** Dismiss the transient hover peek — subclass hook for the same. */
   protected dismissPeek(): void { this.#hidePeek() }
+  /** Pin the peek in place from a control ON the card. The `${ns}:hover-pin`
+   *  effect stays the path for features pinned from somewhere ELSE (a tile
+   *  icon, a list row); this is for a card that carries its own pin, so it
+   *  needs no round trip through the feature that fed it. */
+  protected pinPeek(p: PinnablePanel<T>): void { this.#pin(p.key, p.data) }
   #update(id: number, data: T): void { this.panels.update(l => l.map(x => x.id === id ? { ...x, data } : x)); this.#saveOpen() }
 
   /** Tell the host Escape cascade whether any pinned panel is up. */

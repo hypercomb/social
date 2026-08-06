@@ -16,7 +16,7 @@ import '../rewind-window/rewind-window.component'
 import '../notes-strip/notes-strip.component'
 // ONE index panel for every aggregate — Collections, Websites, and anything
 // that registers a source. The per-aggregate landings it replaced (
-// `website-landing/`, `collections-landing/`) are gone; an aggregate now
+// `website-landing/`, `collections-landing/`) were deleted 2026-08-06; an aggregate now
 // declares a source and inherits the panel's chrome AND its drag-to-create-
 // meaning. See aggregate-index/aggregate-source.ts.
 import '../aggregate-index/aggregate-index.component'

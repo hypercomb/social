@@ -25,6 +25,15 @@
 //
 // Bees hold a CONSTANT SCREEN SIZE (counter-scaled against the world
 // container) so a zoomed-out hive still shows a bee you can see and hit.
+//
+// ── Branding ───────────────────────────────────────────────────────────
+//
+// A bee's NAME is painted ON THE BEE — livery across its abdomen, baked into
+// the same atlas as the drawing (bee-ab-atlas.ts). It is not a caption beside
+// it: a caption is a separate object that has to be positioned, scaled and
+// faded in step with a creature flying a figure-8, and the moment two bees
+// dance near each other a reader has to guess which name goes with which. What
+// is painted on the bee cannot be read against the wrong one.
 
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Sprite, Texture } from 'pixi.js'
@@ -36,12 +45,18 @@ import type { HexGeometry } from '../grid/hex-geometry.js'
 
 type ShowCellLike = { snapshotCells?: () => Array<{ q: number; r: number; label: string }> }
 type LineageLike = { explorerSegments?: () => readonly string[] }
+/** Only the two calls this layer makes — structural, so the bee bundle never
+ *  imports the orchestrator module and mints a second copy of it. */
+type OrchestratorLike = { audit?: () => number; clearAudit?: () => void }
 
 /** One rendered agent. */
 interface BeeSprite {
   id: string
   kind: AgentKind
   sprite: Sprite
+  /** The "waiting on you" mark, minted only once an agent actually blocks.
+   *  A bee that never asks anything never pays for one. */
+  badge: Graphics | null
   frames: Texture[] | null
   /** Where the DANCE is centred, in world coordinates — the bee orbits this. */
   anchorX: number
@@ -59,10 +74,12 @@ interface BeeSprite {
   facing: number
 }
 
-/** Bee size on screen, in CSS pixels, regardless of zoom. */
-const BEE_PX = 42
+/** Bee size on screen, in CSS pixels, regardless of zoom. Big enough that the
+ *  NAME painted on the abdomen is a name and not a smudge — the bee carries its
+ *  own branding, so the bee has to be worth reading. */
+const BEE_PX = 56
 /** Square cell size of a baked avatar atlas frame (agent-avatar.ts). */
-const ATLAS_CELL_PX = 96
+const ATLAS_CELL_PX = 128
 /** Click/hover radius around the BEE ITSELF, in CSS px. The waggle area around
  *  the dance centre is the other, larger half of the target. */
 const HIT_PX = 22
@@ -74,6 +91,14 @@ const FLAP_FPS = 13
 const HOVER_PX = 38
 /** Fixed compact waggle size. Agent status must not pulse the path width. */
 const WAGGLE_SCALE = 0.34
+/** How far a bee leans into the way it is travelling, in radians. */
+const BANK = 0.11
+/** Where a PERCHED bee sits, as a fraction of the screen. The orchestrator
+ *  goes to the top left when you open it and stays there while you read: it is
+ *  watching the hive, so it gets out of the hive's way. Clear of the header
+ *  band, which owns the very top. */
+const PERCH_X = 0.07
+const PERCH_Y = 0.2
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -86,8 +111,10 @@ export class AgentBeeDrone extends Drone {
     'Draws a bee for every agent working in the hive, over the tiles it is working on, and opens the request when clicked.'
   public override effects = ['render'] as const
 
-  protected override listens = ['render:host-ready', 'render:geometry-changed', 'render:set-hive-visible']
-  protected override emits = ['agent:open']
+  protected override listens = [
+    'render:host-ready', 'render:geometry-changed', 'render:set-hive-visible', 'agent:closed',
+  ]
+  protected override emits = ['agent:open', 'agent:close', 'toast:show']
 
   #app: Application | null = null
   #world: Container | null = null
@@ -112,6 +139,12 @@ export class AgentBeeDrone extends Drone {
   /** A press landed on a bee: swallow the pointerup/click that follows it. */
   #swallowPointer: number | null = null
   #swallowClickUntil = 0
+  /** The agent that has been PERCHED — pulled out of the hive to the top-left
+   *  corner where it stays put while its panel is open. Only the orchestrator
+   *  perches today (opening it is a request to audit the hive, and it should
+   *  not be dancing over the tiles you are trying to read), but nothing here is
+   *  specific to it. '' = nobody is perched. */
+  #perched = ''
 
   protected override sense = (): boolean => true
 
@@ -132,6 +165,16 @@ export class AgentBeeDrone extends Drone {
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', geo => { this.#hexGeo = geo })
+
+    // The panel closed by its own button or Escape. A perch is the visible half
+    // of "this agent is open" — when the panel goes, the bee rejoins the hive
+    // and its audit view is put down with it.
+    this.onEffect<{ id?: string }>('agent:closed', ({ id }) => {
+      if (!id || this.#perched !== id) return
+      this.#perched = ''
+      this.#lastAnchorAt = 0
+      ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')?.clearAudit?.()
+    })
 
     // A takeover feature (a website view, the screensaver) owns the screen —
     // the hive is standing down, and so are its agents.
@@ -215,6 +258,7 @@ export class AgentBeeDrone extends Drone {
       id: agent.id,
       kind: agent.kind,
       sprite,
+      badge: null,
       frames: null,
       anchorX: anchor.x,
       anchorY: anchor.y,
@@ -232,7 +276,9 @@ export class AgentBeeDrone extends Drone {
     }
     this.#bees.set(agent.id, bee)
 
-    void this.#avatars()?.frames(agent.behavior, agent.kind).then(frames => {
+    // Resolved under the AVATAR KEY, not the behaviour: a routine that calls a
+    // model flies that model's bee, wearing that model's name.
+    void this.#avatars()?.frames(avatarKeyOf(agent), agent.kind).then(frames => {
       if (!frames?.length) return
       const current = this.#bees.get(agent.id)
       if (!current) return
@@ -261,6 +307,11 @@ export class AgentBeeDrone extends Drone {
    *  `null` means "not on this layer": the bee fades out and comes back when
    *  the participant returns. */
   #anchorFor = (agent: Agent): { x: number; y: number } | null => {
+    // PERCHED: out of the hive, into the corner, on every layer. A perched bee
+    // is being read, not watched at work, so it does not go looking for a tile
+    // and it does not disappear when the participant navigates.
+    if (agent.id === this.#perched) return this.#perchAnchor()
+
     const cells = ioc<ShowCellLike>('@diamondcoreprocessor.com/ShowCellDrone')?.snapshotCells?.() ?? []
     for (const label of agent.targets) {
       const cell = cells.find(c => c.label === label)
@@ -275,6 +326,15 @@ export class AgentBeeDrone extends Drone {
     const lineage = ioc<LineageLike>('@hypercomb.social/Lineage')
     const segments = lineage?.explorerSegments?.()
     return !segments || segments.length === 0
+  }
+
+  /** The corner a perched bee holds, in world coordinates. Resolved from the
+   *  screen every time the anchors are re-read, so it stays in the corner
+   *  through a pan or a zoom instead of being carried off with the hive. */
+  #perchAnchor = (): { x: number; y: number } => {
+    if (!this.#app || !this.#world) return { x: 0, y: 0 }
+    const screen = this.#app.renderer.screen
+    return this.#world.toLocal(new Point(screen.width * PERCH_X, screen.height * PERCH_Y))
   }
 
   /** A stable spot in the current view, spread per agent so several hive-wide
@@ -351,7 +411,7 @@ export class AgentBeeDrone extends Drone {
       const ahead = waggleOffset(bee.kind, bee.danceTime + 0.05, bee.seed, WAGGLE_SCALE)
       bee.x = bee.centreX + offset.x / worldScale
       bee.y = bee.centreY + offset.y / worldScale
-      // Face the way the dance is going — the turn at each end of the run is
+      // Lean the way the dance is going — the turn at each end of the run is
       // what makes a figure-8 read as a figure-8.
       if (Math.abs(ahead.x - offset.x) > 0.2) bee.facing = ahead.x >= offset.x ? 1 : -1
 
@@ -365,8 +425,12 @@ export class AgentBeeDrone extends Drone {
       // A faded bee is only DESTROYED when its agent is gone. An off-layer
       // bee just waits, invisible, for the participant to come back.
       if (!agent && bee.fadeTarget === 0 && bee.alpha < 0.02) {
-        bee.sprite.destroy()
+        // `{ children: true }` — the badge is a child, and a sprite destroyed
+        // without it would leave the mark behind in the scene graph.
+        bee.sprite.destroy({ children: true })
+        bee.badge = null
         this.#bees.delete(id)
+        if (this.#perched === id) this.#perched = ''
         if (this.#hovering === id) this.#setHover('')
         continue
       }
@@ -376,11 +440,42 @@ export class AgentBeeDrone extends Drone {
         bee.sprite.texture = bee.frames[frame]
       }
       bee.sprite.position.set(bee.x, bee.y)
-      bee.sprite.scale.set(scale * bee.facing, scale)
+      bee.sprite.scale.set(scale)
+      // BANKS, never mirrors. A bee that carries its name on its own body
+      // cannot be flipped to show which way it is going — the name would come
+      // out backwards — so the turn at each end of the run is a lean instead.
+      bee.sprite.rotation += (bee.facing * BANK - bee.sprite.rotation) * 0.12
       bee.sprite.alpha = bee.alpha
+      this.#badge(bee, agent?.status === 'blocked')
     }
 
     this.#drawWaggleAreas(worldScale)
+  }
+
+  /** THE BADGE — "this one is waiting on you", carried by the bee itself.
+   *
+   *  It rides as a child of the sprite so it flies the dance with the bee
+   *  and needs no second position to keep in step. It BREATHES rather than
+   *  flashes: the hive's chrome is cold and a blinking dot would read as an
+   *  error, which this is not — the agent is fine, it just asked a question.
+   *  Drawn once and then only faded; nothing is re-tessellated per frame. */
+  #badge = (bee: BeeSprite, wanted: boolean): void => {
+    if (!wanted) {
+      if (bee.badge) bee.badge.visible = false
+      return
+    }
+    if (!bee.badge) {
+      const badge = new Graphics()
+      badge.circle(0, 0, 5).fill({ color: 0x7eb6d6 }).stroke({ color: 0x0b1016, width: 1.5 })
+      // Off the shoulder, so it never sits on the name the bee is wearing.
+      badge.position.set(13, -13)
+      bee.sprite.addChild(badge)
+      bee.badge = badge
+    }
+    bee.badge.visible = true
+    // One slow breath, in step with nothing else — a bee that has been
+    // waiting a while is still asking just as calmly as when it started.
+    bee.badge.alpha = bee.alpha * (0.55 + 0.45 * (0.5 + 0.5 * Math.sin(this.#time * 2.2)))
   }
 
   /** The WAGGLE AREA — a faint trace of the patch of air each bee is dancing
@@ -461,6 +556,35 @@ export class AgentBeeDrone extends Drone {
     event.preventDefault()
     this.#swallowPointer = event.pointerId
     this.#setHover('')
+
+    // THE ORCHESTRATOR IS A DIFFERENT PRESS. Opening the watcher is a request
+    // to audit the hive, which is three things at once: it takes itself out of
+    // the way (perches top-left), it gathers every tile that has an agent on it
+    // into one view to walk, and it opens its panel with the summary. Pressing
+    // it again puts all of that down.
+    if (this.#bees.get(id)?.kind === 'orchestrator') {
+      const orchestrator = ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')
+      if (this.#perched === id) {
+        this.#perched = ''
+        orchestrator?.clearAudit?.()
+        this.emitEffect('agent:close', { id })
+        return
+      }
+      this.#perched = id
+      // Fly to the corner from wherever it is, rather than jumping: the eased
+      // dance centre is already the mechanism, so nothing else is needed.
+      this.#lastAnchorAt = 0
+      const gathered = orchestrator?.audit?.() ?? 0
+      if (gathered === 0) {
+        this.emitEffect('toast:show', {
+          type: 'tip',
+          message: 'No agent is working on a tile right now — nothing to audit.',
+        })
+      }
+      this.emitEffect('agent:open', { id })
+      return
+    }
+
     this.emitEffect('agent:open', { id })
   }
 
@@ -509,7 +633,11 @@ export class AgentBeeDrone extends Drone {
     // bee is wearing), for anything else the kind. The behaviour name alone
     // does not answer "is this a model, and whose?".
     const who = agent.kind === 'model' ? `${agent.vendor ?? 'model'} · ${agent.model ?? agent.behavior}` : `${agent.kind} · ${agent.behavior}`
-    tip.textContent = `${who}${progress} · ${latest}`
+    // A blocked bee says what it wants FIRST — the whole point of the badge
+    // is that hovering it answers "what does this need?" without a click.
+    tip.textContent = agent.status === 'blocked'
+      ? `${who} · waiting on you${agent.needs ? `: ${agent.needs}` : ''}`
+      : `${who}${progress} · ${latest}`
     tip.style.display = 'block'
     tip.style.left = `${Math.round(clientX + 16)}px`
     tip.style.top = `${Math.round(clientY + 16)}px`

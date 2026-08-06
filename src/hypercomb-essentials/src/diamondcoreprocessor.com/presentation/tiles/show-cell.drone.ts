@@ -1146,6 +1146,16 @@ export class ShowCellDrone extends Drone {
   /** Lineage the scan last ran from — re-scan when the location moves under a
    *  live filter, which is what makes the filter FOLLOW you as you drill in. */
   #filterScanKey: string | null = null
+  /** A GATHERED SET — tiles handed to us by name and absolute path rather than
+   *  found by a predicate, painted through the same flatten machinery. This is
+   *  the "show me these, wherever they live" lane (the agent audit uses it):
+   *  nothing is committed, no layer is minted, and it is gone the moment the
+   *  participant walks anywhere — a gathered view is a look, not a place. */
+  #gathered: { label: string; path: string[] }[] | null = null
+  /** Identity of the current gather, so a different set rebuilds the geometry. */
+  #gatherKey = ''
+  /** Where the gather was raised. Leaving clears it (see the render path). */
+  #gatherAnchorKey = ''
   /** Where the filter was switched on. A global filter reads the whole hive
    *  from the root only while you stand here; once you enter a match the walk
    *  re-roots to the current location (otherwise every level would show the
@@ -1915,6 +1925,44 @@ export class ShowCellDrone extends Drone {
   #evictRepaintCount = 0
   static readonly #EVICT_REPAINT_MAX = 8
 
+  /** Location keys already warned about a futile readiness working set. */
+  #repairFutileWarned = new Set<string>()
+
+  /** True when the readiness working set at the current location cannot fit
+   *  its atlas, making eviction REPAIR self-defeating: every repair bake
+   *  evicts another prepared entry, whose own eviction re-arms the next
+   *  repair — an endless idle churn (and, before on-screen pinning, the
+   *  every-tile-text-blinking bug witnessed on hub layers whose branches'
+   *  child names total past the label atlas). Repair stands down; clicks on
+   *  affected branches simply re-bake on demand (~13ms per label). */
+  #readinessRepairFutile(kind: 'image' | 'label'): boolean {
+    let capacity: number
+    let demand = 0
+    if (kind === 'image') {
+      capacity = this.imageAtlas?.capacity ?? Number.POSITIVE_INFINITY
+      for (const c of this.renderedCells.values()) if (c.imageSig) demand++
+      const perLabel = this.#childImageSigsByParent.get(this.#passParentSig)
+      if (perLabel) {
+        for (const [label, sigs] of perLabel) {
+          if (this.#childrenReadyByLabel.get(label) === true) demand += sigs.length
+        }
+      }
+    } else {
+      capacity = this.atlas?.capacity ?? Number.POSITIVE_INFINITY
+      demand = this.renderedCells.size
+      for (const [, headSig] of this.#preparedHeadByLabel) {
+        demand += this.#completeChildNamesByParentSig.get(headSig)?.names.length ?? 0
+      }
+    }
+    if (demand <= capacity) return false
+    const key = `${kind}:${this.#readinessLocationKey}`
+    if (!this.#repairFutileWarned.has(key)) {
+      this.#repairFutileWarned.add(key)
+      console.warn(`[show-cell] readiness ${kind} working set (${demand}) exceeds atlas capacity (${capacity}) — standing down eviction repair at this location; affected branches re-bake on click`)
+    }
+    return true
+  }
+
   /** An atlas slot was reused for different content. If the displaced sig
    *  belongs to an on-screen cell, its baked UV now points at foreign
    *  pixels — force a pass so the cell either reloads (loadOne re-queues
@@ -1949,7 +1997,7 @@ export class ShowCellDrone extends Drone {
           // decode again, so re-bake during idle and leave the tile bright.
           const headSig = this.#preparedHeadByLabel.get(label)
           const names = headSig ? (this.#completeChildNamesByParentSig.get(headSig)?.names ?? []) : []
-          if (headSig) this.#enqueueBake(headSig, sigs, names)
+          if (headSig && !this.#readinessRepairFutile('image')) this.#enqueueBake(headSig, sigs, names)
           break
         }
       }
@@ -1997,6 +2045,7 @@ export class ShowCellDrone extends Drone {
         if (!names.includes(victim)) continue
         if (DIAG) console.info(`[diag:readiness] label eviction repair branch=${branch} victim=${victim}`)
         // Repair, never revoke — same rule as the image twin above.
+        if (this.#readinessRepairFutile('label')) break outer
         const target = this.#readyByLocation
           .get(this.#readinessLocationKey)
           ?.targets.get(branch)
@@ -2765,7 +2814,16 @@ export class ShowCellDrone extends Drone {
     // The filter FOLLOWS you: entering a match re-roots the walk at wherever
     // you landed, so the flatten narrows as you drill in rather than redrawing
     // the same set at every level. A moved location means the scan is stale.
-    if (this.#narrowing()) {
+    // A GATHERED SET is only ever the view you raised it from. Clicking one of
+    // its tiles travels to that tile's real home — and the audit is over, so
+    // the gather clears rather than following you there and painting the same
+    // set again at the destination.
+    if (this.#gathered) {
+      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+      if ([...segs].join('/') !== this.#gatherAnchorKey) this.#clearGather()
+    }
+
+    if (this.#narrowing() && !this.#gathered) {
       const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
       if ([...segs].join('/') !== this.#filterScanKey) await this.#scanTagsAcrossPages()
     }
@@ -4270,6 +4328,18 @@ export class ShowCellDrone extends Drone {
     const labelTex = this.atlas.getAtlasTexture()
     const cellImageTex = this.imageAtlas.getAtlasTexture()
 
+    // Pin THIS pass's labels BEFORE baking them — the hard rule that a
+    // visible tile's text never loses its glyphs to a background readiness
+    // bake (whose working set can exceed the atlas at hub layers; the
+    // eviction→repaint cycle shows as every tile's text blinking). Pinning
+    // must precede the bake loop: with the PREVIOUS layer's pins still
+    // active, a big layer would bake into the few unpinned slots and evict
+    // its own labels mid-pass, re-arming the loop it exists to prevent.
+    // The old layer's labels unpin here and become ordinary evictees.
+    // PENDING_CELL_LABEL is displayed in place of any mid-mutation cell's
+    // name, so it is part of the on-screen set whenever it is baked at all.
+    this.atlas.setPinned([...cells.map(c => c.label), PENDING_CELL_LABEL])
+
     for (const cell of cells) {
       const label = this.#pendingCellMutations.has(cell.label) && !this.atlas.hasLabel(cell.label)
         ? PENDING_CELL_LABEL
@@ -4425,12 +4495,23 @@ export class ShowCellDrone extends Drone {
     this.renderedCount = cells.length
     this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
 
-    // A paint with every image resolvable is the convergence point of the
-    // eviction-repaint cycle — reset its bound here (eviction events alone
-    // can't be relied on for the reset: after the reload pass converges,
-    // no further event arrives to run a clean scan).
-    if (this.imageAtlas && !cells.some(c =>
-      c.imageSig && !this.imageAtlas!.hasImage(c.imageSig) && !this.imageAtlas!.hasFailed(c.imageSig))) {
+    // A paint with every image AND every label resolvable is the convergence
+    // point of the eviction-repaint cycle — reset its bound here (eviction
+    // events alone can't be relied on for the reset: after the reload pass
+    // converges, no further event arrives to run a clean scan).
+    //
+    // The label half is not optional. #evictRepaintCount is SHARED with
+    // #onLabelAtlasEvicted, so an image-only reset defeats the bound on any
+    // layer with more labels than the 256-slot label atlas: the paint wraps
+    // the label ring, the label listener forces a repaint, this reset clears
+    // the counter because the images were fine, and the cycle runs forever —
+    // visible as tile text blinking. Witnessed on a 522-child layer.
+    const imagesConverged = !!this.imageAtlas && !cells.some(c =>
+      c.imageSig && !this.imageAtlas!.hasImage(c.imageSig) && !this.imageAtlas!.hasFailed(c.imageSig))
+    const labelsConverged = !this.atlas || !cells.some(c =>
+      !this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
+      && !this.atlas!.hasLabel(c.label))
+    if (imagesConverged && labelsConverged) {
       this.#evictRepaintCount = 0
     }
 
@@ -4564,13 +4645,26 @@ export class ShowCellDrone extends Drone {
    *  `filterTags.size`, so a requirement alone (entered through a reference
    *  with no lens set) still flattens. */
   #narrowing(): boolean {
-    return this.filterTags.size > 0 || this.#requiredTags.size > 0
+    return this.filterTags.size > 0 || this.#requiredTags.size > 0 || this.#gathered !== null
+  }
+
+  /** Put a gathered set down. Called when the participant navigates away and
+   *  when the gatherer sends an empty list. */
+  #clearGather(): void {
+    this.#gathered = null
+    this.#gatherKey = ''
+    this.#gatherAnchorKey = ''
+    this.#tagFlattenResults = null
+    this.#flatPathByLabel.clear()
+    this.#filterBlockedLabels.clear()
+    this.emitEffect('render:gathered', { active: false, count: 0 })
   }
 
   /** Identity of the current narrowing, for the render key. Both sources, kept
    *  apart: `a|b` and `b|a` are different renders. */
   #narrowKey(): string {
     return [...this.filterTags].sort().join(',') + '|' + [...this.#requiredTags].sort().join(',')
+      + '|' + this.#gatherKey
   }
 
   /** Walk the whole layer tree from the hive root and collect every cell whose
@@ -5352,6 +5446,44 @@ export class ShowCellDrone extends Drone {
       this.renderedCellsKey = ''
       this.requestRender()
     })
+
+    // render:gather-set — paint THESE tiles, wherever in the hive they live.
+    //
+    // The predicate lane (`tags:filter`) answers "what matches?"; this answers
+    // "show me this list", which is what a caller holding the answer already
+    // needs. It rides the same flatten render, so a gathered tile keeps its
+    // absolute path and a click travels to its real home. Every gathered tile
+    // is treated as a branch so that click IS an entry on desktop too — from an
+    // audit, pressing a tile means "take me to it", not "open its editor".
+    //
+    // Nothing is committed. No layer is minted, no lineage is written; sending
+    // an empty list (or walking anywhere) puts the hive back as it was.
+    this.onEffect<{ key?: string; items?: Array<{ label?: string; path?: string[] }> }>(
+      'render:gather-set',
+      ({ key, items }) => {
+        const rows = (items ?? [])
+          .map(item => ({ label: String(item?.label ?? '').trim(), path: (item?.path ?? []).map(String) }))
+          .filter(row => row.label)
+        if (rows.length === 0) {
+          if (this.#gathered) { this.#clearGather(); this.renderedCellsKey = ''; this.requestRender() }
+          return
+        }
+        const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+        this.#gathered = rows
+        this.#gatherKey = String(key ?? '') || rows.map(r => r.label).join(',')
+        this.#gatherAnchorKey = [...segs].join('/')
+        this.#tagFlattenResults = rows.map(row => ({
+          label: row.label,
+          dir: null,
+          path: row.path,
+          hasChildren: true,
+          matchesInside: 1,
+        }))
+        this.renderedCellsKey = ''
+        this.requestRender()
+        this.emitEffect('render:gathered', { active: true, count: rows.length, key: this.#gatherKey })
+      },
+    )
 
     // tags:required effect — the marks a REFERENCE demands of what it shows,
     // in force while the participant stands inside what it points at. ANDed

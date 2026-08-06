@@ -197,7 +197,7 @@ export class WorkflowViewDrone extends Drone {
 
   #mountShell(): void {
     const host = div(
-      `position:fixed;top:0;right:0;bottom:0;left:${this.#leftInset}px;z-index:${Z_BASE};` +
+      `position:fixed;top:0;right:var(--hc-inset-right,0px);bottom:0;left:${this.#leftInset}px;z-index:${Z_BASE};` +
       `overflow:auto;background:${INK};color:${TEXT};overscroll-behavior:contain;`,
     )
     host.id = 'hc-workflow-view-host'
@@ -211,7 +211,7 @@ export class WorkflowViewDrone extends Drone {
     host.appendChild(stage)
 
     const toolbar = div(
-      `position:fixed;top:0;left:${this.#leftInset}px;right:0;height:${TOOLBAR_H}px;z-index:2;box-sizing:border-box;` +
+      `position:fixed;top:0;left:${this.#leftInset}px;right:var(--hc-inset-right,0px);height:${TOOLBAR_H}px;z-index:2;box-sizing:border-box;` +
       `display:flex;align-items:center;gap:14px;padding:0 18px;background:rgba(11,15,20,0.92);` +
       `border-bottom:1px solid ${BORDER};backdrop-filter:blur(8px);`,
     )

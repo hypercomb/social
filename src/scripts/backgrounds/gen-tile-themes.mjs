@@ -93,15 +93,23 @@ const abstract = (i) => {
 // drawing from it should go a long way before a picture repeats. Each entry
 // is one scene, indexed positionally: adding one here is adding a picture.
 const stars = (pts) => pts.map(([x, y], n) => `<circle cx="${x}" cy="${y}" r="${1.5 + (n % 3) * 0.8}" fill="#ffffff" fill-opacity="0.85"/>`).join('')
-/** A conifer: three overlapping triangles on a trunk, widening downward. */
-const pine = (x, base, h, w, dark, light) =>
-  `<rect x="${(x - w * 0.06).toFixed(1)}" y="${(base - h * 0.2).toFixed(1)}" width="${(w * 0.12).toFixed(1)}" height="${(h * 0.2).toFixed(1)}" fill="#4a3524"/>`
-  + [0, 1, 2].map(t => {
-    const apex = base - h + h * 0.26 * t
-    const bot = base - h * 0.18 - h * 0.26 * (2 - t)
-    const half = (w / 2) * (0.5 + 0.25 * t)
-    return `<polygon points="${x},${apex.toFixed(1)} ${(x - half).toFixed(1)},${bot.toFixed(1)} ${(x + half).toFixed(1)},${bot.toFixed(1)}" fill="${t % 2 ? light : dark}"/>`
-  }).join('')
+/** A soft cloud: overlapping lobes riding a flat base, one tone throughout. */
+const cloud = (x, y, s, o) =>
+  `<g fill="#ffffff" fill-opacity="${o}">`
+  + [[-0.95, 0.06, 0.5], [-0.34, -0.28, 0.66], [0.34, -0.16, 0.58], [0.95, 0.1, 0.44]]
+    .map(([dx, dy, r]) => `<ellipse cx="${(x + dx * s).toFixed(1)}" cy="${(y + dy * s).toFixed(1)}" rx="${(r * s).toFixed(1)}" ry="${(r * s * 0.72).toFixed(1)}"/>`).join('')
+  + `<rect x="${(x - s * 1.4).toFixed(1)}" y="${y.toFixed(1)}" width="${(s * 2.8).toFixed(1)}" height="${(s * 0.46).toFixed(1)}" rx="${(s * 0.23).toFixed(1)}"/></g>`
+
+/** A river stone: a flattened pebble, bedded on its own shadow and lit along
+ *  the upper rim — the light rides the edge, not the middle, or it reads as a
+ *  bubble rather than a stone. */
+const stone = (x, y, r, c) =>
+  `<ellipse cx="${x}" cy="${(y + r * 0.1).toFixed(1)}" rx="${(r * 1.02).toFixed(1)}" ry="${(r * 0.62).toFixed(1)}" fill="#8ba07f" fill-opacity="0.26"/>`
+  + `<ellipse cx="${x}" cy="${y}" rx="${r}" ry="${(r * 0.62).toFixed(1)}" fill="${c}"/>`
+  + `<ellipse cx="${x}" cy="${(y - r * 0.2).toFixed(1)}" rx="${(r * 0.72).toFixed(1)}" ry="${(r * 0.24).toFixed(1)}" fill="#ffffff" fill-opacity="0.16"/>`
+
+/** Falling snow: pale flakes, softer and rounder than `stars`. */
+const flakes = (pts) => pts.map(([x, y], n) => `<circle cx="${x}" cy="${y}" r="${2 + (n % 3) * 1.4}" fill="#ffffff" fill-opacity="${0.55 + (n % 2) * 0.25}"/>`).join('')
 
 const NATURE_SCENES = [
   // 1 rolling hills
@@ -114,10 +122,15 @@ const NATURE_SCENES = [
   () => svg(`<defs>${vlin('sky', '#9ec9e8', '#dfeef5')}</defs><rect width="512" height="512" fill="url(#sky)"/><polygon points="-20,420 150,180 320,420" fill="#5b6f86"/><polygon points="150,180 200,250 110,260" fill="#eef4f8"/><polygon points="200,430 360,210 540,430" fill="#43566b"/><polygon points="360,210 405,275 312,282" fill="#eef4f8"/><rect x="0" y="420" width="512" height="92" fill="#34465a"/>`),
   // 5 desert dunes
   () => svg(`<defs>${vlin('sky', '#fbe6c2', '#f6cfa0')}</defs><rect width="512" height="512" fill="url(#sky)"/><circle cx="150" cy="140" r="40" fill="#fff3da" opacity="0.9"/><path d="M0 300 Q170 250 360 300 T560 300 V512 H0 Z" fill="#e7b378"/><path d="M0 380 Q200 330 400 380 T620 380 V512 H0 Z" fill="#cf9558"/><path d="M0 450 Q180 415 380 450 T640 450 V512 H0 Z" fill="#a9743f"/>`),
-  // 6 night sky
-  () => svg(`<defs>${vlin('n', '#0b1230', '#243a6b')}</defs><rect width="512" height="512" fill="url(#n)"/><circle cx="350" cy="140" r="54" fill="#eef0ff"/><circle cx="332" cy="128" r="54" fill="#243a6b"/>${stars([[80, 90], [160, 200], [230, 70], [120, 320], [300, 380], [420, 260], [70, 440], [400, 440], [260, 250]])}`),
-  // 7 pine forest
-  () => svg(`<defs>${vlin('sky', '#cfe6ea', '#f0f6ee')}</defs><rect width="512" height="512" fill="url(#sky)"/><path d="M0 430 H512 V512 H0 Z" fill="#2f5340"/>${[[60, 300], [150, 360], [250, 320], [350, 380], [450, 330]].map(([x, h]) => pine(x, 448, h, 150, '#2c5b45', '#3f7c5c')).join('')}`),
+  // 6 drifting clouds
+  () => svg(`<defs>${vlin('sky', '#cfe6f7', '#f3f9fd')}</defs><rect width="512" height="512" fill="url(#sky)"/>${[[150, 148, 62, 0.85], [372, 250, 46, 0.7], [232, 382, 74, 0.62], [58, 302, 38, 0.5], [438, 92, 34, 0.55]].map(([x, y, s, o]) => cloud(x, y, s, o)).join('')}`),
+  // 7 mossy river stones — a bed of overlapping pebbles, drawn top row first so
+  // the nearer stones settle over the ones behind them
+  () => svg(`<defs>${vlin('bg', '#dfe8d4', '#b1c3a0')}</defs><rect width="512" height="512" fill="url(#bg)"/>${[30, 125, 220, 315, 405, 490].flatMap((y, row) => [0, 1, 2, 3, 4].map(col => {
+    const x = -18 + col * 118 + (row % 2 ? 60 : 0) + ((row * 7 + col * 13) % 5) * 6
+    const r = 40 + ((row * 5 + col * 11) % 4) * 11
+    return stone(x, y + ((row * 3 + col * 7) % 4) * 7, r, ['#c6d0b9', '#adbca4', '#d6dcc9', '#b9c8b1', '#a1b199'][(row * 3 + col) % 5])
+  })).join('')}`),
   // 8 birch woods
   () => svg(`<defs>${vlin('sky', '#e8f1e2', '#c9dcc2')}</defs><rect width="512" height="512" fill="url(#sky)"/>${[40, 120, 210, 300, 385, 465].map((x, n) => `<rect x="${x}" y="0" width="${20 + (n % 3) * 6}" height="512" fill="#f4f2ea"/><rect x="${x}" y="0" width="${5 + (n % 2) * 3}" height="512" fill="#d9d6c8"/>` + [70, 180, 290, 400].map(y => `<rect x="${x + 2}" y="${y + n * 13 % 60}" width="${13 + (n % 3) * 4}" height="6" rx="3" fill="#3c4038" fill-opacity="0.7"/>`).join('')).join('')}<path d="M0 470 H512 V512 H0 Z" fill="#6f8a5e"/>`),
   // 9 autumn maples
@@ -134,8 +147,8 @@ const NATURE_SCENES = [
   () => svg(`<defs>${vlin('sky', '#8fdcf0', '#ffeec4')}</defs><rect width="512" height="512" fill="url(#sky)"/><circle cx="410" cy="100" r="44" fill="#fff6cf"/><rect x="0" y="300" width="512" height="80" fill="#39b6c9"/><rect x="0" y="360" width="512" height="152" fill="#f2dfae"/><g fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="5"><path d="M0 350 Q120 336 256 350 T512 344"/></g><rect x="106" y="150" width="16" height="215" fill="#7a5326" transform="rotate(-6 114 260)"/>${[[-70, -30], [-25, -55], [25, -55], [70, -28], [0, -66]].map(([dx, dy]) => `<ellipse cx="${114 + dx}" cy="${168 + dy}" rx="60" ry="18" fill="#2e8b57" transform="rotate(${dx * 0.5} ${114 + dx} ${168 + dy})"/>`).join('')}`),
   // 15 canyon
   () => svg(`<defs>${vlin('sky', '#ffd9a0', '#f4a978')}</defs><rect width="512" height="512" fill="url(#sky)"/><polygon points="0,140 190,180 210,512 0,512" fill="#a4522f"/><polygon points="0,200 150,240 165,512 0,512" fill="#8a3f26"/><polygon points="512,120 320,170 300,512 512,512" fill="#b25c33"/><polygon points="512,190 380,230 365,512 512,512" fill="#93472a"/><path d="M210 512 Q256 380 300 512 Z" fill="#5f7f8c"/><g stroke="#00000022" stroke-width="6" fill="none"><path d="M0 260 H190"/><path d="M0 330 H185"/><path d="M512 250 H320"/><path d="M512 330 H310"/></g>`),
-  // 16 winter pines
-  () => svg(`<defs>${vlin('sky', '#dbe8f5', '#f6fafd')}</defs><rect width="512" height="512" fill="url(#sky)"/><path d="M0 420 Q140 390 260 415 T512 405 V512 H0 Z" fill="#eef4fa"/>${[[70, 260], [170, 320], [300, 280], [420, 340]].map(([x, h]) => pine(x, 430, h, 130, '#2b4a55', '#3a6470')).join('')}${stars([[40, 60], [130, 120], [220, 70], [330, 130], [440, 80], [480, 200], [90, 210]])}`),
+  // 16 snowfall over drifts
+  () => svg(`<defs>${vlin('sky', '#dbe8f5', '#f6fafd')}</defs><rect width="512" height="512" fill="url(#sky)"/><path d="M0 300 Q140 266 268 296 T512 282 V512 H0 Z" fill="#e7f0f9"/><path d="M0 372 Q160 338 300 368 T512 356 V512 H0 Z" fill="#f1f7fc"/><path d="M0 442 Q150 416 300 440 T512 430 V512 H0 Z" fill="#fbfdff"/>${flakes([[40, 60], [130, 120], [220, 70], [330, 130], [440, 80], [480, 200], [90, 210], [270, 210], [180, 270], [400, 250], [60, 330], [350, 340], [240, 150], [460, 380]])}`),
   // 17 bamboo grove
   () => svg(`<defs>${vlin('bg', '#dff0d8', '#b7d9b0')}</defs><rect width="512" height="512" fill="url(#bg)"/>${[30, 105, 190, 265, 345, 430].map((x, n) => { const w = 22 + (n % 3) * 8; return `<rect x="${x}" y="0" width="${w}" height="512" fill="${n % 2 ? '#6fa860' : '#84bd6e'}"/><rect x="${x}" y="0" width="${w * 0.28}" height="512" fill="#ffffff" fill-opacity="0.18"/>` + [40, 140, 240, 340, 450].map(y => `<rect x="${x - 3}" y="${y + (n * 17) % 70}" width="${w + 6}" height="7" rx="3" fill="#4d7f45"/>`).join('') }).join('')}${[[80, 120, -25], [230, 300, 20], [400, 190, -15]].map(([x, y, r]) => `<ellipse cx="${x}" cy="${y}" rx="58" ry="12" fill="#3f7a3c" fill-opacity="0.75" transform="rotate(${r} ${x} ${y})"/>`).join('')}`),
   // 18 misty valley

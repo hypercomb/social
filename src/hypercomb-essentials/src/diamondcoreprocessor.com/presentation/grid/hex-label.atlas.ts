@@ -163,6 +163,45 @@ export class HexLabelAtlas {
    *  for this label now samples a DIFFERENT label's glyphs). */
   public hasLabel = (label: string): boolean => this.map.has(label)
 
+  /** Total slots — consumers size overcommit checks against this. */
+  public get capacity(): number {
+    return this.cols * this.rows
+  }
+
+  // Labels whose slots the ring allocator must not reuse — the renderer
+  // pins the on-screen set on every paint, exactly like HexImageAtlas
+  // pins on-screen image sigs. Without this, background readiness bakes
+  // (child names of every branch at the current location) wrap the ring
+  // and evict VISIBLE labels; each eviction forces a repaint whose bakes
+  // evict the next victim — on screen that is every tile's text blinking.
+  #pinned: ReadonlySet<string> = new Set()
+
+  /** Replace the pinned set. Called by the renderer with the on-screen
+   *  labels on every paint; the previous layer's labels unpin automatically. */
+  public setPinned = (labels: Iterable<string>): void => {
+    this.#pinned = new Set(labels)
+  }
+
+  /** Claim the next slot for `label`, stepping over slots whose occupant is
+   *  pinned (on screen). Bounded scan; if EVERY slot is pinned (more visible
+   *  labels than slots) fall back to plain reuse — the eviction event keeps
+   *  the display converging, same contract as HexImageAtlas.#loadInto. */
+  #allocSlot(label: string): number {
+    const capacity = this.cols * this.rows
+    let slot = this.nextIndex % capacity
+    for (let scanned = 0; scanned < capacity; scanned++) {
+      const occupant = this.slotToLabel[slot]
+      if (occupant === null || occupant === label || !this.#pinned.has(occupant)) break
+      this.nextIndex++
+      slot = this.nextIndex % capacity
+      if (scanned === capacity - 1) {
+        console.warn('[HexLabelAtlas] every slot pinned — more on-screen labels than atlas slots, evicting a pinned slot')
+      }
+    }
+    this.nextIndex++
+    return slot
+  }
+
   /**
    * Zero a single slot's pixels before a reused slot is overwritten.
    * Labels are mostly transparent (only the glyph strokes have alpha), so
@@ -228,8 +267,7 @@ export class HexLabelAtlas {
     for (const label of labels) {
       if (!label || this.map.has(label)) continue
 
-      const slot = this.nextIndex % (this.cols * this.rows)
-      this.nextIndex++
+      const slot = this.#allocSlot(label)
 
       const previous = this.slotToLabel[slot]
       this.slotToLabel[slot] = label
@@ -265,8 +303,7 @@ export class HexLabelAtlas {
     if (cached) return cached
 
     // wrap if you exceed capacity (production-safe: no crash, just overwrites old slots)
-    const slot = this.nextIndex % (this.cols * this.rows)
-    this.nextIndex++
+    const slot = this.#allocSlot(label)
 
     const previous = this.slotToLabel[slot]
     this.slotToLabel[slot] = label

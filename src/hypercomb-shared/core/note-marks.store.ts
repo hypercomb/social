@@ -5,10 +5,25 @@
 //
 // A mark is `{ icon, name, role }`: a Material icon name, the meaning the
 // user gave it ("Decision", "Risk", "Step"), and the role that meaning plays
-// in a notes tree — `heading` (the row reads as a section break) or `list`
-// (the row reads as an item under one). The ROLE LIVES ON THE MARK, not on
-// the note: renaming or re-roling an icon restyles every note that carries
-// it, which is the whole point of "give an icon meaning".
+// in a notes tree. The ROLE LIVES ON THE MARK, not on the note: renaming or
+// re-roling an icon restyles every note that carries it, which is the whole
+// point of "give an icon meaning".
+//
+// THE THREE ROLES ARE TWO KINDS. `heading` (a section break) and `list` (an
+// item under one) are both CONSTRAINED — a row in either role says one thing
+// and says it in a line. `prose` is the unconstrained role: the longer form,
+// a paragraph elaborating the point it hangs under.
+//
+// That split is the vocabulary the notes tree is built on. A note documents
+// ONE thing, individually — never a relationship between things, which is
+// what pheromones and references are for. A constrained row is therefore a
+// POINT (the structure of a document), and a prose row is a NOTE (its body).
+// The user says "point" and "note"; the code says `heading`/`list` and
+// `prose`, the same way users say tiles and the code says cells.
+//
+// Consequence: nothing hardcodes which icons are points. A view that wants
+// only the structure filters on `roleOf(icon) !== 'prose'`, and the user can
+// re-role any icon at any time to change what their document's outline is.
 //
 // HIVE CONTENT, NOT BROWSER STATE. The palette is stored in the
 // sign('notes:marks') pool of meaning as a single content-addressed document
@@ -28,7 +43,17 @@ const MARKS_MEANING = 'notes:marks'
 const MARKS_SUBKEY = 'v1'
 
 /** What a mark's meaning DOES to the rows that carry it. */
-export type MarkRole = 'heading' | 'list'
+export type MarkRole = 'heading' | 'list' | 'prose'
+
+const ROLES: ReadonlySet<string> = new Set<string>(['heading', 'list', 'prose'])
+
+/** The two KINDS a role falls into — see the header. `point` rows are
+ *  constrained to a line and carry the structure; `note` rows are the prose
+ *  body. Views group and filter on this, never on a list of icon names. */
+export type MarkKind = 'point' | 'note'
+
+export const kindOfRole = (role: MarkRole): MarkKind =>
+  role === 'prose' ? 'note' : 'point'
 
 export type NoteMark = {
   /** Material symbol name, e.g. 'flag'. Also the mark's identity. */
@@ -50,11 +75,15 @@ const SEED: readonly NoteMark[] = Object.freeze([
   { icon: 'label', name: '', role: 'heading' },
   { icon: 'check_circle', name: '', role: 'list' },
   { icon: 'bolt', name: '', role: 'list' },
+  // One prose mark so the note kind isn't an empty group on a fresh hive.
+  // 'notes' is the Material glyph for a written page — the only seed whose
+  // icon has to read as "the longer form" at a glance.
+  { icon: 'notes', name: '', role: 'prose' },
 ])
 
 const MAX_MARKS = 64
 
-type MarksDoc = { v?: number; seeded?: boolean; marks?: unknown }
+type MarksDoc = { v?: number; seeded?: boolean; prosed?: boolean; marks?: unknown }
 
 export class NoteMarksStore extends EventTarget {
 
@@ -62,6 +91,9 @@ export class NoteMarksStore extends EventTarget {
   #store: Store | undefined
   #loaded = false
   #seeded = false
+  /** Whether the one-time prose top-up has run — see `#load`. Separate from
+   *  `#seeded` so deleting the prose mark keeps it deleted. */
+  #prosed = false
 
   public get marks(): readonly NoteMark[] { return this.#marks }
 
@@ -129,7 +161,7 @@ export class NoteMarksStore extends EventTarget {
       await this.#store.initialize()
       const pool = await this.#store.getPool(MARKS_MEANING)
       if (!pool) return
-      const doc: MarksDoc = { v: 1, seeded: this.#seeded, marks: this.#marks }
+      const doc: MarksDoc = { v: 1, seeded: this.#seeded, prosed: this.#prosed, marks: this.#marks }
       const bytes = new TextEncoder().encode(JSON.stringify(doc))
       await this.#store.putPoolDoc(pool, bytes.buffer as ArrayBuffer, MARKS_SUBKEY)
     } catch { /* palette is a preference layer — a failed write is non-fatal */ }
@@ -143,15 +175,31 @@ export class NoteMarksStore extends EventTarget {
       if (buf) {
         const parsed = JSON.parse(new TextDecoder().decode(buf)) as MarksDoc
         this.#seeded = parsed?.seeded === true
+        this.#prosed = parsed?.prosed === true
         this.#marks = Object.freeze(normalizeMarks(parsed?.marks))
       }
     } catch { /* absent or unreadable — fall through to the seed */ }
     this.#loaded = true
+    let dirty = false
     if (!this.#seeded) {
       this.#seeded = true
       this.#marks = Object.freeze(this.#marks.length ? this.#marks.slice() : SEED.slice())
-      void this.#persist()
+      dirty = true
     }
+    if (!this.#prosed) {
+      // One-time top-up for palettes seeded before the prose role existed.
+      // Without it the note kind is an empty group on every hive that
+      // already had a palette — the feature would look broken on exactly
+      // the hives that use notes most. It carries its OWN flag rather than
+      // riding `seeded`, so a user who deletes the prose mark never sees it
+      // grow back — same contract the original seed makes.
+      this.#prosed = true
+      if (!this.#marks.some(m => m.role === 'prose') && this.#marks.length < MAX_MARKS) {
+        this.#marks = Object.freeze([...this.#marks, ...SEED.filter(m => m.role === 'prose')])
+      }
+      dirty = true
+    }
+    if (dirty) void this.#persist()
     this.dispatchEvent(new Event('change'))
   }
 }
@@ -171,7 +219,9 @@ function normalizeMarks(raw: unknown): NoteMark[] {
     out.push({
       icon,
       name: typeof rec?.name === 'string' ? rec.name.trim().slice(0, 40) : '',
-      role: rec?.role === 'heading' ? 'heading' : 'list',
+      // Unknown / absent roles fall back to 'list' — the safe default, since
+      // a list row is the least opinionated thing a mark can make a note.
+      role: typeof rec?.role === 'string' && ROLES.has(rec.role) ? rec.role as MarkRole : 'list',
     })
     if (out.length >= MAX_MARKS) break
   }

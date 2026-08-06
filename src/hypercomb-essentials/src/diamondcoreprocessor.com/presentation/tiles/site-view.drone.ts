@@ -22,6 +22,7 @@ import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
+import { scopeCellPageCss } from './cell-page-css-scope.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -639,18 +640,10 @@ export class SiteViewDrone extends Drone {
 
     const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
 
-    // Lift <style> from parsed head into the live document head, tagged
-    // so unmount can remove exactly these (and not anyone else's).
-    const styleNodes: HTMLStyleElement[] = []
-    for (const s of Array.from(parsed.querySelectorAll('style'))) {
-      const live = document.createElement('style')
-      live.setAttribute('data-hc-cell-page', pageSig)
-      live.textContent = s.textContent ?? ''
-      document.head.appendChild(live)
-      styleNodes.push(live)
-    }
-
-    // Hoist <link rel="stylesheet"> too, same lifecycle.
+    // Hoist <link rel="stylesheet"> into the live head, tagged so unmount can
+    // remove exactly these (and not anyone else's). An external sheet is fetched
+    // by the browser, so its text can't be scoped the way inline CSS is — a page
+    // that wants to travel as an artifact should inline its styles.
     const linkNodes: HTMLLinkElement[] = []
     for (const l of Array.from(parsed.querySelectorAll('link[rel="stylesheet"]'))) {
       const live = document.createElement('link')
@@ -664,7 +657,11 @@ export class SiteViewDrone extends Drone {
     const host = document.createElement('div')
     host.id = 'hc-site-view-host'
     host.style.cssText =
-      'position:fixed;inset:0;z-index:59988;overflow:auto;'
+      // Inset by any docked panel's reservation (`--hc-inset-<side>`, mirrored
+      // from `viewport:inset`) so the Views window can stay open beside the page.
+      'position:fixed;top:0;bottom:0;' +
+      'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
+      'z-index:59988;overflow:auto;'
     // The site host IS the page's scroll surface. Without this opt-out the
     // always-on hex wheel-zoom handler (MousewheelZoomInput) preventDefaults
     // every wheel/trackpad event over the full-viewport canvas — which is only
@@ -674,6 +671,45 @@ export class SiteViewDrone extends Drone {
     // overlay uses), restoring native scroll.
     host.setAttribute('data-consumes-wheel', '')
     document.body.appendChild(host)
+
+    // The page's own CSS goes INSIDE the page's host, rewritten so every rule
+    // is confined to it (`body{…}` → `#hc-site-view-host{…}`). A cell page is
+    // an artifact: it carries its own CSS, so it renders alone or beside
+    // another one without either bleeding into the hive chrome or fighting the
+    // other page. Styles first, so the page paints in one pass rather than
+    // flashing unstyled while the body content is moved across.
+    const styleNodes: HTMLStyleElement[] = []
+    for (const s of Array.from(parsed.querySelectorAll('style'))) {
+      const live = document.createElement('style')
+      live.setAttribute('data-hc-cell-page', pageSig)
+      live.textContent = scopeCellPageCss(s.textContent ?? '', `#${host.id}`)
+      host.appendChild(live)
+      styleNodes.push(live)
+    }
+
+    // A page states its theme by writing on its root — `documentElement
+    // .classList.add('dark')`, `<html data-theme>` — and its own scoped CSS now
+    // reads that off the host instead. Mirror root class/theme writes onto the
+    // host so those toggles keep working, and seed from whatever the page's
+    // pre-paint script already stamped.
+    // The classes the page was AUTHORED with (on its own <html>/<body>) are the
+    // artifact's own — they stay on the host under every mirror pass.
+    const authoredClass = [
+      parsed.documentElement?.className ?? '',
+      parsed.body?.className ?? '',
+    ].join(' ').trim()
+    const mirrorRoot = (): void => {
+      const theme = document.documentElement.getAttribute('data-theme')
+      if (theme === null) host.removeAttribute('data-theme')
+      else host.setAttribute('data-theme', theme)
+      host.className = [authoredClass, document.documentElement.className, document.body.className]
+        .join(' ').trim()
+    }
+    mirrorRoot()
+    const rootObserver = new MutationObserver(mirrorRoot)
+    const watch = { attributes: true, attributeFilter: ['class', 'data-theme'] }
+    rootObserver.observe(document.documentElement, watch)
+    rootObserver.observe(document.body, watch)
 
     const body = parsed.body
     if (body) {
@@ -738,6 +774,7 @@ export class SiteViewDrone extends Drone {
       sitePath: [...segments],
       unmount: () => {
         host.removeEventListener('click', onAnchorClick, true)
+        rootObserver.disconnect()
         for (const node of styleNodes) node.remove()
         for (const node of linkNodes) node.remove()
         for (const node of scriptNodes) node.remove()

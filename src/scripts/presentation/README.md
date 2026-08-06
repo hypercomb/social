@@ -44,7 +44,16 @@ node build.cjs --check     # list scenes whose audio is stale (no network)
 node instructions.cjs      # re-derive scene instructions + production.md
 node instructions.cjs --push   # (bridge live) write instructions onto the hive tiles
 node deploy-azure.cjs      # ship to Azure Static Web Apps
+node verbs.cjs             # the three structural verbs in one short cut
 ```
+
+`verbs.cjs` is the one cut whose product beats are **drawn** rather than
+captured: what a verb does is a movement — children fanning out, a crowded
+level folding into groups, a row spreading to make room — and a still of the
+after-state shows none of it. Frames are shot in filmstrips, many panes to one
+headless launch, then cut apart with ffmpeg `untile`; the launch, not the
+drawing, is the cost. Narration comes from the same `audio-cache` the full
+build fills, keyed by the same words.
 
 ## Narrating it yourself
 

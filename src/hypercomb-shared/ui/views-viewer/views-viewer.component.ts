@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common'
 import { Component, OnDestroy, computed, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { registerShellSurface } from '../../core/shell-surface-registry'
@@ -42,6 +43,7 @@ type History = {
 }
 
 type SourceScope = 'layer' | 'hierarchy'
+type ViewFilter = 'all' | 'active' | 'inactive'
 type ViewRow = ViewDescriptor & {
   attached: boolean
   enabled: boolean
@@ -75,7 +77,7 @@ const FRIENDLY: Record<string, { name: string; description: string; icon: string
 @Component({
   selector: 'hc-views-viewer',
   standalone: true,
-  imports: [DockInsetDirective, HcDockedPanelDirective, TranslatePipe],
+  imports: [NgTemplateOutlet, DockInsetDirective, HcDockedPanelDirective, TranslatePipe],
   templateUrl: './views-viewer.component.html',
   styleUrls: ['./views-viewer.component.scss'],
 })
@@ -86,6 +88,20 @@ export class ViewsViewerComponent implements OnDestroy {
   readonly subject = signal('Current category')
   readonly attachedCount = computed(() => this.rows().filter(row => row.enabled).length)
   readonly defaultView = signal('')
+
+  /** Which half of the list is on show. The window stays open while you flip
+   *  between views, so the ones you are flipping BETWEEN stay at the top and
+   *  the ones you have not turned on sink to the bottom. */
+  readonly filter = signal<ViewFilter>('all')
+  readonly activeRows = computed(() => this.rows().filter(row => row.enabled || row.active))
+  readonly inactiveRows = computed(() => this.rows().filter(row => !row.enabled && !row.active))
+  readonly showActive = computed(() => this.filter() !== 'inactive')
+  readonly showInactive = computed(() => this.filter() !== 'active')
+  readonly nothingToShow = computed(() =>
+    (this.showActive() ? this.activeRows().length : 0) +
+    (this.showInactive() ? this.inactiveRows().length : 0) === 0)
+
+  setFilter(next: ViewFilter): void { this.filter.set(next) }
 
   #registry: Registry | null = null
   #lineage: Lineage | null = null
@@ -207,7 +223,10 @@ export class ViewsViewerComponent implements OnDestroy {
         attached,
         enabled,
         hiddenRecord,
-        active: enabled && mode === view.view,
+        // What is on the container RIGHT NOW, whatever the panel thinks is
+        // attached — a behaviour that opened its own surface still reads as
+        // showing, so the window never lies about what you are looking at.
+        active: mode === view.view,
         sourceScope: records.at(-1)?.record.payload?.sourceScope === 'hierarchy'
           ? 'hierarchy' as const
           : 'layer' as const,
@@ -217,7 +236,10 @@ export class ViewsViewerComponent implements OnDestroy {
     rows.sort((a, b) => {
       const ai = Object.keys(FRIENDLY).indexOf(a.view)
       const bi = Object.keys(FRIENDLY).indexOf(b.view)
-      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi) || this.name(a).localeCompare(this.name(b))
+      // On before off — the ones you flip between stay together at the top.
+      return Number(b.enabled) - Number(a.enabled) ||
+        (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi) ||
+        this.name(a).localeCompare(this.name(b))
     })
     this.rows.set(rows)
     const attachedDefaults = rows.filter(row => row.enabled && row.opensOnTileClick)
@@ -340,9 +362,30 @@ export class ViewsViewerComponent implements OnDestroy {
     }
   }
 
+  /**
+   * Clicking a card SHOWS that view in the container beside this window — the
+   * window stays open so you can flip between views. One at a time: the view
+   * mode is a single value, so showing one stops the last. Clicking the view
+   * that is already showing puts the hexagons back.
+   *
+   * A view that is not on yet gets turned on first, then shown.
+   */
   async activate(row: ViewRow): Promise<void> {
+    if (row.enabled || row.active) { this.showView(row); return }
     if (!row.attached && (!row.attachable || !row.queenKey)) return
     await this.toggleAttached(row)
+    const settled = this.rows().find(candidate => candidate.view === row.view)
+    if (settled?.enabled) this.showView(settled)
+  }
+
+  /** Put this view on the container (or take it off, if it is the one showing). */
+  showView(row: ViewRow): void {
+    if (!row.enabled && !row.active) return
+    const next = this.#mode?.mode === row.view ? 'hexagons' : row.view
+    this.#mode?.setMode(next)
+    // Paint the new selection now; the mode `change` listener reconciles.
+    this.rows.update(rows => rows.map(candidate =>
+      ({ ...candidate, active: candidate.view === next })))
   }
 
   async setSourceScope(event: Event, row: ViewRow, scope: SourceScope): Promise<void> {
@@ -357,10 +400,17 @@ export class ViewsViewerComponent implements OnDestroy {
         : candidate))
   }
 
+  /** The card's explicit show/stop button. Never closes this window. */
   openView(row: ViewRow): void {
-    if (!row.enabled) return
-    this.#mode?.setMode(row.view)
-    this.close()
+    this.showView(row)
+  }
+
+  /** The ON/OFF pill: turn the behaviour on at this cell, or take it off. */
+  async toggleOnOff(event: Event, row: ViewRow): Promise<void> {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!row.attached && (!row.attachable || !row.queenKey)) return
+    await this.toggleAttached(row)
   }
 
   closeView(row: ViewRow): void {

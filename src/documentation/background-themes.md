@@ -131,10 +131,12 @@ the Ember screen.
 | `off` | clears the screen |
 
 **Nature is the ship default** — twenty scenes (hills, waves, sunset, mountains,
-dunes, night sky, pine forest, birch woods, autumn maples, waterfall, lake,
-meadow, aurora, beach, canyon, winter pines, bamboo, misty valley, wheat,
+dunes, clouds, river stones, birch woods, autumn maples, waterfall, lake,
+meadow, aurora, beach, canyon, snowfall, bamboo, misty valley, wheat,
 cherry blossom), the largest group by a distance, so a wall of tiles goes a long
-way before a picture repeats. It leads the list, an unchosen `active` reads as
+way before a picture repeats. A scene has to sit *behind* a tile's own content,
+so the set carries no hard silhouettes and no near-black field: the moon and the
+two conifer walls were replaced for exactly that reason. It leads the list, an unchosen `active` reads as
 `nature`, and its picture set is the substrate's default tile fill. Anyone who
 had never chosen a set — the earlier Steel and Photos ship defaults — is moved
 onto it once, by the `hc:substrate-sets-v` marker; a deliberate choice is left

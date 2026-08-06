@@ -109,6 +109,11 @@ export class HexImageAtlas {
     this.#pinned = new Set(sigs)
   }
 
+  /** Total slots — consumers size overcommit checks against this. */
+  get capacity(): number {
+    return this.#cols * this.#rows
+  }
+
   /** True while the signature is inside a failed-retry window (exceeded
    *  max retries less than FAILURE_RETRY_MS ago). The window lapsing makes
    *  the sig retryable again — "failed" is a cooldown, never a verdict. */

@@ -11,7 +11,15 @@
   // this `:host > *` sweep can't reach it anyway. It is hidden via the inline
   // [style.visibility] binding in app.html (visibility, not display, so the
   // canvas never resizes to 0). See app.html.
-  & > *:not(.header-bar):not(router-outlet):not(#pixi-host) {
+  // `hc-shell-surfaces` is exempt: it is the mount for every registry-fed
+  // toolwindow (pheromones, views, files, history…). Sweeping it away meant a
+  // full-screen view could not have a panel open at all — you could not paint
+  // a pheromone on a site page, and the Views window vanished the moment you
+  // used it. The surfaces are position:fixed at the toolwindow layer (100002,
+  // above the 59988 view overlays) and the overlays inset by
+  // `--hc-inset-right`, so an open panel sits BESIDE the view, not over it.
+  // Matches the web shell, which only ever hid a named list.
+  & > *:not(.header-bar):not(router-outlet):not(#pixi-host):not(hc-shell-surfaces) {
     display: none !important;
   }
 

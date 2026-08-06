@@ -701,12 +701,15 @@ $mint: #6fbf94;
   padding: 0 1em;
   max-height: 12em;
   overflow-y: auto;
+
+  // Opening one is a deliberate ask to read it — give the section room rather
+  // than making the participant scroll a 12em porthole over what they opened.
+  &:has(.bouquet-row.open) { max-height: 26em; }
 }
 
 .bouquet-row {
   display: flex;
-  align-items: flex-start;
-  gap: 0.3em;
+  flex-direction: column;
   padding: 0.15em 0;
 
   // In hand: every tile click is landing this bouquet, so it reads as loud as
@@ -715,6 +718,46 @@ $mint: #6fbf94;
     border-color: rgba($mint, 0.6);
     background: rgba($mint, 0.12);
   }
+}
+
+// The name line: disclosure, the bouquet itself, and the way to forget it.
+.bouquet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3em;
+}
+
+// Opening a bouquet is NOT loading it — the chevron is its own target so that
+// reading what is inside never arms the brush by accident.
+.bouquet-open {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 0 0.1em;
+  color: rgba(158, 179, 194, 0.7);
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.05em; }
+  &:hover { color: #eaf0f4; }
+}
+
+// Its marks, as ordinary rows. Indented and hairlined to the left so the
+// nesting is legible without turning the bouquet into a box.
+//
+// Qualified with `.tags-list` deliberately: the shared list rule is defined
+// further down the file and would otherwise win on source order and flatten
+// the indent back to zero (it did — caught in the browser, not in review).
+.tags-list.bouquet-contents {
+  margin: 0.2em 0 0.35em 0.9em;
+  padding: 0;
+  border-left: 1px solid rgba($steel, 0.22);
+  overflow: visible;
+
+  .tags-row { padding-left: 0.7em; }
+  .tags-row:last-child { border-bottom: none; }
 }
 
 .bouquet-load {
@@ -816,6 +859,74 @@ $mint: #6fbf94;
   flex: 1 1 auto;
   min-height: 0;
   overscroll-behavior: contain;
+}
+
+// ── namespaces — what a tile IS ─────────────────────────────
+//
+// Steel, not mint: mint is the scenting family (the brush, the bouquet, the
+// things you gather). These marks are not gathered — behaviours declare them —
+// so they read as the panel's quiet furniture and stay folded until asked for.
+.tags-namespaces-section {
+  flex: 0 0 auto;
+  border-top: 1px solid rgba($steel, 0.18);
+  padding-bottom: 0.4em;
+}
+
+.namespace-hint {
+  margin: 0;
+  padding: 0 1em 0.5em;
+  font-size: 0.72em;
+  line-height: 1.45;
+  color: #8ea2b0;
+}
+
+.namespace-group + .namespace-group { border-top: 1px solid rgba($steel, 0.07); }
+
+.namespace-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.35em 1em;
+  background: none;
+  border: none;
+  color: #b9cbd8;
+  font: inherit;
+  font-size: 0.8em;
+  text-align: left;
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.05em; color: rgba(158, 179, 194, 0.7); }
+  &:hover { background: rgba($steel, 0.06); color: #eaf0f4; }
+}
+
+.namespace-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.namespace-count {
+  flex: 0 0 auto;
+  font-size: 0.85em;
+  color: rgba(158, 179, 194, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+
+// Qualified to match `.tags-list.bouquet-contents` — same reason, and keeping
+// the two spellings identical is what stops one of them silently drifting.
+.tags-list.namespace-contents {
+  margin: 0 0 0.3em 1.6em;
+  padding: 0;
+  border-left: 1px solid rgba($steel, 0.22);
+  overflow: visible;
+
+  .tags-row { padding-left: 0.7em; }
+  .tags-row:last-child { border-bottom: none; }
 }
 
 .tags-row {

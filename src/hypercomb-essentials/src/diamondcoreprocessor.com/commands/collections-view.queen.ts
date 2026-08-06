@@ -1,9 +1,10 @@
 // diamondcoreprocessor.com/commands/collections-view.queen.ts
 //
 // `/collections` — open the right-docked Collections entrance (the `sets/`
-// index, filterable). The panel itself is shell UI
-// (hypercomb-shared/ui/collections-landing); this queen only fires the open
-// effect, keeping the essentials/shell boundary clean.
+// index, filterable). The panel itself is shell UI: the ONE aggregate index
+// (hypercomb-shared/ui/aggregate-index) rendering the `collections` source.
+// This queen only fires the open effect, keeping the essentials/shell boundary
+// clean.
 //
 // It deliberately does NOT navigate: the panel is a tool window you can open
 // over any page, and `/sets` is reachable on its own (the pools button, or just

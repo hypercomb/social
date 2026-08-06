@@ -1,20 +1,20 @@
 {
   "folders": [
     {
-      "name": "documentation",
-      "path": "documentation"
-    },
-    {
       "name": "hypercomb-dev",
       "path": "hypercomb-dev"
     },
     {
-      "name": "hypercomb-shared",
-      "path": "hypercomb-shared"
+      "name": "diamond-core-processor",
+      "path": "diamond-core-processor"
     },
     {
       "name": "hypercomb-essentials",
       "path": "hypercomb-essentials"
+    },
+    {
+      "name": "hypercomb-client",
+      "path": "hypercomb-client"
     },
     {
       "name": "hypercomb-core",
@@ -25,19 +25,24 @@
       "path": "hypercomb-web"
     },
     {
-      "path": "diamond-core-processor"
+      "name": "hypercomb-shared",
+      "path": "hypercomb-shared"
     },
     {
+      "name": "hypercomb-relay",
       "path": "hypercomb-relay"
     },
     {
+      "name": "hypercomb-cli",
       "path": "hypercomb-cli"
     },
     {
+      "name": "hypercomb-extensions",
       "path": "hypercomb-extensions"
     },
     {
-      "path": "hypercomb-client"
+      "name": "documentation",
+      "path": "documentation"
     }
   ],
   "launch": {

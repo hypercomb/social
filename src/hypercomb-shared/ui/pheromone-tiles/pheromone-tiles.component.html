@@ -21,7 +21,16 @@
         <span class="pheromone-grip" aria-hidden="true">⠿</span>
       }
       <span class="pheromone-card-cell">{{ panel.data.label }}</span>
-      @if (!panel.ephemeral) {
+      @if (panel.ephemeral) {
+        <button
+          class="pheromone-card-pin"
+          type="button"
+          (click)="pin(panel)"
+          (pointerdown)="$event.stopPropagation()"
+          [attr.aria-label]="'pheromone.card.pin' | t"
+          [attr.title]="'pheromone.card.pin' | t"
+        >⌖</button>
+      } @else {
         <button
           class="pheromone-card-close"
           type="button"

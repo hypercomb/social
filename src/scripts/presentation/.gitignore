@@ -6,6 +6,7 @@ teaser/
 posts/
 record/
 full/
+verbs/
 .shots/
 .shots.cjs
 # a reference recording is enough to clone the voice in it — publishing one is

@@ -37,6 +37,7 @@
 // time. Never imports essentials.
 
 import { EffectBus } from '@hypercomb/core'
+import { memberAtLauncherCell } from './aggregation-layer'
 import type { GroupMember, LaunchGroup, GroupRegistry } from './group-registry'
 
 const LAUNCH_KIND = 'launch:target'
@@ -89,7 +90,14 @@ export class MixedGroupBag {
       this.#members(id)
       const member = this.#memberByLabel.get(label)
       const group = this.#groupByLabel.get(label)
-      if (!member || !group) return
+      // The tile the participant pressed CARRIES its own target (a
+      // `launch:target` decoration on its launcher cell). When the in-memory
+      // projection can't answer — a curated group whose scan hasn't run or
+      // threw, a cold reload straight into /<id>, a member enabled in another
+      // tab — read that truth instead of dropping the click. Without this the
+      // menu row (which decodes the layer itself) opened a site while the
+      // TILE for the same site was a silent no-op.
+      if (!member || !group) { void this.#openFromCell(id, label); return }
       // Members WITH a hive location (websites) take over a transient surface
       // at their OWN location, navigating us out of the bag: remember where the
       // site lives so the bag's own exit() back-drills onto it. Closing that
@@ -112,6 +120,29 @@ export class MixedGroupBag {
       const was = prevPublic
       prevPublic = pub
       if (was === false && pub && this.isActive()) this.exit()
+    })
+  }
+
+  /** Open a launcher tile from the LAYER, not the projection: decode the
+   *  pressed cell's own `launch:target` at [id, label] and route it to the
+   *  group that owns the page. Async by nature (one location read), which is
+   *  why it is the fallback and not the primary route — a warm projection
+   *  still opens synchronously. Silent when the cell carries no target (a
+   *  clustered group's header tile opens nothing, correctly). */
+  async #openFromCell(id: string, label: string): Promise<void> {
+    const group = this.#registry.get(id)
+    if (!group) return
+    const decoded = await memberAtLauncherCell(id, label).catch(() => null)
+    if (!decoded || decoded.segments.length === 0) return
+    // The participant may have moved on during the read — only honour the
+    // click while still standing in the page it was pressed on.
+    if (this.currentGroupId() !== id) return
+    this.#lastOpenedSegments = [...decoded.segments]
+    group.open({
+      key: JSON.stringify(decoded.segments),
+      label: decoded.label || label,
+      segments: [...decoded.segments],
+      icon: decoded.icon,
     })
   }
 

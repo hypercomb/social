@@ -64,7 +64,8 @@ $accent: #ffcf6b;
   white-space: nowrap;
 }
 
-.pheromone-card-close {
+.pheromone-card-close,
+.pheromone-card-pin {
   flex: 0 0 auto;
   background: transparent;
   border: none;
@@ -74,9 +75,13 @@ $accent: #ffcf6b;
   cursor: pointer;
   padding: 0 0.15rem;
   transition: color 150ms ease;
-
-  &:hover { color: #ffc8c8; }
 }
+
+.pheromone-card-close:hover { color: #ffc8c8; }
+
+// The peek's only control — it keeps the card up, which is what makes the
+// chips' ×'s reachable now that the tile's hover band stands down here.
+.pheromone-card-pin:hover { color: #ffcf6b; }
 
 .pheromone-chips {
   list-style: none;

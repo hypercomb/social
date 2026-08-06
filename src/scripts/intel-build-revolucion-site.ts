@@ -19,6 +19,7 @@
 // content returns unchanged:true. Safe to re-run after editing page copy.
 
 import WebSocket from 'ws'
+import { EARN_OF, EARN_RULES, EMBERS_JS, HOUSE_ITEMS, SALE_ITEMS, STORE_ITEMS } from './lounge3d/store-items.js'
 
 const BRIDGE_PORT = 2401
 const TIMEOUT = 60_000
@@ -284,7 +285,69 @@ blockquote cite{display:block;margin-top:.7rem;font-style:normal;font-size:.78re
   clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .hexgallery a:hover img{filter:brightness(1.14)}
 .hexgallery a:hover{color:var(--gold-bright)}
+/* ── embers: the purse, the shelves, the ledger ── */
+.purse{display:flex;align-items:center;gap:.45rem;margin-left:1.4rem;padding:.3rem .8rem .3rem .6rem;
+  border:1px solid var(--hairline);border-radius:999px;background:rgba(179,84,47,.1);
+  font-size:.8rem;letter-spacing:.1em;color:var(--gold-bright);white-space:nowrap;
+  transition:border-color .2s ease,background .2s ease}
+.purse:hover{border-color:var(--gold);background:rgba(200,151,90,.16)}
+.purse i{width:.6rem;height:.68rem;flex:none;background:var(--ember);
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+  box-shadow:0 0 9px rgba(179,84,47,.75)}
+@media (prefers-reduced-motion: no-preference){
+  .purse i{animation:pulse 3.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.75}50%{opacity:1}}
+}
+.purse.paid{animation:paid .9s ease}
+@keyframes paid{0%{box-shadow:0 0 0 0 rgba(200,151,90,.5)}100%{box-shadow:0 0 0 14px rgba(200,151,90,0)}}
+.purseline{display:flex;flex-wrap:wrap;align-items:baseline;gap:1.4rem;margin:2.2rem 0 1rem;
+  border:1px solid var(--hairline);border-top:2px solid var(--gold);
+  background:linear-gradient(160deg,var(--coal),var(--smoke));padding:1.6rem 1.8rem;
+  box-shadow:0 12px 30px rgba(0,0,0,.3)}
+.purseline .big{font-size:clamp(2.4rem,6vw,3.6rem);line-height:1;
+  background:var(--foil);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.purseline .t{font-size:.7rem;letter-spacing:.26em;text-transform:uppercase;color:var(--faint)}
+.purseline p{flex:1 1 16rem;font-size:.92rem;color:var(--cream-dim);min-width:14rem}
+.shelf{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:1.1rem;margin:1.6rem 0 2.6rem}
+.good{position:relative;display:flex;flex-direction:column;
+  border:1px solid var(--hairline);background:linear-gradient(160deg,var(--coal),var(--smoke));
+  padding:1.5rem 1.4rem 1.3rem;box-shadow:0 10px 26px rgba(0,0,0,.28);
+  transition:border-color .22s ease,transform .22s ease}
+.good:hover{border-color:var(--gold);transform:translateY(-3px)}
+.good .price{position:absolute;top:1.15rem;right:1.2rem;display:flex;align-items:center;gap:.35rem;
+  font-size:.82rem;letter-spacing:.08em;color:var(--gold-bright)}
+.good .price i{width:.5rem;height:.58rem;background:var(--ember);
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.good h3{padding-right:4.5rem}
+.good p{font-size:.92rem;color:var(--cream-dim);flex:1}
+.good .take{margin-top:1.1rem;align-self:flex-start;padding:.5rem 1.3rem;border:1px solid var(--gold);
+  color:var(--gold-bright);letter-spacing:.18em;text-transform:uppercase;font-size:.7rem;
+  background:transparent;font-family:var(--serif);cursor:pointer;border-radius:2px;
+  transition:background .2s ease,color .2s ease}
+.good .take:hover{background:var(--gold);color:var(--night)}
+.good .take[disabled]{cursor:default;border-color:var(--hairline);color:var(--faint);background:transparent}
+.good.mine{border-color:var(--gold)}
+.good.mine::after{content:'YOURS';position:absolute;bottom:1.35rem;right:1.3rem;
+  font-size:.62rem;letter-spacing:.26em;color:var(--gold)}
+.good.short .price{color:var(--faint)}
+.earn{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1px;
+  background:var(--hairline);border:1px solid var(--hairline);margin:1.8rem 0}
+.earn div{background:var(--night);padding:1.2rem 1.2rem 1.1rem}
+.earn .n{display:block;font-size:1.5rem;line-height:1.2;
+  background:var(--foil);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.earn .t{display:block;font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);margin:.3rem 0 .5rem}
+.earn p{font-size:.86rem;color:var(--faint);line-height:1.6}
+.ledger{border:1px solid var(--hairline);background:var(--coal);margin:1.6rem 0;
+  box-shadow:inset 0 0 40px rgba(0,0,0,.3)}
+.ledger .row{display:flex;align-items:baseline;gap:1rem;padding:.7rem 1.3rem;
+  border-top:1px solid rgba(200,151,90,.12);font-size:.9rem}
+.ledger .row:first-child{border-top:0}
+.ledger .row .w{flex:1;color:var(--cream-dim)}
+.ledger .row .d{letter-spacing:.06em;color:var(--gold-bright)}
+.ledger .row .d.out{color:var(--ember)}
+.ledger .empty{padding:1.4rem 1.3rem;color:var(--faint);font-style:italic;font-size:.92rem}
 @media(max-width:700px){.nav .links{display:none}.hero{padding:11vh 0 8vh}
+  .nav .purse{margin-left:auto}
   .heroart{float:none;width:100%;max-width:340px;margin:0 auto 1.6rem}}
 `
 
@@ -295,6 +358,7 @@ const NAV_LINKS: Array<[string, string]> = [
   ['/revolucion/experience', 'Experience'],
   ['/revolucion/flavor-wheel', 'Flavor Wheel'],
   ['/revolucion/lounge', 'Lounge'],
+  ['/revolucion/store', 'El Mercado'],
   ['/revolucion/discovery', 'Discovery'],
   ['/revolucion/community', 'Community'],
   ['/revolucion/insights', 'Makers'],
@@ -312,6 +376,7 @@ const FOOT_LINKS: Array<[string, string]> = [
   ['/revolucion/collaborations', 'Named Experiences'],
   ['/revolucion/humidor', 'The Humidor'],
   ['/revolucion/lounge', 'The Cigar Lounge'],
+  ['/revolucion/store', 'El Mercado'],
   ['/revolucion/mission', 'The Manifesto'],
 ]
 
@@ -334,7 +399,13 @@ function page(chromeSig: string, route: string, title: string, body: string): st
     <nav class="links">
       ${nav}
     </nav>
+    <a class="purse" href="/revolucion/store" title="Embers — earned in the lounge, spent in El Mercado">
+      <i aria-hidden="true"></i><b data-embers-balance>0</b>
+    </a>
   </header>
+  ${/* the purse comes up BEFORE the body: the lounge's decorate list reads
+        window.RevEmbers while it parses, so the ledger cannot be a tail script */
+    EMBERS_JS}
 ${body}
   <footer class="footer">
     <div class="footorn" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -842,6 +913,12 @@ const CONCIERGE_JS = /* html */ `<script>
         'They stack up here.</p>';
       wmatch.innerHTML = '<p class="wempty">Pick a flavor and the catalog sorts itself against it.</p>';
       return;
+    }
+    // three flavors stacked is a tasting — the house pays for it, once per
+    // distinct set (the claim key IS the set, so re-picking it pays nothing)
+    if (picked.length >= 3 && window.RevEmbers) {
+      window.RevEmbers.claim('tasting:' + picked.slice().sort().join('|'), ${EARN_OF('tasting')},
+        'a tasting logged: ' + picked.slice(0, 3).join(', '));
     }
     wchips.innerHTML = picked.map(function(f){
       return '<span class="chip" data-f="' + esc(f) + '">' + esc(f) + '<span class="x">\\u00d7</span></span>';
@@ -3065,6 +3142,20 @@ function buildPages(
     .drow:hover{background:rgba(200,151,90,.08)}
     .drow .mark{width:.9rem;color:var(--gold-bright)}
     .drow.off{color:var(--faint)}
+    .drow.locked{color:var(--faint)}
+    .drow.locked .mark{color:var(--ember)}
+    .drow .cost{margin-left:auto;display:flex;align-items:center;gap:.3rem;
+      font-size:.78rem;letter-spacing:.06em;color:var(--gold-bright)}
+    .drow .cost i{width:.45rem;height:.52rem;background:var(--ember);
+      clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+    .drow.locked.short .cost{color:var(--faint)}
+    .drow.locked.short:hover .cost::after{content:' · el mercado';color:var(--faint)}
+    .dpurse{display:flex;align-items:center;justify-content:space-between;gap:.6rem;
+      margin:.2rem 0 .8rem;padding:.5rem .7rem;border:1px solid rgba(200,151,90,.22);
+      background:rgba(179,84,47,.1);font-size:.82rem;letter-spacing:.06em;color:var(--gold-bright)}
+    .dpurse a{font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--cream-dim)}
+    .dpurse a:hover{color:var(--gold-bright)}
+    .dnote{margin:.7rem 0 0;font-size:.78rem;color:var(--faint);line-height:1.55}
     .dnote{color:var(--faint);font-size:.86rem;font-style:italic;line-height:1.6}
     @media (prefers-reduced-motion: no-preference){
       .l-flame{transform-box:fill-box;transform-origin:50% 100%;animation:lflick 2.8s ease-in-out infinite}
@@ -3439,56 +3530,80 @@ function buildPages(
     // One decorate list, two renderers: the ids address groups in the SVG
     // fallback AND slots in the 3D room, so whichever came up obeys the same
     // switches. Ids the running renderer doesn't know are simply ignored.
-    var SLOTS = [
-      { id: 'slot-fire',        label: 'A fire going' },
-      { id: 'slot-lamp',        label: 'Reading lamp' },
-      { id: 'slot-window',      label: 'Night window' },
-      { id: 'slot-rug',         label: 'Rug' },
-      { id: 'slot-chairs',      label: 'The wingbacks' },
-      { id: 'slot-tables',      label: 'Tables' },
-      { id: 'slot-cat',         label: 'The lounge cat' },
-      { id: 'slot-whiskey',     label: 'Whiskey, neat-ish' },
-      { id: 'slot-smoke',       label: 'A cigar going' },
-      { id: 'slot-accessories', label: 'Cutter, lighter, ashtray' },
-      { id: 'slot-humidor',     label: 'Humidor cabinet' },
-      { id: 'slot-frames',      label: 'Wall art' },
-      { id: 'slot-darts',       label: 'Dartboard' },
-      { id: 'slot-mirrors',     label: 'The looking glasses' },
-      { id: 'slot-miniature',   label: 'The miniature lounge' },
-      { id: 'slot-shelf',       label: 'Shelves &amp; keepsakes' },
-      { id: 'slot-plant',       label: 'Plant' },
-      { id: 'slot-records',     label: 'Record console' }
-    ];
+    // The catalogue is the decorate list. Everything the house gave you costs
+    // 0 and toggles; everything from El Mercado stays dark until the ledger
+    // says it is yours, and unlocks from this list if you can afford it.
+    var SLOTS = ${JSON.stringify(STORE_ITEMS.map(i => ({ id: i.id, label: i.label, price: i.price })))};
     var KEY = 'rev:lounge:decor';
+    var E = window.RevEmbers;
     var on = {};
     try { on = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch(e){ on = {}; }
-    SLOTS.forEach(function(s){ if (!(s.id in on)) on[s.id] = true; });
+    function mine(s){ return s.price === 0 || (E && E.owned(s.id)); }
+    function seed(){
+      SLOTS.forEach(function(s){
+        // house things default on; a bought thing arrives switched on the
+        // first time we see it owned, and obeys the switch thereafter
+        if (!(s.id in on)) on[s.id] = s.price === 0 || mine(s);
+      });
+    }
+    seed();
+    function lit(s){ return mine(s) && !!on[s.id]; }
     function paintScene(){
       SLOTS.forEach(function(s){
         // a slot may have overlay pieces outside its group (data-slot),
         // e.g. the hearth glow painted above the rug — hide both together
         var nodes = document.querySelectorAll('#' + s.id + ', [data-slot="' + s.id + '"]');
-        for (var i = 0; i < nodes.length; i++) nodes[i].style.display = on[s.id] ? '' : 'none';
-        if (window.RevLounge3D) window.RevLounge3D.setSlot(s.id, !!on[s.id]);
+        for (var i = 0; i < nodes.length; i++) nodes[i].style.display = lit(s) ? '' : 'none';
+        if (window.RevLounge3D) window.RevLounge3D.setSlot(s.id, lit(s));
       });
     }
     function apply(){
+      seed();
       paintScene();
       try { localStorage.setItem(KEY, JSON.stringify(on)); } catch(e){}
+      var bal = E ? E.balance() : 0;
       var lists = document.querySelectorAll('[data-decor-list]');
       for (var li = 0; li < lists.length; li++) {
         var list = lists[li];
         list.innerHTML = '';
+        var purse = document.createElement('div');
+        purse.className = 'dpurse';
+        purse.innerHTML = '<span>' + bal + ' embers</span>' +
+          '<a href="/revolucion/store">el mercado</a>';
+        list.appendChild(purse);
         SLOTS.forEach(function(s){
+          var owned = mine(s);
+          var afford = bal >= s.price;
           var d = document.createElement('div');
-          d.className = 'drow' + (on[s.id] ? '' : ' off');
-          d.innerHTML = '<span class="mark">' + (on[s.id] ? '\\u25a0' : '\\u25a1') + '</span>' + s.label;
-          d.addEventListener('click', function(){ on[s.id] = !on[s.id]; apply(); });
+          d.className = 'drow' + (owned ? (on[s.id] ? '' : ' off') : (' locked' + (afford ? '' : ' short')));
+          d.innerHTML = '<span class="mark">' +
+            (owned ? (on[s.id] ? '\\u25a0' : '\\u25a1') : '\\u2726') + '</span>' + s.label +
+            (owned ? '' : '<span class="cost"><i></i>' + s.price + '</span>');
+          // switching a bought thing on also LOOKS at it — a purchase that
+          // lands somewhere off-camera may as well not have happened
+          function show(){
+            if (s.price === 0) return;
+            if (window.__loungeWalkIn) window.__loungeWalkIn();
+            if (window.__loungeView) window.__loungeView(s.id.replace('slot-', ''));
+            else if (window.RevLounge3D) window.RevLounge3D.view(s.id.replace('slot-', ''));
+          }
+          d.addEventListener('click', function(){
+            if (mine(s)) { on[s.id] = !on[s.id]; apply(); if (on[s.id]) show(); return; }
+            if (!E || E.balance() < s.price) { window.location.href = '/revolucion/store'; return; }
+            if (E.buy(s.id, s.price, s.label) === 'bought') { on[s.id] = true; apply(); show(); }
+          });
           list.appendChild(d);
         });
+        var note = document.createElement('p');
+        note.className = 'dnote';
+        note.textContent = 'Embers are earned in this room — a moment journaled, a leg off ' +
+          'the Colonel, a tasting logged. Spend them here or in El Mercado.';
+        list.appendChild(note);
       }
     }
     apply();
+    // bought in another tab, or earned while this list was open
+    window.addEventListener('embers:change', apply);
     // the concierge flips switches too — one code path, one saved state
     window.__loungeSetSlot = function(id, val){
       if (!(id in on)) return false;
@@ -3529,10 +3644,222 @@ function buildPages(
     };
   })();
   </script>
+  <script>
+  (function(){
+    // ── earning ────────────────────────────────────────────────────────
+    // Everything the house pays for happens in THIS room, so the claims live
+    // here. Each claim key names its occasion — a moment's timestamp, a leg
+    // number — and the ledger refuses a key it has already paid, which is why
+    // re-scanning the concierge's stored lists on every load is safe.
+    var E = window.RevEmbers;
+    if (!E) return;
+    function flash(){
+      var purse = document.querySelector('.purse');
+      if (!purse) return;
+      purse.classList.remove('paid'); void purse.offsetWidth; purse.classList.add('paid');
+    }
+    function load(k){ try { return JSON.parse(localStorage.getItem(k)) || []; } catch(e){ return []; } }
+
+    // the house stakes you the first time you walk in
+    function welcome(){
+      if (E.claim('welcome', ${EARN_OF('welcome')}, 'the house stakes you')) flash();
+    }
+    document.addEventListener('lounge3d:ready', welcome);
+    setTimeout(welcome, 4200); // no WebGL: the drawn room counts as walking in
+
+    // the concierge's own lists, swept for anything not yet paid
+    function sweep(){
+      var paid = false;
+      load('rev:lounge:moments').forEach(function(m){
+        paid = E.claim('moment:' + m.at, ${EARN_OF('moment')},
+          'a moment journaled: ' + String(m.t || '').slice(0, 40)) || paid;
+      });
+      load('rev:lounge:reserved').forEach(function(r){
+        paid = E.claim('reserve:' + r.at, ${EARN_OF('reserve')},
+          'reserved ' + (r.q > 1 ? r.q + ' \\u00d7 ' : '') + r.n) || paid;
+      });
+      if (paid) flash();
+    }
+    sweep();
+    setInterval(sweep, 2500);
+
+    // 501 — a leg taken off the Colonel pays; his legs pay nothing
+    window.addEventListener('lounge3d:leg', function(e){
+      var d = e.detail || {};
+      if (d.house) return;
+      if (E.claim('leg:' + d.legs, ${EARN_OF('leg')}, 'a leg off the Colonel')) flash();
+    });
+  })();
+  </script>
   ${CONCIERGE_JS}`)
+
+  // ── El Mercado — the storefront ──────────────────────────────────────
+  // The shelves are rendered from STORE_ITEMS at build time and hydrated
+  // against the ledger at read time: owned, affordable, or short. Buying is
+  // a ledger entry, nothing more — there is no cart, no checkout, no rail.
+
+  const shelfOf = (group: string): string => SALE_ITEMS.filter(i => i.group === group).map(i => `
+        <article class="good" data-good="${i.id}" data-price="${i.price}">
+          <div class="price"><i aria-hidden="true"></i>${i.price}</div>
+          <h3>${i.label}</h3>
+          <p>${i.blurb}</p>
+          <button type="button" class="take">Take it</button>
+        </article>`).join('')
+
+  const store = P('/revolucion/store', 'El Mercado', `
+  <main class="wrap">
+    <section class="hero">
+      <p class="kicker">el mercado · the store</p>
+      <h1>Earned first.<br>Then <i>spent</i>.</h1>
+      <p class="lede">Embers are the house currency. You cannot buy them — there is no
+      till here and there never will be. You earn them in the lounge: an evening
+      journaled, a leg taken off the Colonel, a tasting logged on the wheel. Then you
+      spend them on the room.</p>
+      ${heroArt('lounge', 'the room you are furnishing')}
+      <div class="purseline">
+        <div>
+          <span class="big" data-embers-balance>0</span>
+          <span class="t">embers in the purse</span>
+        </div>
+        <p>Kept in this browser, on this device, like everything else here. Nobody is
+        counting them but you.</p>
+      </div>
+      <div class="btns">
+        <a class="btn" href="/revolucion/lounge">Go and earn some</a>
+        <a class="btn ghost" href="#shelves">See the shelves</a>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">how you earn</p></div>
+      <h2>The room is <i>earned</i>, not bought.</h2>
+      <div class="earn">
+        ${EARN_RULES.map(r => `<div data-earn="${r.key}">
+          <span class="n">+${r.embers}</span>
+          <span class="t">${r.label}</span>
+          <p>${r.note}</p>
+        </div>`).join('\n        ')}
+      </div>
+      <p class="muted">Each of these pays once per occasion — a claim is written into the
+      ledger the moment it happens, and a claim already in the ledger never pays twice.</p>
+    </section>
+
+    <section class="section" id="shelves">
+      <div class="rule"><p class="kicker">furnishings</p></div>
+      <h2>Things that take up <i>floor</i>.</h2>
+      <div class="shelf">${shelfOf('furnishings')}
+      </div>
+
+      <div class="rule"><p class="kicker">the good stuff</p></div>
+      <div class="shelf">${shelfOf('the good stuff')}
+      </div>
+
+      <div class="rule"><p class="kicker">the wall</p></div>
+      <div class="shelf">${shelfOf('the wall')}
+      </div>
+      <p class="muted">Everything you buy appears in the lounge's Decorate list, switched
+      on. Switch it off any time — it stays yours.</p>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">already yours</p></div>
+      <h2>The house furnishings cost <i>nothing</i>.</h2>
+      <p>The room came with ${HOUSE_ITEMS.length} things in it, and they are yours from the
+      first visit. El Mercado only sells what the room does not already have.</p>
+      <div class="chips">
+        ${HOUSE_ITEMS.map(i => `<span class="chip">${i.label}</span>`).join('\n        ')}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">the ledger</p></div>
+      <h2>Every ember, <i>accounted</i>.</h2>
+      <p>The balance is not stored anywhere. It is the sum of this list — the entries are
+      the truth, the number in the corner is just their total. The same way the hive
+      keeps history.</p>
+      <div class="ledger" data-ledger>
+        <div class="empty">Nothing yet. Walk into the lounge and the house will stake you.</div>
+      </div>
+      <div class="btns">
+        <a class="btn" href="/revolucion/lounge">Into the lounge</a>
+        <a class="btn ghost" href="/revolucion/journal">Journal a moment</a>
+      </div>
+    </section>
+  </main>
+  <script>
+  (function(){
+    var E = window.RevEmbers;
+    if (!E) return;
+    var goods = document.querySelectorAll('[data-good]');
+    var ledger = document.querySelector('[data-ledger]');
+
+    function paintGoods(){
+      var bal = E.balance();
+      for (var i = 0; i < goods.length; i++){
+        (function(el){
+          var id = el.getAttribute('data-good');
+          var price = +el.getAttribute('data-price');
+          var btn = el.querySelector('.take');
+          var mine = E.owned(id);
+          el.classList.toggle('mine', mine);
+          el.classList.toggle('short', !mine && bal < price);
+          btn.disabled = mine || bal < price;
+          btn.textContent = mine ? 'In the room'
+            : bal < price ? (price - bal) + ' more to go'
+            : 'Take it';
+        })(goods[i]);
+      }
+    }
+    function paintEarned(){
+      var rows = document.querySelectorAll('[data-earn]');
+      for (var i = 0; i < rows.length; i++){
+        var key = rows[i].getAttribute('data-earn');
+        // 'welcome' is a bare key; the rest are prefixes on a per-occasion key
+        var done = E.has(key);
+        if (!done){
+          var all = E.entries();
+          for (var j = 0; j < all.length; j++)
+            if (String(all[j].k).indexOf(key + ':') === 0) { done = true; break; }
+        }
+        rows[i].style.opacity = done ? '1' : '.78';
+      }
+    }
+    function paintLedger(){
+      var all = E.entries().slice().reverse();
+      if (!all.length) return;
+      var html = '';
+      for (var i = 0; i < all.length && i < 24; i++){
+        var e = all[i];
+        var d = new Date(e.t || Date.now());
+        var when = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        html += '<div class="row"><span class="w">' + String(e.w || e.k) + '</span>' +
+          '<span class="muted">' + when + '</span>' +
+          '<span class="d' + (e.d < 0 ? ' out' : '') + '">' + (e.d > 0 ? '+' : '') + e.d + '</span></div>';
+      }
+      ledger.innerHTML = html;
+    }
+    function paintAll(){ paintGoods(); paintEarned(); paintLedger(); }
+
+    for (var i = 0; i < goods.length; i++){
+      (function(el){
+        el.querySelector('.take').addEventListener('click', function(){
+          var id = el.getAttribute('data-good');
+          var price = +el.getAttribute('data-price');
+          var label = el.querySelector('h3').textContent;
+          if (E.buy(id, price, label) !== 'bought') return;
+          var purse = document.querySelector('.purse');
+          if (purse){ purse.classList.remove('paid'); void purse.offsetWidth; purse.classList.add('paid'); }
+        });
+      })(goods[i]);
+    }
+    window.addEventListener('embers:change', paintAll);
+    paintAll();
+  })();
+  </script>`)
 
   return [
     { segments: ['revolucion'], label: 'Revolución', html: home },
+    { segments: ['revolucion', 'store'], label: 'El Mercado', html: store },
     { segments: ['revolucion', 'lounge'], label: 'The Cigar Lounge', html: lounge },
     { segments: ['revolucion', 'journal'], label: 'The Journal', html: journal },
     { segments: ['revolucion', 'experience'], label: 'The Experience', html: experience },
@@ -3624,12 +3951,24 @@ async function main(): Promise<void> {
     const nm = typeof (inf?.data as { name?: string })?.name === 'string' ? (inf.data as { name: string }).name.trim() : ''
     if (nm) childNames.push(nm)
   }
-  if (!childNames.includes('lounge')) {
-    console.log(`[site] adding lounge cell (current children: ${childNames.join(', ')})`)
-    const up = await send({ op: 'update', segments: ['revolucion'], layer: { name: rootLayer?.name ?? 'revolucion', children: [...childNames, 'lounge'] } })
-    if (!up.ok) { console.error(`[site] lounge cell FAIL: ${up.error}`); process.exit(1) }
-    await send({ op: 'update', segments: ['revolucion', 'lounge'], layer: { name: 'lounge' } })
-    await send({ op: 'note-add', segments: ['revolucion'], cell: 'lounge', text: 'The cigar lounge — a decorated room of slots you dress yourself. Your own add-ons hang here: art, bottles, bands of cigars you have loved.' })
+  const REQUIRED: Array<{ name: string; note: string }> = [
+    { name: 'lounge', note: 'The cigar lounge — a decorated room of slots you dress yourself. Your own add-ons hang here: art, bottles, bands of cigars you have loved.' },
+    { name: 'store', note: 'El Mercado — the storefront. Embers are earned in the lounge (a moment journaled, a leg off the Colonel, a tasting logged) and spent on furnishings that appear in the room. No payment rail: the ledger is the truth and the balance is its sum.' },
+  ]
+  const missing = REQUIRED.filter(r => !childNames.includes(r.name))
+  if (missing.length) {
+    console.log(`[site] adding cells ${missing.map(m => m.name).join(', ')} (current children: ${childNames.join(', ')})`)
+    const up = await send({
+      op: 'update',
+      segments: ['revolucion'],
+      layer: { name: rootLayer?.name ?? 'revolucion', children: [...childNames, ...missing.map(m => m.name)] },
+    })
+    if (!up.ok) { console.error(`[site] cell FAIL: ${up.error}`); process.exit(1) }
+    for (const m of missing) {
+      await send({ op: 'update', segments: ['revolucion', m.name], layer: { name: m.name } })
+      await send({ op: 'note-add', segments: ['revolucion'], cell: m.name, text: m.note })
+      childNames.push(m.name)
+    }
   }
 
   // 0b. Tile-art sigs — the site reuses the hive's own sig-addressed imagery
@@ -3652,7 +3991,8 @@ async function main(): Promise<void> {
     return typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig) ? sig : undefined
   }
   const art: Record<string, string | undefined> = {}
-  const tops = childNames.includes('lounge') ? childNames : [...childNames, 'lounge']
+  // childNames now includes anything REQUIRED just created
+  const tops = childNames
   for (const c of tops) {
     art[c] = await artOf(['revolucion', c])
     for (const k of await namesAt(['revolucion', c])) {

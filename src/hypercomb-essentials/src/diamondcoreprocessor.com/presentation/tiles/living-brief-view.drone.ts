@@ -411,7 +411,7 @@ export class LivingBriefViewDrone extends Drone {
 }
 
 const CSS = `
-.hc-living-brief{position:fixed;inset:0;z-index:150;background:#e9e7e1;color:#202322;overflow:auto;font:16px/1.65 Inter,ui-sans-serif,system-ui,sans-serif}
+.hc-living-brief{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;background:#e9e7e1;color:#202322;overflow:auto;font:16px/1.65 Inter,ui-sans-serif,system-ui,sans-serif}
 .brief-chrome{position:sticky;top:0;z-index:2;height:52px;padding:0 24px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:rgba(27,32,31,.94);color:#dce5e1;letter-spacing:.18em;font-size:11px}.brief-view-actions{display:flex;align-items:center;gap:10px}.brief-reach{color:#90ada3;font-size:9px}.brief-curate{padding:5px 8px!important;border:1px solid #607b71!important;border-radius:5px;background:#263c34!important;color:#dce9e4!important;font:700 10px/1 Inter,sans-serif!important;letter-spacing:0!important}.brief-chrome button{justify-self:end}
 .brief-chrome button{border:0;background:transparent;color:inherit;font:30px/1 serif;cursor:pointer}
 .brief-paper{box-sizing:border-box;width:min(880px,calc(100% - 32px));min-height:calc(100vh - 92px);margin:40px auto 80px;padding:clamp(42px,8vw,96px);background:#fff;box-shadow:0 16px 60px rgba(28,31,30,.13)}

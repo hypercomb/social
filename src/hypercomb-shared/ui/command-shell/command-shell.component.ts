@@ -149,6 +149,14 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Full ghost text (overlaid as dim autocomplete hint). */
   readonly ghostValue = input('')
 
+  /**
+   * Name of the tile the pointer is currently over, echoed live in the line.
+   * Empty string = nothing hovered (the parent clears it off `tile:hover`'s
+   * "pointer left the grid" broadcast). Presentational only — the shell never
+   * reads the hover itself.
+   */
+  readonly hoverEcho = input('')
+
   /** Whether to show the suggestion dropdown. Parent controls this. */
   readonly showSuggestions = input(false)
 
@@ -432,6 +440,26 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly value = signal('')
   readonly activeIndex = signal(0)
   readonly suppressed = signal(false)
+
+  /**
+   * Invisible spacer that pushes the hover echo to the caret's column: the
+   * typed text, or the ghost completion when one is showing (the echo must
+   * clear the dim suggestion, not sit on top of it), plus one space.
+   */
+  /**
+   * The placeholder actually handed to the input. A hovered tile takes the
+   * line's empty space for as long as the pointer is on it: "share intent…"
+   * and the echo occupy the SAME column, and the two on top of each other are
+   * unreadable. The prompt comes straight back when the pointer leaves.
+   */
+  readonly effectivePlaceholder = computed(() => this.hoverEcho() ? '' : this.placeholder())
+
+  readonly echoPad = computed(() => {
+    const typed = this.value()
+    const ghost = this.ghostValue()
+    const base = ghost.length > typed.length && ghost.startsWith(typed) ? ghost : typed
+    return base ? `${base} ` : ''
+  })
 
   readonly effectiveShowCompletions = computed(() =>
     this.showSuggestions() && this.suggestions().length > 0 && !this.suppressed()

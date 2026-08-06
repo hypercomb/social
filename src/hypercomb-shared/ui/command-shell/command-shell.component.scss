@@ -27,6 +27,12 @@ $bp-phone-max: 599px;
   --terminal-font: var(--hc-font);
   --transition-speed: var(--md-dur-medium);
 
+  // Hover echo — off the shell's blue axis entirely so "the tile under your
+  // pointer" can never be mistaken for typed text or a ghost completion.
+  // Near-opaque and light: it is a name being READ, not a hint being offered,
+  // so it carries the same weight of legibility as the typed line itself.
+  --hover-echo-color: rgba(244, 212, 162, 0.95);
+
   // Foreground for the typed command text AND the prompt chevron icon:
   // a touch past halfway toward the shell's steel blue (--glow-color) from
   // ghostwhite — a brighter icy blue-white (~#afd0e6). The blue reads a
@@ -149,6 +155,7 @@ $bp-phone-max: 599px;
 }
 
 .ghost,
+.hover-echo,
 .command-input {
   grid-area: 1 / 1;
   box-sizing: border-box;
@@ -168,6 +175,28 @@ $bp-phone-max: 599px;
   color: rgba(var(--glow-color-rgb), 0.55);
   pointer-events: none;
   user-select: none;
+}
+
+// The hovered tile's name, reported in the line at the caret's column. Its own
+// muted amber so it never reads as text you typed or as a completion on offer
+// (both of those are the blue glow) — one style whether the line is empty or
+// not. The pad is the typed text made invisible; it only carries the offset.
+.hover-echo {
+  color: var(--hover-echo-color);
+  pointer-events: none;
+  user-select: none;
+}
+
+// The pad carries the OFFSET and nothing else, so it must keep the input's
+// exact metrics — every letter-spacing / weight tweak belongs on the visible
+// run below, or the echo drifts off the caret's column.
+.echo-pad { visibility: hidden; }
+
+// Set a little wider than the typed line so a name reads as a name at a
+// glance, and never as something you half-typed.
+.echo-name {
+  letter-spacing: 0.07em;
+  font-weight: 500;
 }
 
 .command-input {

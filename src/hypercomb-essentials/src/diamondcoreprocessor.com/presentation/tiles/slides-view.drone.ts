@@ -800,7 +800,11 @@ export class SlidesViewDrone extends Drone {
     const host = document.createElement('div')
     host.id = 'hc-slides-view-host'
     host.style.cssText =
-      'position:fixed;inset:0;z-index:59988;overflow:hidden;background:#05040f;' +
+      // Inset by any docked panel's reservation (`--hc-inset-<side>`) so the
+      // Views window can stay open beside the deck.
+      'position:fixed;top:0;bottom:0;' +
+      'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
+      'z-index:59988;overflow:hidden;background:#05040f;' +
       'display:flex;align-items:center;justify-content:center;font-family:inherit;'
     // Opt out of the always-on hex wheel-zoom handler so wheel isn't swallowed.
     host.setAttribute('data-consumes-wheel', '')

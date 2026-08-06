@@ -28,6 +28,7 @@ import {
   DART_NUMS, DART_RINGS, bedCentre, checkout, pickShot, resolveThrow, scoreDart,
   type DartHit,
 } from './darts-rules.js'
+import { SLOT } from './store-items.js'
 
 interface LoungeConfig {
   mount?: string
@@ -1325,6 +1326,11 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     if (res.outcome === 'leg') {
       seat.legs += 1
       chalkNote = `${seat.name.toLowerCase()} takes the leg`
+      // The page pays Embers for a leg taken off the house. On `window`, not
+      // the host element — buildRoom never sees the mount.
+      window.dispatchEvent(new CustomEvent('lounge3d:leg', {
+        detail: { who: seat.name, legs: seat.legs, house: seat.name !== 'YOU' },
+      }))
       drawChalk()
       after(2.0, () => newLeg())
       return
@@ -1971,6 +1977,252 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   tail.rotation.set(Math.PI / 2, 0, 0.6)
   cat.add(tail)
 
+  // ── EL MERCADO — the props you buy with Embers ─────────────────────────
+  // Each one is a slot like any other, so Decorate drives it with the same
+  // switch; the only difference is that the page keeps it dark until the
+  // ledger says you own it. Ids come from store-items.ts so the catalogue and
+  // the room can never drift apart.
+
+  // the drinks cart — brass trolley, bottles, ice bucket
+  const cart = new THREE.Group()
+  // placed inside the arc the camera presets actually frame — a bought thing
+  // you have to go looking for is a bought thing nobody sees
+  cart.position.set(-3.3, 0, 0.75)
+  cart.rotation.y = 0.42
+  scene.add(slot(SLOT.cart, cart))
+  const cartMetal = std({ color: C.brass, roughness: 0.34, metalness: 0.8 })
+  for (const [cx, cz] of [[-0.3, -0.16], [0.3, -0.16], [-0.3, 0.16], [0.3, 0.16]]) {
+    cart.add(cyl(0.02, 0.02, 0.72, 10, cartMetal, cx, 0.36, cz))
+    const wheel = cyl(0.045, 0.045, 0.022, 14, std({ color: 0x1a1218, roughness: 0.8 }), cx, 0.045, cz)
+    wheel.rotation.z = Math.PI / 2
+    cart.add(wheel)
+  }
+  cart.add(box(0.72, 0.022, 0.42, trimWood, 0, 0.34, 0, 0.006))
+  cart.add(box(0.72, 0.022, 0.42, trimWood, 0, 0.72, 0, 0.006))
+  for (const s of [-1, 1]) cart.add(cyl(0.014, 0.014, 0.4, 8, cartMetal, s * 0.38, 0.86, 0))
+  const pushBar = cyl(0.014, 0.014, 0.79, 8, cartMetal, 0, 1.06, 0)
+  pushBar.rotation.z = Math.PI / 2
+  cart.add(pushBar)
+  const bottle = (x: number, z: number, h: number, tint: number): void => {
+    cart.add(cyl(0.038, 0.042, h, 14, glassMat, x, 0.73 + h / 2, z))
+    cart.add(cyl(0.036, 0.04, h * 0.62, 14, std({ color: tint, roughness: 0.2, transparent: true, opacity: 0.9 }), x, 0.73 + h * 0.31, z))
+    cart.add(cyl(0.014, 0.018, 0.09, 10, glassMat, x, 0.73 + h + 0.045, z))
+  }
+  bottle(-0.2, -0.06, 0.26, 0x8a4a1e)
+  bottle(-0.05, 0.05, 0.3, 0x5c2f14)
+  bottle(0.1, -0.04, 0.24, 0xc27a2c)
+  const bucket = cyl(0.1, 0.085, 0.13, 18, cartMetal, 0.26, 0.795, 0.06)
+  cart.add(bucket)
+  for (let i = 0; i < 5; i++) {
+    const ice = box(0.035, 0.035, 0.035, glassMat, 0.26 + (i % 3 - 1) * 0.035, 0.855, 0.06 + (i % 2 - 0.5) * 0.045, 0.004)
+    ice.rotation.set(i, i * 0.7, i * 0.3)
+    cart.add(ice)
+  }
+  cart.add(cyl(0.045, 0.04, 0.09, 16, glassMat, -0.24, 0.385, 0.1))
+  cart.add(cyl(0.045, 0.04, 0.09, 16, glassMat, -0.12, 0.385, 0.14))
+
+  // the chess table — a game left mid-attack
+  const chess = new THREE.Group()
+  chess.position.set(-2.95, 0, -2.3)
+  chess.rotation.y = 0.55
+  scene.add(slot(SLOT.chess, chess))
+  chess.add(cyl(0.07, 0.11, 0.56, 12, darkWood, 0, 0.28, 0))
+  chess.add(cyl(0.28, 0.32, 0.04, 20, darkWood, 0, 0.03, 0))
+  chess.add(box(0.62, 0.05, 0.62, trimWood, 0, 0.585, 0, 0.008))
+  const lightSq = std({ color: 0xd9c39a, roughness: 0.5 })
+  const darkSq = std({ color: 0x2a1a16, roughness: 0.5 })
+  const SQ = 0.062
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      chess.add(box(SQ, 0.008, SQ, (r + c) % 2 ? darkSq : lightSq,
+        (c - 3.5) * SQ, 0.614, (r - 3.5) * SQ, 0))
+    }
+  }
+  const paleMan = std({ color: 0xe6d8bd, roughness: 0.45 })
+  // the dark set is a warm near-black — true black loses the whole side of
+  // the board in this light
+  const darkMan = std({ color: 0x4a3128, roughness: 0.45 })
+  //  (r, c, height, white?) — an unbalanced middlegame, deliberately
+  const MEN: Array<[number, number, number, boolean]> = [
+    [0, 3, 0.09, true], [1, 2, 0.05, true], [1, 4, 0.05, true], [2, 5, 0.07, true],
+    [3, 3, 0.06, true], [4, 4, 0.05, false], [5, 2, 0.07, false], [6, 5, 0.05, false],
+    [7, 4, 0.11, false], [6, 1, 0.05, false], [2, 1, 0.05, true],
+  ]
+  for (const [r, c, h, white] of MEN) {
+    const mat = white ? paleMan : darkMan
+    const man = new THREE.Group()
+    man.position.set((c - 3.5) * SQ, 0.618, (r - 3.5) * SQ)
+    chess.add(man)
+    man.add(cyl(0.017, 0.022, 0.012, 10, mat, 0, 0.006, 0))
+    man.add(cyl(0.009, 0.015, h, 10, mat, 0, 0.012 + h / 2, 0))
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.014, 10, 8), mat)
+    cap.position.y = 0.014 + h
+    man.add(cap)
+  }
+  // two taken men resting on the rail, and the stools
+  chess.add(cyl(0.015, 0.02, 0.05, 10, darkMan, 0.26, 0.635, 0.24))
+  chess.add(cyl(0.015, 0.02, 0.05, 10, paleMan, 0.26, 0.635, 0.16))
+  for (const s of [-1, 1]) {
+    const stool = new THREE.Group()
+    stool.position.set(s * 0.62, 0, s * 0.12)
+    chess.add(stool)
+    stool.add(cyl(0.16, 0.16, 0.06, 16, leatherMat, 0, 0.44, 0))
+    for (let i = 0; i < 3; i++) {
+      const leg = cyl(0.014, 0.018, 0.42, 8, darkWood,
+        Math.cos((i / 3) * Math.PI * 2) * 0.1, 0.21, Math.sin((i / 3) * Math.PI * 2) * 0.1)
+      leg.rotation.set(Math.sin((i / 3) * Math.PI * 2) * 0.09, 0, -Math.cos((i / 3) * Math.PI * 2) * 0.09)
+      stool.add(leg)
+    }
+  }
+
+  // the globe bar — a meridian sphere that opens at the equator
+  const globe = new THREE.Group()
+  globe.position.set(3.45, 0, 1.45)
+  globe.rotation.y = -0.55
+  scene.add(slot(SLOT.globe, globe))
+  for (let i = 0; i < 3; i++) {
+    const leg = cyl(0.018, 0.026, 0.66, 8, darkWood,
+      Math.cos((i / 3) * Math.PI * 2) * 0.16, 0.33, Math.sin((i / 3) * Math.PI * 2) * 0.16)
+    leg.rotation.set(Math.sin((i / 3) * Math.PI * 2) * 0.2, 0, -Math.cos((i / 3) * Math.PI * 2) * 0.2)
+    globe.add(leg)
+  }
+  globe.add(cyl(0.19, 0.19, 0.02, 18, darkWood, 0, 0.66, 0))
+  const meridian = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.014, 8, 28), brassMat)
+  meridian.position.y = 0.94
+  meridian.rotation.y = Math.PI / 2
+  globe.add(meridian)
+  // lower half: the bowl, with bottles standing in it. The continents are
+  // PAINTED — patches of sphere geometry floating at the lid's radius read as
+  // loose crescents, not as land.
+  const globeTex = track(paint(384, 192, (ctx, w, h) => {
+    ctx.fillStyle = '#2f4a52'
+    ctx.fillRect(0, 0, w, h)
+    const gr = rng(77)
+    ctx.fillStyle = '#6f5a33'
+    for (let i = 0; i < 15; i++) {
+      const cx = gr() * w, cy = h * 0.2 + gr() * h * 0.6
+      ctx.beginPath()
+      for (let k = 0; k < 9; k++) {
+        const a = (k / 9) * Math.PI * 2
+        const rr = (10 + gr() * 26)
+        const px = cx + Math.cos(a) * rr * 1.5, py = cy + Math.sin(a) * rr * 0.8
+        k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)
+      }
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.strokeStyle = 'rgba(240,230,214,.16)'
+    ctx.lineWidth = 1
+    for (let i = 1; i < 6; i++) {
+      ctx.beginPath(); ctx.moveTo(0, (i / 6) * h); ctx.lineTo(w, (i / 6) * h); ctx.stroke()
+    }
+    for (let i = 1; i < 12; i++) {
+      ctx.beginPath(); ctx.moveTo((i / 12) * w, 0); ctx.lineTo((i / 12) * w, h); ctx.stroke()
+    }
+    grain(ctx, w, h, 12, 5)
+  }))
+  const sphereMat = std({ map: globeTex, roughness: 0.72, metalness: 0.06 })
+  const bowlG = new THREE.Mesh(new THREE.SphereGeometry(0.26, 24, 14, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), sphereMat)
+  bowlG.position.y = 0.94
+  bowlG.castShadow = true
+  globe.add(bowlG)
+  globe.add(cyl(0.255, 0.255, 0.012, 24, std({ color: C.leatherDark, roughness: 0.9 }), 0, 0.945, 0))
+  for (const [bx, bz, bh] of [[-0.09, 0.03, 0.2], [0.02, -0.07, 0.24], [0.09, 0.05, 0.18]] as const) {
+    globe.add(cyl(0.032, 0.036, bh, 12, glassMat, bx, 0.95 + bh / 2, bz))
+    globe.add(cyl(0.03, 0.034, bh * 0.6, 12, whiskeyMat, bx, 0.95 + bh * 0.3, bz))
+  }
+  // upper half: the lid, hinged open and tipped back
+  // hinged at the BACK OF THE RIM and tipped only a little: swing it wide and
+  // the dome reads as a crescent floating free of the globe
+  const globeLid = new THREE.Group()
+  globeLid.position.set(0, 0.95, -0.26)
+  globeLid.rotation.x = -0.62
+  globe.add(globeLid)
+  const lidG = new THREE.Mesh(new THREE.SphereGeometry(0.26, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2), sphereMat)
+  lidG.position.z = 0.26
+  lidG.castShadow = true
+  globeLid.add(lidG)
+  // a brass catch on the rim, so the open lid reads as hinged and not adrift
+  const catchPin = cyl(0.012, 0.012, 0.05, 8, brassMat, 0, 0.02, 0.26)
+  catchPin.rotation.z = Math.PI / 2
+  globeLid.add(catchPin)
+
+  // the victrola — brass horn, wound by hand
+  const victrola = new THREE.Group()
+  victrola.position.set(2.95, 0, -3.15)
+  victrola.rotation.y = -0.5
+  scene.add(slot(SLOT.victrola, victrola))
+  victrola.add(box(0.52, 0.46, 0.46, trimWood, 0, 0.66, 0, 0.02))
+  for (const [lx, lz] of [[-0.2, -0.17], [0.2, -0.17], [-0.2, 0.17], [0.2, 0.17]]) {
+    victrola.add(cyl(0.022, 0.028, 0.44, 8, darkWood, lx, 0.22, lz))
+  }
+  victrola.add(box(0.56, 0.03, 0.5, darkWood, 0, 0.9, 0, 0.008))
+  const vplatter = cyl(0.15, 0.15, 0.016, 28, std({ color: 0x1d1620, roughness: 0.45, metalness: 0.25 }), 0, 0.924, 0)
+  victrola.add(vplatter)
+  victrola.add(cyl(0.145, 0.145, 0.006, 32, std({ color: 0x0a0810, roughness: 0.35 }), 0, 0.935, 0))
+  victrola.add(cyl(0.05, 0.05, 0.007, 20, std({ color: C.ember, roughness: 0.8 }), 0, 0.938, 0))
+  // the horn — a cone opening away from the wall, on a curved brass neck
+  const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.05, 0.5, 22, 1, true), std({
+    color: C.brassBright, roughness: 0.26, metalness: 0.88, side: THREE.DoubleSide,
+  }))
+  horn.position.set(0, 1.32, 0.14)
+  horn.rotation.set(-0.95, 0, 0)
+  horn.castShadow = true
+  victrola.add(horn)
+  const neck = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.018, 8, 18, Math.PI * 0.8), brassMat)
+  neck.position.set(0, 1.03, -0.02)
+  neck.rotation.set(Math.PI / 2, 0, -0.4)
+  victrola.add(neck)
+  victrola.add(cyl(0.012, 0.012, 0.16, 8, brassMat, 0.2, 1.0, 0.02))
+  // the crank
+  const crank = new THREE.Group()
+  crank.position.set(0.29, 0.7, 0.1)
+  victrola.add(crank)
+  const crankArm = cyl(0.01, 0.01, 0.14, 8, brassMat, 0, 0, 0)
+  crankArm.rotation.z = Math.PI / 2
+  crank.add(crankArm)
+  crank.add(cyl(0.012, 0.012, 0.06, 8, darkWood, 0.07, -0.03, 0))
+  // a stack of shellac by its feet
+  for (let i = 0; i < 4; i++) {
+    victrola.add(box(0.3, 0.012, 0.3, std({ color: [0x3a2a1c, 0x25402e, 0x4a2b21, 0x2c3d52][i], roughness: 0.9 }),
+      0.42, 0.02 + i * 0.014, 0.28, 0.004))
+  }
+
+  // the band wall — every band you kept, pinned behind glass (back wall,
+  // right of the chimney breast)
+  const bands = new THREE.Group()
+  bands.position.set(4.05, 1.78, -HALF_D + 0.07)
+  scene.add(slot(SLOT.bands, bands))
+  bands.add(box(1.15, 1.45, 0.06, trimWood, 0, 0, -0.02, 0.01))
+  bands.add(box(1.0, 1.3, 0.02, std({ color: 0x120d14, roughness: 0.95 }), 0, 0, 0.015, 0))
+  const br = rng(731)
+  const BAND_COLORS = [0xc8975a, 0xb3542f, 0x8a1f24, 0x2c3d52, 0x25402e, 0xe0b578, 0x6b4326]
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 4; col++) {
+      const bandG = new THREE.Group()
+      bandG.position.set((col - 1.5) * 0.23, (2 - row) * 0.25 + (br() - 0.5) * 0.02, 0.028)
+      bandG.rotation.z = (br() - 0.5) * 0.12
+      bands.add(bandG)
+      const face = BAND_COLORS[Math.floor(br() * BAND_COLORS.length)]
+      bandG.add(box(0.17, 0.075, 0.008, std({ color: face, roughness: 0.55, metalness: 0.25 }), 0, 0, 0, 0.004))
+      bandG.add(box(0.17, 0.012, 0.009, std({ color: C.brassBright, roughness: 0.3, metalness: 0.7 }), 0, 0.028, 0.001, 0))
+      bandG.add(box(0.17, 0.012, 0.009, std({ color: C.brassBright, roughness: 0.3, metalness: 0.7 }), 0, -0.028, 0.001, 0))
+      const seal = cyl(0.018, 0.018, 0.006, 12, std({ color: C.cream, roughness: 0.8 }), 0, 0, 0.006)
+      seal.rotation.x = Math.PI / 2
+      bandG.add(seal)
+    }
+  }
+  // glass over the whole thing, and a picture light above
+  bands.add(box(1.0, 1.3, 0.006, glassMat, 0, 0, 0.045, 0))
+  // light + target are CHILDREN of the frame group, so both are in its local
+  // space — world coordinates here would throw the beam across the room
+  const bandLight = new THREE.SpotLight(0xffd9a0, 6, 3.2, 0.7, 0.6, 2)
+  bandLight.position.set(0, 0.94, 0.5)
+  bandLight.target.position.set(0, -0.2, 0)
+  bands.add(bandLight)
+  bands.add(bandLight.target)
+  bands.add(cyl(0.035, 0.035, 0.3, 10, brassMat, 0, 0.92, 0.42))
+
   // ── the doorway back to the hive (front wall) ──────────────────────────
   const doorway = new THREE.Group()
   doorway.position.set(3.1, 0, HALF_D - 0.06)
@@ -2198,6 +2450,13 @@ const VIEWS: Record<string, { pos: [number, number, number]; target: [number, nu
   darts: { pos: [-2.6, 1.66, 1.0], target: [-5.5, 1.72, 1.0] },
   // eye to the little doorway of the model on the pedestal
   miniature: { pos: [3.45, 1.22, 1.5], target: [4.35, 0.97, 2.15] },
+  // El Mercado — one per purchasable prop, so a thing you just bought can
+  // introduce itself instead of waiting to be found
+  cart: { pos: [-1.75, 1.3, 1.5], target: [-3.3, 0.85, 0.75] },
+  chess: { pos: [-1.5, 1.25, -1.1], target: [-2.95, 0.68, -2.3] },
+  globe: { pos: [1.9, 1.3, 1.9], target: [3.45, 0.95, 1.45] },
+  victrola: { pos: [1.5, 1.45, -1.5], target: [2.95, 1.1, -3.15] },
+  bands: { pos: [3.5, 1.85, -1.9], target: [4.05, 1.78, -4.4] },
 }
 
 // ─── boot ─────────────────────────────────────────────────────────────────

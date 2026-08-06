@@ -58,9 +58,12 @@ export type BeeEmblem = 'none' | 'burst' | 'gear' | 'ring' | 'eye'
 
 /** Centre of the emblem on the abdomen, between the two stripes. */
 const EMBLEM_AT = { x: 100, y: 137, r: 9.5 }
+/** Where the emblem goes when the belly is carrying a NAME — up onto the first
+ *  stripe, smaller, so the two marks stack instead of overprinting. */
+const EMBLEM_AT_NAMED = { x: 100, y: 125, r: 7 }
 
-const emblemSvg = (emblem: BeeEmblem, ink: string): string => {
-  const { x, y, r } = EMBLEM_AT
+const emblemSvg = (emblem: BeeEmblem, ink: string, named = false): string => {
+  const { x, y, r } = named ? EMBLEM_AT_NAMED : EMBLEM_AT
   switch (emblem) {
     case 'burst': {
       // Six spokes — the "thinking" star. Drawn, not rotated, so the bake
@@ -123,6 +126,45 @@ const alpha = (value: string, a: number): string => {
   return `rgba(${r},${g},${b},${a})`
 }
 
+// ── livery ───────────────────────────────────────────────────────────
+//
+// THE NAME IS PAINTED ON THE BEE. Not floated beside it, not captioned under
+// it: a caption is a second thing on screen that has to be tracked, aligned and
+// read separately from the creature it belongs to, and once two bees are close
+// together it stops being obvious which name belongs to which. Livery cannot
+// come apart from its bee — it is the same pixels, it turns when the bee turns,
+// it fades when the bee fades, and there is nothing to keep in sync.
+//
+// It rides the abdomen, over the lower stripe, in a light ink haloed dark so it
+// holds against both the body colour and the stripe under it. The width is
+// FORCED (`textLength`) rather than hoped for: a name is whatever a vendor
+// shipped, the belly is 70 units wide, and a long name has to shrink into it
+// rather than run off the side of the bee.
+
+/** Where the name sits on the abdomen, and how much room it has. The belly
+ *  TAPERS, so the room is measured at the baseline (~62..135 in the 200-unit
+ *  drawing) and then kept inside it: livery that reaches the outline gets its
+ *  first and last glyph shaved off by the abdomen clip. */
+const LIVERY = { x: 99, baseline: 152, width: 64, maxSize: 20, minSize: 9 } as const
+
+/** Rough advance width of a glyph as a fraction of font size. Only used to
+ *  CHOOSE a size; the drawn width is then forced, so a wrong guess costs a
+ *  slightly loose or tight fit, never an overflow. */
+const GLYPH_RATIO = 0.62
+
+const liverySvg = (name: string, ink: string, halo: string): string => {
+  // The bake is a data-URL SVG: only characters that cannot need escaping are
+  // allowed through, and the token is already reduced to them upstream.
+  const text = String(name ?? '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()
+  if (!text) return ''
+  const { x, baseline, width, maxSize, minSize } = LIVERY
+  const size = Math.max(minSize, Math.min(maxSize, width / (GLYPH_RATIO * text.length)))
+  const drawn = Math.min(width, text.length * GLYPH_RATIO * size)
+  return `<text x="${x}" y="${baseline}" text-anchor="middle" font-family="Verdana,DejaVu Sans,Arial,sans-serif"`
+    + ` font-size="${size.toFixed(1)}" font-weight="700" textLength="${drawn.toFixed(1)}" lengthAdjust="spacingAndGlyphs"`
+    + ` fill="${ink}" stroke="${halo}" stroke-width="3.4" stroke-linejoin="round" paint-order="stroke" opacity="0.96">${text}</text>`
+}
+
 /** sin²(πp): 0 at p=0, 1 at p=0.5, 0 at p=1 — the eased flap sweep. */
 const flapSweep = (p: number): number => {
   const s = Math.sin(Math.PI * p)
@@ -137,6 +179,7 @@ const beeSvg = (
   px: number,
   palette: BeePalette = AB_PALETTE,
   emblem: BeeEmblem = 'none',
+  name = '',
 ): string => {
   const sweep = flapSweep(p)
   const lAng = (-16 + 28 * sweep).toFixed(2)
@@ -165,7 +208,8 @@ const beeSvg = (
       <path d="M60,144 Q100,153 135,143 L134,155 Q100,164 64,155 Z" fill="${stripe}"/>
       <ellipse cx="100" cy="114" rx="40" ry="11" fill="${bodyLight}" opacity="0.4"/>
       <ellipse cx="100" cy="156" rx="28" ry="8" fill="${bodyShade}" opacity="0.28"/>
-      ${emblemSvg(emblem, mix(stripe, '#ffffff', 0.82))}
+      ${emblemSvg(emblem, mix(stripe, '#ffffff', 0.82), Boolean(name))}
+      ${liverySvg(name, mix(body, '#ffffff', 0.94), mix(stripe, '#000000', 0.25))}
     </g>
     <path d="M108,163 C113,168 117,172 117,172 C113,170 109,168 106,165 Z" fill="${stripe}"/>
     <g stroke="${stripe}" stroke-width="2.6" stroke-linecap="round" fill="none">
@@ -199,6 +243,7 @@ export const bakeBeeAtlas = async (
   cellPx: number = DEFAULT_CELL,
   palette: BeePalette = AB_PALETTE,
   emblem: BeeEmblem = 'none',
+  name = '',
 ): Promise<BeeAtlas | null> => {
   const canvas = document.createElement('canvas')
   canvas.width = cellPx * frames
@@ -207,7 +252,7 @@ export const bakeBeeAtlas = async (
   if (!ctx) return null
 
   for (let i = 0; i < frames; i++) {
-    const img = await svgToImage(beeSvg(i / frames, cellPx, palette, emblem), cellPx)
+    const img = await svgToImage(beeSvg(i / frames, cellPx, palette, emblem, name), cellPx)
     ctx.drawImage(img, i * cellPx, 0, cellPx, cellPx)
   }
 
@@ -221,5 +266,6 @@ export const beeImageUrl = (
   palette: BeePalette = AB_PALETTE,
   px = 64,
   emblem: BeeEmblem = 'none',
+  name = '',
 ): string =>
-  'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(beeSvg(0.5, px, palette, emblem))
+  'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(beeSvg(0.5, px, palette, emblem, name))

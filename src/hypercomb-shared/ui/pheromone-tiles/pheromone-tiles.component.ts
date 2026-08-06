@@ -2,10 +2,14 @@
 //
 // The on-tile pheromone card. While the Pheromones window is open, hovering a
 // tile that carries keywords pops an ephemeral card of coloured chips next to
-// the cursor; clicking the tile's pheromone icon PINS it (draggable, per the
-// shared pin stack) so the ×'s are easy to hit. An × takes that keyword off
-// that one tile. This is the surgical counterpart to the panel's bulk staged
-// removal: "this tile, this keyword, gone."
+// the cursor; the ⌖ in its header PINS it (draggable, per the shared pin stack)
+// so the ×'s are easy to hit. An × takes that keyword off that one tile. This
+// is the surgical counterpart to the panel's bulk staged removal: "this tile,
+// this keyword, gone."
+//
+// The pin used to be an icon on the tile's hover band. That band no longer
+// shows while this window is open — it sat on top of this card and swallowed
+// the press meant for the hive — so the pin moved onto the card.
 //
 // Composes PinnableHoverBase — the hover-peek → click-to-pin → drag stack the
 // contact card uses — so all this component owns is the chip template and the
@@ -94,6 +98,13 @@ export class PheromoneTilesComponent extends PinnableHoverBase<PheromoneTileData
       key: p.label,
       data: { label: p.label, segments, chips: names.map(name => ({ name, color: this.#colorOf(name) })) },
     }
+  }
+
+  /** Keep this card up. It used to be pinned by an icon on the tile's hover
+   *  band, but that band stands down while the Pheromones window is open (it
+   *  covered this very card), so the pin lives on the card itself. */
+  pin(panel: PinnablePanel<PheromoneTileData>): void {
+    this.pinPeek(panel)
   }
 
   /** Take one keyword off this one tile. Optimistically drops the chip so the

@@ -73,8 +73,23 @@ Run `/views` to open the docked Views window. It follows the current category
 and discovers render views from `VisualBeeRegistry`, so newly installed view
 behaviours appear without another hardcoded catalogue.
 
-Each library-view row has an on/off control and a source-reach choice. Turning
-one on writes its view declaration onto the layer you are currently inside.
+The window **stays open while you look at a view**. Clicking a row shows that
+view in the container beside the window; clicking the row that is already
+showing puts the hexagons back. Only one view shows at a time — the view mode
+is a single value, so choosing one stops the last, and flipping between two
+views is two clicks with nothing to reopen in between. Every full-screen view
+surface (website, tree, tutor, slides, living brief, evidence atlas, knowledge
+studio, workflow) reads `--hc-inset-left` / `--hc-inset-right` — the CSS
+mirror of the `viewport:inset` contract every docked toolwindow already emits —
+so an open panel is beside the view, never over it. That is also why the
+**pheromone window works inside a full-screen view**: the panels sit at the
+shared toolwindow layer above the view surfaces, and the surface makes room.
+
+Rows are ordered **on first, off at the bottom**, under **Active** and
+**Inactive** headings, with All / Active / Inactive filters above the list.
+Each row carries an ON/OFF pill (attach or remove the behaviour) and, once it
+is on, a show / back-to-hexagons control. Turning one on writes its view
+declaration onto the layer you are currently inside.
 Choose **Current layer** for a concise view over direct children, or
 **Hierarchy** for a detailed view composed from the entire descendant tree.
 The choice rides the declaration as `payload.sourceScope`, so it is historical,
@@ -110,6 +125,11 @@ Evidence Atlas, or Knowledge Studio turns the previous library view off
 from that same layer, making comparison a simple choice in the Views window.
 Unrelated behaviours such as websites, slides, and lightboxes are untouched.
 Opening a view does not automatically open the Views window.
+
+A view opened from anywhere else — a tile icon, a slash command — still reads
+as **SHOWING** in this window, even where the behaviour is not attached at the
+cell you are standing on. The window reports what is on the container, never
+only what it wrote itself.
 
 The implementation lives in:
 

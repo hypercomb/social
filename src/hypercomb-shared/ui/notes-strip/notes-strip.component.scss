@@ -629,6 +629,42 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   font-variation-settings: 'FILL' 1;
 }
 
+// ── Kind groups ───────────────────────────────────────────
+// The rail is split into the two KINDS a mark's role falls into: points
+// (heading + list, constrained to a line) and notes (prose, the longer
+// form). The separator is the only thing telling them apart — no boxes,
+// no colour coding, since the icons are already the loud element and the
+// rail sits above a dense list.
+.cv2-rail-kind {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+// A hairline before the note group rather than around each group: one
+// mark instead of two, and it disappears on its own when the rail wraps
+// the group to a new line.
+.cv2-rail-kind.is-note {
+  margin-left: 3px;
+  padding-left: 6px;
+  border-left: 1px solid color-mix(in srgb, var(--md-on-surface) 14%, transparent);
+}
+.cv2-rail-kind-label {
+  font-size: 0.6rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-faint);
+  margin-right: 2px;
+  white-space: nowrap;
+  user-select: none;
+}
+// Prose marks read LIGHTER than the constrained ones — the inverse of the
+// heading weight above. Across the rail that puts structure at the heavy
+// end and body text at the light end, which is the distinction itself.
+.cv2-rail-mark.is-prose .mat-sym {
+  font-variation-settings: 'FILL' 0, 'wght' 300;
+}
+
 // ── Palette editor ────────────────────────────────────────
 .cv2-rail-editor-head {
   display: flex;
@@ -679,7 +715,10 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   button {
     background: transparent;
     border: none;
-    padding: 3px 7px;
+    // 6px, not 7 — the third role (prose) pushes this segmented control
+    // wider, and the strip docks narrow. The pixel comes off the padding
+    // rather than out of the name input beside it.
+    padding: 3px 6px;
     color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
     font-family: inherit;
     font-size: 0.68rem;
@@ -1566,6 +1605,12 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
     border-color: color-mix(in srgb, var(--md-secondary) 50%, transparent);
     color: var(--md-on-surface-strong, var(--md-on-surface));
   }
+
+  // The chip whose hover card is open — a hairline tie between the row and
+  // the card floating beside it, so the two read as one thing.
+  &.is-peeked {
+    border-color: color-mix(in srgb, #{$steel} 55%, transparent);
+  }
 }
 .cv2-tilechip-name {
   overflow: hidden;
@@ -1595,6 +1640,228 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
   font-size: 0.78rem;
   font-style: italic;
+}
+
+// ── Identity plate ───────────────────────────────────────
+// The panel's answer to "which tile am I writing on". A hexagon carrying the
+// tile's own picture (the same bytes the canvas paints) sits beside its name,
+// its place in the tree, and what it holds. Two forms share one block: narrow
+// is a single compact line, `.is-wide` grows the hexagon and opens the detail
+// column. The switch is driven by PANEL width in the component, not a media
+// query — the strip can be a thin rail on a huge screen.
+.cv2-plate {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  // A faint wash so the plate reads as the panel's masthead rather than a
+  // first row of the list.
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--md-secondary) 7%, transparent),
+    transparent
+  );
+}
+
+// The hexagon. Flat-top-to-point clip matching every other tile-identity hex
+// in the shell (aggregate index, collections landing, clipboard panel), so a
+// tile looks like the same object wherever it is shown.
+.cv2-plate-hex {
+  flex: 0 0 auto;
+  position: relative;
+  width: 34px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background: color-mix(in srgb, var(--md-secondary) 16%, rgba(255, 255, 255, 0.04));
+  // No size transition: the plate changes form when the panel changes form,
+  // and an animating hexagon would drag behind the user's resize.
+}
+.cv2-plate-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+// No picture — the tile's initial, so the hexagon still says "this tile"
+// instead of reading as a failed image.
+.cv2-plate-initial {
+  font-family: var(--hc-mono, system-ui);
+  font-size: 1rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--md-secondary) 85%, white);
+  line-height: 1;
+}
+
+.cv2-plate-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.cv2-plate-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--md-on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+// Where the tile lives, one chip per explorer segment with a hairline
+// separator drawn between them.
+.cv2-plate-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.3rem;
+  font-size: 0.66rem;
+  color: color-mix(in srgb, var(--md-on-surface) 48%, transparent);
+  overflow: hidden;
+}
+.cv2-plate-seg {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  & + &::before {
+    content: '/';
+    margin-right: 0.3rem;
+    color: color-mix(in srgb, var(--md-on-surface) 28%, transparent);
+  }
+}
+.cv2-plate-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  font-size: 0.68rem;
+  color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.cv2-plate-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+
+  &.is-q { color: color-mix(in srgb, var(--md-secondary) 85%, var(--md-on-surface)); }
+  &.is-a { color: rgb(110, 180, 255); }
+}
+// Tiny hexagon in front of the child-tile count — the count is about TILES,
+// so it carries the tile glyph rather than a note dot.
+.cv2-plate-stat-hex {
+  display: inline-block;
+  width: 7px;
+  height: 8px;
+  background: currentColor;
+  opacity: 0.75;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+}
+
+// Wide form — the panel has room, so the hexagon becomes the anchor of the
+// masthead and the details spread out beside it.
+.cv2-plate.is-wide {
+  gap: 0.85rem;
+  padding: 0.75rem 0.85rem;
+
+  .cv2-plate-hex { width: 62px; height: 71px; }
+  .cv2-plate-initial { font-size: 1.7rem; }
+  .cv2-plate-name { font-size: 1.05rem; }
+  .cv2-plate-stats { font-size: 0.72rem; }
+}
+
+// ── Tile hover card (navigator peek) ─────────────────────
+// Hovering a tile in the navigator lists what is written on it, without
+// leaving the tile being edited. Fixed to the viewport and opened to the LEFT
+// of the docked strip; pointer-transparent, because it is a look, not a
+// target — the pointer must stay free to reach the next chip.
+.cv2-peek {
+  position: fixed;
+  z-index: 60050;
+  pointer-events: none;
+  width: min(360px, 46vw);
+  max-height: 60vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0.45rem 0.55rem 0.5rem;
+  background: rgba(14, 14, 22, 0.97);
+  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in srgb, #{$steel} 45%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  font-family: var(--hc-mono, system-ui);
+  animation: cv2-peek-in var(--md-dur-short, 140ms) var(--md-easing-standard, ease-out);
+}
+@keyframes cv2-peek-in {
+  from { opacity: 0; transform: translateX(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.cv2-peek-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.3rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+
+  .hex-mark { font-size: 0.75rem; }
+}
+.cv2-peek-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--md-on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv2-peek-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.cv2-peek-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.13rem 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
+
+  &.is-q { color: color-mix(in srgb, var(--md-secondary) 80%, var(--md-on-surface)); }
+  &.is-a { color: rgb(140, 195, 255); }
+
+  .dot { flex: 0 0 auto; transform: translateY(-1px); }
+}
+.cv2-peek-mark {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1;
+  transform: translateY(2px);
+  color: color-mix(in srgb, var(--md-secondary) 75%, var(--md-on-surface));
+}
+// One line each — the card is a peek, not the list. Anything longer is read
+// by clicking through to the tile.
+.cv2-peek-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv2-peek-more,
+.cv2-peek-empty {
+  padding-top: 0.3rem;
+  font-size: 0.68rem;
+  font-style: italic;
+  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
 }
 
 // Prompt shown in place of the editor when no tile is active yet.
@@ -1674,6 +1941,20 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
     flex: 1 1 auto;
     min-width: 0;
     max-width: none;
+  }
+
+  // Fullscreen is the one place with room to spare: the identity plate takes
+  // the masthead treatment — a big hexagon the user can read across the room,
+  // with the tile's details set beside it.
+  :host.is-fullscreen .cv2-plate.is-wide {
+    gap: 1.1rem;
+    padding: 1rem 1.2rem;
+
+    .cv2-plate-hex { width: 96px; height: 110px; }
+    .cv2-plate-initial { font-size: 2.6rem; }
+    .cv2-plate-name { font-size: 1.35rem; }
+    .cv2-plate-path { font-size: 0.72rem; }
+    .cv2-plate-stats { font-size: 0.78rem; gap: 0.35rem 0.8rem; }
   }
 }
 

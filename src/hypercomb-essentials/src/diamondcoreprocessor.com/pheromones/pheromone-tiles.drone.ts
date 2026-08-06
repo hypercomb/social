@@ -26,8 +26,11 @@
 //   PEEK / REMOVE — hovering a pheromone-bearing tile shows the tile's keywords
 //     as a small draggable card of coloured chips, each with an ×. The card
 //     composes the shared hover-pin stack (`pheromone:*`, PinnableHoverBase)
-//     exactly like contact cards; the on-tile pheromone icon PINS it so the ×'s
-//     are easy to hit. An × emits `pheromone:remove-from-tile`, spliced live.
+//     exactly like contact cards, and carries its OWN pin control. It used to be
+//     pinned by an on-tile `pheromones` icon on the hover band; the band no
+//     longer shows while this window is open (TileOverlayDrone stands it down —
+//     it covered this card and ate the press), so that icon had nowhere left to
+//     appear and is gone. An × emits `pheromone:remove-from-tile`, spliced live.
 //
 // Mirrors ContactDrone: a Drone that wires its EffectBus handlers in heartbeat,
 // resolves shell services (Lineage, DecorationService, IconProviderRegistry,
@@ -44,32 +47,8 @@ type DecorationServiceLike = {
   removeTag(segments: readonly string[], name: string): Promise<void>
 }
 
-/** Shell-side icon registry contract (declared locally — essentials must not
- *  import shared). One provider, gated on the window being open + the tile
- *  actually carrying pheromones, so the icon only exists while managing them. */
-type IconProviderRegistryLike = {
-  add(p: {
-    name: string
-    owner?: string
-    svgMarkup: string
-    profiles?: readonly string[]
-    defaultActive?: boolean
-    featureRow?: boolean
-    hoverTint?: number
-    visibleWhen?: (ctx: { label?: string }) => boolean
-    labelKey?: string
-    descriptionKey?: string
-  }): void
-  remove(name: string): void
-}
-
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: <U>(k: string) => U | undefined } }).ioc?.get?.<T>(key)
-
-/** Feather "tag" glyph (stroke white so the overlay tint reads clean), matching
- *  the stroke style of the link icon. */
-const PHEROMONE_ICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>'
 
 export class PheromoneTilesDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -82,13 +61,12 @@ export class PheromoneTilesDrone extends Drone {
     'tags:view-state', 'tags:removal-pending',
     'tags:apply-begin', 'tags:apply-paint', 'tags:apply-commit',
     'tags:apply-cancel', 'tags:apply-end', 'render:cell-count',
-    'tile:hover', 'tile:action',
+    'tile:hover',
     'pheromone:remove-from-tile', 'pheromone:card-left', 'pheromone:drop', 'tags:changed',
   ]
   protected override emits = [
     'tags:apply-pending', 'tags:changed', 'toast:show',
-    'pheromone:hover-show', 'pheromone:hover-hide', 'pheromone:hover-pin',
-    'overlay:request-register',
+    'pheromone:hover-show', 'pheromone:hover-hide',
   ]
 
   #wired = false
@@ -116,21 +94,6 @@ export class PheromoneTilesDrone extends Drone {
     if (this.#wired) return
     this.#wired = true
 
-    // The on-tile pheromone icon: only while the window is open AND the tile
-    // carries pheromones, so it never crowds ordinary browsing. Clicking it
-    // pins the keyword card (handled by the tile:action listener below).
-    ioc<IconProviderRegistryLike>('@hypercomb.social/IconProviderRegistry')?.add({
-      name: 'pheromones',
-      owner: this.iocKey,
-      svgMarkup: PHEROMONE_ICON_SVG,
-      profiles: ['private', 'public-own'],
-      defaultActive: true,
-      hoverTint: 0xffcf6b,
-      visibleWhen: (ctx) => this.#iconVisible(ctx?.label),
-      labelKey: 'action.pheromones',
-      descriptionKey: 'action.pheromones.description',
-    })
-
     this.onEffect<{ open?: boolean }>('tags:view-state', (p) => {
       const open = p?.open === true
       if (open === this.#windowOpen) return
@@ -141,9 +104,6 @@ export class PheromoneTilesDrone extends Drone {
         this.#disarm()
         this.#hideHover()
       }
-      // Purge/rebuild the overlay icons so the pheromone icon appears or leaves
-      // without needing a re-hover.
-      this.emitEffect('overlay:request-register', {})
     })
 
     this.onEffect<{ active?: boolean }>('tags:removal-pending', (p) => {
@@ -207,12 +167,6 @@ export class PheromoneTilesDrone extends Drone {
     // ── hover card feed ──────────────────────────────────────────
     this.onEffect<{ label?: string | null }>('tile:hover', (p) => {
       this.#onHover(p?.label ?? null)
-    })
-
-    // Clicking the on-tile pheromone icon pins the keyword card.
-    this.onEffect<{ action?: string; label?: string }>('tile:action', (p) => {
-      if (p?.action !== 'pheromones' || !p.label) return
-      this.#pin(p.label)
     })
 
     // A pheromone was DRAGGED out of the panel and dropped on a tile (or on
@@ -394,12 +348,6 @@ export class PheromoneTilesDrone extends Drone {
     this.#emitHover('pheromone:hover-show', label)
   }
 
-  #pin(label: string): void {
-    if (!this.#windowOpen || tagsForLabel(label).length === 0) return
-    this.#hoverLabel = label
-    this.#emitHover('pheromone:hover-pin', label)
-  }
-
   /** Re-emit the CURRENT card for a label whose keywords changed. Hides it when
    *  nothing is left to show. */
   #refreshHover(label: string): void {
@@ -410,7 +358,7 @@ export class PheromoneTilesDrone extends Drone {
   /** `pheromones` overrides the index read for callers that already know the
    *  tile's set — see #drop, where the index can lag the write by a beat. */
   #emitHover(
-    effect: 'pheromone:hover-show' | 'pheromone:hover-pin',
+    effect: 'pheromone:hover-show',
     label: string,
     pheromones?: readonly string[],
   ): void {
@@ -442,11 +390,6 @@ export class PheromoneTilesDrone extends Drone {
    *  contradictory ways to remove the same keyword. */
   #canHover(): boolean {
     return this.#windowOpen && !this.#removalArmed
-  }
-
-  #iconVisible(label?: string): boolean {
-    if (!label || !this.#windowOpen) return false
-    return tagsForLabel(label).length > 0
   }
 
   #parentSegments(): string[] {

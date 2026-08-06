@@ -4,7 +4,7 @@
 //
 // A hive can have several models working at once, from several vendors, and
 // "which one is that" is a question a glance should answer. So a model bee's
-// look is built in two steps:
+// look is built in three steps, each one narrowing the answer:
 //
 //   VENDOR  decides the colour family. Every Claude bee is clay, every GPT
 //           bee is teal, every Gemini bee is sky. You learn six families once
@@ -12,6 +12,22 @@
 //   TIER    shades within the family: `deep` models darkest, `fast` models
 //           lightest. So opus and haiku are obviously siblings, and obviously
 //           not each other.
+//   MODEL   its own accent inside that shade — a few degrees of hue, its own
+//           saturation, its own wing tint. This is what makes EVERY model its
+//           own brand rather than one of three looks per vendor.
+//
+// The third step exists because the first two were not enough: a vendor with
+// four models had only three appearances to give them, so `sonnet` and `fable`
+// — both "balanced" — came out BYTE-IDENTICAL, and two different models flying
+// over the same hive were indistinguishable. Tier alone can never separate
+// same-weight siblings, and vendors keep shipping them.
+//
+// The accent is deliberately the SMALLEST of the three effects. It is derived
+// from the model's own name (so it is stable forever and needs no catalog) and
+// bounded so it can never carry a model out of its family or across a tier:
+// hue moves less than the closest two vendors are apart, and the lightness
+// nudge is a fraction of a tier step. A spec brute-forces both properties over
+// the whole catalog — the bounds are the contract, not a hope.
 //
 // Pure data and string matching — no Pixi, no DOM, no IoC. The agent registry
 // needs this to classify an agent, and the registry must never drag the
@@ -108,6 +124,58 @@ export const identifyModel = (name: string): ModelIdentity => {
   return { vendor, model, tier }
 }
 
+// ── the name it wears ─────────────────────────────────────────────────
+
+/** Words that say WHOSE a model is rather than WHICH one it is. A bee already
+ *  wears its vendor as a colour family, so repeating it in the livery spends
+ *  the belly's few letters on the thing you can already see. */
+const VENDOR_WORDS = new Set([
+  'claude', 'anthropic', 'openai', 'google', 'meta', 'mistralai',
+  'ollama', 'lmstudio', 'llamacpp', 'local', 'xai', 'ai', 'models', 'chat',
+])
+
+/** Room for the name on a bee's abdomen, in characters. Past this a name stops
+ *  being read and starts being a smudge; the hover still carries it in full. */
+const TOKEN_MAX = 8
+
+const isWord = (segment: string): boolean => /[a-z]/.test(segment)
+
+/**
+ * THE NAME A BEE WEARS — a model name reduced to what fits on a belly.
+ *
+ * `claude-opus-4-5` → `opus`, `gemini-2.5-flash` → `gemflash`, `grok-2` →
+ * `grok2`. Three things in order: drop the vendor (the colour said it), drop
+ * the version numbers only when they cost letters that matter, and when even
+ * that is too long, keep the FIRST word's opening and the LAST word whole —
+ * the last word is nearly always the one that separates siblings (`flash`,
+ * `mini`, `pro`), so it is the last thing that may be cut.
+ *
+ * Deterministic and catalog-free: a model nobody has heard of still gets a
+ * stable token, which is the whole point — the livery must never depend on
+ * someone having added the model here first.
+ */
+export const brandToken = (name: string): string => {
+  const segments = String(name ?? '').trim().toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+  if (!segments.length) return ''
+
+  let kept = segments.length > 1 ? segments.filter(s => !VENDOR_WORDS.has(s)) : segments
+  if (!kept.length) kept = segments
+  // A version left stranded at the front by the dropped vendor (`claude-3-5-
+  // sonnet`) names nothing on its own.
+  while (kept.length > 1 && !isWord(kept[0])) kept.shift()
+
+  if (kept.join('').length <= TOKEN_MAX) return kept.join('')
+
+  const words = kept.filter(isWord)
+  if (words.length && words.join('').length <= TOKEN_MAX) return words.join('')
+
+  const parts = words.length ? words : kept
+  if (parts.length < 2) return parts.join('').slice(0, TOKEN_MAX)
+  const last = parts[parts.length - 1]
+  const head = parts[0].slice(0, Math.max(3, TOKEN_MAX - last.length))
+  return (head + last).slice(0, TOKEN_MAX)
+}
+
 // ── colour ────────────────────────────────────────────────────────────
 
 const hex = (value: string): [number, number, number] => {
@@ -151,22 +219,92 @@ const hsl = (h: number, s: number, l: number): string => {
 const vendorBody = (vendor: string): string =>
   VENDOR_BODY[vendor] ?? hsl((hash(vendor) * 137.508) % 360, 0.6, 0.55)
 
+/** The inverse of `hsl` — a family colour is authored as a hex, but a model's
+ *  accent has to move within it, and hue/saturation/lightness is the only
+ *  space where "a few degrees off, same family" is expressible. */
+const toHsl = (value: string): [number, number, number] => {
+  const [r, g, b] = hex(value).map(v => v / 255)
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  if (max === min) return [0, 0, l]
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  return [((h * 60) % 360 + 360) % 360, s, l]
+}
+
+const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value))
+
+/** Avalanche (murmur3's finalizer). DJB2 alone is not good enough HERE: it
+ *  moves by the size of the edit, so `o1` and `o3` hash two apart and every
+ *  accent derived from them rounds to the same byte — the two models come out
+ *  identical, which is the exact failure the accent exists to prevent. Model
+ *  names differ by a character all the time (`grok-2`/`grok-4`,
+ *  `gemini-1.5`/`gemini-2.5`), so one bit of input has to change every bit of
+ *  output. */
+const mix32 = (value: number): number => {
+  let h = value | 0
+  h ^= h >>> 16
+  h = Math.imul(h, 0x85ebca6b)
+  h ^= h >>> 13
+  h = Math.imul(h, 0xc2b2ae35)
+  h ^= h >>> 16
+  return h >>> 0
+}
+
+/** A model's own signature, as four independent numbers in -1..1 derived from
+ *  its name. Independent matters: slicing one hash into four fields ties hue to
+ *  saturation, so most of the possible looks could never occur — each axis gets
+ *  its own salted mix instead. */
+const accentOf = (model: string): { hue: number; sat: number; light: number; wing: number } => {
+  const seed = hash(model)
+  const spread = (salt: number): number => (mix32(seed ^ salt) % 2048) / 2047 * 2 - 1
+  return { hue: spread(0x9e3779b9), sat: spread(0x85ebca6b), light: spread(0xc2b2ae35), wing: spread(0x27d4eb2f) }
+}
+
+/** How far a model may wander from its family, per axis.
+ *
+ *  HUE is the tight one: the two closest vendor hues are ~23° apart, so a
+ *  budget of ±4° leaves ~15° between the nearest two families in the worst
+ *  case — still further apart than any two siblings can be from each other.
+ *  LIGHT is bounded well inside one tier step (0.11 and 0.13) so an accent can
+ *  never make a deep model read as balanced. WING is the loud one, because a
+ *  wing carries no family meaning — it is the largest area on the bee and the
+ *  cheapest place to spend distinctness. */
+const ACCENT = { hue: 4, sat: 0.13, light: 0.028, wing: 42 } as const
+
 /**
  * The palette for a model: its vendor's family, shaded by tier. Deep models
  * are darker and heavier, fast models lighter and airier — the same read you
  * get from the names.
  */
 export const modelPalette = (name: string): ModelPalette => {
-  const { vendor, tier } = identifyModel(name)
-  const base = vendorBody(vendor)
-  const body = tier === 'deep' ? mix(base, '#000000', 0.22)
-    : tier === 'fast' ? mix(base, '#ffffff', 0.3)
-    : base
+  const { vendor, tier, model } = identifyModel(name)
+  const [familyHue, familySat, familyLight] = toHsl(vendorBody(vendor))
+  const accent = accentOf(model)
+
+  // Tier first and largest — it is the thing being READ, and an accent must
+  // never be able to argue with it.
+  const tierLight = tier === 'deep' ? -0.11 : tier === 'fast' ? 0.13 : 0
+
+  const hue = (familyHue + accent.hue * ACCENT.hue + 360) % 360
+  const sat = clamp(familySat + accent.sat * ACCENT.sat, 0.32, 0.95)
+  const light = clamp(familyLight + tierLight + accent.light * ACCENT.light, 0.2, 0.78)
+  const body = hsl(hue, sat, light)
+
+  // The wing is the model's loudest signature: its own hue, and mixed far
+  // enough toward white that it stays the lightest thing on the bee whatever
+  // that hue costs in luminance. (Rotating a hue changes brightness a lot —
+  // pure yellow and pure blue at one lightness are nowhere near each other —
+  // so the white mix is what keeps "wings read as wings" true by construction
+  // rather than by luck.)
+  const wingHue = (hue + accent.wing * ACCENT.wing + 360) % 360
   return {
     body,
     stripe: mix(body, '#000000', 0.78),
     head: mix(body, '#000000', 0.24),
-    wing: mix(body, '#ffffff', 0.72),
+    wing: mix(hsl(wingHue, clamp(sat, 0.35, 0.7), clamp(light + 0.06, 0.4, 0.8)), '#ffffff', 0.78),
   }
 }
 
