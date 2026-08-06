@@ -65,7 +65,7 @@
       "id": "tags-panel-bouquet-grouping",
       "title": "Mirror the bouquet-organised pheromone panel (bouquets > loose > namespaces)",
       "run": "npx tsx scripts/mirror-bouquets.ts",
-      "note": "tags-viewer restructured so bouquets are the organising unit; new tag-grouping.ts holds the set-not-a-folder rule (gathered marks leave the loose list, namespaced marks never leave their namespace). mirror-bouquets.ts reconciles behaviors/views/tags/{bouquet-registry,tags-viewer.component} — its existing note is now stale, and tag-grouping.ts needs a new part tile. Bridge broker was up and a renderer was registered, but ops timed out (cold/unresponsive renderer tab).",
+      "note": "tags-viewer restructured so bouquets are the organising unit; new tag-grouping.ts holds the set-not-a-folder rule (gathered marks leave the loose list, namespaced marks never leave their namespace). mirror-bouquets.ts reconciles behaviors/views/tags/{bouquet-registry,tags-viewer.component} — its existing note is now stale, and tag-grouping.ts needs a new part tile. Bridge broker was up and a renderer was registered, but ops timed out (cold/unresponsive renderer tab). RENDERER MUST BE EDGE 4250 — a Chrome tab may hold the slot and answers from an empty tree.",
       "created": "2026-08-05",
       "status": "done",
       "completed": "2026-08-06"
@@ -144,7 +144,25 @@
       "id": "carry-apply-references",
       "title": "Mirror carry→travel→apply + drag-names-the-reference",
       "run": "npx tsx scripts/mirror-behavior-parts.ts",
-      "note": "Organizer/Portals panel gained a CARRY basket that survives navigation (opposite direction of travel from the staged tray, which still clears on every hop) and an Apply that mints one reference per carried item at the current page, scented with the bouquet in hand. Drag-onto-hive no longer writes: it composes '/reference <name> = <path>' into the command line with the name selected. Needs tiles for: carry basket, apply, drag-names-the-reference, and the name-is-an-address collision refusal.",
+      "note": "Organizer/Portals panel gained a CARRY basket that survives navigation (opposite direction of travel from the staged tray, which still clears on every hop) and an Apply that mints one reference per carried item at the current page, scented with the bouquet in hand. Drag-onto-hive no longer writes: it composes '/reference <name> = <path>' into the command line with the name selected. Needs tiles for: carry basket, apply, drag-names-the-reference, and the name-is-an-address collision refusal. RENDERER MUST BE EDGE 4250 — a Chrome tab may hold the slot and answers from an empty tree.",
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "spotlight-behavior",
+      "title": "Mirror /spotlight — the glowing-tile pointing finger + agent-panel tile links",
+      "run": null,
+      "note": "New behavior: SpotlightDrone (presentation/tiles/spotlight.drone.ts) draws a pulsing warm glow on tiles named by spotlight:show {targets}; the light goes out the moment the pointer finds the tile (tile:hover, tile:click on touch) with a 400ms fade, and any navigation clears all — a pointing finger, not selection. SpotlightQueenBee (commands/spotlight.queen.ts) is the /spotlight <tile>|off command. The agent panel's WORKING ON row (assistant/agent-panel.view.ts #whereRow/#goToTile) now renders each target tile as a link: click opens the agent's parent layer (goRaw segments, same place its bee flies) then raises the spotlight, which survives the trip because callers navigate first and show second. Owed in the behaviors deck: a /spotlight glyph card + part tiles for the three files, pheromone-marked, notes carrying the found-is-dismissed doctrine. note-add is additive — keep out of the idle drain.",
+      "created": "2026-08-06",
+      "status": "pending",
+      "unattended": false
+    },
+    {
+      "id": "walkthrough-reel",
+      "title": "The bakery walkthrough — one tile becomes a world, verb by verb",
+      "run": null,
+      "note": "scripts/presentation/walkthrough.cjs renders the worked-example reel walkthrough/hypercomb-walkthrough.mp4: one concept (a neighborhood bakery) grown from a single tile into a three-level plan by /atomize (parts fan out), travel-inside, /expand twice (the shelf gains only the siblings it was missing, then gets crowded), /organize (the session answers with a plan, the hive moves the tiles), a stacked /atomize on sourdough, and a full-tree map. Every verb beat shows the honest machinery: the command line, the ask minted as a honey hex flying to the parked-claude-session badge, and honey-glow marking only what the verb just made. Twenty-six flat-vector art glyphs (no text in the art) in the shell's honey palette. Narrated by the same neural voice and audio cache as the last rendered full presentation. Owed under the presentation mirror: a 'walkthrough' chapter tile beside the verbs chapter holding one part tile per beat (open, seed, ask-atomize, atomize, travel, expand, crowded, organize, deep-atomize, map, close) with its say line as the note, pheromone-marked as part of the presentation production; the behaviors-deck cards for /atomize, /organize and /expand gain a note pointing at this cut as the worked example with the bridge machinery visible. note-add is additive — keep out of the idle drain.",
+      "unattended": false,
       "created": "2026-08-06",
       "status": "pending"
     }

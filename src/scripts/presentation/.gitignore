@@ -16,3 +16,4 @@ voice/spoken/
 voice/lines.json
 *.log
 __pycache__/
+walkthrough/
