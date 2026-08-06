@@ -8,6 +8,7 @@
 //   node voice.cjs --reference "…\Recording.m4a" --from 24.6 --to 43.6
 //   node voice.cjs --teaser            # speak the teaser beats, master, seed
 //   node voice.cjs --scenes 1,4,7      # speak whole scenes, master, seed
+//   node voice.cjs --posts protocol    # speak one post's beats (omit id: all posts)
 //   node voice.cjs --check             # which slots are spoken, and how close
 //
 // Short lines are where a clone is weakest — there is barely any line for it to
@@ -70,6 +71,22 @@ function teaserLines() {
     const say = m[2].replace(/\s+/g, ' ').trim()
     return { id: `teaser:${m[1]}`, text: say, cache, slot: keyOf(voice, rate, say) }
   })
+}
+
+function postLines(which) {
+  const src = fs.readFileSync(path.join(ROOT, 'posts.cjs'), 'utf8')
+  const cache = path.join(ROOT, 'teaser', 'audio')   // posts share the teaser's cache
+  const voice = (src.match(/const VOICE = '([^']+)'/) || [])[1]
+  const rate = (src.match(/const RATE = '([^']+)'/) || [])[1]
+  const lines = []
+  for (const post of [...src.matchAll(/\n\s+id: '([^']+)', scene[\s\S]*?beats: \[([\s\S]*?)\n\s{4}\]/g)]) {
+    if (which.length && !which.includes(post[1])) continue
+    ;[...post[2].matchAll(/say: `([^`]*)`/g)].forEach((m, i) => {
+      const say = m[1].replace(/\s+/g, ' ').trim()
+      lines.push({ id: `post:${post[1]}-${i}`, text: strip(say), cache, slot: keyOf(voice, rate, say) })
+    })
+  }
+  return lines
 }
 
 function sceneLines(which) {
@@ -162,6 +179,10 @@ try {
       : '\nno reference yet — node voice.cjs --reference "…"')
   } else if (has('teaser')) {
     speak(teaserLines())
+  } else if (has('posts')) {
+    const which = String(arg('posts') || '').split(',').map(s => s.trim())
+      .filter(s => s && !s.startsWith('--'))
+    speak(postLines(which))
   } else if (has('scenes')) {
     const which = String(arg('scenes') || '').split(',').map(n => parseInt(n, 10)).filter(Number.isFinite)
     speak(sceneLines(which))
