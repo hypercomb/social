@@ -165,6 +165,33 @@
       "unattended": false,
       "created": "2026-08-06",
       "status": "pending"
+    },
+    {
+      "id": "annotations-window-notes-lists-tabs",
+      "title": "Annotations window — the notes window splits into notes | lists tabs",
+      "run": null,
+      "note": "The notes strip is the ANNOTATIONS WINDOW: two tabs under its dragbar. notes = prose + the question/answer conversation; lists = the hierarchical list-notes (roots carrying a heading/list mark, or any nested note tree). Same editor, mark rail, form and tile navigator on both tabs — only which roots show differs (#isListRoot / visibleNotes in notes-strip.component.ts). PORTALS IS UNTOUCHED — still its own left-docked aggregate panel; do NOT mirror any portals change here. Mirror pass: on the behaviors mirror's notes-window cell, add a note explaining the two tabs and the split rule; update the window's part tiles if the mirror lists template/scss parts; mint/refresh the themed deck card for the annotations window. note-add is additive — manual drain only.",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "controls-rail-override-persistence",
+      "title": "Note the controls-rail override persistence fix on the behaviors/appearance fit tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive, re-running lands the note twice. The rail's enabled map now persists ONLY overrides (entries differing from DEFAULT_ENABLED_MAP), so a default flip reaches existing users; hc:controls-enabled-rev gates a one-time sweep that reclaimed zoom-in/zoom-out from legacy full maps. Explains why the magnifiers kept reappearing after bab6045d despite defaulting off. Add as a note on the fit/view-menu tile under behaviors/appearance.",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "reference-closure-guards",
+      "title": "Note the closure guards on behaviors/structure/reference",
+      "run": null,
+      "note": "MANUAL — note-add is additive, re-running lands the note twice. Two guards landed in sharing/decoration-closure.ts: (1) reference records get a kind-scoped closure fallback — a record minted past buildReferenceRecord (hand-rolled writer, bridge script) still carries payload.requiredBouquet on push AND adopt, so a shared portal's demand is always expandable on arrival; (2) collectSigsDeep now skips targetSig keys beside groupSig — targetSig is an identity pointer in every use (a reference's lineage address, a feedback item being retired), so writeDecoration's refs auto-declare can never mint a permanent 404 cascade from it. Doctrine line for the note: the closure carries DEPENDENCIES, never REFERENTS. Add as a note on the behaviors/structure/reference tile, beside the existing /requires bouquet note. Specs: decoration-closure.spec.ts (4 guards + harvest test).",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
     }
   ]
 }

@@ -22,8 +22,10 @@
 //
 // It is NOT website-specific: any decoration kind that either (a) carries a
 // flat `refs` closure array, or (b) carries a `payload.htmlSig` HTML body,
-// becomes portable through the same hop. A `files:attachment` decoration, for
-// instance, can opt in later by writing `refs` with no walker change.
+// becomes portable through the same hop — and (c) `reference` records get a
+// kind-scoped fallback to `payload.requiredBouquet` for records minted past
+// `buildReferenceRecord`. A `files:attachment` decoration, for instance, can
+// opt in later by writing `refs` with no walker change.
 //
 // The embedded-ref forms `extractPageRefSigs` recognises are EXACTLY the forms
 // `rewritePageRefs` rewrites at render time — both live on the two regexes
@@ -93,8 +95,11 @@ export function collectSigsDeep(value: unknown): string[] {
         // `groupSig` fields carry a GROUP SIGNATURE — sha256('group:'+meaning),
         // a pure identity mark with no bytes behind it anywhere (see
         // core/group-signature.ts). Declaring it as a ref sends every closure
-        // walker on a permanent 404 cascade across all byte hosts.
-        if (k === 'groupSig') continue
+        // walker on a permanent 404 cascade across all byte hosts. `targetSig`
+        // is the same species in every use (a reference's LINEAGE address, a
+        // feedback item being retired): a pointer at a REFERENT, never bytes
+        // the record owns. A closure carries dependencies, not referents.
+        if (k === 'groupSig' || k === 'targetSig') continue
         walk(x)
       }
     }
@@ -156,6 +161,11 @@ export function rewritePageRefs(text: string, prefix: string): string {
  *   - Not a JSON object, or no string `kind`  → `[]` (ordinary resource leaf).
  *   - `refs: string[]` present (non-empty)    → return it (forward path; no
  *                                                HTML fetch needed).
+ *   - else `kind:'reference'`                 → `[payload.requiredBouquet]` when
+ *                                                present — covers records minted
+ *                                                past `buildReferenceRecord`;
+ *                                                never the sibling `targetSig`,
+ *                                                a lineage address.
  *   - else `payload.htmlSig` (64-hex) present → `[htmlSig, ...sigs embedded in
  *                                                the HTML body]`, fetching the
  *                                                body via `fetchHtml` (legacy
@@ -210,8 +220,24 @@ export async function decorationClosureSigs(
     // refs present but empty / garbage — fall through to the htmlSig path.
   }
 
-  // Legacy fallback: follow payload.htmlSig and parse the body for assets.
   const payload = record['payload']
+
+  // Reference fallback: a record minted past `buildReferenceRecord` (a
+  // hand-rolled writer, a bridge script) declares no refs[], but its
+  // `payload.requiredBouquet` names the `{marks}` resource that must travel
+  // or the demand cannot be expanded on arrival. Kind-scoped on purpose —
+  // never a whole-payload harvest, because the sibling `targetSig` is a
+  // lineage address (no bytes behind it on any host; declaring it 404s
+  // forever, the `group` lesson above).
+  if (record['kind'] === 'reference') {
+    const bouquet = payload && typeof payload === 'object'
+      ? String((payload as Record<string, unknown>)['requiredBouquet'] ?? '').toLowerCase()
+      : ''
+    if (SIG_RE.test(bouquet)) out.add(bouquet)
+    return [...out]
+  }
+
+  // Legacy fallback: follow payload.htmlSig and parse the body for assets.
   const htmlSig = payload && typeof payload === 'object'
     ? String((payload as Record<string, unknown>)['htmlSig'] ?? '').toLowerCase()
     : ''
