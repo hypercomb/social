@@ -211,6 +211,14 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** The behavior axis of the pre-join review: open the Beehaviors ROSTER
+   *  (global switches — off = dormant everywhere AND withheld from every
+   *  swarm). ShowFeaturesDrone answers with the rows; the panel docks right,
+   *  this modal stays where it is. */
+  readonly openSharedBehaviors = (): void => {
+    EffectBus.emit('features:roster-open', {})
+  }
+
   readonly pickLocation = (name: string): void => {
     this.roomDraft.set(name)
   }

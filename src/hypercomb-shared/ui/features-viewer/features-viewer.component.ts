@@ -40,6 +40,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
+import { setKindGlobalOn, setWakeAt, isWokenExactlyAt, isKindGloballyOff } from './behavior-enablement'
 import { enableAggregation, disableAggregation, listAggregation } from '../../core/aggregation-layer'
 
 /** A feature already applied to the layer. */
@@ -98,6 +99,28 @@ interface FeatureRow {
   gateSig?: string
   /** Publisher domain attributed to the gate sig (empty = unknown origin). */
   publisherDomain?: string
+  /** True when the behavior-enablement lens holds this kind DORMANT here —
+   *  off on the global roster (or withheld by the adopted root's publisher)
+   *  with no wake exception covering the tile. Rendered off with the
+   *  "off everywhere" chip; clicking the row wakes it HERE (the local ON
+   *  exception), never flips the global switch. */
+  dormant?: boolean
+}
+
+/** One row of the GLOBAL ROSTER — the third mode. No tile subject, no
+ *  belonging: every behavior the app knows, one switch each. Off = dormant
+ *  everywhere AND withheld from every swarm (one switch, one meaning). */
+interface RosterRow {
+  view: string
+  icon: string
+  kind: string
+  label: string
+  description: string
+  category: string
+  slashCommand?: string
+  foreign?: boolean
+  module?: string
+  on: boolean
 }
 
 /** A feature the app knows but this layer doesn't have yet. */
@@ -116,6 +139,9 @@ interface AvailableRow {
    *  are not addable — their content (a page, a deck) must be authored, so
    *  their rows carry the slash-command chip instead of a switch. */
   addable?: boolean
+  /** True when this kind is off on the global roster — the row is not offered
+   *  at all (dormant means gone; the roster is where it comes back). */
+  globalOff?: boolean
 }
 
 /** Minimal shape the selection / bulk helpers need — both row kinds satisfy
@@ -266,7 +292,72 @@ export class FeaturesViewerComponent implements OnDestroy {
   // behaviour whose module hasn't arrived yet too. Slot-backed behaviours (a
   // tutor deck, a website page) can't be brushed — they say so on the row.
 
-  readonly mode = signal<'manage' | 'paint'>('manage')
+  // ROSTER — the global behavior list, no tile subject at all. Every behavior
+  // the app knows, one switch each: off = dormant everywhere AND withheld
+  // from every swarm. Opened pre-swarm (WORLD stage / join selector) and any
+  // time from the header. Rows arrive on `features:roster` (show-features
+  // owns the census); switches write the global-off list directly.
+
+  readonly mode = signal<'manage' | 'paint' | 'roster'>('manage')
+
+  /** The global roster rows, as last delivered by `features:roster`. */
+  readonly rosterRows = signal<RosterRow[]>([])
+
+  readonly isRoster = computed(() => this.mode() === 'roster')
+
+  /** Roster rows surviving the header query, grouped by category. */
+  readonly rosterGroups = computed<{ category: string; rows: RosterRow[] }[]>(() => {
+    const q = this.query().trim().toLowerCase()
+    const rows = this.rosterRows().filter(r => !q
+      || r.label.toLowerCase().includes(q)
+      || r.kind.toLowerCase().includes(q)
+      || r.description.toLowerCase().includes(q)
+      || (r.slashCommand ?? '').toLowerCase().includes(q))
+    const byCat = new Map<string, RosterRow[]>()
+    for (const r of rows) {
+      const list = byCat.get(r.category) ?? []
+      list.push(r)
+      byCat.set(r.category, list)
+    }
+    return [...byCat.entries()].map(([category, list]) => ({ category, rows: list }))
+  })
+
+  readonly rosterOnCount = computed(() => this.rosterRows().filter(r => r.on).length)
+
+  /** Flip one behavior on the global roster. Optimistic row update — the
+   *  writer emits `behavior:enablement-changed`, so every other surface
+   *  (icons, view toggles, swarm broadcast) reacts at once. */
+  readonly rosterToggle = (row: RosterRow): void => {
+    const next = !row.on
+    setKindGlobalOn(row.kind, next)
+    this.rosterRows.set(this.rosterRows().map(r => r.kind === row.kind ? { ...r, on: next } : r))
+  }
+
+  /** Open the roster (from the header button; WORLD stage and the join
+   *  selector emit the same effect). show-features answers with the rows. */
+  readonly openRoster = (): void => {
+    EffectBus.emit('features:roster-open', {})
+  }
+
+  /** Leave the roster back to the per-tile manager. */
+  readonly closeRoster = (): void => {
+    if (this.mode() === 'roster') this.mode.set('manage')
+  }
+
+  /** Wake a dormant behavior HERE — the local ON exception (covers the
+   *  subtree). Never touches the global switch. A second click while woken
+   *  removes the exception again. Refreshes the group so the row re-stamps. */
+  readonly wakeHere = (group: FeatureGroup, feat: FeatureRow): void => {
+    const woken = isWokenExactlyAt(feat.kind, group.segments)
+    setWakeAt(group.segments, feat.kind, !woken)
+    EffectBus.emit('tile:action', { action: 'features', label: group.cell, segments: [...group.segments] })
+  }
+
+  /** Show the "woken here" line only while the exception is LOAD-BEARING —
+   *  the kind is globally off and this wake is what keeps the row alive. A
+   *  lingering wake under a re-enabled global is a harmless no-op, not news. */
+  readonly isWokenHere = (group: FeatureGroup, feat: FeatureRow): boolean =>
+    isKindGloballyOff(feat.kind) && isWokenExactlyAt(feat.kind, group.segments)
 
   /** How far out the applied list reaches (see `Reach`). Chosen per subject
    *  tile, never sticky across tiles: an ADOPTED tile opens at `direct` — the
@@ -490,6 +581,24 @@ export class FeaturesViewerComponent implements OnDestroy {
       // checkboxes read their real state.
       void this.#refreshHidden()
       void this.#refreshMembers()
+      // A tile subject arriving takes the panel out of the roster — the two
+      // views answer different questions and never stack.
+      if (this.mode() === 'roster') this.mode.set('manage')
+    }))
+
+    // ── the GLOBAL ROSTER arriving (features:roster-open → show-features) ──
+    this.#cleanups.push(EffectBus.on<{ rows?: RosterRow[] }>('features:roster', (p) => {
+      const rows = Array.isArray(p?.rows) ? p!.rows! : []
+      EffectBus.emit('files:viewer-close', {})
+      this.rosterRows.set(rows)
+      this.query.set('')
+      this.selectedKeys.set(new Set())
+      this.brush.set(new Set())
+      this.mode.set('roster')
+      if (!this.visible()) {
+        this.visible.set(true)
+        EffectBus.emit('features:viewer-state', { open: true })
+      }
     }))
 
     // ── the panel FOLLOWS NAVIGATION ──────────────────────────────────
@@ -948,7 +1057,9 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   /** The "Available to add" rows, through the same search filter. */
   visibleAvailable(group: FeatureGroup): AvailableRow[] {
-    return group.available.filter(f => this.#matchesQuery(group, f))
+    // A globally-off behavior is never OFFERED — dormant means gone, not
+    // "available to add". The roster is where it comes back.
+    return group.available.filter(f => !f.globalOff && this.#matchesQuery(group, f))
   }
 
   /** Number of behaviors currently active in this context. Off rows remain in
@@ -965,6 +1076,7 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  The community gate is a separate story: a gated row keeps its checkbox
    *  (your intent) and carries the "needs your OK" chip + allow beside it. */
   isOn(group: FeatureGroup, feat: FeatureRow): boolean {
+    if (feat.dormant) return false
     if (this.isHidden(group, feat)) return false
     if (feat.view === 'website' && this.#isScopeRoot(group, feat)) {
       return this.websiteMembers().has(group.segments.join('/'))
@@ -1065,6 +1177,10 @@ export class FeaturesViewerComponent implements OnDestroy {
       return
     }
     if (this.isPending(group, feat)) return
+    // A DORMANT row (global roster off / publisher-withheld) can't be flipped
+    // by the hidden-pool toggle — the click wakes it HERE instead (the local
+    // ON exception), which is the only per-tile answer to a global off.
+    if (feat.dormant) { this.wakeHere(group, feat); return }
     void this.toggleActive(group, feat)
   }
 
@@ -1407,6 +1523,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (this.reviewTarget()) { this.cancelReview(); return }
     if (this.mode() === 'paint') { this.toggleMode(); return }
     if (this.query()) { this.query.set(''); return }
+    if (this.mode() === 'roster') { this.closeRoster(); return }
     this.close()
   }
 }

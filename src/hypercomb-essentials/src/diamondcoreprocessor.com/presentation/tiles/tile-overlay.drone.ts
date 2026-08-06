@@ -473,6 +473,7 @@ export class TileOverlayDrone extends Drone {
     'bee:disposed', 'genotype:set-visible', 'mobile:mode',
     'substrate:applied', 'cell:removed', 'tile:saved',
     'tile:public-changed',
+    'behavior:enablement-changed',
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
     'tags:view-state', 'tags:removal-pending', 'tags:apply-pending',
@@ -786,6 +787,13 @@ export class TileOverlayDrone extends Drone {
       // The public/private flag flipped — swap the person↔globe toggle glyph
       // on the hovered tile immediately, without waiting for a pointer move.
       this.onEffect('tile:public-changed', () => {
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
+      })
+
+      // The global behavior roster flipped (behavior-enablement lens) — a
+      // dormant behavior's icons must vanish (or wake) on the hovered tile
+      // immediately; visibleWhen re-reads the lens on the repaint.
+      this.onEffect('behavior:enablement-changed', () => {
         if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
       })
 

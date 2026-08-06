@@ -39,6 +39,7 @@ import { Worker, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/c
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
 import { WEBSITE_SLOT } from './website-slot.js'
 import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
+import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
@@ -142,6 +143,15 @@ export class ViewBee extends Worker {
     })
     EffectBus.on('feature:restored', () => this.#schedule())
 
+    // The GLOBAL roster (behavior-enablement lens). A behavior flipped off
+    // there goes dormant everywhere at once: drop its toggle, and if it owns
+    // the current surface, release it — same transition as feature:hidden.
+    // Flipping it back on wakes every toggle on the next recompute.
+    EffectBus.on(ENABLEMENT_CHANGED, () => {
+      void this.#enforceActiveViewEnabled()
+      this.#schedule()
+    })
+
     // Command-line click and the `/website` slash command both arrive here.
     // A `navigation` behavior delegates to its controller (open/close a
     // lineage); a `render` behavior flips the GLOBAL ViewMode directly. There
@@ -185,6 +195,12 @@ export class ViewBee extends Worker {
     if (!descriptor?.decorationKind || descriptor.behavior === 'navigation') return
     const segments = (get<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
+    // Dormant (global roster off / publisher-withheld, no wake here) — the
+    // surface must fall back to hexagons exactly as a hide does.
+    if (isBehaviorDormant(descriptor.decorationKind, segments)) {
+      if (vm.mode === descriptor.view) vm.setMode(DEFAULT_SURFACE)
+      return
+    }
     const branchScoped = descriptor.scope === 'branch' || !!descriptor.cascades
     const hidden = await (branchScoped
       ? isFeatureHiddenWithin(segments, descriptor.decorationKind)
@@ -216,6 +232,12 @@ export class ViewBee extends Worker {
     const toggles: ViewToggle[] = []
     for (const v of views) {
       if (!v?.view) continue
+
+      // Dormant behavior (global roster off / publisher-withheld, no wake
+      // covering this node) — no toggle at all. "Disappear for all intents
+      // and purposes"; the decoration stays on the tile, and re-enabling
+      // globally brings the toggle straight back.
+      if (v.decorationKind && isBehaviorDormant(v.decorationKind, segments)) continue
 
       // Views launched from the launch-group aggregator (website) opt out of
       // the per-node command-line toggle — the launcher owns opening them, so

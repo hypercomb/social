@@ -91,6 +91,7 @@ import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../e
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
+import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
 
 const SIG = /^[0-9a-f]{64}$/
 /** ABOVE THE CANVAS FLOOR, deliberately — unlike the other takeovers' 59988.
@@ -736,7 +737,10 @@ export class TileViewDrone extends Drone {
       .filter(bee =>
         bee.adoptable !== false &&
         bee.behavior !== 'navigation' &&
-        !hasDecorationKind(label, bee.decorationKind),
+        !hasDecorationKind(label, bee.decorationKind) &&
+        // Globally-off behaviors (the roster lens) aren't offered as
+        // creations — dormant means gone, not "available to add".
+        !isKindGloballyOff(bee.decorationKind),
       )
     if (bees.length === 0) return null
 

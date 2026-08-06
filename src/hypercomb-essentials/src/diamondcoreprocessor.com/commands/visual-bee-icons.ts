@@ -47,6 +47,7 @@ import { EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
 import { hasDecorationKind } from './decoration-kind-index.js'
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
+import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
 
 /** IoC key for the shell-side icon registry. */
 const ICON_REGISTRY_KEY = '@hypercomb.social/IconProviderRegistry'
@@ -104,6 +105,20 @@ function enterIconNameForBee(bee: VisualBeeDescriptor): string {
   return `${ENTER_ACTION_PREFIX}${bee.view}`
 }
 
+/** Enablement lens for the sync `visibleWhen` predicates: is this bee's
+ *  behavior DORMANT at the tile the overlay is painting? Globally-off (or
+ *  publisher-withheld) behaviors disappear for all intents and purposes —
+ *  no adopt icon, no enter icon — unless a local wake exception covers the
+ *  tile. Reads the cached lens + the live lineage, same shape as
+ *  `isPreferredView` below. */
+function dormantHere(ctx: unknown, kind: string): boolean {
+  const label = String((ctx as { label?: string })?.label ?? '').trim()
+  const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+  const here = (lineage?.explorerSegments?.() ?? [])
+    .map(segment => String(segment ?? '').trim()).filter(Boolean)
+  return isBehaviorDormant(kind, label ? [...here, label] : here)
+}
+
 function isPreferredView(ctx: unknown, view: string): boolean {
   const label = String((ctx as { label?: string })?.label ?? '').trim()
   if (!label) return false
@@ -155,7 +170,9 @@ function syncIcons(): void {
       // capturing peer's layer-sig at adoption time — pending.
       visibleWhen: (ctx) => {
         const label = (ctx as { label?: string })?.label
-        return typeof label === 'string' && !hasDecorationKind(label, bee.decorationKind)
+        return typeof label === 'string'
+          && !hasDecorationKind(label, bee.decorationKind)
+          && !dormantHere(ctx, bee.decorationKind)
       },
     })
     REGISTERED_ICONS.add(name)
@@ -194,7 +211,9 @@ function syncIcons(): void {
       descriptionKey: bee.descriptionKey,
       visibleWhen: (ctx) => {
         const label = (ctx as { label?: string })?.label
-        return typeof label === 'string' && hasDecorationKind(label, bee.decorationKind)
+        return typeof label === 'string'
+          && hasDecorationKind(label, bee.decorationKind)
+          && !dormantHere(ctx, bee.decorationKind)
       },
     })
     REGISTERED_ICONS.add(name)

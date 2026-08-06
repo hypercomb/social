@@ -159,6 +159,11 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
       // actually looked at what's private.
       if (this.#skipReview()) { this.#setStage(STAGE_HOST); this.#openSelector(); return }
       this.#setStage(STAGE_WORLD)
+      // The WORLD stage reviews BOTH axes of what you'd share: the canvas
+      // dims unshared tiles, and the Beehaviors roster opens so unfinished
+      // behaviors can be shortlisted off before joining (off = dormant
+      // everywhere and withheld from the swarm — one switch, one meaning).
+      EffectBus.emit('features:roster-open', {})
       return
     }
 

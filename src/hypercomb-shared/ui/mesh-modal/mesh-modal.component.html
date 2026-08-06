@@ -99,6 +99,13 @@
         <input type="checkbox" [checked]="skipReview()" (change)="toggleSkipReview()" />
         <span>{{ 'mesh-modal.skip-review' | t }}</span>
       </label>
+      <!-- The behavior axis of the pre-join review: opens the Beehaviors
+           roster (global switches — off = dormant everywhere AND withheld
+           from the swarm). The modal stays open; the panel docks beside it. -->
+      <button class="mesh-modal-behaviors" type="button" (click)="openSharedBehaviors()">
+        <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+        {{ 'mesh-modal.shared-behaviors' | t }}
+      </button>
     }
 
     <footer class="mesh-modal-actions">

@@ -776,6 +776,20 @@ $path-fail: #e08a8a;     // failed terminal
   border: 1px solid rgba(255, 180, 120, 0.35);
 }
 
+// Dormant: off on the GLOBAL roster (or publisher-withheld). Cold neutral —
+// not a warning, just "asleep everywhere"; the wake button sits beside it.
+.dormant-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.04em 0.42em;
+  border-radius: 3px;
+  font-family: var(--hc-mono, monospace);
+  letter-spacing: 0.02em;
+  color: rgba(170, 185, 205, 0.85);
+  background: rgba(150, 170, 200, 0.1);
+  border: 1px solid rgba(150, 170, 200, 0.3);
+}
+
 // Row-level outcome: the plain-words failure landing on the row that asked
 // (the activity log gets the same sentence — this is the copy you're looking
 // at). Quiet chrome: muted, no motion. The optional why-line carries the

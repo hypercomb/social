@@ -38,6 +38,7 @@ import { SWARM_INVITE_KIND } from './meeting-invite.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isWithinAdoptedRoot } from './adopted-roots.js'
 import { swarmFilterSelection } from './swarm-filter.service.js'
+import { withheldForShare, ENABLEMENT_CHANGED } from './behavior-enablement.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -129,6 +130,17 @@ const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
 // dead-man's-switch (beacon expiry) — never the navigation-coupled flush
 // that made a peer's tiles vanish when YOU moved.
 const SWARM_LIFECYCLE_KIND = 30206
+
+// Withheld-behaviors event — the behavior axis of the share shortlist.
+// The publisher broadcasts WHICH decoration kinds they hold back (their
+// global-off roster: one switch, one meaning — off locally = withheld from
+// the swarm), on the SAME zone lifecycle channel, replaceable per (pubkey,
+// kind, d-tag=pubkey) with NIP-40 expiration. Layer bytes are SIGNED and
+// never edited — the adopted snapshot arrives intact; receivers record the
+// withheld kinds at the adopted root (behavior-enablement's
+// `hc:withheld-at-roots`) and the enablement lens renders those behaviors
+// inert there. 30207 belongs to client-presence; this is the next free slot.
+const SWARM_BEHAVIOR_KIND = 30208
 
 // Debug logging — gated on the same master flag the mesh uses
 // (localStorage['hc:nostrmesh:debug'] = '1'). The publish walk logs PER
@@ -525,8 +537,8 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -568,6 +580,14 @@ export class SwarmDrone extends Drone {
   // NIP-40 refresh cadence instead of firing on every navigation — the
   // heartbeat keeps it alive; nav-time calls within the window no-op.
   #lastBeaconMs = 0
+
+  /** Last withheld-list JSON we broadcast (kind 30208) — republish only on
+   *  actual change; '' = never published this zone. */
+  #lastWithheldJson = ''
+
+  /** Per-peer withheld decoration kinds (from their 30208 broadcasts).
+   *  Consulted by the adopt fold to record `hc:withheld-at-roots`. */
+  readonly #withheldByPubkey = new Map<string, string[]>()
 
   // Per-pubkey-per-lineage hidden-tile names. Populated from kind-
   // 30202 events (SWARM_HIDE_KIND). The publisher's own hide event
@@ -1010,6 +1030,12 @@ export class SwarmDrone extends Drone {
     // the filter; a tile going private shrinks the slot, going public adds it.
     this.onEffect('tile:public-changed', () => { void this.#syncForCurrentLineage() })
 
+    // The global behavior roster changed — rebroadcast the withheld list so
+    // peers' enablement lenses follow at once (flipping a behavior back on
+    // publishes the shrunken list, which is the wake signal). No-op when the
+    // zone credentials aren't set / we're not public.
+    this.onEffect(ENABLEMENT_CHANGED, () => { void this.#publishWithheld() })
+
     // Host receipt landed — a closure the availability gate held back may
     // just have become fully served. Re-run the publish walk (debounced;
     // a big first drain confirms receipts in bursts) so held content
@@ -1207,7 +1233,7 @@ export class SwarmDrone extends Drone {
     // item (FeedbackChannelDrone). 30214 = the per-recipient feedback REPLY
     // (FeedbackReplyDrone — host → sender's own channel). Same rule as above:
     // omit them and the relay filter drops the events as a silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, 20400, 30401, 30207, 30210, 30211, 30212, 30213, 30214], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 30401, 30207, 30210, 30211, 30212, 30213, 30214], true)
   }
 
   /**
@@ -3676,11 +3702,44 @@ const payload: SwarmLayerPayload = myLabel
       if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
       this.#lifecycleSig = sig
       this.#lastBeaconMs = 0  // new zone — beacon immediately
+      this.#lastWithheldJson = ''  // new zone — broadcast the withheld list afresh
     }
     if (!this.#lifecycleSub) {
       this.#lifecycleSub = mesh.subscribe(sig, (evt) => this.#onLifecycleEvent(evt))
     }
     void this.#publishAlive()
+    void this.#publishWithheld()
+  }
+
+  // Withheld-behaviors broadcast (kind 30208, same channel) — the behavior
+  // axis of the share shortlist. Replaceable per (pubkey, kind, d=pubkey);
+  // sent on zone entry and whenever the global roster changes, and only when
+  // the list actually differs from what's already on the relay. An EMPTY
+  // list is still published after a change — that's the retraction that
+  // wakes a previously-withheld behavior for peers.
+  #publishWithheld = async (force = false): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+    const myPubkey = this.#myPubkey
+    if (!myPubkey) return
+    const sig = this.#lifecycleSig || await this.#computeLifecycleSig()
+    if (!sig) return
+    const withheld = withheldForShare()
+    const json = JSON.stringify(withheld)
+    if (!force && json === this.#lastWithheldJson) return
+    this.#lastWithheldJson = json
+    try {
+      await mesh.publish(SWARM_BEHAVIOR_KIND, sig, { withheld }, [
+        ['d', myPubkey],
+        ['expiration', String(Math.floor(Date.now() / 1000) + EVENT_TTL_SECS)],
+      ])
+    } catch (err) { console.warn('[swarm] publishWithheld failed', err) }
+  }
+
+  /** The decoration kinds `pubkey` withholds from this swarm (their global
+   *  roster's off list) — empty when they withhold nothing / haven't said. */
+  public withheldByPeer(pubkey: string): readonly string[] {
+    return this.#withheldByPubkey.get(String(pubkey ?? '').trim().toLowerCase()) ?? []
   }
 
   // Liveness beacon — replaceable per (pubkey, kind, d-tag=pubkey) with a
@@ -3728,6 +3787,19 @@ const payload: SwarmLayerPayload = myLabel
   }
 
   #onLifecycleEvent = (evt: MeshEvtLike): void => {
+    // Withheld-behaviors broadcast rides the same channel — record the
+    // peer's list (replaceable slot: latest wins) and tell the adopt path.
+    if (Number(evt.event?.kind) === SWARM_BEHAVIOR_KIND) {
+      const from = String(evt.event?.pubkey ?? '').trim().toLowerCase()
+      if (!from || (this.#myPubkey && from === this.#myPubkey)) return
+      const payload = evt.payload as { withheld?: unknown } | undefined
+      const kinds = Array.isArray(payload?.withheld)
+        ? payload!.withheld!.map(k => String(k ?? '').trim()).filter(Boolean)
+        : []
+      this.#withheldByPubkey.set(from, kinds)
+      EffectBus.emit('swarm:withheld-changed', { pubkey: from, withheld: [...kinds] })
+      return
+    }
     if (Number(evt.event?.kind) !== SWARM_LIFECYCLE_KIND) return
     const pubkey = String(evt.event?.pubkey ?? '').trim().toLowerCase()
     if (!pubkey) return

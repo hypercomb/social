@@ -43,6 +43,7 @@ import {
   writeTilePropsIndex,
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
+import { recordWithheldAtRoot } from './behavior-enablement.js'
 import { WEBSITE_SLOT } from '../commands/website-slot.js'
 import { extractPageRefSigs } from './decoration-closure.js'
 import {
@@ -107,6 +108,9 @@ interface SwarmDroneLike {
   /** Compose the swarm sig for a path (same bytes the publisher used), so
    *  the scan can address a child location's peer cache. */
   composeSigForSegments?: (segments: readonly string[]) => Promise<string>
+  /** Decoration kinds this publisher withholds from the swarm (their global
+   *  roster's off list, broadcast on wire kind 30208). */
+  withheldByPeer?: (pubkey: string) => readonly string[]
 }
 
 interface LineageLike {
@@ -373,7 +377,7 @@ export class SwarmAdoptDrone extends Drone {
   #resolvePeerBranch = (
     label: string,
     pubkey?: string,
-  ): { layerSig: string; at: string[]; domain?: string; label: string } | null => {
+  ): { layerSig: string; at: string[]; domain?: string; label: string; pubkey?: string } | null => {
     const ioc = this.#ioc()
     const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
     if (!swarm?.peerTilesAtCurrentSig) return null
@@ -398,7 +402,8 @@ export class SwarmAdoptDrone extends Drone {
     const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
     const ownerDomain = String(broker?.getKnownDomains?.(layerSig)?.[0] ?? '').trim()
 
-    return { layerSig, at, domain: ownerDomain || undefined, label }
+    const publisherPubkey = String(peerEntry.peerPubkey ?? '').trim().toLowerCase()
+    return { layerSig, at, domain: ownerDomain || undefined, label, pubkey: publisherPubkey || undefined }
   }
 
   /** Distinct publisher pubkeys currently offering `label` (current-location
@@ -619,7 +624,19 @@ export class SwarmAdoptDrone extends Drone {
       return true
     }
     const res = await this.adoptResolvedBranch(branch, opts)
-    return res === 'committed' || res === 'exists'
+    const ok = res === 'committed' || res === 'exists'
+    // The publisher's WITHHELD BEHAVIORS (their global-off roster, wire kind
+    // 30208) land as a record at the adopted root: the snapshot arrives
+    // intact — layers are signed and never edited — but the enablement lens
+    // renders those decoration kinds inert under this root. An empty list
+    // clears any earlier record (they stopped withholding). Participant-
+    // local, never in the lineage.
+    if (ok && branch.pubkey) {
+      const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+      const withheld = swarm?.withheldByPeer?.(branch.pubkey) ?? []
+      try { recordWithheldAtRoot([...branch.at, branch.label], withheld) } catch { /* never blocks an adopt */ }
+    }
+    return ok
   }
 
   /** Is `label` a live child of the layer at `at` right now? Routes adopt to

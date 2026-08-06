@@ -62,6 +62,7 @@ import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
+import { isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds } from '../../sharing/behavior-enablement.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
@@ -251,6 +252,11 @@ interface FeatureItem {
   /** Publisher domain attributed to the gate sig via the broker's address
    *  graph. Empty/absent = unknown origin. */
   publisherDomain?: string
+  /** True when the behavior-enablement lens holds this kind DORMANT here —
+   *  globally off on the roster (or withheld by an adopted root's publisher)
+   *  with no wake exception covering the tile. The panel renders the switch
+   *  off with an "off everywhere" chip and offers "wake here". */
+  dormant?: boolean
 }
 
 /** A feature AVAILABLE to add — registered in the app but not yet on this
@@ -272,6 +278,9 @@ interface AvailableItem {
    *  are NOT addable here — their slash commands TOGGLE a view; "adding" one
    *  means authoring content (a page, a deck), which no switch can conjure. */
   addable?: boolean
+  /** True when this kind is off on the GLOBAL roster — a dormant behavior is
+   *  not offered for adding (dormant means gone, not "available"). */
+  globalOff?: boolean
 }
 
 interface FeaturesOpenPayload {
@@ -340,8 +349,8 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'feature:apply', 'features:paint']
-  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:paint-result']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'feature:apply', 'features:paint', 'features:roster-open']
+  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:paint-result', 'features:roster']
 
   constructor() {
     super()
@@ -419,6 +428,75 @@ export class ShowFeaturesDrone extends Drone {
       void this.#paint(source, kinds, targets)
     })
 
+    // The GLOBAL ROSTER — the Beehaviors window's third mode. No tile
+    // subject, no belonging: every behavior the app knows, one switch each.
+    // Off = dormant everywhere AND withheld from every swarm (one switch,
+    // one meaning). Opened pre-swarm from the WORLD stage / join selector,
+    // and any time from the panel header. This drone owns the census
+    // (registry + CAPABILITIES + off-kinds whose module isn't here — those
+    // must stay listed or they could never be turned back on).
+    this.onEffect('features:roster-open', () => { this.#emitRoster() })
+
+  }
+
+  /** Build + emit the global roster. Sync — the census is in-memory. */
+  #emitRoster(): void {
+    const registry = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
+    const i18n = this.#ioc()?.get<I18nProvider>(I18N_KEY)
+    const off = readGlobalOffKinds()
+    const seen = new Set<string>()
+    const rows: Array<{
+      view: string; icon: string; kind: string; label: string; description: string
+      category: string; slashCommand?: string; foreign?: boolean; module?: string; on: boolean
+    }> = []
+    for (const bee of registry?.all?.() ?? []) {
+      if (!bee.decorationKind || seen.has(bee.decorationKind)) continue
+      seen.add(bee.decorationKind)
+      rows.push({
+        view: bee.view,
+        icon: bee.toggleIcon || bee.iconName,
+        kind: bee.decorationKind,
+        label: this.#t(i18n, bee.labelKey, bee.view),
+        description: this.#t(i18n, bee.descriptionKey, ''),
+        category: bee.behavior || 'view',
+        ...(bee.slashCommand ? { slashCommand: bee.slashCommand } : {}),
+        on: !off.has(bee.decorationKind),
+      })
+    }
+    for (const [kind, cap] of Object.entries(CAPABILITIES)) {
+      if (seen.has(kind)) continue
+      seen.add(kind)
+      rows.push({
+        view: cap.view,
+        icon: cap.icon,
+        kind,
+        label: this.#t(i18n, cap.labelKey, cap.fallbackLabel),
+        description: this.#t(i18n, cap.descriptionKey, ''),
+        category: 'capability',
+        ...(cap.slashCommand ? { slashCommand: cap.slashCommand } : {}),
+        on: !off.has(kind),
+      })
+    }
+    // Off-kinds nobody here declares (a community module's behavior turned
+    // off before the module left, or on another device) — named from the
+    // kind, still switchable, so an off exception can always be undone.
+    for (const kind of off) {
+      if (seen.has(kind)) continue
+      seen.add(kind)
+      const moduleName = moduleFromKind(kind)
+      rows.push({
+        view: kind,
+        icon: 'deployed_code_alert',
+        kind,
+        label: nameFromKind(kind),
+        description: this.#t(i18n, 'features.foreign.desc', '').replace('{module}', moduleName || kind),
+        category: 'foreign',
+        foreign: true,
+        ...(moduleName ? { module: moduleName } : {}),
+        on: false,
+      })
+    }
+    this.emitEffect('features:roster', { rows })
   }
 
   /** Copy every picked behaviour from `source` onto each target tile. Targets
@@ -748,6 +826,18 @@ export class ShowFeaturesDrone extends Drone {
     // the SAME payload sig the renderer would mount, so the panel's "blocked by
     // community" line and the site-view review gate can never disagree.
     await this.#stampGates(applied, segments, records)
+
+    // ── 5. ENABLEMENT — the global-roster lens ──
+    // A kind held dormant HERE (globally off / publisher-withheld, no wake
+    // covering this tile) keeps its row — the honest-switch rule — but the
+    // panel renders it off with the "off everywhere" chip and a "wake here"
+    // action. Available rows lose their offer entirely: dormant means gone.
+    for (const row of applied) {
+      if (row.kind && isBehaviorDormant(row.kind, segments)) row.dormant = true
+    }
+    for (const row of available) {
+      if (row.kind && isKindGloballyOff(row.kind)) row.globalOff = true
+    }
 
     this.emitEffect<FeaturesOpenPayload>('features:open', {
       cell: label, segments, applied, available,

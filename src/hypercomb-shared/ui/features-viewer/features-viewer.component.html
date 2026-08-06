@@ -24,9 +24,21 @@
         </span>
         <span class="features-title">{{ 'features.viewer.title' | t }}</span>
       </div>
+      <!-- The ROSTER switch: the global behavior list — every behavior the
+           app knows, one switch each, no tile subject. Off = dormant
+           everywhere AND withheld from every swarm. -->
+      <button
+        class="features-mode"
+        type="button"
+        [class.active]="isRoster()"
+        (click)="isRoster() ? closeRoster() : openRoster()"
+        [attr.title]="'features.mode.roster.hint' | t"
+        [attr.aria-pressed]="isRoster()"
+      ><span class="mat-sym" aria-hidden="true">tune</span></button>
       <!-- The mode switch. MANAGE: rows are on/off switches for this tile.
            PAINT: rows narrow to what's ON here and each click picks it into
            the brush, which lands on the selected tiles in one press. -->
+      @if (!isRoster()) {
       <button
         class="features-mode"
         type="button"
@@ -35,6 +47,7 @@
         [attr.title]="(isPainting() ? 'features.mode.manage.hint' : 'features.mode.paint.hint') | t"
         [attr.aria-pressed]="isPainting()"
       ><span class="mat-sym" aria-hidden="true">format_paint</span></button>
+      }
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">
         <span class="mat-sym" aria-hidden="true">close</span>
       </button>
@@ -55,7 +68,7 @@
     </div>
 
     <!-- The ONE tile the manager is scoped to, plus a stable inventory summary. -->
-    @if (group(); as g) {
+    @if (!isRoster() && group(); as g) {
       <div class="features-context" [title]="g.cell">
         <span class="features-context-icon" aria-hidden="true">
           <span class="mat-sym">grid_view</span>
@@ -127,7 +140,7 @@
 
     <!-- Canvas-selection response: the selected tiles carry features — one
          press re-targets this window at them (show-features.drone answers). -->
-    @if (showCanvasSelectionAffordance() && !isPainting()) {
+    @if (showCanvasSelectionAffordance() && !isPainting() && !isRoster()) {
       <button class="features-selection" type="button" (click)="openSelectionFeatures()"
               [attr.aria-label]="'features.selection' | t: { count: canvasSelectionCount() }">
         <span class="mat-sym" aria-hidden="true">extension</span>
@@ -279,7 +292,65 @@
       }
     }
 
-    @if (group(); as group) {
+    @if (isRoster()) {
+      <!-- ══ THE GLOBAL ROSTER ═══════════════════════════════════════
+           No tile subject, no belonging: every behavior the app knows,
+           one switch each. Off = dormant everywhere (icons, toggles and
+           offers vanish; the decorations stay put on their tiles) AND
+           withheld from every swarm. Per-tile wake exceptions and hidden
+           records are never touched — re-enabling here wakes a behavior
+           wherever it lives. -->
+      <div class="features-scroll roster">
+        <section class="features-group">
+          @for (grp of rosterGroups(); track grp.category) {
+            <div class="section-head">
+              <span class="section-label">{{ grp.category }}</span>
+              <span class="section-count">{{ grp.rows.length }}</span>
+            </div>
+            <ul class="features-list">
+              @for (row of grp.rows; track row.kind) {
+                <li
+                  class="features-row"
+                  role="checkbox"
+                  tabindex="0"
+                  [attr.aria-checked]="row.on"
+                  [class.off]="!row.on"
+                  (click)="rosterToggle(row)"
+                  (keydown.enter)="rosterToggle(row)"
+                  (keydown.space)="rosterToggle(row); $event.preventDefault()"
+                  [attr.title]="(row.on ? 'features.roster.off.hint' : 'features.roster.on.hint') | t"
+                >
+                  <span class="feature-icon" aria-hidden="true">
+                    <span class="mat-sym">{{ row.icon }}</span>
+                  </span>
+                  <div class="feature-meta">
+                    <span class="feature-name">
+                      {{ row.label }}
+                      @if (row.slashCommand) {
+                        <code class="feature-cmd">{{ row.slashCommand }}</code>
+                      }
+                    </span>
+                    <span class="feature-kind" [title]="row.kind">{{ row.kind }}</span>
+                    @if (row.foreign) {
+                      <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
+                    }
+                    @if (row.description) {
+                      <span class="feature-desc">{{ row.description }}</span>
+                    }
+                  </div>
+                  @if (row.on) {
+                    <span class="feat-check" aria-hidden="true">✓</span>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        </section>
+      </div>
+      <footer class="features-foot">
+        {{ 'features.roster.hint' | t: { on: rosterOnCount(), total: rosterRows().length } }}
+      </footer>
+    } @else if (group(); as group) {
       <div class="features-scroll">
           <section class="features-group">
 
@@ -432,8 +503,33 @@
                       <!-- An off inherited from ABOVE (a branch or the site
                            root turned off) says where — clicking the row
                            flips the record that actually did it. -->
-                      @if (!isOn(group, feat) && offAt(group, feat); as at) {
+                      @if (!isOn(group, feat) && !feat.dormant && offAt(group, feat); as at) {
                         <span class="feature-offat">{{ 'features.off.at' | t: { path: at } }}</span>
+                      }
+                      <!-- DORMANT: off on the GLOBAL roster (or withheld by
+                           the adopted root's publisher). The row stays — the
+                           honest-switch rule — with the way to wake it HERE
+                           as a local exception, never a global flip. -->
+                      @if (feat.dormant) {
+                        <span class="feature-blocked">
+                          <span class="dormant-chip">{{ 'features.chip.dormant' | t }}</span>
+                          <button
+                            class="allow-btn"
+                            type="button"
+                            (click)="wakeHere(group, feat); $event.stopPropagation()"
+                            [attr.title]="'features.wake.hint' | t"
+                          >{{ 'features.wake' | t }}</button>
+                        </span>
+                      } @else if (isWokenHere(group, feat)) {
+                        <span class="feature-offat">
+                          {{ 'features.woken.here' | t }}
+                          <button
+                            class="overrides-reset"
+                            type="button"
+                            (click)="wakeHere(group, feat); $event.stopPropagation()"
+                            [attr.title]="'features.woken.undo.hint' | t"
+                          >{{ 'features.overrides.reset' | t }}</button>
+                        </span>
                       }
                       <!-- Community gate: enabled here but INERT until
                            allowed. The checkbox keeps showing your intent;

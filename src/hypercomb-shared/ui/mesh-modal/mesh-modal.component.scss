@@ -244,6 +244,31 @@
   }
 }
 
+// The behavior axis of the pre-join review — quiet text button, same
+// register as the skip label above it.
+.mesh-modal-behaviors {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 1rem 0.6rem;
+  padding: 0.3rem 0.55rem;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(245, 245, 245, 0.55);
+  font-size: 0.68rem;
+  cursor: pointer;
+
+  .material-symbols-outlined {
+    font-size: 0.9rem;
+  }
+
+  &:hover {
+    color: rgba(245, 245, 245, 0.85);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+}
+
 .mesh-modal-actions {
   display: flex;
   justify-content: flex-end;

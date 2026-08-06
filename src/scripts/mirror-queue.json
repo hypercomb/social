@@ -120,6 +120,15 @@
       "unattended": false,
       "created": "2026-08-06",
       "status": "pending"
+    },
+    {
+      "id": "behavior-enablement-roster",
+      "title": "Global behavior roster + enablement lens — mirror the shortlist that gates swarm sharing",
+      "run": null,
+      "note": "One switch, one meaning: the Beehaviors window grew a ROSTER mode (header tune button; opened by the mesh toggle's WORLD stage and the join selector's 'choose shared beehaviors') listing every behavior with a global on/off switch. Off = dormant everywhere — icons, view toggles and offers vanish; decorations stay on their tiles — AND withheld from every swarm (wire kind 30208 on the lifecycle channel; adopters record hc:withheld-at-roots at the fold, the snapshot layer arrives untouched). Per-tile wake exceptions (hc:behavior-wake, subtree-covering) outrank the global off; re-enabling globally wakes everything, exceptions and hidden records untouched. Precedence: wake ON > global OFF > per-tile hidden > ON. Owed under behaviors/swarm + the behaviors deck: a card for the roster mode, part tiles for sharing/behavior-enablement.ts (essentials reader), features-viewer/behavior-enablement.ts (shell writer), the dormancy gates (visual-bee-icons, view.bee, tile-view creation row, show-features stamps), swarm.drone 30208 publish/receive and the swarm-adopt fold recorder — pheromone-marked, notes carrying the one-switch doctrine. note-add is additive; keep out of the idle drain.",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
     }
   ]
 }
