@@ -281,6 +281,15 @@
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
+    },
+    {
+      "id": "mesh-lock-no-roster-popup",
+      "title": "Note on the share-toggle behavior card: the lock no longer opens the Beehaviors roster",
+      "run": null,
+      "note": "MANUAL — note-add is additive. The three-stage share toggle's first click (PRIVATE→WORLD) force-opened the Beehaviors roster (features:roster-open emitted from mesh-header.component.ts), so every attempt to allow access popped the behaviors window over the canvas. Removed: the WORLD stage now previews the tile axis only (canvas dims unshared tiles); the behavior axis stays one explicit click away via the join selector's shared-behaviors button and the features-viewer's own store button. Update the share-toggle/roster behavior cards to say the roster opens only on explicit request.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
     }
   ]
 }
