@@ -319,7 +319,9 @@ export class NotesStripComponent implements OnDestroy {
   #revealRow(noteId: string): void {
     // The tab strip docked, the tree column on the desk — whichever is the
     // selector in this layout.
-    const list = this.#host.nativeElement.querySelector('.cv2-notetabs, .cv2-list') as HTMLElement | null
+    const list = this.#host.nativeElement.querySelector(
+      '.cv2-peek.is-pinned .cv2-peek-list, .cv2-notetabs, .cv2-list',
+    ) as HTMLElement | null
     if (!list) return
     const row = list.querySelector(`[data-note-id="${CSS.escape(noteId)}"]`) as HTMLElement | null
     if (!row) return
@@ -864,6 +866,7 @@ export class NotesStripComponent implements OnDestroy {
     }
     return hit('article.cv2-note[data-note-id]', 'data-note-id')
       ?? hit('.cv2-notetab[data-note-id]', 'data-note-id')
+      ?? hit('.cv2-peek-row[data-note-id]', 'data-note-id')
       ?? hit('.cv2-line[data-pheromone-note]', 'data-pheromone-note')
       ?? hit('.cv2-reading-scroll[data-pheromone-note]', 'data-pheromone-note')
   }
@@ -1975,8 +1978,24 @@ export class NotesStripComponent implements OnDestroy {
 
   /** Flattened preview of a hovered tile's entries, depth-tagged so nesting
    *  still reads, capped at HOVER_LIST_MAX rows. */
+  /**
+   * WHICH tile the card is showing. Hover wins while the pointer is over
+   * another tile's row (a peek at what you have not picked); otherwise it is
+   * the SELECTED tile's card, and that one is PINNED — it stays put, and its
+   * rows are how you pick a note.
+   *
+   * A card you can only reach by holding the pointer still is a card you
+   * cannot click a row in: the moment you set off towards it you have left
+   * the row that opened it. So selection pins it.
+   */
+  readonly peekCell = computed<string | null>(() => this.hoverCell() ?? this.cell())
+
+  /** True when the card belongs to the selected tile — pointer-events on,
+   *  rows clickable, no truncation. */
+  readonly peekPinned = computed<boolean>(() => !this.hoverCell() && !!this.cell())
+
   readonly hoverNotes = computed<readonly { id: string; text: string; kind: 'q' | 'a' | 'note'; mark: string | null; depth: number }[]>(() => {
-    const cell = this.hoverCell()
+    const cell = this.peekCell()
     if (!cell) return []
     const out: { id: string; text: string; kind: 'q' | 'a' | 'note'; mark: string | null; depth: number }[] = []
     const walk = (list: readonly Note[], depth: number): void => {
@@ -1989,9 +2008,43 @@ export class NotesStripComponent implements OnDestroy {
     return out
   })
 
-  /** Rows actually rendered, and how many were left off. */
-  readonly hoverVisible = computed(() => this.hoverNotes().slice(0, HOVER_LIST_MAX))
-  readonly hoverOverflow = computed(() => Math.max(0, this.hoverNotes().length - HOVER_LIST_MAX))
+  /** Rows actually rendered, and how many were left off. The PINNED card
+   *  shows every note — it is the selector, and a selector that hides rows
+   *  behind "+3 more" cannot select them. A hover peek stays capped. */
+  readonly hoverVisible = computed(() =>
+    this.peekPinned() ? this.hoverNotes() : this.hoverNotes().slice(0, HOVER_LIST_MAX))
+  readonly hoverOverflow = computed(() =>
+    this.peekPinned() ? 0 : Math.max(0, this.hoverNotes().length - HOVER_LIST_MAX))
+
+  /** Click a row of the pinned card — that note goes in the pane. */
+  selectPeekNote(noteId: string, event?: Event): void {
+    event?.stopPropagation()
+    if (!this.peekPinned()) return
+    this.selectForReading(noteId)
+  }
+
+  /** Anchor the pinned card beside the active tile's row, or — when that row
+   *  isn't on screen (the filter scrolled it away, or the tile was picked on
+   *  the canvas) — beside the panel itself. Runs whenever the selection
+   *  changes, so the card never sits where the last hover left it. */
+  #anchorPinnedCard(): void {
+    const host = this.#host.nativeElement
+    const active = host.querySelector('.cv2-tilechip.is-active') as HTMLElement | null
+    const panel = this.panel()?.nativeElement
+    const rect = active?.getBoundingClientRect() ?? panel?.getBoundingClientRect()
+    if (!rect) return
+    const width = this.#peekWidth()
+    if (rect.left - width - 10 >= 8) {
+      this.hoverRight.set(Math.round(window.innerWidth - rect.left + 10))
+      this.hoverLeft.set(null)
+    } else {
+      this.hoverLeft.set(Math.round(Math.min(rect.right + 10, window.innerWidth - width - 8)))
+      this.hoverRight.set(null)
+    }
+    const rows = this.#flatCount(this.#allForCell(this.cell()))
+    const estimated = 52 + Math.min(rows, 18) * 22
+    this.hoverTop.set(Math.round(Math.max(8, Math.min(rect.top - 6, window.innerHeight - estimated - 12))))
+  }
 
   /** Has the hovered tile been read yet? An unwarmed tile shows "reading…"
    *  rather than an empty card that lies about the tile being empty. */
@@ -2110,6 +2163,14 @@ export class NotesStripComponent implements OnDestroy {
       const id = this.readingRow()?.note.id
       if (!id) return
       untracked(() => queueMicrotask(() => this.#revealRow(id)))
+    })
+
+    // The pinned card follows the selection — re-anchored once the active
+    // row has rendered, so it opens beside the tile you just picked.
+    effect(() => {
+      const cell = this.cell()
+      if (!cell) return
+      untracked(() => queueMicrotask(() => this.#anchorPinnedCard()))
     })
 
     // Track the desk's breakpoint so the form renders where the layout

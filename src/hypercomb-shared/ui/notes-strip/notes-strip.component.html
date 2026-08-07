@@ -855,23 +855,36 @@
           [style.left.px]="markGhostX()" [style.top.px]="markGhostY()">{{ icon }}</span>
   }
 
-  <!-- Tile hover card — a peek at another tile's notes while you keep working
-       on this one. Opens on whichever side of the hovered chip has room (left
-       of the docked rail; right of the fullscreen navigator column) so it
-       never covers the row the pointer is on. Read-only and pointer-
-       transparent: it is a look, not a target.
+  <!-- The tile's notes card. TWO modes, one card:
+         PINNED (the selected tile) — it stays put, takes the pointer, and
+           its rows are how you pick a note. Every note shows: a selector
+           that hides rows behind "+3 more" cannot select them.
+         PEEK (hovering another tile) — a look at what you have not picked,
+           capped and pointer-transparent, gone when you move away.
+       A card you can only reach by holding the pointer still is a card you
+       can never click a row in, which is why selection pins it.
 
-       Deliberately a SIBLING of .notes-strip, not a child: the panel carries
+       Opens on whichever side of the anchor has room (left of the docked
+       rail; right of the fullscreen navigator column). Deliberately a
+       SIBLING of .notes-strip, not a child: the panel carries
        `backdrop-filter`, which makes it the containing block for fixed
        descendants — a card inside it would resolve its viewport coordinates
        against the panel's box and drift down the screen. -->
-  @if (hoverCell(); as peeked) {
-    <div class="cv2-peek" role="tooltip"
+  @if (peekCell(); as peeked) {
+    <div class="cv2-peek" [class.is-pinned]="peekPinned()"
+         [attr.role]="peekPinned() ? 'listbox' : 'tooltip'"
          [style.left.px]="hoverLeft()" [style.right.px]="hoverRight()"
          [style.top.px]="hoverTop()">
       <div class="cv2-peek-head">
         <span class="hex-mark" aria-hidden="true"></span>
         <span class="cv2-peek-name">{{ peeked }}</span>
+        @if (peekPinned()) {
+          <span class="cv2-peek-spacer"></span>
+          <button type="button" class="cv2-peek-add" (click)="paneAdd()"
+                  [attr.aria-label]="'notes.add' | t" [title]="'notes.add' | t">
+            <span class="mat-sym" style="font-size:14px">add</span>
+          </button>
+        }
       </div>
       @if (hoverVisible().length > 0) {
         <ul class="cv2-peek-list">
@@ -879,6 +892,12 @@
             <li class="cv2-peek-row"
                 [class.is-q]="row.kind === 'q'"
                 [class.is-a]="row.kind === 'a'"
+                [class.is-active]="peekPinned() && readingRow()?.note?.id === row.id"
+                [class.is-mark-target]="markDropTargetId() === row.id"
+                [attr.data-note-id]="peekPinned() ? row.id : null"
+                [attr.role]="peekPinned() ? 'option' : null"
+                [attr.aria-selected]="peekPinned() ? (readingRow()?.note?.id === row.id) : null"
+                (click)="selectPeekNote(row.id, $event)"
                 [style.paddingLeft.px]="row.depth * 10">
               @if (row.mark) {
                 <span class="mat-sym cv2-peek-mark" aria-hidden="true">{{ row.mark }}</span>
