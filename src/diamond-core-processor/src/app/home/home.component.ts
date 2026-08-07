@@ -1,7 +1,7 @@
 // diamond-core-processor/src/app/home/home.component.ts
 
 import { Component, computed, effect, ElementRef, inject, OnDestroy, signal, viewChild } from '@angular/core'
-import { TreeResolverService } from '../core/tree-resolver.service'
+import { TreeResolverService, type PackageMeta } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
 import { DcpDomainStorage, LOGICAL_LINEAGE, normalizeDomainKey } from '../core/dcp-domain-storage.service'
 import { PatchStore, type PatchRecord } from '../core/patch-store'
@@ -151,7 +151,8 @@ export interface DomainGroup {
   sections: DomainSection[]
   /** The package's deploy-version chain, newest-first, offered as switchable
    *  revisions. One renders as the active section; the rest live in the
-   *  revision switcher. Empty for groups with ≤1 version. */
+   *  revision switcher. Filled whenever the group has package sections —
+   *  a single-version chain still lists its one row. */
   revisions: RevisionRow[]
   /** Root sig of the active revision (active.json pick, else newest). */
   activeRootSig: string
@@ -2916,6 +2917,12 @@ export class HomeComponent implements OnDestroy {
 
       const rootSig = root.signature ?? sig
       const children = root.children ?? []
+      // The manifest's full deploy chain (sidecar generation/at/previous per
+      // entry). The baseline used to resolve ONLY the head sig and drop the
+      // chain on the floor — so a profile whose sole source is the own-origin
+      // baseline never saw a revision list even though the manifest carried
+      // one. Non-fatal: an unreachable manifest just means no chain rows.
+      const chain = await this.#resolver.fetchPackages(base).catch(() => [] as PackageMeta[])
       // The content's OWN domains (diamondcoreprocessor.com, miro.com) are
       // HOISTED to top-level SIBLINGS — never nested under the host folder.
       const domainChildren = children.filter(c => c.kind === 'layer' && c.name.includes('.'))
@@ -2944,7 +2951,30 @@ export class HomeComponent implements OnDestroy {
       // accordion action) reveals the current import; adopted items (e.g.
       // dolphin) nest INSIDE here, not at the root. No label — "open to
       // current import" is what clicking it DOES, not text on the node.
-      siblings.push(mk(base, host, rootSig, [], null))
+      // Carries the manifest's version sidecar so the group's revision
+      // switcher can name and order it.
+      const hostSection = mk(base, host, rootSig, [], null)
+      const activeMeta = chain.find(p => p.sig === rootSig)
+      if (activeMeta) {
+        hostSection.label = activeMeta.label
+        hostSection.deployedAt = activeMeta.at
+        hostSection.previous = activeMeta.previous
+        hostSection.generation = activeMeta.generation
+      }
+      siblings.push(hostSection)
+      // Older deploy versions ride along as non-rendering package sections —
+      // only the active revision renders (domainGrouped), but these rows feed
+      // the revision switcher so walkback works from the baseline too, same
+      // as the stored-domain path (#loadAllDomains).
+      for (const p of chain) {
+        if (p.sig === rootSig) continue
+        const older = mk(base, host, p.sig, [], null)
+        older.label = p.label
+        older.deployedAt = p.at
+        older.previous = p.previous
+        older.generation = p.generation
+        siblings.push(older)
+      }
 
       // keep any pre-existing (adopted) sections, drop the loading placeholder
       // and only OUR prior package output for this base — an adopted content

@@ -5,6 +5,10 @@
 // (persisted to active.json, applied on load by the auto-hotswap). Mirrors
 // the patch-list visually, but lists DEPLOY versions, not local AI patches —
 // the two switchers sit side by side under a package.
+//
+// Renders from ONE version up: a lone v1 is still the deploy record, and
+// hiding it read as "revisions aren't being created" when the chain was
+// simply one long.
 
 import { Component, input, output } from '@angular/core'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
@@ -24,7 +28,7 @@ export interface RevisionRow {
   standalone: true,
   imports: [DcpTranslatePipe],
   template: `
-    @if (revisions().length > 1) {
+    @if (revisions().length > 0) {
       <div class="revision-list">
         <button class="toggle" (click)="expanded = !expanded">
           {{ 'dcp.revisions' | t }} ({{ revisions().length }})

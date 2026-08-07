@@ -21,9 +21,10 @@
 //                                      resolution endpoints from here — see
 //                                      memory: project_domain_as_identity.md)
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
+import { chainManifest, chainScore, type ContentManifest } from './chain-manifest.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -138,7 +139,19 @@ const drainLegacyDirs = (targetDir: string, additive: boolean): number => {
   return drained
 }
 
-const syncTarget = (targetDir: string, additive: boolean): { copied: number; skipped: number; removed: number; drained: number } => {
+/** Read and parse a target's manifest.json, or null when absent/unreadable. */
+const readTargetManifest = (targetDir: string): ContentManifest | null => {
+  const path = join(targetDir, MANIFEST_FILE)
+  if (!existsSync(path)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    return parsed?.packages && typeof parsed.packages === 'object' ? parsed as ContentManifest : null
+  } catch {
+    return null
+  }
+}
+
+const syncTarget = (targetDir: string, additive: boolean, manifestJson: string): { copied: number; skipped: number; removed: number; drained: number } => {
   mkdirSync(targetDir, { recursive: true })
 
   let copied = 0
@@ -184,20 +197,15 @@ const syncTarget = (targetDir: string, additive: boolean): { copied: number; ski
     }
   }
 
-  // manifest.json: compare content before copying
-  const srcManifest = join(DIST_ROOT, MANIFEST_FILE)
+  // manifest.json: every target receives the SAME chained manifest (computed
+  // once in main against the deepest existing chain), compare-first so an
+  // unchanged re-deploy writes nothing.
   const tgtManifest = join(targetDir, MANIFEST_FILE)
-  if (existsSync(tgtManifest)) {
-    const srcContent = readFileSync(srcManifest, 'utf8')
-    const tgtContent = readFileSync(tgtManifest, 'utf8')
-    if (srcContent === tgtContent) {
-      skipped++
-    } else {
-      copyFileSync(srcManifest, tgtManifest)
-      copied++
-    }
+  const existing = existsSync(tgtManifest) ? readFileSync(tgtManifest, 'utf8') : null
+  if (existing === manifestJson) {
+    skipped++
   } else {
-    copyFileSync(srcManifest, tgtManifest)
+    writeFileSync(tgtManifest, manifestJson, 'utf8')
     copied++
   }
 
@@ -215,8 +223,36 @@ const main = () => {
     process.exit(1)
   }
 
+  // ── Version chaining ────────────────────────────────────────────────────
+  // dist holds the build's single-package manifest (stable genesis label,
+  // previous: null — see build-module.ts). The version is minted HERE, at
+  // ship time, by chaining against the deepest chain any target already
+  // holds (the additive relay pool normally — it never prunes, so its chain
+  // is the operator's real deploy history). All targets then receive the
+  // SAME merged manifest so their chains can never diverge. An identical
+  // rebuild adopts the version it already has — no re-chaining, no churn.
+  // dist itself stays single-package: the build's skip-write compare must
+  // keep seeing its own bytes. (Azure keeps its own equivalent merge in
+  // deploy-azure.ps1 — numbering there is per-remote by construction.)
+  const localManifest = JSON.parse(readFileSync(join(DIST_ROOT, MANIFEST_FILE), 'utf8')) as ContentManifest
+  let authority: ContentManifest | null = null
+  let authorityScore = 0
+  for (const { dir } of TARGETS) {
+    const candidate = readTargetManifest(dir)
+    const score = chainScore(candidate)
+    if (candidate && score > authorityScore) {
+      authority = candidate
+      authorityScore = score
+    }
+  }
+  const chained = chainManifest(localManifest, authority, new Date())
+  const manifestJson = JSON.stringify(chained.manifest, null, 2) + '\n'
+  if (chained.generation) {
+    console.log(`[copy-to-dcp] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
+  }
+
   for (const { dir, additive } of TARGETS) {
-    const { copied, skipped, removed, drained } = syncTarget(dir, additive)
+    const { copied, skipped, removed, drained } = syncTarget(dir, additive, manifestJson)
     console.log(`[copy-to-dcp] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }

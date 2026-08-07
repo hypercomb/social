@@ -352,6 +352,16 @@
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
+    },
+    {
+      "id": "deploy-revision-chaining",
+      "title": "Mirror deploy-revision chaining into the hive (behaviors/structure)",
+      "run": null,
+      "note": "chain-manifest.ts mints generation/previous/at at ship time (copy-to-dcp), every target gets the same chained manifest; DCP baseline path now carries the chain and the revision switcher shows from v1. Tiles for chain-manifest.ts + copy-to-dcp wiring + revision-list unhide, notes on the semantics (identical re-deploy never re-chains; head is first manifest key). Extends the builds/upgrade mirror area — note-add additive, needs a human.",
+      "commit": "pending",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
     }
   ]
 }
