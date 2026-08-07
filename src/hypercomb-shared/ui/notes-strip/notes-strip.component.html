@@ -7,7 +7,6 @@
   <div class="notes-strip cv2-panel"
        [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
        [class.dock-right]="dockSide() === 'right'"
-       [class.tiles-open]="tilesOpen()"
        #panel
        data-consumes-wheel
        hcDockInset="right"
@@ -32,19 +31,6 @@
         <span>{{ cell() || ('annotations.title' | t) }}</span>
       </span>
       <span class="cv2-dragbar-spacer"></span>
-      <!-- WHICH TILE — a header question. The docked window is two panes
-           (the note, then the notes); the tile navigator opens over the
-           selector from here and closes as soon as a tile is picked. On the
-           desk it is the permanent left column, so the toggle stays home. -->
-      @if (!isFullscreen()) {
-        <button type="button" class="cv2-mini-btn"
-                [class.is-on]="tilesOpen()" (click)="toggleTiles()"
-                [attr.aria-pressed]="tilesOpen()"
-                [attr.aria-label]="'notes.filterPlaceholder' | t"
-                [title]="'notes.filterPlaceholder' | t">
-          <span class="mat-sym">hexagon</span>
-        </button>
-      }
       <!-- Open the READER on this tile. The strip is for authoring — a dense
            tree you edit in place; the reader is for reading one note at a
            time, big, with the hierarchy around it. Only offered when a tile
@@ -80,6 +66,101 @@
               [attr.aria-selected]="tab() === 'lists'"
               (click)="setTab('lists')">{{ 'annotations.tab.lists' | t }}</button>
     </div>
+
+    <!-- ── Mark rail — part of the HEADER, not of either pane ──────
+         The participant's own icons live with the window, not with one
+         of its halves: the same icon has to be droppable on a LINE of a
+         list and on a NOTE in the pane, so it sits across the top of both
+         and reaches either one. Clicking marks what is being written;
+         DRAGGING one onto a row, a line or the open note marks THAT one
+         (drop the icon it already carries to clear it). The meaning's ROLE
+         decides how every row carrying it renders, so re-roling an icon
+         restyles the whole tree. "+" opens the shared Material chooser;
+         "tune" flips to the palette editor. -->
+    @if (cell()) {
+    <div class="cv2-rail" [class.is-editing]="paletteEditing()">
+      @if (!paletteEditing()) {
+        <!-- Grouped by KIND: points (the constrained roles) then notes
+             (prose). The labels only appear once both kinds are in the
+             palette — with one kind the rail is the flat icon strip it
+             has always been. -->
+        <div class="cv2-rail-marks" role="group" [attr.aria-label]="'notes.markRail' | t">
+          @for (g of markGroups(); track g.kind) {
+            <div class="cv2-rail-kind" [class.is-note]="g.kind === 'note'">
+              @if (showKindLabels()) {
+                <span class="cv2-rail-kind-label" aria-hidden="true">
+                  {{ (g.kind === 'point' ? 'notes.kindPoints' : 'notes.kindNotes') | t }}
+                </span>
+              }
+              @for (m of g.marks; track m.icon) {
+                <button type="button" class="cv2-rail-mark"
+                        [class.is-active]="draftMark() === m.icon"
+                        [class.is-heading]="m.role === 'heading'"
+                        [class.is-prose]="m.role === 'prose'"
+                        [class.is-dragging]="markDragIcon() === m.icon"
+                        (pointerdown)="onMarkPointerDown(m.icon, $event)"
+                        (click)="pickMark(m.icon)"
+                        [attr.aria-pressed]="draftMark() === m.icon"
+                        [title]="markLabel(m.icon) + ' — ' + ('notes.markDragHint' | t)">
+                  <span class="mat-sym">{{ m.icon }}</span>
+                </button>
+              }
+            </div>
+          }
+          <button type="button" class="cv2-rail-btn" (click)="addMarkIcon()"
+                  [attr.aria-label]="'notes.addMark' | t" [title]="'notes.addMark' | t">
+            <span class="mat-sym">add</span>
+          </button>
+        </div>
+        <span class="cv2-rail-spacer"></span>
+        <button type="button" class="cv2-rail-btn" (click)="togglePaletteEdit()"
+                [attr.aria-label]="'notes.editMarks' | t" [title]="'notes.editMarks' | t">
+          <span class="mat-sym">tune</span>
+        </button>
+      } @else {
+        <div class="cv2-rail-editor">
+          <div class="cv2-rail-editor-head">
+            <span>{{ 'notes.markPalette' | t }}</span>
+            <span class="cv2-rail-spacer"></span>
+            <button type="button" class="cv2-rail-btn" (click)="togglePaletteEdit()"
+                    [title]="'notes.markDone' | t">
+              <span class="mat-sym">check</span>
+            </button>
+          </div>
+          @for (m of marks(); track m.icon) {
+            <div class="cv2-mark-row">
+              <span class="mat-sym cv2-mark-row-icon" aria-hidden="true">{{ m.icon }}</span>
+              <input type="text" class="cv2-mark-name"
+                     [value]="m.name"
+                     (input)="renameMark(m.icon, $event)"
+                     [attr.placeholder]="'notes.markMeaning' | t"
+                     [attr.aria-label]="'notes.markMeaning' | t" />
+              <!-- The three roles, grouped as the user reads them: the two
+                   constrained roles make a POINT, prose makes a NOTE. -->
+              <div class="cv2-mark-roles" role="group">
+                <button type="button" [class.is-on]="m.role === 'heading'"
+                        (click)="setMarkRole(m.icon, 'heading')">{{ 'notes.markHeading' | t }}</button>
+                <button type="button" [class.is-on]="m.role === 'list'"
+                        (click)="setMarkRole(m.icon, 'list')">{{ 'notes.markList' | t }}</button>
+                <button type="button" [class.is-on]="m.role === 'prose'"
+                        (click)="setMarkRole(m.icon, 'prose')">{{ 'notes.markProse' | t }}</button>
+              </div>
+              <button type="button" class="cv2-mark-remove" (click)="removeMark(m.icon)"
+                      [attr.aria-label]="'notes.markRemove' | t" [title]="'notes.markRemove' | t">
+                <span class="mat-sym" style="font-size:14px">close</span>
+              </button>
+            </div>
+          } @empty {
+            <div class="cv2-rail-empty">{{ 'notes.noMarks' | t }}</div>
+          }
+          <button type="button" class="cv2-mark-add" (click)="addMarkIcon()">
+            <span class="mat-sym" style="font-size:14px">add</span>
+            <span>{{ 'notes.addMark' | t }}</span>
+          </button>
+        </div>
+      }
+    </div>
+    }
 
     <!-- Embedded note form — the single authoring surface, defined ONCE at
          the panel's top level so both columns can outlet it (an @if block's
@@ -194,97 +275,6 @@
         </div>
       </section>
 
-      <!-- ── Mark rail ────────────────────────────────────────────
-           The participant's own icons, each carrying the meaning THEY gave
-           it. Clicking one marks the note being written; DRAGGING one onto a
-           note row marks that note (drop the icon it already carries to
-           clear it). The meaning's ROLE (heading / list) decides how every
-           row carrying that icon renders, so re-roling an icon restyles the
-           whole tree. "+" opens the shared Material chooser; "tune" flips to
-           the palette editor where each mark gets a name, a role and a
-           remove. -->
-      <div class="cv2-rail" [class.is-editing]="paletteEditing()">
-        @if (!paletteEditing()) {
-          <!-- Grouped by KIND: points (the constrained roles) then notes
-               (prose). The labels only appear once both kinds are in the
-               palette — with one kind the rail is the flat icon strip it
-               has always been. -->
-          <div class="cv2-rail-marks" role="group" [attr.aria-label]="'notes.markRail' | t">
-            @for (g of markGroups(); track g.kind) {
-              <div class="cv2-rail-kind" [class.is-note]="g.kind === 'note'">
-                @if (showKindLabels()) {
-                  <span class="cv2-rail-kind-label" aria-hidden="true">
-                    {{ (g.kind === 'point' ? 'notes.kindPoints' : 'notes.kindNotes') | t }}
-                  </span>
-                }
-                @for (m of g.marks; track m.icon) {
-                  <button type="button" class="cv2-rail-mark"
-                          [class.is-active]="draftMark() === m.icon"
-                          [class.is-heading]="m.role === 'heading'"
-                          [class.is-prose]="m.role === 'prose'"
-                          [class.is-dragging]="markDragIcon() === m.icon"
-                          (pointerdown)="onMarkPointerDown(m.icon, $event)"
-                          (click)="pickMark(m.icon)"
-                          [attr.aria-pressed]="draftMark() === m.icon"
-                          [title]="markLabel(m.icon) + ' — ' + ('notes.markDragHint' | t)">
-                    <span class="mat-sym">{{ m.icon }}</span>
-                  </button>
-                }
-              </div>
-            }
-            <button type="button" class="cv2-rail-btn" (click)="addMarkIcon()"
-                    [attr.aria-label]="'notes.addMark' | t" [title]="'notes.addMark' | t">
-              <span class="mat-sym">add</span>
-            </button>
-          </div>
-          <span class="cv2-rail-spacer"></span>
-          <button type="button" class="cv2-rail-btn" (click)="togglePaletteEdit()"
-                  [attr.aria-label]="'notes.editMarks' | t" [title]="'notes.editMarks' | t">
-            <span class="mat-sym">tune</span>
-          </button>
-        } @else {
-          <div class="cv2-rail-editor">
-            <div class="cv2-rail-editor-head">
-              <span>{{ 'notes.markPalette' | t }}</span>
-              <span class="cv2-rail-spacer"></span>
-              <button type="button" class="cv2-rail-btn" (click)="togglePaletteEdit()"
-                      [title]="'notes.markDone' | t">
-                <span class="mat-sym">check</span>
-              </button>
-            </div>
-            @for (m of marks(); track m.icon) {
-              <div class="cv2-mark-row">
-                <span class="mat-sym cv2-mark-row-icon" aria-hidden="true">{{ m.icon }}</span>
-                <input type="text" class="cv2-mark-name"
-                       [value]="m.name"
-                       (input)="renameMark(m.icon, $event)"
-                       [attr.placeholder]="'notes.markMeaning' | t"
-                       [attr.aria-label]="'notes.markMeaning' | t" />
-                <!-- The three roles, grouped as the user reads them: the two
-                     constrained roles make a POINT, prose makes a NOTE. -->
-                <div class="cv2-mark-roles" role="group">
-                  <button type="button" [class.is-on]="m.role === 'heading'"
-                          (click)="setMarkRole(m.icon, 'heading')">{{ 'notes.markHeading' | t }}</button>
-                  <button type="button" [class.is-on]="m.role === 'list'"
-                          (click)="setMarkRole(m.icon, 'list')">{{ 'notes.markList' | t }}</button>
-                  <button type="button" [class.is-on]="m.role === 'prose'"
-                          (click)="setMarkRole(m.icon, 'prose')">{{ 'notes.markProse' | t }}</button>
-                </div>
-                <button type="button" class="cv2-mark-remove" (click)="removeMark(m.icon)"
-                        [attr.aria-label]="'notes.markRemove' | t" [title]="'notes.markRemove' | t">
-                  <span class="mat-sym" style="font-size:14px">close</span>
-                </button>
-              </div>
-            } @empty {
-              <div class="cv2-rail-empty">{{ 'notes.noMarks' | t }}</div>
-            }
-            <button type="button" class="cv2-mark-add" (click)="addMarkIcon()">
-              <span class="mat-sym" style="font-size:14px">add</span>
-              <span>{{ 'notes.addMark' | t }}</span>
-            </button>
-          </div>
-        }
-      </div>
 
       <!-- Docked / narrow fullscreen: the form lives here in the column.
            On the desk it renders in the READING PANE instead — the template
@@ -555,6 +545,7 @@
                 @for (item of listItems(); track trackById($index, item)) {
                   <div class="cv2-line"
                        [class.is-editing]="editingItemId() === item.id"
+                       [class.is-mark-target]="markDropTargetId() === item.id"
                        [attr.data-pheromone-note]="item.id"
                        [attr.data-pheromone-note-cell]="cell()">
                     @if (markOf(item); as icon) {
@@ -622,6 +613,7 @@
           </div>
         } @else if (readingRow(); as row) {
           <div class="cv2-reading-scroll thin-scroll"
+               [class.is-mark-target]="markDropTargetId() === row.note.id"
                [attr.data-pheromone-note]="row.note.id"
                [attr.data-pheromone-note-cell]="cell()">
 
@@ -738,7 +730,6 @@
          be clicked on the canvas but are still listed here.
          Docked: a wrapping tag cloud under the editor. Desktop fullscreen:
          a vertical list in the left column (SCSS reflows it). -->
-    @if (isFullscreen() || tilesOpen() || !cell()) {
     <div class="cv2-tilelist">
       <div class="cv2-tilelist-filter">
         <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>
@@ -769,7 +760,6 @@
                   [attr.aria-selected]="t.cell === cell()"
                   [class.is-active]="t.cell === cell()"
                   [class.is-peeked]="t.cell === hoverCell()"
-                  [style.fontSize.rem]="t.size"
                   (pointerenter)="onChipEnter(t.cell, $event)"
                   (pointerleave)="onChipLeave()"
                   (click)="activateCell(t.cell)" [title]="t.cell">
@@ -785,7 +775,6 @@
         }
       </div>
     </div>
-    }
 
     <!-- Invisible edge drag-handles. The left edge is the live resize
          edge when docked right; bottom + corner handle the floating panel. -->

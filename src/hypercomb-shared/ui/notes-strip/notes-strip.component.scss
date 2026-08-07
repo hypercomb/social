@@ -97,56 +97,104 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 // desk as the centre column, the docked stack as the bottom pane.
 .cv2-main { display: contents; }
 
-// ── The docked window: a header and TWO panes ─────────────
-// A dense tree with an editor bolted above it made the note the smallest
-// thing on screen. The window now reads top to bottom: the SELECTED NOTE,
-// given the room (read and written in the same pane — the desk's contract,
-// brought down to the dock), then the tree along the bottom as the selector
-// that says which note that is. Source order can't express it (the pane is
-// declared after the column so the desk's grid can place it), so the docked
-// stack orders its children explicitly.
+// ── The docked window: a header, a pane, a filter — and the notes
+//    hanging off the left edge ──────────────────────────────
+// Three things want to be seen at once and only two of them are about the
+// same question. So:
+//   header  — which tile, which tab, the mark icons (they reach BOTH lists)
+//   pane    — the selected note, read and written, or the open LIST
+//   bottom  — THE TILE FILTER: search a tile, pick a tile. Same on both tabs.
+//   left    — the selected tile's NOTES, a vertical tree hanging off the
+//             panel's left edge, the way the peek card already showed them.
+//
+// The notes tree is OUTSIDE the panel box on purpose. It is the index of
+// what the pane is showing, it carries hierarchy and marks (so it needs
+// width, not a squeezed third), and the peek card proved that is where the
+// eye already looks. `.notes-strip` is the positioning parent (position:
+// relative, overflow visible), so `right: 100%` hangs the column on its
+// left with no new stacking context to fight.
 :host(:not(.is-fullscreen)) {
   .cv2-dragbar { order: 1; }
   .cv2-tabs { order: 2; }
+  // The rail is the third band of the header — see .cv2-rail's own rule for
+  // why it belongs to the window rather than to either pane.
+  .cv2-rail { order: 3; flex: 0 0 auto; }
 
   .cv2-reading {
-    order: 3;
-    flex: 1.7 1 46%;
+    order: 4;
+    flex: 1.7 1 55%;
     min-height: 160px;
     border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
   }
 
+  // The tile filter — the bottom pane, always there, never a cloud.
+  .cv2-tilelist {
+    order: 5;
+    flex: 1 1 32%;
+    min-height: 120px;
+  }
+
+  // ── The notes column, hanging left ──────────────────────
   .cv2-main {
-    order: 4;
+    position: absolute;
+    right: 100%;
+    top: 0;
+    bottom: 0;
+    width: clamp(220px, 20vw, 320px);
     display: flex;
     flex-direction: column;
-    flex: 1 1 34%;
-    min-height: 120px;
     overflow: hidden;
+    background: rgba(14, 14, 22, 0.96);
+    backdrop-filter: blur(18px);
+    border-left: 1px solid rgba($steel, 0.28);
+    border-top: 1px solid rgba($steel, 0.28);
+    border-bottom: 1px solid rgba($steel, 0.28);
+    border-radius: 8px 0 0 8px;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
   }
-  // Everything above the tree in the bottom pane holds its own height; only
-  // the tree itself takes the slack (it already carries `flex: 1 1 auto`).
+  // Nothing in the notes column but the notes: the plate, the mark rail and
+  // the footer all live in the window itself now.
+  .cv2-main > .cv2-plate,
   .cv2-main > .cv2-rail,
+  .cv2-main > .cv2-foot { display: none; }
   .cv2-main > .cv2-filter,
   .cv2-main > .cv2-notes-search { flex: 0 0 auto; }
 
-  // The bottom pane is the SELECTOR. Anything in it that isn't the tree is
-  // height the tree doesn't get, so the two panels that only repeat what the
-  // window already says stand down here: the identity plate (the dragbar
-  // titles the tile, and the button beside it changes which) and the note
-  // count footer (the tree is right there). Both keep their place on the
-  // desk, where the column has room for them.
-  .cv2-main > .cv2-plate,
-  .cv2-main > .cv2-foot { display: none; }
+  // With no tile picked there are no notes — the column would be an empty
+  // slab hanging in the canvas.
+  .cv2-main:not(:has(.cv2-note)):not(:has(.cv2-notes-search)) { display: none; }
 
-  // The navigator opens OVER the bottom pane rather than beside it — while
-  // it is up, the question is which tile, not which note.
-  .notes-strip.tiles-open .cv2-main { display: none; }
-  .cv2-tilelist {
+  // Rows read as LONG TABS: full width, one note each, the mark on the left
+  // and the indent still saying what sits under what.
+  .cv2-main .cv2-list { padding: 6px 0 10px; }
+  .cv2-main .cv2-note {
+    border-radius: 0 6px 6px 0;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+  .cv2-main .cv2-note.is-reading,
+  .cv2-main .cv2-note.is-open-list {
+    background: color-mix(in srgb, #{$steel} 14%, transparent);
+    box-shadow: inset 3px 0 0 0 rgba($steel, 0.9);
+  }
+}
+
+// Narrow viewports have nowhere to hang a column — the notes go back inside
+// the window, above the tile filter, and the panel is a plain stack again.
+@media (max-width: 760px) {
+  :host(:not(.is-fullscreen)) .cv2-main {
+    position: static;
+    width: auto;
     order: 5;
     flex: 1 1 34%;
-    min-height: 0;
+    min-height: 110px;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    background: none;
   }
+  :host(:not(.is-fullscreen)) .cv2-tilelist { order: 6; flex: 1 1 26%; }
 }
 
 .notes-strip {
@@ -630,17 +678,22 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 .cv2-toolbar-spacer { flex: 1; }
 
 // ── Mark rail ─────────────────────────────────────────────
-// The participant's icon palette, sitting above the note form. Compact
-// mode is a row of icon buttons (a click picks the mark for the note being
-// written, a drag drops it onto an existing row); the "tune" button flips
-// it into the palette editor where each mark gets a MEANING (its name) and
-// a ROLE (heading / list).
+// The participant's icon palette — the third band of the HEADER, above
+// both panes rather than inside either one. The same icon has to reach a
+// LINE of a list, a row of the tree and the NOTE open in the pane, so it
+// cannot live in one of them; and the marks belong to the window (they are
+// the participant's vocabulary), not to whatever is selected right now.
+// Compact mode is a row of icon buttons (a click picks the mark for what is
+// being written, a drag drops it onto an existing row / line / note); the
+// "tune" button flips it into the palette editor where each mark gets a
+// MEANING (its name) and a ROLE (heading / list).
 .cv2-rail {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 5px 8px;
-  border-bottom: 1px solid rgba($steel, 0.16);
+  background: rgba(255, 255, 255, 0.012);
+  border-bottom: 1px solid rgba($steel, 0.25);
 
   &.is-editing {
     display: block;
@@ -1676,43 +1729,50 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   padding: 0;
   &:hover { color: var(--md-on-surface); }
 }
-// ── Tile tag cloud ───────────────────────────────────────
-// Tiles render as wrapping chips that fill the panel width (replacing the old
-// vertical row list). Single-select ("one of"): the active tile's chip carries
-// the secondary accent and opens its notes list above. A count badge rides
-// inside each chip when the tile holds notes.
+// ── The tile list ────────────────────────────────────────
+// One tile per ROW, full width, in layer order — a list you read down and
+// a filter you type into, not a weighted cloud. (It WAS a tag cloud, sized
+// by note count. At any real tile count that is a wall of jumbled type you
+// have to hunt through, and the size carried information nobody asked for.)
+// Single-select: the active tile's row carries the accent and its notes
+// fill the column on the left.
 .cv2-tilecloud {
   display: flex;
-  flex-flow: row wrap;
-  align-items: baseline;     // weighted chips sit on a shared text baseline
+  flex-flow: column nowrap;
+  align-items: stretch;
   align-content: flex-start;
-  gap: 7px 6px;
-  padding: 0.5rem 0.6rem 0.6rem;
+  gap: 1px;
+  padding: 0.15rem 0.35rem 0.6rem;
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
 }
 .cv2-tilechip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  max-width: 100%;
+  width: 100%;
+  max-width: none;
   line-height: 1.15;
-  padding: 4px 6px 4px 11px;
-  background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: 3px;
+  padding: 6px 8px 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
   color: color-mix(in srgb, var(--md-on-surface) 85%, transparent);
   font-family: inherit;
-  font-size: 0.8rem;
+  // The cloud weighted each row by note count with an inline font-size; in a
+  // list that reads as noise, so every row takes one size.
+  font-size: 0.8rem !important;
+  text-align: left;
   cursor: pointer;
   transition: background var(--md-dur-short) var(--md-easing-standard),
               border-color var(--md-dur-short) var(--md-easing-standard),
               color var(--md-dur-short) var(--md-easing-standard);
 
   &:hover {
-    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
-    border-color: color-mix(in srgb, var(--md-on-surface) 22%, transparent);
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+    border-color: color-mix(in srgb, var(--md-on-surface) 18%, transparent);
     color: var(--md-on-surface);
   }
   &:focus-visible { outline: 1px solid var(--md-secondary); outline-offset: 2px; }
@@ -1723,17 +1783,18 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
     color: var(--md-on-surface-strong, var(--md-on-surface));
   }
 
-  // The chip whose hover card is open — a hairline tie between the row and
+  // The row whose hover card is open — a hairline tie between the row and
   // the card floating beside it, so the two read as one thing.
   &.is-peeked {
     border-color: color-mix(in srgb, #{$steel} 55%, transparent);
   }
 }
 .cv2-tilechip-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 200px;
 }
 .cv2-tilechip-count {
   flex: 0 0 auto;
@@ -2029,6 +2090,13 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
     text-align: center;
     padding: $pad;
     gap: 0.9rem;
+
+    // A mark from the header hovering the open note — the whole pane is the
+    // target, since the note IS the pane here.
+    &.is-mark-target {
+      box-shadow: inset 0 0 0 1px rgba($steel, 0.65);
+      background: color-mix(in srgb, #{$steel} 8%, transparent);
+    }
   }
 
   .cv2-reading-kind {
@@ -2476,6 +2544,13 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 }
 .cv2-line-sub { font-variant-numeric: tabular-nums; }
 
+// A mark dragged from the header, hovering a line — the same steel rim the
+// tree rows show, so one gesture reads the same wherever it lands.
+.cv2-line.is-mark-target {
+  background: color-mix(in srgb, #{$steel} 18%, transparent);
+  box-shadow: inset 0 0 0 1px rgba($steel, 0.65);
+}
+
 .cv2-list-blank {
   flex: 1 1 auto;
   display: grid;
@@ -2501,17 +2576,22 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   :host.is-fullscreen .notes-strip {
     display: grid;
     grid-template-columns: clamp(200px, 17%, 300px) minmax(0, 1fr) minmax(0, 1.1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+    // Three header bands, then the columns. The tabs and the rail used to
+    // be auto-placed, which dropped them into an implicit row BELOW the
+    // navigator; naming every band's row is what keeps the header a header.
+    grid-template-rows: auto auto auto minmax(0, 1fr);
   }
-  // Header spans both columns; the resize grips are absolutely positioned
-  // (and hidden in fullscreen), so they need no placement.
-  :host.is-fullscreen .cv2-dragbar { grid-column: 1 / -1; }
+  // Every header band spans all three columns; the resize grips are
+  // absolutely positioned (and hidden in fullscreen), so they need none.
+  :host.is-fullscreen .cv2-dragbar { grid-column: 1 / -1; grid-row: 1; }
+  :host.is-fullscreen .cv2-tabs { grid-column: 1 / -1; grid-row: 2; }
+  :host.is-fullscreen .cv2-rail { grid-column: 1 / -1; grid-row: 3; }
 
   :host.is-fullscreen .cv2-main {
     display: flex;
     flex-direction: column;
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 4;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
@@ -2519,45 +2599,13 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 
   :host.is-fullscreen .cv2-tilelist {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 4;
     min-width: 0;
     border-top: none;
     border-right: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
   }
 
-  // Cloud → vertical list: one tile per row, full column width.
-  :host.is-fullscreen .cv2-tilecloud {
-    flex-flow: column nowrap;
-    align-items: stretch;
-    align-content: stretch;
-    gap: 1px;
-    padding: 0.35rem 0.4rem 0.6rem;
-  }
-  :host.is-fullscreen .cv2-tilechip {
-    width: 100%;
-    max-width: none;
-    justify-content: space-between;
-    // The cloud weights each chip by note count via an inline font-size;
-    // in a list that reads as noise, so rows take one uniform size.
-    font-size: 0.8rem !important;
-    padding: 6px 8px 6px 10px;
-    background: transparent;
-    border-color: transparent;
-    text-align: left;
-  }
-  :host.is-fullscreen .cv2-tilechip:hover {
-    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
-    border-color: color-mix(in srgb, var(--md-on-surface) 18%, transparent);
-  }
-  :host.is-fullscreen .cv2-tilechip.is-active {
-    background: color-mix(in srgb, var(--md-secondary) 20%, transparent);
-    border-color: color-mix(in srgb, var(--md-secondary) 50%, transparent);
-  }
-  :host.is-fullscreen .cv2-tilechip-name {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: none;
-  }
+  // (The tile list is a plain row list everywhere now — see .cv2-tilecloud.)
 
   // Fullscreen is the one place with room to spare: the identity plate takes
   // the masthead treatment — a big hexagon the user can read across the room,
@@ -2590,7 +2638,7 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
       $ed-font: 1.02rem
     );
     grid-column: 3;
-    grid-row: 2;
+    grid-row: 4;
     border-left: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
   }
 

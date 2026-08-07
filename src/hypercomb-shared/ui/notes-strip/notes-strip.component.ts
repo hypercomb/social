@@ -249,17 +249,6 @@ export class NotesStripComponent implements OnDestroy {
     try { localStorage.setItem('hc:annotations-tab', next) } catch { /* ignore */ }
   }
 
-  /**
-   * WHICH TILE is a header question, not a pane. The window is two panes —
-   * the note, then the notes — so the tile navigator no longer sits under
-   * them competing for the same third; it opens over the selector from the
-   * header, picks a tile, and closes. On the desk it stays the permanent
-   * left column it already was (the grid has room), so this flag only
-   * governs the docked stack.
-   */
-  readonly tilesOpen = signal(false)
-
-  toggleTiles(): void { this.tilesOpen.update(v => !v) }
 
   // ── Reading pane (fullscreen) ─────────────────────────────
   // Fullscreen is the desk: navigator left, tree centre, and THIS on the
@@ -837,18 +826,26 @@ export class NotesStripComponent implements OnDestroy {
     this.#version.update(v => v + 1)
   }
 
-  /** Note id of the row under a viewport point, or null. Rows carry
-   *  `data-note-id`; the tree renders them all through one template. */
+  /** Note id under a viewport point, or null.
+   *
+   *  The rail belongs to the WINDOW, so a dragged icon has to land on
+   *  whatever the pointer is actually over — a row of the tree below, a
+   *  LINE of the open list, or the NOTE being read in the pane. Each of
+   *  those advertises its own id; they are checked small-to-large so a line
+   *  inside the pane wins over the pane itself. */
   #noteRowIdAt(x: number, y: number): string | null {
-    const rows = Array.from(
-      this.#host.nativeElement.querySelectorAll('article.cv2-note[data-note-id]'),
-    ) as HTMLElement[]
-    for (const row of rows) {
-      const r = row.getBoundingClientRect()
-      if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) continue
-      return row.getAttribute('data-note-id')
+    const hit = (selector: string, attr: string): string | null => {
+      const rows = Array.from(this.#host.nativeElement.querySelectorAll(selector)) as HTMLElement[]
+      for (const row of rows) {
+        const r = row.getBoundingClientRect()
+        if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) continue
+        return row.getAttribute(attr)
+      }
+      return null
     }
-    return null
+    return hit('article.cv2-note[data-note-id]', 'data-note-id')
+      ?? hit('.cv2-line[data-pheromone-note]', 'data-pheromone-note')
+      ?? hit('.cv2-reading-scroll[data-pheromone-note]', 'data-pheromone-note')
   }
 
   /** "+" on the rail — borrow the shared Material icon chooser. `store: false`
@@ -1763,26 +1760,14 @@ export class NotesStripComponent implements OnDestroy {
 
   /** Always-on tile navigator: every tile in the current layer, filtered by
    *  the find box, in layer order (CellSuggestionProvider order). Clicking a
-   *  chip makes that tile active (its notes open in the editor above). Each
-   *  chip carries a `size` (rem) weighted by note count — the tag-cloud look
-   *  where busier tiles render larger. */
-  readonly tileList = computed<readonly { cell: string; count: number; size: number }[]>(() => {
-    const rows = this.#layerCellLabels()
+   *  row makes that tile active and its notes fill the column on the left.
+   *  A plain list — the count rides in a badge and every row is one size;
+   *  the weighted tag cloud this used to be made a wall of jumbled type. */
+  readonly tileList = computed<readonly { cell: string; count: number }[]>(() => {
+    return this.#layerCellLabels()
       .filter(cell => this.#matchesFilter(cell))
       .map(cell => ({ cell, count: this.#cellCount(cell) }))
-    const max = rows.reduce((m, r) => Math.max(m, r.count), 0)
-    return rows.map(r => ({ ...r, size: this.#chipSize(r.count, max) }))
   })
-
-  /** Tag-cloud weighting: map a tile's note count to a chip font-size (rem).
-   *  Sqrt scale so the busiest tiles read as larger without dwarfing the rest;
-   *  tiles with no notes sit at the floor. */
-  #chipSize(count: number, max: number): number {
-    const MIN = 0.78, MAX = 1.32
-    if (max <= 0 || count <= 0) return MIN
-    const t = Math.sqrt(count) / Math.sqrt(max)
-    return +(MIN + (MAX - MIN) * t).toFixed(3)
-  }
 
   /** Make `cell` the active tile — its notes open in the editor above the
    *  list. Clears any in-progress edit so switching tiles starts clean. The
@@ -1799,8 +1784,6 @@ export class NotesStripComponent implements OnDestroy {
     this.readingIndex.set(0)
     this.cancelItemEdit()
     this.#clearNewLine()
-    // Picked from the navigator overlay — the question it answered is done.
-    this.tilesOpen.set(false)
   }
 
   /**
