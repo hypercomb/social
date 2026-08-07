@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
@@ -3633,6 +3633,23 @@ export class ShowCellDrone extends Drone {
         }
       }
     } catch { /* malformed hc:hidden-lineages — other hide sources still apply */ }
+
+    // TILES ARE ASSETS for takeover views (visual-bee `replacesTileRender`):
+    // a cell claimed by such a view — the post-it whose sticky, not hexagon,
+    // is its whole presence — leaves the hex render entirely. Same union
+    // filter as hides, so the show-hidden toggle stays the X-ray that
+    // reveals the underlying tile. Registry-driven: no view is named here.
+    try {
+      const beeRegistry = (window as any).ioc?.get?.('@diamondcoreprocessor.com/VisualBeeRegistry') as
+        | { kindsReplacingTileRender?: () => ReadonlySet<string> }
+        | undefined
+      const takeoverKinds = beeRegistry?.kindsReplacingTileRender?.()
+      if (takeoverKinds && takeoverKinds.size > 0) {
+        for (const name of union) {
+          if (kindsForLabel(name).some(k => takeoverKinds.has(k))) hiddenSet.add(name)
+        }
+      }
+    } catch { /* registry not up yet — tiles render this pass; the next synchronize re-filters */ }
 
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {

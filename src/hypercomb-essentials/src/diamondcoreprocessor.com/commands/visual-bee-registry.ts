@@ -301,6 +301,18 @@ export type VisualBeeDescriptor = {
   readonly takeoverRank?: number
 
   /**
+   * TILES ARE ASSETS for this view: a cell carrying this bee's decoration
+   * kind does not render as a hexagon at all — the view owns the cell's
+   * entire on-screen presence (the post-it's sticky, a gallery's frame).
+   * The hex render drops the label through the same union filter as hides,
+   * so the show-hidden toggle doubles as the X-ray that reveals the
+   * underlying tile; the view's own surface is the only ordinary way in.
+   * Default false: most views are an ALTERNATE render a tile offers, not a
+   * replacement for its presence.
+   */
+  readonly replacesTileRender?: boolean
+
+  /**
    * Capability pheromones this behaviour SHIPS — how a module self-declares
    * what it is good for, so no one has to chase modules down to tag them.
    * Every behaviour MUST include `platform:mobile`, `platform:desktop`, or
@@ -407,6 +419,20 @@ export class VisualBeeRegistry extends EventTarget {
   /** Look up a bee by its `view` name. */
   get(view: string): VisualBeeDescriptor | undefined {
     return this.#bees.get(view)
+  }
+
+  /**
+   * Decoration kinds whose owner view REPLACES the tile's hex render —
+   * tiles are ASSETS for those views (see `replacesTileRender`). The hex
+   * renderer consults this set on every pass; registry-driven, so no view
+   * is ever named in the renderer.
+   */
+  kindsReplacingTileRender(): Set<string> {
+    const out = new Set<string>()
+    for (const bee of this.#bees.values()) {
+      if (bee.replacesTileRender) out.add(bee.decorationKind)
+    }
+    return out
   }
 
   /** Look up the bee that owns a decoration kind. */

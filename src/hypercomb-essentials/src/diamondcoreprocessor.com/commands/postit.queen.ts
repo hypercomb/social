@@ -122,6 +122,9 @@ window.ioc.register('@diamondcoreprocessor.com/PostitQueenBee', _postit)
     // Clicking the sticky (or the tile's view-enter icon) opens the note in
     // place — navigating away from the note to read the note would be absurd.
     opensOnTileClick: true,
+    // A post-it cell IS its sticky: the tile is the asset, the view is the
+    // presence. The hexagon never renders while the mark is on.
+    replacesTileRender: true,
     pheromones: ['platform:mobile', 'platform:desktop'],
   }),
 )

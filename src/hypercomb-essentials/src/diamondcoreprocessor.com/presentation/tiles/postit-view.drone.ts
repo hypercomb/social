@@ -1,19 +1,21 @@
-// Post-it — the small sticky on screen for a decorated tile, and the full
-// page it opens into.
+// Post-it — a VIEWER. The tile is an asset; the post-it is its presence.
 //
-// Two surfaces, one drone:
+// A cell carrying `visual:postit:note` does not render as a hexagon at all
+// (`replacesTileRender` — the hex renderer drops the label). Instead:
 //
-//   1. STICKIES (hexagons mode): every `visual:postit:note` on the current
-//      layer — the cell you are standing at plus its children — gets a small
-//      sticky note docked bottom-left. The sticky shows the note's title and
-//      is the OPEN affordance; it never intercepts the canvas (pointer
-//      events live on the notes alone, navigation is never blocked).
+//   1. STICKIES (hexagons mode): every post-it on the current layer — the
+//      cell you are standing at plus its children — is a small sticky note
+//      docked top-left. The sticky IS the cell on screen: it shows the
+//      note's title and is the only ordinary way in. It never intercepts
+//      the canvas (pointer events live on the notes alone).
 //
 //   2. THE POST (postit view): opening a sticky (or the tile's view-enter
-//      icon) mounts the note full-viewport. A payload `htmlSig` mounts that
-//      one-page resource inside a shadow root — the page is a standalone
-//      artifact, its CSS never leaks either way. A text-only payload renders
-//      as one large sticky. Escape / × returns to the hexagons.
+//      icon) mounts the cell's CONTENT full-viewport. The viewer is
+//      content-agnostic: a payload `htmlSig` mounts that resource in a
+//      shadow root with its <script>s re-executed (HTML, Pixi, three.js —
+//      whatever the page carries); a `text` payload renders as one large
+//      sticky; with neither, the tile's own image shows. Escape / × returns
+//      to the hexagons.
 
 import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { hasDecorationKind, titleForLabel } from '../../commands/decoration-kind-index.js'
@@ -30,6 +32,7 @@ type HistoryShape = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
 }
+const SIG_RE = /^[0-9a-f]{64}$/
 type StoreShape = { getResource(sig: string): Promise<Blob | null> }
 
 const STICKY_LIMIT = 5
@@ -199,8 +202,8 @@ export class PostitViewDrone extends Drone {
     close.textContent = '×'
     close.onclick = () => this.#vm()?.setMode('hexagons')
 
+    const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
     if (payload?.htmlSig) {
-      const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
       const blob = await store?.getResource(payload.htmlSig)
       if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) { host.remove(); return }
       const paper = document.createElement('article')
@@ -212,22 +215,70 @@ export class PostitViewDrone extends Drone {
       shadow.innerHTML = blob
         ? rewritePageRefs(await blob.text(), RESOURCE_URL_PREFIX)
         : '<p style="padding:2rem;font-family:system-ui">This post-it\'s page has not arrived yet.</p>'
+      // The viewer is content-agnostic — a page may carry behaviour (Pixi,
+      // three.js, plain JS). innerHTML never executes <script>, so re-create
+      // each one in place; a created script element runs on connection (the
+      // same trick the site view uses on inline mounts).
+      shadow.querySelectorAll('script').forEach(inert => {
+        const live = document.createElement('script')
+        for (const attr of Array.from(inert.attributes)) live.setAttribute(attr.name, attr.value)
+        live.textContent = inert.textContent
+        inert.replaceWith(live)
+      })
       host.append(paper)
-    } else {
+    } else if (payload?.text) {
       const note = document.createElement('article')
       note.className = 'postit-paper'
       const heading = document.createElement('h1')
       heading.textContent = title
       const body = document.createElement('p')
-      body.textContent = payload?.text ?? 'Nothing on this post-it yet — `/postit here <text>` writes it.'
+      body.textContent = payload.text
       note.append(heading, body)
       host.append(note)
+    } else {
+      // No authored content — the tile's own image IS the asset to show.
+      const imageSig = await this.#tileImageSig(segments)
+      if (gen !== this.#gen || this.#vm()?.mode !== POSTIT_VIEW) { host.remove(); return }
+      const frame = document.createElement('article')
+      frame.className = 'postit-image'
+      if (imageSig) {
+        const img = document.createElement('img')
+        img.src = RESOURCE_URL_PREFIX + imageSig
+        img.alt = title
+        frame.append(img)
+      } else {
+        const note = document.createElement('p')
+        note.className = 'postit-empty'
+        note.textContent = 'Nothing on this post-it yet — `/postit here <text>` writes it.'
+        frame.append(note)
+      }
+      host.append(frame)
     }
 
     host.append(close)
     document.body.appendChild(host)
     this.#post = host
     this.#setActive(true)
+  }
+
+  /** The tile's own picture, resolved from its `properties` slot — the
+   *  asset the viewer falls back to when the post-it carries no page/text. */
+  async #tileImageSig(segments: readonly string[]): Promise<string | null> {
+    const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
+    const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
+    if (!history || !store) return null
+    try {
+      const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
+      const propsSig = Array.isArray((layer as { properties?: unknown })?.properties)
+        ? String(((layer as { properties?: unknown[] }).properties as unknown[])[0] ?? '')
+        : ''
+      if (!SIG_RE.test(propsSig)) return null
+      const blob = await store.getResource(propsSig)
+      if (!blob) return null
+      const props = JSON.parse(await blob.text()) as { small?: { image?: string } }
+      const imageSig = String(props?.small?.image ?? '')
+      return SIG_RE.test(imageSig) ? imageSig : null
+    } catch { return null }
   }
 
   #teardownPost(): void {
@@ -249,14 +300,14 @@ export class PostitViewDrone extends Drone {
 // chrome — the one warm object in a cold shell. No text lives in tile art;
 // the sticky is DOM and carries the note's title.
 const STICKY_CSS = `
-.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));bottom:calc(4.9rem + env(safe-area-inset-bottom,0px));z-index:60;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
+.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(4.5rem + env(safe-area-inset-top,0px));z-index:60;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
 .postit-sticky{pointer-events:auto;width:8.5rem;min-height:4.6rem;padding:.6rem .65rem .95rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#4a3f0f;box-shadow:0 6px 14px rgba(0,0,0,.35),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.18);transform:rotate(var(--postit-tilt,-2deg));transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
 .postit-sticky{position:relative}
 .postit-sticky:hover{transform:rotate(0deg) scale(1.04);box-shadow:0 10px 20px rgba(0,0,0,.42)}
 .postit-sticky-title{display:block;font-size:.8rem;font-weight:700;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .postit-sticky-cue{position:absolute;right:.55rem;bottom:.3rem;font-size:.62rem;opacity:.55}
-@media(max-width:640px){.hc-postit-stickies{bottom:calc(7.4rem + env(safe-area-inset-bottom,0px))}.postit-sticky{width:7rem;min-height:4rem}}
+@media(max-width:640px){.hc-postit-stickies{top:calc(3.9rem + env(safe-area-inset-top,0px))}.postit-sticky{width:7rem;min-height:4rem}}
 `
 
 const POST_CSS = `
@@ -265,6 +316,9 @@ const POST_CSS = `
 .postit-paper{box-sizing:border-box;width:min(680px,calc(100% - 2rem));margin:8vh auto;padding:3.2rem 3rem 4.4rem;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#3f350c;box-shadow:0 22px 60px rgba(0,0,0,.5),inset 0 -2.5rem 2rem -2rem rgba(120,90,10,.16);transform:rotate(-.6deg);font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-paper h1{margin:0 0 1.2rem;font-size:1.6rem;line-height:1.25}
 .postit-paper p{margin:0;font-size:1.08rem;line-height:1.75;white-space:pre-wrap}
+.postit-image{min-height:100%;display:flex;align-items:center;justify-content:center;padding:2rem;box-sizing:border-box}
+.postit-image img{max-width:min(94vw,1100px);max-height:88vh;box-shadow:0 22px 60px rgba(0,0,0,.55)}
+.postit-empty{color:#8fa3b3;font-family:system-ui;font-size:1rem}
 .postit-close{position:fixed;z-index:2147483600;right:calc(0.75rem + env(safe-area-inset-right,0px));top:calc(0.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(12,17,24,.82);border:1px solid rgba(126,182,214,.42);backdrop-filter:blur(6px);color:#cfe2ee;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.55;transition:opacity .16s ease}
 .postit-close:hover{opacity:1}
 `
