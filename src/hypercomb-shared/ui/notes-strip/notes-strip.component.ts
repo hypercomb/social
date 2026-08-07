@@ -310,6 +310,50 @@ export class NotesStripComponent implements OnDestroy {
     if (idx >= 0) this.readingIndex.set(idx)
   }
 
+  /**
+   * CLICK A NOTE, SEE IT IN THE VIEW. The one selection entry point — the
+   * pinned card's rows, the note tabs and the desk's tree all come here.
+   *
+   * Two things used to swallow a click. The card lists EVERY note of the
+   * tile while the pane only cycles the rows of the ACTIVE TAB, so a note
+   * belonging to the other tab resolved to no index and nothing happened —
+   * the tab follows the click now. And on the lists tab the pane is the
+   * list interface, not the reader, so "showing" a note there means opening
+   * the list it belongs to (or itself, when it IS a list).
+   */
+  selectNote(noteId: string): void {
+    if (!noteId) return
+    if (!this.readingRows().some(r => r.note.id === noteId)) {
+      this.setTab(this.tab() === 'notes' ? 'lists' : 'notes')
+    }
+    if (this.tab() === 'lists') {
+      const path = this.#pathOf(noteId)
+      if (path) this.openListPath(path)
+    }
+    this.selectForReading(noteId)
+    // A PRISTINE add form yields — the click said "show me that one", and a
+    // pane still sitting on an empty composer isn't showing it. Anything in
+    // flight is kept: a half-written note never loses to a click.
+    if (this.paneEditorOpen() && !this.editingNoteId() && !this.draftText().trim()) {
+      this.paneEditorOpen.set(false)
+    }
+  }
+
+  /** Index path of a note within the visible tree, or null when it isn't in
+   *  it. Positions, not ids — the same currency the list pane runs on. */
+  #pathOf(noteId: string): readonly number[] | null {
+    const walk = (nodes: readonly Note[], trail: readonly number[]): readonly number[] | null => {
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!
+        if (n.id === noteId) return [...trail, i]
+        const found = walk(n.children, [...trail, i])
+        if (found) return found
+      }
+      return null
+    }
+    return walk(this.visibleNotes(), [])
+  }
+
   /** Bring the row the pane is showing INTO VIEW in the notes column, and
    *  put it at the TOP when it is off-screen. Prev/next walk the whole tree,
    *  so without this the column silently falls out of step with the pane —
@@ -1101,13 +1145,7 @@ export class NotesStripComponent implements OnDestroy {
       return
     }
     if (this.formInPane()) {
-      this.selectForReading(noteId)
-      // A PRISTINE pane editor (add mode, nothing typed) yields to reading —
-      // the click says "show me that one". Anything in flight is kept: a
-      // half-written note never loses to a stray click.
-      if (this.paneEditorOpen() && !this.editingNoteId() && !this.draftText().trim()) {
-        this.paneEditorOpen.set(false)
-      }
+      this.selectNote(noteId)
       return
     }
     this.open(noteId, cellLabel)
@@ -2016,11 +2054,11 @@ export class NotesStripComponent implements OnDestroy {
   readonly hoverOverflow = computed(() =>
     this.peekPinned() ? 0 : Math.max(0, this.hoverNotes().length - HOVER_LIST_MAX))
 
-  /** Click a row of the pinned card — that note goes in the pane. */
+  /** Click a row of the pinned card — that note goes in the view. */
   selectPeekNote(noteId: string, event?: Event): void {
     event?.stopPropagation()
     if (!this.peekPinned()) return
-    this.selectForReading(noteId)
+    this.selectNote(noteId)
   }
 
   /** Anchor the pinned card beside the active tile's row, or — when that row
@@ -2086,6 +2124,18 @@ export class NotesStripComponent implements OnDestroy {
   onChipLeave(): void {
     this.#clearHoverTimers()
     this.#hoverCloseTimer = setTimeout(() => this.hoverCell.set(null), HOVER_CLOSE_DELAY)
+  }
+
+  /** The pointer reached the CARD. Drop any hover instantly, so the pinned
+   *  card is what is under the pointer.
+   *
+   *  Without this the card is unreachable in practice: the trip from a tile
+   *  row to the card crosses other tile rows, each of which opens its own
+   *  peek — the contents change under you mid-reach and the row you were
+   *  going to click is a different tile's note by the time you get there. */
+  onPeekEnter(): void {
+    this.#clearHoverTimers()
+    if (this.hoverCell() !== null) this.hoverCell.set(null)
   }
 
   /** Rows a note tree renders as — every node at every depth. */

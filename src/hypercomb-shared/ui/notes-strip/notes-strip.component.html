@@ -239,7 +239,7 @@
                   [class.is-mark-target]="markDropTargetId() === row.note.id"
                   [class.cv2-note-q]="noteKind(row.note) === 'q'"
                   [attr.aria-selected]="readingRow()?.note?.id === row.note.id"
-                  (click)="selectForReading(row.note.id)"
+                  (click)="selectNote(row.note.id)"
                   [title]="noteDisplayText(row.note)">
             @if (markOf(row.note); as icon) {
               <span class="mat-sym cv2-notetab-mark">{{ icon }}</span>
@@ -872,6 +872,7 @@
        against the panel's box and drift down the screen. -->
   @if (peekCell(); as peeked) {
     <div class="cv2-peek" [class.is-pinned]="peekPinned()"
+         (pointerenter)="onPeekEnter()"
          [attr.role]="peekPinned() ? 'listbox' : 'tooltip'"
          [style.left.px]="hoverLeft()" [style.right.px]="hoverRight()"
          [style.top.px]="hoverTop()">
