@@ -326,6 +326,23 @@
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
+    },
+    {
+      "id": "annotations-two-pane-lists",
+      "title": "Annotations window: two panes + the lists interface",
+      "run": null,
+      "note": "Mirror the reshaped annotations window: docked = header, the selected note read AND written in one pane, the tree as the bottom-third selector; the lists tab is its own interface (title, one-liners, an always-open new line grown one line at a time, drill-in to nested lists). Tiles owed 1:1 for notes-strip.component.{ts,html,scss}, note-tree.ts (addChildInTree/setTextInTree) and notes.drone.ts (note:add-child / note:retext), gathered in a collection, marked, with notes explaining the two writes and WHY a list is addressed by POSITION not id (every write re-signs the note and its ancestors).",
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "link-drag-landing-ring",
+      "title": "Note the landing ring for link drags on the link-drop tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive. A link drag now ANNOUNCES itself (drop:dragging active on the first dragover, cleared on drop, dragend, and a dragleave that exits the window). Before this the ring machinery was dormant for links — only ImageDropDrone announced — so the overlay went on HOVER-highlighting whichever tile the pointer passed, a tile the drop had nothing to do with. drop:dragging now carries atTop, and DropLandingDrone rings slot 0 instead of the tail of the spiral when set, because a dropped link mints its tile at the TOP; the flag is absent for every other drag, so their behaviour is unchanged. Restores what commit f29cd5a50 (wip, 2026-04-12) removed when it replaced create-on-drop with command-line arming.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
     }
   ]
 }

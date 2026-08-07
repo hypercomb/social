@@ -7,6 +7,7 @@
   <div class="notes-strip cv2-panel"
        [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
        [class.dock-right]="dockSide() === 'right'"
+       [class.tiles-open]="tilesOpen()"
        #panel
        data-consumes-wheel
        hcDockInset="right"
@@ -31,6 +32,19 @@
         <span>{{ cell() || ('annotations.title' | t) }}</span>
       </span>
       <span class="cv2-dragbar-spacer"></span>
+      <!-- WHICH TILE — a header question. The docked window is two panes
+           (the note, then the notes); the tile navigator opens over the
+           selector from here and closes as soon as a tile is picked. On the
+           desk it is the permanent left column, so the toggle stays home. -->
+      @if (!isFullscreen()) {
+        <button type="button" class="cv2-mini-btn"
+                [class.is-on]="tilesOpen()" (click)="toggleTiles()"
+                [attr.aria-pressed]="tilesOpen()"
+                [attr.aria-label]="'notes.filterPlaceholder' | t"
+                [title]="'notes.filterPlaceholder' | t">
+          <span class="mat-sym">hexagon</span>
+        </button>
+      }
       <!-- Open the READER on this tile. The strip is for authoring — a dense
            tree you edit in place; the reader is for reading one note at a
            time, big, with the hierarchy around it. Only offered when a tile
@@ -309,10 +323,11 @@
       <!-- Notes tree — recursive row template. Each row carries its
            depth via [style.paddingLeft.px]; children render via
            ng-template self-recursion when not collapsed. -->
-      <ng-template #rowTpl let-note="note" let-depth="depth">
+      <ng-template #rowTpl let-note="note" let-depth="depth" let-path="path">
         <article class="cv2-note"
                  [attr.data-note-id]="note.id"
                  [style.--depth]="depth"
+                 [class.is-open-list]="tab() === 'lists' && listRoot()?.id === note.id"
                  [class.is-heading]="roleOf(note) === 'heading'"
                  [class.is-prose]="roleOf(note) === 'prose'"
                  [class.is-reading]="isFullscreen() && readingRow()?.note?.id === note.id"
@@ -346,7 +361,7 @@
           <!-- Grip is a CSS-drawn rail (see .cv2-note-grip) — no glyph. -->
           <div class="cv2-note-grip" [title]="'notes.dragToReorder' | t"
                (pointerdown)="onNoteGripPointerDown(cell()!, note.id, $event)"></div>
-          <div class="cv2-note-body" (click)="onRowBodyClick(cell()!, note.id, $event)">
+          <div class="cv2-note-body" (click)="onRowBodyClick(cell()!, note.id, $event, path)">
             @if (noteKind(note) === 'q') {
               <div class="cv2-note-kind">
                 <span class="mat-sym filled" style="font-size:12px">help</span> {{ 'notes.noteKindQuestion' | t }}
@@ -431,7 +446,7 @@
         </article>
         @if (!isCollapsed(note.id) && note.children.length > 0) {
           @for (child of note.children; track trackById($index, child)) {
-            <ng-container *ngTemplateOutlet="rowTpl; context: { note: child, depth: depth + 1 }"></ng-container>
+            <ng-container *ngTemplateOutlet="rowTpl; context: { note: child, depth: depth + 1, path: path.concat([$index]) }"></ng-container>
           }
         }
       </ng-template>
@@ -458,7 +473,7 @@
       <div class="cv2-list thin-scroll notes-strip-body"
            [class.has-root-drop]="noteDropMode() === 'root'">
         @for (root of visibleNotes(); track trackById($index, root)) {
-          <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0 }"></ng-container>
+          <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0, path: [$index] }"></ng-container>
         } @empty {
           @if (noteQuery()) {
             <div class="cv2-cloud-empty">{{ 'notes.noteNoMatch' | t }}</div>
@@ -490,10 +505,114 @@
          lands on the NOTE. -->
     @if (cell()) {
       <aside class="cv2-reading" [attr.aria-label]="'notes.viewer.aria' | t">
-        <!-- Writing mode — the same embedded form, given the whole pane.
-             Editing a note or adding a fresh one both land here on the
-             desk; save/cancel put the reader back. -->
-        @if (paneEditorOpen()) {
+        <!-- ── LISTS: its own interface ──────────────────────────
+             A list is not prose and does not want the prose surface. It is
+             a title and a column of one-liners, GROWN ONE LINE AT A TIME:
+             the new-line input at the foot never closes — Enter commits the
+             line, clears the field and leaves the caret exactly where it
+             was, so the next line is just more typing. Existing lines are
+             corrected in place (click, type, Enter). Only the tab's pane
+             changes: the bottom selector below is the same tree on both
+             tabs, which is how you pick WHICH list. -->
+        @if (tab() === 'lists') {
+          <div class="cv2-listpane">
+            <div class="cv2-listpane-head">
+              @if (listTrail().length > 0) {
+                <button type="button" class="cv2-list-back" (click)="exitList()"
+                        [title]="'notes.lists.back' | t">
+                  <span class="mat-sym" aria-hidden="true">chevron_left</span>
+                  <span class="cv2-list-back-text">{{ listTrail()[listTrail().length - 1] }}</span>
+                </button>
+              }
+              @if (listRoot(); as root) {
+                @if (editingItemId() === root.id) {
+                  <input class="cv2-list-title-input"
+                         [value]="itemDraft()"
+                         (input)="onItemInput($event)"
+                         (keydown)="onItemKeydown($event)"
+                         (blur)="commitItemEdit()"
+                         [attr.aria-label]="'notes.lists.rename' | t" />
+                } @else {
+                  <button type="button" class="cv2-list-title" (click)="startListRename($event)"
+                          [title]="'notes.lists.rename' | t">
+                    @if (markOf(root); as icon) {
+                      <span class="mat-sym cv2-list-title-mark" aria-hidden="true">{{ icon }}</span>
+                    }
+                    <span>{{ noteDisplayText(root) }}</span>
+                  </button>
+                }
+                <span class="cv2-list-count">{{ 'notes.lists.count' | t: { count: listItems().length } }}</span>
+              }
+              <span class="cv2-toolbar-spacer"></span>
+              <button type="button" class="cv2-mini-btn" (click)="newList()"
+                      [attr.aria-label]="'notes.lists.new' | t" [title]="'notes.lists.new' | t">
+                <span class="mat-sym">playlist_add</span>
+              </button>
+            </div>
+
+            @if (listRoot()) {
+              <div class="cv2-list-lines thin-scroll">
+                @for (item of listItems(); track trackById($index, item)) {
+                  <div class="cv2-line"
+                       [class.is-editing]="editingItemId() === item.id"
+                       [attr.data-pheromone-note]="item.id"
+                       [attr.data-pheromone-note-cell]="cell()">
+                    @if (markOf(item); as icon) {
+                      <span class="mat-sym cv2-line-mark" aria-hidden="true">{{ icon }}</span>
+                    } @else {
+                      <span class="cv2-line-bullet" aria-hidden="true"></span>
+                    }
+                    @if (editingItemId() === item.id) {
+                      <input class="cv2-line-input"
+                             [value]="itemDraft()"
+                             (input)="onItemInput($event)"
+                             (keydown)="onItemKeydown($event)"
+                             (blur)="commitItemEdit()"
+                             [attr.aria-label]="'notes.edit' | t" />
+                    } @else {
+                      <button type="button" class="cv2-line-text" (click)="startItemEdit(item, $event)">
+                        {{ noteDisplayText(item) }}
+                      </button>
+                      @if (item.children.length > 0) {
+                        <button type="button" class="cv2-line-btn" (click)="enterItem($index)"
+                                [title]="'notes.lists.open' | t">
+                          <span class="mat-sym" style="font-size:15px">chevron_right</span>
+                          <span class="cv2-line-sub">{{ item.children.length }}</span>
+                        </button>
+                      }
+                      <button type="button" class="cv2-line-btn cv2-line-del"
+                              (click)="remove(item.id, $event)"
+                              [attr.aria-label]="'notes.delete' | t" [title]="'notes.delete' | t">
+                        <span class="mat-sym" style="font-size:14px">close</span>
+                      </button>
+                    }
+                  </div>
+                }
+                <!-- The line that is always open. This is the interface. -->
+                <div class="cv2-line is-new">
+                  <span class="cv2-line-bullet is-new" aria-hidden="true"></span>
+                  <input #newLineInput class="cv2-line-input"
+                         [value]="newItemText()"
+                         (input)="onNewItemInput($event)"
+                         (keydown)="onNewItemKeydown($event)"
+                         [attr.placeholder]="'notes.lists.addLine' | t"
+                         [attr.aria-label]="'notes.lists.addLine' | t" />
+                </div>
+              </div>
+            } @else {
+              <div class="cv2-list-blank">
+                <span>{{ 'annotations.lists.empty' | t }}</span>
+                <button type="button" class="cv2-reading-edit" (click)="newList()">
+                  <span class="mat-sym" aria-hidden="true">playlist_add</span>
+                  <span>{{ 'notes.lists.new' | t }}</span>
+                </button>
+              </div>
+            }
+          </div>
+        } @else if (paneEditorOpen()) {
+          <!-- Writing mode — the same embedded form, given the whole pane.
+               Editing a note or adding a fresh one both land here; save or
+               cancel puts the reader back. -->
           <div class="cv2-reading-editor">
             <div class="cv2-reading-kind" [class.is-q]="draftKind() === 'q'">
               <span class="mat-sym" aria-hidden="true">{{ editingNoteId() ? 'edit' : 'add' }}</span>
@@ -619,6 +738,7 @@
          be clicked on the canvas but are still listed here.
          Docked: a wrapping tag cloud under the editor. Desktop fullscreen:
          a vertical list in the left column (SCSS reflows it). -->
+    @if (isFullscreen() || tilesOpen() || !cell()) {
     <div class="cv2-tilelist">
       <div class="cv2-tilelist-filter">
         <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>
@@ -665,6 +785,7 @@
         }
       </div>
     </div>
+    }
 
     <!-- Invisible edge drag-handles. The left edge is the live resize
          edge when docked right; bottom + corner handle the floating panel. -->

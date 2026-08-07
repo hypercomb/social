@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitInTree, type Note } from './note-tree.js'
+import { addChildInTree, setTextInTree, splitInTree, type Note } from './note-tree.js'
 
 const note = (id: string, text: string, extra: Partial<Note> = {}): Note => ({
   id,
@@ -148,6 +148,117 @@ describe('splitInTree', () => {
 
     // The sibling branch is the SAME object — materializing it hits the
     // Store's content address and writes no new bytes.
+    expect(next[0]).toBe(sibling)
+    expect(next[1]).not.toBe(tree[1])
+  })
+})
+
+// ── The list interface's two writes ─────────────────────────────────────
+// A list is grown one line at a time (addChildInTree) and corrected in
+// place (setTextInTree). Both had to exist because `note:commit` can only
+// touch the cell's TOP-LEVEL slot, and a list item is nested by definition.
+
+describe('addChildInTree', () => {
+
+  it('appends the new line as the parent\'s last child', () => {
+    const tree = [note('a', 'shopping', { children: [note('a1', 'milk')] })]
+
+    const { tree: next, changed } = addChildInTree(tree, 'a', 'bread')
+
+    expect(changed).toBe(true)
+    expect(next[0].children.map(c => c.text)).toEqual(['milk', 'bread'])
+  })
+
+  it('gives the new line no id — it has no bytes yet, so no signature', () => {
+    const { tree: next } = addChildInTree([note('a', 'list')], 'a', 'first item')
+    expect(next[0].children[0].id).toBe('')
+  })
+
+  it('carries the mark the line was written with', () => {
+    const { tree: next } = addChildInTree([note('a', 'list')], 'a', 'item', 'check_box')
+    expect(next[0].children[0].mark).toBe('check_box')
+  })
+
+  it('grows a nested list at any depth', () => {
+    const tree = [note('a', 'top', { children: [note('a1', 'sub list')] })]
+
+    const { tree: next, changed } = addChildInTree(tree, 'a1', 'deep item')
+
+    expect(changed).toBe(true)
+    expect(next[0].children[0].children.map(c => c.text)).toEqual(['deep item'])
+  })
+
+  it('refuses a blank line and an unknown parent', () => {
+    const tree = [note('a', 'list')]
+    expect(addChildInTree(tree, 'a', '   ').changed).toBe(false)
+    expect(addChildInTree(tree, 'nope', 'item').changed).toBe(false)
+    expect(addChildInTree(tree, 'a', '   ').tree).toBe(tree)
+  })
+
+  it('never mutates the input tree or its nodes', () => {
+    const parent = note('a', 'list', { children: [note('a1', 'one')] })
+    const tree = [parent]
+
+    addChildInTree(tree, 'a', 'two')
+
+    expect(parent.children).toHaveLength(1)
+  })
+})
+
+describe('setTextInTree', () => {
+
+  it('retexts a NESTED note, keeping its children and position', () => {
+    const tree = [
+      note('a', 'first'),
+      note('b', 'list', { children: [note('b1', 'typo', { children: [note('b1a', 'kid')] }), note('b2', 'other')] }),
+    ]
+
+    const { tree: next, changed } = setTextInTree(tree, 'b1', 'fixed')
+
+    expect(changed).toBe(true)
+    expect(next.map(n => n.id)).toEqual(['a', 'b'])
+    const item = next[1].children[0]
+    expect(item.text).toBe('fixed')
+    expect(item.children.map(c => c.id)).toEqual(['b1a'])   // subtree survives
+    expect(next[1].children.map(n => n.id)).toEqual(['b1', 'b2'])  // position held
+  })
+
+  it('keeps the mark and the pheromones when only text is given', () => {
+    const tree = [note('a', 'old', { mark: 'lightbulb', tags: ['jwize.com:idea'] })]
+
+    const { tree: next } = setTextInTree(tree, 'a', 'new')
+
+    expect(next[0].mark).toBe('lightbulb')
+    expect(next[0].tags).toEqual(['jwize.com:idea'])
+  })
+
+  it('sets the mark too when the caller passes one', () => {
+    const { tree: next } = setTextInTree([note('a', 'old', { mark: 'lightbulb' })], 'a', 'new', 'check_box')
+    expect(next[0].mark).toBe('check_box')
+
+    const cleared = setTextInTree([note('a', 'old', { mark: 'lightbulb' })], 'a', 'new', null)
+    expect(cleared.tree[0].mark).toBeNull()
+  })
+
+  it('refuses a blank text — a blank is a delete, and the caller has to say so', () => {
+    const tree = [note('a', 'text')]
+    const { tree: next, changed } = setTextInTree(tree, 'a', '   ')
+    expect(changed).toBe(false)
+    expect(next).toBe(tree)
+  })
+
+  it('reports no change when the note already reads exactly that', () => {
+    const tree = [note('a', 'same')]
+    expect(setTextInTree(tree, 'a', 'same').changed).toBe(false)
+    expect(setTextInTree(tree, 'a', '  same  ').changed).toBe(false)
+  })
+
+  it('returns untouched subtrees by reference so re-materialization dedups them', () => {
+    const sibling = note('a', 'first', { children: [note('a1', 'kid')] })
+    const tree = [sibling, note('b', 'old')]
+
+    const { tree: next } = setTextInTree(tree, 'b', 'new')
+
     expect(next[0]).toBe(sibling)
     expect(next[1]).not.toBe(tree[1])
   })

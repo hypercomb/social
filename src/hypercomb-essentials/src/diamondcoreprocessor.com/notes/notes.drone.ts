@@ -31,6 +31,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import {
+  addChildInTree,
   insertAsChild,
   isNoteTag,
   normalizeMark,
@@ -39,6 +40,7 @@ import {
   removeFromTree,
   setMarkInTree,
   setTagInTree,
+  setTextInTree,
   splitInTree,
   subtreeContains,
   type Note,
@@ -186,6 +188,37 @@ export class NotesService {
       const mark = 'mark' in (payload as object) ? normalizeMark(payload.mark) : this.#activeMark
       void this.#commit(payload.cellLabel, text, shape, mark, payload.editId)
     })
+
+    // Add ONE new sub-note under an existing note — the list interface's
+    // whole write gesture (a list is built a line at a time, and every line
+    // is a child of the list's root). `note:commit` can only append at the
+    // TOP LEVEL, so without this a list item costs a commit plus a nest.
+    EffectBus.on<{ cellLabel: string; parentId: string; text: string; mark?: unknown }>(
+      'note:add-child',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.parentId) return
+        const text = (payload.text ?? '').trim()
+        if (!text) return
+        const mark = 'mark' in (payload as object) ? normalizeMark(payload.mark) : null
+        void this.#addChild(payload.cellLabel, payload.parentId, text, mark)
+      },
+    )
+
+    // Retext a note AT ANY DEPTH, keeping its children, its position, its
+    // pheromones and (unless the payload names one) its mark. The
+    // `note:commit` edit path can't: it rewrites the cell's top-level slot,
+    // so a nested note edited through it silently doesn't change and a
+    // parent edited through it loses its subtree.
+    EffectBus.on<{ cellLabel: string; noteId: string; text: string; mark?: unknown }>(
+      'note:retext',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.noteId) return
+        const text = (payload.text ?? '').trim()
+        if (!text) return
+        const mark = 'mark' in (payload as object) ? normalizeMark(payload.mark) : undefined
+        void this.#retext(payload.cellLabel, payload.noteId, text, mark)
+      },
+    )
 
     EffectBus.on<{ cellLabel: string; noteId: string }>('note:delete', (payload) => {
       if (!payload?.cellLabel || !payload?.noteId) return
@@ -481,6 +514,60 @@ export class NotesService {
   }
 
   /**
+   * Append ONE new sub-note under `parentId` at an explicit cell location.
+   * Headless equivalent of the `note:add-child` handler — the write a list
+   * makes for every line it grows by.
+   */
+  public async addChildAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    parentId: string,
+    text: string,
+    mark: string | null = null,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedParent = String(parentId ?? '').trim()
+    const cleanedText = String(text ?? '').trim()
+    if (!cleanedLabel || !cleanedParent || !cleanedText) return
+    await this.#addChildAtSegments(
+      [...cleanedParents, cleanedLabel],
+      cleanedParent,
+      cleanedText,
+      normalizeMark(mark),
+    )
+  }
+
+  /**
+   * Replace the TEXT of `noteId` at an explicit cell location, at any
+   * depth, keeping its children, position, pheromones and (unless `mark`
+   * is passed) its mark. Headless equivalent of the `note:retext` handler.
+   */
+  public async retextAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteId: string,
+    text: string,
+    mark?: string | null,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedSig = String(noteId ?? '').trim()
+    const cleanedText = String(text ?? '').trim()
+    if (!cleanedLabel || !cleanedSig || !cleanedText) return
+    await this.#retextAtSegments(
+      [...cleanedParents, cleanedLabel],
+      cleanedSig,
+      cleanedText,
+      mark === undefined ? undefined : normalizeMark(mark),
+    )
+  }
+
+  /**
    * Break `noteId` into a one-line head plus one sub-note per part, at an
    * explicit cell location. Headless equivalent of the `note:split`
    * EffectBus handler, and the call a bulk breakdown pass makes.
@@ -615,6 +702,69 @@ export class NotesService {
     // 4. Re-materialize the surviving tree from leaves up. The Store
     //    dedups by content sig, so unchanged subtrees produce identical
     //    sigs and don't write new bytes.
+    const rootSigs: string[] = []
+    for (const node of nextTree) {
+      rootSigs.push(await this.#materializeNote(node))
+    }
+    await this.#commitCellNotes(segments, () => rootSigs)
+  }
+
+  async #addChild(cellLabel: string, parentId: string, text: string, mark: string | null): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#addChildAtSegments(resolved.segments, parentId, text, mark)
+  }
+
+  /**
+   * Grow one node's children by one. Same shape as every other tree flow:
+   * read, transform purely, re-materialize from leaves up so untouched
+   * subtrees dedup back to their existing sigs, commit once — so a list
+   * grown a line at a time reads as one entry per line in history.
+   */
+  async #addChildAtSegments(
+    segments: readonly string[],
+    parentId: string,
+    text: string,
+    mark: string | null,
+  ): Promise<void> {
+    const locSig = await this.#locSig(segments)
+    const tree = await this.#readAtLocation(locSig)
+    const { tree: nextTree, changed } = addChildInTree(tree, parentId, text, mark)
+    if (!changed) return  // parent isn't in this cell
+    const rootSigs: string[] = []
+    for (const node of nextTree) {
+      rootSigs.push(await this.#materializeNote(node))
+    }
+    await this.#commitCellNotes(segments, () => rootSigs)
+  }
+
+  async #retext(
+    cellLabel: string,
+    noteId: string,
+    text: string,
+    mark: string | null | undefined,
+  ): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#retextAtSegments(resolved.segments, noteId, text, mark)
+  }
+
+  /**
+   * Retext one node of the cell's tree. Text (and optionally the mark) is
+   * all that changes: children, position, pheromones and legacy shape
+   * travel — the guarantee `#markNoteAtSegments` gives, and the reason the
+   * `note:commit` edit path can't serve a nested note.
+   */
+  async #retextAtSegments(
+    segments: readonly string[],
+    noteId: string,
+    text: string,
+    mark: string | null | undefined,
+  ): Promise<void> {
+    const locSig = await this.#locSig(segments)
+    const tree = await this.#readAtLocation(locSig)
+    const { tree: nextTree, changed } = setTextInTree(tree, noteId, text, mark)
+    if (!changed) return  // node not in this cell, or already reads exactly that
     const rootSigs: string[] = []
     for (const node of nextTree) {
       rootSigs.push(await this.#materializeNote(node))

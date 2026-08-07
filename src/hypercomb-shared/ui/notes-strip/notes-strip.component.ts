@@ -244,8 +244,22 @@ export class NotesStripComponent implements OnDestroy {
     this.tab.set(next)
     // A new tab is a new document — reading starts back at the top of it.
     this.readingIndex.set(0)
+    this.listPathIdx.set([])
+    this.cancelItemEdit()
     try { localStorage.setItem('hc:annotations-tab', next) } catch { /* ignore */ }
   }
+
+  /**
+   * WHICH TILE is a header question, not a pane. The window is two panes —
+   * the note, then the notes — so the tile navigator no longer sits under
+   * them competing for the same third; it opens over the selector from the
+   * header, picks a tile, and closes. On the desk it stays the permanent
+   * left column it already was (the grid has room), so this flag only
+   * governs the docked stack.
+   */
+  readonly tilesOpen = signal(false)
+
+  toggleTiles(): void { this.tilesOpen.update(v => !v) }
 
   // ── Reading pane (fullscreen) ─────────────────────────────
   // Fullscreen is the desk: navigator left, tree centre, and THIS on the
@@ -319,8 +333,14 @@ export class NotesStripComponent implements OnDestroy {
   /** Mirrors the desk's CSS breakpoint ($bp-tablet-land). */
   readonly deskWide = signal<boolean>(window.matchMedia('(min-width: 1024px)').matches)
 
-  /** True when the pane exists — the form renders THERE, not the centre. */
-  readonly formInPane = computed<boolean>(() => this.isFullscreen() && this.deskWide())
+  /** True when the pane exists — the form renders THERE, not the centre.
+   *
+   *  The DOCKED window is now the same shape as the desk, stacked: header,
+   *  then the pane (the selected note, read and written in ONE surface,
+   *  given the room), then the tree as the selector along the bottom. The
+   *  only layout without a pane is NARROW fullscreen, where there isn't
+   *  width for one — there the form stays in the column. */
+  readonly formInPane = computed<boolean>(() => !this.isFullscreen() || this.deskWide())
 
   /** Pane mode: false = reading, true = the editor fills the pane. */
   readonly paneEditorOpen = signal(false)
@@ -361,6 +381,257 @@ export class NotesStripComponent implements OnDestroy {
     const noteId = this.readingRow()?.note.id
     if (!cell || !noteId) return
     this.editNote(noteId, cell)
+  }
+
+  // ── The LISTS interface ───────────────────────────────────
+  // Lists are not prose and do not want the prose surface. A list is a
+  // title and a column of one-liners, and it is built ONE LINE AT A TIME:
+  // type, Enter, type, Enter. So the lists tab keeps the shared bottom
+  // selector and replaces the pane entirely with this.
+  //
+  // WHICH list is addressed BY POSITION, never by id: every write re-signs
+  // the note it touched and every ancestor (new bytes, new sig), so an id
+  // held across a commit is a dangling id. A path of child indices survives
+  // the write — the list at position [2] is still the list at position [2].
+
+  /** Index path from the visible roots down to the open list. Empty = the
+   *  first list on the tab, so the pane is never blank when there is
+   *  something to show. */
+  readonly listPathIdx = signal<readonly number[]>([])
+
+  /** The path actually in force — the stored one, or the first list on the
+   *  tab when nothing has been picked yet, so the pane is never blank while
+   *  there is something to show. */
+  readonly listPath = computed<readonly number[]>(() => {
+    const stored = this.listPathIdx()
+    if (stored.length > 0) return stored
+    return this.visibleNotes().length > 0 ? [0] : []
+  })
+
+  /** The open list — the note whose children are the lines. Clamped on read:
+   *  an edit can shrink the tree under it. */
+  readonly listRoot = computed<Note | null>(() => {
+    const roots = this.visibleNotes()
+    if (roots.length === 0) return null
+    let nodes: readonly Note[] = roots
+    let node: Note | null = null
+    for (const i of this.listPath()) {
+      const pick = nodes[Math.min(i, nodes.length - 1)]
+      if (!pick) break
+      node = pick
+      nodes = pick.children
+    }
+    return node
+  })
+
+  /** The lines of the open list. */
+  readonly listItems = computed<readonly Note[]>(() => this.listRoot()?.children ?? [])
+
+  /** Titles of the open list's ancestors — the trail back out of a nested
+   *  list. Empty when the open list is a root. */
+  readonly listTrail = computed<readonly string[]>(() => {
+    const out: string[] = []
+    let nodes: readonly Note[] = this.visibleNotes()
+    const path = this.listPath()
+    for (let d = 0; d < path.length - 1; d++) {
+      const pick = nodes[Math.min(path[d]!, nodes.length - 1)]
+      if (!pick) break
+      out.push(this.noteDisplayText(pick))
+      nodes = pick.children
+    }
+    return out
+  })
+
+  /** Open the list at `path`. A line with children IS a list (click it to
+   *  go in); a leaf line opens the list it belongs to instead. */
+  openListPath(path: readonly number[]): void {
+    const node = this.#noteAtPath(path)
+    const next = node && node.children.length > 0 ? path : path.slice(0, -1)
+    this.listPathIdx.set([...next])
+    this.cancelItemEdit()
+  }
+
+  /** Go INTO the line at `index` — a line with children is itself a list. */
+  enterItem(index: number): void {
+    this.openListPath([...this.listPath(), index])
+  }
+
+  /** Step out to the list that contains this one. */
+  exitList(): void {
+    this.listPathIdx.set(this.listPath().slice(0, -1))
+    this.cancelItemEdit()
+  }
+
+  #noteAtPath(path: readonly number[]): Note | null {
+    let nodes: readonly Note[] = this.visibleNotes()
+    let node: Note | null = null
+    for (const i of path) {
+      const pick = nodes[i]
+      if (!pick) return null
+      node = pick
+      nodes = pick.children
+    }
+    return node
+  }
+
+  /** The new-line input at the foot of the list — the whole write gesture.
+   *  It never closes: commit clears it and leaves the caret in it, so the
+   *  next line is just more typing. */
+  readonly newItemText = signal('')
+
+  /** The open line itself. Held because the field has to be cleared by HAND:
+   *  a commit sets the signal back to the value the binding last WROTE (''),
+   *  so Angular sees no change and leaves the user's text sitting in the DOM
+   *  — the line would appear to have been added twice. */
+  readonly newLineInput = viewChild<ElementRef<HTMLInputElement>>('newLineInput')
+
+  #clearNewLine(): void {
+    this.newItemText.set('')
+    const el = this.newLineInput()?.nativeElement
+    if (!el) return
+    el.value = ''
+    el.focus()
+  }
+
+  onNewItemInput(event: Event): void {
+    this.newItemText.set((event.target as HTMLInputElement).value)
+  }
+
+  onNewItemKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      this.commitNewItem()
+      return
+    }
+    if (event.key === 'Escape' && this.newItemText()) {
+      event.preventDefault(); event.stopPropagation()
+      this.#clearNewLine()
+    }
+  }
+
+  /** Enter on the new-line input — one more line on the open list. */
+  commitNewItem(): void {
+    const cellLabel = this.cell()
+    const root = this.listRoot()
+    const text = this.newItemText().trim()
+    if (!cellLabel || !root || !text) return
+    EffectBus.emit('note:add-child', { cellLabel, parentId: root.id, text, mark: null })
+    this.#paintChildOptimistic(cellLabel, root.id, text)
+    this.#clearNewLine()
+  }
+
+  // ── Editing one line, in place ────────────────────────────
+  // A line is one line: it is corrected where it sits, not in a form
+  // somewhere else. Enter saves, Esc reverts, blur saves (the same
+  // contract a spreadsheet cell has).
+
+  readonly editingItemId = signal<string | null>(null)
+  readonly itemDraft = signal('')
+
+  startItemEdit(item: Note, event?: Event): void {
+    event?.stopPropagation()
+    this.editingItemId.set(item.id)
+    this.itemDraft.set(this.noteDisplayText(item))
+  }
+
+  onItemInput(event: Event): void {
+    this.itemDraft.set((event.target as HTMLInputElement).value)
+  }
+
+  onItemKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      this.commitItemEdit()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation()
+      this.cancelItemEdit()
+    }
+  }
+
+  /** Save the line. Routed through `note:retext`, NOT the note form's
+   *  commit: a line is nested by definition, and the commit path can only
+   *  rewrite a cell's top-level entry. */
+  commitItemEdit(): void {
+    const cellLabel = this.cell()
+    const noteId = this.editingItemId()
+    const text = this.itemDraft().trim()
+    if (!cellLabel || !noteId) return
+    if (!text) { this.cancelItemEdit(); return }
+    EffectBus.emit('note:retext', { cellLabel, noteId, text })
+    this.#paintTextOptimistic(cellLabel, noteId, text)
+    this.cancelItemEdit()
+  }
+
+  cancelItemEdit(): void {
+    this.editingItemId.set(null)
+    this.itemDraft.set('')
+  }
+
+  /** Rename the open list itself — same in-place gesture as a line. */
+  startListRename(event?: Event): void {
+    const root = this.listRoot()
+    if (root) this.startItemEdit(root, event)
+  }
+
+  /** "+ new list" — a fresh empty list at the top level. It has to be born
+   *  carrying a list-role mark: classification reads the mark (or children,
+   *  and a new list has none), so an unmarked new list would be filed on the
+   *  notes tab and vanish from the tab that made it. */
+  newList(): void {
+    const cellLabel = this.cell()
+    if (!cellLabel) return
+    const i18n = this.i18n
+    const title = i18n?.t('notes.lists.newTitle') ?? 'new list'
+    const mark = this.#listMark()
+    EffectBus.emit('note:commit', { cellLabel, text: title, mark })
+    this.#paintOptimistic(cellLabel, title, null, mark)
+    // The optimistic root is appended last, so the new list is the last
+    // entry of the tab — open it and put the caret on its first line.
+    this.listPathIdx.set([Math.max(0, this.visibleNotes().length - 1)])
+    this.cancelItemEdit()
+  }
+
+  /** A mark whose ROLE is list (or heading), minting one into the palette
+   *  if the participant has emptied it. Never a hardcoded per-feature icon:
+   *  whatever they have said means "list" is what a new list carries. */
+  #listMark(): string | null {
+    const marks = this.marks()
+    const listy = marks.find(m => m.role === 'list') ?? marks.find(m => m.role === 'heading')
+    if (listy) return listy.icon
+    const store = this.#markStore
+    if (!store) return null
+    store.add('checklist', 'list')
+    return 'checklist'
+  }
+
+  /** Paint a just-added line immediately — same contract as
+   *  `#paintOptimistic`: the reconcile that follows replaces it. */
+  #paintChildOptimistic(cell: string, parentId: string, text: string): void {
+    const pending: Note = { id: `pending-${++this.#pendingSeq}`, text, shape: null, mark: null, children: [] }
+    const walk = (nodes: readonly Note[]): Note[] =>
+      nodes.map(n => (n.id === parentId
+        ? { ...n, children: [...n.children, pending] }
+        : { ...n, children: walk(n.children) }))
+    this.#notesByCell.update(prev => {
+      const next = new Map(prev)
+      next.set(cell, walk(next.get(cell) ?? []))
+      return next
+    })
+    this.#version.update(v => v + 1)
+  }
+
+  /** Paint a just-saved line immediately, at any depth. */
+  #paintTextOptimistic(cell: string, noteId: string, text: string): void {
+    const walk = (nodes: readonly Note[]): Note[] =>
+      nodes.map(n => (n.id === noteId ? { ...n, text } : { ...n, children: walk(n.children) }))
+    this.#notesByCell.update(prev => {
+      const next = new Map(prev)
+      next.set(cell, walk(next.get(cell) ?? []))
+      return next
+    })
+    this.#version.update(v => v + 1)
   }
 
   /**
@@ -772,10 +1043,10 @@ export class NotesStripComponent implements OnDestroy {
 
   toggleFullscreen(): void {
     this.isFullscreen.update(v => !v)
-    // Entering with an edit in flight carries it into the pane, big — that
-    // is the whole point of the desk. Leaving always closes the pane editor;
-    // docked, the centre form is back and always visible.
-    this.paneEditorOpen.set(this.isFullscreen() && !!this.editingNoteId())
+    // An edit in flight rides across the switch: the pane exists on both
+    // sides now, so it stays open. Only narrow fullscreen has no pane —
+    // there the form is back in the column and the flag has to be off.
+    this.paneEditorOpen.set(this.formInPane() && !!this.editingNoteId())
     EffectBus.emit('notes:expand-to-index', { cellLabel: this.cell(), fullscreen: this.isFullscreen() })
     // Fullscreen changes the panel width by the largest jump there is —
     // re-measure once the class has landed so the plate follows immediately.
@@ -798,12 +1069,18 @@ export class NotesStripComponent implements OnDestroy {
     this.#layerCellLabels.set(provider ? [...provider.suggestions()] : [])
   }
 
-  /** Click a row's body. Fullscreen, the click SELECTS — the note lands in
-   *  the reading pane, and editing is the pane's explicit affordance.
-   *  Docked, there is no pane, so the click opens the embedded editor as
-   *  it always has. */
-  onRowBodyClick(cellLabel: string, noteId: string, _event: Event): void {
-    if (this.isFullscreen()) {
+  /** Click a row's body. Wherever the pane exists — docked and on the desk
+   *  alike — the click SELECTS: the note lands in the pane, and editing is
+   *  the pane's own affordance. Narrow fullscreen has no pane, so there the
+   *  click opens the embedded editor as it always has. */
+  onRowBodyClick(cellLabel: string, noteId: string, _event: Event, path?: readonly number[]): void {
+    // The lists tab has its own pane — a row click there picks WHICH LIST
+    // (or which list an item belongs to), never the prose editor.
+    if (this.tab() === 'lists' && path) {
+      this.openListPath(path)
+      return
+    }
+    if (this.formInPane()) {
       this.selectForReading(noteId)
       // A PRISTINE pane editor (add mode, nothing typed) yields to reading —
       // the click says "show me that one". Anything in flight is kept: a
@@ -1516,6 +1793,14 @@ export class NotesStripComponent implements OnDestroy {
     this.editingNoteId.set(null)
     this.draftText.set('')
     this.#activeCell.set(cell)
+    // A different tile is a different document: back to its first list, its
+    // first note, and no half-typed line carried across.
+    this.listPathIdx.set([])
+    this.readingIndex.set(0)
+    this.cancelItemEdit()
+    this.#clearNewLine()
+    // Picked from the navigator overlay — the question it answered is done.
+    this.tilesOpen.set(false)
   }
 
   /**

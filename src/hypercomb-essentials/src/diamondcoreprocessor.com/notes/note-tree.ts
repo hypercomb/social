@@ -320,6 +320,98 @@ export function setTagInTree(
 }
 
 /**
+ * Return a new tree with the first occurrence of `noteId` carrying `text`
+ * (and `mark`, when the caller passes one) — the text counterpart of
+ * `setMarkInTree`, immutable in the same reference-preserving way.
+ *
+ * This is how a note is RETEXTED at any depth. The `note:commit` edit path
+ * can only rewrite a TOP-LEVEL entry (it swaps one sig in the cell's root
+ * slot and writes a childless layer), so editing a nested note through it
+ * silently does nothing and editing a parent drops its children. A list
+ * item is nested by definition, so the list interface needs this.
+ *
+ * `changed` is false when the node isn't in the tree, when the trimmed text
+ * is empty (a blank is a delete, and the caller has to say so explicitly),
+ * or when nothing about the node would actually differ.
+ */
+export function setTextInTree(
+  tree: readonly Note[],
+  noteId: string,
+  text: string,
+  mark?: string | null,
+): { tree: readonly Note[]; changed: boolean } {
+  const clean = String(text ?? '').trim()
+  if (!clean) return { tree, changed: false }
+  const nextMark = mark === undefined ? undefined : normalizeMark(mark)
+  let changed = false
+  let found = false
+  const walk = (nodes: readonly Note[]): readonly Note[] => {
+    let mutated = false
+    const next: Note[] = []
+    for (const n of nodes) {
+      if (found) {
+        next.push(n)
+        continue
+      }
+      if (n.id === noteId) {
+        found = true
+        const sameText = n.text === clean
+        const sameMark = nextMark === undefined || n.mark === nextMark
+        if (sameText && sameMark) {
+          next.push(n)
+        } else {
+          changed = true
+          mutated = true
+          next.push({ ...n, text: clean, mark: nextMark === undefined ? n.mark : nextMark })
+        }
+        continue
+      }
+      const newChildren = walk(n.children)
+      if (newChildren !== n.children) {
+        mutated = true
+        next.push({ ...n, children: newChildren as Note[] })
+      } else {
+        next.push(n)
+      }
+    }
+    return mutated ? next : nodes
+  }
+  const nextTree = walk(tree)
+  return { tree: nextTree, changed }
+}
+
+/**
+ * Append a BRAND NEW child under the first occurrence of `parentId` — the
+ * one-line-at-a-time gesture the list interface is built on.
+ *
+ * `insertAsChild` moves an EXISTING node; this one mints a node that has no
+ * bytes yet (empty `id`, like `splitInTree`'s parts — the caller's
+ * materialization walk derives the real signature when it writes it).
+ *
+ * `changed` is false when the parent isn't in the tree or the text trims to
+ * nothing, so an accidental Enter on an empty line never mints a revision.
+ */
+export function addChildInTree(
+  tree: readonly Note[],
+  parentId: string,
+  text: string,
+  mark?: string | null,
+): { tree: readonly Note[]; changed: boolean } {
+  const clean = String(text ?? '').trim()
+  if (!clean || !parentId) return { tree, changed: false }
+  const node: Note = {
+    id: UNWRITTEN,
+    text: clean,
+    shape: null,
+    mark: normalizeMark(mark),
+    tags: [],
+    children: [],
+  }
+  const { tree: nextTree, placed } = insertAsChild(tree, parentId, node)
+  return { tree: nextTree, changed: placed }
+}
+
+/**
  * Break the first occurrence of `noteId` into a one-line head plus one
  * sub-note per part, IN PLACE.
  *
