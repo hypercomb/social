@@ -37,7 +37,7 @@ import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directiv
 import { signalSession } from '../window-session'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
-import { setKindGlobalOn } from './behavior-enablement'
+import { setKindGlobalOn, ENABLEMENT_CHANGED } from './behavior-enablement'
 import { enableAggregation, disableAggregation, listAggregation } from '../../core/aggregation-layer'
 
 /** A feature applied to the tile — a decoration (or slot) it carries. */
@@ -264,9 +264,28 @@ export class FeaturesViewerComponent implements OnDestroy {
     EffectBus.emit('features:roster-open', {})
   }
 
-  /** Leave the store back to the per-tile surface. */
+  /** Leave the store back to the per-tile surface. The group's rows carry
+   *  the dormant/global-off marks computed when the group was OPENED — any
+   *  switch flipped in the store made them stale, so re-request the group
+   *  rather than showing rows that should have disappeared (dormant means
+   *  gone) or offers that should have been withdrawn. */
   readonly closeStore = (): void => {
-    if (this.mode() === 'store') this.mode.set('tile')
+    if (this.mode() !== 'store') return
+    this.mode.set('tile')
+    this.#refreshGroup()
+  }
+
+  /** Re-request the current group so the drone re-marks its rows (fresh
+   *  dormant/global-off state). Same pipeline follow-navigation uses; the
+   *  root group re-targets with `root: true` (segments [] is the hive). */
+  #refreshGroup(): void {
+    const g = this.group()
+    if (!g) return
+    if (g.segments.length === 0) {
+      EffectBus.emit('tile:action', { action: 'features', label: g.cell, segments: [], root: true })
+      return
+    }
+    EffectBus.emit('tile:action', { action: 'features', label: g.cell, segments: [...g.segments] })
   }
 
   /** The behaviour kinds loaded in the brush (paint mode). */
@@ -390,6 +409,15 @@ export class FeaturesViewerComponent implements OnDestroy {
       ),
       EffectBus.on('feature:activation-settled', () => {
         if (this.visible()) void this.#refreshHidden()
+      }),
+      // An enablement flip (roster switch, wake-here, publisher-withheld
+      // record at adopt) re-marks the open tile group — its rows filter on
+      // dormant/global-off, and those flags only exist at group-open time.
+      // Tile mode only: while IN the store the rows are the switches
+      // themselves, and a features:open arriving would yank the panel out
+      // of the store mid-flip (closeStore refreshes on the way back).
+      EffectBus.on(ENABLEMENT_CHANGED, () => {
+        if (this.visible() && this.mode() === 'tile') this.#refreshGroup()
       }),
     )
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {

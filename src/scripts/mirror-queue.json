@@ -343,6 +343,15 @@
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
+    },
+    {
+      "id": "beehaviors-roster-flip-refresh",
+      "title": "Note the roster-flip refresh on the Beehaviors tile",
+      "run": null,
+      "note": "One switch, one meaning — and one truth across both views: flipping a behavior on the GLOBAL roster now re-marks the per-tile view immediately. The tile group's rows carry their dormant/global-off marks from group-open time, so leaving the store re-requests the group (closeStore refresh) and any enablement change (roster switch, wake-here, publisher-withheld record) refreshes an open tile group in place. Dormant means gone: an attached behavior turned off globally disappears from the tile view AND stops acting on the canvas (view.bee falls back to hexagons, toggles and offers withdraw); its decorations stay on the tile untouched, so re-enabling globally brings everything straight back.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
     }
   ]
 }
