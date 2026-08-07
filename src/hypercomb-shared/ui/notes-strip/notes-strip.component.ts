@@ -2026,11 +2026,18 @@ export class NotesStripComponent implements OnDestroy {
    * cannot click a row in: the moment you set off towards it you have left
    * the row that opened it. So selection pins it.
    */
-  readonly peekCell = computed<string | null>(() => this.hoverCell() ?? this.cell())
+  readonly peekCell = computed<string | null>(
+    () => this.hoverCell() ?? (this.isFullscreen() ? null : this.cell()))
 
   /** True when the card belongs to the selected tile — pointer-events on,
-   *  rows clickable, no truncation. */
-  readonly peekPinned = computed<boolean>(() => !this.hoverCell() && !!this.cell())
+   *  rows clickable, no truncation.
+   *
+   *  NEVER on the desk. Fullscreen already shows the whole tree in its own
+   *  column, so a card of the same notes floating over it is a second copy
+   *  of the answer. (The HOVER peek stays: that is a look at a tile you have
+   *  NOT selected, which the desk has no other way to give you.) */
+  readonly peekPinned = computed<boolean>(
+    () => !this.hoverCell() && !!this.cell() && !this.isFullscreen())
 
   readonly hoverNotes = computed<readonly { id: string; text: string; kind: 'q' | 'a' | 'note'; mark: string | null; depth: number }[]>(() => {
     const cell = this.peekCell()
