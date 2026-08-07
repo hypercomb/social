@@ -812,6 +812,10 @@
                   (pointerenter)="onChipEnter(t.cell, $event)"
                   (pointerleave)="onChipLeave()"
                   (click)="activateCell(t.cell)" [title]="t.cell">
+            <!-- The tile's own hexagon, carrying its initial — the same
+                 shape the canvas paints and the same shape a mark wears, so
+                 a row of tiles reads as tiles. -->
+            <span class="cv2-tilechip-hex" aria-hidden="true">{{ initialOf(t.cell) }}</span>
             <span class="cv2-tilechip-name">{{ t.cell }}</span>
             @if (t.count > 0) {
               <span class="cv2-tilechip-count" aria-hidden="true">{{ t.count }}</span>

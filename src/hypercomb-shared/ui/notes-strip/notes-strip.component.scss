@@ -1868,6 +1868,34 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
     border-color: color-mix(in srgb, #{$steel} 55%, transparent);
   }
 }
+// The hexagon on the left of a tile row. Same shape language as the marks
+// and the canvas — a list of tiles should look like a list of tiles, not a
+// list of words. The initial stands in for the tile's picture, which would
+// cost a props hop and a blob per row to resolve.
+.cv2-tilechip-hex {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 20px;
+  margin-right: 2px;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background:
+    linear-gradient(160deg, rgba($steel, 0.26), rgba($steel, 0.07) 60%),
+    rgba(255, 255, 255, 0.03);
+  color: color-mix(in srgb, #{$steel} 75%, white);
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1;
+
+  .cv2-tilechip.is-active & {
+    background:
+      linear-gradient(160deg, color-mix(in srgb, var(--md-secondary) 45%, transparent), transparent 65%),
+      rgba(255, 255, 255, 0.05);
+    color: var(--md-on-surface-strong, white);
+  }
+}
+
 .cv2-tilechip-name {
   flex: 1 1 auto;
   min-width: 0;

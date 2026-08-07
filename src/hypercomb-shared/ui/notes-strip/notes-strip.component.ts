@@ -1789,6 +1789,12 @@ export class NotesStripComponent implements OnDestroy {
       .map(cell => ({ cell, count: this.#cellCount(cell) }))
   })
 
+  /** First letter of a tile's name, for the hexagon on its row. Mirrors the
+   *  identity plate's fallback, so a tile reads the same in both places. */
+  initialOf(cell: string): string {
+    return (cell ?? '').trim().charAt(0).toUpperCase() || '·'
+  }
+
   /** Make `cell` the active tile — its notes open in the editor above the
    *  list. Clears any in-progress edit so switching tiles starts clean. The
    *  list-click counterpart to clicking the tile on the canvas. */
