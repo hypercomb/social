@@ -14,6 +14,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // keeps its own edge handles and width store (`ownsSize` false) — see the
 // directive's header.
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { type WindowSession } from '../window-session'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { fromRuntime } from '../../core/from-runtime'
 import {
@@ -26,6 +27,9 @@ import {
   type NoteMarksStore,
 } from '../../core/note-marks.store'
 import { requestIconPick } from '../../core/icon-pick'
+// The reading cycle's wrap arithmetic — shared with the standalone reader so
+// prev/next behave identically wherever notes are read.
+import { stepIndex } from '../notes-viewer/note-cycle'
 
 // Correlation token for this window's requests to the shared icon chooser
 // (see core/icon-pick.ts). The chooser also serves the tile-icon override
@@ -90,6 +94,9 @@ type Note = {
   /** Material icon name from the participant's mark palette. Supersedes
    *  `shape`; notes written before marks existed carry only a shape. */
   mark: string | null
+  /** Pheromones on the note itself. Older services predate the slot, so
+   *  reads go through `readingTags()` rather than touching it directly. */
+  tags?: string[]
   children: Note[]
 }
 
@@ -221,6 +228,116 @@ export class NotesStripComponent implements OnDestroy {
   readonly mode = signal<'chips' | 'rows'>(
     (localStorage.getItem('hc:notes-strip-mode') as 'chips' | 'rows' | null) ?? 'rows'
   )
+
+  /**
+   * Which tab of the ANNOTATIONS WINDOW is showing — `notes` is the editor
+   * this strip has always been, `lists` is the embedded aggregate index
+   * (Collections & friends). One window, one rail icon; the tab is the only
+   * mode switch. Persisted so the window reopens the way it was left.
+   */
+  readonly tab = signal<'notes' | 'lists'>(
+    (localStorage.getItem('hc:annotations-tab') as 'notes' | 'lists' | null) ?? 'notes'
+  )
+
+  setTab(next: 'notes' | 'lists'): void {
+    if (next === this.tab()) return
+    this.tab.set(next)
+    // A new tab is a new document — reading starts back at the top of it.
+    this.readingIndex.set(0)
+    try { localStorage.setItem('hc:annotations-tab', next) } catch { /* ignore */ }
+  }
+
+  // ── Reading pane (fullscreen) ─────────────────────────────
+  // Fullscreen is the desk: navigator left, tree centre, and THIS on the
+  // right — the selected note, big. Clicking a row in the tree focuses it
+  // here; prev/next walk the visible tree depth-first and WRAP at both
+  // ends (the cycle the standalone reader established — note-cycle.ts).
+  // The pane follows the active tab: on `lists` it reads the lists.
+
+  /** Which row of the flattened visible tree the pane is showing. Clamped
+   *  on read, never trusted — an edit can shrink the tree under it, and
+   *  re-reading by POSITION is what keeps the pane steady across a write
+   *  (the note at row 3 is still the note at row 3). */
+  readonly readingIndex = signal(0)
+
+  /** The active tab's tree, flattened depth-first — parent, then its
+   *  children in order, recursively. This IS the reading order. Collapse
+   *  state is deliberately ignored: reading sees the whole document. */
+  readonly readingRows = computed<readonly { note: Note; depth: number }[]>(() => {
+    const out: { note: Note; depth: number }[] = []
+    const walk = (nodes: readonly Note[], depth: number): void => {
+      for (const n of nodes) { out.push({ note: n, depth }); walk(n.children, depth + 1) }
+    }
+    walk(this.visibleNotes(), 0)
+    return out
+  })
+
+  /** The note under the big glyph. Null only when the tab is empty. */
+  readonly readingRow = computed<{ note: Note; depth: number } | null>(() => {
+    const rows = this.readingRows()
+    if (rows.length === 0) return null
+    return rows[Math.min(this.readingIndex(), rows.length - 1)] ?? null
+  })
+
+  /** 1-based position for the "3 / 11" readout between prev/next. */
+  readonly readingPosition = computed<number>(() => {
+    const rows = this.readingRows()
+    return rows.length === 0 ? 0 : Math.min(this.readingIndex(), rows.length - 1) + 1
+  })
+
+  /** Ancestor texts of the reading note — the breadcrumb that says WHERE
+   *  in the hierarchy the big note sits. Empty for roots. */
+  readonly readingPath = computed<readonly string[]>(() => {
+    const target = this.readingRow()?.note.id
+    if (!target) return []
+    const walk = (nodes: readonly Note[], trail: readonly string[]): readonly string[] | null => {
+      for (const n of nodes) {
+        if (n.id === target) return trail
+        const found = walk(n.children, [...trail, this.noteDisplayText(n)])
+        if (found) return found
+      }
+      return null
+    }
+    return walk(this.visibleNotes(), []) ?? []
+  })
+
+  /** Click a tree row while fullscreen → read it here. */
+  selectForReading(noteId: string): void {
+    const idx = this.readingRows().findIndex(r => r.note.id === noteId)
+    if (idx >= 0) this.readingIndex.set(idx)
+  }
+
+  /** Step the pane. WRAPS in both directions — a cycle, not a list with
+   *  ends, so neither button ever disables. */
+  stepReading(delta: number): void {
+    const n = this.readingRows().length
+    if (n === 0) return
+    this.readingIndex.set(stepIndex(this.readingIndex(), delta, n))
+  }
+
+  /** Pheromones on a note. Notes written before the slot existed simply
+   *  have none. */
+  readingTags(note: Note | null | undefined): readonly string[] {
+    return Array.isArray(note?.tags) ? note!.tags! : []
+  }
+
+  /** Take one pheromone off the reading note (its chip's ×). */
+  removeReadingTag(tag: string, event?: Event): void {
+    event?.stopPropagation()
+    const cellLabel = this.cell()
+    const noteId = this.readingRow()?.note.id
+    if (!cellLabel || !noteId) return
+    EffectBus.emit('note:tag', { cellLabel, noteId, tag, add: false })
+  }
+
+  /** Edit the reading note — loads it into the embedded form in the
+   *  centre column (questions route to the tile editor, as everywhere). */
+  editReading(): void {
+    const cell = this.cell()
+    const noteId = this.readingRow()?.note.id
+    if (!cell || !noteId) return
+    this.editNote(noteId, cell)
+  }
 
   /**
    * Kind filter — `all` (default) shows every entry, `q` only open questions,
@@ -653,8 +770,15 @@ export class NotesStripComponent implements OnDestroy {
     this.#layerCellLabels.set(provider ? [...provider.suggestions()] : [])
   }
 
-  /** Click a row's body — opens the note in the embedded editor. */
+  /** Click a row's body. Fullscreen, the click SELECTS — the note lands in
+   *  the reading pane, and editing is the pane's explicit affordance.
+   *  Docked, there is no pane, so the click opens the embedded editor as
+   *  it always has. */
   onRowBodyClick(cellLabel: string, noteId: string, _event: Event): void {
+    if (this.isFullscreen()) {
+      this.selectForReading(noteId)
+      return
+    }
     this.open(noteId, cellLabel)
   }
 
@@ -1220,12 +1344,32 @@ export class NotesStripComponent implements OnDestroy {
   }
   clearNoteQuery(): void { this.noteQuery.set('') }
 
-  /** The active tile's note tree, pruned to the search query. Each surviving
-   *  node is a shallow copy with its children likewise pruned, so the recursive
-   *  row template renders the filtered tree without mutating the source. */
+  /** Does this root belong on the LISTS tab? A list is STRUCTURE: a root
+   *  carrying a heading/list mark, or a root with children (a tree IS a
+   *  hierarchical list). Questions and answers are conversation, so they stay
+   *  with the notes tab whatever their shape. Unmarked leaves are plain
+   *  notes — `roleOf()` defaults unmarked rows to 'list' for ROW STYLING, so
+   *  the mark is read directly here instead of through that default. */
+  #isListRoot(note: Note): boolean {
+    const kind = this.noteKind(note)
+    if (kind === 'q' || kind === 'a') return false
+    if (note.children.length > 0) return true
+    if (!note.mark) return false
+    // Unknown icons fall back to 'list', matching the row renderer.
+    const role = this.#markStore?.roleOf(note.mark) ?? 'list'
+    return role === 'heading' || role === 'list'
+  }
+
+  /** The active tile's note tree — split by the annotations tab (prose and
+   *  conversation on `notes`, structured lists on `lists`), then pruned to
+   *  the search query. Each surviving node is a shallow copy with its
+   *  children likewise pruned, so the recursive row template renders the
+   *  filtered tree without mutating the source. Only ROOTS are classified:
+   *  a list's prose children belong to their list, not to the other tab. */
   readonly visibleNotes = computed<readonly Note[]>(() => {
     const q = this.noteQuery().trim().toLowerCase()
-    const all = this.notes()
+    const wantLists = this.tab() === 'lists'
+    const all = this.notes().filter(n => this.#isListRoot(n) === wantLists)
     if (!q) return all
     const prune = (nodes: readonly Note[]): Note[] => {
       const out: Note[] = []
@@ -1582,7 +1726,19 @@ export class NotesStripComponent implements OnDestroy {
    * the sole on/off control. When open with no active tile, the panel still
    * shows so the always-on tile list is available to find and pick one.
    */
-  readonly visible = computed<boolean>(() => this.#open() || !!this.#capturingFor())
+  readonly visible = computed<boolean>(() => !this.#parked() && (this.#open() || !!this.#capturingFor()))
+
+  /** Put away while the hive is covered (the installer). A flag OVER the
+   *  visibility rather than a write to `#open`: the strip also shows while
+   *  authoring, so clearing the toggle alone would leave a half-typed note
+   *  floating on top of the installer — and the draft is exactly what has to
+   *  survive the round trip. */
+  readonly #parked = signal<boolean>(false)
+
+  readonly session: WindowSession = {
+    park: () => this.#parked.set(true),
+    unpark: () => this.#parked.set(false),
+  }
 
   #cleanups: (() => void)[] = []
   #selectionListener: (() => void) | null = null
@@ -1612,6 +1768,13 @@ export class NotesStripComponent implements OnDestroy {
   #hoverActive = false
 
   constructor() {
+    // A different tile is a different document — the reading pane starts
+    // back at its top. `untracked` so the write never joins the read graph.
+    effect(() => {
+      this.cell()
+      untracked(() => this.readingIndex.set(0))
+    })
+
     // Folder navigation invalidates NotesService's cell-locationSig cache
     // (the same label resolves differently per folder), so notesFor() will
     // start returning [] for previously-warmed cells until getNotes runs
@@ -1836,6 +1999,10 @@ export class NotesStripComponent implements OnDestroy {
     // line stays free for a future quick-note syntax.
     this.#cleanups.push(EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string }>('note:capture', (p) => {
       if (!p?.cellLabel) return
+      // External capture affordances mean "write a NOTE" — land on the notes
+      // tab so the row just written is in front of the participant (a prose
+      // commit made from the lists tab would vanish into the other tab).
+      this.setTab('notes')
       if (p.editId) { this.editNote(p.editId, p.cellLabel); return }
       this.#openForm(p.cellLabel, { prefill: p.prefill })
     }))
@@ -1888,7 +2055,9 @@ export class NotesStripComponent implements OnDestroy {
     // tile is selected. Last-value replayed by EffectBus, so a late-mounting
     // control bar reflects the current state. Mirrors `clipboard:open`.
     effect(() => {
-      EffectBus.emit('notes:panel-state', { open: this.#open() })
+      // Parked (the installer is covering the hive) reads as shut here too, so
+      // the button doesn't sit lit for a strip that isn't on screen.
+      EffectBus.emit('notes:panel-state', { open: this.#open() && !this.#parked() })
     })
 
     // Warm the decoded-set cache for the active cell AND every tile in the

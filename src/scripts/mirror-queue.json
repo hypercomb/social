@@ -176,15 +176,6 @@
       "status": "pending"
     },
     {
-      "id": "controls-rail-override-persistence",
-      "title": "Note the controls-rail override persistence fix on the behaviors/appearance fit tile",
-      "run": null,
-      "note": "MANUAL — note-add is additive, re-running lands the note twice. The rail's enabled map now persists ONLY overrides (entries differing from DEFAULT_ENABLED_MAP), so a default flip reaches existing users; hc:controls-enabled-rev gates a one-time sweep that reclaimed zoom-in/zoom-out from legacy full maps. Explains why the magnifiers kept reappearing after bab6045d despite defaulting off. Add as a note on the fit/view-menu tile under behaviors/appearance.",
-      "unattended": false,
-      "created": "2026-08-06",
-      "status": "pending"
-    },
-    {
       "id": "reference-closure-guards",
       "title": "Note the closure guards on behaviors/structure/reference",
       "run": null,
@@ -199,6 +190,87 @@
       "run": "npx tsx scripts/mirror-notes-reader.ts",
       "note": "Script written and ready to drain. Needs a live renderer (open the hive with ?claudeBridge=1) and behaviors/tool-windows to already exist from mirror-window-chrome.ts. Adds notes-reader to that collection with six part cells. Union-merges the collection's children; note/mark writes check presence first, so a re-run is safe.",
       "created": "2026-08-05",
+      "status": "pending"
+    },
+    {
+      "id": "controls-rail-fit-caret",
+      "title": "Note the fit caret + rail override persistence on the behaviors/appearance fit tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive, re-running lands the note twice. TWO changes on the fit/view-menu behaviour: (1) the fit button now carries a visible caret (.fit-caret) — left-click toggles the view flyout WITHOUT running the fit; right-click still opens it, which is also how the keyboard context-menu key gets in. The flyout was right-click-only and therefore invisible, and it is where the step-zoom verbs live now that the magnifiers are off the rail. (2) the rail's enabled map persists ONLY overrides (entries differing from DEFAULT_ENABLED_MAP), so a default flip reaches existing users; hc:controls-enabled-rev + RECLAIMED_BY_REV gate a one-time sweep that reclaimed zoom-in/zoom-out from legacy full maps — that stale full map is why the magnifiers kept reappearing after bab6045d despite defaulting off.",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "link-drop-open-graph",
+      "title": "Note the open-graph drop on the behaviors link-drop tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive, re-running lands the note twice. A dropped YouTube link now reads its open-graph card ONCE per drop (oEmbed, the CORS-readable face of og:title/og:image — the watch page's own HTML is cross-origin and unreadable). On empty canvas the og:title seeds the command line (selected, so a keystroke replaces it) and the created tile carries the link. On an EXISTING tile the drop writes the link AND the poster frame in the same canonical props write — but the picture is optional at every step: no card, a failed fetch, or a picture the participant already chose all yield link-only. A substrate default is filler, so the poster frame replaces it.",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "behaviors-store-simplification",
+      "title": "Beehaviors panel simplified — store light+badge, tile view remove/apply",
+      "run": null,
+      "note": "MANUAL — note-add is additive. The Beehaviors panel is now TWO surfaces (documentation/behaviors-view-simplification.md): THE STORE (every behavior, one row, dim/lit contrast + in-use badge counted from decorations — click flips the ONE global switch, no verbs, no gate chips) and ON THIS TILE (the decorations ARE the applied behaviors — × removes the decoration, Apply picker offers only lit behaviors, inherited rows say 'from {cell}' in one quiet line). DELETED: reach ladder tabs, hidden/carve-out pool UI, scope attribution, master-switch resets, per-row gate chips (legacy hidden records stay readable — a suppressed row renders dim, click restores). Update the behaviors mirror: refresh notes on behaviors/tool-windows (or the beehaviors panel tile) describing the two surfaces + the three facts (adopted · lit · in use), and remove stale notes describing the reach ladder / hidden pool. Owed too: essentials rebuild for web (features:remove handler + used counts live in show-features.drone.ts).",
+      "unattended": false,
+      "created": "2026-08-06",
+      "status": "pending"
+    },
+    {
+      "id": "window-session-parking",
+      "title": "Mirror the window session (park on installer, unpark on return)",
+      "run": null,
+      "note": "New shared primitive: hypercomb-shared/ui/window-session.ts. Mirror as a collection under behaviors with one tile per source resource: window-session.ts (the registry: park/unpark, idempotent second park, holds sessions so a window whose DOM went with the parking still comes back), hc-docked-panel.directive.ts (the hcSession input — a docked window joins the session for exactly as long as its element exists), pinnable-hover.base.ts (pins park as a stack, positions and order kept, persisted open-set untouched), portal-overlay.component.ts (the two doors: park when a VISIBLE portal opens or a headless one promotes, unpark in close() and on teardown), plus the per-window session objects that say what 'stop showing without forgetting' means for each panel. Pheromones: mark each tile part + the shell-ui/window kind. Note on the collection: windows are PARKED, never closed — close() clears content (files list, feature rows, filter draft) and parking must cost the participant nothing.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "link-drop-arm-on-release",
+      "title": "Note arm-on-release + armed-line-is-a-name on the behaviors link-drop tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive. TWO fixes to the dropped-link gesture, both found by reproduction after 'nothing is added on completing'. (1) ARM ON RELEASE: reading the open-graph card takes ~1.2s measured, and until it landed the command line stayed empty and the chevron cold — Enter in that window created NOTHING and the drop showed no sign of having registered. The chevron now arms on release holding just the URL (measured t=0), and the title + picture fill the SAME slot when they arrive, matched by an armId; commit or dismiss RETIRES the id so a late card cannot raise a chevron over a finished gesture. Committing inside the window yields a tile with the link and no picture — the image is optional, as designed. (2) AN ARMED LINE IS A NAME: with something armed, a non-slash line goes straight to create instead of through tag extraction and the behaviour table. A video titles itself, and those titles carry operators — a leading '~' is remove-cell, so the create never happened at all; '&', '#' and '?' truncated 'Q&A #5 what?! + more' to 'qa'. Now: 'tilde-title', 'qa-5-what-more', 'next-level'. Cost: create-time ':tag' while armed lands in the name instead of persisting a tag. Slash commands still run while armed (verified /help).",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "portal-drop-context-and-window",
+      "title": "Mirror the portals-drop gesture AND the context window",
+      "run": null,
+      "note": "Two halves of one feature, 1:1 with source. THE DROP: drop-landing.drone.ts (landing ring), tile-overlay drop:target on the pointer path, command-shell subject chip, reference.queen slash tail + slashComplete. THE CONTEXT: aggregate-drop.dropContextOnTile, decoration-kind-index ContextIndex, assistant/tile-context.ts (branch resolution), ui/context-window/ (the management window), commands/context.queen.ts (/context). Collection gathering all of them, 'part' pheromone per tile. Notes must record: the ring shows the NEXT FREE SLOT for an empty drop (no arbitrary-hex placement exists); drop-on-a-tile means CONTEXT not membership; context stores a LINEAGE sig (a branch at its head, never a content hash) and resolution to signatures is DERIVED on demand, never cached back onto the tile; walks are budgeted (depth 4 / 240 nodes) and a capped walk says so. Mint a behavior card on the themed behaviors deck. NOT re-runnable (note-add is additive).",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "link-drop-name-and-link-field",
+      "title": "Note the URL-derived name + the Link field following the service",
+      "run": null,
+      "note": "MANUAL — note-add is additive. TWO further fixes on the dropped-link gesture. (1) A DROP ALWAYS YIELDS A NAME: the command line is seeded from the URL itself on release (youtube <id>, or the publisher's slug / host for other links — link-name.ts, defaultNameForLink), and the open-graph title REPLACES that seed when it arrives, but only while the line is still the one we seeded. Before this, any drop whose card could not be read — a platform that publishes none, or a browser whose tracking protection blocks youtube.com — left an armed chevron over an empty line and an Enter that did nothing. Verified with youtube.com/ytimg.com fetches force-rejected: line reads 'youtube aircAruvnKk' and the create works. (2) THE EDITOR'S LINK FIELD FOLLOWS THE SERVICE: linkValue was a plain field filled ONLY at open, so a link dropped onto an ALREADY-OPEN editor never appeared — and save() wrote that stale field straight back, ERASING the dropped link. It is now a signal refreshed from the service on every change (never while that input has focus). Verified: field flips to the dropped URL, save persists it across a reopen.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "fit-hand-framed-pages",
+      "title": "Mirror: global fit yields to a hand-framed page",
+      "run": null,
+      "note": "Behaviour change in controls-bar.component.ts + zoom.drone.ts: the global fit switch no longer refits a page the participant framed by hand. New persisted per-page set hc:hand-framed-pages (written on viewport:manual while the switch is on, cleared per-page by the new transient viewport:fit effect that zoomToFit emits for source='user', cleared wholesale when the switch is flipped on). Mirror needs: a tile for the hand-framed hold under the fit/navigation behaviour collection, a note explaining the three write sites (gesture marks / explicit fit releases / switch-on clears all), and pheromone marks tying it to the existing fit-flyout pin tiles (pin-size, pin-position) since it is the same per-page-exception family. note-add is additive, hence --manual.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "annotations-fullscreen-reading-pane",
+      "title": "Note the fullscreen reading pane on the annotations-window tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive. The annotations window's fullscreen is now the DESK: three columns — tile navigator left, notes tree centre, READING PANE right (hypercomb-shared/ui/notes-strip). The pane shows the selected note big: kind line (question/answer/mark meaning), hexagon glyph plate, ancestor breadcrumb, text, pheromone chips (rows carry data-pheromone-note so a drag from the panel lands on the NOTE). Clicking a tree row in fullscreen SELECTS for reading (steel edge-rail is-reading highlight, distinct from is-editing's warm tint) — docked, the click still opens the editor. Prev/next walk the visible tree depth-first and WRAP (same stepIndex cycle as the standalone reader, notes-viewer/note-cycle.ts); the notes|lists tabs govern the pane too, so the lists tab reads the lists. Edit button routes to the embedded form. Role glyphs are now distinct colours: heading=accent, list=steel, prose=quiet grey. All 13 non-en catalogs also gained the notes.viewer.* set they were missing plus notes.reading.empty. Note this on the annotations-window tile in the behaviors mirror; the standalone reader tile's note should say fullscreen now embeds the same cycle.",
+      "unattended": false,
+      "created": "2026-08-07",
       "status": "pending"
     }
   ]

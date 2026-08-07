@@ -13,7 +13,8 @@
        [hcDockInsetActive]="dockSide() === 'right'"
        hcDockedPanel="notes-strip" dockSide="right" [ownsSize]="false"
        [dockExclusive]="dockSide() === 'right'"
-       (hcDockedPanelClose)="hide()"
+       [hcSession]="session"
+    (hcDockedPanelClose)="hide()"
        [minWidth]="256" [maxWidth]="900"
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
        [style.transform]="panelTransformActive()"
@@ -27,7 +28,7 @@
          (dblclick)="resetPanelOffset($event)">
       <span class="cv2-dragbar-title">
         <span class="hex-mark" aria-hidden="true"></span>
-        <span>{{ cell() || ('notes.strip.title' | t) }}</span>
+        <span>{{ cell() || ('annotations.title' | t) }}</span>
       </span>
       <span class="cv2-dragbar-spacer"></span>
       <!-- Open the READER on this tile. The strip is for authoring — a dense
@@ -48,6 +49,22 @@
               [attr.aria-label]="'notes.hide' | t" [title]="'notes.hide' | t">
         <span class="mat-sym">close</span>
       </button>
+    </div>
+
+    <!-- The annotations window's two tabs — plain NOTES (prose and the
+         question/answer conversation) and LISTS (the hierarchical list-notes:
+         roots carrying a heading/list mark, or any note tree). Same editor,
+         same navigator, same form on both — only which roots show differs
+         (see visibleNotes). One window, one rail icon. -->
+    <div class="cv2-tabs" role="tablist" [attr.aria-label]="'annotations.title' | t">
+      <button type="button" class="cv2-tab" role="tab"
+              [class.is-active]="tab() === 'notes'"
+              [attr.aria-selected]="tab() === 'notes'"
+              (click)="setTab('notes')">{{ 'annotations.tab.notes' | t }}</button>
+      <button type="button" class="cv2-tab" role="tab"
+              [class.is-active]="tab() === 'lists'"
+              [attr.aria-selected]="tab() === 'lists'"
+              (click)="setTab('lists')">{{ 'annotations.tab.lists' | t }}</button>
     </div>
 
     <!-- Editor column. `cv2-main` is `display: contents` in the docked strip
@@ -246,8 +263,9 @@
         }
       </form>
 
-      <!-- Filter chips -->
-      @if (hasQuestions()) {
+      <!-- Filter chips — the question/answer axis lives on the notes tab
+           only; the lists tab never carries conversation rows. -->
+      @if (tab() === 'notes' && hasQuestions()) {
         <div class="cv2-filter" role="group" [attr.aria-label]="'notes.kindLabel' | t">
           <button type="button" class="cv2-filter-chip"
                   [class.active]="kindFilter() === 'all'"
@@ -279,6 +297,8 @@
                  [attr.data-note-id]="note.id"
                  [style.--depth]="depth"
                  [class.is-heading]="roleOf(note) === 'heading'"
+                 [class.is-prose]="roleOf(note) === 'prose'"
+                 [class.is-reading]="isFullscreen() && readingRow()?.note?.id === note.id"
                  [class.cv2-note-q]="noteKind(note) === 'q'"
                  [class.cv2-note-a]="noteKind(note) === 'a'"
                  [class.is-editing]="editingNoteId() === note.id"
@@ -425,6 +445,8 @@
         } @empty {
           @if (noteQuery()) {
             <div class="cv2-cloud-empty">{{ 'notes.noteNoMatch' | t }}</div>
+          } @else if (tab() === 'lists') {
+            <div class="cv2-cloud-empty">{{ 'annotations.lists.empty' | t }}</div>
           }
         }
       </div>
@@ -439,6 +461,118 @@
     }
 
     </div><!-- /cv2-main -->
+
+    <!-- ── Reading pane — fullscreen only (SCSS gates it) ─────────────
+         The right column of the desk. Whatever row is selected in the
+         tree reads HERE, big: its mark in a hexagon plate, its kind, its
+         place in the hierarchy, its text, its pheromones. Prev/next walk
+         the visible tree depth-first and wrap — the same cycle as the
+         standalone reader. The pane follows the active tab, so on
+         `lists` it reads the lists. Rows advertise themselves with
+         `data-pheromone-note`, so a pheromone dragged from the panel
+         lands on the NOTE. -->
+    @if (cell()) {
+      <aside class="cv2-reading" [attr.aria-label]="'notes.viewer.aria' | t">
+        @if (readingRow(); as row) {
+          <div class="cv2-reading-scroll thin-scroll"
+               [attr.data-pheromone-note]="row.note.id"
+               [attr.data-pheromone-note-cell]="cell()">
+
+            <!-- Kind line: what this entry IS, said before anything else. -->
+            <div class="cv2-reading-kind"
+                 [class.is-q]="noteKind(row.note) === 'q'"
+                 [class.is-a]="noteKind(row.note) === 'a'"
+                 [class.is-heading]="roleOf(row.note) === 'heading'"
+                 [class.is-prose]="roleOf(row.note) === 'prose'">
+              @if (noteKind(row.note) === 'q') {
+                <span class="mat-sym filled" aria-hidden="true">help</span>
+                <span>{{ 'notes.noteKindQuestion' | t }}</span>
+              } @else if (noteKind(row.note) === 'a') {
+                <span class="mat-sym filled" aria-hidden="true">chat</span>
+                <span>{{ 'notes.noteKindAnswer' | t }}</span>
+              } @else if (markOf(row.note); as icon) {
+                <span class="mat-sym" aria-hidden="true">{{ icon }}</span>
+                <span>{{ markLabel(icon) }}</span>
+              } @else {
+                <span>{{ 'notes.kindNote' | t }}</span>
+              }
+            </div>
+
+            <!-- The glyph plate — the note's mark, room-readable. -->
+            <div class="cv2-reading-hex"
+                 [class.is-q]="noteKind(row.note) === 'q'"
+                 [class.is-a]="noteKind(row.note) === 'a'"
+                 aria-hidden="true">
+              @if (markOf(row.note); as icon) {
+                <span class="mat-sym cv2-reading-hex-icon">{{ icon }}</span>
+              } @else if (noteKind(row.note) === 'q') {
+                <span class="mat-sym filled cv2-reading-hex-icon">help</span>
+              } @else if (noteKind(row.note) === 'a') {
+                <span class="mat-sym filled cv2-reading-hex-icon">chat</span>
+              } @else {
+                <span class="hc-shape-glyph cv2-reading-hex-shape"
+                      [class.hc-shape-circle]="row.note.shape === 'circle'"
+                      [class.hc-shape-square]="row.note.shape === 'square'"
+                      [class.hc-shape-triangle]="row.note.shape === 'triangle'"
+                      [class.hc-shape-diamond]="row.note.shape === 'diamond'"
+                      [class.hc-shape-star]="row.note.shape === 'star'"
+                      [class.hc-shape-hexagon]="row.note.shape === 'hexagon'"></span>
+              }
+            </div>
+
+            <!-- Where it sits: ancestors, root → parent. Roots show none. -->
+            @if (readingPath().length > 0) {
+              <div class="cv2-reading-path" [title]="readingPath().join(' / ')">
+                @for (seg of readingPath(); track $index) {
+                  <span class="cv2-reading-seg">{{ seg }}</span>
+                }
+              </div>
+            }
+
+            <p class="cv2-reading-text">{{ noteDisplayText(row.note) }}</p>
+
+            <!-- Pheromones ON THIS NOTE. Dropped here from the panel;
+                 each chip's × takes it back off. -->
+            <div class="cv2-reading-tags">
+              @for (tag of readingTags(row.note); track tag) {
+                <span class="cv2-reading-tag">
+                  <span>{{ tag }}</span>
+                  <button type="button" class="cv2-reading-tag-off"
+                          (click)="removeReadingTag(tag, $event)"
+                          [attr.aria-label]="'notes.viewer.untag' | t: { tag: tag }">×</button>
+                </span>
+              } @empty {
+                <span class="cv2-reading-tags-hint">{{ 'notes.viewer.dropHint' | t }}</span>
+              }
+            </div>
+          </div>
+
+          <!-- The cycle: prev / position / next. Never disabled — wraps. -->
+          <div class="cv2-reading-cycle">
+            <button type="button" class="cv2-reading-cycle-btn" (click)="stepReading(-1)"
+                    [title]="'notes.viewer.prev' | t"
+                    [attr.aria-label]="'notes.viewer.prev' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_left</span>
+            </button>
+            <span class="cv2-reading-pos" aria-live="polite">
+              {{ 'notes.viewer.position' | t: { at: readingPosition(), of: readingRows().length } }}
+            </span>
+            <button type="button" class="cv2-reading-cycle-btn" (click)="stepReading(1)"
+                    [title]="'notes.viewer.next' | t"
+                    [attr.aria-label]="'notes.viewer.next' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_right</span>
+            </button>
+            <span class="cv2-reading-cycle-spacer"></span>
+            <button type="button" class="cv2-reading-edit" (click)="editReading()">
+              <span class="mat-sym" aria-hidden="true">edit</span>
+              <span>{{ 'notes.edit' | t }}</span>
+            </button>
+          </div>
+        } @else {
+          <div class="cv2-reading-empty">{{ 'notes.reading.empty' | t }}</div>
+        }
+      </aside>
+    }
 
     <!-- Tile navigator — always on. A one-of list of every tile in this
          layer, filterable by name OR note text. Click a row to make that
