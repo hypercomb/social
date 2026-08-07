@@ -322,7 +322,7 @@
       "id": "beehaviors-root-context",
       "title": "Note the root-context follow on the Beehaviors tile",
       "run": null,
-      "note": "The Beehaviors window follows navigation all the way to the ROOT: backing out to / no longer leaves the panel on the previous tile's group — the hive itself becomes the subject (context row shows the hive, segments []). Root rows read the root layer's decorations authoritatively (the label-keyed hot index is skipped at root so a tile sharing the hive's display name can't leak kinds in), the root is never a peer-branch offer, and ADD/REMOVE work at the root: empty segments WITH a named cell is the hive-root group, a real write target on the root layer. Direction noted in-session: the root context name is a placeholder ('hypercomb') until named hive roots land — then the panel names WHICH hive you are in.",
+      "note": "The Beehaviors window follows navigation all the way to the ROOT: backing out to / no longer leaves the panel on the previous tile's group — the hive itself becomes the subject. THE ROOT CONTEXT IS THE HOME PAGE: the group names itself from the root layer's own name (whatever is active at /), falling back to 'hypercomb' only when the layer carries none; when named hive roots land, this same spot resolves the ACTIVE hive's name. Root rows read the root layer's decorations authoritatively (the label-keyed hot index is skipped at root so a tile sharing the display name can't leak kinds in), the root is never a peer-branch offer, and ADD/REMOVE work at the root: empty segments WITH a named cell is the hive-root group, a real write target on the root layer.",
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
@@ -359,6 +359,40 @@
       "run": null,
       "note": "chain-manifest.ts mints generation/previous/at at ship time (copy-to-dcp), every target gets the same chained manifest; DCP baseline path now carries the chain and the revision switcher shows from v1. Tiles for chain-manifest.ts + copy-to-dcp wiring + revision-list unhide, notes on the semantics (identical re-deploy never re-chains; head is first manifest key). Extends the builds/upgrade mirror area — note-add additive, needs a human.",
       "commit": "pending",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "global-fit-surface-reconciler",
+      "title": "Global fit reconciles against the surface + chrome, not just window resize",
+      "run": null,
+      "note": "Fix: the global fit switch refit was bound only to window 'resize'. When the DRAWING SURFACE changed with no window resize (a panel reserving a column, the shell re-laying out) or when only the CHROME moved (header grows a row as a drop arms the command line, controls rail docks/undocks), nothing refit — the page kept the scale/position computed for the previous safe area, leaving content small and pushed into a corner. pixi-host already reconciled the CANVAS for this reason (resyncToHost) but only recentres the stage, so the renderer reported the new surface while the fit kept the old framing. Now a 250ms signature reconciler samples canvas box + --hc-controls-left/right + header bottom and refits only on change. Owed: a note on the fit-switch tile under behaviors describing the two non-window triggers, so the mark explains why the fit follows chrome. Manual because note-add is additive and would land twice.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "global-fit-back-nav-ordering",
+      "title": "Global fit: back-nav paints land BEFORE the navigate that arms them",
+      "run": null,
+      "note": "Fix: arrived() was gated purely on an arm set by the window 'navigate' event. Verified event order — forward nav: navigate -> cell-count (fit runs). BACK nav (MovementService.back / history.back): cell-count, cell-count, THEN navigate. Every paint at the destination ran unarmed and bailed, so the page was NEVER refit on the way back; it kept whatever stale snapshot the viewport store held (auto-fits never persist, so that snapshot can be from any earlier moment) — the 'it shrinks when I click back' report. Now arrived() also treats an unsettled page key as an arrival (#lastSettledPageKey), so the fit is independent of event ORDER; add/remove stillness is preserved because those paint the same key already settled. Owed: a note on the fit-switch tile under behaviors recording that arrival is a LOCATION change, not an event, and why back-nav inverts the order.",
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "viewport-source-gesture-vs-persist",
+      "title": "Viewport source splits GESTURE from PERSIST — 'auto-persist' added, ratchet frozen",
+      "run": null,
+      "note": "Sweep after the back-click fix. Root cause class: automatic code borrowing a user-gesture path. (1) source 'user' meant BOTH 'persist this' and 'the participant asked' — the latter announces viewport:fit, which the control bar uses to DISCARD a page's hand framing. Three automatic callers claimed 'user' purely to persist (auto-fit-first-add, show-cell first-visit fit, and the comments all said 'so it STICKS'): a first-tile add or first-visit render silently stripped a hand framing and the page re-fitted forever after. Added ViewportSource 'auto-persist' = persists (even through suspend) but never announces; migrated the two truly automatic callers; sequence-cycle stays 'user' (it follows an \"a\" keypress). (2) Mirror image: zoomByFactor/zoomToScale/animateToScale unconditionally emitted viewport:manual, which MARKS a page hand-framed — so the tutorial zoom LESSON permanently excluded whatever page it ran on from global fit. Added a source param defaulting to 'user'; tutorial passes 'auto'. Also fixed controls-bar passing an undeclared third arg 'controls-bar' that would now read as a source and demote the magnifier buttons. (3) pixi-host now emits render:surface-resized from resyncToHost — the missing 'the canvas changed size without a window resize' signal; center-slot-tracker consumed it (its scores were ranking slots against a dead viewport after a panel opened). Guard: doctrine.spec.ts ratchet 'viewport source user means a GESTURE' with a 4-entry allowlist, verified to FAIL when the regression is reintroduced. Owed: a note on the fit-switch tile recording the two-question source model (persist vs gesture) and why marks/mode changes must never ride a gesture path.",
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "home-portal-mark",
+      "title": "Mirror the marked-home-portal behavior into the hive",
+      "run": null,
+      "note": "Supersedes the auto-follow described in the home-is-last-portal entry — mirror the SHIPPED behavior, not that one. Home = the portal MARKED as home from the Portals toolwindow (aggregate-index row toggle, one slot so marking a second releases the first); walking never re-homes; Ctrl/cmd+click on Home lists recently walked portals for travel only, with the marked one lit and the hive root as the last row. Tiles for: hypercomb-shared/core/recent-portals.store.ts, aggregate-index.component.{ts,html,scss} row toggle, controls-bar.component.{ts,html,scss} Home button + menu. Collection gathering them, pheromones per part, notes on the why (marked never inferred: a home that moved when you looked at something was a home you could lose by accident). Mint a glyph card in the behaviors deck.",
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
