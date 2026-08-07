@@ -238,6 +238,7 @@
   "annotations.tab.notes": "ملاحظات",
   "annotations.tab.lists": "القوائم",
   "annotations.lists.empty": "لا توجد قوائم بعد — امنح ملاحظةً علامة قائمة أو عنوان، أو داخِل الملاحظات، فتظهر هنا",
+  "notes.empty.none": "لا يوجد شيء مكتوب على هذه البلاطة بعد",
   "notes.lists.new": "قائمة جديدة",
   "notes.lists.newTitle": "قائمة جديدة",
   "notes.lists.rename": "إعادة تسمية هذه القائمة",

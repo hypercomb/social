@@ -238,6 +238,7 @@
   "annotations.tab.notes": "नोट्स",
   "annotations.tab.lists": "सूचियाँ",
   "annotations.lists.empty": "अभी कोई सूची नहीं — किसी नोट को सूची या शीर्षक चिह्न दें, या नोट्स को नेस्ट करें, और वह यहाँ दिखेगा",
+  "notes.empty.none": "इस टाइल पर अभी कुछ नहीं लिखा है",
   "notes.lists.new": "नई सूची",
   "notes.lists.newTitle": "नई सूची",
   "notes.lists.rename": "इस सूची का नाम बदलें",

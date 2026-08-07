@@ -27,6 +27,28 @@ $steel: #7eb6d6;
 $indent-step: 18px;
 $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 
+// ── Marks are HEXAGONS ───────────────────────────────────
+// A mark is a meaning the participant assigned to an icon, and the shape
+// that means "a thing in this hive" is the hexagon — so a mark reads as a
+// small hexagon tile carrying its glyph, in the rail you drag it FROM and
+// on the row or line you drop it ON. Same object, same shape, three
+// places; that is what makes the drag legible without a hint.
+@mixin hex-mark($w, $h, $glyph) {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: $w;
+  height: $h;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background:
+    linear-gradient(160deg, rgba($steel, 0.30), rgba($steel, 0.08) 60%),
+    rgba(255, 255, 255, 0.03);
+  color: color-mix(in srgb, #{$steel} 70%, white);
+  font-size: $glyph;
+  line-height: 1;
+}
+
+
 :host {
   position: fixed;
   // The strip is a dock-style panel: it fills the entire vertical
@@ -160,9 +182,10 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   .cv2-main > .cv2-filter,
   .cv2-main > .cv2-notes-search { flex: 0 0 auto; }
 
-  // With no tile picked there are no notes — the column would be an empty
-  // slab hanging in the canvas.
-  .cv2-main:not(:has(.cv2-note)):not(:has(.cv2-notes-search)) { display: none; }
+  // With no tile picked there are no notes to index — the column would be
+  // an empty slab hanging in the canvas. (The WINDOW still shows both its
+  // panes; only this outrigger stands down.)
+  .cv2-main:has(> .cv2-empty-hint) { display: none; }
 
   // Rows read as LONG TABS: full width, one note each, the mark on the left
   // and the indent still saying what sits under what.
@@ -742,6 +765,10 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   cursor: grab;
 
   &:active { cursor: grabbing; }
+  .mat-sym {
+    @include hex-mark(24px, 26px, 15px);
+  }
+  &:hover .mat-sym { color: white; }
 }
 // The icon currently riding the pointer — dimmed in place so the ghost
 // reads as the thing being moved.
@@ -1138,10 +1165,53 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 .cv2-list {
   display: flex;
   flex-direction: column;
+  // Rows start AT THE TOP and stay there. Without this a short list gets
+  // distributed down the column and the first note sits in mid-air.
+  justify-content: flex-start;
+  align-content: flex-start;
   padding: 8px;
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+// Empty column — a fresh tile has no notes yet, which is normal, so it says
+// so and offers the one thing there is to do rather than showing a void.
+.cv2-col-blank {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.7rem 0.6rem;
+  font-size: 0.76rem;
+  font-style: italic;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+
+  .cv2-reading-edit { font-style: normal; }
+}
+
+// The pane's action button, defined at the top level as well as inside the
+// pane mixin: the empty column offers the same "add a note" affordance, and
+// it must not read as a different control just because it is elsewhere.
+.cv2-reading-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--md-on-surface) 16%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
+  font-family: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+  .mat-sym { font-size: 15px; }
+  &:hover {
+    border-color: rgba($steel, 0.55);
+    color: color-mix(in srgb, #{$steel} 85%, white);
+    background: rgba($steel, 0.08);
+  }
 }
 
 // ── Notes search (within the active tile) ────────────────
@@ -1283,12 +1353,9 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 // it above so each role's glyph is its own colour, never one grey soup.
 .cv2-note-mark {
   grid-column: 1;      // the glyph column, beside the text — never above it
-  font-size: 15px;
-  line-height: 21px;   // match the text's first line box
-  color: color-mix(in srgb, #{$steel} 55%, var(--md-on-surface));
-  flex-shrink: 0;
+  @include hex-mark(19px, 21px, 12px);
   margin-right: 5px;
-  vertical-align: -3px;
+  vertical-align: -4px;
 }
 
 // Drag grip — a single slim vertical rail, drawn in CSS. The Material
@@ -2469,26 +2536,21 @@ $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
   &:hover .cv2-line-btn { opacity: 1; }
 }
 
+// An unmarked line still holds the mark's SLOT — a bare hexagon, so the
+// icons dropped on its neighbours line up in one column down the left and
+// an empty one reads as "nothing said about this line yet".
 .cv2-line-bullet {
   flex: 0 0 auto;
-  width: 5px;
-  height: 5px;
-  margin: 0 5px;
-  border-radius: 50%;
-  background: color-mix(in srgb, #{$steel} 65%, transparent);
+  width: 20px;
+  height: 22px;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background: color-mix(in srgb, var(--md-on-surface) 9%, transparent);
 
-  // The open line's bullet is hollow — it is where the list continues, not
-  // a line that exists yet.
-  &.is-new {
-    background: transparent;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--md-on-surface) 35%, transparent);
-  }
+  // The open line's slot is fainter still — it is where the list continues,
+  // not a line that exists yet.
+  &.is-new { background: color-mix(in srgb, var(--md-on-surface) 5%, transparent); }
 }
-.cv2-line-mark {
-  flex: 0 0 auto;
-  font-size: 15px;
-  color: color-mix(in srgb, #{$steel} 75%, var(--md-on-surface));
-}
+.cv2-line-mark { @include hex-mark(20px, 22px, 13px); }
 
 .cv2-line-text {
   flex: 1 1 auto;

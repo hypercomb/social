@@ -238,6 +238,7 @@
   "annotations.tab.notes": "заметки",
   "annotations.tab.lists": "списки",
   "annotations.lists.empty": "списков пока нет — дайте заметке метку списка или заголовка либо вложите заметки, и она появится здесь",
+  "notes.empty.none": "на этой плитке пока ничего не написано",
   "notes.lists.new": "новый список",
   "notes.lists.newTitle": "новый список",
   "notes.lists.rename": "переименовать этот список",

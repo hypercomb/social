@@ -238,6 +238,7 @@
   "annotations.tab.notes": "notas",
   "annotations.tab.lists": "listas",
   "annotations.lists.empty": "aún no hay listas — dale a una nota una marca de lista o de título, o anida notas, y vivirá aquí",
+  "notes.empty.none": "aún no hay nada escrito en esta tesela",
   "notes.lists.new": "nueva lista",
   "notes.lists.newTitle": "nueva lista",
   "notes.lists.rename": "renombrar esta lista",

@@ -238,6 +238,7 @@
   "annotations.tab.notes": "메모",
   "annotations.tab.lists": "목록",
   "annotations.lists.empty": "아직 목록이 없습니다 — 노트에 목록 또는 제목 마크를 붙이거나 노트를 중첩하면 여기에 표시됩니다",
+  "notes.empty.none": "이 타일에는 아직 아무것도 적혀 있지 않습니다",
   "notes.lists.new": "새 목록",
   "notes.lists.newTitle": "새 목록",
   "notes.lists.rename": "이 목록 이름 바꾸기",

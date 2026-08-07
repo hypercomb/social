@@ -238,6 +238,7 @@
   "annotations.tab.notes": "笔记",
   "annotations.tab.lists": "列表",
   "annotations.lists.empty": "还没有列表 — 给笔记加上列表或标题标记，或者嵌套笔记，它就会出现在这里",
+  "notes.empty.none": "这块瓦片上还什么都没写",
   "notes.lists.new": "新建列表",
   "notes.lists.newTitle": "新建列表",
   "notes.lists.rename": "重命名此列表",

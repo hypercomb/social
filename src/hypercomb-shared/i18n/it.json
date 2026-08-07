@@ -238,6 +238,7 @@
   "annotations.tab.notes": "note",
   "annotations.tab.lists": "elenchi",
   "annotations.lists.empty": "ancora nessun elenco — dai a una nota un segno di elenco o di titolo, o annida le note, e vivrà qui",
+  "notes.empty.none": "su questa tessera non c'è ancora nulla",
   "notes.lists.new": "nuovo elenco",
   "notes.lists.newTitle": "nuovo elenco",
   "notes.lists.rename": "rinomina questo elenco",

@@ -465,10 +465,25 @@
         @for (root of visibleNotes(); track trackById($index, root)) {
           <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0, path: [$index] }"></ng-container>
         } @empty {
+          <!-- Nothing here YET is the normal state of a fresh tile, so the
+               column says so and offers the one thing there is to do. -->
           @if (noteQuery()) {
             <div class="cv2-cloud-empty">{{ 'notes.noteNoMatch' | t }}</div>
-          } @else if (tab() === 'lists') {
-            <div class="cv2-cloud-empty">{{ 'annotations.lists.empty' | t }}</div>
+          } @else {
+            <div class="cv2-col-blank">
+              <span>{{ (tab() === 'lists' ? 'annotations.lists.empty' : 'notes.empty.none') | t }}</span>
+              @if (tab() === 'lists') {
+                <button type="button" class="cv2-reading-edit" (click)="newList()">
+                  <span class="mat-sym" aria-hidden="true">playlist_add</span>
+                  <span>{{ 'notes.lists.new' | t }}</span>
+                </button>
+              } @else {
+                <button type="button" class="cv2-reading-edit" (click)="paneAdd()">
+                  <span class="mat-sym" aria-hidden="true">add</span>
+                  <span>{{ 'notes.add' | t }}</span>
+                </button>
+              }
+            </div>
           }
         }
       </div>
@@ -484,17 +499,27 @@
 
     </div><!-- /cv2-main -->
 
-    <!-- ── Reading pane — fullscreen only (SCSS gates it) ─────────────
-         The right column of the desk. Whatever row is selected in the
-         tree reads HERE, big: its mark in a hexagon plate, its kind, its
-         place in the hierarchy, its text, its pheromones. Prev/next walk
-         the visible tree depth-first and wrap — the same cycle as the
-         standalone reader. The pane follows the active tab, so on
-         `lists` it reads the lists. Rows advertise themselves with
+    <!-- ── The pane — the top half of the window (and the desk's right
+         column). Whatever row is selected in the notes column reads HERE,
+         big: its mark in a hexagon plate, its kind, its place in the
+         hierarchy, its text, its pheromones. Prev/next walk the visible
+         tree depth-first and wrap — the same cycle as the standalone
+         reader. The pane follows the active tab, so on `lists` it IS the
+         list interface. Rows advertise themselves with
          `data-pheromone-note`, so a pheromone dragged from the panel
-         lands on the NOTE. -->
-    @if (cell()) {
-      <aside class="cv2-reading" [attr.aria-label]="'notes.viewer.aria' | t">
+         lands on the NOTE.
+
+         ALWAYS RENDERED. The window is two panes; a window that drops to
+         one because nothing is picked yet is a window that changes shape
+         under you. With no tile it says which question to answer instead
+         (pick one below), and with no notes it offers the one thing there
+         is to do. -->
+    <aside class="cv2-reading" [attr.aria-label]="'notes.viewer.aria' | t">
+      @if (!cell()) {
+        <div class="cv2-reading-empty">
+          <span>{{ 'notes.pickTile' | t }}</span>
+        </div>
+      } @else {
         <!-- ── LISTS: its own interface ──────────────────────────
              A list is not prose and does not want the prose surface. It is
              a title and a column of one-liners, GROWN ONE LINE AT A TIME:
@@ -712,24 +737,27 @@
             </button>
           </div>
         } @else {
+          <!-- Nothing selected. On a tile with notes that means "pick one";
+               on a fresh tile it means "write the first one" — and either
+               way the button is right there. -->
           <div class="cv2-reading-empty">
-            <span>{{ 'notes.reading.empty' | t }}</span>
+            <span>{{ (notes().length === 0 ? 'notes.empty.none' : 'notes.reading.empty') | t }}</span>
             <button type="button" class="cv2-reading-edit" (click)="paneAdd()">
               <span class="mat-sym" aria-hidden="true">add</span>
               <span>{{ 'notes.add' | t }}</span>
             </button>
           </div>
         }
-      </aside>
-    }
+      }
+    </aside>
 
-    <!-- Tile navigator — always on. A one-of list of every tile in this
-         layer, filterable by name OR note text. Click a row to make that
-         tile active (single selection); the active tile (also set by
-         clicking the tile on the canvas) is highlighted. Hidden tiles can't
-         be clicked on the canvas but are still listed here.
-         Docked: a wrapping tag cloud under the editor. Desktop fullscreen:
-         a vertical list in the left column (SCSS reflows it). -->
+    <!-- Tile filter — the bottom pane, always on. A one-of list of every
+         tile in this layer, filterable by name OR note text. Click a row to
+         make that tile active (single selection) and its notes fill the
+         column on the left; the active tile (also set by clicking the tile
+         on the canvas) is highlighted. Hidden tiles can't be clicked on the
+         canvas but are still listed here. On the desk it is the left
+         column of the three (SCSS places it). -->
     <div class="cv2-tilelist">
       <div class="cv2-tilelist-filter">
         <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>

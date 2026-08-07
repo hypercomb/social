@@ -304,10 +304,27 @@ export class NotesStripComponent implements OnDestroy {
     return walk(this.visibleNotes(), []) ?? []
   })
 
-  /** Click a tree row while fullscreen → read it here. */
+  /** Click a row in the notes column → read it in the pane. */
   selectForReading(noteId: string): void {
     const idx = this.readingRows().findIndex(r => r.note.id === noteId)
     if (idx >= 0) this.readingIndex.set(idx)
+  }
+
+  /** Bring the row the pane is showing INTO VIEW in the notes column, and
+   *  put it at the TOP when it is off-screen. Prev/next walk the whole tree,
+   *  so without this the column silently falls out of step with the pane —
+   *  you are reading note 14 while the column still shows the first three.
+   *  A row already visible is left exactly where it is: scrolling under a
+   *  pointer that didn't ask for it is worse than not scrolling. */
+  #revealRow(noteId: string): void {
+    const list = this.#host.nativeElement.querySelector('.cv2-list') as HTMLElement | null
+    if (!list) return
+    const row = list.querySelector(`[data-note-id="${CSS.escape(noteId)}"]`) as HTMLElement | null
+    if (!row) return
+    const box = list.getBoundingClientRect()
+    const r = row.getBoundingClientRect()
+    if (r.top >= box.top && r.bottom <= box.bottom) return
+    list.scrollTop += r.top - box.top
   }
 
   // ── Editing IN the pane ───────────────────────────────────
@@ -2075,6 +2092,15 @@ export class NotesStripComponent implements OnDestroy {
     effect(() => {
       this.cell()
       untracked(() => this.readingIndex.set(0))
+    })
+
+    // Keep the notes column in step with the pane: whatever the pane is
+    // showing gets driven into view (to the top when it is off-screen).
+    // The row has to exist first, hence the microtask.
+    effect(() => {
+      const id = this.readingRow()?.note.id
+      if (!id) return
+      untracked(() => queueMicrotask(() => this.#revealRow(id)))
     })
 
     // Track the desk's breakpoint so the form renders where the layout

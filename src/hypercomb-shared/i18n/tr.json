@@ -238,6 +238,7 @@
   "annotations.tab.notes": "notlar",
   "annotations.tab.lists": "listeler",
   "annotations.lists.empty": "henüz liste yok — bir nota liste ya da başlık işareti verin veya notları iç içe koyun, burada görünür",
+  "notes.empty.none": "bu karoya henüz bir şey yazılmadı",
   "notes.lists.new": "yeni liste",
   "notes.lists.newTitle": "yeni liste",
   "notes.lists.rename": "bu listeyi yeniden adlandır",
