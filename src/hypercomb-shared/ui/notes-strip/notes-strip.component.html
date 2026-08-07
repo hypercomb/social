@@ -218,6 +218,44 @@
       </form>
     </ng-template>
 
+    <!-- ── NOTE TABS — the selector, up in the header ─────────────
+         One short tab per note of the active tile, in tree order, carrying
+         the note's hexagon mark and enough of its text to recognise it.
+         Click one and it fills the pane below. This is the whole selector:
+         there is no search (a tile's notes are a handful of things you can
+         see at once, and a search box for them cost more room than it ever
+         saved), and there is no second list anywhere.
+
+         Docked only. The desk keeps its tree column — the one place with
+         width for the whole hierarchy at once. -->
+    @if (!isFullscreen() && cell()) {
+      <div class="cv2-notetabs thin-scroll" role="tablist"
+           [attr.aria-label]="'notes.strip.aria' | t">
+        @for (row of readingRows(); track trackById($index, row.note)) {
+          <button type="button" class="cv2-notetab" role="tab"
+                  [attr.data-note-id]="row.note.id"
+                  [style.--depth]="row.depth"
+                  [class.is-active]="readingRow()?.note?.id === row.note.id"
+                  [class.is-mark-target]="markDropTargetId() === row.note.id"
+                  [class.cv2-note-q]="noteKind(row.note) === 'q'"
+                  [attr.aria-selected]="readingRow()?.note?.id === row.note.id"
+                  (click)="selectForReading(row.note.id)"
+                  [title]="noteDisplayText(row.note)">
+            @if (markOf(row.note); as icon) {
+              <span class="mat-sym cv2-notetab-mark">{{ icon }}</span>
+            } @else {
+              <span class="cv2-notetab-slot" aria-hidden="true"></span>
+            }
+            <span class="cv2-notetab-text">{{ noteDisplayText(row.note) }}</span>
+          </button>
+        }
+        <button type="button" class="cv2-notetab is-add" (click)="paneAdd()"
+                [attr.aria-label]="'notes.add' | t" [title]="'notes.add' | t">
+          <span class="mat-sym" style="font-size:15px">add</span>
+        </button>
+      </div>
+    }
+
     <!-- Editor column. `cv2-main` is `display: contents` in the docked strip
          (so the rows below stay direct flex children, exactly as before) and
          becomes the RIGHT column in desktop fullscreen, where the tile
@@ -440,23 +478,6 @@
           }
         }
       </ng-template>
-
-      <!-- Notes search — filters the tree below to notes (and their
-           ancestors) whose text matches. The list stays a tree. -->
-      <div class="cv2-notes-search">
-        <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>
-        <input type="text" class="cv2-notes-search-input"
-               [value]="noteQuery()"
-               (input)="setNoteQuery($event)"
-               [attr.placeholder]="'notes.searchPlaceholder' | t"
-               [attr.aria-label]="'notes.searchPlaceholder' | t" />
-        @if (noteQuery()) {
-          <button type="button" class="cv2-tilelist-clear" (click)="clearNoteQuery()"
-                  [attr.aria-label]="'notes.clearFilter' | t" [title]="'notes.clearFilter' | t">
-            <span class="mat-sym" style="font-size:14px">close</span>
-          </button>
-        }
-      </div>
 
       <!-- Notes tree body. Roots render through the recursive template,
            filtered by the search above. -->

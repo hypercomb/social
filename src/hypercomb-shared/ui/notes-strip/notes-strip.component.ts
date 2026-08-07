@@ -317,7 +317,9 @@ export class NotesStripComponent implements OnDestroy {
    *  A row already visible is left exactly where it is: scrolling under a
    *  pointer that didn't ask for it is worse than not scrolling. */
   #revealRow(noteId: string): void {
-    const list = this.#host.nativeElement.querySelector('.cv2-list') as HTMLElement | null
+    // The tab strip docked, the tree column on the desk — whichever is the
+    // selector in this layout.
+    const list = this.#host.nativeElement.querySelector('.cv2-notetabs, .cv2-list') as HTMLElement | null
     if (!list) return
     const row = list.querySelector(`[data-note-id="${CSS.escape(noteId)}"]`) as HTMLElement | null
     if (!row) return
@@ -861,6 +863,7 @@ export class NotesStripComponent implements OnDestroy {
       return null
     }
     return hit('article.cv2-note[data-note-id]', 'data-note-id')
+      ?? hit('.cv2-notetab[data-note-id]', 'data-note-id')
       ?? hit('.cv2-line[data-pheromone-note]', 'data-pheromone-note')
       ?? hit('.cv2-reading-scroll[data-pheromone-note]', 'data-pheromone-note')
   }
