@@ -565,13 +565,59 @@ export class AgentPanelView extends EventTarget {
     return row
   }
 
+  /** WORKING ON — and a way THERE. Each tile name is a link: it opens the
+   *  layer the tile lives on (the agent's own page, the same place its bee is
+   *  flying — see #goToBee) and raises a spotlight on the tile, which burns
+   *  until the pointer finds it. A hive-wide agent has no single place, so it
+   *  stays a sentence. */
   #whereRow(agent: Agent): HTMLElement {
-    const where = agent.scope === 'hive'
-      ? this.#t('agent.where-hive', 'the whole hive')
-      : agent.targets.length
-        ? agent.targets.join(', ')
-        : '/' + agent.segments.join('/')
-    return this.#section(this.#t('agent.where', 'Working on'), where)
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-agent-section'
+    const head = document.createElement('div')
+    head.className = 'hc-agent-label'
+    head.textContent = this.#t('agent.where', 'Working on')
+    wrap.appendChild(head)
+
+    if (agent.scope === 'hive') {
+      const value = document.createElement('div')
+      value.className = 'hc-agent-text'
+      value.textContent = this.#t('agent.where-hive', 'the whole hive')
+      wrap.appendChild(value)
+      return wrap
+    }
+
+    const row = document.createElement('div')
+    row.className = 'hc-agent-where'
+    if (agent.targets.length) {
+      const hint = this.#t('agent.where-open', 'Open its layer with this tile lit up')
+      for (const target of agent.targets) {
+        const link = document.createElement('button')
+        link.type = 'button'
+        link.className = 'hc-agent-tile'
+        link.textContent = target
+        link.title = hint
+        link.addEventListener('click', () => this.#goToTile(agent, target))
+        row.appendChild(link)
+      }
+    } else {
+      const link = document.createElement('button')
+      link.type = 'button'
+      link.className = 'hc-agent-tile'
+      link.textContent = '/' + agent.segments.join('/')
+      link.title = this.#t('agent.where-open-page', 'Open this page')
+      link.addEventListener('click', () => navigation()?.goRaw?.(agent.segments))
+      row.appendChild(link)
+    }
+    wrap.appendChild(row)
+    return wrap
+  }
+
+  /** Navigate FIRST, then light: the navigation's own spotlight-clear has
+   *  already run by the time the show lands, so the glow survives the trip
+   *  and waits on the parent layer for the pointer to find it. */
+  #goToTile(agent: Agent, target: string): void {
+    navigation()?.goRaw?.(agent.segments)
+    EffectBus.emit('spotlight:show', { targets: [target] })
   }
 
   #section(label: string, text: string): HTMLElement {
@@ -780,6 +826,12 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-finding .hc-agent-text{flex:1 1 auto;min-width:0;font-size:0.8rem;}
 .hc-agent-label{font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;
   color:rgba(${STEEL},0.6);margin-bottom:0.2rem;}
+.hc-agent-where{display:flex;flex-wrap:wrap;gap:0.3rem;}
+.hc-agent-tile{padding:0.14rem 0.55rem;border:1px solid rgba(${STEEL},0.35);border-radius:999px;
+  background:none;color:rgba(238,244,250,0.9);font:inherit;font-size:0.8rem;cursor:pointer;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-tile:hover,.hc-agent-tile:focus-visible{border-color:rgba(${STEEL},0.85);
+  background:rgba(${STEEL},0.14);color:whitesmoke;outline:none;}
 .hc-agent-text{font-size:0.85rem;line-height:1.45;color:rgba(238,244,250,0.9);white-space:pre-wrap;
   word-break:break-word;}
 .hc-agent-log{display:flex;flex-direction:column;gap:0.25rem;}

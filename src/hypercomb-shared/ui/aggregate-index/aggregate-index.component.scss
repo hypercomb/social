@@ -495,6 +495,137 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
 }
 
+// ── carrying — picked here, applied there ────────────────────────────────────
+//
+// Distinct from the staged tray on purpose. The tray is DASHED and unsaturated
+// because it is pending and dies on the next hop; this basket SURVIVES
+// navigation, so it is drawn as something you are definitely holding: solid
+// left edge, a warmer border, and a count that rides in the header. The visual
+// weight is the honesty — state that follows you around must never look
+// tentative.
+
+.ai-carry-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #d9c39a;
+  background: rgba(214, 176, 110, 0.14);
+  border: 1px solid rgba(214, 176, 110, 0.45);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  line-height: 1.5;
+
+  .mat-sym { font-size: 0.85em; }
+}
+
+.ai-carry {
+  flex: 0 0 auto;
+  padding: 0.4em 0.55em 0.5em;
+  border-bottom: 1px solid rgba($steel, 0.16);
+  border-left: 2px solid rgba(214, 176, 110, 0.6);
+  background: rgba(214, 176, 110, 0.06);
+}
+
+.ai-carry-list {
+  margin: 0 0 0.4em;
+  padding: 0;
+  list-style: none;
+  max-height: 8.5em;
+  overflow-y: auto;
+}
+
+.ai-carry-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.18em 0.2em;
+  color: rgba(226, 214, 190, 0.9);
+  font-size: 0.78em;
+
+  .ai-carry-icon { font-size: 1em; color: rgba(214, 176, 110, 0.8); }
+}
+
+.ai-carry-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-carry-drop {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 0.2em;
+  color: rgba(226, 214, 190, 0.55);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { color: #f4fafd; }
+}
+
+// What the bouquet in hand will do to this batch. Said BEFORE the press, never
+// discovered after — a mark landing on twelve new references is not a surprise
+// anyone should have to undo.
+.ai-carry-marks {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  margin: 0 0 0.4em;
+  font-size: 0.72em;
+  color: #8fbfa4;
+
+  .mat-sym { font-size: 1.1em; }
+}
+
+.ai-carry-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.ai-carry-apply {
+  flex: 1 1 auto;
+  padding: 0.4em 0.6em;
+  border: 1px solid rgba(214, 176, 110, 0.6);
+  border-radius: 3px;
+  background: transparent;
+  color: #f0e3c9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78em;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  &:hover { background: rgba(214, 176, 110, 0.18); border-color: rgba(214, 176, 110, 0.9); color: #fff; }
+  &:focus-visible { outline: 1px solid rgba(214, 176, 110, 0.8); outline-offset: 1px; }
+}
+
+.ai-carry-clear {
+  flex: 0 0 auto;
+  padding: 0.4em 0.55em;
+  border: 1px solid rgba($steel, 0.3);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(207, 226, 238, 0.7);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78em;
+
+  &:hover { background: rgba($steel, 0.14); color: #f4fafd; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+}
+
+// The row control, lit while that row is in the basket.
+.ai-action-carry.is-carried {
+  background: rgba(214, 176, 110, 0.22);
+  border-color: rgba(214, 176, 110, 0.85);
+  color: #f0e3c9;
+}
+
 // MOVE — the second verb, and the heavier one: it takes custody, so the tiles
 // leave the page they were on. Same size and rhythm as Add (they are peers, not
 // a primary and a secondary), distinguished by a SOLID border rather than Add's

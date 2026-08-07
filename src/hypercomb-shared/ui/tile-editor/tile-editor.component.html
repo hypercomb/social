@@ -88,8 +88,8 @@
             type="text"
             name="tile-link"
             placeholder="https://..."
-            [ngModel]="linkValue"
-            (ngModelChange)="linkValue = $event"
+            [ngModel]="linkValue()"
+            (ngModelChange)="linkValue.set($event)"
             (blur)="onLinkBlur()"
             [title]="linkSafetyReason"
           />

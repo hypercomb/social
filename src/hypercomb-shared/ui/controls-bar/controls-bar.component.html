@@ -467,6 +467,18 @@
                 @if (ctrl.id === 'clipboard' && badgeValue(ctrl) > 0) {
                   <span class="badge">{{ badgeValue(ctrl) }}</span>
                 }
+                <!-- The fit button's caret — the only visible sign that the
+                     view flyout exists. Right-click still opens it (and is how
+                     the keyboard's context-menu key gets in), but nobody
+                     guesses a right-click on a rail icon, and the step-zoom
+                     verbs live behind it now that the magnifiers are off the
+                     rail. Not a nested <button> — invalid inside one — so it
+                     stops its own click from firing the fit. -->
+                @if (ctrl.id === 'fit' && !editMode()) {
+                  <span class="fit-caret" aria-hidden="true"
+                        (click)="onFitCaretClick($event)"
+                        (contextmenu)="onCtrlContext(ctrl, $event)">&#x25BE;</span>
+                }
               </button>
             }
           </div>

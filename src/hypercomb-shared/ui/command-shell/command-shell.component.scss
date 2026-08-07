@@ -100,6 +100,19 @@ $bp-phone-max: 599px;
     cursor: pointer;
     opacity: 1;
   }
+
+  // A SUBJECT reads the same as an armed resource — same box, same click-to-
+  // dismiss — but a hair cooler, because it is a label rather than cargo:
+  // nothing about the line is waiting on it, so it must not draw the eye the
+  // way something pending does.
+  &.subject {
+    cursor: pointer;
+    opacity: 1;
+
+    .prompt-thumb {
+      box-shadow: 0 0 0 1px rgba(var(--glow-color-rgb), 0.35);
+    }
+  }
 }
 
 .prompt-chevron {

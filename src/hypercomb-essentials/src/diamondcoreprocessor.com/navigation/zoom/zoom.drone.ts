@@ -602,6 +602,15 @@ export class ZoomDrone extends Drone {
     // below so an early return has zero side effects.
     if (availW <= 0 || availH <= 0) return false
 
+    // An EXPLICIT fit (button, `0`/`r`, /fit, quick menu — every path that
+    // passes source 'user') is the participant asking for this framing. The
+    // control bar listens so it can hand the page back to the global fit
+    // switch, undoing the hand-framed hold a pan/zoom here had taken. Auto
+    // fits — restore-refits, the switch's own arrival fits — must never
+    // announce themselves here, or the switch would clear its own exceptions.
+    // Emitted only past every bail above, so it means "a fit is running".
+    if (source === 'user') EffectBus.emitTransient('viewport:fit', {})
+
     const stageScale = this.app.stage.scale.x || 1
 
     // safe area center in screen coords

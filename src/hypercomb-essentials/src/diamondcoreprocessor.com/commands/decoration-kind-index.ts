@@ -220,6 +220,69 @@ export const LAUNCH_DECORATION_KIND = 'launch:target'
  *  portals to that location. See reference.drone.ts / reference.queen.ts. */
 export const REFERENCE_DECORATION_KIND = 'reference'
 
+// ── Context sub-index (what a tile's questions should also see) ───────
+//
+// Decoration kind marking a place whose material belongs in any language-model
+// request made ABOUT this tile. Written by dropping a portal ONTO a tile.
+//
+// ── Why this is not a tag, and not the context basket ────────────────────────
+//
+// A TAG says what a tile IS — membership, painted from the pheromone panel, and
+// switchable off by anyone looking at the chips. Context is not a claim about
+// the tile; it is a claim about how to ANSWER for it, and switching it off from
+// a chip strip would silently thin every future answer with no sign that it had.
+//
+// The CONTEXT BASKET (assistant/context-basket.ts) is the other neighbour, and
+// it is transient by design: gathered on one trip, spent on one ask. This is
+// the opposite — it rides with the tile, travels in its layer to whoever adopts
+// it, and is still true next month. Same idea at two lifetimes, so they are two
+// records rather than one with a flag.
+//
+// The payload is a reference's payload (`targetSegments` + `targetSig`) because
+// it IS the same act at heart: a live pointer at another place, resolved at read
+// time, never a copy. What differs is what reading it means.
+
+/** Decoration kind attaching a place as context for questions about this tile. */
+export const CONTEXT_DECORATION_KIND = 'context'
+
+/** Map<locationKey, targetSegments[]> — every place attached to a cell as
+ *  context. A LIST, not a single value: gathering is additive, and a tile that
+ *  needs three sources to be answered for is the normal case rather than a
+ *  conflict to resolve. */
+const contextTargetsByKey = new Map<string, readonly string[][]>()
+
+/** Map<locationKey, Map<targetKey, decorationSig>> — lets a remove path find
+ *  the exact sig to splice without re-reading the cell's whole slot. */
+const contextSigByKeyTarget = new Map<string, Map<string, string>>()
+
+/** The places attached to a cell as context, or `[]` when it carries none.
+ *  Synchronous and O(1), like every reader here — an ask composer resolves this
+ *  while assembling a request and must not touch OPFS to find out. */
+export function contextTargetsForLabel(label: string): readonly string[][] {
+  return contextTargetsByKey.get(keyForLabel(label)) ?? EMPTY_CONTEXT
+}
+
+/** The same lookup by FULL PATH — for callers walking a subtree, where a bare
+ *  label would resolve against the page being rendered rather than the cell
+ *  actually being asked about. */
+export function contextTargetsForSegments(segments: readonly string[]): readonly string[][] {
+  return contextTargetsByKey.get(locationKey(segments)) ?? EMPTY_CONTEXT
+}
+
+/** The decoration sig of one context attachment on a cell, keyed by the target
+ *  path it points at. Undefined when the index has not seen it. */
+export function contextSigFor(
+  label: string,
+  targetSegments: readonly string[],
+  segments?: readonly string[],
+): string | undefined {
+  const key = segments ? locationKey(segments) : keyForLabel(label)
+  return contextSigByKeyTarget.get(key)?.get(locationKey(targetSegments))
+}
+
+/** Shared empty result — the miss is the common case, and this is read per cell. */
+const EMPTY_CONTEXT: readonly string[][] = Object.freeze([])
+
 /** Map<locationKey, targetSegments> — the location a reference tile points at.
  *  A present entry (even `[]`, meaning the hive root) marks the cell as a
  *  reference; absent means "not a reference". */
@@ -531,6 +594,16 @@ window.ioc.register('@diamondcoreprocessor.com/OverlapMetrics', {
   tagCount: countLabelsWithTag,
 })
 
+// The context index, reachable from OUTSIDE essentials — the shell writes these
+// attachments (the portals drop lives in shared, which may never import
+// essentials) and an ask composer has to read them back. Same loose-IoC seam
+// OverlapMetrics uses, and the only route there is.
+window.ioc.register('@diamondcoreprocessor.com/ContextIndex', {
+  targetsForLabel: contextTargetsForLabel,
+  targetsForSegments: contextTargetsForSegments,
+  sigFor: contextSigFor,
+})
+
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }
@@ -742,6 +815,21 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
       void hydrateBouquetMarks(bouquet)
     } else referenceBouquetByKey.delete(key)
   }
+  if (kind === CONTEXT_DECORATION_KIND) {
+    const target = targetSegmentsOf(record)
+    // Additive and DEDUPED by target: hydration re-walks a cell's whole slot,
+    // and the same place attached twice must not answer twice — a doubled
+    // source is a doubled prompt, which is a cost with no benefit.
+    if (target) {
+      const targetKey = locationKey(target)
+      let bySig = contextSigByKeyTarget.get(key)
+      if (!bySig) { bySig = new Map<string, string>(); contextSigByKeyTarget.set(key, bySig) }
+      if (!bySig.has(targetKey)) {
+        bySig.set(targetKey, sig)
+        contextTargetsByKey.set(key, [...(contextTargetsByKey.get(key) ?? []), [...target]])
+      }
+    }
+  }
   if (kind === TITLE_DECORATION_KIND) {
     const text = textOf(record)
     if (text) titleByKey.set(key, text)
@@ -856,6 +944,31 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       // `bouquetMarksBySig` is kept — content-addressed and shared across
       // cells, same reasoning as `nameBySig`/`kindBySig` above.
     }
+    if (kind === CONTEXT_DECORATION_KIND) {
+      // Subtract the ONE attachment this sig names, not the cell's whole
+      // context. A context record is content-addressed (`appliesTo: []`), so
+      // the same sig is shared by every cell attached to that place — but the
+      // event names the cell, so the pair is unambiguous.
+      const bySig = contextSigByKeyTarget.get(key)
+      const targetKey = bySig
+        ? [...bySig.entries()].find(([, s]) => s === sig)?.[0]
+        : undefined
+      if (bySig && targetKey !== undefined) {
+        bySig.delete(targetKey)
+        const kept = (contextTargetsByKey.get(key) ?? []).filter(t => locationKey(t) !== targetKey)
+        if (kept.length) contextTargetsByKey.set(key, kept)
+        else contextTargetsByKey.delete(key)
+        if (bySig.size === 0) contextSigByKeyTarget.delete(key)
+        // `removeKind` above is blunt — it drops the KIND on the first removal,
+        // which is wrong for anything a cell can carry several of: losing one
+        // attachment does not stop the cell from having context. Put the kind
+        // back while any remain, so a `visibleWhen` icon (and the overlap count)
+        // keeps telling the truth. Deliberately fixed HERE rather than in
+        // `removeKind`: tags have the same shape and the same flaw, and
+        // changing the shared subtraction is a wider claim than this branch.
+        if (kept.length) addKind(key, CONTEXT_DECORATION_KIND)
+      }
+    }
     if (kind === TITLE_DECORATION_KIND) {
       titleByKey.delete(key)
       EffectBus.emit('title:indexed', { label })
@@ -912,6 +1025,8 @@ export function forgetDecorationLabel(label: string): void {
     referenceTargetByKey.delete(key)
     referenceSigByKey.delete(key)
     referenceMarksByKey.delete(key)
+    contextTargetsByKey.delete(key)
+    contextSigByKeyTarget.delete(key)
     titleByKey.delete(key)
     segmentsByKey.delete(key)
   }

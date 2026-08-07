@@ -33,11 +33,12 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 import {
   aggregateSources, getAggregateSource, sourceForLocation,
   type AddedRows, type AggregateItem, type AggregateSource, type AggregateVersion, type StagedEntry,
 } from './aggregate-source'
-import { dropReferenceTile, dropTagsOnTile, safeCellName } from './aggregate-drop'
+import { dropContextOnTile, dropReferenceTile, dropTagsOnTile, safeCellName } from './aggregate-drop'
 import { onSelection, withSelectionService } from '../../core/selection-context'
 
 /** Movement before a press counts as a drag rather than a click — small enough
@@ -69,6 +70,10 @@ const KEY_SEP = '\u0000'
 })
 export class AggregateIndexComponent implements OnDestroy {
   readonly open = signal(false)
+
+  /** Put away while the hive is covered; back on the same source, same filter,
+   *  same origin — `close()` also drops a rename in progress, parking doesn't. */
+  readonly session = signalSession(this.open)
   readonly items = signal<readonly AggregateItem[]>([])
   /** The ONE field. There is no create mode — see `creatable`. */
   readonly query = signal('')
@@ -222,6 +227,42 @@ export class AggregateIndexComponent implements OnDestroy {
     return segs.length ? segs[segs.length - 1] : ''
   })
 
+  // ── carrying: choose here, travel, apply there ──────────────────────────────
+  //
+  // Dragging one row at a time answers "put this there". It does not answer
+  // "put these twelve there", and it forces the destination to be on screen at
+  // the moment you decide — which it usually isn't, because deciding what
+  // belongs together and finding where it goes are different acts.
+  //
+  // So: pick rows, walk the hive to wherever they belong, press Apply.
+  //
+  // ── THIS SURVIVES NAVIGATION, AND THE STAGED TRAY MUST NOT ──────────────────
+  //
+  // `#dropStaged()` deliberately empties on every hop (2026-07-28): a tray that
+  // follows you around keeps offering to file tiles you picked on a page you
+  // have since left, and the offer reads as live because the buttons are lit.
+  // That rule is right for THAT tray and wrong for this one, and the difference
+  // is the DIRECTION OF TRAVEL:
+  //
+  //   "file these tiles I picked HERE"  → leaving INVALIDATES it.
+  //   "carry these somewhere ELSE"      → leaving COMPLETES it.
+  //
+  // Same-shaped state, opposite meaning, so they are kept as two baskets rather
+  // than one with a flag. What this one owes in exchange for surviving is being
+  // impossible to forget: the count rides in the header, the bar names the page
+  // it would land on, and Apply empties it.
+
+  /** Rows picked up to be applied elsewhere. Order is the order they were
+   *  picked — the batch lands the way you built it. */
+  readonly carried = signal<readonly AggregateItem[]>([])
+  readonly carryCount = computed(() => this.carried().length)
+
+  /** The marks the scenting brush is holding, mirrored from `tags:apply-pending`
+   *  (sticky). A bouquet in hand at the moment you press Apply lands on the
+   *  references as they are created — see `applyCarried`. */
+  readonly #brushMarks = signal<readonly string[]>([])
+  readonly brushMarks = computed(() => [...this.#brushMarks()])
+
   readonly #cdr = inject(ChangeDetectorRef)
   readonly #activeTags = signal<ReadonlySet<string>>(new Set())
   #filterScope: 'local' | 'children' | 'global' = 'global'
@@ -258,6 +299,17 @@ export class AggregateIndexComponent implements OnDestroy {
       this.selection.set(selected.map(label => ({ label, segments: [...here, label] })))
       this.#cdr.detectChanges()
     }))
+    // Bouquet in hand (sticky). Read-only here — the pheromone panel owns the
+    // brush; this window only asks what it is holding when Apply is pressed.
+    this.#cleanups.push(EffectBus.on<{ tags?: string[]; tag?: string | null; active?: boolean }>(
+      'tags:apply-pending', (p) => {
+        const armed = p?.active === true
+        const marks = armed
+          ? (Array.isArray(p?.tags) && p.tags.length ? p.tags : (p?.tag ? [p.tag] : []))
+          : []
+        this.#brushMarks.set(marks.map(String).filter(Boolean))
+        this.#cdr.markForCheck()
+      }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-open', (p) => this.openPanel(p?.id)))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-toggle', (p) => this.togglePanel(p?.id)))
     this.#cleanups.push(EffectBus.on('aggregate:view-close', () => this.close()))
@@ -559,6 +611,143 @@ export class AggregateIndexComponent implements OnDestroy {
     await this.reload()
   }
 
+  // ── carrying ────────────────────────────────────────────────────────────────
+
+  isCarried(item: AggregateItem): boolean {
+    return this.carried().some(c => c.key === item.key)
+  }
+
+  /** Pick a row up, or put it back down. Its own control, never the row body:
+   *  the body already means open, and a press-and-move already means drag. */
+  toggleCarry(item: AggregateItem, event?: Event): void {
+    event?.stopPropagation()
+    this.carried.update(list => this.isCarried(item)
+      ? list.filter(c => c.key !== item.key)
+      : [...list, item])
+  }
+
+  dropCarried(): void {
+    this.carried.set([])
+  }
+
+  /**
+   * Apply everything carried, here — one reference per item, at the page in
+   * front of you.
+   *
+   * WHAT LANDS, AND WHAT DOES NOT:
+   *
+   *   • A reference per item. Nothing is copied; the target is untouched.
+   *   • The bouquet in hand, if any, onto the NEW REFERENCE CELLS. Applying a
+   *     batch is exactly when a shared mark earns its keep — that batch is the
+   *     subset you will want to see alone later — and the mark belongs on the
+   *     incidence, never on the target.
+   *   • NOT the marks the source references carry. A mark on `friends/susan`
+   *     says something about THAT membership; copying it here would assert the
+   *     same thing about a different one. If it should be true here too, it is
+   *     something you say here.
+   *
+   * One pulse for the whole batch (see `dropReferenceTile`): a pulse awaits
+   * every bee and repaints the hive, so it is priced per gesture.
+   */
+  async applyCarried(): Promise<void> {
+    const items = this.carried()
+    if (items.length === 0) return
+    const here = this.#segments()
+
+    // ── A NAME IS AN ADDRESS, so an occupied one must be REFUSED ─────────────
+    //
+    // `sha256(lineageKey([...here, name]))` is the whole identity of the tile
+    // this would create. If something already answers to that name here, the
+    // commit does not make a second tile — it appends a marker to the EXISTING
+    // one, quietly turning that tile into a reference and stamping the batch's
+    // marks on it. Caught in the browser: applying `people` at the root wrote
+    // into the real `people` collection.
+    //
+    // So an occupied address is skipped and counted, never merged and never
+    // auto-suffixed: `people-2` is a name nobody chose. Wanting a second alias
+    // under one parent is a naming act, and the drag path asks for the name.
+    const seen = new Set<string>()
+    const created: string[] = []
+    let skipped = 0
+    for (const item of items) {
+      const name = safeCellName(item.label)
+      // Two rows can carry the same label from different collections; the
+      // second would land on the first's address.
+      if (!name || seen.has(name)) { skipped++; continue }
+      seen.add(name)
+      if (await this.#addressTaken([...here, name])) { skipped++; continue }
+      const made = await dropReferenceTile(item, here)
+      if (made) created.push(made)
+    }
+    if (created.length === 0) {
+      this.dropCarried()
+      if (skipped > 0) this.#toast('aggregate.apply.none.title', 'aggregate.apply.none.message',
+        { count: skipped }, 'Nothing applied', `${skipped} already answer to that name here.`)
+      return
+    }
+
+    // Scent the batch BEFORE the pulse, so the references and their marks reach
+    // the hive in the same repaint rather than as a tile that flickers unmarked.
+    const marks = this.#brushMarks()
+    if (marks.length) for (const name of created) await dropTagsOnTile(marks, [...here, name])
+
+    await new hypercomb().act()
+    this.dropCarried()
+    // `tags:changed` carries `{updates:[{cell,tag}]}` — every other emitter in
+    // the app sends that shape and its handlers iterate it, so a `{segments}`
+    // payload throws inside the bus handler instead of failing visibly.
+    if (marks.length) {
+      EffectBus.emit('tags:changed', {
+        updates: created.flatMap(cell => marks.map(tag => ({ cell, tag }))),
+      })
+    }
+
+    const page = this.hereLabel() || 'home'
+    const tail = skipped > 0 ? ' ' + (this.#t('aggregate.applied.skipped', { count: skipped })
+      ?? `${skipped} skipped — already named here.`) : ''
+    this.#toast(
+      'aggregate.applied.title',
+      marks.length ? 'aggregate.applied.marked' : 'aggregate.applied.message',
+      { count: created.length, page, marks: marks.join(', ') },
+      `Applied ${created.length}`,
+      marks.length
+        ? `${created.length} references, scented ${marks.join(', ')}.`
+        : `${created.length} references landed on ${page}.`,
+      tail,
+    )
+    void this.reload()
+  }
+
+  /** Is this location already spoken for? A bag that has ever been committed
+   *  answers, which is deliberately conservative: committing onto a name whose
+   *  tile was removed resurrects that lineage rather than starting a new one. */
+  async #addressTaken(segments: readonly string[]): Promise<boolean> {
+    const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as {
+      sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
+      currentLayerAt(sig: string): Promise<unknown | null>
+    } | undefined
+    if (!history?.sign) return false
+    try {
+      const sig = await history.sign({ explorerSegments: () => [...segments] })
+      return !!(await history.currentLayerAt(sig))
+    } catch { return false }   // unknowable → let the write decide
+  }
+
+  #t(key: string, params?: Record<string, unknown>): string | undefined {
+    const i18n = ioc()?.get('@hypercomb.social/I18n') as
+      { t(k: string, p?: Record<string, unknown>): string } | undefined
+    return i18n?.t(key, params)
+  }
+
+  #toast(titleKey: string, messageKey: string, params: Record<string, unknown>,
+         titleFallback: string, messageFallback: string, tail = ''): void {
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      title: this.#t(titleKey, params) ?? titleFallback,
+      message: (this.#t(messageKey, params) ?? messageFallback) + tail,
+    })
+  }
+
   /** Commit the staged selection as members. The canvas selection is cleared
    *  afterwards: the staged rows have become real ones, and leaving them
    *  selected would offer to add what was just added. */
@@ -709,41 +898,75 @@ export class AggregateIndexComponent implements OnDestroy {
   async #applyDrop(item: AggregateItem, label: string | null): Promise<void> {
     const here = (this.#lineage?.explorerSegments?.() ?? []).map(String)
     if (label) {
-      // Dropped ON a tile → attach this item's keywords, making that tile a
-      // member of everything parameterised by them.
-      const tags = item.tags ?? []
-      if (!tags.length) {
-        // A collection with no keyword has no pheromone to give, so there is
-        // nothing to relate. Deliberately NOT auto-minting one from the name —
-        // relating things is a pheromone act you do on purpose (Jaime: don't
-        // create things on the fly here, it's already complicated). But dying
-        // in silence made the drop feel broken, so narrate the task that
-        // remains instead.
-        const i18n = ioc()?.get('@hypercomb.social/I18n') as
-          { t(k: string, p?: Record<string, unknown>): string } | undefined
-        EffectBus.emit('toast:show', {
-          type: 'info',
-          title: i18n?.t('aggregate.drop-no-keyword.title') ?? 'No keyword yet',
-          message: i18n?.t('aggregate.drop-no-keyword.message', { name: item.label })
-            ?? `"${item.label}" carries no keyword — give it one first; its pheromones are what make a tile a member.`,
-        })
-        return
-      }
-      await dropTagsOnTile(tags, [...here, label])
-      EffectBus.emit('tags:changed', { segments: [...here, label] })
+      // ── Dropped ON a tile → the item becomes that tile's CONTEXT ──────────
+      //
+      // There is no room on an occupied hex, so this drop cannot mean "put it
+      // here"; it says something about the TILE — that answering questions
+      // about it means knowing about the dropped place too. Written as a live
+      // pointer (see `dropContextOnTile`), so the context follows the source
+      // rather than freezing a copy of it.
+      //
+      // This used to copy the item's KEYWORDS onto the tile (membership). That
+      // meaning moved out entirely rather than being kept behind a modifier:
+      // marks belong to the pheromone panel, where painting one is deliberate.
+      const attached = await dropContextOnTile(item, [...here, label])
+      await new hypercomb().act()
+      this.#toast(
+        attached ? 'aggregate.context.added.title' : 'aggregate.context.failed.title',
+        attached ? 'aggregate.context.added.message' : 'aggregate.context.failed.message',
+        { name: item.label, cell: label },
+        attached ? 'Context attached' : 'Could not attach',
+        attached
+          ? `"${item.label}" now informs questions about "${label}".`
+          : `"${item.label}" could not be attached to "${label}".`,
+      )
       return
     }
-    // Dropped on empty hive → a plain reference to the item, here. It demands
-    // NOTHING at birth: what a reference filters its target by is a pheromone
-    // act, and pheromones come from the pheromone panel, not from a palette this
-    // window keeps of its own (see the note above `hasFilter`).
+    // ── Dropped on empty hive → THE NAME IS ASKED FOR ──────────────────────
     //
-    // The pulse is HERE rather than inside the write: one gesture, one repaint
-    // (see dropReferenceTile). The re-read isn't awaited — the tile is on the
-    // hive already, and this list only changes if the drop landed in the index.
-    await dropReferenceTile(item, here)
-    await new hypercomb().act()
-    void this.reload()
+    // A reference mints a new LOCATION, and a location's name IS its address
+    // (`sha256(lineageKey(segments))`). So the name cannot be an afterthought:
+    // renaming later is a title decoration, which changes the reading and not
+    // the address, and dropping the same target twice under one parent would
+    // land on the same bag instead of making two references.
+    //
+    // Rather than grow a dialog mid-gesture, the drop COMPOSES the command that
+    // already does this correctly and hands it over with the name selected:
+    // Enter takes the target's own name, typing replaces it. One writer
+    // (`/reference <name> = <path>`, race-free create+decorate in essentials),
+    // one place where the name is decided, and the composable path stays open —
+    // whatever else you can type on that line still works.
+    //
+    // ── THE FILTER, AND WHY IT IS PRE-WRITTEN ────────────────────────────────
+    //
+    // A portal can demand pheromones of what it shows ("People, but only
+    // family"), and the line is where that is said: `+ family, @field-notes`,
+    // completed live from the pheromone and bouquet pools (see
+    // `ReferenceQueenBee.slashComplete`).
+    //
+    // A tail nobody knows about is a tail nobody types, so the BRUSH writes the
+    // first one. If the pheromone panel has marks in hand at the moment of the
+    // drop, they arrive already spelled out on the line — the same marks
+    // `applyCarried` lands on a batch, said out loud instead of applied
+    // invisibly. You can delete them; what you cannot do is fail to notice that
+    // the syntax exists.
+    const path = item.segments.map(s => String(s ?? '')).filter(Boolean).join('/')
+    const name = safeCellName(item.label) || (item.segments[item.segments.length - 1] ?? '')
+    if (!path || !name) return
+    const head = '/reference '
+    const marks = this.#brushMarks()
+    const tail = marks.length ? ` + ${marks.join(', ')}` : ''
+    EffectBus.emit('search:prefill', {
+      value: `${head}${name} = ${path}${tail}`,
+      focus: true,
+      // The NAME is selected, never the tail: naming is the decision the drop
+      // could not make for you, and the filter is one you have already made (or
+      // left empty). Enter accepts both.
+      select: [head.length, head.length + name.length],
+      // The dragged row's own face, in the glyph slot — so the line says WHAT
+      // it is about while you are busy deciding what to call it.
+      subject: { previewUrl: item.image, label: item.label, icon: 'conversion_path' },
+    })
   }
 
   // ── activation ──────────────────────────────────────────────────────────────

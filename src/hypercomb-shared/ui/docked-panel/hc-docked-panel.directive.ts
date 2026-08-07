@@ -48,6 +48,12 @@ import {
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
 } from './panel-groups'
 
+// The session — how a window is put away while the hive is covered (the
+// installer) and brought back on the way home. A docked window joins just by
+// handing over its `park`/`unpark` pair; the directive only exists while the
+// window is showing, so its own lifetime IS the "currently open" fact.
+import { holdWindow, type WindowSession } from '../window-session'
+
 const t = (key: string, fallback: string, params?: Record<string, unknown>): string => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
     { t(k: string, p?: Record<string, unknown>): string } | undefined
@@ -149,6 +155,13 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
    *  common settings gear offers Add/Remove from controls and persists through
    *  the controls bar's participant-local preference map. */
   @Input() launcherControlId = ''
+  /** How this window is PUT AWAY and BROUGHT BACK when the hive is covered —
+   *  entering the installer parks every showing window, leaving unparks them.
+   *  Supplied by the window itself because only the window knows what "stop
+   *  showing without forgetting" means for it (a `close()` usually also clears
+   *  its content, which is exactly what a park must not do). Absent → the
+   *  window simply doesn't take part. */
+  @Input() hcSession: WindowSession | null = null
   /** Side docks are single-window lanes. Set false only while a surface is
    * genuinely floating or when a future multi-window host owns its layout. */
   @Input() set dockExclusive(value: boolean) {
@@ -174,6 +187,8 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   #dockExclusive = true
   #initialized = false
   #claimQueued = false
+  /** Drops this window out of the "currently showing" set when it goes. */
+  #releaseSession: (() => void) | null = null
   /** Only when `ownsSize` is false: watches the window's self-driven resize so
    *  its group mates track it, exactly as the grip does for owned panels. */
   #sizeWatch: ResizeObserver | null = null
@@ -192,6 +207,8 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     live.add(this)
     members.add(this)
     this.#initialized = true
+    // Showing, from now until this panel's element goes away.
+    if (this.hcSession) this.#releaseSession = holdWindow(this.id, this.hcSession)
     if (this.#dockExclusive) this.#scheduleSideClaim()
     this.#group = readMembership(this.id)
     // A grouped panel opens at its GROUP's width rather than its own remembered
@@ -230,6 +247,10 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     this.#initialized = false
     live.delete(this)
     members.delete(this)
+    // Closed, or parked — either way it is no longer showing. A parked window's
+    // session lives on in the parked list, which is what brings it back.
+    this.#releaseSession?.()
+    this.#releaseSession = null
     this.#stopListeners()
     this.#closePopover()
     this.#sizeWatch?.disconnect()

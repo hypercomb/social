@@ -5,6 +5,7 @@ import { EffectBus } from '@hypercomb/core'
 import { getClientIdentity } from '../../core/client-identity'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
+import { parkWindows, unparkWindows } from '../window-session'
 
 const DEFAULT_PORTALS: Record<string, string> = {
   meadowverse: 'https://meadowverse.com',
@@ -366,6 +367,11 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       // passive exit funnels there) and ngOnDestroy. Resolved lazily because
       // the gate's bee may register after this component constructs on web.
       this.#gate()?.lock(PORTAL_LOCK_OWNER)
+      // …and put the tool windows away. They dock ABOVE this overlay (z-index
+      // 100002 vs 90000), so an open features panel or notes strip would go on
+      // floating over the installer. PARKED, not closed: unparked in close(),
+      // so coming back to the hive finds them exactly as they were left.
+      this.#parkWindows()
     }
     this.#recomputeDiff()   // also calls detectChanges()
   }
@@ -507,6 +513,9 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#clearHeadlessTimers()
     this.headless = false
     this.#gate()?.lock(PORTAL_LOCK_OWNER)
+    // It is a visible installer from here on, so the tool windows go away —
+    // a headless install never touched them, because nothing covered the hive.
+    this.#parkWindows()
     this.#recomputeDiff()   // detectChanges → the visible panel now renders
     // Say WHY the installer suddenly appeared — the install was invisible
     // until now, so the promotion needs a visible cause. Emitted AFTER our own
@@ -647,14 +656,37 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#unsubDiff?.()
     this.#clearHeadlessTimers()
     // Release on teardown so a portal destroyed while open never leaves the
-    // hexes locked.
+    // hexes locked — or the participant's windows put away with nothing left
+    // to bring them back.
     this.#gate()?.unlock(PORTAL_LOCK_OWNER)
+    this.#unparkWindows()
   }
 
   /** InputGate — the shared tile-input lock. Resolved at runtime (shared
    *  must never import from modules); undefined until its bee registers. */
   #gate(): InputGateLike | undefined {
     return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
+  }
+
+  /** Put the tool windows away for as long as this overlay covers the hive.
+   *  Idempotent by the session's own rule, so a queued install opening behind
+   *  this one — or a headless install promoting to visible — never re-parks an
+   *  already-parked (and therefore empty) screen over the remembered set. */
+  #parkWindows(): void {
+    const parked = parkWindows()
+    if (parked > 0) this.#parkedWindows = true
+  }
+
+  /** Did WE park? Only then do we bring them back — a portal that opened over
+   *  an empty screen has nothing to restore, and must not restore someone
+   *  else's. */
+  #parkedWindows = false
+
+  /** Back to the hive: the windows come back exactly as they were left. */
+  #unparkWindows(): void {
+    if (!this.#parkedWindows) return
+    this.#parkedWindows = false
+    unparkWindows()
   }
 
   // -------------------------------------------------
@@ -681,6 +713,11 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.headless = false
     this.isOpen = false
     this.#gate()?.unlock(PORTAL_LOCK_OWNER)
+    // Back in the hive — the windows that were up when we left come back up,
+    // with their content, scroll, scope and drill level intact. Before the
+    // queue drains below, so a NEXT queued install parks them again from a
+    // truthful "what is showing" rather than from an empty screen.
+    this.#unparkWindows()
     this.portalSrc = null
     this.#activeUrl = null
     this.#activeTarget = null

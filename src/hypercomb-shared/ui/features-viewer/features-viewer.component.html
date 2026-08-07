@@ -4,6 +4,7 @@
     [class.reviewing]="isPhone() && !!reviewTarget()"
     hcDockInset="right"
     hcDockedPanel="features-viewer"
+    [hcSession]="session"
     (hcDockedPanelClose)="close()"
     dockSide="right"
     [minWidth]="300"
@@ -15,8 +16,6 @@
     role="dialog"
     [attr.aria-label]="'features.viewer.title' | t"
   >
-    <!-- Product identity and global actions stay visible; search gets a full
-         row of its own below. Escape clears the query first, then closes. -->
     <header class="features-header">
       <div class="features-brand">
         <span class="features-brand-mark" aria-hidden="true">
@@ -24,21 +23,18 @@
         </span>
         <span class="features-title">{{ 'features.viewer.title' | t }}</span>
       </div>
-      <!-- The ROSTER switch: the global behavior list — every behavior the
-           app knows, one switch each, no tile subject. Off = dormant
-           everywhere AND withheld from every swarm. -->
+      <!-- THE STORE: every behavior the app knows, one light each. -->
       <button
         class="features-mode"
         type="button"
-        [class.active]="isRoster()"
-        (click)="isRoster() ? closeRoster() : openRoster()"
+        [class.active]="isStore()"
+        (click)="isStore() ? closeStore() : openStore()"
         [attr.title]="'features.mode.roster.hint' | t"
-        [attr.aria-pressed]="isRoster()"
-      ><span class="mat-sym" aria-hidden="true">tune</span></button>
-      <!-- The mode switch. MANAGE: rows are on/off switches for this tile.
-           PAINT: rows narrow to what's ON here and each click picks it into
-           the brush, which lands on the selected tiles in one press. -->
-      @if (!isRoster()) {
+        [attr.aria-pressed]="isStore()"
+      ><span class="mat-sym" aria-hidden="true">storefront</span></button>
+      <!-- PAINT: rows narrow to what's ON here; each click picks it into the
+           brush, which lands on the selected tiles in one press. -->
+      @if (!isStore()) {
       <button
         class="features-mode"
         type="button"
@@ -67,46 +63,13 @@
       />
     </div>
 
-    <!-- The ONE tile the manager is scoped to, plus a stable inventory summary. -->
-    @if (!isRoster() && group(); as g) {
+    <!-- The ONE tile the panel is scoped to. -->
+    @if (!isStore() && group(); as g) {
       <div class="features-context" [title]="g.cell">
         <span class="features-context-icon" aria-hidden="true">
           <span class="mat-sym">grid_view</span>
         </span>
-        <span class="features-context-copy">
-          <span class="features-context-label">{{ 'features.origin.direct' | t }}</span>
-          <strong class="features-tile">{{ g.cell }}</strong>
-        </span>
-        <span class="features-context-stats">
-          <span class="context-stat active">
-            <b>{{ activeAppliedCount(g) }}</b>
-            {{ 'features.hidden.hide' | t }}
-          </span>
-          <span class="context-stat">
-            <b>{{ g.available.length }}</b>
-            {{ 'features.section.available' | t }}
-          </span>
-        </span>
-      </div>
-      <!-- ── Reach: how far out the list looks ──
-           this tile / its context / your whole hive. A LOOK, not a switch —
-           narrowing hides rows from the list and turns nothing off. An
-           ADOPTED tile opens on "this tile", so you see the branch as it
-           arrived rather than with your own hive-wide behaviours over it. -->
-      <div class="features-reach" role="group" [attr.aria-label]="'features.reach.label' | t">
-        @for (r of ['direct', 'context', 'hive']; track r) {
-          <button
-            type="button"
-            class="reach-opt"
-            [class.active]="isReach($any(r))"
-            [attr.aria-pressed]="isReach($any(r))"
-            [attr.title]="('features.reach.' + r + '.hint') | t"
-            (click)="setReach($any(r))"
-          >{{ ('features.reach.' + r) | t }}</button>
-        }
-        @if (g.adopted) {
-          <span class="reach-adopted" [attr.title]="'features.reach.adopted.hint' | t">{{ 'features.reach.adopted' | t }}</span>
-        }
+        <strong class="features-tile">{{ g.cell }}</strong>
       </div>
       @if (isPhone() && !reviewTarget()) {
         <button class="features-select-tile" type="button" (click)="selectTile()">
@@ -116,10 +79,7 @@
       }
     }
 
-    <!-- ── Paint bar: the brush and where it lands ──
-         Always visible in paint mode so the two halves of the gesture are
-         never guesswork: how many behaviours are picked, and how many tiles
-         are selected to receive them. The button says both. -->
+    <!-- Paint bar: the brush and where it lands. -->
     @if (isPainting()) {
       <div class="paint-bar" role="status" aria-live="polite">
         <span class="paint-count">{{ 'features.paint.picked' | t: { count: brushCount() } }}</span>
@@ -138,9 +98,8 @@
       </div>
     }
 
-    <!-- Canvas-selection response: the selected tiles carry features — one
-         press re-targets this window at them (show-features.drone answers). -->
-    @if (showCanvasSelectionAffordance() && !isPainting() && !isRoster()) {
+    <!-- Canvas-selection response: selected tiles carry behaviors. -->
+    @if (showCanvasSelectionAffordance() && !isPainting() && !isStore()) {
       <button class="features-selection" type="button" (click)="openSelectionFeatures()"
               [attr.aria-label]="'features.selection' | t: { count: canvasSelectionCount() }">
         <span class="mat-sym" aria-hidden="true">extension</span>
@@ -148,13 +107,10 @@
       </button>
     }
 
-    <!-- ── Bulk bar: acts on the selected rows ── -->
+    <!-- Bulk bar: acts on the Ctrl/Shift-selected rows. -->
     @if (selectedCount() > 0) {
       <div class="bulk-bar">
         <span class="bulk-count">{{ 'features.selected' | t: { count: selectedCount() } }}</span>
-        <!-- Open is the primary action — enter the selected view behaviour and
-             close. Opening a view is single-surface, so this opens the first
-             selected enterable row. -->
         @if (openableSelectedCount() > 0) {
           <button
             class="bulk-open"
@@ -162,14 +118,6 @@
             (click)="openSelected()"
             [attr.title]="'features.bulk.open.hint' | t"
           >▶ {{ 'features.bulk.open' | t }}</button>
-        }
-        @if (allowableCount() > 0) {
-          <button
-            class="bulk-allow"
-            type="button"
-            (click)="allowSelected()"
-            [attr.title]="'features.bulk.allow.hint' | t"
-          >✓ {{ 'features.allow' | t }} · {{ allowableCount() }}</button>
         }
         @if (downloadableCount() > 0) {
           <button
@@ -185,12 +133,7 @@
       </div>
     }
 
-    <!-- ── Download pathway: the panel's answer to "did anything happen?" —
-         one stepper per tile, sent → receiving → done. The first node fills
-         the instant the click lands, the second when bytes stream (with the
-         climbing file count as the anti-stall cue), and the terminal node is
-         unmistakable: full green track + check on success, red node with
-         what went wrong on failure. -->
+    <!-- Download pathway: one stepper per tile, sent → receiving → done. -->
     @if (pathway().length > 0) {
       <div class="download-status" role="status" aria-live="polite">
         @for (p of pathway(); track p.cell) {
@@ -234,14 +177,10 @@
       </div>
     }
 
-    <!-- ── Review gate: a foreign feature handed here by the website gate ── -->
+    <!-- Review gate: a foreign feature handed here by the website gate. -->
     @if (reviewTarget(); as rt) {
       @if (isPhone()) {
-        <!-- ══ PHONE: a DECISION, and the code is somewhere you GO ══
-             The desktop gate shows the source and the buttons together, which
-             on a phone means a wall of unread code above two choices — an
-             invitation to pretend you read it. Here the screen asks the actual
-             question, in words, and reading the code is its own full page. -->
+        <!-- PHONE: a DECISION, and the code is somewhere you GO. -->
         <div class="feature-review phone" [class.reading]="codeOpen()">
           @if (codeOpen()) {
             <div class="review-head">
@@ -252,9 +191,6 @@
             </div>
             <pre class="review-code">{{ rt.code }}</pre>
             <div class="review-actions">
-              <!-- Accepting from IN HERE is the reviewed path — you have had
-                   the code in front of you, so it is not recorded as an
-                   unread override. -->
               <button type="button" class="review-accept" (click)="acceptReview(false)">{{ 'features.allow' | t }}</button>
               <button type="button" class="review-cancel" (click)="waitForCommunity()">{{ 'features.review.pending' | t }}</button>
             </div>
@@ -264,9 +200,6 @@
               <span class="review-kind" [title]="rt.sig">{{ rt.kind }}</span>
             </div>
             <p class="review-note">{{ 'features.review.note.phone' | t }}</p>
-            <!-- The honest warning, said once and calmly. Not a scare screen:
-                 the risk is real and the sentence is plain, and then it gets
-                 out of the way of the two buttons. -->
             <p class="review-warn">{{ 'features.review.warn' | t }}</p>
             <div class="review-actions">
               <button type="button" class="review-accept" (click)="acceptReview(true)">{{ 'features.allow' | t }}</button>
@@ -292,17 +225,15 @@
       }
     }
 
-    @if (isRoster()) {
-      <!-- ══ THE GLOBAL ROSTER ═══════════════════════════════════════
-           No tile subject, no belonging: every behavior the app knows,
-           one switch each. Off = dormant everywhere (icons, toggles and
-           offers vanish; the decorations stay put on their tiles) AND
-           withheld from every swarm. Per-tile wake exceptions and hidden
-           records are never touched — re-enabling here wakes a behavior
-           wherever it lives. -->
-      <div class="features-scroll roster">
+    @if (isStore()) {
+      <!-- ══ THE STORE ══════════════════════════════════════════════
+           No tile subject, no verbs. One row per behavior; the row reads
+           dim (off) / lit (on) / lit + badge (in use). Clicking flips the
+           ONE global light: off = dormant everywhere AND withheld from
+           every swarm. Decorations stay put on their tiles. -->
+      <div class="features-scroll store">
         <section class="features-group">
-          @for (grp of rosterGroups(); track grp.category) {
+          @for (grp of storeGroups(); track grp.category) {
             <div class="section-head">
               <span class="section-label">{{ grp.category }}</span>
               <span class="section-count">{{ grp.rows.length }}</span>
@@ -310,14 +241,15 @@
             <ul class="features-list">
               @for (row of grp.rows; track row.kind) {
                 <li
-                  class="features-row"
-                  role="checkbox"
+                  class="features-row store-row"
+                  role="switch"
                   tabindex="0"
                   [attr.aria-checked]="row.on"
+                  [class.lit]="row.on"
                   [class.off]="!row.on"
-                  (click)="rosterToggle(row)"
-                  (keydown.enter)="rosterToggle(row)"
-                  (keydown.space)="rosterToggle(row); $event.preventDefault()"
+                  (click)="storeToggle(row)"
+                  (keydown.enter)="storeToggle(row)"
+                  (keydown.space)="storeToggle(row); $event.preventDefault()"
                   [attr.title]="(row.on ? 'features.roster.off.hint' : 'features.roster.on.hint') | t"
                 >
                   <span class="feature-icon" aria-hidden="true">
@@ -330,7 +262,6 @@
                         <code class="feature-cmd">{{ row.slashCommand }}</code>
                       }
                     </span>
-                    <span class="feature-kind" [title]="row.kind">{{ row.kind }}</span>
                     @if (row.foreign) {
                       <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
                     }
@@ -338,9 +269,13 @@
                       <span class="feature-desc">{{ row.description }}</span>
                     }
                   </div>
-                  @if (row.on) {
-                    <span class="feat-check" aria-hidden="true">✓</span>
+                  <!-- The badge: this behavior is IN USE — decorations
+                       referencing it exist. Derived by counting, never
+                       stored. No badge = adopted but idle. -->
+                  @if (row.on && (row.used ?? 0) > 0) {
+                    <span class="feat-used" [attr.title]="'features.used.hint' | t: { count: row.used ?? 0 }">{{ row.used }}</span>
                   }
+                  <span class="feat-light" aria-hidden="true"></span>
                 </li>
               }
             </ul>
@@ -348,18 +283,14 @@
         </section>
       </div>
       <footer class="features-foot">
-        {{ 'features.roster.hint' | t: { on: rosterOnCount(), total: rosterRows().length } }}
+        {{ 'features.roster.hint' | t: { on: storeOnCount(), total: storeRows().length } }}
       </footer>
     } @else if (group(); as group) {
       <div class="features-scroll">
           <section class="features-group">
 
             @if (isPainting()) {
-            <!-- ══ PAINT MODE ══════════════════════════════════════════
-                 Only the behaviours that are ON at this tile — you hand over
-                 what it actually does. Click rows to load the brush, select
-                 the tiles on the hive, press apply: every picked behaviour
-                 lands on every selected tile in one press. -->
+            <!-- ══ PAINT MODE: pick behaviours ON here into the brush. ══ -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.paint' | t }}</span>
               <span class="section-count">{{ paintable(group).length }}</span>
@@ -385,10 +316,7 @@
                       <span class="mat-sym">{{ feat.icon }}</span>
                     </span>
                     <div class="feature-meta">
-                      <div class="feature-title-line">
-                        <span class="feature-name">{{ feat.label }}</span>
-                      </div>
-                      <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
+                      <span class="feature-name">{{ feat.label }}</span>
                       @if (feat.foreign) {
                         <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
                       }
@@ -405,155 +333,54 @@
             }
             } @else {
 
-            <!-- ── On this layer: features the tile already has ── -->
+            <!-- ── On this tile: the decorations it carries. Membership is
+                 positive — these rows ARE the applied behaviors. Remove (×)
+                 removes the decoration; inherited rows say where they flow
+                 from in one quiet line and are managed at their origin.
+                 A row a LEGACY hidden record still suppresses renders dim —
+                 clicking it restores (the one-tap drain). -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
               <span class="section-count">{{ visibleApplied(group).length }}</span>
             </div>
-            <!-- What the reach is holding back, said plainly with the way to
-                 see it — a narrowed list must never read as the whole truth. -->
-            @if (outOfReachCount(group); as beyond) {
-              <button class="reach-beyond" type="button" (click)="widen()"
-                      [attr.title]="'features.reach.widen.hint' | t">
-                {{ 'features.reach.beyond' | t: { count: beyond } }}
-              </button>
-            }
             @if (visibleApplied(group).length === 0) {
               <p class="section-empty">{{ 'features.applied.empty' | t }}</p>
             } @else {
               <ul class="features-list">
                 @for (feat of visibleApplied(group); track feat.kind) {
-                  <!-- THE ROW IS THE TOGGLE: click anywhere to flip the
-                       behavior in place (checkbox shows the state); Ctrl/
-                       Shift-click selects the row for the bulk bar. A WEBSITE
-                       row at its site root: checking it is the explicit
-                       enable — it commits the site into the websites menu, so
-                       its /websites link appears the moment it's checked. For
-                       a scope feature the flip acts AT THIS NODE, so a page
-                       or branch turns off individually. The row never moves
-                       or disappears. -->
                   <li
                     class="features-row"
-                    role="checkbox"
                     tabindex="0"
-                    [attr.aria-checked]="isOn(group, feat)"
                     [class.selected]="isSelected(group, feat)"
-                    [class.gated]="feat.gated"
                     [class.off]="!isOn(group, feat)"
                     [class.busy]="isPending(group, feat)"
                     (click)="rowClick(group, feat, $event)"
                     (keydown.enter)="rowClick(group, feat)"
                     (keydown.space)="rowClick(group, feat); $event.preventDefault()"
-                    [attr.title]="(isOn(group, feat) ? 'features.hide.hint' : 'features.turnon.hint') | t"
                   >
                     <span class="feature-icon" aria-hidden="true">
                       <span class="mat-sym">{{ feat.icon }}</span>
                     </span>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
-                      <!-- Origin: direct on the node, or cascaded from a parent. -->
-                      <span class="feature-origin" [class.cascade]="feat.origin === 'cascade'">
-                        @if (feat.origin === 'cascade') {
+                      <!-- Inherited: ONE quiet line saying where it flows
+                           from. Direct rows say nothing — being listed is
+                           the whole statement. -->
+                      @if (feat.origin === 'cascade') {
+                        <span class="feature-origin cascade">
                           @if (feat.originCell) {
                             {{ 'features.origin.cascade' | t: { cell: feat.originCell } }}
                           } @else {
                             {{ 'features.origin.cascade.root' | t }}
                           }
-                        } @else {
-                          {{ 'features.origin.direct' | t }}
-                          @if (feat.cascades) {
-                            <span class="origin-flow">{{ 'features.origin.cascades.down' | t }}</span>
-                          }
-                        }
-                      </span>
-                      <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
-                      <!-- A behaviour whose module isn't here: named from its
-                           own kind, with the missing module as PROVENANCE.
-                           It stays inert, and stays fully manageable. -->
+                        </span>
+                      }
                       @if (feat.foreign) {
                         <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
                       }
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
                       }
-                      <!-- Location where the feature is attached — last line, always
-                           visible (the tile itself for direct features, the declaring
-                           ancestor for cascaded ones). -->
-                      <span class="feature-attached">{{ 'features.attached' | t: { path: attachedAt(group, feat) } }}</span>
-                      <!-- Scope lineage: this node sits inside a website declared
-                           above it — the row leads back to the site root, where
-                           the master switch lives. -->
-                      @if (scopePartOf(group, feat); as scopePath) {
-                        <span class="feature-scope">{{ 'features.scope.partof' | t: { path: scopePath } }}</span>
-                      }
-                      <!-- Site-root row: descendant pages/branches turned off
-                           below this master switch, with a one-tap reset —
-                           "toggle everything back on from the root". -->
-                      @if (overrideRecords(group, feat).length; as offCount) {
-                        <span class="feature-overrides">
-                          {{ 'features.overrides.offbelow' | t: { count: offCount } }}
-                          <button
-                            class="overrides-reset"
-                            type="button"
-                            (click)="resetOverrides(group, feat); $event.stopPropagation()"
-                            [attr.title]="'features.overrides.reset.hint' | t"
-                          >{{ 'features.overrides.reset' | t }}</button>
-                        </span>
-                      }
-                      <!-- An off inherited from ABOVE (a branch or the site
-                           root turned off) says where — clicking the row
-                           flips the record that actually did it. -->
-                      @if (!isOn(group, feat) && !feat.dormant && offAt(group, feat); as at) {
-                        <span class="feature-offat">{{ 'features.off.at' | t: { path: at } }}</span>
-                      }
-                      <!-- DORMANT: off on the GLOBAL roster (or withheld by
-                           the adopted root's publisher). The row stays — the
-                           honest-switch rule — with the way to wake it HERE
-                           as a local exception, never a global flip. -->
-                      @if (feat.dormant) {
-                        <span class="feature-blocked">
-                          <span class="dormant-chip">{{ 'features.chip.dormant' | t }}</span>
-                          <button
-                            class="allow-btn"
-                            type="button"
-                            (click)="wakeHere(group, feat); $event.stopPropagation()"
-                            [attr.title]="'features.wake.hint' | t"
-                          >{{ 'features.wake' | t }}</button>
-                        </span>
-                      } @else if (isWokenHere(group, feat)) {
-                        <span class="feature-offat">
-                          {{ 'features.woken.here' | t }}
-                          <button
-                            class="overrides-reset"
-                            type="button"
-                            (click)="wakeHere(group, feat); $event.stopPropagation()"
-                            [attr.title]="'features.woken.undo.hint' | t"
-                          >{{ 'features.overrides.reset' | t }}</button>
-                        </span>
-                      }
-                      <!-- Community gate: enabled here but INERT until
-                           allowed. The checkbox keeps showing your intent;
-                           this quiet chip says why nothing mounts, with the
-                           allow override right beside it (bulk-allow in the
-                           top bar covers many at once). -->
-                      <!-- On a phone the state is said in full — "pending
-                           community verification" — rather than in a shorthand
-                           chip with a number beside it. Two words for the two
-                           states this can be in: allowed, or waiting. -->
-                      @if (feat.gated) {
-                        <span class="feature-blocked">
-                          <span class="needs-ok-chip">{{ (isPhone() ? 'features.review.pending' : 'features.chip.needsOk') | t }}</span>
-                          <button
-                            class="allow-btn"
-                            type="button"
-                            (click)="allow(group, feat); $event.stopPropagation()"
-                            [attr.title]="'features.allow.hint' | t"
-                          >✓ {{ 'features.allow' | t }}</button>
-                        </span>
-                      }
-                      <!-- Row-level outcome: the action's failure lands HERE, in
-                           the same plain words the activity log gets — plus the
-                           content-health WHY while fetching is degraded. -->
                       @if (rowNote(group, feat); as note) {
                         <span class="feature-note">
                           {{ note }}
@@ -563,9 +390,7 @@
                         </span>
                       }
                     </div>
-                    <!-- Open: ENTER this view behaviour (play the slides, show
-                         the page). Distinct from the row toggle — only on,
-                         enterable views (slides/website/tutor) show it. -->
+                    <!-- Open: ENTER this view behaviour. -->
                     @if (isOpenable(group, feat)) {
                       <button
                         class="feat-open"
@@ -575,11 +400,22 @@
                         [attr.aria-label]="'features.open' | t"
                       >▶ {{ 'features.open' | t }}</button>
                     }
-                    <!-- The ACTIVE mark — appears only once the row has been
-                         activated. Far right, vertically centered: a filled
-                         accent square with a dark check, unmistakable against
-                         an inactive row (which shows nothing). -->
-                    @if (isOn(group, feat)) {
+                    <!-- Remove the decoration — the whole off for a direct
+                         row. Its own control, never the row body. -->
+                    @if (canRemove(group, feat)) {
+                      <button
+                        class="feat-remove"
+                        type="button"
+                        (click)="removeHere(group, feat); $event.stopPropagation()"
+                        [attr.title]="'features.remove.hint' | t"
+                        [attr.aria-label]="'features.remove' | t"
+                      ><span class="mat-sym" aria-hidden="true">close</span></button>
+                    }
+                    <!-- The website root's ONE toggle: membership of the
+                         /websites menu. -->
+                    @if (isWebsiteRoot(group, feat)) {
+                      <span class="feat-light" role="switch" [attr.aria-checked]="isOn(group, feat)" aria-hidden="false"></span>
+                    } @else if (isOn(group, feat)) {
                       <span class="feat-check" aria-hidden="true">✓</span>
                     }
                   </li>
@@ -587,7 +423,9 @@
               </ul>
             }
 
-            <!-- ── Available to add: features this layer doesn't have yet ── -->
+            <!-- ── Apply here: behaviors whose light is on, not yet on this
+                 tile. Addable rows attach on click; view bees whose content
+                 must be authored carry their command chip instead. -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.available' | t }}</span>
               <span class="section-count">{{ visibleAvailable(group).length }}</span>
@@ -597,20 +435,12 @@
             } @else {
               <ul class="features-list">
                 @for (feat of visibleAvailable(group); track feat.kind) {
-                  <!-- ADDABLE rows: the row is the toggle here too — clicking
-                       ADDS the feature to this tile (essentials writes the
-                       decoration at the tile's own segments); the active mark
-                       appears once it's on. View features aren't addable by
-                       click — their content must be authored (e.g. /website
-                       builds a page) — so those rows carry the command chip
-                       and click only selects. -->
                   <li
                     class="features-row available"
                     [class.addable]="feat.addable"
                     [class.selected]="isSelected(group, feat)"
                     [class.busy]="isPending(group, feat)"
-                    [attr.role]="feat.addable ? 'checkbox' : null"
-                    [attr.aria-checked]="feat.addable ? false : null"
+                    [attr.role]="feat.addable ? 'button' : null"
                     [attr.tabindex]="feat.addable ? 0 : null"
                     [attr.title]="feat.addable ? ('features.enable.hint' | t) : null"
                     (click)="availableRowClick(group, feat, $event)"
@@ -626,9 +456,6 @@
                         @if (feat.slashCommand) {
                           <code class="feature-cmd">{{ feat.slashCommand }}</code>
                         }
-                        @if (feat.cascades) {
-                          <span class="avail-flow" [attr.title]="'features.origin.cascades.down' | t">⤵</span>
-                        }
                       </span>
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
@@ -642,6 +469,9 @@
                         </span>
                       }
                     </div>
+                    @if (feat.addable) {
+                      <span class="feat-add mat-sym" aria-hidden="true">add</span>
+                    }
                   </li>
                 }
               </ul>

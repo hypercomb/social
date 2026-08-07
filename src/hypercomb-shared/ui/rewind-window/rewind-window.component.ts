@@ -25,6 +25,7 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, ElementRef, computed, effect, inject, signal, type AfterViewInit, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { holdWindow, signalSession } from '../window-session'
 
 type CursorState = {
   locationSig: string
@@ -117,6 +118,10 @@ export class RewindWindowComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly #visible = signal(false)
   readonly visible = this.#visible.asReadonly()
+
+  /** Put away while the hive is covered (the installer), back on return. */
+  readonly session = signalSession(this.#visible)
+  #releaseSession: (() => void) | null = null
 
   #entries = signal<readonly Step[]>([])
   #position = signal(0)          // 1-based cursor position
@@ -234,6 +239,12 @@ export class RewindWindowComponent implements OnInit, AfterViewInit, OnDestroy {
     )
     effect(() => {
       if (this.visible()) void this.#reload()
+    })
+    // Showing = in the window session, whichever door opened it.
+    effect(() => {
+      const showing = this.visible()
+      if (showing && !this.#releaseSession) this.#releaseSession = holdWindow('rewind-window', this.session)
+      else if (!showing && this.#releaseSession) { this.#releaseSession(); this.#releaseSession = null }
     })
   }
 

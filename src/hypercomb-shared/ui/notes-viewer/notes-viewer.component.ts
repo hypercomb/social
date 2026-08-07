@@ -24,10 +24,11 @@
 // reads and marks; it never grows its own text input.
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
-import { Component, computed, signal, type OnDestroy } from '@angular/core'
+import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
+import { holdWindow, type WindowSession } from '../window-session'
 import { flattenHierarchy, stepIndex } from './note-cycle'
 
 type ShapeId = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'hexagon'
@@ -124,7 +125,40 @@ export class NotesViewerComponent implements OnDestroy {
 
   #cleanups: (() => void)[] = []
 
+  /** The tile being read, held while the hive is covered by the installer.
+   *  The reader's whole visibility is `cell !== null`, so parking is "put the
+   *  tile down, remember which one" — and the rail's hierarchy + the row in
+   *  the big hexagon come back with it. */
+  #parkedCell: string | null = null
+
+  readonly session: WindowSession = {
+    park: () => {
+      this.#parkedCell = this.cell()
+      this.cell.set(null)
+      EffectBus.emit('notes:viewer', { active: false })
+    },
+    unpark: () => {
+      const cell = this.#parkedCell
+      this.#parkedCell = null
+      if (!cell) return
+      this.cell.set(cell)
+      EffectBus.emit('notes:viewer', { active: true })
+    },
+  }
+
+  /** In the session's "showing" set exactly while the reader is up. */
+  #releaseSession: (() => void) | null = null
+
   constructor() {
+    // Joining and leaving the window session IS opening and closing, and the
+    // reader opens from several places (`notes:open`, a landing, a cascade) —
+    // so it is tracked off the visibility itself rather than at each door.
+    effect(() => {
+      const showing = this.visible()
+      if (showing && !this.#releaseSession) this.#releaseSession = holdWindow('notes-viewer', this.session)
+      else if (!showing && this.#releaseSession) { this.#releaseSession(); this.#releaseSession = null }
+    })
+
     // `noteId` is optional. With one, the reader opens ON that note —
     // selecting the hierarchy that contains it and focusing its row.
     // Without one, it opens on the first note of the first hierarchy.

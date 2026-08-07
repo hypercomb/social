@@ -60,14 +60,14 @@
 
 import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
-import { kindsForLabel } from '../../commands/decoration-kind-index.js'
+import { kindsForLabel, countLabelsWithKind } from '../../commands/decoration-kind-index.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds } from '../../sharing/behavior-enablement.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
-import { writeDecoration, listDecorations, removeDecoration } from '../../commands/decoration-manifest.js'
+import { writeDecoration, listDecorations, removeDecoration, removeDecorationAndWait } from '../../commands/decoration-manifest.js'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 
 const VISUAL_BEE_REGISTRY_KEY = '@diamondcoreprocessor.com/VisualBeeRegistry'
@@ -349,7 +349,7 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'feature:apply', 'features:paint', 'features:roster-open']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:remove', 'feature:apply', 'features:paint', 'features:roster-open']
   protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:paint-result', 'features:roster']
 
   constructor() {
@@ -402,6 +402,17 @@ export class ShowFeaturesDrone extends Drone {
       void this.#enableAt(segments, kind)
     })
 
+    // The panel's REMOVE on an applied row. Membership is positive — the
+    // decorations ARE the applied behaviors — so removing the tile's records
+    // of the kind is the whole off. Answers with `features:outcome` and
+    // re-opens the group so the row leaves "on this tile".
+    this.onEffect<{ cell?: string; segments?: string[]; kind?: string }>('features:remove', (p) => {
+      const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      const kind = String(p?.kind ?? '')
+      if (segments.length === 0 || !kind) return
+      void this.#removeAt(segments, kind)
+    })
+
     // `name@view` from the command line (`diagram@slides` / `~diagram@slides`).
     // The command line emits this intent and, until now, NOTHING listened — so
     // the attach silently did nothing and the fallback ran the bee's bare slash
@@ -447,7 +458,8 @@ export class ShowFeaturesDrone extends Drone {
     const seen = new Set<string>()
     const rows: Array<{
       view: string; icon: string; kind: string; label: string; description: string
-      category: string; slashCommand?: string; foreign?: boolean; module?: string; on: boolean
+      category: string; slashCommand?: string; foreign?: boolean; module?: string
+      on: boolean; used: number
     }> = []
     for (const bee of registry?.all?.() ?? []) {
       if (!bee.decorationKind || seen.has(bee.decorationKind)) continue
@@ -461,6 +473,10 @@ export class ShowFeaturesDrone extends Drone {
         category: bee.behavior || 'view',
         ...(bee.slashCommand ? { slashCommand: bee.slashCommand } : {}),
         on: !off.has(bee.decorationKind),
+        // IN USE — the badge. Derived by counting decorations the hot index
+        // has seen this session, never stored (complete-or-absent honesty:
+        // an unvisited branch's uses simply aren't counted yet).
+        used: countLabelsWithKind(bee.decorationKind),
       })
     }
     for (const [kind, cap] of Object.entries(CAPABILITIES)) {
@@ -475,6 +491,7 @@ export class ShowFeaturesDrone extends Drone {
         category: 'capability',
         ...(cap.slashCommand ? { slashCommand: cap.slashCommand } : {}),
         on: !off.has(kind),
+        used: countLabelsWithKind(kind),
       })
     }
     // Off-kinds nobody here declares (a community module's behavior turned
@@ -494,6 +511,7 @@ export class ShowFeaturesDrone extends Drone {
         foreign: true,
         ...(moduleName ? { module: moduleName } : {}),
         on: false,
+        used: countLabelsWithKind(kind),
       })
     }
     this.emitEffect('features:roster', { rows })
@@ -627,6 +645,31 @@ export class ShowFeaturesDrone extends Drone {
       console.warn('[show-features] enable failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
       this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't add "${kind}" to "${label}"` })
+    }
+  }
+
+  /** REMOVE every decoration of `kind` at `segments` — the panel row's ×.
+   *  Committed (not just queued) before the refresh so the row is gone when
+   *  the group re-reads. A kind with no records here (slot-backed content)
+   *  is refused loudly rather than silently un-removed. */
+  async #removeAt(segments: readonly string[], kind: string): Promise<void> {
+    const label = segments[segments.length - 1] ?? ''
+    try {
+      const existing = await listDecorations({ kind, segments: [...segments] })
+      if (existing.length === 0) {
+        this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `"${kind}" has no record here to remove — use its own command` })
+        return
+      }
+      for (const e of existing) {
+        await removeDecorationAndWait({ sig: e.sig, segments: [...segments] })
+      }
+      this.emitEffect('activity:log', { message: `${kind} off "${label}"`, icon: '○' })
+      this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
+      if (label) await this.#open(label, segments)   // refresh the panel group in place
+    } catch (err) {
+      console.warn('[show-features] remove failed', { kind, segments, err })
+      this.emitEffect('activity:log', { message: `couldn't remove "${kind}" from "${label}"`, icon: '○' })
+      this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't remove "${kind}" from "${label}"` })
     }
   }
 

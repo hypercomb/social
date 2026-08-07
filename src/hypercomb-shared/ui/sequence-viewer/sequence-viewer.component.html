@@ -1,5 +1,6 @@
 @if (visible()) {
   <aside class="sequence-panel" hcDockInset="right" hcDockedPanel="sequence-viewer"
+    [hcSession]="session"
     (hcDockedPanelClose)="close()"
     launcherControlId="sequences"
     dockSide="right" [minWidth]="280" [maxWidth]="620" [defaultWidth]="370"

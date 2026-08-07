@@ -50,6 +50,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 import {
   feedbackMatchesReach,
   indexFeedbackRetirements,
@@ -125,6 +126,12 @@ interface FeedbackItem {
 export class FeedbackViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered — including anything half-typed in the
+   *  composer, which a reload-free return must not throw away. */
+  readonly session = signalSession(this.visible, open =>
+    EffectBus.emit('feedback:panel-state', { open }))
+
   readonly loading = signal(false)
   readonly items = signal<FeedbackItem[]>([])
   /** Feedback history is an explicit panel-local lens. Tile hiding can

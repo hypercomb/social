@@ -1,5 +1,6 @@
 @if (visible()) {
   <aside class="filter-panel" hcDockInset="right" hcDockedPanel="filter-configurations"
+    [hcSession]="session"
     (hcDockedPanelClose)="close()"
     dockSide="right" [minWidth]="260" [maxWidth]="520" [defaultWidth]="320"
     data-consumes-wheel role="dialog" [attr.aria-label]="'filter.aria' | t">

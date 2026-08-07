@@ -357,12 +357,12 @@ export class ActiveGenomeService {
         }`
     const state = { record, signature: this.#recordSig, dirty: this.#dirty, label }
     EffectBus.emit('genome:state', state)
-    EffectBus.emit('indicator:set', {
-      key: INDICATOR_KEY,
-      icon: 'genetics',
-      label,
-      dismissable: false,
-    })
+    // The census no longer keeps a standing pill in the header. It was a
+    // permanent, undismissable icon reporting a number nobody had asked for —
+    // `genome:state` still carries the same label to anything that wants it.
+    // Cleared rather than merely unsent so a session that already raised the
+    // pill drops it too (EffectBus replays the last `indicator:set`).
+    EffectBus.emit('indicator:clear', { key: INDICATOR_KEY })
   }
 }
 

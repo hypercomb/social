@@ -49,12 +49,20 @@ export const storeImageResources = async (blob: Blob): Promise<ImageResources | 
 
 export const armImageBlob = async (
   blob: Blob,
-  opts: { url?: string | null; type?: ArmType; attachment?: PendingAttachment | null; name?: string | null } = {},
+  opts: {
+    url?: string | null
+    type?: ArmType
+    attachment?: PendingAttachment | null
+    name?: string | null
+    /** Identity of an already-armed slot this is filling in, if any. */
+    armId?: string | null
+  } = {},
 ): Promise<boolean> => {
   const res = await storeImageResources(blob)
   if (!res) return false
 
   EffectBus.emit('command:arm-resource', {
+    armId: opts.armId ?? null,
     previewUrl: res.previewUrl,
     largeSig: res.largeSig,
     smallPointSig: res.smallPointSig,

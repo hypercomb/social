@@ -47,6 +47,9 @@ export interface DropTarget {
  *  shared must not reach into essentials. */
 const REFERENCE_KIND = 'reference'
 const TAG_KIND = 'tag'
+/** Mirrors CONTEXT_DECORATION_KIND — a place whose material belongs in any
+ *  language-model request made about the tile carrying it. */
+const CONTEXT_KIND = 'context'
 
 const BACKSLASH = String.fromCharCode(92)
 
@@ -175,10 +178,63 @@ export const dropReferenceTile = async (
 }
 
 /**
- * Attach the item's keywords to an EXISTING tile — the "drop onto a tile"
- * gesture. A pheromone on a tile is what makes that tile a member of every
- * collection parameterised by it, so this is the additive half of the same
- * idea: dropping a collection onto a tile says "this belongs here".
+ * Attach a place to an EXISTING tile as CONTEXT — the "drop onto a tile"
+ * gesture.
+ *
+ * Dropping onto empty hive says "put this here". Dropping onto something that
+ * is already there cannot mean the same thing, because there is no room; what
+ * it means is a statement about the TILE — that answering questions about it
+ * requires knowing about the dropped place too. So the drop writes a `context`
+ * decoration: a live pointer, resolved at read time, never a copy.
+ *
+ * ── This REPLACED attaching the item's keywords ─────────────────────────────
+ *
+ * That gesture used to mean "make this tile a member of this collection" by
+ * copying the collection's pheromones onto it. It is gone, and one gesture now
+ * has one meaning. Membership is still sayable, and still says itself better,
+ * from the pheromone panel — where marks live and where painting one is a
+ * deliberate act rather than a side effect of a drag that missed the gap.
+ *
+ * `targetSig` is the target's LINEAGE address, not a content hash, for exactly
+ * the reason a reference carries one: a content hash would freeze this into a
+ * snapshot that stops tracking the moment the source changes, and stale context
+ * is worse than none — it answers confidently out of date.
+ *
+ * Returns true when the attachment landed.
+ */
+export const dropContextOnTile = async (
+  item: AggregateItem,
+  tileSegments: readonly string[],
+): Promise<boolean> => {
+  const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
+  const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+  if (!store?.putResource || !item.segments.length) return false
+
+  const payload: ReferencePayload = { targetSegments: [...item.segments] }
+  try {
+    if (history?.sign) {
+      const targetSig = await history.sign({ explorerSegments: () => [...item.segments] })
+      if (targetSig) payload.targetSig = targetSig
+    }
+    // appliesTo:[] so the same place attached to two tiles dedups to ONE sig —
+    // the same economy every other decoration here gets.
+    const record = { kind: CONTEXT_KIND, appliesTo: [] as string[], payload }
+    const sig = await store.putResource(
+      new Blob([JSON.stringify(record)], { type: 'application/json' }))
+    EffectBus.emit('decorations:changed', { segments: [...tileSegments], op: 'append', sig })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Attach the item's keywords to an EXISTING tile. A pheromone on a tile is what
+ * makes that tile a member of every collection parameterised by it.
+ *
+ * NO LONGER REACHED BY THE DROP GESTURE — see `dropContextOnTile`. Kept because
+ * `applyCarried` still uses it to scent a batch of new references with the
+ * bouquet in hand, which is a different act with the same mechanics.
  *
  * Writes one tag decoration per keyword, through the same
  * `decorations:changed` contract the tag system already uses.

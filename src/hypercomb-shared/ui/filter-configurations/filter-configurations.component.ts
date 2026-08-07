@@ -3,6 +3,7 @@ import { EffectBus } from '@hypercomb/core'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { AggregateItem } from '../aggregate-index/aggregate-source'
 
@@ -26,6 +27,12 @@ const DRAG_THRESHOLD = 5
 })
 export class FilterConfigurationsComponent implements OnDestroy {
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered. No `filter:view` — that would clear
+   *  the filter the canvas is drawn through, and hiding the window must not
+   *  change what the hive shows; the draft is still here on return. */
+  readonly session = signalSession(this.visible)
+
   readonly scope = signal<Scope>('local')
   readonly name = signal('')
   readonly draft = signal<AggregateItem[]>([])

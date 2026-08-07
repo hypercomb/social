@@ -39,20 +39,61 @@ export function parseYouTubeVideoId(link: string): string | null {
 }
 
 /**
- * Fetch a YouTube video's title via the public oEmbed endpoint (CORS-enabled),
- * so a dropped link can pre-fill a default tile name the user can override.
- * Returns null on any failure — the caller falls back to manual naming.
+ * The open-graph card a dropped YouTube link carries: what the video calls
+ * itself, and the picture it shows for itself.
+ *
+ * Both are read from the public oEmbed endpoint rather than the page's own
+ * `<meta property="og:*">` tags, because the watch page is cross-origin and
+ * its HTML can never be read from the browser. oEmbed is the same card by
+ * another door — `title` IS `og:title`, `thumbnail_url` IS `og:image` — and
+ * it is CORS-enabled, so it works from the participant's own tab with no
+ * proxy and no key.
+ *
+ * Each half is independently optional. A video whose title cannot be read is
+ * still a link the participant can name themselves; a video whose picture
+ * cannot be fetched is still a link. Nothing here may block the drop.
  */
-export async function fetchYouTubeTitle(link: string): Promise<string | null> {
+export type YouTubeOpenGraph = {
+  /** `og:title` — the default tile name, overridable before Enter. */
+  title: string | null
+  /** `og:image` — the poster frame. Optional, always. */
+  thumbnailUrl: string | null
+}
+
+/**
+ * Read a YouTube link's open-graph card. Never throws: any failure degrades
+ * to the deterministic thumbnail URL (which needs no request to construct)
+ * and a null title.
+ */
+export async function fetchYouTubeOpenGraph(
+  link: string,
+  fetcher: typeof fetch = fetch,
+): Promise<YouTubeOpenGraph> {
+  const videoId = parseYouTubeVideoId(link)
+  const fallbackThumbnail = videoId ? youTubeThumbnailUrl(videoId) : null
+
   try {
     const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(link)}&format=json`
-    const resp = await fetch(endpoint)
-    if (!resp.ok) return null
-    const data = await resp.json() as { title?: unknown }
-    return typeof data.title === 'string' && data.title.trim() ? data.title.trim() : null
+    const resp = await fetcher(endpoint)
+    if (!resp.ok) return { title: null, thumbnailUrl: fallbackThumbnail }
+    const data = await resp.json() as { title?: unknown; thumbnail_url?: unknown }
+    const title = typeof data.title === 'string' && data.title.trim() ? data.title.trim() : null
+    const thumbnail = typeof data.thumbnail_url === 'string' && data.thumbnail_url.trim()
+      ? data.thumbnail_url.trim()
+      : null
+    return { title, thumbnailUrl: thumbnail ?? fallbackThumbnail }
   } catch {
-    return null
+    return { title: null, thumbnailUrl: fallbackThumbnail }
   }
+}
+
+/**
+ * Fetch a YouTube video's title, so a dropped link can pre-fill a default
+ * tile name the user can override. Returns null on any failure — the caller
+ * falls back to manual naming.
+ */
+export async function fetchYouTubeTitle(link: string): Promise<string | null> {
+  return (await fetchYouTubeOpenGraph(link)).title
 }
 
 /**

@@ -50,6 +50,7 @@ import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 
 /** A step as the author drone reports it. */
 interface StateStep {
@@ -120,6 +121,11 @@ const DRAG_THRESHOLD = 5
 export class WorkflowDesignerComponent implements OnDestroy {
 
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered — the design on the board, the
+   *  inspector and any run in flight are all still there on return. */
+  readonly session = signalSession(this.visible, open =>
+    EffectBus.emit('workflow:view-state', { open }))
 
   // ── what the drone tells us ───────────────────────────────────────
   readonly segments = signal<string[]>([])

@@ -19,6 +19,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // entrance (the aggregate index) and its sibling panels ride. The viewer
 // owns no sizing of its own.
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 
 type CursorState = {
   locationSig: string
@@ -230,6 +231,9 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
   // history:view-open / history:view-close / history:view-toggle.
   readonly #visible = signal(false)
   readonly visible = this.#visible.asReadonly()
+
+  /** Put away while the hive is covered; back at the same row, same slice. */
+  readonly session = signalSession(this.#visible)
   readonly total = this.#total.asReadonly()
   readonly position = this.#position.asReadonly()
   readonly groupStepEnabled = this.#groupStepEnabled.asReadonly()

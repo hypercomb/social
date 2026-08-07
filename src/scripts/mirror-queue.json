@@ -272,6 +272,15 @@
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
+    },
+    {
+      "id": "link-drop-gesture-never-swallowed",
+      "title": "Note the three ways a link drop used to do nothing at all",
+      "run": null,
+      "note": "MANUAL — note-add is additive. THREE fixes so a dropped link can never silently do nothing. (1) DRAGOVER CLAIMS ANYTHING CARRYING A LINK: it used to refuse when the source ADVERTISED the 'Files' type, which a dragged browser TAB and links out of native apps do while delivering no file at all — no preventDefault meant the drop event was never delivered and the whole gesture vanished. Real files are still handed to ImageDropDrone, decided at drop by dataTransfer.files.length, which is the only place it is knowable. (2) NO IN-FLIGHT GUARD: #busy was held across every await of the route (safety check, card read, picture fetch), so a second drop within those seconds was discarded without a trace, and any route that never settled wedged the gesture PERMANENTLY. Each drop is its own gesture now, carrying its own armId; per-cell writes already serialise on their own lock. (3) ARM BEFORE THE SAFETY CHECK: the arm sat behind an LLM safety call whose endpoint is loopback (127.0.0.1:4220) and can be absent or behind a Local Network Access prompt. The chevron now lights on release and a denied link RETRACTS it via command:disarm-resource.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
     }
   ]
 }

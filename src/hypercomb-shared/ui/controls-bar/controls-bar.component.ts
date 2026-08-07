@@ -30,6 +30,15 @@ import { secretTag } from '@hypercomb/core'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
+/** Bumped when a default flip has to reclaim ids a legacy FULL map froze.
+ *  Rev 1: the magnifiers came off the rail (bab6045d), but every map written
+ *  before that carried `zoom-in`/`zoom-out: true`, so the flip never reached
+ *  anyone who had ever opened edit mode — the icons kept coming back. */
+const ENABLED_REV_KEY = 'hc:controls-enabled-rev'
+const ENABLED_REV = 1
+const RECLAIMED_BY_REV: Record<number, readonly string[]> = {
+  1: ['zoom-in', 'zoom-out'],
+}
 /** Page keys (lineage paths) whose viewport is pinned. The pin is per LAYER. */
 const PINNED_PAGES_KEY = 'hc:pinned-pages'
 /** Partial pins — per-page exceptions the fit flyout sets. Size-pinned pages
@@ -38,6 +47,11 @@ const PINNED_PAGES_KEY = 'hc:pinned-pages'
  *  fits WITHOUT the full pin's input lock. */
 const PINNED_SIZE_PAGES_KEY = 'hc:pinned-size-pages'
 const PINNED_POSITION_PAGES_KEY = 'hc:pinned-position-pages'
+/** Pages the participant has framed BY HAND (a zoom or pan gesture made while
+ *  global fit was on). Global fit never touches these again — a viewport you
+ *  set yourself is remembered, always. Same per-page key model as the pins,
+ *  persisted for the same reason: the framing has to survive walking away. */
+const HAND_FRAMED_PAGES_KEY = 'hc:hand-framed-pages'
 
 /** Owner token for the InputGate lock a pinned layer holds. */
 const PIN_OWNER = 'pin'
@@ -145,6 +159,19 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   // the retired floating menu was the old primary path).
   'promote-to-parent': true,
   'clipboard': true, 'voice': false, 'bees': false,
+}
+
+/** Only the entries that DIFFER from the current default. Storing the whole map
+ *  froze every control at whatever the default was the day it was written, so a
+ *  later default flip could never reach an existing user — an id the user never
+ *  touched still won over the new value. Persist overrides, and anything absent
+ *  follows the current default forever. */
+function overridesOf(map: Record<string, boolean>): Record<string, boolean> {
+  const out: Record<string, boolean> = {}
+  for (const [id, on] of Object.entries(map)) {
+    if ((DEFAULT_ENABLED_MAP[id] ?? true) !== on) out[id] = on
+  }
+  return out
 }
 
 @Component({
@@ -381,20 +408,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   //  - 'off'    (white): regular click performs a one-shot fit; nothing sticks
   //  - 'global' (green): every layer auto-fits on navigation, everywhere,
   //                      until it is turned off from this same button.
-  // While the switch is on, ARRIVING anywhere fits: every navigation fits the
-  // layer you land on, every time. Manually zooming/panning does NOT turn the
-  // switch off — it only suppresses the fit for the REST OF THIS VISIT
-  // (`#fitSuppressedHere`), so the view you dialled in isn't yanked back by a
-  // resize while you are looking at it. Walk away and return and the page fits
-  // again. Pinned pages (`#pinnedPages`) are exempt: a pin freezes that
-  // layer's viewport and global fit never touches it.
+  // While the switch is on, ARRIVING anywhere fits — but only on pages you
+  // have never framed yourself. Manually zooming/panning does NOT turn the
+  // switch off; it hands that ONE page to you permanently (`#handFramedPages`,
+  // persisted), because a viewport you set by hand is remembered, always. Walk
+  // away and return and your framing is still there — global fit keeps owning
+  // every page you never touched. Clicking fit on a page gives it back to the
+  // switch; flipping the switch on again forgets every hand framing at once.
+  // Pinned pages (`#pinnedPages`) are exempt for the same reason.
   #fitMode = signal<'off' | 'global'>(
     localStorage.getItem('hc:fit-mode') === 'global' || localStorage.getItem('hc:fit-locked') === '1'
       ? 'global'
       : 'off',
   )
-  // Set when the user adjusts the viewport by hand; cleared on every arrival.
-  #fitSuppressedHere = signal(false)
+  // Pages whose viewport the participant set by hand. Written on the first
+  // pan/zoom gesture made there while global fit is on, and NEVER cleared by
+  // arriving — that per-visit reset was the "sometimes the zoom is lost, it
+  // just zooms out" report: the framing persisted in the viewport pool, then
+  // the next arrival fitted straight over it.
+  #handFramedPages = signal<ReadonlySet<string>>(this.#restorePageSet(HAND_FRAMED_PAGES_KEY))
   #fitLockedSnapshot: { scale: number; cx: number; cy: number; dx: number; dy: number } | null = null
 
   #currentPageKey(): string {
@@ -654,16 +686,38 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       if (!raw) return { ...DEFAULT_ENABLED_MAP }
       const parsed = JSON.parse(raw) as Record<string, boolean>
       if (typeof parsed === 'object' && parsed !== null) {
-        // merge with defaults so newly-added controls inherit a sane initial state
-        return { ...DEFAULT_ENABLED_MAP, ...parsed }
+        // Only genuine overrides are stored, so an untouched control inherits
+        // the CURRENT default — that is what lets a default flip land on an
+        // existing user. Legacy full maps predate that; #reclaimDefaults strips
+        // the ids a flip has since taken back.
+        return { ...DEFAULT_ENABLED_MAP, ...this.#reclaimDefaults(parsed) }
       }
     } catch { /* ignore */ }
     return { ...DEFAULT_ENABLED_MAP }
   }
 
+  /** One-time sweep per rev: drop the ids a default flip reclaimed from a map
+   *  written before it, rewrite the map as overrides-only, and record the rev.
+   *  Runs from a field initializer, so it must not touch `#enabledMap`. */
+  #reclaimDefaults(parsed: Record<string, boolean>): Record<string, boolean> {
+    let seen = 0
+    try { seen = Number(localStorage.getItem(ENABLED_REV_KEY)) || 0 } catch { /* ignore */ }
+    if (seen >= ENABLED_REV) return parsed
+    const swept = { ...parsed }
+    for (let rev = seen + 1; rev <= ENABLED_REV; rev++) {
+      for (const id of RECLAIMED_BY_REV[rev] ?? []) delete swept[id]
+    }
+    try {
+      localStorage.setItem(ENABLED_MAP_KEY, JSON.stringify(overridesOf(swept)))
+      localStorage.setItem(ENABLED_REV_KEY, String(ENABLED_REV))
+    } catch { /* ignore */ }
+    return swept
+  }
+
   #persistEnabledMap(): void {
     try {
-      localStorage.setItem(ENABLED_MAP_KEY, JSON.stringify(this.#enabledMap()))
+      localStorage.setItem(ENABLED_MAP_KEY, JSON.stringify(overridesOf(this.#enabledMap())))
+      localStorage.setItem(ENABLED_REV_KEY, String(ENABLED_REV))
     } catch { /* ignore */ }
   }
 
@@ -922,14 +976,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** True when the global fit switch is on. */
   readonly fitLocked = computed(() => this.#fitMode() === 'global')
   /** True when global fit should actually drive THIS page: the switch is on,
-   *  the viewport has not been hand-adjusted during this visit, and the page
-   *  is not pinned. */
+   *  the page has never been framed by hand, and it is not pinned. */
   readonly fitAppliesHere = computed(() => {
     // Track navigation so this recomputes when the user moves between layers.
     this.#moved$()
     if (this.#fitMode() !== 'global') return false
-    if (this.#fitSuppressedHere()) return false
-    return !this.#pinnedPages().has(this.#currentPageKey())
+    const key = this.#currentPageKey()
+    if (this.#handFramedPages().has(key)) return false
+    return !this.#pinnedPages().has(key)
   })
   readonly mode = this.#mode.asReadonly()
   readonly utility = this.#utility.asReadonly()
@@ -1073,6 +1127,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   #fitLockedUnsub: (() => void) | null = null
   #zoomManualUnsub: (() => void) | null = null
+  #zoomFitUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #hoverCrumbUnsub: (() => void) | null = null
@@ -1210,6 +1265,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#zoomManualUnsub = EffectBus.on('viewport:manual', () => {
       if (this.fitAppliesHere()) this.#disableFitLockedPreservingCurrent()
+    })
+
+    // An explicit fit hands the page back to the global fit switch: you asked
+    // for the fitted framing, so there is nothing of yours left to protect.
+    // Transient, so a fresh mount never replays an old fit and silently drops
+    // a hand framing.
+    this.#zoomFitUnsub = EffectBus.on('viewport:fit', () => {
+      if (this.#fitMode() !== 'global') return
+      this.#markHandFramed(this.#currentPageKey(), false)
     })
 
     this.#clipboardAvailableUnsub = EffectBus.on<{ available: boolean }>('clipboard:available', (payload) => {
@@ -1501,6 +1565,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#fitLockedUnsub?.()
     this.#lanesUnsub?.()
     this.#zoomManualUnsub?.()
+    this.#zoomFitUnsub?.()
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
     this.#hoverCrumbUnsub?.()
@@ -1741,7 +1806,26 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (ctrl.id !== 'fit' || this.#editMode()) return
     event.preventDefault()
     event.stopPropagation()
-    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+    this.#openFitMenuAt(event.currentTarget as HTMLElement | null)
+  }
+
+  /** The caret on the fit button. Right-click was the only way in, which is an
+   *  unguessable gesture — and the step-zoom verbs live behind it now that the
+   *  magnifiers are off the rail, so there has to be something to aim at.
+   *  Left-click toggles the menu WITHOUT running the fit. */
+  readonly onFitCaretClick = (event: MouseEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (this.#editMode()) return
+    if (this.fitMenuOpen()) { this.closeFitMenu(); return }
+    this.#openFitMenuAt(event.currentTarget as HTMLElement | null)
+  }
+
+  /** Places the flyout beside the fit BUTTON — the caret is a corner of it, so
+   *  anchor off the button either way and the menu lands in one place. */
+  #openFitMenuAt(anchor: HTMLElement | null): void {
+    const button = (anchor?.closest?.('.ctl-btn') as HTMLElement | null) ?? anchor
+    const rect = button?.getBoundingClientRect()
     const width = 208
     const height = 240
     const x = rect ? rect.right + 10 : 12
@@ -1764,7 +1848,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly #onFitMenuOutside = (event: PointerEvent): void => {
     const target = event.target as HTMLElement | null
-    if (target?.closest?.('.fit-menu')) return
+    // The caret is excluded so it can TOGGLE — otherwise this pointerdown
+    // closed the menu and the trailing click reopened it, reading as dead.
+    if (target?.closest?.('.fit-menu, .fit-caret')) return
     this.closeFitMenu()
   }
 
@@ -1855,9 +1941,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#fitLockedSnapshot = this.#captureViewport()
     this.#fitMode.set('global')
     localStorage.setItem('hc:fit-mode', 'global')
-    // Turning the switch on forgets a hand-adjustment made here, so this page
-    // fits the window too.
-    this.#fitSuppressedHere.set(false)
+    // Flipping the switch ON is the one gesture that means "fit everything":
+    // it releases every page held back by a hand framing, this one included.
+    // (Pins are untouched — those are a stronger, explicit hold.)
+    this.#setHandFramedPages(new Set())
     this.#enableFitLocked()
     // A pinned page keeps its frozen viewport — the fit starts on the next
     // page you walk to. Both partial pins together hold the whole viewport
@@ -1874,7 +1961,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clearFit(): void {
     this.#fitMode.set('off')
     localStorage.setItem('hc:fit-mode', 'off')
-    this.#fitSuppressedHere.set(false)
+    // Hand framings are kept: they only gate global fit, and the switch can
+    // come back on. Flipping it on is what clears them.
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
     vp?.resume?.()
     this.#fitLockedUnsub?.()
@@ -1912,7 +2000,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The arm is what keeps this from firing on tile add/remove:
     // `render:cell-count` fires there too, but nothing armed it.
     const arm = (): void => {
-      this.#fitSuppressedHere.set(false)
+      // Deliberately does NOT forget a hand framing: `#handFramedPages` is the
+      // page's own setting now, and arriving is not a request to lose it.
       this.#fitArmedSticky = true
       this.#fitArmedUntil = 0
     }
@@ -1996,12 +2085,29 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #disableFitLockedPreservingCurrent(): void {
     if (this.#fitMode() !== 'global') return
 
-    this.#fitSuppressedHere.set(true)
+    // The page is the participant's from here on — persisted, so returning to
+    // it later restores their framing instead of re-fitting over it.
+    this.#markHandFramed(this.#currentPageKey(), true)
     this.#fitLockedSnapshot = null
 
     // Resume persistence so the user's manual adjustment saves for this page.
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
     vp?.resume?.()
+  }
+
+  /** Add / remove a page from the hand-framed set (persisted). */
+  #markHandFramed(key: string, framed: boolean): void {
+    const current = this.#handFramedPages()
+    if (current.has(key) === framed) return
+    const next = new Set(current)
+    if (framed) next.add(key)
+    else next.delete(key)
+    this.#setHandFramedPages(next)
+  }
+
+  #setHandFramedPages(next: ReadonlySet<string>): void {
+    this.#handFramedPages.set(next)
+    this.#persistPageSet(HAND_FRAMED_PAGES_KEY, next)
   }
 
   #captureViewport(): { scale: number; cx: number; cy: number; dx: number; dy: number } | null {

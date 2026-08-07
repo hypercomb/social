@@ -35,6 +35,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // Settings-only: the gear + group chrome every tool window carries. The panel
 // keeps its own grip and width signal — `ownsSize` false, `sizeOwner` this.
 import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
+import { type WindowSession } from '../window-session'
 import { onSelection } from '../../core/selection-context'
 
 interface ClipboardItem {
@@ -85,6 +86,18 @@ type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
 export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
 
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered. Deliberately NOT `#setVisible` — that
+   *  resets the drill level on the way back in, and the level you had drilled
+   *  to is precisely what "remembered" means here. The `clipboard:open`
+   *  announcement still goes out both ways so the Escape cascade and the
+   *  control-bar light agree with the screen. Session-only as ever: parking
+   *  survives the installer, not a refresh. */
+  readonly session: WindowSession = {
+    park: () => { this.visible.set(false); EffectBus.emit('clipboard:open', { open: false }) },
+    unpark: () => { this.visible.set(true); EffectBus.emit('clipboard:open', { open: true }) },
+  }
+
   readonly items = signal<ClipboardItem[]>([])
   readonly op = signal<'copy' | 'cut'>('copy')
   /** Live canvas selection size — this window's selection response

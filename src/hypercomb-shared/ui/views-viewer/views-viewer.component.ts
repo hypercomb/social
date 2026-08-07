@@ -4,6 +4,7 @@ import { EffectBus } from '@hypercomb/core'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import {
   hideFeature,
@@ -83,6 +84,11 @@ const FRIENDLY: Record<string, { name: string; description: string; icon: string
 })
 export class ViewsViewerComponent implements OnDestroy {
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered; back with the same list, no re-walk. */
+  readonly session = signalSession(this.visible, open =>
+    EffectBus.emit('views:state', { open }))
+
   readonly loading = signal(false)
   readonly rows = signal<readonly ViewRow[]>([])
   readonly subject = signal('Current category')

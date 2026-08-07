@@ -16,6 +16,7 @@ import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 import { onSelection } from '../../core/selection-context'
 import { categorize, typeMeta, TYPE_META, TYPE_ORDER, type FileTypeKey, type FileTypeMeta } from './file-icons'
 
@@ -47,6 +48,13 @@ type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 export class FilesViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered, brought back with the SAME gather —
+   *  `close()` drops the file list, and a window that came back empty would
+   *  read as "my files vanished". */
+  readonly session = signalSession(this.visible, open =>
+    EffectBus.emit('files:viewer', { active: open }))
+
   readonly title = signal<string>('')
   readonly scope = signal<Scope>('tile')
   readonly reach = signal<Reach>('local')

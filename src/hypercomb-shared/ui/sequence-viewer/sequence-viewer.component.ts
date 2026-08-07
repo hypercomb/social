@@ -3,6 +3,7 @@ import { EffectBus } from '@hypercomb/core'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
 type SequenceSet = { name: string; indexes: number[] }
@@ -20,6 +21,10 @@ const ioc = <T,>(key: string): T | undefined =>
 })
 export class SequenceViewerComponent implements OnDestroy {
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered; back on the same sequence. */
+  readonly session = signalSession(this.visible)
+
   readonly active = signal('')
   readonly rows = signal<readonly Row[]>([])
   readonly savedCount = computed(() => this.rows().filter(r => !r.builtIn).length)

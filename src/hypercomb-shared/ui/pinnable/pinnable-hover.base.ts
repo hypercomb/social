@@ -30,6 +30,7 @@
 
 import { signal, Directive, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { holdWindow, type WindowSession } from '../window-session'
 
 export interface PinnablePanel<T> {
   id: number
@@ -105,6 +106,32 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   #currentPage = ''
   #dragId: number | null = null
   #dragOffset = { x: 0, y: 0 }
+  // Session parking — the installer covers the hive, so the pins go away and
+  // come back. Held here rather than in `#parkedByPage`: parking is not a
+  // navigation, and a park must survive one.
+  #sessionParked: PinnablePanel<T>[] = []
+  #releaseSession: (() => void) | null = null
+
+  /** How this pin stack is put away while the hive is covered, and brought
+   *  back. Positions, stacking order and each panel's data all survive — the
+   *  persisted open-set is left untouched, so a refresh while parked still
+   *  restores the pins the participant actually put up. */
+  readonly windowSession: WindowSession = {
+    park: () => {
+      if (this.#sessionParked.length) return
+      this.#sessionParked = this.panels().filter(p => !p.ephemeral)
+      if (!this.#sessionParked.length) return
+      this.panels.set([])          // drops the transient peek with them
+      this.#announce()
+    },
+    unpark: () => {
+      const back = this.#sessionParked
+      this.#sessionParked = []
+      if (!back.length) return
+      this.panels.set(back)
+      this.#announce()
+    },
+  }
 
   ngOnInit(): void {
     this.#savedPos = this.#loadPos()
@@ -149,6 +176,8 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.#cancelHide()
     this.#detachDrag()
+    this.#releaseSession?.()
+    this.#releaseSession = null
     if (this.#pinnedAnnounced) EffectBus.emit(`${this.ns}:pinned`, { active: false })
     for (const c of this.#cleanups) c()
   }
@@ -201,11 +230,15 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   protected pinPeek(p: PinnablePanel<T>): void { this.#pin(p.key, p.data) }
   #update(id: number, data: T): void { this.panels.update(l => l.map(x => x.id === id ? { ...x, data } : x)); this.#saveOpen() }
 
-  /** Tell the host Escape cascade whether any pinned panel is up. */
+  /** Tell the host Escape cascade whether any pinned panel is up — and join or
+   *  leave the window session on the same transition, since "a pin is up" IS
+   *  this feature's window being open. */
   #announce(): void {
     const active = this.panels().some(x => !x.ephemeral)
     if (active === this.#pinnedAnnounced) return
     this.#pinnedAnnounced = active
+    if (active) this.#releaseSession = holdWindow(this.ns, this.windowSession)
+    else { this.#releaseSession?.(); this.#releaseSession = null }
     EffectBus.emit(`${this.ns}:pinned`, { active })
   }
 

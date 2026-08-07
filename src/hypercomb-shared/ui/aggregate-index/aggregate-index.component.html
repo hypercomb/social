@@ -3,6 +3,7 @@
     class="ai-panel"
     hcDockInset="left"
     [hcDockedPanel]="'aggregate-' + src.id"
+    [hcSession]="session"
     (hcDockedPanelClose)="close()"
     dockSide="left"
     [minWidth]="220"
@@ -19,6 +20,14 @@
         <span class="ai-title">{{ src.titleKey | t }}</span>
         @if (items().length > 0) {
           <span class="ai-total">{{ visible().length }}</span>
+        }
+        <!-- What you are carrying rides in the HEADER, not only in the bar
+             below: this basket survives navigation, so it must be impossible to
+             forget it is armed. -->
+        @if (carryCount() > 0) {
+          <span class="ai-carry-count" [title]="'aggregate.carrying' | t: { count: carryCount() }">
+            <span class="mat-sym" aria-hidden="true">luggage</span>{{ carryCount() }}
+          </span>
         }
       </div>
       <button class="ai-close mat-sym" type="button" (click)="close()"
@@ -51,6 +60,43 @@
           {{ 'collections-landing.add-here' | t: { name: hereLabel() } }}
         </span>
       </button>
+    }
+
+    <!-- Carrying: picked here, applied wherever you walk to. The bar names the
+         page it would land on, so pressing it can never be a guess — and it
+         says what the bouquet in hand will do, because a mark landing on twelve
+         new references is not something to discover afterwards. -->
+    @if (carryCount() > 0) {
+      <div class="ai-carry" role="group" [attr.aria-label]="'aggregate.carrying' | t: { count: carryCount() }">
+        <ul class="ai-carry-list">
+          @for (item of carried(); track item.key) {
+            <li class="ai-carry-row">
+              <span class="mat-sym ai-carry-icon" aria-hidden="true">north_east</span>
+              <span class="ai-carry-name">{{ item.label }}</span>
+              <button class="ai-carry-drop" type="button" (click)="toggleCarry(item, $event)"
+                      [attr.aria-label]="'aggregate.carry.remove' | t: { name: item.label }"
+                      [title]="'aggregate.carry.remove' | t: { name: item.label }">×</button>
+            </li>
+          }
+        </ul>
+        @if (brushMarks().length > 0) {
+          <p class="ai-carry-marks">
+            <span class="mat-sym" aria-hidden="true">local_florist</span>
+            {{ 'aggregate.apply.with-marks' | t: { marks: brushMarks().join(', ') } }}
+          </p>
+        }
+        <div class="ai-carry-actions">
+          <button class="ai-carry-apply" type="button" (click)="applyCarried()"
+                  [attr.aria-label]="'aggregate.apply-here' | t: { count: carryCount(), page: hereLabel() || ('aggregate.home' | t) }"
+                  [title]="'aggregate.apply.hint' | t">
+            {{ 'aggregate.apply-here' | t: { count: carryCount(), page: hereLabel() || ('aggregate.home' | t) } }}
+          </button>
+          <button class="ai-carry-clear" type="button" (click)="dropCarried()"
+                  [attr.aria-label]="'aggregate.carry.clear' | t" [title]="'aggregate.carry.clear' | t">
+            {{ 'aggregate.carry.clear' | t }}
+          </button>
+        </div>
+      </div>
     }
 
     @if (staged().length > 0 && src.addKey; as addKey) {
@@ -199,6 +245,17 @@
                 </form>
               } @else {
                 <div class="ai-actions">
+                  <!-- Pick it up to apply elsewhere. Its own control, never the
+                       row body: the body already means open, and press-and-move
+                       already means drag. -->
+                  <button class="ai-action ai-action-carry" type="button"
+                          [class.is-carried]="isCarried(item)"
+                          (click)="toggleCarry(item, $event)"
+                          [attr.aria-pressed]="isCarried(item)"
+                          [attr.aria-label]="(isCarried(item) ? 'aggregate.carry.remove' : 'aggregate.carry.add') | t: { name: item.label }"
+                          [title]="(isCarried(item) ? 'aggregate.carry.remove' : 'aggregate.carry.add') | t: { name: item.label }">
+                    <span class="mat-sym">{{ isCarried(item) ? 'luggage' : 'add' }}</span>
+                  </button>
                   @if (canPickVersion()) {
                     <button class="ai-action" type="button"
                             [class.is-active]="versionsFor() === item.key"

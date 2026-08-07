@@ -42,4 +42,5 @@ export * from './sync-indicator/sync-indicator.component'
 export * from './swarm-adopt-panel/swarm-adopt-panel.component'
 export * from './upgrade-indicator/upgrade-indicator.component'
 export * from './dock-inset/dock-inset.directive'
+export * from './window-session'
 

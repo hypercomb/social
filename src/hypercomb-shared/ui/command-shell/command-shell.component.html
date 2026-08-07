@@ -4,10 +4,18 @@
   <div class="command-shell" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 
+      <!-- ONE slot, three states, in priority order: an armed resource (cargo
+           that commits with the line), then a subject (what a gesture composed
+           this line ABOUT — a dragged portal row), then the plain chevron.
+           Sharing the box is the point: there is one place that answers "what
+           is this line for", and it never grows a second chip beside it. -->
       <span
         class="prompt-glyph"
         [class.armed]="!!armedResource()"
-        [attr.aria-label]="armedResource() ? ('command-shell.armed-resource' | t) : null"
+        [class.subject]="!armedResource() && !!subject()"
+        [attr.aria-label]="armedResource() ? ('command-shell.armed-resource' | t)
+          : (subject() ? ('command-shell.subject' | t: { name: subject()!.label }) : null)"
+        [attr.title]="!armedResource() && subject() ? subject()!.label : null"
         (mousedown)="onArmedGlyphMouseDown($event)"
       >
         @if (armedResource(); as armed) {
@@ -18,6 +26,14 @@
           }
           @if (armed.previewUrl && armedBadge(); as b) {
             <span class="prompt-badge">{{ b }}</span>
+          }
+        } @else if (subject(); as subj) {
+          @if (subj.previewUrl) {
+            <img class="prompt-thumb" [src]="subj.previewUrl" alt="" draggable="false" />
+          } @else if (subj.icon) {
+            <span class="prompt-thumb prompt-thumb-fallback mat-sym" aria-hidden="true">{{ subj.icon }}</span>
+          } @else {
+            <span class="prompt-thumb prompt-thumb-fallback" aria-hidden="true">{{ subjectMonogram() }}</span>
           }
         } @else {
           <span class="prompt-chevron mat-sym" aria-hidden="true">chevron_right</span>

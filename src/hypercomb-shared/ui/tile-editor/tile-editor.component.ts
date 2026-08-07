@@ -114,7 +114,14 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   public readonly hideText = computed(() => this.hideText$())
 
   // bound form values (updated on open, pushed on change)
-  public linkValue = ''
+  /** The Link field's text.
+   *
+   *  A signal, not a plain field: the app is ZONELESS, and the link can change
+   *  from OUTSIDE the editor while it is open — dropping a link onto an open
+   *  editor calls `setLink` on the service. A bare field left the input showing
+   *  nothing, and `save()` then wrote that empty field straight back over the
+   *  dropped link. The field now follows the service (see `#onEditorChange`). */
+  public readonly linkValue = signal('')
 
   /** The tile's reading in the CURRENT locale — empty means it has none and
    *  draws under its raw address. Editing this never moves the tile.
@@ -158,7 +165,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   #onEditorChange = (): void => {
     const isOpen = this.editorService?.mode === 'editing'
     if (isOpen && !this.#wasOpen) {
-      this.linkValue = this.editorService?.link ?? ''
+      this.linkValue.set(this.editorService?.link ?? '')
       this.borderColorValue = this.editorService?.borderColor || '#c8975a'
       this.backgroundColorValue = this.editorService?.backgroundColor || '#1e1e1e'
       // ensure defaults are persisted in properties
@@ -175,10 +182,21 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#refreshQaItems()
       this.#loadTitle()
     }
+    // Already open, and the link changed from OUTSIDE the field — a link
+    // dropped onto the open editor. The field has to follow: it is what `save`
+    // commits, so a stale one does not merely hide the drop, it erases it.
+    // Never while the participant is typing in that very input.
+    if (isOpen && this.#wasOpen) {
+      const live = this.editorService?.link ?? ''
+      const typingHere = document.activeElement instanceof HTMLElement
+        && document.activeElement.classList.contains('link-input')
+      if (!typingHere && live !== this.linkValue()) this.linkValue.set(live)
+    }
+
     if (!isOpen && this.#wasOpen) {
       document.removeEventListener('keydown', this.#onKeyDown)
       if (this.cameraActive) this.closeCamera()
-      this.linkValue = ''
+      this.linkValue.set('')
       this.titleValue.set('')
       this.#titleLoadedFor = ''
       this.renaming.set(false)
@@ -407,7 +425,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Safety-checked link update — runs on blur so we don't call LLM on every keystroke. */
   readonly onLinkBlur = (): void => {
-    const value = this.linkValue.trim()
+    const value = this.linkValue().trim()
 
     // reset safety state
     this.linkDenied = false
@@ -562,10 +580,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly save = (): void => {
     // Commit the current link input value in case blur hasn't fired yet
     // (e.g. user pastes a URL and clicks save directly)
-    const link = this.linkValue?.trim()
-    if (link !== undefined) {
-      this.editorService.setLink(link ?? '')
-    }
+    this.editorService.setLink(this.linkValue().trim())
     this.editorDrone?.saveAndComplete?.()
   }
 

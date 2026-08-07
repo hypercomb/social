@@ -1536,8 +1536,28 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.shell?.focus()
     })
 
-    this.#prefillUnsub = EffectBus.on<{ value: string }>('search:prefill', ({ value }) => {
+    // Prefill. `focus`, `select` and `subject` are optional and additive: a
+    // gesture elsewhere can COMPOSE a command and hand the participant the one
+    // word it could not know — dragging a portal onto the hive fills in
+    // `/reference <name> = <path>`, selects the name so Enter accepts it and
+    // typing renames it, and puts the dragged thing's picture in the glyph slot
+    // so the line says WHAT it is about while you decide what to call it.
+    // Without them this behaves exactly as before.
+    this.#prefillUnsub = EffectBus.on<{
+      value: string
+      focus?: boolean
+      select?: [number, number]
+      subject?: { previewUrl?: string; label: string; icon?: string } | null
+    }>('search:prefill', ({ value, focus, select, subject }) => {
       this.#setShellValue(value, false)
+      // A prefill with no subject CLEARS the chip rather than leaving the
+      // previous gesture's face over an unrelated command.
+      this.commandSubject.set(subject ?? null)
+      if (!focus) return
+      // A collapsed mobile bar has to open first — focusing an input inside a
+      // display:none header is the known dead end (see `command:focus`).
+      if (this.mobileHidden()) EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
+      this.#focusShellSoon(select)
     })
 
     this.#commandFocusUnsub = EffectBus.on<{ cell: string }>('command:focus', ({ cell }) => {
@@ -1715,27 +1735,63 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       type: 'image' | 'youtube' | 'link' | 'document'
       attachment?: { name: string; mime: string; size: number; sig: string } | null
       name?: string | null
+      armId?: string | null
     }>('command:arm-resource', (payload) => {
       if (!payload || (!payload.largeSig && !payload.url)) return
+      // A link arms on release and is filled in when its card arrives. Once the
+      // participant has committed or dismissed that slot it is RETIRED, and the
+      // late fill-in must not raise a chevron over a gesture they finished.
+      if (payload.armId && this.#retiredArms.has(payload.armId)) return
       const prev = this.armedResource()
       if (prev?.previewUrl && prev.previewUrl !== payload.previewUrl) {
         try { URL.revokeObjectURL(prev.previewUrl) } catch { /* ignore */ }
       }
       this.armedResource.set(payload)
-      // Seed the tile name with the link's default title (e.g. the YouTube
-      // video title). Only when the field is empty — never clobber what the
-      // user is already typing; select it so an immediate keystroke overrides
-      // it while Enter accepts it as-is.
-      if (payload.name && this.value().trim() === '') {
+      // Seed the tile name with the link's default title. A link arms with a
+      // name derived from its URL and is upgraded to the open-graph title a
+      // beat later, so the seed is replaced while it is still OURS: an empty
+      // field, or a field still holding exactly what we last put there. Once
+      // the participant has typed, the line is theirs and nothing overwrites
+      // it. Selected, so an immediate keystroke replaces it and Enter takes it.
+      if (payload.name) {
         const seed = this.#sanitizeArmName(payload.name)
-        if (seed) {
+        const current = this.value().trim()
+        if (seed && seed !== current && (current === '' || current === this.#seededArmName)) {
           this.shell?.setValue(seed)
           this.value.set(this.shell?.value() ?? seed)
           this.shell?.selectAll()
+          this.#seededArmName = seed
         }
       }
       this.shell?.focus()
     })
+
+    // A slot armed on release can be retracted — the safety check runs after
+    // the arm now, so a denied link has to take its chevron back down.
+    this.#disarmResourceUnsub = EffectBus.on<{ armId?: string | null }>(
+      'command:disarm-resource',
+      (payload) => {
+        const armed = this.armedResource()
+        if (!armed) return
+        if (payload?.armId && armed.armId !== payload.armId) return
+        this.onArmedResourceDismiss()
+      },
+    )
+  }
+
+  /**
+   * WHAT THE LINE IS ABOUT — set by a gesture that composed the command (see
+   * the `search:prefill` handler). Purely a label: it commits nothing and is
+   * never read by any Enter path, which is exactly what keeps it out of
+   * `armedResource`'s way (that one suppresses completion-on-Enter, and a
+   * composed `/reference` line very much wants its completions).
+   */
+  readonly commandSubject = signal<{ previewUrl?: string; label: string; icon?: string } | null>(null)
+
+  /** Put the subject chip away. The composed text stays — dismissing a label
+   *  is not deleting what someone is midway through typing. */
+  public onSubjectDismiss = (): void => {
+    this.commandSubject.set(null)
   }
 
   /** Clear the armed resource (thumbnail click, Escape, or after successful commit). */
@@ -1744,8 +1800,24 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (prev?.previewUrl) {
       try { URL.revokeObjectURL(prev.previewUrl) } catch { /* ignore */ }
     }
+    this.#seededArmName = ''
+    if (prev?.armId) {
+      this.#retiredArms.add(prev.armId)
+      // One drop is in flight at a time, so this only ever guards against the
+      // fill-in of a slot just closed; a handful of ids is the whole horizon.
+      if (this.#retiredArms.size > 8) {
+        this.#retiredArms.delete(this.#retiredArms.values().next().value as string)
+      }
+    }
     this.armedResource.set(null)
   }
+
+  /** Armed slots already committed or dismissed — their fill-ins are ignored. */
+  readonly #retiredArms = new Set<string>()
+
+  /** The last name this component seeded into the line — replaceable while the
+   *  participant has not typed over it. Empty once the line is theirs. */
+  #seededArmName = ''
 
   /** Strip command-line grammar chars ([ ] , : / @) so a dropped link's title
    *  can seed the tile name without tripping select/tag/slash/feature parsing. */
@@ -1769,8 +1841,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     attachment?: { name: string; mime: string; size: number; sig: string } | null
     /** Default tile name suggested by the dropped resource (link title). */
     name?: string | null
+    /** Identity of this armed slot, so a late card fill-in can find it. */
+    armId?: string | null
   } | null>(null)
   #armResourceUnsub?: () => void
+  #disarmResourceUnsub?: () => void
   /** True when the command-line should be collapsed on mobile (toggle off). */
   readonly mobileHidden = signal(false)
   #mobileVisibilityUnsub?: () => void
@@ -1933,6 +2008,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#micPressUnsub?.()
     this.#micReleaseUnsub?.()
     this.#armResourceUnsub?.()
+    this.#disarmResourceUnsub?.()
     this.onArmedResourceDismiss()
     if (this.#micHoldTimer) {
       clearTimeout(this.#micHoldTimer)
@@ -1960,6 +2036,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Typing leaves the recall walk — the line is the user's again.
     this.#historyIndex = -1
+
+    // An emptied line is about nothing. Editing the composed text does NOT
+    // clear the chip — renaming the tile is the whole point of handing the line
+    // over — but deleting all of it means the gesture was abandoned.
+    if (!v.trim()) this.commandSubject.set(null)
 
     // auto-populate index when typing '(' after /move
     if (this.#autoPopulateMoveIndex(v)) {
@@ -2154,6 +2235,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     const completed = this.#completeOnEnter(v)
     if (completed === null) return
+    // The line has been spent, so it is no longer about anything. Cleared
+    // BEFORE the dispatch: executing may prefill the line again (a command
+    // that hands the participant a follow-up), and that prefill owns the chip.
+    this.commandSubject.set(null)
     void this.#preprocessTagsThenExecute(completed)
   }
 
@@ -2275,6 +2360,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // Remember the line as TYPED (before tag stripping) — recall should give
     // back exactly what the user ran, ready to edit and run again.
     this.#recordHistory(original)
+
+    // A dropped resource is a "make THIS" gesture, so the line is a NAME —
+    // the same rule `#completeOnEnter` already applies to the dropdown, held
+    // one step further down. A video titles itself, and those titles carry
+    // characters this bar reads as operators: a leading `~` is remove-cell,
+    // so the create never happened and nothing was added; `?`, `&` and `#`
+    // truncated the name to a fragment of itself. None of that is grammar the
+    // participant typed. A slash line still runs as a command — that one they
+    // did type, since the seed strips `/` out.
+    //
+    // The cost is create-time tagging (`name:tag`) while something is armed:
+    // the colon stays in the name instead of persisting a tag. Tagging the new
+    // tile is one gesture away; a title silently eaten is not recoverable.
+    if (this.armedResource() && !original.trimStart().startsWith('/')) {
+      await this.commitCreateCellInPlace()
+      return
+    }
 
     const cleaned = await this.#extractAndPersistTags(original)
 
@@ -3482,11 +3584,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.shell.placeCaretAtEnd()
   }
 
-  #focusShellSoon(): void {
+  /** Focus the shell, retrying across the frames where something else may
+   *  reclaim it. `select` keeps a range highlighted through the whole ladder —
+   *  placing the caret at the end on any retry would silently drop the
+   *  selection a moment after the participant saw it. */
+  #focusShellSoon(select?: [number, number]): void {
     const focus = (): void => {
       this.shell?.unsuppress()
       this.shell?.focus()
-      this.shell?.placeCaretAtEnd()
+      if (select) this.shell?.selectRange(select[0], select[1])
+      else this.shell?.placeCaretAtEnd()
     }
     focus()
     queueMicrotask(focus)

@@ -22,6 +22,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 
 // Mirrors of the essentials read-model shapes (shared cannot import essentials).
 interface ObservedParticipant {
@@ -62,6 +63,12 @@ interface ObserveRenderPayload {
 export class ObserveViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered. No `observe:close` — that stops the
+   *  drone observing, and we are hiding a window, not ending an observation;
+   *  the walk keeps feeding the panel so it is current when it comes back. */
+  readonly session = signalSession(this.visible)
+
   readonly groups = signal<ObservationGroup[]>([])
   readonly showNames = signal(true)
   readonly groupBy = signal<ObservationGrouping>('flat')

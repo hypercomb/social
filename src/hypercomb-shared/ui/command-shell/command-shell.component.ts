@@ -290,6 +290,22 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    */
   readonly armedResource = input<{ previewUrl: string; type: 'image' | 'youtube' | 'link' | 'document' } | null>(null)
 
+  /**
+   * WHAT THIS LINE IS ABOUT — the thing a gesture composed the command from,
+   * shown in the same glyph slot as an armed resource.
+   *
+   * Deliberately NOT folded into `armedResource`, which the two share a box
+   * with but nothing else: an armed resource is CARGO (bytes that attach to the
+   * cell on Enter, and which make `#completeOnEnter` treat the typed text as a
+   * finished name), whereas a subject is a LABEL — it commits nothing, and the
+   * line it decorates wants its completions working normally. One slot, two
+   * meanings, kept apart so neither inherits the other's commit behaviour.
+   *
+   * They can never both be live: arming is a drop that mints a tile HERE, a
+   * subject is a drop that composed a command. Armed wins if it ever happens.
+   */
+  readonly subject = input<{ previewUrl?: string; label: string; icon?: string } | null>(null)
+
   // ── outputs to parent ───────────────────────────────────
 
   /** Emitted on every input change (after leading-space strip). */
@@ -328,6 +344,11 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   /** Emitted when the user clicks the armed-resource thumbnail to dismiss it. */
   readonly armedResourceDismiss = output<void>()
+
+  /** Emitted when the subject chip is clicked — "this line is no longer about
+   *  that". Clears the chip only; the composed text stays, because deleting
+   *  what someone is midway through typing is not what dismissing a label means. */
+  readonly subjectDismiss = output<void>()
 
   /** Emitted when the open-for-subscribers icon is clicked. Parent
    *  flips swarm.setOpenForSubscribers — the shell never touches IoC. */
@@ -421,9 +442,25 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   /** Template handler for clicks on the armed-resource thumbnail. */
   onArmedGlyphMouseDown = (e: MouseEvent): void => {
-    if (!this.armedResource()) return
+    if (this.armedResource()) {
+      e.preventDefault()
+      this.armedResourceDismiss.emit()
+      return
+    }
+    if (!this.subject()) return
     e.preventDefault()
-    this.armedResourceDismiss.emit()
+    this.subjectDismiss.emit()
+  }
+
+  /** Initial(s) for a subject with no picture — the same fallback the portals
+   *  index draws, so a row that reads as its monogram there still reads as
+   *  itself here rather than collapsing to a generic glyph. */
+  subjectMonogram(): string {
+    const label = this.subject()?.label ?? ''
+    const w = label.trim().split(/\s+/).filter(Boolean)
+    if (!w.length) return '·'
+    if (w.length === 1) return [...w[0]].slice(0, 2).join('').toUpperCase()
+    return ([...w[0]][0] + [...w[1]][0]).toUpperCase()
   }
 
   /** Badge glyph for armed-resource type (shown as small corner overlay). */
@@ -538,6 +575,21 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     const el = this.inputElement
     if (!el) return
     queueMicrotask(() => el.setSelectionRange(0, el.value.length))
+  }
+
+  /** Select PART of the current value. Used when a gesture composes a command
+   *  and leaves one word for the participant to overwrite — dragging a
+   *  reference onto the hive writes `/reference people = a/b/people` and
+   *  selects the name, so pressing Enter keeps it and typing renames it.
+   *  Clamped rather than trusted: the caller composed the string, but the
+   *  input may have been re-set in between. */
+  selectRange(start: number, end: number): void {
+    const el = this.inputElement
+    if (!el) return
+    queueMicrotask(() => {
+      const max = el.value.length
+      el.setSelectionRange(Math.max(0, Math.min(start, max)), Math.max(0, Math.min(end, max)))
+    })
   }
 
   /** Suppress the suggestion dropdown (e.g. after an explicit accept). */

@@ -1040,7 +1040,11 @@ export class TileOverlayDrone extends Drone {
         // isn't stranded hidden. (No-ops while editing — the editor:mode close
         // handler runs the recovery once the panel dismisses.)
         if (active) { this.#updatePerTileVisibility(); this.#updateVisibility() }
-        else this.#recoverHover()
+        // The drag is over, so there is no landing place any more. Said
+        // explicitly rather than left to the last move: `drop:target` replays
+        // its last value to late subscribers, so a stale ring would otherwise
+        // be the FIRST thing the indicator hears about on the next drag.
+        else { this.#emitDropTarget(null); this.#recoverHover() }
       })
     }
   }
@@ -2216,16 +2220,8 @@ export class TileOverlayDrone extends Drone {
       this.#positionOverlay(axial.q, axial.r)
       this.#updateCellLabel(axial.q, axial.r)
 
-      // tell ImageDropDrone what's under the cursor
-      const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
-      this.emitEffect('drop:target', {
-        q: axial.q,
-        r: axial.r,
-        occupied: !!entry,
-        label: entry?.label ?? null,
-        index: entry?.index ?? -1,
-        hasImage: entry ? !this.#noImageLabels.has(entry.label) : false,
-      })
+      // tell ImageDropDrone (and the landing indicator) what's under the cursor
+      this.#emitDropTarget(axial)
     }
   }
 
@@ -2245,7 +2241,15 @@ export class TileOverlayDrone extends Drone {
     // overlay THROUGH the panel and re-arms every hover-driven surface, which
     // is exactly the furniture the participant is trying to reach past.
     // #onPointerDown already gates on the same condition; hover was the hole.
-    if (e.target !== this.#canvas) { this.#suppressHover(); return }
+    if (e.target !== this.#canvas) {
+      this.#suppressHover()
+      // A drag that wanders onto chrome has NO landing place, and the indicator
+      // must say so rather than freeze on the last hex it crossed — a stuck ring
+      // reads as "release here and it lands there", which is a lie the moment
+      // the release happens over the panel (a cancelled drag).
+      if (this.#dropDragging) this.#emitDropTarget(null)
+      return
+    }
     this.#hoverSuppressed = false
 
     // Painting a stroke: extend it to whatever tile the cursor is now over. The
@@ -2286,6 +2290,13 @@ export class TileOverlayDrone extends Drone {
     if (hexChanged) {
       this.#currentAxial = axial
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
+      // A POINTER drag (a row dragged out of a docked index) reports its
+      // landing place here. `#onDragOverTrack` covers the HTML5 file/image
+      // drag, which is a different event stream entirely — pointermove does
+      // not fire during a native drag, and DragEvents never fire during a
+      // pointer drag, so BOTH paths have to emit or half the drags in the app
+      // are invisible to every drop consumer.
+      if (this.#dropDragging) this.#emitDropTarget(axial)
       this.#clearHint()
       // Nothing to collapse on a new tile: every icon the tile offers is
       // already on screen, wrapped across the band's two rows.
@@ -3575,6 +3586,31 @@ export class TileOverlayDrone extends Drone {
 
   #lookupIndex(q: number, r: number): number | undefined {
     return this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))?.index
+  }
+
+  /** Broadcast where a drag would land. `null` means NOWHERE — the pointer has
+   *  left the hive for chrome — and is sent with the shape intact rather than as
+   *  a null payload, because consumers destructure this on arrival. `over`
+   *  carries the distinction that `occupied:false` cannot: empty hive is a
+   *  perfectly good landing place, off the hive is not. Absent `over` reads as
+   *  true, so every consumer written before this field behaves as it always did. */
+  #emitDropTarget(axial: Axial | null): void {
+    if (!axial) {
+      this.emitEffect('drop:target', {
+        q: 0, r: 0, occupied: false, label: null, index: -1, hasImage: false, over: false,
+      })
+      return
+    }
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+    this.emitEffect('drop:target', {
+      q: axial.q,
+      r: axial.r,
+      occupied: !!entry,
+      label: entry?.label ?? null,
+      index: entry?.index ?? -1,
+      hasImage: entry ? !this.#noImageLabels.has(entry.label) : false,
+      over: true,
+    })
   }
 
   #clientToPixiGlobal(cx: number, cy: number) {

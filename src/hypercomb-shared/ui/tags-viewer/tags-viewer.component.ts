@@ -52,6 +52,7 @@ import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { signalSession } from '../window-session'
 import { looseMarks, namespaceGroupsOf } from './tag-grouping'
 
 interface TagRow {
@@ -123,6 +124,11 @@ type BouquetRegistryLike = {
 export class TagsViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
+
+  /** Put away while the hive is covered. Only the showing stops: a staged
+   *  removal or an armed brush stays armed, where `close()` disarms them. */
+  readonly session = signalSession(this.visible, open =>
+    EffectBus.emit('tags:view-state', { open }))
 
   /** Per-page tag counts, last value from `render:tags`. */
   readonly #counts = signal<Map<string, number>>(new Map())
