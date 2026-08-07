@@ -71,7 +71,7 @@
         </span>
         <strong class="features-tile">{{ g.cell }}</strong>
       </div>
-      @if (isPhone() && !reviewTarget()) {
+      @if (isPhone() && !reviewTarget() && g.segments.length) {
         <button class="features-select-tile" type="button" (click)="selectTile()">
           <span class="mat-sym" aria-hidden="true">select_all</span>
           {{ 'features.selectTile' | t }}

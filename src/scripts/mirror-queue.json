@@ -290,6 +290,42 @@
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
+    },
+    {
+      "id": "link-drop-playwright-harness",
+      "title": "Note the real-drag harness on the behaviors link-drop tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive. scripts/verify-link-drop.cjs drives a REAL native drag with Playwright (trusted CDP input, the browser's own DataTransfer) and asserts the five steps: drop delivered / open-graph card read / command line named by the title / tile carries the dropped URL / picture from the og image. Two modes: default drops on empty canvas and presses Enter; --tile drops on an existing tile (link + picture land there, command line deliberately untouched). Synthetic new DragEvent() cannot stand in for this — it never exercises the browser's DataTransfer and cannot show whether dragover ACCEPTED the drag, which is exactly where the gesture was being lost.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "link-drop-one-tab-and-deadlines",
+      "title": "Note create-on-drop, deadlines, and the ONE-TAB packed-store trap on the link-drop tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive. (1) DROPPING ON EMPTY SPACE IS THE CREATION: the drop commits itself (command:commit-armed) instead of waiting for an Enter nobody asked to press; the tile is pinned to the first slot (props index 0, atTop through arm-resource → ResourceAttachDrone) and the title stays in the line naming what landed. Dropping on an EXISTING tile still only pastes the link, and now asks first (requestConfirm) before replacing a link that tile already had. (2) DEADLINES ON EVERY NETWORK STEP (deadline.ts): card read 3.5s, picture 5s, safety verdict 5s, each aborting what it abandons. A hung request is worse than a failed one — it parked the whole drop with no title, no picture and no tile. (3) THE PICTURE IS BEST-EFFORT IN THE STORE TOO: armImageBlob throwing used to take the link with it; it now degrades to the bare arm. (4) THE TRAP THAT COST A DAY: the packed store admits ONE WRITER — a second tab on the same origin comes up with opfsAvailable false and putResource throwing 'Cannot read properties of undefined (reading getFileHandle)'. Every symptom of a dead drop follows. Console says it plainly: '[packed-store] unavailable — held by another tab'. NEVER open a second tab (in-app browser pane, MCP tab, Playwright against the same profile) on a hive someone is using; Playwright with its own profile is safe. Harness: scripts/verify-link-drop.cjs.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "link-drop-verify-card",
+      "title": "Note the open-graph verification popup on the link-drop tile",
+      "run": null,
+      "note": "MANUAL — note-add is additive. link-drop-card.view.ts shows the open-graph card a drop actually READ — the picture, the title, the address, and where it is about to land — as a framework-free overlay (same pattern as the youtube metadata queue). Two modes: 'verify' REPORTS and never gates the gesture (one OK button; this is what a drop shows today, as a test aid), 'confirm' asks and can cancel, and names the link it would replace. Switched on by default; localStorage['hc:link-drop:verify-card'] = 'off' silences it with no rebuild. Verified by the real-drag harness (check 8): title read, image URL loaded, rows 'LINK' and 'LANDS AS: a new tile, at the top'.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "beehaviors-root-context",
+      "title": "Note the root-context follow on the Beehaviors tile",
+      "run": null,
+      "note": "The Beehaviors window follows navigation all the way to the ROOT: backing out to / no longer leaves the panel on the previous tile's group — the hive itself becomes the subject (context row shows the hive, segments []). Root rows read the root layer's decorations authoritatively (the label-keyed hot index is skipped at root so a tile sharing the hive's display name can't leak kinds in), the root is never a peer-branch offer, and ADD/REMOVE work at the root: empty segments WITH a named cell is the hive-root group, a real write target on the root layer. Direction noted in-session: the root context name is a placeholder ('hypercomb') until named hive roots land — then the panel names WHICH hive you are in.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
     }
   ]
 }

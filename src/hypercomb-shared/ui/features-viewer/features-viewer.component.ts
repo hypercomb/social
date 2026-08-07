@@ -451,7 +451,16 @@ export class FeaturesViewerComponent implements OnDestroy {
         const key = segs.join('\u0000')
         if (key === this.#lastNavKey) return
         this.#lastNavKey = key
-        if (!this.visible() || segs.length === 0) return
+        if (!this.visible()) return
+        // Root is a context too — the hive itself. Leaving the panel on the
+        // previous tile's group after backing out to `/` showed a subject the
+        // participant is no longer standing on. `root: true` tells the drone
+        // to describe the hive root (segments []) rather than resolving the
+        // label as a tile at the current location.
+        if (segs.length === 0) {
+          EffectBus.emit('tile:action', { action: 'features', label: 'hypercomb', segments: [], root: true })
+          return
+        }
         EffectBus.emit('tile:action', {
           action: 'features',
           label: segs[segs.length - 1],

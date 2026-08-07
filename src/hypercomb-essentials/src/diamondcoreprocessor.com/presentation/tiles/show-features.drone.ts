@@ -364,7 +364,12 @@ export class ShowFeaturesDrone extends Drone {
       const segments = Array.isArray((payload as { segments?: unknown }).segments)
         ? ((payload as { segments: unknown[] }).segments).map(s => String(s ?? '').trim()).filter(Boolean)
         : undefined
-      void this.#open(label, segments && segments.length ? segments : undefined)
+      // `root: true` — the subject is the HIVE ROOT itself (the panel follows
+      // navigation back to `/`). An explicit EMPTY override reaches #open only
+      // through this flag; a plain empty `segments` still means "resolve the
+      // label at the current location".
+      const root = (payload as { root?: unknown }).root === true
+      void this.#open(label, root ? [] : (segments && segments.length ? segments : undefined))
     })
 
     // The selection context menu mirrors the per-tile puzzle-piece: when the
@@ -398,8 +403,12 @@ export class ShowFeaturesDrone extends Drone {
     this.onEffect<{ cell?: string; segments?: string[]; kind?: string }>('features:enable', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const kind = String(p?.kind ?? '')
-      if (segments.length === 0 || !kind) return
-      void this.#enableAt(segments, kind)
+      const cell = String(p?.cell ?? '').trim()
+      // Empty segments WITH a named cell = the hive-root group (the panel
+      // follows navigation to `/`) — a real target. Empty segments with no
+      // cell is still a targetless intent, refused.
+      if (!kind || (segments.length === 0 && !cell)) return
+      void this.#enableAt(segments, kind, cell)
     })
 
     // The panel's REMOVE on an applied row. Membership is positive — the
@@ -409,8 +418,9 @@ export class ShowFeaturesDrone extends Drone {
     this.onEffect<{ cell?: string; segments?: string[]; kind?: string }>('features:remove', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const kind = String(p?.kind ?? '')
-      if (segments.length === 0 || !kind) return
-      void this.#removeAt(segments, kind)
+      const cell = String(p?.cell ?? '').trim()
+      if (!kind || (segments.length === 0 && !cell)) return
+      void this.#removeAt(segments, kind, cell)
     })
 
     // `name@view` from the command line (`diagram@slides` / `~diagram@slides`).
@@ -613,8 +623,10 @@ export class ShowFeaturesDrone extends Drone {
   /** Attach an addable feature at `segments`. Only cascading capabilities are
    *  mechanically attachable today (dropbox — a payload-free decoration);
    *  anything else is refused loudly rather than half-applied. */
-  async #enableAt(segments: readonly string[], kind: string): Promise<void> {
-    const label = segments[segments.length - 1] ?? ''
+  async #enableAt(segments: readonly string[], kind: string, cellLabel = ''): Promise<void> {
+    // Root group: no last segment — the panel's cell name (display-only)
+    // keeps the outcome routed back to the row that asked.
+    const label = segments[segments.length - 1] ?? cellLabel
     try {
       const attachable = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)?.byDecorationKind?.(kind)
       if (kind === 'files:dropbox') {
@@ -640,7 +652,8 @@ export class ShowFeaturesDrone extends Drone {
       // back missing until they re-opened the panel. Wait (briefly, bounded)
       // for the kind to actually be on the layer, then refresh in place.
       await this.#settleKind(segments, kind)
-      if (label) await this.#open(label)   // refresh the panel group in place
+      // refresh the panel group in place ([] = the hive-root group)
+      if (label) await this.#open(label, segments.length ? undefined : [])
     } catch (err) {
       console.warn('[show-features] enable failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
@@ -652,8 +665,8 @@ export class ShowFeaturesDrone extends Drone {
    *  Committed (not just queued) before the refresh so the row is gone when
    *  the group re-reads. A kind with no records here (slot-backed content)
    *  is refused loudly rather than silently un-removed. */
-  async #removeAt(segments: readonly string[], kind: string): Promise<void> {
-    const label = segments[segments.length - 1] ?? ''
+  async #removeAt(segments: readonly string[], kind: string, cellLabel = ''): Promise<void> {
+    const label = segments[segments.length - 1] ?? cellLabel
     try {
       const existing = await listDecorations({ kind, segments: [...segments] })
       if (existing.length === 0) {
@@ -707,14 +720,19 @@ export class ShowFeaturesDrone extends Drone {
 
     // Default: the tile lives at the CURRENT location. An explicit override
     // (the adopt fold's target) wins — the panel must describe the tile where
-    // it IS, not where the participant happens to stand.
+    // it IS, not where the participant happens to stand. An explicit EMPTY
+    // override is the HIVE ROOT (follow-navigation back to `/`): the group's
+    // subject is the hive itself, so the label is display-only.
     const lineage = ioc?.get<LineageLike>(LINEAGE_KEY)
-    const segments = segmentsOverride?.length
+    const segments = segmentsOverride
       ? segmentsOverride.map(s => String(s ?? '').trim()).filter(Boolean)
       : [...(lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean), label]
+    const isRoot = segments.length === 0
     const parent = segments.slice(0, -1)
 
-    const branchSig = this.#peerBranchSig(label)
+    // The root is never a peer branch offer — and its label must not collide
+    // with a tile that happens to share the display name.
+    const branchSig = isRoot ? undefined : this.#peerBranchSig(label)
     const i18n = ioc?.get<I18nProvider>(I18N_KEY)
 
     // Behaviors belong to ADOPTED tiles. A peer-only offer has nothing local
@@ -738,7 +756,10 @@ export class ShowFeaturesDrone extends Drone {
     // the next repaint. The layer read is authoritative; the index only adds
     // speed, never rows.
     const records = await this.#decorationRecordsAt(segments)
-    const directKinds: string[] = [...kindsForLabel(label)]
+    // At the root the label is display-only — the hot index is keyed by tile
+    // label, and consulting it would leak kinds from any tile that shares the
+    // hive's display name. The layer read below is the authoritative source.
+    const directKinds: string[] = isRoot ? [] : [...kindsForLabel(label)]
     for (const rec of records) {
       if (!directKinds.includes(rec.kind)) directKinds.push(rec.kind)
     }
