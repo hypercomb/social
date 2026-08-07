@@ -733,6 +733,17 @@ export class ShowFeaturesDrone extends Drone {
     // The root is never a peer branch offer — and its label must not collide
     // with a tile that happens to share the display name.
     const branchSig = isRoot ? undefined : this.#peerBranchSig(label)
+
+    // The root context IS the home page — whatever is active at `/` names
+    // the group: the root layer's own name when it carries one, the shell
+    // default otherwise. (Named hive roots will resolve the ACTIVE hive's
+    // name here when they land.)
+    let cell = label
+    if (isRoot) {
+      const rootLayer = await this.#layerAt(segments)
+      const name = String((rootLayer as { name?: unknown } | null)?.name ?? '').trim()
+      cell = name || label || 'hypercomb'
+    }
     const i18n = ioc?.get<I18nProvider>(I18N_KEY)
 
     // Behaviors belong to ADOPTED tiles. A peer-only offer has nothing local
@@ -904,7 +915,7 @@ export class ShowFeaturesDrone extends Drone {
     }
 
     this.emitEffect<FeaturesOpenPayload>('features:open', {
-      cell: label, segments, applied, available,
+      cell, segments, applied, available,
       adopted: isWithinAdoptedRoot(segments),
     })
   }
