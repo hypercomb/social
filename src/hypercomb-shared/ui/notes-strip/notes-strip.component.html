@@ -67,6 +67,62 @@
               (click)="setTab('lists')">{{ 'annotations.tab.lists' | t }}</button>
     </div>
 
+    <!-- Embedded note form — the single authoring surface, defined ONCE at
+         the panel's top level so both columns can outlet it (an @if block's
+         template refs are scoped to that block). Add mode by default;
+         clicking a note row loads it for editing. The leading kind pill
+         flips the entry between note and question; placeholder, accent,
+         and submit label follow it. Enter commits, Shift+Enter newlines,
+         Esc cancels. Docked (and narrow fullscreen) it renders in the
+         centre column; on the desk it renders in the READING PANE, where a
+         note has room to be written the size it is read (formInPane /
+         paneEditorOpen). -->
+    <ng-template #formTpl>
+      <form class="cv2-form" [class.is-question]="draftKind() === 'q'"
+            (submit)="$event.preventDefault(); commitForm()">
+        <div class="cv2-form-input-row">
+          <div class="cv2-input-wrap">
+            <textarea #formInput
+                      class="cv2-form-input"
+                      rows="1"
+                      [value]="draftText()"
+                      (input)="onFormInput($event)"
+                      (keydown)="onFormKeydown($event)"
+                      [attr.placeholder]="(draftKind() === 'q' ? 'notes.capturePlaceholderQ' : 'notes.capturePlaceholder') | t"
+                      [attr.aria-label]="editingNoteId() ? ('notes.edit' | t) : ('notes.add' | t)"></textarea>
+            <!-- In-input kind toggle — small chip pinned to the bottom-left
+                 corner of the textarea. One click flips note ↔ question;
+                 styled subtly (not like the primary submit) so it reads as
+                 an accessory of the field, not a second action button. -->
+            <button type="button" class="cv2-kind-toggle"
+                    [class.is-question]="draftKind() === 'q'"
+                    (click)="toggleDraftKind()"
+                    [attr.aria-label]="'notes.kindLabel' | t"
+                    [attr.aria-pressed]="draftKind() === 'q'"
+                    [title]="(draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t">
+              <span class="dot" [class.q]="draftKind() === 'q'" [class.n]="draftKind() === 'note'"></span>
+              <span class="cv2-kind-toggle-label">{{ (draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t }}</span>
+            </button>
+          </div>
+          <button type="submit" class="cv2-form-submit" [disabled]="!draftText().trim()">
+            {{ editingNoteId() ? ('notes.save' | t) : ((draftKind() === 'q' ? 'notes.formAsk' : 'notes.formAdd') | t) }}
+          </button>
+        </div>
+        <!-- Cancel: always offered while editing; in the pane it is also
+             the way back to reading from an empty add form. -->
+        @if (editingNoteId() || formInPane()) {
+          <div class="cv2-form-tools">
+            <span class="cv2-toolbar-spacer"></span>
+            <button type="button" class="cv2-form-cancel" (click)="cancelEdit()"
+                    [title]="'notes.close' | t">
+              <span class="mat-sym" style="font-size:14px">close</span>
+              <span>{{ 'notes.cancel' | t }}</span>
+            </button>
+          </div>
+        }
+      </form>
+    </ng-template>
+
     <!-- Editor column. `cv2-main` is `display: contents` in the docked strip
          (so the rows below stay direct flex children, exactly as before) and
          becomes the RIGHT column in desktop fullscreen, where the tile
@@ -216,52 +272,13 @@
         }
       </div>
 
-      <!-- Embedded note form — the single authoring surface. Add mode by
-           default; clicking a note row loads it here for editing. The
-           leading kind pill flips the entry between note and question;
-           placeholder, accent, and submit label follow it. Enter commits,
-           Shift+Enter newlines, Esc cancels. -->
-      <form class="cv2-form" [class.is-question]="draftKind() === 'q'"
-            (submit)="$event.preventDefault(); commitForm()">
-        <div class="cv2-form-input-row">
-          <div class="cv2-input-wrap">
-            <textarea #formInput
-                      class="cv2-form-input"
-                      rows="1"
-                      [value]="draftText()"
-                      (input)="onFormInput($event)"
-                      (keydown)="onFormKeydown($event)"
-                      [attr.placeholder]="(draftKind() === 'q' ? 'notes.capturePlaceholderQ' : 'notes.capturePlaceholder') | t"
-                      [attr.aria-label]="editingNoteId() ? ('notes.edit' | t) : ('notes.add' | t)"></textarea>
-            <!-- In-input kind toggle — small chip pinned to the bottom-left
-                 corner of the textarea. One click flips note ↔ question;
-                 styled subtly (not like the primary submit) so it reads as
-                 an accessory of the field, not a second action button. -->
-            <button type="button" class="cv2-kind-toggle"
-                    [class.is-question]="draftKind() === 'q'"
-                    (click)="toggleDraftKind()"
-                    [attr.aria-label]="'notes.kindLabel' | t"
-                    [attr.aria-pressed]="draftKind() === 'q'"
-                    [title]="(draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t">
-              <span class="dot" [class.q]="draftKind() === 'q'" [class.n]="draftKind() === 'note'"></span>
-              <span class="cv2-kind-toggle-label">{{ (draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t }}</span>
-            </button>
-          </div>
-          <button type="submit" class="cv2-form-submit" [disabled]="!draftText().trim()">
-            {{ editingNoteId() ? ('notes.save' | t) : ((draftKind() === 'q' ? 'notes.formAsk' : 'notes.formAdd') | t) }}
-          </button>
-        </div>
-        @if (editingNoteId()) {
-          <div class="cv2-form-tools">
-            <span class="cv2-toolbar-spacer"></span>
-            <button type="button" class="cv2-form-cancel" (click)="cancelEdit()"
-                    [title]="'notes.close' | t">
-              <span class="mat-sym" style="font-size:14px">close</span>
-              <span>{{ 'notes.cancel' | t }}</span>
-            </button>
-          </div>
-        }
-      </form>
+      <!-- Docked / narrow fullscreen: the form lives here in the column.
+           On the desk it renders in the READING PANE instead — the template
+           itself is defined once at the panel's top level (formTpl), since
+           an @if block's refs are invisible to its sibling blocks. -->
+      @if (!formInPane()) {
+        <ng-container *ngTemplateOutlet="formTpl"></ng-container>
+      }
 
       <!-- Filter chips — the question/answer axis lives on the notes tab
            only; the lists tab never carries conversation rows. -->
@@ -473,7 +490,18 @@
          lands on the NOTE. -->
     @if (cell()) {
       <aside class="cv2-reading" [attr.aria-label]="'notes.viewer.aria' | t">
-        @if (readingRow(); as row) {
+        <!-- Writing mode — the same embedded form, given the whole pane.
+             Editing a note or adding a fresh one both land here on the
+             desk; save/cancel put the reader back. -->
+        @if (paneEditorOpen()) {
+          <div class="cv2-reading-editor">
+            <div class="cv2-reading-kind" [class.is-q]="draftKind() === 'q'">
+              <span class="mat-sym" aria-hidden="true">{{ editingNoteId() ? 'edit' : 'add' }}</span>
+              <span>{{ (editingNoteId() ? 'notes.edit' : 'notes.add') | t }}</span>
+            </div>
+            <ng-container *ngTemplateOutlet="formTpl"></ng-container>
+          </div>
+        } @else if (readingRow(); as row) {
           <div class="cv2-reading-scroll thin-scroll"
                [attr.data-pheromone-note]="row.note.id"
                [attr.data-pheromone-note-cell]="cell()">
@@ -563,13 +591,23 @@
               <span class="mat-sym" aria-hidden="true">chevron_right</span>
             </button>
             <span class="cv2-reading-cycle-spacer"></span>
+            <button type="button" class="cv2-reading-edit" (click)="paneAdd()">
+              <span class="mat-sym" aria-hidden="true">add</span>
+              <span>{{ 'notes.add' | t }}</span>
+            </button>
             <button type="button" class="cv2-reading-edit" (click)="editReading()">
               <span class="mat-sym" aria-hidden="true">edit</span>
               <span>{{ 'notes.edit' | t }}</span>
             </button>
           </div>
         } @else {
-          <div class="cv2-reading-empty">{{ 'notes.reading.empty' | t }}</div>
+          <div class="cv2-reading-empty">
+            <span>{{ 'notes.reading.empty' | t }}</span>
+            <button type="button" class="cv2-reading-edit" (click)="paneAdd()">
+              <span class="mat-sym" aria-hidden="true">add</span>
+              <span>{{ 'notes.add' | t }}</span>
+            </button>
+          </div>
         }
       </aside>
     }

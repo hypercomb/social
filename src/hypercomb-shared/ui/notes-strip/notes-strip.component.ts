@@ -307,6 +307,30 @@ export class NotesStripComponent implements OnDestroy {
     if (idx >= 0) this.readingIndex.set(idx)
   }
 
+  // ── Editing IN the pane ───────────────────────────────────
+  // On the desk, the pane is where notes are big — so it is where they are
+  // WRITTEN. The one embedded form (state, kind toggle, mark staging,
+  // commit path — all unchanged) renders in the pane instead of the centre
+  // column whenever the pane exists; `paneEditorOpen` flips the pane
+  // between reading and that editor. Narrow fullscreen has no pane (the
+  // SCSS hides it), so the form stays in the centre there — `deskWide`
+  // tracks the same 1024px break the grid uses.
+
+  /** Mirrors the desk's CSS breakpoint ($bp-tablet-land). */
+  readonly deskWide = signal<boolean>(window.matchMedia('(min-width: 1024px)').matches)
+
+  /** True when the pane exists — the form renders THERE, not the centre. */
+  readonly formInPane = computed<boolean>(() => this.isFullscreen() && this.deskWide())
+
+  /** Pane mode: false = reading, true = the editor fills the pane. */
+  readonly paneEditorOpen = signal(false)
+
+  /** The pane's add button — a fresh note, written large. */
+  paneAdd(): void {
+    const cell = this.cell()
+    if (cell) this.#openForm(cell)
+  }
+
   /** Step the pane. WRAPS in both directions — a cycle, not a list with
    *  ends, so neither button ever disables. */
   stepReading(delta: number): void {
@@ -748,6 +772,10 @@ export class NotesStripComponent implements OnDestroy {
 
   toggleFullscreen(): void {
     this.isFullscreen.update(v => !v)
+    // Entering with an edit in flight carries it into the pane, big — that
+    // is the whole point of the desk. Leaving always closes the pane editor;
+    // docked, the centre form is back and always visible.
+    this.paneEditorOpen.set(this.isFullscreen() && !!this.editingNoteId())
     EffectBus.emit('notes:expand-to-index', { cellLabel: this.cell(), fullscreen: this.isFullscreen() })
     // Fullscreen changes the panel width by the largest jump there is —
     // re-measure once the class has landed so the plate follows immediately.
@@ -777,6 +805,12 @@ export class NotesStripComponent implements OnDestroy {
   onRowBodyClick(cellLabel: string, noteId: string, _event: Event): void {
     if (this.isFullscreen()) {
       this.selectForReading(noteId)
+      // A PRISTINE pane editor (add mode, nothing typed) yields to reading —
+      // the click says "show me that one". Anything in flight is kept: a
+      // half-written note never loses to a stray click.
+      if (this.paneEditorOpen() && !this.editingNoteId() && !this.draftText().trim()) {
+        this.paneEditorOpen.set(false)
+      }
       return
     }
     this.open(noteId, cellLabel)
@@ -1775,6 +1809,17 @@ export class NotesStripComponent implements OnDestroy {
       untracked(() => this.readingIndex.set(0))
     })
 
+    // Track the desk's breakpoint so the form renders where the layout
+    // actually is: shrinking below it mid-session moves the form back to
+    // the centre column (and the pane, hidden by CSS, drops its editor).
+    const deskQuery = window.matchMedia('(min-width: 1024px)')
+    const onDesk = (): void => {
+      this.deskWide.set(deskQuery.matches)
+      if (!deskQuery.matches) this.paneEditorOpen.set(false)
+    }
+    deskQuery.addEventListener('change', onDesk)
+    this.#cleanups.push(() => deskQuery.removeEventListener('change', onDesk))
+
     // Folder navigation invalidates NotesService's cell-locationSig cache
     // (the same label resolves differently per folder), so notesFor() will
     // start returning [] for previously-warmed cells until getNotes runs
@@ -2380,6 +2425,9 @@ export class NotesStripComponent implements OnDestroy {
     const mark = opts?.mark ?? null
     this.draftMark.set(mark)
     EffectBus.emit('notes:active-mark', { mark })
+    // On the desk the form lives in the pane — opening it flips the pane
+    // from reading to writing.
+    if (this.formInPane()) this.paneEditorOpen.set(true)
     this.#focusForm()
   }
 
@@ -2409,6 +2457,10 @@ export class NotesStripComponent implements OnDestroy {
       } else if (this.draftText().trim()) {
         event.preventDefault(); event.stopPropagation()
         this.draftText.set('')
+      } else if (this.paneEditorOpen()) {
+        // Empty add form in the pane — Esc puts the reader back.
+        event.preventDefault(); event.stopPropagation()
+        this.paneEditorOpen.set(false)
       }
     }
   }
@@ -2435,6 +2487,13 @@ export class NotesStripComponent implements OnDestroy {
     this.#paintOptimistic(cell, finalText, editId ?? null, mark)
     this.draftText.set('')
     this.editingNoteId.set(null)           // editing is one-shot → back to add
+    // In the pane, saving an EDIT returns to reading (you were reading; the
+    // note you fixed is under the glass). Saving an ADD keeps the editor up,
+    // focused — the "keep adding" flow the docked form has always had.
+    if (this.formInPane() && editId) {
+      this.paneEditorOpen.set(false)
+      return
+    }
     this.#focusForm()
   }
 
@@ -2464,13 +2523,18 @@ export class NotesStripComponent implements OnDestroy {
     this.#version.update(v => v + 1)
   }
 
-  /** Drop out of edit mode back to a blank add form. */
+  /** Drop out of edit mode back to a blank add form — and, in the pane,
+   *  back to reading. */
   cancelEdit(): void {
     this.editingNoteId.set(null)
     this.draftText.set('')
     this.draftKind.set('note')
     this.draftMark.set(null)
     EffectBus.emit('notes:active-mark', { mark: null })
+    if (this.formInPane()) {
+      this.paneEditorOpen.set(false)
+      return
+    }
     this.#focusForm()
   }
 
