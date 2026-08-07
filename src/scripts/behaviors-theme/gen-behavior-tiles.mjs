@@ -29,6 +29,7 @@ const CATEGORIES = {
 const GLYPHS = {
   arkanoid: 'apps', bubble: 'bubble_chart', roper: 'gesture', solomon: 'castle',
   tree: 'account_tree', present: 'slideshow', website: 'web', view: 'visibility',
+  postit: 'sticky_note_2',
   home: 'home', lightbox: 'photo_library', tutor: 'school', mobile: 'smartphone',
   screensaver: 'wallpaper', tags: 'sell', history: 'history', revise: 'edit_note',
   versions: 'layers',
