@@ -26,7 +26,22 @@
 //   --headed           show the browsers
 //   --keep             leave browsers open at the end
 
-const { chromium } = require('playwright')
+const { chromium, webkit, firefox } = require('playwright')
+
+// Two clients can be two isolated contexts (own OPFS, own identity — already
+// genuinely separate participants) or two different BROWSERS. --engine-b puts
+// B on another engine or another installed browser so the check also covers
+// "my laptop's Edge cannot see my desktop's Chrome".
+//   chromium (default) | webkit | firefox | msedge | chrome
+function launcherFor(name) {
+  switch (name) {
+    case 'webkit': return { type: webkit, opts: {} }
+    case 'firefox': return { type: firefox, opts: {} }
+    case 'msedge': return { type: chromium, opts: { channel: 'msedge' } }
+    case 'chrome': return { type: chromium, opts: { channel: 'chrome' } }
+    default: return { type: chromium, opts: {} }
+  }
+}
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf('--' + name)
@@ -36,6 +51,8 @@ function arg(name, fallback = null) {
 }
 const URL_ = arg('url', 'http://localhost:4250/')
 const RELAY = arg('relay', null)
+const ENGINE_A = arg('engine-a', 'chromium')
+const ENGINE_B = arg('engine-b', 'chromium')
 const HEADED = process.argv.includes('--headed')
 const KEEP = process.argv.includes('--keep')
 
@@ -85,6 +102,19 @@ async function newClient(browser, label) {
   return { label, ctx, page }
 }
 
+async function waitForShell(page, timeoutMs = 60000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const ok = await page.evaluate(() => !!(
+      window.ioc?.get?.('@hypercomb.social/Lineage') &&
+      window.ioc?.get?.('@hypercomb.social/Navigation')
+    )).catch(() => false)
+    if (ok) return true
+    await sleep(300)
+  }
+  return false
+}
+
 async function waitForReady(page, timeoutMs = 45000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -98,6 +128,46 @@ async function waitForReady(page, timeoutMs = 45000) {
     await sleep(300)
   }
   return false
+}
+
+// A deployed shell loads its drones from OPFS, and a first-time visitor has
+// none: ensure-install reports "no cached install + no sentinel — surfacing
+// install-needed" and WAITS for the participant (push-only contract — boot
+// never installs by itself). Until that is accepted there is no SwarmDrone
+// at all, so a swarm check would be measuring an empty shell.
+//
+// window.upgradeHypercomb is the install prompt's own handler, exposed by
+// hypercomb-web/src/app/app.ts for exactly this — so this is the button, not
+// a back door. It reloads the shell on success. The dev shell imports its
+// drones directly and never needs any of this.
+async function installIfNeeded(page, label) {
+  // The prompt's handler is published by the App constructor, which runs
+  // AFTER the runtime registers Lineage/Navigation — so a single sample can
+  // catch the window where the shell is up, the drones are absent, and the
+  // install button does not exist yet. Poll for whichever settles first.
+  const deadline = Date.now() + 45000
+  let need = { missing: true, canInstall: false }
+  while (Date.now() < deadline) {
+    need = await page.evaluate(() => ({
+      missing: !window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone'),
+      canInstall: typeof window.upgradeHypercomb === 'function',
+    })).catch(() => ({ missing: true, canInstall: false }))
+    if (!need.missing || need.canInstall) break
+    await sleep(1000)
+  }
+  if (!need.missing) return 'already-installed'
+  if (!need.canInstall) return 'no-install-affordance'
+  log(label, 'shell has no drones — accepting the install prompt')
+  await page.evaluate(() => window.upgradeHypercomb()).catch(() => null)
+  // It reloads itself when the install lands; wait for drones, not a timer.
+  const start = Date.now()
+  while (Date.now() - start < 240000) {
+    const ok = await page.evaluate(() =>
+      !!window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')).catch(() => false)
+    if (ok) { log(label, `install complete after ${Math.round((Date.now() - start) / 1000)}s`); return 'installed' }
+    await sleep(3000)
+  }
+  return 'install-timeout'
 }
 
 /** Wait until the page has stopped navigating for `quietMs`. */
@@ -228,20 +298,45 @@ function check(name, ok, detail) {
 
 async function main() {
   log('boot', `url=${URL_} relay=${RELAY ?? '(shell default)'} zone=${ROOM}`)
-  const browser = await chromium.launch({ headless: !HEADED })
-  const A = await newClient(browser, 'A')
-  const B = await newClient(browser, 'B')
+  log('boot', `clients: A=${ENGINE_A} B=${ENGINE_B}`)
+  const la = launcherFor(ENGINE_A)
+  const lb = launcherFor(ENGINE_B)
+  const browserA = await la.type.launch({ headless: !HEADED, ...la.opts })
+  // Same engine and same options: one browser process, two isolated contexts
+  // (still separate OPFS + identity). Different engine: a second process, so
+  // the two clients are different BROWSERS in the way a user means it.
+  const sameBrowser = ENGINE_A === ENGINE_B
+  const browserB = sameBrowser ? browserA : await lb.type.launch({ headless: !HEADED, ...lb.opts })
+  const browsers = sameBrowser ? [browserA] : [browserA, browserB]
+  const A = await newClient(browserA, 'A')
+  const B = await newClient(browserB, 'B')
 
   for (const c of [A, B]) await c.page.goto(URL_, { waitUntil: 'domcontentloaded' })
 
   for (const c of [A, B]) {
+    await waitForShell(c.page)
+    const installed = await installIfNeeded(c.page, c.label)
+    if (installed === 'no-install-affordance') log(c.label, 'no install prompt — treating as a source-loaded shell')
     if (!(await waitForReady(c.page))) {
-      check(`${c.label}: shell reaches IoC ready`, false, 'timeout')
-      return finish(browser)
+      check(`${c.label}: shell reaches IoC ready`, false, `install=${installed}`)
+      return finish(browsers)
     }
   }
   for (const c of [A, B]) await settle(c.page)
   check('both shells boot to IoC ready', true)
+
+  // A hive stores its tiles in OPFS. A browser without it can still RECEIVE a
+  // swarm, but it can never author or adopt — so say that plainly instead of
+  // letting it surface as three unexplained failures. (Playwright's WebKit
+  // build ships without navigator.storage.getDirectory; Safari itself has it.)
+  for (const c of [A, B]) {
+    const hasOpfs = await c.page.evaluate(
+      () => typeof navigator?.storage?.getDirectory === 'function').catch(() => false)
+    if (!hasOpfs) {
+      check(`${c.label}: browser provides OPFS`, false,
+        `${c.label === 'A' ? ENGINE_A : ENGINE_B} has no navigator.storage.getDirectory — it cannot author or adopt`)
+    }
+  }
 
   const [pkA, pkB] = [await pubkeyOf(A.page), await pubkeyOf(B.page)]
   log('boot', `pubkeys A=${pkA?.slice(0, 8)} B=${pkB?.slice(0, 8)}`)
@@ -270,7 +365,7 @@ async function main() {
   check('A opens a relay socket', openA.ok, openA.ok ? `${openA.waitedMs}ms` : JSON.stringify(openA.value?.sockets))
   check('B opens a relay socket', openB.ok, openB.ok ? `${openB.waitedMs}ms` : JSON.stringify(openB.value?.sockets))
 
-  if (!openA.ok || !openB.ok) return finish(browser)
+  if (!openA.ok || !openB.ok) return finish(browsers)
 
   log('tiles', 'A adds alpha+bravo, B adds charlie+delta')
   await addTile(A.page, 'alpha'); await sleep(800)
@@ -310,9 +405,12 @@ async function main() {
   // nothing seeds a room there) takes the keyboard shortcut to go public.
   // It must NOT end up flagged public with a swarm that can never reach
   // anyone — the state that reads as "the swarm is broken".
-  const C = await newClientNoZone(browser, 'C')
+  const C = await newClientNoZone(browserA, 'C')
   await C.page.goto(URL_, { waitUntil: 'domcontentloaded' })
-  if (await waitForReady(C.page) && await settle(C.page)) {
+  await waitForShell(C.page, 120000)
+  const cInstall = await installIfNeeded(C.page, 'C')
+  log('C', 'install:', cInstall)
+  if (await waitForReady(C.page, 120000) && await settle(C.page)) {
     const zone = await C.page.evaluate(() => ({
       room: (window.ioc?.get?.('@hypercomb.social/RoomStore'))?.value ?? '',
       secret: (window.ioc?.get?.('@hypercomb.social/SecretStore'))?.value ?? '',
@@ -330,10 +428,11 @@ async function main() {
         `meshPublic=${m.meshPublic} sig=${s.currentSig || '(none)'}`)
     }
   } else {
-    check('an incomplete zone never lands in a dead swarm', false, 'client C never reached IoC ready')
+    check('an incomplete zone never lands in a dead swarm', false,
+      `client C never reached IoC ready (install=${cInstall})`)
   }
 
-  return finish(browser)
+  return finish(browsers)
 }
 
 // Same as newClient but with no zone seeded — a first-time visitor.
@@ -346,12 +445,12 @@ async function newClientNoZone(browser, label) {
   return { label, ctx, page }
 }
 
-async function finish(browser) {
+async function finish(browsers) {
   const failed = results.filter(r => !r.ok)
   console.log('\n========== ' + URL_ + ' ==========')
   for (const r of results) console.log((r.ok ? '  ✓ ' : '  ✗ ') + r.name + (r.detail ? '  — ' + r.detail : ''))
   console.log(`========== ${results.length - failed.length}/${results.length} passed ==========\n`)
-  if (!KEEP) await browser.close()
+  if (!KEEP) for (const b of browsers) await b.close()
   else log('boot', 'left open (--keep)')
   process.exit(failed.length ? 1 : 0)
 }
