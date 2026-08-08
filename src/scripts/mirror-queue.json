@@ -406,6 +406,15 @@
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"
+    },
+    {
+      "id": "swarm-zone-incomplete",
+      "title": "Swarm zone gate — joining a swarm you cannot reach is now refused out loud",
+      "run": null,
+      "note": "No mirror pass run (no live bridge this session). Owed under behaviors/swarm: (1) a part tile for the ZONE GATE with a note saying the swarm address is composed from (path, room, secret) and BOTH credentials are required — the gate is the privacy rule, not a bug; (2) a note on the swarm/join cards that a half-set zone now routes to the selector instead of flipping to a public-but-deaf hive, and that the drone reports 'swarm:zone-incomplete' / 'swarm:zone-complete' edge-triggered; (3) a part tile for scripts/drive-swarm-connectivity.cjs as the swarm's proof harness (two isolated clients, real join gesture) — and retire the card for drive-swarm-sync-test.cjs if one exists, since that harness reported a dead swarm on a healthy one. Files: hypercomb-essentials/src/diamondcoreprocessor.com/sharing/swarm.drone.ts, hypercomb-shared/core/runtime-initializer.ts, hypercomb-shared/ui/mesh-modal/*, hypercomb-shared/ui/controls-bar/controls-bar.component.ts.",
+      "commit": "1aefc52cb",
+      "created": "2026-08-08",
+      "status": "pending"
     }
   ]
 }
