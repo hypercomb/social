@@ -56,6 +56,8 @@ export const armImageBlob = async (
     name?: string | null
     /** Identity of an already-armed slot this is filling in, if any. */
     armId?: string | null
+    /** Pin the created tile to the first slot. */
+    atTop?: boolean
   } = {},
 ): Promise<boolean> => {
   const res = await storeImageResources(blob)
@@ -63,6 +65,7 @@ export const armImageBlob = async (
 
   EffectBus.emit('command:arm-resource', {
     armId: opts.armId ?? null,
+    atTop: opts.atTop === true,
     previewUrl: res.previewUrl,
     largeSig: res.largeSig,
     smallPointSig: res.smallPointSig,

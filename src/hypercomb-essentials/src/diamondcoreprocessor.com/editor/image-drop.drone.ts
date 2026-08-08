@@ -9,6 +9,8 @@
 //                  user types a cell name and presses Enter to commit.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+import { extractDroppedUrl } from '../link/link-drop-destination.js'
+import { isImageUrl } from '../link/photo.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 import { armImageBlob } from './arm-resource.js'
@@ -160,6 +162,15 @@ export class ImageDropDrone extends Drone {
         }
       }
     }
+
+    // Hyperlink precedence: a drag can carry an image file AND a URL at
+    // once — dragging a linked thumbnail (a YouTube video off its page)
+    // packages both. The LINK is what the participant dragged; the image
+    // is its dressing. Claiming those here minted a mute picture tile with
+    // no name and no link, and the link path never saw the gesture at all.
+    // Only a URL that IS an image (a bare <img> drag) stays ours.
+    const draggedUrl = extractDroppedUrl(e.dataTransfer)
+    if (draggedUrl && !isImageUrl(draggedUrl)) { this.#clearDragging(); return }
 
     // find the first image file
     const files = e.dataTransfer?.files

@@ -146,7 +146,8 @@
       "run": "npx tsx scripts/mirror-behavior-parts.ts",
       "note": "Organizer/Portals panel gained a CARRY basket that survives navigation (opposite direction of travel from the staged tray, which still clears on every hop) and an Apply that mints one reference per carried item at the current page, scented with the bouquet in hand. Drag-onto-hive no longer writes: it composes '/reference <name> = <path>' into the command line with the name selected. Needs tiles for: carry basket, apply, drag-names-the-reference, and the name-is-an-address collision refusal. RENDERER MUST BE EDGE 4250 — a Chrome tab may hold the slot and answers from an empty tree.",
       "created": "2026-08-06",
-      "status": "pending"
+      "status": "done",
+      "completed": "2026-08-07"
     },
     {
       "id": "spotlight-behavior",
@@ -389,10 +390,19 @@
       "status": "pending"
     },
     {
-      "id": "home-portal-mark",
-      "title": "Mirror the marked-home-portal behavior into the hive",
+      "id": "link-drop-hyperlink-arbitration",
+      "title": "Note the hyperlink-vs-image drop arbitration on the link-drop tile",
       "run": null,
-      "note": "Supersedes the auto-follow described in the home-is-last-portal entry — mirror the SHIPPED behavior, not that one. Home = the portal MARKED as home from the Portals toolwindow (aggregate-index row toggle, one slot so marking a second releases the first); walking never re-homes; Ctrl/cmd+click on Home lists recently walked portals for travel only, with the marked one lit and the hive root as the last row. Tiles for: hypercomb-shared/core/recent-portals.store.ts, aggregate-index.component.{ts,html,scss} row toggle, controls-bar.component.{ts,html,scss} Home button + menu. Collection gathering them, pheromones per part, notes on the why (marked never inferred: a home that moved when you looked at something was a home you could lose by accident). Mint a glyph card in the behaviors deck.",
+      "note": "MANUAL — note-add is additive. THE bug behind 'no text, no link, file icon at the top': dragging a video off the YouTube page packages an IMAGE FILE and the URL in one drag. ImageDropDrone registered first and claimed any drop with files, so the gesture minted a mute picture tile — no name, no link — and LinkDropWorker never saw it (its own guard bailed on files.length). Found by reading the participant's replayed bus values: command:arm-resource with largeSig true, url null, name null = the image path's signature. Arbitration is now BY CONTENT and order-independent, decided identically on both sides via extractDroppedUrl (link-drop-destination.ts): a drop carrying a URL that is NOT itself an image is a HYPERLINK — the link path claims it and the dragged file becomes the tile's picture (beats fetching); no URL, or a URL that IS the image (a bare <img> drag), stays with the image path. Harness gained --thumb: a real drag of <a href=watch><img></a>, the exact YouTube shape — 8/8.",
+      "unattended": false,
+      "created": "2026-08-07",
+      "status": "pending"
+    },
+    {
+      "id": "root-is-home",
+      "title": "Mirror: the root shows the marked home's data, address stays /",
+      "run": null,
+      "note": "SHIPPED. Supersedes the home-is-the-root entry (that one redirected the URL; this one does not). hypercomb-shared/core/home-root.ts exports homeSubstituted(address) + showHiveRoot(); Lineage.followLocation — the ONE place an address becomes a location — substitutes an empty address for the marked home's segments, so sigbag/currentLayer/explorerDir/render all resolve to home while the URL and breadcrumb stay at the root. Walking in materializes the real address (/<home>/<child>); showHiveRoot() suspends the substitution while standing deliberately on the bare root and lapses on walking away. Mark is set per-row in the Portals toolwindow (one slot); Ctrl+click Home lists recent portals for travel only. Tiles for home-root.ts, lineage.ts followLocation, recent-portals.store.ts, aggregate-index.component.*, controls-bar.component.*. Notes on the why: a shortcut is a second way to reach a place, a home changes what the first way MEANS — which is why nothing is spelled out in the address.",
       "unattended": false,
       "created": "2026-08-07",
       "status": "pending"

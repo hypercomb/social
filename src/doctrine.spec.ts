@@ -243,6 +243,30 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual, [], 'raw view:active emit')
   })
 
+  it("viewport source 'user' means a GESTURE — automatic paths that merely persist use 'auto-persist'", () => {
+    // `source: 'user'` answers TWO questions at once: persist this framing, AND
+    // the participant asked for it. The second half makes zoomToFit announce
+    // `viewport:fit`, which the control bar reads as permission to DISCARD the
+    // page's hand framing and hand it back to the global fit switch. Automatic
+    // callers only ever wanted the first half, and every one of them said so in
+    // its own comment ("'user' so it STICKS") while taking both — so a
+    // first-tile add, a first-visit render, or a tutorial zoom demo silently
+    // stripped a framing the participant had set, and the page re-fitted (i.e.
+    // "shrank") from then on. 'auto-persist' is the honest half: it persists,
+    // it never announces.
+    //
+    // Allowlist = the paths that really are a gesture. If you are adding a
+    // caller and reaching for 'user' to make a fit STICK, you want
+    // 'auto-persist' — do not extend this list.
+    const actual = filesMatching(/zoomToFit\s*\?*\.?\s*\(\s*[^)]*['"`]user['"`]/)
+    assertRatchet(actual, [
+      'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/fit.queen.ts',        // /fit
+      'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts',       // `0`/`r` keymap + pinch-below-min
+      'hypercomb-essentials/src/diamondcoreprocessor.com/sequence/sequence-cycle.drone.ts',    // the `a` recompose keypress
+      'hypercomb-shared/ui/controls-bar/controls-bar.component.ts',                            // the fit button
+    ], "automatic zoomToFit claiming source 'user'")
+  })
+
   it('multi-anchor producers end their pass with build-record — atomicity is not optional', () => {
     // The build-revisions standard (documentation/build-revisions.md): a
     // pass that mints resources AND stamps more than one anchor must end

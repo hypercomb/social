@@ -21,6 +21,10 @@ type AttachPayload = {
   smallFlatSig: string | null
   url: string | null
   type: 'image' | 'youtube' | 'link' | 'document'
+  /** Pin this tile to the first slot. A dropped link lands on TOP, where the
+   *  participant is looking, instead of at the tail of the spiral. `index` is
+   *  the pinned-layout slot — the same property the layout pass writes. */
+  atTop?: boolean
 }
 
 type YouTubeMetadataQueue = {
@@ -53,6 +57,8 @@ export class ResourceAttachDrone {
     // `large.image` + transforms. Never set `substrate: true` — this is
     // a user-provided image, so the reroll affordance must stay hidden.
     const props: Record<string, unknown> = {}
+
+    if (payload.atTop) props['index'] = 0
 
     if (payload.smallPointSig) {
       ;(props as any).small = { image: payload.smallPointSig }

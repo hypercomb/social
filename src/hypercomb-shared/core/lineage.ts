@@ -2,6 +2,7 @@
 // synchronize is dispatched only by the processor — lineage fires 'change' on itself
 
 import { EffectBus } from '@hypercomb/core'
+import { homeSubstituted } from './home-root'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
 
@@ -444,12 +445,19 @@ export class Lineage extends EventTarget {
   private readonly followLocation = (): void => {
     try {
       // explorer path must stay lossless; use raw decoded URL segments
-      const next = this.navigation.segmentsRaw()
+      //
+      // THE ONE PLACE an address becomes a location — so it is the one place
+      // the root can mean something other than itself. With a portal marked as
+      // home, `/` resolves to that portal's segments and every reader below
+      // (currentSig, currentLayer, explorerDir, the renderer) follows without
+      // knowing. The URL is left alone: the root showing home's data IS the
+      // feature, and rewriting the address would turn it back into a shortcut.
+      const next = homeSubstituted(this.navigation.segmentsRaw())
 
       // do not spam invalidations if nothing changed
       if (this.sameSegments(this.explorerPath, next)) return
 
-      this.explorerPath = next
+      this.explorerPath = [...next]
       this.invalidate()
     } catch {
       // ignore until nav is ready

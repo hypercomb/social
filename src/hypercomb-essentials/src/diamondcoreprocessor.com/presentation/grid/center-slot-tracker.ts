@@ -24,10 +24,13 @@
 // pass over sparse[] at placement time.
 //
 // Invalidation: viewport gestures emit `viewport:manual` (transient),
-// the post-debounce persist emits `viewport:persisted`, and a window
-// resize listener handles canvas-size changes. Recompute is lazy on
-// next read after a dirty mark, so rapid viewport churn does not pay
-// re-sort cost until someone needs the result.
+// the post-debounce persist emits `viewport:persisted`, and canvas-size
+// changes arrive as `render:surface-resized` (plus the window resize that
+// is only ONE of the ways the canvas changes size — a panel reserving a
+// column resizes it with no window event at all, and these scores then
+// ranked slots against a viewport that no longer existed). Recompute is
+// lazy on next read after a dirty mark, so rapid viewport churn does not
+// pay re-sort cost until someone needs the result.
 
 import { EffectBus } from '@hypercomb/core'
 import type { AxialService } from './axial-service.js'
@@ -41,6 +44,7 @@ export class CenterSlotTracker {
   constructor() {
     EffectBus.on('viewport:persisted', () => { this.#dirty = true })
     EffectBus.on('viewport:manual', () => { this.#dirty = true })
+    EffectBus.on('render:surface-resized', () => { this.#dirty = true })
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', () => { this.#dirty = true })
     }

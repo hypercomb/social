@@ -1,6 +1,7 @@
 @if (open() && source(); as src) {
   <aside
     class="ai-panel"
+    [attr.data-source]="src.id"
     hcDockInset="left"
     [hcDockedPanel]="'aggregate-' + src.id"
     [hcSession]="session"
@@ -256,6 +257,19 @@
                           [title]="(isCarried(item) ? 'aggregate.carry.remove' : 'aggregate.carry.add') | t: { name: item.label }">
                     <span class="mat-sym">{{ isCarried(item) ? 'luggage' : 'add' }}</span>
                   </button>
+                  <!-- Pin this portal as home. One pin across the whole list —
+                       the store holds a single slot, so lighting this row is
+                       what unlights whichever was lit before. -->
+                  @if (canPinHome()) {
+                    <button class="ai-action ai-action-home" type="button"
+                            [class.is-home]="isHome(item)"
+                            (click)="toggleHome(item, $event)"
+                            [attr.aria-pressed]="isHome(item)"
+                            [attr.aria-label]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }"
+                            [title]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }">
+                      <span class="mat-sym">{{ isHome(item) ? 'home_pin' : 'home' }}</span>
+                    </button>
+                  }
                   @if (canPickVersion()) {
                     <button class="ai-action" type="button"
                             [class.is-active]="versionsFor() === item.key"

@@ -626,6 +626,65 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   color: #f0e3c9;
 }
 
+// HOME — lit on the one portal pinned as home. Exactly one row in the list can
+// wear this, so unlike carry it does not stay half-visible when idle: it reads
+// as a standing statement about where home is, not as an available verb.
+.ai-action-home.is-home {
+  background: rgba(214, 176, 110, 0.22);
+  border-color: rgba(214, 176, 110, 0.85);
+  color: #f0e3c9;
+}
+
+// ── PORTALS: actions on the hovered row only ─────────────────────────────────
+//
+// Scoped to this one source rather than changed globally — the standing-dim
+// default above is deliberate and was verified in a browser (see its comment:
+// hover-only once made rename/delete undiscoverable). Portals is different
+// because it is a LIST YOU READ. It is the picker for where home is and where
+// you are going, so four verbs standing on every row is noise against the one
+// thing the row is for: its name.
+//
+// The dimming moves from the strip to each button, because opacity composites —
+// a dimmed strip cannot have a bright child, and one child does have to stay
+// bright.
+.ai-panel[data-source='collections'] {
+  .ai-actions { opacity: 1; }
+
+  .ai-action {
+    opacity: 0;
+    transition: opacity 140ms ease;
+  }
+
+  .ai-row:hover .ai-action,
+  .ai-row:focus-within .ai-action { opacity: 1; }
+
+  // The home mark is STATE, not a verb. It stays lit on the marked row whether
+  // or not you are hovering it — otherwise finding which portal is home means
+  // hovering every row in turn, which is the opposite of what a mark is for.
+  .ai-action-home.is-home { opacity: 1; }
+
+  // RIGHT-ALIGNED while it stands alone. Invisible buttons still take up room,
+  // so the lone mark used to sit where the strip began — adrift in the middle
+  // of nothing, reading as a gap rather than as an edge. Collapsing the hidden
+  // verbs to zero width lets it fall against the row's right edge, which is
+  // where a status mark belongs and where the eye can run down the list to find
+  // it. On hover they take their space back and the verbs return.
+  //
+  // Only rows that CARRY the mark reflow. Doing it to every row would mean the
+  // label resized under the pointer on every row you passed over.
+  .ai-row:not(:hover):not(:focus-within):has(.ai-action-home.is-home) {
+    .ai-actions { gap: 0; }
+
+    .ai-action:not(.ai-action-home) {
+      width: 0;
+      padding: 0;
+      margin: 0;
+      border-width: 0;
+      overflow: hidden;
+    }
+  }
+}
+
 // MOVE — the second verb, and the heavier one: it takes custody, so the tiles
 // leave the page they were on. Same size and rhythm as Add (they are peers, not
 // a primary and a secondary), distinguished by a SOLID border rather than Add's

@@ -82,6 +82,8 @@ export class DropLandingDrone extends Drone {
   #flat = false
 
   #dragging = false
+  /** This drag mints its tile in the FIRST slot (a dropped link). */
+  #landsAtTop = false
   #target: DropTarget | null = null
 
   protected override deps = {
@@ -124,8 +126,12 @@ export class DropLandingDrone extends Drone {
       this.#redraw()
     })
 
-    this.onEffect<{ active: boolean }>('drop:dragging', ({ active }) => {
+    this.onEffect<{ active: boolean; atTop?: boolean }>('drop:dragging', ({ active, atTop }) => {
       this.#dragging = !!active
+      // A drag that MINTS AT THE TOP lands in slot 0, not the tail of the
+      // spiral. Ringing the append slot would promise a place the tile is not
+      // going to take. Absent flag = the old behaviour, unchanged.
+      this.#landsAtTop = !!active && atTop === true
       // The target that arrives with the NEXT move is the only one this drag
       // owns. Clearing on arm rather than trusting the previous drag's farewell
       // keeps a replayed last-value from painting a ring before the pointer has
@@ -165,7 +171,9 @@ export class DropLandingDrone extends Drone {
 
     const center = t.occupied
       ? this.#centerOfIndex(t.index)
-      : this.#centerOfIndex(this.#cellCount)   // the slot a NEW tile will take
+      // the slot a NEW tile will take — the first one when the drag mints at
+      // the top, otherwise the next free one at the tail of the spiral
+      : this.#centerOfIndex(this.#landsAtTop ? 0 : this.#cellCount)
     if (!center) return
 
     const fill = t.occupied ? ATTACH_FILL : LAND_FILL

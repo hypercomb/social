@@ -1371,6 +1371,8 @@
   "context.ask": "「{cell}」について尋ねる",
   "slash.context": "このタイルのAIリクエストが読むブランチを管理する",
   "aggregate.home": "ホーム",
+  "aggregate.home.pin": "{name} をホームにする — ホームは移動先を追わなくなります",
+  "aggregate.home.unpin": "{name} のホーム指定を解除 — ホームは再び直前のポータルを追います",
   "aggregate.carry.add": "{name} を持ち運ぶ — 移動した先で適用できます",
   "aggregate.carry.remove": "{name} を置く",
   "aggregate.carry.clear": "置く",

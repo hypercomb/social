@@ -3185,7 +3185,10 @@ export class TileOverlayDrone extends Drone {
       // Announce the portal BEFORE travelling. A reference may demand marks of
       // what it shows, and only the reference cell knows them — once we have
       // landed it is behind us and no longer resolvable from where we stand.
-      this.emitEffect('tile:navigate-reference', { label })
+      // The target rides along for the same reason: the recent-portals list
+      // (and with it Home) records where the portal LED, and after the hop
+      // nothing on screen still says which portal we came through.
+      this.emitEffect('tile:navigate-reference', { label, target: [...refTarget] })
       const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
       nav?.goRaw?.([...refTarget])
       this.#releaseGuardIfNoMove(before)

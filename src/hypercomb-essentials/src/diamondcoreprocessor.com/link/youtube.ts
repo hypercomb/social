@@ -68,13 +68,14 @@ export type YouTubeOpenGraph = {
 export async function fetchYouTubeOpenGraph(
   link: string,
   fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<YouTubeOpenGraph> {
   const videoId = parseYouTubeVideoId(link)
   const fallbackThumbnail = videoId ? youTubeThumbnailUrl(videoId) : null
 
   try {
     const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(link)}&format=json`
-    const resp = await fetcher(endpoint)
+    const resp = await fetcher(endpoint, signal ? { signal } : undefined)
     if (!resp.ok) return { title: null, thumbnailUrl: fallbackThumbnail }
     const data = await resp.json() as { title?: unknown; thumbnail_url?: unknown }
     const title = typeof data.title === 'string' && data.title.trim() ? data.title.trim() : null

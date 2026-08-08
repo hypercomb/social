@@ -94,3 +94,19 @@ export async function persistDroppedTileLink(
   index[location || cell] = propsSig
   persistence.writeIndex(index)
 }
+
+/**
+ * The URL a drag is carrying, if any. Shared by the link worker (to claim a
+ * drop) and the image drone (to yield one): both must read the SAME answer,
+ * or a drop could be claimed by both paths — or neither.
+ */
+export function extractDroppedUrl(dt: DataTransfer | null): string | null {
+  const uriList = dt?.getData('text/uri-list') ?? ''
+  for (const line of uriList.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed && !trimmed.startsWith('#') && /^https?:\/\//i.test(trimmed)) return trimmed
+  }
+  const plain = (dt?.getData('text/plain') ?? '').trim()
+  if (/^https?:\/\//i.test(plain)) return plain
+  return null
+}

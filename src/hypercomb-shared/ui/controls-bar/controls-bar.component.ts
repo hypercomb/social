@@ -22,6 +22,8 @@ import type { MovementService } from '../../core/movement.service'
 import { EffectBus, consumePointerGesture } from '@hypercomb/core'
 import { iconOverrides } from '../../core/icon-override.store'
 import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
+import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
+import { showHiveRoot } from '../../core/home-root'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
@@ -1535,6 +1537,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // open — closing releases them.
     this.closeTourMenu()
     this.closeFitMenu()
+    this.closeHomeMenu()
     // Never leave the gate locked behind a torn-down bar — the pin would be
     // unreleasable (the only button that releases it went away with us).
     this.gate?.removeEventListener?.('change', this.#onGateChange)
@@ -1638,11 +1641,153 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.navigation.goRaw(segments)
   }
 
-  /** Home: jump to the root of the tree (empty segment path) — the domain
-   *  root, i.e. hypercomb.io's home. Same target as clicking the leading
-   *  domain crumb. Pinned to the top of the left-docked rail. */
-  readonly goHome = (): void => {
+  // ── home is the portal you marked ─────────────────────
+  //
+  // Home used to mean the domain root, unconditionally. It now means THE PORTAL
+  // MARKED AS HOME in the Portals toolwindow — the thing you are actually
+  // working on, which you went through a portal to reach. The root is what
+  // everything hangs off, not a place worth landing on over and over; making
+  // the portal home is what lets the rest of the hive stay out of sight.
+  //
+  // Marked, never inferred: home does not follow where you walk, so looking at
+  // something else cannot cost you your home. It survives a refresh, because
+  // the focus is the point and a reload must not cost you it either.
+  //
+  // Ctrl/⌘+click still opens the RECENT list — travelling somewhere you were a
+  // moment ago is a different act from choosing where home is, and only the
+  // second one is a decision. The root is never stranded: the leading
+  // breadcrumb crumb goes there, and it is the last row of that menu.
+
+  private get recentPortals(): RecentPortalsStore | undefined {
+    return get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
+  }
+
+  #portals$ = fromRuntime(
+    get('@hypercomb.social/RecentPortalsStore') as EventTarget,
+    () => this.recentPortals?.value ?? [],
+  )
+
+  /** The portal Home flies to — the one MARKED as home in the Portals
+   *  toolwindow, or `undefined` while none is marked (Home means the hive root
+   *  then, exactly as it always did). Never inferred from where you have been. */
+  readonly homePortal = computed<RecentPortal | undefined>(
+    () => { this.#portals$(); return this.recentPortals?.home },
+  )
+
+  readonly isPinnedPortal = (entry: RecentPortal): boolean =>
+    !!this.recentPortals?.isPinned(entry.segments)
+
+  /** What the button says it will do — the portal's own name, so the tooltip
+   *  names the thing rather than the mechanism. */
+  readonly homeLabel = computed<string>(() => {
+    const portal = this.homePortal()
+    if (!portal) return ''
+    return portal.label || '/' + portal.segments.join('/')
+  })
+
+  /** Home. Plain click flies to the marked portal (hive root until one is
+   *  marked); Ctrl/⌘+click opens the recent list, so somewhere you were a
+   *  moment ago is one click away instead of a walk back down the tree. */
+  readonly goHome = (event?: MouseEvent): void => {
+    if (event && (event.ctrlKey || event.metaKey)) {
+      this.#openHomeMenu(event)
+      return
+    }
+    this.closeHomeMenu()
+    // Ask for the ROOT, never for the home's address. The root resolves to
+    // whatever is marked as home (home-redirect.ts), so this button, the
+    // leading breadcrumb crumb and a cold load of `/` are one behaviour rather
+    // than three that have to be kept agreeing.
     this.navigateTo([])
+  }
+
+  // ── the recent-portals picker ─────────────────────────
+
+  readonly homeMenuOpen = signal(false)
+  readonly homeMenuPos = signal<{ x: number; y: number; flip: boolean }>({ x: 0, y: 0, flip: false })
+  readonly homeEntries = signal<readonly RecentPortal[]>([])
+
+  #openHomeMenu(event: MouseEvent): void {
+    const entries = this.recentPortals?.value ?? []
+    if (entries.length === 0) {
+      // Nothing walked yet — there is no list to show, so honour the plain
+      // meaning rather than opening an empty menu.
+      this.navigateTo([])
+      return
+    }
+    this.homeEntries.set(entries)
+
+    // Fixed positioning off the button's own rect, for the same reason the tour
+    // picker does it: the rail is a scrolling, overflow-hidden box that would
+    // clip a menu rendered inside it.
+    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+    const width = 248
+    const x = rect ? rect.right + 10 : 12
+    const flip = x + width > window.innerWidth - 8
+    const maxHeight = Math.min(window.innerHeight * 0.7, 520)
+    this.homeMenuPos.set({
+      x: flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x,
+      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - maxHeight - 8)),
+      flip,
+    })
+    this.homeMenuOpen.set(true)
+    window.addEventListener('pointerdown', this.#onHomeMenuOutside, true)
+    window.addEventListener('keydown', this.#onHomeMenuKey, true)
+  }
+
+  readonly closeHomeMenu = (): void => {
+    if (!this.homeMenuOpen()) return
+    this.homeMenuOpen.set(false)
+    window.removeEventListener('pointerdown', this.#onHomeMenuOutside, true)
+    window.removeEventListener('keydown', this.#onHomeMenuKey, true)
+  }
+
+  /** Travel to somewhere you were. This does NOT re-home — jumping back to a
+   *  place you passed through is looking around, not deciding, and only the
+   *  Portals toolwindow's mark decides. It does move the row to the front of
+   *  the recent list, because you have just been there again. */
+  readonly pickHomePortal = (entry: RecentPortal): void => {
+    this.closeHomeMenu()
+    this.recentPortals?.record(entry.label, entry.segments)
+    this.navigateTo([...entry.segments])
+  }
+
+  /** Put a portal down. Dropping the current one hands Home to the next most
+   *  recent — this is how a finished piece of work stops being your home. */
+  readonly forgetHomePortal = (entry: RecentPortal, event?: MouseEvent): void => {
+    event?.stopPropagation()
+    this.recentPortals?.remove(entry.segments)
+    const left = this.recentPortals?.value ?? []
+    this.homeEntries.set(left)
+    if (left.length === 0) this.closeHomeMenu()
+  }
+
+  /** The hive root ITSELF, not what stands in for it. Always the last row:
+   *  marking a portal as home makes `/` resolve to that portal, so this is the
+   *  one way back to the bare root — it suspends the substitution for as long
+   *  as you stay there. */
+  readonly goHiveRoot = (): void => {
+    this.closeHomeMenu()
+    showHiveRoot()
+    this.navigateTo([])
+  }
+
+  readonly homePortalPath = (entry: RecentPortal): string =>
+    entry.segments.length ? '/' + entry.segments.join('/') : '/'
+
+  readonly #onHomeMenuOutside = (event: PointerEvent): void => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest?.('.home-menu, .rail-home')) return
+    this.closeHomeMenu()
+  }
+
+  readonly #onHomeMenuKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return
+    // Take Escape before the global cascade — the menu is the innermost thing
+    // open, so it is what Escape must close.
+    event.stopPropagation()
+    event.preventDefault()
+    this.closeHomeMenu()
   }
 
   /** Start the guided beeing tour — the same entry point /tutorial uses, so
@@ -1982,6 +2127,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #fitArmedSticky = false
   #fitArmedUntil = 0
   #FIT_ARM_MS = 1500
+  /** The page key `arrived` last SETTLED — fitted, or found exempt. Arriving
+   *  somewhere else is an arrival no matter which event announced it, so this
+   *  is what makes the fit independent of event ORDER. Back-navigation emits
+   *  its paints BEFORE the `navigate` that arms them (verified: two
+   *  `render:cell-count` at the destination, then `navigate`), so an
+   *  arm-only gate bailed on every one of them and the page was never refit —
+   *  it kept whatever stale snapshot the viewport store held, which is the
+   *  "it shrinks when I click back" report. Forward navigation armed first and
+   *  worked, which is why this only ever showed on the way back. */
+  #lastSettledPageKey: string | null = null
 
   #enableFitLocked(bootArm = false): void {
     if (this.#fitLockedUnsub) return
@@ -2007,7 +2162,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
     const arrived = (): void => {
       const now = performance.now()
-      if (!this.#fitArmedSticky && now > this.#fitArmedUntil) return
+      // A page key we have not settled yet IS an arrival, whether or not the
+      // arm got here first. This is the ordering-independent half of the gate:
+      // back-nav paints land before its `navigate`, so waiting to be armed
+      // meant never fitting on the way back. It still cannot fire on tile
+      // add/remove — those paint the SAME key we already settled, so only the
+      // arm (or the rolling settle window) can fit there, exactly as before.
+      const pageKey = this.#currentPageKey()
+      const isArrival = pageKey !== this.#lastSettledPageKey
+      if (!isArrival && !this.#fitArmedSticky && now > this.#fitArmedUntil) return
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
       // Suspend persistence while auto-fitting so the fitted viewport doesn't
       // overwrite the page's saved viewport; resume on pages that are not
@@ -2029,16 +2192,24 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
         if (fitted) {
           this.#fitArmedSticky = false
           this.#fitArmedUntil = now + this.#FIT_ARM_MS
+          // Settled: this key is no longer an arrival, so later paints here
+          // (a tile added, a bounds settle) fall back to the arm / rolling
+          // window and cannot surprise-fit.
+          this.#lastSettledPageKey = pageKey
         } else {
           // Nothing was fitted, so nothing can have overwritten the saved
           // viewport — don't leave persistence suspended on the way out.
+          // Deliberately NOT settled: the next paint must retry, which is the
+          // same reason the arm stays sticky here.
           vp?.resume?.()
         }
       } else {
-        // Exempt page (pinned / hand-adjusted this visit) — disarm so a
-        // later tile add here can't surprise-fit, and let edits persist.
+        // Exempt page (pinned / hand-framed) — disarm so a later tile add
+        // here can't surprise-fit, and let edits persist. Settled too: the
+        // page was handled, it just wanted no fit.
         this.#fitArmedSticky = false
         this.#fitArmedUntil = 0
+        this.#lastSettledPageKey = pageKey
         vp?.resume?.()
       }
     }
@@ -2062,6 +2233,51 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       }, 150)
     }
 
+    // The WINDOW is not the only thing that changes the framing, and listening
+    // to it alone is why a page could be left sized for a viewport it is no
+    // longer in — content small and pushed into a corner, the "it reset to be
+    // smaller after I dropped a link" report. Two ways it happens with no
+    // window `resize` at all:
+    //   - the drawing surface changes: a panel reserving a column, the shell
+    //     re-laying out. pixi-host already reconciles the CANVAS against its
+    //     host for exactly this reason (resyncToHost) — but it only recentres
+    //     the stage, so the renderer reports the new surface while the fit
+    //     keeps the scale it computed for the old one.
+    //   - only the CHROME moves: the header grows a row (a drop arms the
+    //     command line), the controls rail docks or undocks. The surface is
+    //     unchanged, so even a canvas observer would not fire, yet the safe
+    //     area zoomToFit measures against has moved.
+    // So reconcile on the same terms zoomToFit uses: sample the surface AND
+    // the chrome, refit only when that signature actually changes. Same shape
+    // and cadence as resyncToHost, which had to learn this lesson first.
+    const frameSignature = (): string => {
+      const box = this.zoom?.canvas?.getBoundingClientRect?.()
+        ?? document.querySelector('canvas')?.getBoundingClientRect()
+      const rootStyle = getComputedStyle(document.documentElement)
+      const headerBottom = document.querySelector('.header-bar')?.getBoundingClientRect().bottom ?? 0
+      return [
+        Math.round(box?.width ?? 0), Math.round(box?.height ?? 0),
+        Math.round(box?.left ?? 0), Math.round(box?.top ?? 0),
+        Math.round(Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-left')) || 0),
+        Math.round(Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-right')) || 0),
+        Math.round(headerBottom),
+      ].join(':')
+    }
+    // A collapsed surface is never a framing — pixi-host refuses to follow the
+    // host to 0×0 for the same reason. Ignoring it here keeps a transient
+    // zero-size layout from spending a refit on a viewport nothing is in.
+    const liveFrame = (): string | null => {
+      const sig = frameSignature()
+      return sig.startsWith('0:0:') ? null : sig
+    }
+    let lastFrame = liveFrame()
+    const frameTimer = setInterval(() => {
+      const next = liveFrame()
+      if (next === null || next === lastFrame) return
+      lastFrame = next
+      onResize()
+    }, 250)
+
     window.addEventListener('navigate', arm)
     window.addEventListener('resize', onResize)
     const offGuard = EffectBus.on('navigation:guard-end', arrived)
@@ -2070,10 +2286,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       window.removeEventListener('navigate', arm)
       window.removeEventListener('resize', onResize)
       if (resizeTimer !== null) { clearTimeout(resizeTimer); resizeTimer = null }
+      clearInterval(frameTimer)
       offGuard()
       offCount()
       this.#fitArmedUntil = 0
       this.#fitArmedSticky = false
+      // Switching off forgets where we had settled, so flipping back on
+      // treats the page you are standing on as an arrival and fits it.
+      this.#lastSettledPageKey = null
     }
   }
 
@@ -2181,18 +2401,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#persistPageSet(PINNED_POSITION_PAGES_KEY, next)
   }
 
+  // The magnifiers ARE a gesture — 'user' explicitly, because the third
+  // argument is the viewport SOURCE now. It used to be an undeclared
+  // `'controls-bar'` tag that the drone ignored; read as a source it would
+  // have quietly demoted these two buttons to non-gestures (no
+  // `viewport:manual`, no persisted zoom).
   readonly zoomIn = (): void => {
     if (this.#locked()) return
     const center = this.#viewportCenter()
-    this.zoom?.zoomByFactor?.(1.25, center, 'controls-bar')
-    this.zoom?.end?.('controls-bar')
+    this.zoom?.zoomByFactor?.(1.25, center, 'user')
   }
 
   readonly zoomOut = (): void => {
     if (this.#locked()) return
     const center = this.#viewportCenter()
-    this.zoom?.zoomByFactor?.(0.8, center, 'controls-bar')
-    this.zoom?.end?.('controls-bar')
+    this.zoom?.zoomByFactor?.(0.8, center, 'user')
   }
 
   readonly toggleFullscreen = (): void => {

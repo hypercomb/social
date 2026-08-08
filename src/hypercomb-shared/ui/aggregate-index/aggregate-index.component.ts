@@ -30,6 +30,7 @@
 import { ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import type { RecentPortalsStore } from '../../core/recent-portals.store'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
@@ -44,6 +45,12 @@ import { onSelection, withSelectionService } from '../../core/selection-context'
 /** Movement before a press counts as a drag rather than a click — small enough
  *  to feel immediate, large enough that a click that jitters still opens. */
 const DRAG_THRESHOLD = 5
+
+/** The Portals view. The only source whose rows may be pinned as home — every
+ *  source's `segments` is "what this row points at", so the mechanism would
+ *  work anywhere, but a home that is a tag row or a search hit is not a place
+ *  you meant to keep. */
+const PORTALS_SOURCE_ID = 'collections'
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
 type OverlayLike = { labelAtClient(x: number, y: number): string | null }
@@ -313,6 +320,9 @@ export class AggregateIndexComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-open', (p) => this.openPanel(p?.id)))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-toggle', (p) => this.togglePanel(p?.id)))
     this.#cleanups.push(EffectBus.on('aggregate:view-close', () => this.close()))
+    // The home pin can move from outside this window (the rail's Home menu, or
+    // forgetting the pinned portal), and the lit row has to follow it.
+    this.#cleanups.push(EffectBus.on('portals:recent-changed', () => this.#cdr.markForCheck()))
     this.#cleanups.push(EffectBus.on<{ active?: readonly string[]; scope?: string }>('tags:filter', (p) => {
       this.#activeTags.set(new Set((p?.active ?? []).map(String).filter(Boolean)))
       const s = p?.scope
@@ -628,6 +638,39 @@ export class AggregateIndexComponent implements OnDestroy {
 
   dropCarried(): void {
     this.carried.set([])
+  }
+
+  // ── pin as home ─────────────────────────────────────────────────────────────
+  //
+  // Home follows the last portal you walked, which is right while you are still
+  // finding the thing and wrong once you have found it — dip into something
+  // else and home moves off what you meant. Pinning stops the drift: the pin
+  // outranks the walk.
+  //
+  // Portals only. Every source's `segments` is "what this row points at", so
+  // the mechanism would work anywhere, but a home that is a tag row or a search
+  // hit is not a place you meant to keep.
+
+  private get portals(): RecentPortalsStore | undefined {
+    return get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
+  }
+
+  /** Whether this view's rows can be pinned as home. */
+  canPinHome(): boolean {
+    return this.source()?.id === PORTALS_SOURCE_ID && !!this.portals
+  }
+
+  isHome(item: AggregateItem): boolean {
+    return !!this.portals?.isPinned(item.segments)
+  }
+
+  /** Pin this row as home, or release it if it already is. Mutually exclusive
+   *  by construction — the store holds ONE pin, so pinning another is what
+   *  releases this one; nothing here has to hunt down the previous row. */
+  toggleHome(item: AggregateItem, event?: Event): void {
+    event?.stopPropagation()
+    this.portals?.togglePin(item.label, item.segments)
+    this.#cdr.markForCheck()
   }
 
   /**

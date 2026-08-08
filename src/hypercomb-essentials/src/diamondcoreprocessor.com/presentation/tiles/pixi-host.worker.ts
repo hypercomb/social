@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/pixi-host.worker.ts
-import { Worker } from '@hypercomb/core'
+import { Worker, EffectBus } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
 import {
   computeStageCenter,
@@ -412,6 +412,16 @@ export class PixiHostWorker extends Worker {
       if (Math.round(app.renderer.screen.width) === Math.round(w)
         && Math.round(app.renderer.screen.height) === Math.round(h)) return
       try { app.resize(); center() } catch { /* app may be disposed */ }
+      // THE surface-changed signal. This is the only place that knows the
+      // drawing surface changed for a reason `window` never hears about — a
+      // panel reserving a column, the shell re-laying out. Anything that
+      // caches against the viewport was listening to window 'resize' and
+      // silently going stale here (the fit kept the previous framing; the
+      // centre-slot scores kept the previous viewport). Emit it once, so a
+      // consumer can be right without re-deriving this check.
+      EffectBus.emit('render:surface-resized', {
+        width: Math.round(w), height: Math.round(h),
+      })
     }
     if ('ResizeObserver' in globalThis) {
       const ro = new ResizeObserver(() => resyncToHost())

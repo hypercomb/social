@@ -41,6 +41,46 @@
   </div>
 }
 
+<!-- RECENT PORTALS — Ctrl/⌘+click on Home. Home is the last portal you walked,
+     so this is the list of the ones before it: an older focus is one click away
+     rather than a walk back down the tree. Picking one makes it home again.
+     The hive root is the last row — adopting a portal as home must never make
+     the root unreachable from the button that used to mean it. Fixed position
+     for the same reason as the tour menu: the rail scrolls and clips. -->
+@if (homeMenuOpen()) {
+  <div class="tour-menu home-menu"
+       [style.left.px]="homeMenuPos().x"
+       [style.top.px]="homeMenuPos().y"
+       role="menu"
+       [attr.aria-label]="'controls.home.recent' | t">
+    <div class="tour-menu-title">{{ 'controls.home.recent' | t }}</div>
+    @for (entry of homeEntries(); track homePortalPath(entry)) {
+      <div class="tour-group">
+        <button class="tour-row" role="menuitem"
+                [class.is-pinned]="isPinnedPortal(entry)"
+                (click)="pickHomePortal(entry)">
+          <span class="mat-sym">{{ isPinnedPortal(entry) ? 'home_pin' : 'door_open' }}</span>
+          <span class="tour-label">
+            <span class="home-name">{{ entry.label || homePortalPath(entry) }}</span>
+            <span class="home-path">{{ homePortalPath(entry) }}</span>
+          </span>
+        </button>
+        <button class="tour-caret home-forget"
+                type="button"
+                [attr.aria-label]="'controls.home.forget' | t"
+                [title]="'controls.home.forget' | t"
+                (click)="forgetHomePortal(entry, $event)">
+          <span class="mat-sym">close</span>
+        </button>
+      </div>
+    }
+    <button class="tour-row home-root" role="menuitem" (click)="goHiveRoot()">
+      <span class="mat-sym">home</span>
+      <span class="tour-label">{{ 'controls.home.root' | t }}</span>
+    </button>
+  </div>
+}
+
 <!-- FIT FLYOUT — right-click on the rail's fit button. The fit's second-order
      controls: the global fit switch (was Ctrl+click only, invisible), this
      page's pin-size / pin-position holds, and the step-zoom verbs the
@@ -426,12 +466,22 @@
                       data-ctrl-id="pin">
                 <span class="mat-sym" [class.filled]="locked()">push_pin</span>
               </button>
-              <!-- HOME ("comb") — jumps to the domain root (hypercomb.io home),
-                   same target as the leading domain crumb. -->
+              <!-- HOME — flies to the LAST PORTAL walked (the hive root until
+                   one has been), because the portal you went through is what
+                   you are working on. Ctrl/⌘+click opens the recent list. The
+                   glyph turns into a door once home is a portal, so the button
+                   says which of the two meanings it currently carries. -->
               <button class="ctl-btn rail-home"
-                      (click)="goHome()"
-                      [attr.aria-label]="'controls.home' | t">
-                <span class="mat-sym">home</span>
+                      [class.active]="homeMenuOpen()"
+                      [class.on-portal]="!!homePortal()"
+                      (click)="goHome($event)"
+                      [attr.aria-label]="homePortal()
+                        ? ('controls.home.portal' | t: { portal: homeLabel() })
+                        : ('controls.home' | t)"
+                      [title]="(homePortal()
+                        ? ('controls.home.portal' | t: { portal: homeLabel() })
+                        : ('controls.home' | t)) + ' — ' + ('controls.home.pick' | t)">
+                <span class="mat-sym">{{ homePortal() ? 'home_pin' : 'home' }}</span>
               </button>
             }
             @for (ctrl of railControls(); track ctrl.id) {

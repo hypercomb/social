@@ -4500,11 +4500,16 @@ export class ShowCellDrone extends Drone {
       const firstVisit = this.#pendingFirstVisitFit
       this.#pendingFitRestore = false
       this.#pendingFirstVisitFit = false
-      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto') => void } | undefined
-      // First-visit adopted fit persists (source 'user') so it sticks like a
+      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto-persist' | 'auto') => void } | undefined
+      // First-visit adopted fit persists ('auto-persist') so it sticks like a
       // normal viewport and never re-fits; a restored fit re-frames visually
-      // only (source 'auto') and must never re-commit on every entry.
-      zoom?.zoomToFit?.(true, firstVisit ? 'user' : 'auto')
+      // only ('auto') and must never re-commit on every entry.
+      //
+      // 'auto-persist', NOT 'user': this is a RENDER, not a gesture. As 'user'
+      // it announced `viewport:fit`, which the control bar treats as an
+      // explicit request and uses to discard the page's hand framing — so a
+      // first-visit render could quietly strip a framing the participant set.
+      zoom?.zoomToFit?.(true, firstVisit ? 'auto-persist' : 'auto')
     }
 
     this.geom = geom

@@ -21,7 +21,7 @@ const ZOOM_DRONE_KEY = '@diamondcoreprocessor.com/ZoomDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SIGNATURE_STORE_KEY = '@hypercomb/SignatureStore'
 
-interface ZoomLike { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto') => void }
+interface ZoomLike { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto-persist' | 'auto') => void }
 interface LineageLike {
   explorerSegments?: () => readonly string[]
   explorerDir?: () => Promise<FileSystemDirectoryHandle | null>
@@ -116,12 +116,20 @@ export class AutoFitFirstAddDrone extends Drone {
         .filter((x: string) => x.length > 0)
       if (liveSegs.join('/') !== key) return  // navigated away inside the delay
       const zoom = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(ZOOM_DRONE_KEY) as ZoomLike | undefined
-      // 'user' so the framing STICKS. This fit is the sanctioned carve-out
-      // (first tile at a genuinely empty lineage) and is memoised per session
-      // by #fittedSigs, so persisting it cannot re-fire on later adds. Left at
-      // the default 'auto' it lived in memory only: the new page looked
-      // correctly framed until the first reload, which reset it to scale 1.
-      zoom?.zoomToFit?.(true, 'user')
+      // 'auto-persist' so the framing STICKS. This fit is the sanctioned
+      // carve-out (first tile at a genuinely empty lineage) and is memoised
+      // per session by #fittedSigs, so persisting it cannot re-fire on later
+      // adds. Left at the default 'auto' it lived in memory only: the new page
+      // looked correctly framed until the first reload, which reset it to
+      // scale 1.
+      //
+      // NOT 'user' — that was the same request plus a lie. Nobody made a
+      // gesture here, but 'user' announced `viewport:fit`, and the control bar
+      // reads that as the participant asking for this framing and DISCARDS
+      // their hand framing for the page: frame a page by hand, drop the first
+      // tile onto it, and the page was silently handed back to the global fit
+      // switch to be re-fitted from then on.
+      zoom?.zoomToFit?.(true, 'auto-persist')
     }, 80)
   }
 }

@@ -168,13 +168,18 @@ tutorialLessons.register({
     await stage.say('zoom', 'Zoom',
       'Roll the mouse wheel to zoom in and out — pinch on a touch screen. A quick demo…')
 
-    const zoom = window.ioc.get<{ zoomByFactor?: (f: number, pivot: { x: number; y: number }) => void }>(
-      '@diamondcoreprocessor.com/ZoomDrone')
+    const zoom = window.ioc.get<{
+      zoomByFactor?: (f: number, pivot: { x: number; y: number }, source?: 'user' | 'auto') => void
+    }>('@diamondcoreprocessor.com/ZoomDrone')
     if (!zoom?.zoomByFactor) return
     const pivot = stage.center()
-    zoom.zoomByFactor(0.8, pivot)
+    // 'auto' — this is a DEMONSTRATION, not the participant zooming. Left at
+    // the default it emitted `viewport:manual`, which the control bar reads as
+    // "they framed this page by hand" and marks it hand-framed permanently —
+    // so watching the zoom lesson quietly excluded that page from global fit.
+    zoom.zoomByFactor(0.8, pivot, 'auto')
     await stage.wait(650)
-    zoom.zoomByFactor(1.25, pivot)
+    zoom.zoomByFactor(1.25, pivot, 'auto')
     await stage.wait(450)
   },
 })

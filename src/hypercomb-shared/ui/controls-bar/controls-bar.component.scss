@@ -1785,6 +1785,74 @@ $actions-corner: 12rem;
   color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
 }
 
+// ── recent portals ───────────────────────────────────────
+//
+// Ctrl/⌘+click on Home. Same chrome as the tour picker — same rail, same tier —
+// so it reuses .tour-menu / .tour-row / .tour-group wholesale and only adds
+// what a portal row needs the course row does not: a name over its path, a
+// forget button, and the hive-root row set apart at the bottom.
+.home-menu {
+  width: 248px;
+  max-height: min(70vh, 520px);
+}
+
+// Name over path. The name is what was clicked; the path is where it lands —
+// two portals can share a name, so the path is what tells them apart.
+.home-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-path {
+  display: block;
+  font-family: var(--hc-mono);
+  font-size: 0.62rem;
+  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  // The path reads right-to-left in practice — the tail of a long one is the
+  // part that identifies it.
+  direction: rtl;
+  text-align: left;
+}
+
+// The pinned portal, if one is pinned. Lit the same gold the Portals toolwindow
+// uses for the pin, so the two surfaces agree at a glance about which is home.
+.tour-row.is-pinned {
+  .mat-sym { color: #ffc65c; }
+  .home-name { color: #f0e3c9; }
+}
+
+// Forget stays quiet until the row is under the pointer: putting a portal down
+// is deliberate, and an always-lit × on every row reads as clutter.
+.home-forget {
+  opacity: 0;
+  .tour-group:hover &,
+  &:focus-visible { opacity: 1; }
+  &:hover { color: var(--md-error, #ff8a80); }
+}
+
+// The hive root, always last and always present. Ruled off because it is the
+// one row that is not a portal.
+.home-root {
+  margin-top: 0.2rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--md-outline-variant);
+  border-radius: 0 0 4px 4px;
+  color: color-mix(in srgb, var(--md-on-surface) 75%, transparent);
+  .mat-sym { color: color-mix(in srgb, var(--md-on-surface) 55%, transparent); }
+  &:hover { color: var(--md-on-surface); }
+}
+
+// Home standing on a portal rather than the root. A hairline ring, no fill —
+// this is a statement of what the button means, not an alert.
+.rail-home.on-portal .mat-sym {
+  color: color-mix(in srgb, #ffc65c 72%, var(--md-on-surface));
+}
+
 // ── fit flyout ───────────────────────────────────────────
 //
 // Right-click on the fit button. Same elevated-surface tier and hairline

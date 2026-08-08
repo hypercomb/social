@@ -35,17 +35,30 @@ export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot; meshOff
 
 /**
  * Source of a viewport setter call.
- * - `'user'`: result of an explicit user gesture (mousewheel, pinch,
- *   spacebar pan, touch pan, /fit shortcut). Schedules a debounced
- *   commit to the new tile-properties-backed viewport store so the
- *   state persists across navigation and reload.
- * - `'auto'` (default): automatic / programmatic write (refit-on-entry,
- *   auto-fit-first-add, init defaults, fullscreen recenter). Updates
- *   in-memory state only; does NOT trigger the persistent commit.
- *   Otherwise re-entering a layer would commit a fresh fit-snapshot
- *   on every visit and clobber the user's saved pan.
+ *
+ * These are TWO independent questions and the type keeps them separate on
+ * purpose: (a) does this framing PERSIST, and (b) was it an explicit GESTURE?
+ * They were once a single 'user' flag, and every automatic path that merely
+ * wanted to persist had to claim it was a gesture to get there — which also
+ * announced `viewport:fit`, and the control bar reads that as "the participant
+ * asked for this framing" and DISCARDS their hand framing for the page. A
+ * first-tile add or a first-visit render then silently handed a page the user
+ * had framed themselves back to the global fit switch, and it re-fitted from
+ * then on. Hence the third member.
+ *
+ * - `'user'`: an explicit gesture (mousewheel, pinch, spacebar pan, touch pan,
+ *   the fit button, `0`/`r`, /fit). Persists, AND announces `viewport:fit` —
+ *   the page is being handed back to the global fit switch deliberately.
+ * - `'auto-persist'`: automatic, but the framing is meant to STICK (the
+ *   first-tile fit at an empty lineage, the first-visit adopted fit). Persists
+ *   exactly like `'user'` — including through a `suspend()` — but never
+ *   announces, so it cannot discard a hand framing.
+ * - `'auto'` (default): automatic and transient (refit-on-entry, the fit
+ *   switch's own arrival fits, init defaults, fullscreen recenter). In-memory
+ *   only; no commit. Otherwise re-entering a layer would commit a fresh
+ *   fit-snapshot on every visit and clobber the user's saved pan.
  */
-export type ViewportSource = 'user' | 'auto'
+export type ViewportSource = 'user' | 'auto-persist' | 'auto'
 
 export class ViewportPersistence extends EventTarget {
 
@@ -103,19 +116,22 @@ export class ViewportPersistence extends EventTarget {
   // debounced commit to the sig-keyed store.
 
   setZoom = (scale: number, cx: number, cy: number, fit = false, source: ViewportSource = 'auto'): void => {
-    if (this.#suspended && source !== 'user') return
+    // Only a transient 'auto' write is swallowed by a suspend — a framing that
+    // is meant to stick still has to reach the store, which is the whole
+    // difference between 'auto-persist' and 'auto'.
+    if (this.#suspended && source === 'auto') return
     // Strip `fit: false` from the stored snapshot to keep JSON minimal —
     // absence == not a fit. Only set the property when truly a fit.
     const zoom = fit ? { scale, cx, cy, fit: true } : { scale, cx, cy }
     this.#lastRead = { ...this.#lastRead, zoom }
-    if (source === 'user') this.#scheduleStoreCommit()
+    if (source !== 'auto') this.#scheduleStoreCommit()
   }
 
   setPan = (dx: number, dy: number, source: ViewportSource = 'auto'): void => {
-    if (this.#suspended && source !== 'user') return
+    if (this.#suspended && source === 'auto') return
     const pan = { dx, dy }
     this.#lastRead = { ...this.#lastRead, pan }
-    if (source === 'user') this.#scheduleStoreCommit()
+    if (source !== 'auto') this.#scheduleStoreCommit()
   }
 
   /** Persist the renderer's mesh offset (its position inside the layer
@@ -123,10 +139,10 @@ export class ViewportPersistence extends EventTarget {
    *  navigation; never auto-changed by the renderer. Only updated when
    *  the user explicitly recenters via the navigation command. */
   setMeshOffset = (x: number, y: number, source: ViewportSource = 'auto'): void => {
-    if (this.#suspended && source !== 'user') return
+    if (this.#suspended && source === 'auto') return
     const meshOffset = { x, y }
     this.#lastRead = { ...this.#lastRead, meshOffset }
-    if (source === 'user') this.#scheduleStoreCommit()
+    if (source !== 'auto') this.#scheduleStoreCommit()
   }
 
   get lastPan(): PanSnapshot | undefined {
@@ -282,6 +298,9 @@ export class ZoomDrone extends Drone {
   #animPivotClient: Pt = { x: 0, y: 0 }
   // snapshot of the local point under the pivot at animation start
   #animPivotLocal: Pt = { x: 0, y: 0 }
+  // Source of the animation in flight, so every tick saves as what STARTED it
+  // rather than assuming a gesture.
+  #animSource: ViewportSource = 'user'
   readonly #animDuration = 150 // ms — short for crisp feel
 
   protected override deps = {
@@ -467,10 +486,16 @@ export class ZoomDrone extends Drone {
     return this.renderContainer?.scale.x ?? 1
   }
 
-  public zoomToScale = (scale: number, pivotClient: Pt): void => {
+  // `source` defaults to 'user' because every INPUT delegate (wheel, pinch,
+  // the control-bar magnifiers) is a real gesture. It exists for the callers
+  // that are NOT: a tutorial lesson demonstrating zoom drives these same
+  // methods, and `viewport:manual` is what the control bar reads to mark a
+  // page HAND-FRAMED — so a demo silently froze that page's framing and
+  // excluded it from global fit for good. Automatic callers pass 'auto'.
+  public zoomToScale = (scale: number, pivotClient: Pt, source: ViewportSource = 'user'): void => {
     if (getLaneScrollAxis()) return
     if (!this.renderContainer || !this.canvas) return
-    EffectBus.emitTransient('viewport:manual', {})
+    if (source === 'user') EffectBus.emitTransient('viewport:manual', {})
     // Wheel snap path — must cancel any in-flight animation before
     // snapping. Without this, a Ctrl-zoom or zoomToFit in progress
     // continues ticking after the snap and overwrites the user's wheel
@@ -479,14 +504,14 @@ export class ZoomDrone extends Drone {
     // sibling.
     this.#cancelAnim()
     const clamped = this.clamp(scale)
-    this.adjustZoom(this.renderContainer, clamped, pivotClient, 'user')
+    this.adjustZoom(this.renderContainer, clamped, pivotClient, source)
   }
 
-  public zoomByFactor = (factor: number, pivotClient: Pt): void => {
+  public zoomByFactor = (factor: number, pivotClient: Pt, source: ViewportSource = 'user'): void => {
     if (getLaneScrollAxis()) return
     if (!this.renderContainer || !this.canvas) return
 
-    EffectBus.emitTransient('viewport:manual', {})
+    if (source === 'user') EffectBus.emitTransient('viewport:manual', {})
 
     this.#cancelAnim()
 
@@ -495,14 +520,15 @@ export class ZoomDrone extends Drone {
     const current = target.scale.x || 1
     const raw = current * factor
 
-    // if pinch-zoom pushes below minScale, trigger zoom-to-fit
+    // if pinch-zoom pushes below minScale, trigger zoom-to-fit. Carry the
+    // source: an automatic caller must not announce an explicit fit either.
     if (raw < this.minScale) {
-      this.zoomToFit(false, 'user')
+      this.zoomToFit(false, source === 'user' ? 'user' : 'auto')
       return
     }
 
     const next = this.clamp(raw)
-    this.adjustZoom(target, next, pivotClient, 'user')
+    this.adjustZoom(target, next, pivotClient, source)
   }
 
   /** Assigned by the shell (controls-bar): reports the current page's
@@ -609,6 +635,11 @@ export class ZoomDrone extends Drone {
     // fits — restore-refits, the switch's own arrival fits — must never
     // announce themselves here, or the switch would clear its own exceptions.
     // Emitted only past every bail above, so it means "a fit is running".
+    //
+    // 'auto-persist' is deliberately NOT here: it persists its framing but was
+    // nobody's gesture, so it must not discard a hand framing. If you are
+    // adding a caller and reaching for 'user' to make a fit STICK, you want
+    // 'auto-persist' — 'user' additionally means "the participant asked".
     if (source === 'user') EffectBus.emitTransient('viewport:fit', {})
 
     const stageScale = this.app.stage.scale.x || 1
@@ -725,11 +756,12 @@ export class ZoomDrone extends Drone {
   // smooth animated zoom (mousewheel snap levels)
   // -------------------------------------------------
 
-  public animateToScale = (scale: number, pivotClient: Pt): void => {
+  public animateToScale = (scale: number, pivotClient: Pt, source: ViewportSource = 'user'): void => {
     if (getLaneScrollAxis()) return
     if (!this.renderContainer || !this.canvas || !this.renderer) return
 
-    EffectBus.emitTransient('viewport:manual', {})
+    if (source === 'user') EffectBus.emitTransient('viewport:manual', {})
+    this.#animSource = source
 
     const target = this.renderContainer
     const clamped = this.clamp(scale)
@@ -791,8 +823,9 @@ export class ZoomDrone extends Drone {
     // navigation, page close, or another gesture, the partial scale
     // still persists. The previous "save only on completion" pattern
     // dropped state when animations didn't reach t=1.
-    // animateToScale is called by mousewheel input — user-source.
-    this.#saveZoom(target, false, 'user')
+    // Normally mousewheel input — user-source — but an automatic caller
+    // (a tutorial demo) must not persist as a gesture, so carry its source.
+    this.#saveZoom(target, false, this.#animSource)
 
     if (t < 1) {
       this.#animFrameId = requestAnimationFrame(this.#animTick)

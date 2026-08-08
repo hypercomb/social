@@ -1736,6 +1736,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       attachment?: { name: string; mime: string; size: number; sig: string } | null
       name?: string | null
       armId?: string | null
+      atTop?: boolean
     }>('command:arm-resource', (payload) => {
       if (!payload || (!payload.largeSig && !payload.url)) return
       // A link arms on release and is filled in when its card arrives. Once the
@@ -1765,6 +1766,28 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
       this.shell?.focus()
     })
+
+    // Dropping a link on empty space IS the creation — the drop commits itself
+    // rather than waiting for an Enter the participant never asked to press.
+    // The title stays in the line afterwards, naming what just landed; a name
+    // IS an address here, so a stray Enter re-commits that same tile rather
+    // than making a second one.
+    this.#commitArmedUnsub = EffectBus.on<{ armId?: string | null }>(
+      'command:commit-armed',
+      (payload) => {
+        const armed = this.armedResource()
+        if (!armed) return
+        if (payload?.armId && armed.armId !== payload.armId) return
+        const named = this.value()
+        void this.commitCreateCellInPlace().then(() => {
+          const seed = named.trim()
+          if (!seed) return
+          this.shell?.setValue(seed)
+          this.value.set(this.shell?.value() ?? seed)
+          this.#seededArmName = seed
+        })
+      },
+    )
 
     // A slot armed on release can be retracted — the safety check runs after
     // the arm now, so a denied link has to take its chevron back down.
@@ -1843,9 +1866,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     name?: string | null
     /** Identity of this armed slot, so a late card fill-in can find it. */
     armId?: string | null
+    /** Pin the created tile to the first slot — a dropped link lands on top. */
+    atTop?: boolean
   } | null>(null)
   #armResourceUnsub?: () => void
   #disarmResourceUnsub?: () => void
+  #commitArmedUnsub?: () => void
   /** True when the command-line should be collapsed on mobile (toggle off). */
   readonly mobileHidden = signal(false)
   #mobileVisibilityUnsub?: () => void
@@ -2009,6 +2035,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#micReleaseUnsub?.()
     this.#armResourceUnsub?.()
     this.#disarmResourceUnsub?.()
+    this.#commitArmedUnsub?.()
     this.onArmedResourceDismiss()
     if (this.#micHoldTimer) {
       clearTimeout(this.#micHoldTimer)
@@ -2373,7 +2400,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // The cost is create-time tagging (`name:tag`) while something is armed:
     // the colon stays in the name instead of persisting a tag. Tagging the new
     // tile is one gesture away; a title silently eaten is not recoverable.
-    if (this.armedResource() && !original.trimStart().startsWith('/')) {
+    // Narrow on purpose: ONLY while the line still holds the name the drop put
+    // there. The moment the participant types their own, the bar is theirs
+    // again and every operator works as it always did — `name:tag` on a
+    // dropped image still tags.
+    if (
+      this.armedResource()
+      && !original.trimStart().startsWith('/')
+      && this.#seededArmName
+      && original.trim() === this.#seededArmName
+    ) {
       await this.commitCreateCellInPlace()
       return
     }
@@ -2563,6 +2599,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         url: armed.url,
         type: armed.type,
         attachment: armed.attachment ?? null,
+        atTop: armed.atTop === true,
       })
       this.onArmedResourceDismiss()
     }

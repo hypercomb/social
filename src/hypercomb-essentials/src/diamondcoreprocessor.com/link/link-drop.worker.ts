@@ -2,10 +2,12 @@
 // Intercepts drag-and-drop link events on the document and routes them
 // through the safety service + tile editor pipeline.
 
-import { Worker, EffectBus } from '@hypercomb/core'
+import { Worker, EffectBus, requestConfirm } from '@hypercomb/core'
 import { parseYouTubeVideoId, fetchYouTubeOpenGraph, type YouTubeOpenGraph } from './youtube.js'
-import { fetchImageBlob } from './photo.js'
+import { fetchImageBlob, isImageUrl } from './photo.js'
 import { defaultNameForLink } from './link-name.js'
+import { byDeadline, CARD_DEADLINE_MS, PICTURE_DEADLINE_MS, SAFETY_DEADLINE_MS } from './deadline.js'
+import { verifyLinkDropCard } from './link-drop-card.view.js'
 import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
 import type { LinkSafetyService, SafetyVerdict } from '../safety/link-safety.service.js'
@@ -58,9 +60,18 @@ export class LinkDropWorker extends Worker {
     super()
     document.addEventListener('dragover', this.#onDragOver)
     document.addEventListener('drop', this.#onDrop)
+    // A drag can leave without dropping — the ring must go with it.
+    document.addEventListener('dragleave', this.#onDragLeave)
+    document.addEventListener('dragend', this.#endDrag)
   }
 
   protected override act = async (): Promise<void> => { }
+
+  /** Only a leave that exits the WINDOW ends the drag; leaving one element for
+   *  the next fires the same event and would flicker the ring off and on. */
+  #onDragLeave = (e: DragEvent): void => {
+    if (e.relatedTarget === null) this.#endDrag()
+  }
 
   // ── drag handlers ─────────────────────────────────────────────
 
@@ -76,22 +87,51 @@ export class LinkDropWorker extends Worker {
     // a real file came is knowable only at drop, and that is where we decide.
     const types = e.dataTransfer?.types ?? []
     const hasLink = types.includes('text/uri-list') || types.includes('text/plain')
-    if (hasLink) {
-      e.preventDefault()
+    if (!hasLink) return
+    e.preventDefault()
+
+    // Say that a drag is in the air. Without this the landing ring never
+    // appeared for a link and the overlay went on HOVER-highlighting whatever
+    // tile the pointer passed — a tile the drop had nothing to do with. The
+    // ring answers the question the pointer is actually asking, and the
+    // overlay stops answering a different one.
+    if (!this.#dragAnnounced) {
+      this.#dragAnnounced = true
+      EffectBus.emit('drop:dragging', { active: true, atTop: true })
     }
   }
 
+  /** True between the first dragover of a link drag and its end. */
+  #dragAnnounced = false
+
+  #endDrag = (): void => {
+    if (!this.#dragAnnounced) return
+    this.#dragAnnounced = false
+    EffectBus.emit('drop:dragging', { active: false })
+  }
+
   #onDrop = (e: DragEvent): void => {
+    this.#endDrag()
     // don't steal drops from inputs
     const tgt = e.target as HTMLElement | null
     if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
 
-    // Don't steal REAL file drops (those go to ImageDropDrone / ImagePasteWorker).
-    // The advertised `Files` type is not proof of one — only the file list is.
-    if ((e.dataTransfer?.files?.length ?? 0) > 0) return
-
+    // The SAME arbitration ImageDropDrone applies, from the other side: a
+    // drag carrying both an image file and a URL is a HYPERLINK drag — a
+    // YouTube video dragged off its page arrives exactly like this — and it
+    // is ours; the dragged file becomes the tile's picture. Only a bare
+    // image drag (no URL, or a URL that IS the image) goes to the image path.
     const url = this.#extractUrl(e)
     if (!url) return
+    const files = e.dataTransfer?.files
+    if ((files?.length ?? 0) > 0 && isImageUrl(url)) return
+
+    let draggedImage: File | null = null
+    if (files) {
+      for (let i = 0; i < files.length; i++) {
+        if (files[i].type.startsWith('image/')) { draggedImage = files[i]; break }
+      }
+    }
 
     // A drop belongs to the tile under the release point. Selection is not a
     // proxy for aiming: a participant can drop on an unselected tile, or on
@@ -102,7 +142,7 @@ export class LinkDropWorker extends Worker {
     const targetSegments = [...(this.#lineage?.explorerSegments?.() ?? [])]
 
     e.preventDefault()
-    void this.#routeLink(url, targetLabel, targetSegments)
+    void this.#routeLink(url, targetLabel, targetSegments, draggedImage)
   }
 
   // ── URL extraction ────────────────────────────────────────────
@@ -130,6 +170,7 @@ export class LinkDropWorker extends Worker {
     url: string,
     targetLabel: string | null,
     targetSegments: readonly string[],
+    draggedImage: Blob | null = null,
   ): Promise<void> {
     try {
       const editorSvc = this.#editorService
@@ -151,7 +192,10 @@ export class LinkDropWorker extends Worker {
       const safety = this.#safetyService
       let verdict: SafetyVerdict = { decision: 'allow', reason: 'no safety service' }
       if (safety) {
-        verdict = await safety.check(url)
+        // Its checks run through one queue, so a single stalled verdict would
+        // hold every drop after it. Past the deadline the drop proceeds.
+        verdict = await byDeadline(() => safety.check(url), SAFETY_DEADLINE_MS,
+          { decision: 'allow', reason: 'safety check timed out' })
       }
 
       if (verdict.decision === 'deny') {
@@ -164,7 +208,24 @@ export class LinkDropWorker extends Worker {
       // 3. The open-graph card, read ONCE per drop and shared by every
       // destination: its title seeds the command line on a create, its image
       // becomes the picture on whichever tile the drop lands on.
-      const openGraph = videoId ? await fetchYouTubeOpenGraph(url) : NO_OPEN_GRAPH
+      const openGraph = videoId
+        ? await byDeadline(
+            (signal) => fetchYouTubeOpenGraph(url, fetch, signal),
+            CARD_DEADLINE_MS,
+            { title: null, thumbnailUrl: null },
+          )
+        : NO_OPEN_GRAPH
+
+      // Show what the drop actually READ, right where the participant is
+      // looking. Reporting only — the gesture carries on behind it.
+      verifyLinkDropCard({
+        url,
+        title: openGraph.title,
+        imageUrl: openGraph.thumbnailUrl,
+        destination: destination.kind === 'tile'
+          ? { kind: 'tile', label: destination.label }
+          : { kind: 'create' },
+      })
 
       // A drop on an existing tile is a complete edit gesture: persist the
       // link immediately. Requiring an unrelated editor Save left the field
@@ -178,11 +239,12 @@ export class LinkDropWorker extends Worker {
         return
       }
 
-      // 4. resolve thumbnail / image
-      let thumbnailBlob: Blob | null = null
+      // 4. resolve thumbnail / image — the drag may have BROUGHT one, and
+      // what the participant dragged beats anything we could go and fetch.
+      let thumbnailBlob: Blob | null = draggedImage
 
       // 4a. YouTube — fetch the open-graph poster frame
-      if (openGraph.thumbnailUrl) {
+      if (!thumbnailBlob && openGraph.thumbnailUrl) {
         thumbnailBlob = await this.#fetchThumbnail(openGraph.thumbnailUrl)
       }
 
@@ -190,7 +252,7 @@ export class LinkDropWorker extends Worker {
       // Handles both extension-based URLs (.jpg, .png, etc.) and extensionless
       // URLs (picsum.photos, CDN redirects) via HEAD probe fallback.
       if (!thumbnailBlob) {
-        thumbnailBlob = await fetchImageBlob(url)
+        thumbnailBlob = await byDeadline(() => fetchImageBlob(url), PICTURE_DEADLINE_MS, null)
       }
 
       // 5. Route by the actual release target.
@@ -202,10 +264,14 @@ export class LinkDropWorker extends Worker {
           await this.#loadImageWhenReady(thumbnailBlob)
         }
       }
-      // Path B: empty canvas — fill the chevron armed on release with what the
-      // card turned out to hold. User types a cell name and presses Enter.
+      // Path B: empty space — the drop IS the creation. Fill the slot armed on
+      // release with what the card turned out to hold, then commit it: dropping
+      // a link on empty space means "make this a tile", and waiting for Enter
+      // made a finished gesture look like a dead one. The title stays in the
+      // line afterwards, naming what just landed.
       else {
         await this.#armLink(url, videoId, thumbnailBlob, openGraph.title, armId)
+        EffectBus.emit('command:commit-armed', { armId })
       }
 
       // 6. emit warning if verdict was warn
@@ -239,6 +305,7 @@ export class LinkDropWorker extends Worker {
       smallFlatSig: null,
       url,
       type: videoId ? 'youtube' as const : 'link' as const,
+      atTop: true,
       // A name from the URL alone, so the line is NEVER empty after a drop.
       // The card's title replaces it when it arrives — and when no card ever
       // arrives (a platform that publishes none, or a read the browser's
@@ -270,9 +337,17 @@ export class LinkDropWorker extends Worker {
     // which would leave the armed slot describing less than it did on release.
     const named = name ?? (videoId ? `youtube ${videoId}` : defaultNameForLink(url))
 
+    // The picture is stored best-effort. Storing it can fail outright — a
+    // second tab holding the packed store is enough — and when it did, the
+    // throw took the whole gesture with it: no title, no tile, no LINK. The
+    // link is the part that must always land, so a failed picture degrades to
+    // the bare arm instead of ending the drop.
     if (thumbnailBlob) {
-      await armImageBlob(thumbnailBlob, { url, type, name: named, armId })
-      return
+      try {
+        if (await armImageBlob(thumbnailBlob, { url, type, name: named, armId, atTop: true })) return
+      } catch (err) {
+        console.warn('[link-drop] picture could not be stored — keeping the link:', err)
+      }
     }
     // No picture — emit the bare arm anyway so the chevron shows a type badge
     // and the cell gets the link attached on commit.
@@ -285,6 +360,7 @@ export class LinkDropWorker extends Worker {
       url,
       type,
       name: named,
+      atTop: true,
     })
   }
 
@@ -297,6 +373,23 @@ export class LinkDropWorker extends Worker {
     thumbnailUrl: string | null,
   ): Promise<void> {
     const existing = await readTilePropertiesAt(parentSegments, cell)
+
+    // A tile holds ONE link. Replacing one the participant put there is not
+    // something a drop should do behind their back — a drop can land a hex
+    // away from where it was aimed, and the old address would be gone with no
+    // sign it had ever been there. Ask, and name both, before overwriting.
+    const priorLink = typeof existing['link'] === 'string' ? existing['link'] as string : ''
+    if (priorLink && priorLink !== url) {
+      const replace = await requestConfirm({
+        title: 'Replace this tile’s link?',
+        message: `“${cell}” already links to ${priorLink}`,
+        warning: `Dropping replaces it with ${url}`,
+        confirmLabel: 'Replace',
+        cancelLabel: 'Keep the old one',
+      })
+      if (!replace) return
+    }
+
     const image = await this.#tileDropImage(existing, thumbnailUrl)
 
     await persistDroppedTileLink(
@@ -325,12 +418,10 @@ export class LinkDropWorker extends Worker {
 
   /** Fetch a poster frame. Never throws — a missing picture is not a failure. */
   async #fetchThumbnail(thumbnailUrl: string): Promise<Blob | null> {
-    try {
-      const resp = await fetch(thumbnailUrl)
+    return byDeadline(async (signal) => {
+      const resp = await fetch(thumbnailUrl, { signal })
       return resp.ok ? await resp.blob() : null
-    } catch {
-      return null
-    }
+    }, PICTURE_DEADLINE_MS, null)
   }
 
   /**
