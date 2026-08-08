@@ -1149,6 +1149,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #meshModalUnsub: (() => void) | null = null
   #lanesUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
+  #swarmZoneUnsub: (() => void) | null = null
   #lockBumpUnsub: (() => void) | null = null
   #iconEditUnsub: (() => void) | null = null
   #configureControlUnsub: (() => void) | null = null
@@ -1216,6 +1217,26 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshJoinUnsub = EffectBus.on('mesh:join', () => {
       if (!this.meshPublic()) this.meshToggled.emit()
     })
+
+    // The swarm reports that it is public but has nowhere to publish — it
+    // composes its sig from (path, room, secret) and declines without both.
+    // Left alone this is invisible: relay socket up, swarm chrome on, no
+    // peers, ever. Say it and reopen the selector on the missing field.
+    // Edge-triggered by the drone, so a participant who dismisses it is not
+    // nagged; it speaks again only after the zone goes good and bad again.
+    this.#swarmZoneUnsub = EffectBus.on<{ hasRoom?: boolean; hasSecret?: boolean }>(
+      'swarm:zone-incomplete',
+      ({ hasRoom }) => {
+        EffectBus.emit('toast:show', {
+          type: 'error',
+          title: 'swarm',
+          message: hasRoom
+            ? 'This swarm has no secret, so nothing can reach it. Set one to join.'
+            : 'This swarm has no location, so nothing can reach it. Pick one to join.',
+        })
+        EffectBus.emit('mesh:open-modal', { join: true })
+      },
+    )
 
     // ── mobile detection via matchMedia ──
     // A phone is small in EITHER dimension: ≤599px WIDE (portrait) OR ≤449px
@@ -1590,6 +1611,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#atomizeStrategyUnsub?.()
     this.#meshModalUnsub?.()
     this.#meshJoinUnsub?.()
+    this.#swarmZoneUnsub?.()
     this.#lockBumpUnsub?.()
     this.#iconEditUnsub?.()
     this.#configureControlUnsub?.()

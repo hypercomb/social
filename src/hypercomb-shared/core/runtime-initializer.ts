@@ -449,6 +449,25 @@ const _runInitializeRuntime = async (
     if (cmd !== 'mesh.togglePublic') return
     const current = localStorage.getItem('hc:mesh-public') === 'true'
     const next = !current
+
+    // Going public needs somewhere to go public IN. The swarm composes its
+    // sig from (path, room, secret) and refuses to subscribe or publish
+    // without both credentials — so flipping the flag with a half-set zone
+    // produces a hive that LOOKS joined (swarm chrome, relay socket) and is
+    // deaf and mute. Nothing seeds a room on a bare-domain origin, so that
+    // was the default result of this shortcut there. Send the participant to
+    // the selector instead; confirming it emits 'mesh:join', which flips the
+    // flag through the same path the swarm control uses. Leaving is never
+    // gated — the safe direction always works on the first press.
+    if (next) {
+      const room = (get('@hypercomb.social/RoomStore') as { value?: string } | undefined)?.value?.trim() ?? ''
+      const secret = (get('@hypercomb.social/SecretStore') as { value?: string } | undefined)?.value?.trim() ?? ''
+      if (!room || !secret) {
+        EffectBus.emit('mesh:open-modal', { join: true })
+        return
+      }
+    }
+
     localStorage.setItem('hc:mesh-public', String(next))
     const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
     mesh?.setNetworkEnabled?.(next, true)

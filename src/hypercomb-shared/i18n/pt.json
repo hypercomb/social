@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "ilegível aqui",
   "context.detach": "desanexar “{name}”",
   "context.ask": "Perguntar sobre “{cell}”",
-  "slash.context": "Gerir os ramos que os pedidos de IA desta peça leem"
+  "slash.context": "Gerir os ramos que os pedidos de IA desta peça leem",
+  "mesh-modal.needs-location": "é necessário um local para entrar",
+  "mesh-modal.needs-secret": "é necessário um segredo para entrar"
 }

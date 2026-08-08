@@ -1945,5 +1945,7 @@
   "views.scope.hierarchy": "階層全体",
   "views.scope.layer-desc": "このレイヤーの直下にある子タイルだけを使います。",
   "views.scope.hierarchy-desc": "すべての子孫を、階層と参照元のパスを保ったまま使います。",
-  "views.aria": "ビュー"
+  "views.aria": "ビュー",
+  "mesh-modal.needs-location": "参加するには場所が必要です",
+  "mesh-modal.needs-secret": "参加するには秘密鍵が必要です"
 }

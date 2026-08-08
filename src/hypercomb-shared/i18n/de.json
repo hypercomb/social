@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "hier nicht lesbar",
   "context.detach": "„{name}“ lösen",
   "context.ask": "Zu „{cell}“ fragen",
-  "slash.context": "Die Zweige verwalten, die die KI-Anfragen dieser Kachel lesen"
+  "slash.context": "Die Zweige verwalten, die die KI-Anfragen dieser Kachel lesen",
+  "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
+  "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt"
 }

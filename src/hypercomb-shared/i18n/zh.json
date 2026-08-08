@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "此处无法读取",
   "context.detach": "取消附加“{name}”",
   "context.ask": "询问关于“{cell}”",
-  "slash.context": "管理此格子的 AI 请求所读取的分支"
+  "slash.context": "管理此格子的 AI 请求所读取的分支",
+  "mesh-modal.needs-location": "加入需要一个位置",
+  "mesh-modal.needs-secret": "加入需要一个密钥"
 }

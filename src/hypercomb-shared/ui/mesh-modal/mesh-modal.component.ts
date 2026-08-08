@@ -52,6 +52,10 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly labelDraft = signal('')
   readonly hostDraft = signal('')
   readonly secretVisible = signal(false)
+  /** JOIN mode only: which credential blocked the start ('room' | 'secret'),
+   *  so the field can say so instead of the dialog closing on a join that
+   *  could never have worked. Cleared on every open and on a good start. */
+  readonly missingField = signal<'room' | 'secret' | null>(null)
   /** JOIN mode only: persisted opt-out so a future join skips the pre-join
    *  privacy-review step (mesh-header reads `hc:skip-privacy-review`). */
   readonly skipReview = signal(false)
@@ -102,6 +106,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       this.labelDraft.set(this.#readMyLabel())
       this.hostDraft.set(this.#readHost())
       this.secretVisible.set(false)
+      this.missingField.set(null)
       try { this.skipReview.set(localStorage.getItem('hc:skip-privacy-review') === '1') }
       catch { this.skipReview.set(false) }
       this.open.set(true)
@@ -233,6 +238,18 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     const secret = this.secretDraft().trim()
     const label = this.labelDraft().trim().slice(0, 64)
     const host = this.hostDraft().trim()
+
+    // START with a half-set zone used to join anyway, and the swarm then
+    // refused to subscribe or publish (it composes its sig from BOTH
+    // credentials) — a hive that looked joined and saw nobody, with nothing
+    // said. Joining needs both; stay open and point at what is missing.
+    // Non-join saves are unaffected: clearing the zone from the editor is a
+    // legitimate way to go quiet.
+    if (this.joinMode() && (!room || !secret)) {
+      this.missingField.set(!room ? 'room' : 'secret')
+      return
+    }
+    this.missingField.set(null)
     this.#roomStore?.set(room)
     this.#secretStore?.set(secret)
     // Host writes directly to localStorage — single canonical key, no

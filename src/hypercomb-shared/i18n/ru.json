@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "здесь не читается",
   "context.detach": "открепить «{name}»",
   "context.ask": "Спросить о «{cell}»",
-  "slash.context": "Управлять ветвями, которые читают ИИ-запросы этой плитки"
+  "slash.context": "Управлять ветвями, которые читают ИИ-запросы этой плитки",
+  "mesh-modal.needs-location": "для присоединения нужно место",
+  "mesh-modal.needs-secret": "для присоединения нужен секрет"
 }

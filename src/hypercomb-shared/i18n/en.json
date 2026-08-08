@@ -1992,5 +1992,7 @@
   "views.scope.hierarchy": "Hierarchy",
   "views.scope.layer-desc": "Use only this layer's direct child tiles.",
   "views.scope.hierarchy-desc": "Use every descendant, with its hierarchy and source path preserved.",
-  "views.aria": "Views"
+  "views.aria": "Views",
+  "mesh-modal.needs-location": "a location is needed to join",
+  "mesh-modal.needs-secret": "a secret is needed to join"
 }

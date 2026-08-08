@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "illisible ici",
   "context.detach": "détacher « {name} »",
   "context.ask": "Poser une question sur « {cell} »",
-  "slash.context": "Gérer les branches que lisent les requêtes IA de cette tuile"
+  "slash.context": "Gérer les branches que lisent les requêtes IA de cette tuile",
+  "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
+  "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
 }

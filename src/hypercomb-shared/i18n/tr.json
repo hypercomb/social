@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "burada okunamıyor",
   "context.detach": "“{name}” bağlantısını kaldır",
   "context.ask": "“{cell}” hakkında sor",
-  "slash.context": "Bu karonun YZ isteklerinin okuduğu dalları yönet"
+  "slash.context": "Bu karonun YZ isteklerinin okuduğu dalları yönet",
+  "mesh-modal.needs-location": "katılmak için bir konum gerekli",
+  "mesh-modal.needs-secret": "katılmak için bir parola gerekli"
 }

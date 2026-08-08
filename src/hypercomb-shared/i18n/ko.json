@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "여기서 읽을 수 없음",
   "context.detach": "“{name}” 분리",
   "context.ask": "“{cell}”에 대해 묻기",
-  "slash.context": "이 타일의 AI 요청이 읽는 가지를 관리합니다"
+  "slash.context": "이 타일의 AI 요청이 읽는 가지를 관리합니다",
+  "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
+  "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다"
 }

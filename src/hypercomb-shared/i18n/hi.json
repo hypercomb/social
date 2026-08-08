@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "यहाँ पढ़ने योग्य नहीं",
   "context.detach": "“{name}” अलग करें",
   "context.ask": "“{cell}” के बारे में पूछें",
-  "slash.context": "इस टाइल के AI अनुरोध जो शाखाएँ पढ़ते हैं उन्हें प्रबंधित करें"
+  "slash.context": "इस टाइल के AI अनुरोध जो शाखाएँ पढ़ते हैं उन्हें प्रबंधित करें",
+  "mesh-modal.needs-location": "शामिल होने के लिए एक स्थान चाहिए",
+  "mesh-modal.needs-secret": "शामिल होने के लिए एक गुप्त कुंजी चाहिए"
 }

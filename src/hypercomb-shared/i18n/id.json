@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "tak terbaca di sini",
   "context.detach": "lepaskan “{name}”",
   "context.ask": "Tanya tentang “{cell}”",
-  "slash.context": "Kelola cabang yang dibaca permintaan AI ubin ini"
+  "slash.context": "Kelola cabang yang dibaca permintaan AI ubin ini",
+  "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
+  "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung"
 }

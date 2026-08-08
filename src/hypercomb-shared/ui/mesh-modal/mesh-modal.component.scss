@@ -132,6 +132,20 @@
   }
 }
 
+// The credential that blocked START. Marks the field rather than throwing a
+// dialog: the answer is one keystroke away, in the box already on screen.
+.mesh-modal-input-missing {
+  border-color: rgba(255, 138, 128, 0.7);
+}
+
+.mesh-modal-missing {
+  margin: 0.35rem 0 0;
+  color: rgba(255, 138, 128, 0.9);
+  font-family: var(--hc-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+}
+
 // ── secret row (input + eye toggle) ───────────────────
 .mesh-modal-secret-row {
   display: flex;

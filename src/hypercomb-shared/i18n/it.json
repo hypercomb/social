@@ -1347,5 +1347,7 @@
   "context.row.unreadable": "illeggibile qui",
   "context.detach": "stacca «{name}»",
   "context.ask": "Chiedi di «{cell}»",
-  "slash.context": "Gestisci i rami che le richieste IA di questa tessera leggono"
+  "slash.context": "Gestisci i rami che le richieste IA di questa tessera leggono",
+  "mesh-modal.needs-location": "serve un luogo per unirsi",
+  "mesh-modal.needs-secret": "serve un segreto per unirsi"
 }

@@ -538,7 +538,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -1506,6 +1506,27 @@ export class SwarmDrone extends Drone {
     void this.#syncForCurrentLineage()
   }
 
+  // Whether the last gate decision was "incomplete zone". Sync runs on
+  // every lineage change and every store change, so the announcement is
+  // edge-triggered: one report when the swarm goes dead, one when it
+  // recovers, nothing in between.
+  #zoneIncomplete = false
+
+  /** Report a public-but-unreachable swarm. `hasRoom`/`hasSecret` name the
+   *  field that is missing so the shell can open the selector focused on it
+   *  rather than asking the participant to guess. */
+  #announceZoneIncomplete = (hasRoom: boolean, hasSecret: boolean): void => {
+    if (this.#zoneIncomplete) return
+    this.#zoneIncomplete = true
+    this.emitEffect('swarm:zone-incomplete', { hasRoom, hasSecret })
+  }
+
+  #announceZoneComplete = (): void => {
+    if (!this.#zoneIncomplete) return
+    this.#zoneIncomplete = false
+    this.emitEffect('swarm:zone-complete', {})
+  }
+
   #syncForCurrentLineage = async (): Promise<void> => {
     const lineage = this.#getLineage()
     const sigStore = this.#getSignatureStore()
@@ -1520,8 +1541,19 @@ export class SwarmDrone extends Drone {
     if (!room || !secret) {
       const meshPublic = typeof localStorage !== 'undefined' ? localStorage.getItem('hc:mesh-public') : null
       slog('[swarm] syncForCurrentLineage: room/secret missing — broadcast skipped', { hasRoom: !!room, hasSecret: !!secret, meshPublic })
+      // Declining is correct — never broadcast without an explicit zone.
+      // Declining SILENTLY is not. A hive that flipped public with a
+      // half-set zone opens a relay socket, paints the swarm chrome, and
+      // then drops every subscribe and publish on this line: no sig, no
+      // peers, no adopt affordance, no error. It reads exactly like a dead
+      // relay, and on a bare-domain origin (nothing seeds a room there) it
+      // is the DEFAULT outcome of joining any way but through the selector.
+      // Say so, once per transition, so the shell can route the participant
+      // back to the selector instead of leaving them in a dead swarm.
+      if (meshPublic === 'true') this.#announceZoneIncomplete(!!room, !!secret)
       return
     }
+    this.#announceZoneComplete()
     slog('[swarm] syncForCurrentLineage: proceeding', { roomLen: room.length, secretLen: secret.length })
 
     const segsRaw = lineage.explorerSegments?.() ?? []

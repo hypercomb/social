@@ -49,8 +49,12 @@
           type="text"
           [placeholder]="'mesh-modal.location-placeholder' | t"
           [value]="roomDraft()"
+          [class.mesh-modal-input-missing]="missingField() === 'room'"
           (input)="onRoomInput($event)"
         />
+        @if (missingField() === 'room') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-location' | t }}</p>
+        }
         @if (savedLocations().length > 0) {
           <div class="mesh-modal-chips">
             @for (loc of savedLocations(); track loc) {
@@ -79,6 +83,7 @@
             [type]="secretInputType()"
             [placeholder]="'mesh-modal.secret-placeholder' | t"
             [value]="secretDraft()"
+            [class.mesh-modal-input-missing]="missingField() === 'secret'"
             (input)="onSecretInput($event)"
             autocomplete="off"
             spellcheck="false"
@@ -90,6 +95,9 @@
             <span class="material-symbols-outlined">{{ secretVisible() ? 'visibility_off' : 'visibility' }}</span>
           </button>
         </div>
+        @if (missingField() === 'secret') {
+          <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-secret' | t }}</p>
+        }
       </section>
 
     </div>
