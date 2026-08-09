@@ -248,6 +248,36 @@ export class HostSyncService extends EventTarget {
     void this.drain()
   }
 
+  /** Give this participant a durable place to put bytes before they share.
+   *
+   *  The swarm carries SIGNATURES, never bytes: peers resolve an image by
+   *  fetching it from a host. A participant with no host therefore announces
+   *  tiles whose pictures no one on earth can fetch — every candidate host
+   *  404s and the tile renders bare. That is the whole "tiles show, images
+   *  don't" bug.
+   *
+   *  Not everyone runs a host, and they don't need to: the public content
+   *  endpoint auto-grants an unknown pubkey 100MB for 90 days on its first
+   *  upload (public-content-endpoint.md — AUTO_GRANT), so a participant with
+   *  nothing but a key has somewhere to put their pictures.
+   *
+   *  A participant who already has a target keeps it — their own host wins,
+   *  and we never re-enable a CDN they deliberately turned off (`'0'` is a
+   *  decision; absent is merely unasked).
+   *
+   *  CONSENT: joining a swarm IS the gesture — it is an explicit act that
+   *  says "share these tiles with these people", and sharing them is exactly
+   *  what puts their bytes on a host. Callers must not invoke this on boot,
+   *  on navigation, or anywhere a participant has not asked to share. */
+  public readonly ensureSwarmTarget = (): boolean => {
+    if (this.#anyEnabled()) return false
+    let optedOut = false
+    try { optedOut = localStorage.getItem(PUBLIC_HOST_KEY) === '0' } catch { /* treat as unasked */ }
+    if (optedOut) return false
+    this.enablePublicHost()
+    return true
+  }
+
   /** Opt out of the public CDN target. Queued entries and `.public`
    *  markers stay on disk (not destructive); public pushes stop until the
    *  gate is flipped back on. Bytes already on the CDN remain — the CDN

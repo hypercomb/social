@@ -1076,6 +1076,16 @@ export class SwarmDrone extends Drone {
         mesh.resubscribeAll?.()
       }
 
+      if (payload?.public === true) {
+        // Bytes before broadcast. Every join path lands here, so this is the
+        // one place that can promise a participant has somewhere to put the
+        // pictures they are about to advertise. Without a target the
+        // availability gate holds everything back — correct, but useless;
+        // with one, the drain stages the closure and tiles announce as
+        // receipts land. Own host wins; a deliberate CDN opt-out is honored.
+        try { this.#getHostSync()?.ensureSwarmTarget?.() } catch { /* never block the join */ }
+      }
+
       if (payload?.public === false) {
         // Graceful leave — tell the whole swarm we're gone in one shot so
         // peers drop our tiles immediately instead of waiting on beacon
@@ -2323,18 +2333,31 @@ export class SwarmDrone extends Drone {
     const filteredRefs: { name: string; layerSig?: string }[] = []
     const hostSync = this.#getHostSync()
     // AVAILABILITY GATE — the share doctrine: "to share something in a
-    // swarm it already has to be available." ACTIVE only when a durable
-    // host is configured (self-domain and/or public CDN opt-in); with no
-    // host at all, mesh-only live sharing keeps its ungated behavior
-    // (dev/test: two browsers over a relay while the sharer is online).
-    // Under the gate, a public child is announced ONLY once its closure
-    // holds confirmed read-back receipts on at least one enabled host —
-    // until then it is HELD BACK (and retracted if previously announced):
-    // announcing a sig no host serves is exactly the receiver-404 bug.
-    // markPublic below stages the uploads; every landed receipt bumps the
-    // gate's epoch and `host:receipt` re-triggers this walk, so held
-    // content announces the moment it becomes durable.
-    const gateActive = hostSync?.isGateActive?.() === true && typeof hostSync?.isClosureAvailable === 'function'
+    // swarm it already has to be available." Being in a swarm MEANS the
+    // files are there, so adopt never 404s. A public child is announced
+    // ONLY once its closure holds confirmed read-back receipts on at least
+    // one enabled host — until then it is HELD BACK (and retracted if
+    // previously announced): announcing a sig no host serves is exactly the
+    // receiver-404 bug. markPublic below stages the uploads; every landed
+    // receipt bumps the gate's epoch and `host:receipt` re-triggers this
+    // walk, so held content announces the moment it becomes durable.
+    //
+    // The gate used to switch OFF whenever no host was configured, which
+    // read as a dev convenience and was in fact the default for every real
+    // participant (both host-sync gates ship off). So the one case the gate
+    // exists for — a hive with nowhere to put its bytes — was precisely the
+    // case that skipped it, and peers got tiles whose pictures 404'd on
+    // every candidate host. Going public now provisions a target instead
+    // (ensureSwarmTarget, on mesh:public-changed), so "no host" is no longer
+    // a state a sharing hive is in.
+    //
+    // `hc:swarm:ungated` = '1' keeps the old behavior for the local
+    // two-browser loop, where nothing is uploaded and both peers are online
+    // anyway. Explicit, opt-in, and never the default — the previous escape
+    // was implicit, which is why it swallowed production.
+    let ungated = false
+    try { ungated = localStorage.getItem('hc:swarm:ungated') === '1' } catch { /* gated */ }
+    const gateActive = !ungated && typeof hostSync?.isClosureAvailable === 'function'
     const heldBack: string[] = []
     for (const c of childRefs) {
       if (isCellPublic(publicLocation, c.name)) {
@@ -3365,7 +3388,12 @@ const payload: SwarmLayerPayload = myLabel
       // re-announce via the host:receipt republish once their uploads
       // confirm. Sealed handles are pool-written locally at seal time, so
       // the closure walk always has bytes to verify against.
-      if (hostSync?.isGateActive?.() === true && typeof hostSync.isClosureAvailable === 'function') {
+      // Same unconditional contract as #publishSubtree above — the old
+      // isGateActive() check meant a hostless hive skipped the gate on this
+      // surface too, so a follower adopted handles nothing served.
+      let channelUngated = false
+      try { channelUngated = localStorage.getItem('hc:swarm:ungated') === '1' } catch { /* gated */ }
+      if (!channelUngated && typeof hostSync?.isClosureAvailable === 'function') {
         const gated: typeof childEntries = []
         for (const c of childEntries) {
           let available = false
@@ -4042,6 +4070,8 @@ const payload: SwarmLayerPayload = myLabel
       markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<void>
       isGateActive?: () => boolean
       isClosureAvailable?: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<boolean>
+      /** Provision a durable byte target on join — see host-sync.service. */
+      ensureSwarmTarget?: () => boolean
     } | undefined
 
   #getRegistry = (): TileSourceRegistryLike | undefined =>
