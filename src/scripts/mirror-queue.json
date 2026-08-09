@@ -424,6 +424,15 @@
       "commit": "b8b25018a",
       "created": "2026-08-09",
       "status": "pending"
+    },
+    {
+      "id": "notes-strip-stylesheet-split",
+      "title": "Notes strip stylesheets — one sheet per surface, 11 new source resources",
+      "run": null,
+      "note": "notes-strip.component.scss (91kB, 61.33kB compiled) was split into 11 per-surface stylesheets plus two @use partials, all listed in the component's styleUrls; compiled CSS is byte-identical, largest sheet is now 9.87kB. Tiles are 1:1 with source resources, so the notes-view creation's mirror now under-counts: the one .scss part tile needs to become part tiles for _notes-strip-shared.scss, _notes-strip-reading-pane.scss, notes-strip.{component,frame,tabs,rail,form,tree,navigator,plate,reading,lists,desk}.scss, each marked 'part'. Also restate the source pointer in the dock-drag mirror (scripts/mirror-notes-dock-drag.ts writes 'source: .../notes-strip.component.scss' for the drag affordance, which now lives in notes-strip.tabs.scss). Manual because note-add is additive and the existing .scss note must be replaced, not doubled. Files: hypercomb-shared/ui/notes-strip/*.scss.",
+      "unattended": false,
+      "created": "2026-08-09",
+      "status": "pending"
     }
   ]
 }

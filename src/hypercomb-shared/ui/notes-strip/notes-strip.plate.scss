@@ -1,0 +1,292 @@
+// hypercomb-shared/ui/notes-strip/notes-strip.plate.scss
+//
+// The identity plate, and the navigator's hover card.
+// The plate that names the tile the strip is open on — hexagon, path,
+// counts — and the peek card the navigator raises over a tile in the list.
+//
+// One of the notes strip's surface stylesheets. Each surface is its own
+// entry in the component's `styleUrls`, listed in the order the rules were
+// always in — so the cascade is unchanged, and no single sheet carries the
+// whole panel.
+
+@use './notes-strip-shared' as *;
+
+// ── Identity plate ───────────────────────────────────────
+// The panel's answer to "which tile am I writing on". A hexagon carrying the
+// tile's own picture (the same bytes the canvas paints) sits beside its name,
+// its place in the tree, and what it holds. Two forms share one block: narrow
+// is a single compact line, `.is-wide` grows the hexagon and opens the detail
+// column. The switch is driven by PANEL width in the component, not a media
+// query — the strip can be a thin rail on a huge screen.
+.cv2-plate {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  // A faint wash so the plate reads as the panel's masthead rather than a
+  // first row of the list.
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--md-secondary) 7%, transparent),
+    transparent
+  );
+}
+
+// The hexagon. Flat-top-to-point clip matching every other tile-identity hex
+// in the shell (aggregate index, collections landing, clipboard panel), so a
+// tile looks like the same object wherever it is shown.
+.cv2-plate-hex {
+  flex: 0 0 auto;
+  position: relative;
+  width: 34px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background: color-mix(in srgb, var(--md-secondary) 16%, rgba(255, 255, 255, 0.04));
+  // No size transition: the plate changes form when the panel changes form,
+  // and an animating hexagon would drag behind the user's resize.
+}
+.cv2-plate-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+// No picture — the tile's initial, so the hexagon still says "this tile"
+// instead of reading as a failed image.
+.cv2-plate-initial {
+  font-family: var(--hc-mono, system-ui);
+  font-size: 1rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--md-secondary) 85%, white);
+  line-height: 1;
+}
+
+.cv2-plate-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.cv2-plate-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--md-on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+// Where the tile lives, one chip per explorer segment with a hairline
+// separator drawn between them.
+.cv2-plate-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.3rem;
+  font-size: 0.66rem;
+  color: color-mix(in srgb, var(--md-on-surface) 48%, transparent);
+  overflow: hidden;
+}
+.cv2-plate-seg {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  & + &::before {
+    content: '/';
+    margin-right: 0.3rem;
+    color: color-mix(in srgb, var(--md-on-surface) 28%, transparent);
+  }
+}
+.cv2-plate-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  font-size: 0.68rem;
+  color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.cv2-plate-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+
+  &.is-q { color: color-mix(in srgb, var(--md-secondary) 85%, var(--md-on-surface)); }
+  &.is-a { color: rgb(110, 180, 255); }
+}
+// Tiny hexagon in front of the child-tile count — the count is about TILES,
+// so it carries the tile glyph rather than a note dot.
+.cv2-plate-stat-hex {
+  display: inline-block;
+  width: 7px;
+  height: 8px;
+  background: currentColor;
+  opacity: 0.75;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+}
+
+// Wide form — the panel has room, so the hexagon becomes the anchor of the
+// masthead and the details spread out beside it.
+.cv2-plate.is-wide {
+  gap: 0.85rem;
+  padding: 0.75rem 0.85rem;
+
+  .cv2-plate-hex { width: 62px; height: 71px; }
+  .cv2-plate-initial { font-size: 1.7rem; }
+  .cv2-plate-name { font-size: 1.05rem; }
+  .cv2-plate-stats { font-size: 0.72rem; }
+}
+
+// ── Tile hover card (navigator peek) ─────────────────────
+// Hovering a tile in the navigator lists what is written on it, without
+// leaving the tile being edited. Fixed to the viewport and opened to the LEFT
+// of the docked strip; pointer-transparent, because it is a look, not a
+// target — the pointer must stay free to reach the next chip.
+.cv2-peek {
+  position: fixed;
+  z-index: 60050;
+  pointer-events: none;
+  width: min(360px, 46vw);
+  max-height: 60vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0.45rem 0.55rem 0.5rem;
+  background: rgba(14, 14, 22, 0.97);
+  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in srgb, #{$steel} 45%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  font-family: var(--hc-mono, system-ui);
+  animation: cv2-peek-in var(--md-dur-short, 140ms) var(--md-easing-standard, ease-out);
+}
+
+// PINNED — the selected tile's card. It takes the pointer (its rows are the
+// note selector), scrolls instead of truncating, and wears the steel rim a
+// little brighter so it reads as a surface you can work in rather than a
+// tooltip that will vanish.
+.cv2-peek.is-pinned {
+  pointer-events: auto;
+  border-color: color-mix(in srgb, #{$steel} 70%, transparent);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($steel, 0.12) inset;
+  animation: none;   // it is not appearing and disappearing; it is just there
+
+  .cv2-peek-list {
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .cv2-peek-row {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 0.2rem 0.35rem;
+    &:hover { background: color-mix(in srgb, var(--md-on-surface) 9%, transparent); }
+    &.is-active {
+      background: color-mix(in srgb, #{$steel} 20%, transparent);
+      box-shadow: inset 2px 0 0 0 rgba($steel, 0.9);
+      color: var(--md-on-surface-strong, var(--md-on-surface));
+    }
+    // A mark dragged from the rail, hovering a row of the pinned card.
+    &.is-mark-target {
+      background: color-mix(in srgb, #{$steel} 26%, transparent);
+      box-shadow: inset 0 0 0 1px rgba($steel, 0.7);
+    }
+  }
+}
+.cv2-peek-spacer { flex: 1 1 auto; }
+.cv2-peek-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--md-on-surface) 18%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--md-on-surface) 65%, transparent);
+  cursor: pointer;
+  &:hover {
+    border-color: rgba($steel, 0.6);
+    color: color-mix(in srgb, #{$steel} 85%, white);
+  }
+}
+@keyframes cv2-peek-in {
+  from { opacity: 0; transform: translateX(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.cv2-peek-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.3rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+
+  .hex-mark { font-size: 0.75rem; }
+}
+.cv2-peek-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--md-on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv2-peek-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.cv2-peek-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.13rem 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
+
+  &.is-q { color: color-mix(in srgb, var(--md-secondary) 80%, var(--md-on-surface)); }
+  &.is-a { color: rgb(140, 195, 255); }
+
+  .dot { flex: 0 0 auto; transform: translateY(-1px); }
+}
+.cv2-peek-mark {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1;
+  transform: translateY(2px);
+  color: color-mix(in srgb, var(--md-secondary) 75%, var(--md-on-surface));
+}
+// One line each — the card is a peek, not the list. Anything longer is read
+// by clicking through to the tile.
+.cv2-peek-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv2-peek-more,
+.cv2-peek-empty {
+  padding-top: 0.3rem;
+  font-size: 0.68rem;
+  font-style: italic;
+  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+}
+
+// Prompt shown in place of the editor when no tile is active yet.
+.cv2-empty-hint {
+  padding: 0.7rem 0.8rem;
+  color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
+  font-size: 0.8rem;
+}
+

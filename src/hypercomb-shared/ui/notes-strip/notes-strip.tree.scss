@@ -1,0 +1,584 @@
+// hypercomb-shared/ui/notes-strip/notes-strip.tree.scss
+//
+// The notes tree — the cards, their nesting, and their drag.
+// The note cards themselves (mark, grip, kind, text, caret, kebab), the
+// search over them, the drag-reorder visuals, the chevron/drop states and
+// popovers that make the hierarchy legible, and the per-note shape glyph.
+//
+// One of the notes strip's surface stylesheets. Each surface is its own
+// entry in the component's `styleUrls`, listed in the order the rules were
+// always in — so the cascade is unchanged, and no single sheet carries the
+// whole panel.
+
+@use './notes-strip-shared' as *;
+
+// ── notes list (Comb v2 cards) ──────────────────────────
+// Body fills whatever vertical space the strip's chrome (dragbar,
+// toolbar, filter, footer) leaves behind. No max-height — the strip
+// itself is window-height by default, and the user's resize is honored
+// via the .mode-rows ResizeObserver path.
+.cv2-list {
+  display: flex;
+  flex-direction: column;
+  // Rows start AT THE TOP and stay there. Without this a short list gets
+  // distributed down the column and the first note sits in mid-air.
+  justify-content: flex-start;
+  align-content: flex-start;
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+// Empty column — a fresh tile has no notes yet, which is normal, so it says
+// so and offers the one thing there is to do rather than showing a void.
+.cv2-col-blank {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.7rem 0.6rem;
+  font-size: 0.76rem;
+  font-style: italic;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+
+  .cv2-reading-edit { font-style: normal; }
+}
+
+// The pane's action button, defined at the top level as well as inside the
+// pane mixin: the empty column offers the same "add a note" affordance, and
+// it must not read as a different control just because it is elsewhere.
+.cv2-reading-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--md-on-surface) 16%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
+  font-family: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+  .mat-sym { font-size: 15px; }
+  &:hover {
+    border-color: rgba($steel, 0.55);
+    color: color-mix(in srgb, #{$steel} 85%, white);
+    background: rgba($steel, 0.08);
+  }
+}
+
+// ── Notes search (within the active tile) ────────────────
+// Free-text box above the notes tree; prunes the tree to matching notes and
+// their ancestors. Mirrors the tile cloud's find box styling.
+.cv2-notes-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--md-outline-variant);
+  flex-shrink: 0;
+
+  .mat-sym { color: color-mix(in srgb, var(--md-on-surface) 55%, transparent); }
+}
+.cv2-notes-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: 0.8rem;
+
+  &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 45%, transparent); }
+}
+
+// Empty state shown when a search prunes the tree to nothing.
+.cv2-cloud-empty {
+  padding: 0.6rem 0.7rem;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.cv2-note {
+  display: grid;
+  // chevron (16px) · grip (16px) · body (1fr) · kebab (20px). The per-note
+  // select checkbox was removed; the body column (1fr) must follow the grip
+  // directly or the text squeezes into a stale fixed column on the left.
+  grid-template-columns: 16px 16px 1fr 20px;
+  gap: 5px;
+  align-items: start;
+  // OUTLINE ROWS, NOT CARDS. Every row used to be its own bordered,
+  // rounded, tinted box — at any real note count that reads as a wall of
+  // grey bricks with the hierarchy buried inside it. A row is now a plain
+  // line of text; depth is carried by the indent + the guide hairlines
+  // below, the way a file tree or an outliner does it.
+  padding: 3px 6px 3px calc(8px + var(--depth, 0) * #{$indent-step});
+  position: relative;  // anchor for kebab + nest-picker popovers
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  transition: background-color var(--md-dur-short) var(--md-easing-standard);
+
+  // Indent guides — one hairline per ancestor level, painted ONLY across
+  // the indent gutter (the gradient's box is exactly depth × step wide, so
+  // a depth-0 row paints nothing). Cheaper and more robust than nesting a
+  // container per level, which the flat recursive template can't produce.
+  background-image: repeating-linear-gradient(
+    to right,
+    #{$guide} 0 1px,
+    transparent 1px #{$indent-step}
+  );
+  background-repeat: no-repeat;
+  background-position: 8px 0;
+  background-size: calc(var(--depth, 0) * #{$indent-step}) 100%;
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
+  }
+
+  &.is-selected {
+    background-color: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+  }
+
+  &.is-editing {
+    background-color: color-mix(in srgb, var(--md-secondary) 10%, transparent);
+  }
+
+  &.cv2-note-q {
+    background-color: color-mix(in srgb, var(--md-secondary) 7%, transparent);
+  }
+
+  &.cv2-note-a {
+    background-color: color-mix(in srgb, var(--md-primary) 7%, transparent);
+  }
+
+  // ── Heading rows ────────────────────────────────────────
+  // A note whose mark's meaning is roled `heading` reads as a section
+  // break: air above it, heavier type, the accent on the glyph. The role
+  // lives on the PALETTE entry, so re-roling one icon restyles every row
+  // that carries it — that is what "giving an icon meaning" buys.
+  &.is-heading {
+    margin-top: 12px;
+    padding-top: 5px;
+
+    .cv2-note-text {
+      font-size: 0.84rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      color: var(--md-on-surface);
+    }
+    .cv2-note-mark {
+      font-size: 17px;
+      color: var(--md-secondary);
+    }
+  }
+  // No leading gap when the tree opens on a heading.
+  &.is-heading:first-child { margin-top: 0; }
+
+  // ── Prose rows ──────────────────────────────────────────
+  // The quiet role. Its glyph recedes and the text softens a step, so the
+  // three roles read apart at a glance: heading = bright accent, list =
+  // steel, prose = quiet grey.
+  &.is-prose {
+    .cv2-note-mark {
+      color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+    }
+    .cv2-note-text {
+      color: color-mix(in srgb, var(--md-on-surface) 78%, transparent);
+    }
+  }
+
+  // ── The reading selection ───────────────────────────────
+  // The row the fullscreen reading pane is showing. A steel edge-rail plus
+  // a wash — present without shouting, and distinct from `.is-editing`'s
+  // warm tint so "being read" and "being edited" never blur.
+  &.is-reading {
+    background-color: color-mix(in srgb, #{$steel} 13%, transparent);
+    box-shadow: inset 2px 0 0 #{$steel};
+  }
+}
+
+// The mark glyph a row paints when the note carries an icon (the legacy
+// .hc-shape-glyph is the fallback for notes written before marks existed).
+// Steel by default — the LIST role's colour; heading and prose rows restate
+// it above so each role's glyph is its own colour, never one grey soup.
+.cv2-note-mark {
+  grid-column: 1;      // the glyph column, beside the text — never above it
+  @include hex-mark(19px, 21px, 12px);
+  margin-right: 5px;
+  vertical-align: -4px;
+}
+
+// Drag grip — a single slim vertical rail, drawn in CSS. The Material
+// `drag_indicator` six-dot glyph it replaced read as clip-art at this size;
+// a hairline rail is the quiet, professional convention (Linear, Notion) and
+// reads as "grab this edge" without competing with the note text.
+.cv2-note-grip {
+  display: flex;
+  // Center against the note text's first line box (14px × 1.5 = 21px)
+  // instead of pinning to the top with a baseline nudge.
+  align-items: center;
+  justify-content: center;
+  min-height: 21px;
+  opacity: 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;  // let the pointer drag take over (no native scroll)
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
+
+  &::before {
+    content: '';
+    width: 2px;
+    height: 15px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--md-on-surface) 30%, transparent);
+    transition: background var(--md-dur-short) var(--md-easing-standard);
+  }
+
+  .cv2-note:hover & { opacity: 1; }
+  &:hover::before { background: color-mix(in srgb, var(--md-on-surface) 60%, transparent); }
+  &:active { cursor: grabbing; }
+  &:active::before { background: var(--md-secondary); }
+}
+
+// ── note drag-reorder visuals ────────────────────────────
+// Source row dims while being dragged.
+.cv2-note.is-dragging {
+  opacity: 0.4;
+}
+
+// The row's body is a two-column grid: the mark glyph in a leading column,
+// the text beside it. It used to be a plain block, which put the glyph's
+// span on its own line above the `<p>` — the icon read as a row of its own
+// instead of a bullet for the text it marks.
+.cv2-note-body {
+  min-width: 0;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.cv2-note-kind {
+  // The question / answer chip is a caption for the whole row, so it spans
+  // both columns and keeps the glyph aligned with the text under it.
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--md-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--md-secondary);
+  margin-bottom: 4px;
+
+  &.cv2-kind-a { color: var(--md-primary); }
+}
+
+.cv2-note-text {
+  // Column 2 explicitly: with the kind chip spanning the row above, auto
+  // placement would otherwise drop the text into whichever cell came free.
+  // An unmarked note leaves column 1 at zero width (the legacy shape glyph
+  // is display:none), so its text still starts flush at the row's edge.
+  grid-column: 2;
+  margin: 0;
+  font-family: var(--md-font-display);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--md-on-surface);
+  text-wrap: pretty;
+  // pre-wrap preserves user-typed newlines without consuming whitespace,
+  // and lets browsers wrap long lines naturally.
+  white-space: pre-wrap;
+  // Plain-text rendering only — no HTML inside this element. Defense-
+  // in-depth: even if an upstream change accidentally rendered tags,
+  // hyphens / no-break would not be an attack vector here.
+  overflow-wrap: anywhere;
+
+  .cv2-note-q & {
+    font-style: italic;
+    color: var(--md-on-surface-strong);
+  }
+
+  .cv2-note.is-editing & { color: var(--md-on-surface-strong); }
+}
+
+.cv2-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  background: var(--md-secondary);
+  margin-left: 2px;
+  vertical-align: -2px;
+  animation: cv2-blink 1.1s steps(2, end) infinite;
+}
+
+@keyframes cv2-blink { 50% { opacity: 0; } }
+
+.cv2-note-kebab {
+  background: transparent;
+  border: 0;
+  color: var(--md-on-surface-faint);
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  padding: 0;
+
+  .cv2-note:hover &,
+  &.is-open { opacity: 1; }
+
+  &:hover, &.is-open {
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+    color: var(--md-on-surface);
+  }
+}
+
+// ── Tree (chevron + drop states + popovers) ───────────────────
+//
+// The chevron column sits at the row's leading edge. Leaves render a
+// transparent spacer of the same width so rows align horizontally
+// across the tree regardless of whether a node has children.
+.cv2-note-chevron,
+.cv2-note-chevron-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.cv2-note-chevron {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--md-on-surface-faint);
+
+  &:hover { color: var(--md-on-surface); }
+
+  // Chevron mark is a pure-CSS triangle pointing down. Rotates -90deg
+  // when collapsed so it points right ("expand me"). No glyph font.
+  .cv2-chevron-mark {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    transition: transform var(--md-dur-short, 0.12s) var(--md-easing-standard, ease);
+  }
+  &.is-collapsed .cv2-chevron-mark {
+    transform: rotate(-90deg);
+  }
+}
+
+// Drop indicators painted on the row itself during a drag-to-nest.
+// 'into' = ring around the row (= drop as child).
+// 'before' / 'after' = top / bottom edge accent.
+.cv2-note.is-drop-into {
+  background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--md-secondary) 65%, transparent);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.cv2-note.is-drop-before {
+  box-shadow: inset 0 2px 0 0 color-mix(in srgb, var(--md-secondary) 75%, transparent);
+}
+.cv2-note.is-drop-after {
+  box-shadow: inset 0 -2px 0 0 color-mix(in srgb, var(--md-secondary) 75%, transparent);
+}
+
+// Mark-drop target: the row a rail icon is hovering. Distinct from the
+// nest indicators above — a left edge accent pointing back at the rail the
+// icon came from, so the two drags never read as the same gesture.
+.cv2-note.is-mark-target {
+  background: color-mix(in srgb, var(--md-secondary) 10%, transparent);
+  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--md-secondary) 80%, transparent);
+  border-radius: 4px;
+}
+
+// Root-drop affordance: when the user drags a nested note to the empty
+// area below all rows, the list body shows a faint accent at its
+// bottom edge to telegraph "drop here to un-nest".
+.cv2-list.has-root-drop {
+  box-shadow: inset 0 -3px 0 0 color-mix(in srgb, var(--md-secondary) 60%, transparent);
+}
+
+// Kebab popover — small anchored menu off the kebab button. Positioned
+// absolutely against the .cv2-note article (which has position: relative
+// elsewhere in the file).
+.cv2-kebab-menu {
+  position: absolute;
+  top: 26px;
+  right: 6px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--md-surface-c-high);
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 80%, transparent);
+  border-radius: 6px;
+  box-shadow: var(--md-elev-3);
+  font-family: var(--md-font-ui);
+  font-size: 12px;
+}
+
+.cv2-kebab-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+
+  &.cv2-kebab-danger {
+    color: color-mix(in srgb, var(--md-error, #d33) 85%, var(--md-on-surface));
+  }
+}
+
+// Nest-target picker popover — same anchor as the kebab; replaces the
+// kebab menu while open. Scrolls when the candidate list is tall.
+.cv2-nest-picker {
+  position: absolute;
+  top: 26px;
+  right: 6px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-height: 280px;
+  padding: 4px;
+  background: var(--md-surface-c-high);
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 80%, transparent);
+  border-radius: 6px;
+  box-shadow: var(--md-elev-3);
+  font-family: var(--md-font-ui);
+  font-size: 12px;
+  overflow-y: auto;
+}
+
+.cv2-nest-picker-head {
+  padding: 4px 8px 6px;
+  font-family: var(--md-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-faint);
+}
+
+.cv2-nest-picker-empty {
+  padding: 8px;
+  color: var(--md-on-surface-faint);
+  font-style: italic;
+}
+
+.cv2-nest-picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+
+  &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+}
+
+// Mark icon on a candidate row — same idea as the note row: the mark when
+// the note has one, the legacy shape glyph otherwise.
+.cv2-nest-picker-mark {
+  font-size: 14px;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
+}
+.cv2-nest-picker-shape {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.cv2-nest-picker-item:not(:has(.hc-shape-circle, .hc-shape-square, .hc-shape-triangle, .hc-shape-diamond, .hc-shape-star, .hc-shape-hexagon)) .cv2-nest-picker-shape {
+  display: none;
+}
+
+.cv2-nest-picker-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+// ── per-note shape glyph ─────────────────────────────────
+// Each .cv2-note article carries an .hc-shape-X class (toggled from
+// the data via [class.hc-shape-X]) when the user has tagged the note.
+// The static <span class="hc-shape-glyph cv2-note-shape"> lives at the
+// top of the body; the parent's class chooses which shape paints it.
+// All shape paint rules come from hypercomb-shared/styles/_notes-shapes
+// (imported above).
+.cv2-note-shape {
+  grid-column: 1;      // same glyph column the mark uses
+  margin-right: 6px;
+  align-self: flex-start;
+  margin-top: 5px;
+}
+.cv2-note:not(.hc-shape-circle):not(.hc-shape-square):not(.hc-shape-triangle):not(.hc-shape-diamond):not(.hc-shape-star):not(.hc-shape-hexagon) .cv2-note-shape {
+  display: none;
+}
+
+// add-note row
+.cv2-add-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px dashed var(--md-outline-variant);
+  border-radius: 8px;
+  color: var(--md-on-surface-faint);
+  font-family: var(--md-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--md-secondary) 35%, transparent);
+    color: var(--md-on-surface-var);
+  }
+}
+
+.cv2-add-kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 3px;
+  color: var(--md-on-surface-faint);
+}
+

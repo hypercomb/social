@@ -163,7 +163,25 @@ type InputModeStackLike = {
   standalone: true,
   imports: [TranslatePipe, NgTemplateOutlet, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './notes-strip.component.html',
-  styleUrls: ['./notes-strip.component.scss'],
+  // One stylesheet per surface, in the order the rules were always in — the
+  // cascade is the concatenation of these, so the order here IS the order in
+  // the file this was split out of. Angular compiles each `styleUrls` entry to
+  // its own stylesheet, and the `anyComponentStyle` budget measures one
+  // stylesheet at a time; as one file the strip sat 2.7 kB under the ceiling
+  // and had frozen the deploy pipeline twice. Add a surface, don't grow one.
+  styleUrls: [
+    './notes-strip.component.scss',
+    './notes-strip.frame.scss',
+    './notes-strip.tabs.scss',
+    './notes-strip.rail.scss',
+    './notes-strip.form.scss',
+    './notes-strip.tree.scss',
+    './notes-strip.navigator.scss',
+    './notes-strip.plate.scss',
+    './notes-strip.reading.scss',
+    './notes-strip.lists.scss',
+    './notes-strip.desk.scss',
+  ],
 })
 export class NotesStripComponent implements OnDestroy {
 
