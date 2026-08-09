@@ -124,11 +124,13 @@ describe('passive active-genome queue', () => {
     registrations.set('@hypercomb.social/Store', store)
     const labels: string[] = []
     const indicators: Array<{ key: string; label: string; dismissable?: boolean }> = []
+    const cleared: Array<{ key: string }> = []
     EffectBus.on<{ label: string }>('genome:state', state => labels.push(state.label))
     EffectBus.on<{ key: string; label: string; dismissable?: boolean }>(
       'indicator:set',
       indicator => indicators.push(indicator),
     )
+    EffectBus.on<{ key: string }>('indicator:clear', indicator => cleared.push(indicator))
     const service = new ActiveGenomeService()
 
     await service.initialize(store as never)
@@ -145,11 +147,12 @@ describe('passive active-genome queue', () => {
     expect(labels.at(-1)).toContain('· updating')
     expect(await service.current()).toBe(service.record)
     expect(sealSubtree).not.toHaveBeenCalled()
-    expect(indicators.at(-1)).toMatchObject({
-      key: 'genome-weight',
-      dismissable: false,
-    })
-    expect(indicators.at(-1)?.label).toContain('· updating')
+    // The census no longer keeps a standing header pill: the label rides
+    // `genome:state` (asserted above), and any pill a prior session raised is
+    // actively CLEARED — EffectBus replays the last `indicator:set`, so
+    // merely not sending one would leave a stale pill standing.
+    expect(indicators).toEqual([])
+    expect(cleared.at(-1)).toEqual({ key: 'genome-weight' })
   })
 
   it('leaves the signature queued when no coherent seal can be produced', async () => {
