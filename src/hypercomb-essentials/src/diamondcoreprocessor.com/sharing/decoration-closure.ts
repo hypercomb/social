@@ -32,6 +32,8 @@
 // defined here — so the set the closure pushes can never diverge from the set
 // the renderer resolves.
 
+import { isReferentField } from '@hypercomb/core'
+
 const SIG_RE = /^[0-9a-f]{64}$/
 
 // `resource:<sig>` — used in src/href, in CSS `url('resource:<sig>')`, and in
@@ -92,14 +94,14 @@ export function collectSigsDeep(value: unknown): string[] {
     if (Array.isArray(v)) { for (const x of v) walk(x); return }
     if (v && typeof v === 'object') {
       for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-        // `groupSig` fields carry a GROUP SIGNATURE — sha256('group:'+meaning),
-        // a pure identity mark with no bytes behind it anywhere (see
-        // core/group-signature.ts). Declaring it as a ref sends every closure
-        // walker on a permanent 404 cascade across all byte hosts. `targetSig`
-        // is the same species in every use (a reference's LINEAGE address, a
-        // feedback item being retired): a pointer at a REFERENT, never bytes
-        // the record owns. A closure carries dependencies, not referents.
-        if (k === 'groupSig' || k === 'targetSig') continue
+        // Referent fields (groupSig, targetSig, …) carry an ADDRESS or
+        // identity — no bytes exist behind them on any host, by construction,
+        // so declaring one as a ref sends every closure walker on a permanent
+        // 404 cascade. The edge registry is the ONE declaration of which
+        // sig-shaped fields are referents; a new pointer field opts out of
+        // every precise walker by registering there, never by an inline skip
+        // here (the doctrine ratchet forbids it).
+        if (isReferentField(k)) continue
         walk(x)
       }
     }

@@ -82,6 +82,15 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
  *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'pheromones:deposits',
+  // Sig-keyed author marks — one record per TARGET signature, member named
+  // by that sig (the substrate:references pattern: the pool listing IS the
+  // index, lookup is O(1) by anchor). "These exact bytes carry these marks"
+  // — the participant-local carrier of the uniform decoration model
+  // (documentation/uniform-decoration.md); community deposits with decay
+  // stay in `pheromones:deposits` above. Written by PheromoneMarks
+  // (essentials/pheromones/pheromone-marks.ts), truth pool, never minted
+  // from the optimize phase.
+  'pheromones:content',
   // 'places:references' / 'places:sources' — SHORT-LIVED, never shipped. The
   // substrate surface was briefly renamed Places before that name went to the
   // collections index instead. Both are drain sources in substrate.service.ts

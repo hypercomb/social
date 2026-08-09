@@ -315,6 +315,21 @@ describe('doctrine ratchets', () => {
     ].sort(), 'unwired multi-anchor producer')
   })
 
+  it('referent-field skips live in the edge registry — never inline in a walker', () => {
+    // Sig-shaped fields split into EDGES (dependencies whose bytes must
+    // travel: children/content/refs) and REFERENTS (addresses/identities
+    // with NO bytes behind them: groupSig, targetSig). Treating a referent
+    // as an edge is the permanent-404 bug class; missing an edge strands
+    // content on fresh adopters. The edge registry
+    // (hypercomb-core/src/core/edge-registry.ts) is the ONE declaration —
+    // walkers consult isReferentField()/EDGE_FIELDS, never an inline
+    // comparison. This catches `=== 'groupSig'`-style skips creeping back
+    // into a walker (or a new walker minting its own local list). Empty
+    // allowlist: register the field instead.
+    const actual = filesMatching(/[=!]==\s*['"`](?:groupSig|targetSig)['"`]/)
+    assertRatchet(actual, [], 'inline referent-field comparison')
+  })
+
   it('no NEW bare-word pool meaning — a new pool meaning must carry a colon', () => {
     // Pools of meaning and lineage sigbags share ONE flat OPFS root
     // namespace:
