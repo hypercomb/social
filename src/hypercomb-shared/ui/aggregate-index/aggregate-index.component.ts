@@ -193,16 +193,20 @@ export class AggregateIndexComponent implements OnDestroy {
   /** The selection, minus what would be a no-op.
    *
    *  Adding to the INDEX skips anything already indexed — a second reference to
-   *  the same place would be a duplicate row. Adding INTO a collection only
-   *  skips the collection itself; a tile can legitimately be a member of many
-   *  collections, and that is the whole point. Empty unless the active source
-   *  actually supports adding. */
+   *  the same place would be a duplicate row. Adding INTO a collection skips
+   *  the collection itself AND its own children: a tile selected while standing
+   *  inside the collection is already in it, so offering "Add to <here>" for it
+   *  reads as broken. A tile can still be a member of many OTHER collections —
+   *  that is the whole point. Empty unless the active source actually supports
+   *  adding. */
   readonly staged = computed<readonly StagedEntry[]>(() => {
     if (!this.source()?.add) return []
     const into = this.destination()
     if (into) {
       const self = into.segments.join(KEY_SEP)
-      return this.selection().filter(e => e.segments.join(KEY_SEP) !== self)
+      return this.selection().filter(e =>
+        e.segments.join(KEY_SEP) !== self
+        && e.segments.slice(0, -1).join(KEY_SEP) !== self)
     }
     const known = new Set(this.items().map(i => i.key))
     return this.selection().filter(e => !known.has(e.label))
