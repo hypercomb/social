@@ -651,6 +651,8 @@
   "view.livingBrief": "ブリーフ",
   "view.postit": "付箋",
   "view.postit.description": "タイルに貼られた小さな付箋。開くと1ページの全画面表示になります。",
+  "view.revolucionWelcome": "ウェルカム",
+  "view.revolucionWelcome.description": "セルの子タイルで構成された3Dウェルカムページ。パネルをくぐると中に入れます。",
   "view.evidenceAtlas": "アトラス",
   "view.knowledgeStudio": "スタジオ",
   "view.slides.description": "このエリアの図タイルを1画面ずつ表示するスライドショー。",

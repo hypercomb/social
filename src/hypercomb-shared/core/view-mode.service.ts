@@ -42,7 +42,8 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // tombstone so an existing browser cannot boot into a mode whose renderer
   // has been removed and strand the participant on a blank canvas.
   'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
-  'living-brief', 'evidence-atlas', 'knowledge-studio',
+  'living-brief', 'evidence-atlas', 'knowledge-studio', 'postit',
+  'revolucion-welcome',
 ])
 
 export class ViewModeService extends EventTarget {

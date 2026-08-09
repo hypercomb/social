@@ -451,6 +451,22 @@
       "unattended": false,
       "created": "2026-08-09",
       "status": "pending"
+    },
+    {
+      "id": "welcome-threshold-decorate",
+      "title": "Mark /revolucion with visual:revolucion:welcome (3D threshold view)",
+      "run": "node scripts/bridge/_welcome-decorate.cjs",
+      "note": "The welcome view builds from the layer's children; the decoration is one live record (replaceKind, no wall-clock fields) so the pass is idempotent and safe to auto-drain. Verify: open localhost:4250/revolucion and /welcome (or the tile's view-enter icon) shows the colonnade.",
+      "created": "2026-08-09",
+      "status": "pending"
+    },
+    {
+      "id": "welcome-behavior-mirror",
+      "title": "Mirror the welcome behaviour — behaviors/views/welcome + glyph card",
+      "run": "node scripts/bridge/_mirror-welcome.cjs && node scripts/behaviors-theme/sweep.cjs",
+      "note": "behaviors/views/welcome with part tiles welcome.queen.ts + welcome-view.drone.ts (tags behavior/view/part, notes), then the theme sweep mints the door_open card (GLYPHS entry already committed in gen-behavior-tiles.mjs). Mirror script dedupes notes by first line — safe to re-run.",
+      "created": "2026-08-09",
+      "status": "pending"
     }
   ]
 }
