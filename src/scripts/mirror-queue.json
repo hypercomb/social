@@ -415,6 +415,15 @@
       "commit": "1aefc52cb",
       "created": "2026-08-08",
       "status": "pending"
+    },
+    {
+      "id": "swarm-byte-path-r2",
+      "title": "Swarm byte path — a shared tile brings its pictures, R2 hosts them",
+      "run": null,
+      "note": "No mirror pass run (no live bridge). Owed under behaviors/swarm: (1) a part tile for the BYTE PATH with a note stating the rule — the swarm carries SIGNATURES, never bytes; layers have a mesh fallback, resources do NOT, so a picture is only ever fetched from a host; (2) a note on the join card that joining PROVISIONS a byte target (own host wins, else the public content endpoint's 100MB/90d auto-grant) and that joining is the consent gesture for staging bytes; (3) a part tile for the AVAILABILITY GATE — announce only what a host has receipted, held tiles announce when receipts land, hc:swarm:ungated is the explicit dev-loop escape. Ties to the standing 'bytes before broadcast' doctrine. Files: hypercomb-essentials/src/diamondcoreprocessor.com/sharing/host-sync.service.ts (ensureSwarmTarget), sharing/swarm.drone.ts (gate + mesh:public-changed), sharing/content-broker.drone.ts (#resolveRemote layer-only fallback).",
+      "commit": "b8b25018a",
+      "created": "2026-08-09",
+      "status": "pending"
     }
   ]
 }
