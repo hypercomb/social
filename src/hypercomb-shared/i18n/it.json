@@ -304,6 +304,8 @@
   "action.share-link.description": "Copia un link a questa tessera — aprendolo si arriva qui con la tessera selezionata. Niente si attiva da un link.",
   "action.contact": "contatto",
   "action.contact.description": "Aggiungi o modifica il biglietto da visita su questa tessera",
+  "action.portal-carry": "aggiungi a un portale",
+  "action.portal-carry.description": "Trascina su un portale nella finestra Portali per aggiungervi questa tessera; un clic apre la finestra Portali",
   "action.break-apart": "ripristina",
   "action.break-apart.description": "Ripristina la visibilità di questa tessera nascosta",
   "action.hide": "nascondi",

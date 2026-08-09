@@ -173,6 +173,14 @@ export class AggregateIndexComponent implements OnDestroy {
   /** Is the + a live act right now? */
   readonly creatable = computed(() => this.canCreate() && !!this.draft() && !this.draftExists())
 
+  /** A tile is being dragged by its handle (PortalCarryDrone) — while true the
+   *  Portals rows present themselves as drop zones. */
+  readonly portalCarryActive = signal(false)
+
+  /** Are the rows portals? Only the Portals view accepts a carried tile —
+   *  every other aggregate's rows mean something else. */
+  readonly portalDropView = computed(() => this.source()?.id === PORTALS_SOURCE_ID)
+
   /** Labels currently selected on the canvas, with the location they were
    *  selected AT. Captured rather than derived on read: a selection outlives
    *  navigation, and resolving `here + label` later would name whatever tile
@@ -322,6 +330,18 @@ export class AggregateIndexComponent implements OnDestroy {
         this.#cdr.markForCheck()
       }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-open', (p) => this.openPanel(p?.id)))
+    // A tile is riding the pointer (the drag handle PortalCarryDrone owns) —
+    // light the portal rows as drop zones while it does, and land the drop.
+    this.#cleanups.push(EffectBus.on('portal-carry:drag-start', () => {
+      this.portalCarryActive.set(true)
+      this.#cdr.detectChanges()
+    }))
+    this.#cleanups.push(EffectBus.on('portal-carry:drag-end', () => {
+      this.portalCarryActive.set(false)
+      this.#cdr.detectChanges()
+    }))
+    this.#cleanups.push(EffectBus.on<{ label?: string; segments?: string[]; targetKey?: string }>(
+      'portal-carry:drop', (p) => { void this.#onPortalCarryDrop(p) }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-toggle', (p) => this.togglePanel(p?.id)))
     this.#cleanups.push(EffectBus.on('aggregate:view-close', () => this.close()))
     // The home pin can move from outside this window (the rail's Home menu, or
@@ -809,6 +829,30 @@ export class AggregateIndexComponent implements OnDestroy {
     catch { /* fall through — the re-read shows the truth */ }
     this.#dropStaged()
     this.#showAdded(added)
+  }
+
+  /** A tile was dropped (via its drag handle) onto one of our portal rows —
+   *  add it to THAT portal, wherever we happen to be standing. Same write as
+   *  Add: a reference in the portal, pointing at where the tile lives.
+   *
+   *  Guards mirror the staged-tray rule from the other direction: the portal
+   *  itself, and a tile that already lives inside it, are already "in there" —
+   *  the drop says so instead of minting a duplicate doorway. */
+  async #onPortalCarryDrop(p: { label?: string; segments?: string[]; targetKey?: string } | null): Promise<void> {
+    const src = this.source()
+    if (!src?.add || !this.portalDropView()) return
+    const item = this.items().find(i => i.key === String(p?.targetKey ?? ''))
+    const label = String(p?.label ?? '').trim()
+    const segments = (p?.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (!item || !label || segments.length === 0) return
+    if (sameSegments(segments, item.segments) || sameSegments(segments.slice(0, -1), item.segments)) {
+      EffectBus.emit('activity:log', { message: `"${label}" is already in "${item.label}"`, icon: '○' })
+      return
+    }
+    try { await src.add([{ label, segments }], item) }
+    catch { return }
+    EffectBus.emit('activity:log', { message: `added "${label}" to "${item.label}"`, icon: '◈' })
+    void this.reload()
   }
 
   /** File the staged tiles away INTO the collection we are standing in — they

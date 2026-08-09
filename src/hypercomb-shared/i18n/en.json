@@ -358,6 +358,8 @@
   "action.share-link.description": "Copy a link to this tile — opening it lands here with the tile selected. Nothing activates from a link.",
   "action.contact": "contact",
   "action.contact.description": "Add or edit the contact card on this tile",
+  "action.portal-carry": "add to portal",
+  "action.portal-carry.description": "Drag onto a portal in the Portals window to add this tile to it; a click opens the Portals window",
   "action.break-apart": "restore",
   "action.break-apart.description": "Restore this hidden tile to full visibility",
   "action.hide": "hide",

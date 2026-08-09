@@ -304,6 +304,8 @@
   "action.share-link.description": "Salin tautan ke ubin ini — membukanya membawa Anda ke sini dengan ubin terpilih. Tidak ada yang diaktifkan dari tautan.",
   "action.contact": "kontak",
   "action.contact.description": "Tambah atau edit kartu kontak pada ubin ini",
+  "action.portal-carry": "tambahkan ke portal",
+  "action.portal-carry.description": "Seret ke sebuah portal di jendela Portal untuk menambahkan ubin ini; klik membuka jendela Portal",
   "action.break-apart": "pulihkan",
   "action.break-apart.description": "Pulihkan visibilitas ubin yang tersembunyi",
   "action.hide": "sembunyikan",

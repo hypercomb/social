@@ -304,6 +304,8 @@
   "action.share-link.description": "نسخ رابط لهذه البلاطة — فتحه يوصلك إلى هنا مع تحديد البلاطة. لا شيء يُفعَّل من الرابط.",
   "action.contact": "جهة اتصال",
   "action.contact.description": "إضافة أو تحرير بطاقة الاتصال على هذا البلاط",
+  "action.portal-carry": "إضافة إلى بوابة",
+  "action.portal-carry.description": "اسحب إلى بوابة في نافذة البوابات لإضافة هذا البلاط إليها؛ النقر يفتح نافذة البوابات",
   "action.break-apart": "استعادة",
   "action.break-apart.description": "إعادة إظهار هذا البلاط المخفي",
   "action.hide": "إخفاء",

@@ -304,6 +304,8 @@
   "action.share-link.description": "Link zu dieser Kachel kopieren — beim Öffnen landet man hier mit ausgewählter Kachel. Ein Link aktiviert nichts.",
   "action.contact": "Kontakt",
   "action.contact.description": "Kontaktkarte auf dieser Kachel hinzufügen oder bearbeiten",
+  "action.portal-carry": "zu einem Portal hinzufügen",
+  "action.portal-carry.description": "Auf ein Portal im Portale-Fenster ziehen, um diese Kachel dort hinzuzufügen; ein Klick öffnet das Portale-Fenster",
   "action.break-apart": "wiederherstellen",
   "action.break-apart.description": "Diese versteckte Kachel wieder sichtbar machen",
   "action.hide": "verstecken",

@@ -354,6 +354,8 @@
   "action.share-link.description": "このタイルへのリンクをコピーします — 開くとタイルが選択された状態でここに着地します。リンクから何かが起動することはありません。",
   "action.contact": "連絡先",
   "action.contact.description": "このタイルの連絡先カードを追加・編集する",
+  "action.portal-carry": "ポータルへ追加",
+  "action.portal-carry.description": "ドラッグしてポータルウィンドウの行に重ねると、このタイルをそのポータルに追加します。クリックでポータルウィンドウを開きます",
   "action.break-apart": "復元",
   "action.break-apart.description": "非表示のタイルを再表示する",
   "action.hide": "非表示",

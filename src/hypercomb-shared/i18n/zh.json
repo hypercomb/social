@@ -304,6 +304,8 @@
   "action.share-link.description": "复制此磁贴的链接 — 打开后会直接到达这里并选中该磁贴。链接不会激活任何内容。",
   "action.contact": "联系人",
   "action.contact.description": "添加或编辑此磁贴的联系人卡片",
+  "action.portal-carry": "添加到门户",
+  "action.portal-carry.description": "拖到门户窗口中的某个门户上即可将此磁贴添加进去；单击打开门户窗口",
   "action.break-apart": "恢复",
   "action.break-apart.description": "恢复此隐藏磁贴的可见性",
   "action.hide": "隐藏",

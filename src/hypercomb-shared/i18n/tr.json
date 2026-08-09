@@ -304,6 +304,8 @@
   "action.share-link.description": "Bu döşemeye bir bağlantı kopyala — açıldığında döşeme seçili olarak buraya gelinir. Bağlantıdan hiçbir şey etkinleşmez.",
   "action.contact": "kişi",
   "action.contact.description": "Bu döşemede kişi kartı ekle veya düzenle",
+  "action.portal-carry": "portala ekle",
+  "action.portal-carry.description": "Bu döşemeyi eklemek için Portallar penceresindeki bir portalın üzerine sürükleyin; tıklama Portallar penceresini açar",
   "action.break-apart": "geri yükle",
   "action.break-apart.description": "Bu gizli kutucuan tekrar görünür yap",
   "action.hide": "gizle",

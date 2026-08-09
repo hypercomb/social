@@ -304,6 +304,8 @@
   "action.share-link.description": "इस टाइल का लिंक कॉपी करें — खोलने पर आप यहाँ पहुँचेंगे और टाइल चयनित होगी। लिंक से कुछ सक्रिय नहीं होता।",
   "action.contact": "संपर्क",
   "action.contact.description": "इस टाइल पर संपर्क कार्ड जोड़ें या संपादित करें",
+  "action.portal-carry": "पोर्टल में जोड़ें",
+  "action.portal-carry.description": "इस टाइल को जोड़ने के लिए पोर्टल विंडो में किसी पोर्टल पर खींचें; क्लिक से पोर्टल विंडो खुलती है",
   "action.break-apart": "पुनर्स्थापित करें",
   "action.break-apart.description": "इस छिपे हुए टाइल को फिर से दिखाएँ",
   "action.hide": "छिपाएँ",

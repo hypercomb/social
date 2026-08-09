@@ -216,8 +216,14 @@
              to carry it onto the hive; a plain click opens it. -->
         <ul class="ai-list" role="list">
           @for (item of visible(); track item.key) {
+            <!-- Portals rows double as DROP ZONES for a tile carried by its
+                 drag handle (PortalCarryDrone) — the data attribute is the
+                 drop contract, the class only lights the row while a carry
+                 is live. -->
             <li class="ai-row" [class.is-renaming]="renaming() === item.key"
                 [class.is-selected]="isSelected(item)"
+                [class.is-portal-drop]="portalDropView() && portalCarryActive()"
+                [attr.data-portal-drop]="portalDropView() ? item.key : null"
                 [style.--accent]="accent(item.label)">
               <button class="ai-row-open" type="button"
                       (pointerdown)="onRowPointerDown($event, item)"

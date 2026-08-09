@@ -304,6 +304,8 @@
   "action.share-link.description": "Copia um link para este mosaico — ao abrir, chega-se aqui com o mosaico selecionado. Nada é ativado a partir de um link.",
   "action.contact": "contato",
   "action.contact.description": "Adicionar ou editar o cartão de contato neste bloco",
+  "action.portal-carry": "adicionar a um portal",
+  "action.portal-carry.description": "Arraste sobre um portal na janela de Portais para adicionar este bloco; um clique abre a janela de Portais",
   "action.break-apart": "restaurar",
   "action.break-apart.description": "Restaurar este tile oculto à visibilidade total",
   "action.hide": "ocultar",

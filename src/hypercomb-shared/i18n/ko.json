@@ -304,6 +304,8 @@
   "action.share-link.description": "이 타일의 링크 복사 — 열면 타일이 선택된 상태로 이곳에 도착합니다. 링크로는 아무것도 활성화되지 않습니다.",
   "action.contact": "연락처",
   "action.contact.description": "이 타일의 연락처 카드 추가 또는 편집",
+  "action.portal-carry": "포털에 추가",
+  "action.portal-carry.description": "포털 창의 포털 위로 끌어다 놓으면 이 타일이 추가됩니다. 클릭하면 포털 창이 열립니다",
   "action.break-apart": "복원",
   "action.break-apart.description": "숨겨진 타일을 다시 표시",
   "action.hide": "숨기기",

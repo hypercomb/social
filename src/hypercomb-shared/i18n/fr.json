@@ -304,6 +304,8 @@
   "action.share-link.description": "Copie un lien vers cette tuile — l'ouvrir amène ici avec la tuile sélectionnée. Rien ne s'active depuis un lien.",
   "action.contact": "contact",
   "action.contact.description": "Ajouter ou modifier la fiche contact de ce tile",
+  "action.portal-carry": "ajouter à un portail",
+  "action.portal-carry.description": "Faites glisser sur un portail dans la fenêtre Portails pour y ajouter ce tile ; un clic ouvre la fenêtre Portails",
   "action.break-apart": "restaurer",
   "action.break-apart.description": "Restaurer la visibilité de ce tile masqué",
   "action.hide": "masquer",
