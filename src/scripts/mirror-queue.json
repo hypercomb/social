@@ -433,6 +433,15 @@
       "unattended": false,
       "created": "2026-08-09",
       "status": "pending"
+    },
+    {
+      "id": "portal-carry-drag-handle",
+      "title": "Portal carry — drag a tile's handle onto a Portals-window row to add it to that portal",
+      "run": null,
+      "note": "No mirror pass run (no live bridge this session). Owed under behaviors: (1) a behavior card for PORTAL CARRY — the feature-row drag handle (drag_indicator glyph) on every held tile; pull it and the Portals window opens with its rows lit as drop zones, release on a row and the tile gains an appearance in that portal (same reference write as Add); a plain click just opens the Portals window; (2) part tiles 1:1 with sources: hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/portal-carry.drone.ts (press-to-drag choreography, mirrors entrance-pin), plus notes on the aggregate-index surface (hypercomb-shared/ui/aggregate-index/aggregate-index.component.ts/.html/.scss) for the drop contract: [data-portal-drop] rows, is-portal-drop lighting, and the already-inside guard; (3) a note that the staged tray no longer offers 'Add to <portal>' for tiles selected inside that portal (same-pass fix, commit affa7333f) — the drop guard says 'already in' the same way.",
+      "commit": "ccf49b865",
+      "created": "2026-08-09",
+      "status": "pending"
     }
   ]
 }
