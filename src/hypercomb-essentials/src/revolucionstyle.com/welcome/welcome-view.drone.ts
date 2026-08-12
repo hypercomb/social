@@ -1,20 +1,19 @@
-// The Revolución threshold — a 3D welcome page built from the layer itself.
+// The Revolución threshold — a daylight welcome page built from the layer.
 //
 // The decorated cell's CHILDREN are the elements of the page: each child
-// tile is a gilded frame HUNG ON A WALL — a solid wood-and-wainscot plane
-// the frames sit proud of, every element visible at once, nothing hidden
-// behind a walk and nothing floating in space. One row up to seven
-// children, two rows beyond. The pointer pans the camera a few pixels
-// (translate parallax — near planes shift more than far ones, which reads
-// as solid depth; rotating the room read as floating); hovering lifts a
-// frame off the wall; stepping through one enters that child — whose own
-// view implementation owns the surface from there. This drone renders
-// exactly ONE layer; children are doorways.
+// tile is a plate in a bright ATELIER — warm ivory paper, espresso ink,
+// gold hairlines — laid out as a clean centred gallery grid. Every element
+// visible at once, obviously clickable, nothing floating and nothing to
+// learn: hovering lifts a plate, stepping through one opens that child's
+// own view (the room mounts its page; a bespoke view takes over when the
+// child earns one). This drone renders exactly ONE layer; children are
+// doorways. Depth is garnish here — soft shadows, a staggered entrance —
+// never a scene the visitor has to navigate.
 //
-// Everything is self-drawn: CSS 3D perspective for the room, a 2D canvas
-// for embers and smoke. No dependencies, no fetching beyond the hive's own
-// sig-addressed tile art. The atmosphere loop pauses when the document is
-// hidden and dies with the view — an orphaned rAF must never outlive it.
+// No dependencies, no canvases, no fetching beyond the hive's own
+// sig-addressed tile art. Earlier concepts are recorded in the behaviour's
+// hive notes: the dark colonnade hid the layer, the dark 3D wall read as
+// heavy — the interface is light now, in both senses.
 
 import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
@@ -41,15 +40,13 @@ export class WelcomeViewDrone extends Drone {
   readonly namespace = 'revolucionstyle.com'
   override genotype = 'presentation'
   override description =
-    'Revolución welcome renderer — the decorated cell opens into a 3D threshold whose panels are its children.'
+    'Revolución welcome renderer — the decorated cell opens into a daylight atelier whose plates are its children.'
 
   #host: HTMLElement | null = null
   #targetSegments: string[] | null = null
   #bound = false
   #active = false
   #gen = 0
-  #raf = 0
-  #cleanup: Array<() => void> = []
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -154,108 +151,84 @@ export class WelcomeViewDrone extends Drone {
     } catch { return null }
   }
 
-  // ── The scene ────────────────────────────────────────────────────────
+  // ── The page ─────────────────────────────────────────────────────────
 
   #build(title: string, tagline: string, segments: readonly string[], panels: PanelData[]): HTMLElement {
     const host = document.createElement('section')
     host.className = 'hc-welcome-view'
     host.innerHTML = `<style>${SCENE_CSS}</style>`
+    // The page scrolls like a page; the hex wheel-zoom handler must not
+    // preventDefault our wheel events (same hatch the site view uses).
+    host.setAttribute('data-consumes-wheel', '')
 
-    const atmo = document.createElement('canvas')
-    atmo.className = 'wl-atmo'
-    host.appendChild(atmo)
+    const sheet = document.createElement('div')
+    sheet.className = 'wv-sheet'
+    host.appendChild(sheet)
 
-    const viewport = document.createElement('div')
-    viewport.className = 'wl-viewport'
-    const stage = document.createElement('div')
-    stage.className = 'wl-stage'
-    viewport.appendChild(stage)
-    host.appendChild(viewport)
-
-    const floor = document.createElement('div')
-    floor.className = 'wl-floor'
-    stage.appendChild(floor)
-
-    // The wall itself — the panels hang ON something, never in space.
-    const wall = document.createElement('div')
-    wall.className = 'wl-wall'
-    stage.appendChild(wall)
-
-    // The gallery wall: one row up to seven, two rows beyond, a flat
-    // architectural grid. Every panel is visible at once — the welcome
-    // page shows the whole layer at a glance, no walking required.
-    const twoRows = panels.length > 7
-    const topCount = twoRows ? Math.ceil(panels.length / 2) : 0
-    const rows: PanelData[][] = twoRows
-      ? [panels.slice(0, topCount), panels.slice(topCount)]
-      : [panels]
-    rows.forEach((row, rowIndex) => {
-      const rowClass = twoRows
-        ? (rowIndex === 0 ? 'wl-row-top' : 'wl-row-main')
-        : 'wl-row-solo'
-      row.forEach((panel, column) => {
-        const index = rowIndex === 0 ? column : topCount + column
-        const slot = document.createElement('div')
-        slot.className = `wl-slot ${rowClass}`
-        slot.style.setProperty('--col', String(column - (row.length - 1) / 2))
-        const door = document.createElement('button')
-        door.type = 'button'
-        door.className = 'wl-panel'
-        door.style.setProperty('--i', String(index))
-        door.title = panel.title
-        if (panel.imageUrl) {
-          const img = document.createElement('img')
-          img.className = 'wl-art'
-          img.src = panel.imageUrl
-          img.alt = ''
-          img.draggable = false
-          door.appendChild(img)
-        } else {
-          const blank = document.createElement('span')
-          blank.className = 'wl-art wl-art-blank'
-          door.appendChild(blank)
-        }
-        const plaque = document.createElement('span')
-        plaque.className = 'wl-plaque'
-        plaque.textContent = panel.title
-        door.appendChild(plaque)
-        door.onclick = () => this.#enter([...segments, panel.label])
-        slot.appendChild(door)
-        stage.appendChild(slot)
-      })
-    })
-
-    // The crest presides above the wall.
-    const crest = document.createElement('div')
-    crest.className = `wl-crest${panels.length ? '' : ' wl-crest-alone'}`
+    const crest = document.createElement('header')
+    crest.className = 'wv-crest'
     const heading = document.createElement('h1')
-    heading.className = 'wl-title'
+    heading.className = 'wv-title'
     heading.textContent = title
     crest.appendChild(heading)
+    const rule = document.createElement('div')
+    rule.className = 'wv-rule'
+    crest.appendChild(rule)
     if (tagline) {
       const sub = document.createElement('p')
-      sub.className = 'wl-tagline'
+      sub.className = 'wv-tagline'
       sub.textContent = tagline
       crest.appendChild(sub)
     }
-    stage.appendChild(crest)
+    sheet.appendChild(crest)
+
+    const grid = document.createElement('main')
+    grid.className = 'wv-grid'
+    panels.forEach((panel, index) => {
+      const plate = document.createElement('button')
+      plate.type = 'button'
+      plate.className = 'wv-plate'
+      plate.style.setProperty('--i', String(index))
+      plate.title = panel.title
+      const mat = document.createElement('span')
+      mat.className = 'wv-mat'
+      if (panel.imageUrl) {
+        const img = document.createElement('img')
+        img.className = 'wv-art'
+        img.src = panel.imageUrl
+        img.alt = ''
+        img.draggable = false
+        mat.appendChild(img)
+      } else {
+        const blank = document.createElement('span')
+        blank.className = 'wv-art wv-art-blank'
+        mat.appendChild(blank)
+      }
+      plate.appendChild(mat)
+      const caption = document.createElement('span')
+      caption.className = 'wv-caption'
+      caption.textContent = panel.title
+      plate.appendChild(caption)
+      plate.onclick = () => this.#enter([...segments, panel.label])
+      grid.appendChild(plate)
+    })
+    sheet.appendChild(grid)
 
     const hint = document.createElement('p')
-    hint.className = 'wl-hint'
+    hint.className = 'wv-hint'
     hint.textContent = panels.length
-      ? 'step through a panel'
+      ? 'step through a plate'
       : 'nothing behind the threshold yet'
-    host.appendChild(hint)
+    sheet.appendChild(hint)
 
     const close = document.createElement('button')
     close.type = 'button'
-    close.className = 'wl-close'
+    close.className = 'wv-close'
     close.setAttribute('aria-label', 'Return to hexagons')
     close.textContent = '×'
     close.onclick = () => this.#vm()?.setMode('hexagons')
     host.appendChild(close)
 
-    this.#animate(host, stage, atmo)
     return host
   }
 
@@ -267,91 +240,7 @@ export class WelcomeViewDrone extends Drone {
     this.emitEffect('view:open-for-tile', { view: ROOM_VIEW, segments: [...segments] })
   }
 
-  // ── Motion: one loop drives parallax and atmosphere ──────────────────
-
-  #animate(host: HTMLElement, stage: HTMLElement, atmo: HTMLCanvasElement): void {
-    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-    // Translate parallax, never rotation: shifting the stage under a fixed
-    // perspective moves near planes more than far ones, so the room reads
-    // as SOLID depth — rotating the whole stage read as floating.
-    let panX = 0, panY = 0, panXTarget = 0, panYTarget = 0
-
-    // Interaction must land even when rAF starves (occluded/uncomposited
-    // tabs) — write the transform immediately, let the loop smooth it.
-    const render = (): void => {
-      stage.style.transform = `translate3d(${panX}px, ${panY}px, 0)`
-    }
-    const step = (rate: number): void => {
-      panX += (panXTarget - panX) * rate
-      panY += (panYTarget - panY) * rate
-      render()
-    }
-    const onMove = (event: PointerEvent): void => {
-      if (still) return
-      const vw = window.innerWidth || 1
-      const vh = window.innerHeight || 1
-      panXTarget = (0.5 - event.clientX / vw) * 26
-      panYTarget = (0.5 - event.clientY / vh) * 12
-      step(0.2)
-    }
-    host.addEventListener('pointermove', onMove)
-    this.#cleanup.push(() => host.removeEventListener('pointermove', onMove))
-
-    // Embers rise, smoke drifts — modest counts, 2D canvas, no fetching.
-    const context = atmo.getContext('2d')
-    const embers = Array.from({ length: 36 }, () => ({
-      x: Math.random(), y: Math.random(), r: 0.6 + Math.random() * 1.6,
-      vy: 0.0003 + Math.random() * 0.0008, sway: Math.random() * Math.PI * 2,
-    }))
-    const wisps = Array.from({ length: 5 }, (_, i) => ({
-      x: 0.15 + i * 0.17, y: 0.25 + Math.random() * 0.4, r: 90 + Math.random() * 120,
-      drift: Math.random() * Math.PI * 2,
-    }))
-
-    let last = 0
-    const frame = (now: number): void => {
-      this.#raf = requestAnimationFrame(frame)
-      const dt = Math.min(48, now - last || 16)
-      last = now
-
-      panX += (panXTarget - panX) * 0.06
-      panY += (panYTarget - panY) * 0.06
-      render()
-
-      if (!context || still || document.hidden) return
-      const w = atmo.clientWidth, h = atmo.clientHeight
-      if (atmo.width !== w || atmo.height !== h) { atmo.width = w; atmo.height = h }
-      context.clearRect(0, 0, w, h)
-      const t = now * 0.001
-      for (const wisp of wisps) {
-        const x = (wisp.x + Math.sin(t * 0.07 + wisp.drift) * 0.05) * w
-        const y = (wisp.y + Math.cos(t * 0.05 + wisp.drift) * 0.04) * h
-        const glow = context.createRadialGradient(x, y, 0, x, y, wisp.r)
-        glow.addColorStop(0, 'rgba(212,175,55,0.045)')
-        glow.addColorStop(1, 'rgba(212,175,55,0)')
-        context.fillStyle = glow
-        context.fillRect(x - wisp.r, y - wisp.r, wisp.r * 2, wisp.r * 2)
-      }
-      for (const ember of embers) {
-        ember.y -= ember.vy * dt
-        ember.sway += 0.0006 * dt
-        if (ember.y < -0.02) { ember.y = 1.02; ember.x = Math.random() }
-        const x = (ember.x + Math.sin(ember.sway) * 0.01) * w
-        const y = ember.y * h
-        const a = 0.25 + Math.sin(ember.sway * 3) * 0.15
-        context.fillStyle = `rgba(230,168,60,${a.toFixed(3)})`
-        context.beginPath()
-        context.arc(x, y, ember.r, 0, Math.PI * 2)
-        context.fill()
-      }
-    }
-    this.#raf = requestAnimationFrame(frame)
-  }
-
   #teardown(): void {
-    cancelAnimationFrame(this.#raf)
-    this.#raf = 0
-    for (const undo of this.#cleanup.splice(0)) undo()
     this.#host?.remove()
     this.#host = null
     this.#setActive(false)
@@ -366,52 +255,39 @@ export class WelcomeViewDrone extends Drone {
   }
 }
 
-// Espresso and gold — the Revolución chrome. The room is dark wood and
-// candle-light; panels are the only bright objects, the crest the only
-// words. Wide gradients, no images: the atmosphere canvas carries the rest.
+// Daylight atelier: warm ivory paper, espresso ink, gold hairlines. The
+// plates are the only pictures on the sheet; everything else is type and
+// air. Depth is garnish — soft shadows and a staggered entrance — never a
+// scene to navigate.
 const SCENE_CSS = `
-.hc-welcome-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:hidden;background:radial-gradient(120% 90% at 50% 30%,#2a1c12 0%,#1a110a 46%,#0c0805 100%)}
-.wl-atmo{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.wl-viewport{position:absolute;inset:0;perspective:1300px;perspective-origin:50% 42%;pointer-events:none}
-.wl-stage{position:absolute;inset:0;transform-style:preserve-3d;will-change:transform;pointer-events:none}
-.wl-floor{position:absolute;left:50%;top:50%;width:2600px;height:4200px;pointer-events:none;transform:translate(-50%,-50%) rotateX(90deg) translateZ(-330px);background:
- repeating-linear-gradient(90deg,rgba(212,175,55,.05) 0 1px,transparent 1px 130px),
- repeating-linear-gradient(0deg,rgba(212,175,55,.05) 0 1px,transparent 1px 130px),
- radial-gradient(60% 45% at 50% 42%,rgba(212,175,55,.07),transparent 70%),
- linear-gradient(#150d07,#0b0704);
- -webkit-mask-image:radial-gradient(58% 46% at 50% 44%,#000 30%,transparent 78%);mask-image:radial-gradient(58% 46% at 50% 44%,#000 30%,transparent 78%)}
-.wl-wall{position:absolute;left:50%;top:50%;width:2600px;height:1700px;pointer-events:none;transform:translate(-50%,-50%) translateZ(calc(-1 * var(--wz,1034px)));border-bottom:14px solid #0a0603;background:
- radial-gradient(50% 40% at 50% 36%,rgba(212,175,55,.10),transparent 72%),
- repeating-linear-gradient(90deg,rgba(0,0,0,.22) 0 2px,rgba(255,255,255,.014) 2px 4px,transparent 4px 240px),
- linear-gradient(180deg,#241610 0%,#1b100a 55%,#130b06 100%);
- box-shadow:inset 0 -120px 90px -60px rgba(0,0,0,.55);
- -webkit-mask-image:radial-gradient(74% 64% at 50% 46%,#000 46%,transparent 94%);mask-image:radial-gradient(74% 64% at 50% 46%,#000 46%,transparent 94%)}
-.wl-wall::before,.wl-wall::after{content:'';position:absolute;left:5%;right:5%;height:2px;background:linear-gradient(90deg,transparent,rgba(212,175,55,.34) 12%,rgba(212,175,55,.34) 88%,transparent)}
-.wl-wall::before{top:17%}
-.wl-wall::after{top:74%;box-shadow:0 5px 0 rgba(0,0,0,.35)}
-.wl-slot{position:absolute;left:50%;top:50%;width:216px;height:292px;transform-style:preserve-3d;pointer-events:none;transform:translate(-50%,-50%) translate3d(calc(var(--col,0) * var(--gapx,252px)),var(--ry,0px),calc(-1 * var(--r,980px)))}
-.wl-row-solo{--r:980px;--ry:44px}
-.wl-row-top{--r:980px;--ry:-152px}
-.wl-row-main{--r:980px;--ry:164px}
-.wl-panel{position:relative;width:100%;height:100%;padding:0;pointer-events:auto;border:1px solid rgba(212,175,55,.55);background:linear-gradient(170deg,#241710,#160e08);cursor:pointer;transform-style:preserve-3d;box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(212,175,55,.28);animation:wl-arrive .9s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.08s * var(--i,0));transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease}
-.wl-panel:hover,.wl-panel:focus-visible{transform:translateZ(34px) scale(1.02);border-color:#e9c767;box-shadow:0 34px 80px rgba(0,0,0,.65),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(233,199,103,.7),0 0 46px rgba(212,175,55,.28);outline:none}
-.wl-art{position:absolute;inset:10px 10px 52px;object-fit:cover;display:block;background:#0e0906;filter:saturate(.92) brightness(.96)}
-.wl-panel:hover .wl-art{filter:saturate(1.05) brightness(1.05)}
-.wl-art-blank{background:
- radial-gradient(40% 40% at 50% 44%,rgba(212,175,55,.2),transparent 70%),
- conic-gradient(from 30deg,rgba(212,175,55,.12) 0 60deg,transparent 0 120deg,rgba(212,175,55,.12) 0 180deg,transparent 0 240deg,rgba(212,175,55,.12) 0 300deg,transparent 0),#140d08}
-.wl-plaque{position:absolute;left:10px;right:10px;bottom:10px;height:34px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#2b1c10,#1c1109);border-top:1px solid rgba(212,175,55,.4);color:#e8d9ae;font:600 .78rem/1.1 Georgia,'Times New Roman',serif;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 .5rem;box-sizing:border-box}
-.wl-crest{position:absolute;left:50%;top:50%;width:760px;text-align:center;transform-style:preserve-3d;pointer-events:none;transform:translate(-50%,-50%) translate3d(0,var(--cy,-352px),calc(-1 * var(--r,980px) + 6px))}
-.wl-crest-alone{--cy:-60px}
-.wl-title{margin:0;font:italic 700 4rem/1.05 Georgia,'Times New Roman',serif;letter-spacing:.06em;background:linear-gradient(100deg,#8a6a1f 0%,#e9c767 28%,#fff3c4 50%,#e9c767 72%,#8a6a1f 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 26px rgba(212,175,55,.25))}
-.wl-tagline{margin:.8rem 0 0;color:#cdb98a;font:400 1rem/1.5 Georgia,serif;letter-spacing:.22em;text-transform:uppercase}
-.wl-hint{position:absolute;left:50%;bottom:calc(1.1rem + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:4;margin:0;color:rgba(205,185,138,.55);font:400 .78rem/1 Georgia,serif;letter-spacing:.24em;text-transform:uppercase;pointer-events:none;animation:wl-fade 1.2s ease .8s backwards}
-.wl-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(20,12,7,.82);border:1px solid rgba(212,175,55,.45);backdrop-filter:blur(6px);color:#e8d9ae;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.55;transition:opacity .16s ease}
-.wl-close:hover{opacity:1}
-@keyframes wl-arrive{from{opacity:0;translate:0 26px}to{opacity:1;translate:0 0}}
-@keyframes wl-fade{from{opacity:0}to{opacity:1}}
-@media(prefers-reduced-motion:reduce){.wl-panel{animation:none;opacity:1}.wl-hint{animation:none}}
-@media(max-width:900px){.wl-slot{width:150px;height:206px;--gapx:172px}.wl-row-solo{--r:760px;--ry:30px}.wl-row-top{--r:760px;--ry:-112px}.wl-row-main{--r:760px;--ry:120px}.wl-wall{--wz:814px}.wl-art{inset:7px 7px 40px}.wl-plaque{height:28px;font-size:.66rem;bottom:7px;left:7px;right:7px}.wl-title{font-size:2.4rem}.wl-crest{width:88vw;--r:760px;--cy:-252px}.wl-viewport{perspective:1050px}}
+.hc-welcome-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:auto;background:
+ radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.75),transparent 60%),
+ linear-gradient(180deg,#f8f3e8 0%,#f3ecdd 60%,#ede4d1 100%);
+ color:#31241a}
+.wv-sheet{box-sizing:border-box;max-width:1180px;margin:0 auto;padding:clamp(2.2rem,6vh,4.5rem) clamp(1.2rem,4vw,3rem) 4rem;min-height:100%;display:flex;flex-direction:column}
+.wv-crest{text-align:center;margin-bottom:clamp(1.8rem,4.5vh,3.2rem);animation:wv-rise .7s cubic-bezier(.2,.7,.2,1) backwards}
+.wv-title{margin:0;font:italic 700 clamp(2.6rem,6vw,4.2rem)/1.08 Georgia,'Times New Roman',serif;letter-spacing:.04em;color:#3a2a1c}
+.wv-rule{width:7.5rem;height:2px;margin:1.05rem auto 0;background:linear-gradient(90deg,transparent,#b8933f 18%,#d9b96a 50%,#b8933f 82%,transparent)}
+.wv-tagline{margin:.95rem 0 0;color:#8a7657;font:400 .95rem/1.5 Georgia,serif;letter-spacing:.24em;text-transform:uppercase}
+.wv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:clamp(1rem,2.4vw,1.8rem);justify-items:stretch;align-content:start;max-width:980px;margin:0 auto;width:100%}
+.wv-plate{display:flex;flex-direction:column;gap:.7rem;padding:0;border:0;background:none;cursor:pointer;text-align:center;animation:wv-rise .6s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.05s * var(--i,0));transition:transform .18s ease}
+.wv-plate:hover,.wv-plate:focus-visible{transform:translateY(-5px);outline:none}
+.wv-mat{display:block;background:#fffdf7;border:1px solid rgba(184,147,63,.55);padding:9px;box-shadow:0 1px 2px rgba(58,42,28,.08),0 10px 24px -12px rgba(58,42,28,.28);transition:box-shadow .18s ease,border-color .18s ease}
+.wv-plate:hover .wv-mat,.wv-plate:focus-visible .wv-mat{border-color:#b8933f;box-shadow:0 2px 3px rgba(58,42,28,.1),0 18px 34px -14px rgba(58,42,28,.4),0 0 0 1px rgba(184,147,63,.35)}
+.wv-art{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;background:#efe7d6}
+.wv-plate:hover .wv-art{filter:saturate(1.05) brightness(1.03)}
+.wv-art-blank{background:
+ radial-gradient(42% 42% at 50% 46%,rgba(184,147,63,.22),transparent 72%),
+ conic-gradient(from 30deg,rgba(184,147,63,.14) 0 60deg,transparent 0 120deg,rgba(184,147,63,.14) 0 180deg,transparent 0 240deg,rgba(184,147,63,.14) 0 300deg,transparent 0),#f4edde}
+.wv-caption{color:#5c4630;font:600 .78rem/1.3 Georgia,'Times New Roman',serif;letter-spacing:.14em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wv-plate:hover .wv-caption{color:#3a2a1c}
+.wv-hint{margin:auto auto 0;padding-top:2.6rem;text-align:center;color:rgba(138,118,87,.75);font:400 .74rem/1 Georgia,serif;letter-spacing:.26em;text-transform:uppercase;animation:wv-fade 1s ease .6s backwards}
+.wv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
+.wv-close:hover{opacity:1}
+@keyframes wv-rise{from{opacity:0;translate:0 14px}to{opacity:1;translate:0 0}}
+@keyframes wv-fade{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.wv-plate,.wv-crest{animation:none}.wv-hint{animation:none}}
+@media(max-width:560px){.wv-grid{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}.wv-mat{padding:6px}.wv-caption{font-size:.68rem;letter-spacing:.1em}}
 `
 
 const _welcomeView = new WelcomeViewDrone()

@@ -66,17 +66,17 @@ const PARTS = [
   ['welcome.queen.ts', `${E}/welcome/welcome.queen.ts`,
    'the /welcome command + VisualBeeRegistry declaration — kind visual:revolucion:welcome, view revolucion-welcome; mark/update via replaceDecoration, remove, view toggle; attachable, opens on tile click'],
   ['welcome-view.drone.ts', `${E}/welcome/welcome-view.drone.ts`,
-   'the 3D threshold renderer — reads the decorated layer\'s children (childNamesOf) and each child\'s tile art from its properties slot, hangs them as a flat grid of gilded frames on a solid wood-and-wainscot wall plane (one row to seven / two rows beyond, foil crest mounted on the wall), drives translate-parallax + ember canvas from one loop, steps through a frame into that child\'s own view; Escape / × returns to the hive'],
+   'the daylight atelier renderer — reads the decorated layer\'s children (childNamesOf) and each child\'s tile art from its properties slot, lays them out as gold-hairlined plates on a warm ivory sheet (clean centred gallery grid, espresso-ink crest, staggered entrance, hover lift), steps through a plate into that child\'s own view; Escape / × returns to the hive'],
   ['room-view.drone.ts', `${E}/welcome/room-view.drone.ts`,
    'the generic room — a child\'s OWN view behind its frame: mounts the cell\'s existing visual:website:page as its presence (CSS scoped to the host via scopeCellPageCss, scripts re-executed, resource: refs rewritten, root class/theme mirrored, theme write undone on unmount), in-page absolute links become room-to-room passage, Escape walks back onto the wall, no page = fall through to hexagons — the view never traps'],
 ]
 
 const NOTE_ROOM = [
-  'The room — every frame on the wall opens the child\'s OWN view. The children\'s existing pages (the three.js lounge, the interactive flavor wheel, the parchment journal — all visual:website:page decorations) ARE those views: stepping through a frame mounts the child\'s page full-viewport as the cell\'s presence, not bare hexagons and not the global website mode. Escape walks back out onto the wall; × leaves to the hexagons; a child with no page falls through to the hexagons, so the view never traps.',
+  'The room — every plate on the welcome page opens the child\'s OWN view. The children\'s existing pages (the three.js lounge, the interactive flavor wheel, the parchment journal — all visual:website:page decorations) ARE those views: stepping through a plate mounts the child\'s page full-viewport as the cell\'s presence, not bare hexagons and not the global website mode. Escape walks back out onto the welcome page; × leaves to the hexagons; a child with no page falls through to the hexagons, so the view never traps.',
   '',
-  'The wall itself (v3) is a FLAT architectural grid — frames hung proud of a solid wood-and-wainscot wall plane, crest mounted on the wall — superseding the earlier curved-arc phrasing: rotating or curving the room read as floating; translate-parallax over solid planes reads as depth.',
+  'The welcome page itself (v4, superseding the earlier dark 3D concepts) is a DAYLIGHT ATELIER: warm ivory paper, espresso ink, gold hairlines — the children as clean plates in a centred gallery grid, every element visible at once, obviously clickable. Design history: the dark colonnade hid the layer (panels shrank to specks); the dark 3D wall read as heavy and its floating variants as sloppy. Depth is garnish — soft shadows, hover lift, staggered entrance — never a scene the visitor must navigate.',
   '',
-  'This room is the GENERIC child view. When a child earns a bespoke view implementation, that view takes over its frame and the room steps aside — one layer at a time.',
+  'This room is the GENERIC child view. When a child earns a bespoke view implementation, that view takes over its plate and the room steps aside — one layer at a time.',
 ].join('\n')
 
 async function noted(segments, text) {
