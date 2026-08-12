@@ -978,6 +978,11 @@ const CONCIERGE_JS = /* html */ `<script>
   window.__loungeWalkIn = openFull;
   window.__loungeShowTab = showTab;
   window.__loungeWheel = openWheel;
+
+  // Mounted as the cell's OWN view (the threshold's room sets
+  // window.__hcRoomView before our scripts run): no website interface —
+  // walk straight into the lounge. setTimeout so every wire above is live.
+  if (window.__hcRoomView) setTimeout(openFull, 0);
 })();
 </script>`
 

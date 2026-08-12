@@ -177,6 +177,18 @@ export class RoomViewDrone extends Drone {
     const body = parsed.body
     if (body) while (body.firstChild) host.appendChild(body.firstChild)
 
+    // Announce the context BEFORE the page's scripts run: mounted as the
+    // cell's own view, a page may skip its website interface entirely (the
+    // lounge walks straight into the 3D room). A page that walks in may
+    // also write `documentElement.style.overflow` — snapshot and restore
+    // it, since leaving via Escape never runs the page's own "leave".
+    ;(window as { __hcRoomView?: boolean }).__hcRoomView = true
+    const prevOverflow = document.documentElement.style.overflow
+    this.#undo.push(() => {
+      delete (window as { __hcRoomView?: boolean }).__hcRoomView
+      document.documentElement.style.overflow = prevOverflow
+    })
+
     const runScripts = (sources: readonly HTMLScriptElement[]): void => {
       for (const inert of sources) {
         const live = document.createElement('script')
