@@ -5,7 +5,7 @@
 // fetches from trusted domains, verifies signatures, and returns bytes.
 
 import { inject, Injectable } from '@angular/core'
-import { SignatureService } from '@hypercomb/core'
+import { meaningfulLabel, revisionWords, SignatureService } from '@hypercomb/core'
 import { DcpDomainStorage } from '../core/dcp-domain-storage.service'
 import { DcpInstallerService } from '../core/dcp-installer.service'
 import { DcpStore } from '../core/dcp-store'
@@ -47,6 +47,11 @@ export type SentinelRequest =
   // what exists; changing what runs is re-validated here before it lands.
   | { type: 'revisions'; rid: string; domain?: string }
   | { type: 'use-revision'; rid: string; domain: string; rootSig: string }
+  // Participant-local rename of a deployed version, pushed from the hive —
+  // the name typed into the upgrade pill's restore-point field names the
+  // SAME revision the installer lists, so it lands on the same
+  // `dcp:label:<sig>` key the installer's own version-name editor writes.
+  | { type: 'name-revision'; rid: string; rootSig: string; name?: string }
   | { type: 'backup-export'; rid: string }
   | { type: 'backup-import-file'; rid: string; path: string; sha256: string; bytes: ArrayBuffer }
 
@@ -62,6 +67,7 @@ export type SentinelResponse =
   | { type: 'domains-result'; rid: string; ok: boolean; domains: string[]; error?: string }
   | { type: 'revisions-result'; rid: string; ok: boolean; groups: RevisionGroup[]; error?: string }
   | { type: 'use-revision-result'; rid: string; ok: boolean; error?: string }
+  | { type: 'name-revision-result'; rid: string; ok: boolean; error?: string }
   | { type: 'backup-file'; rid: string; path: string; sha256: string; bytes: ArrayBuffer }
   | { type: 'backup-done'; rid: string; ok: boolean; files: number; bytes: number; error?: string }
   | { type: 'backup-import-ack'; rid: string; ok: boolean; error?: string }
@@ -105,6 +111,7 @@ export class SentinelHandler {
       case 'domains-for': return this.#handleDomainsFor(msg, port)
       case 'revisions': return this.#handleRevisions(msg, port)
       case 'use-revision': return this.#handleUseRevision(msg, port)
+      case 'name-revision': return this.#handleNameRevision(msg, port)
       case 'backup-export': return this.#handleBackupExport(msg, port)
       case 'backup-import-file': return this.#handleBackupImportFile(msg, port)
     }
@@ -300,14 +307,36 @@ export class SentinelHandler {
   }
 
   /** Deploy label for a version: the participant's local rename first (the same
-   *  override the installer's editor writes), then the deploy-time name, then a
-   *  short sig — never nothing. */
+   *  override the installer's editor writes), then the deploy-time name when it
+   *  is a real name (a git-branch stamp is not — meaningfulLabel), then the
+   *  signature's own word pair, then a short sig — never nothing, and never
+   *  "development" repeated down the whole chain. */
   #versionLabel(sig: string, deployLabel?: string): string {
     try {
       const local = localStorage.getItem(`${LABEL_KEY_PREFIX}${sig}`)
       if (local && local.trim()) return local.trim()
     } catch { /* storage unavailable — fall through */ }
-    return (deployLabel ?? '').trim() || sig.slice(0, 8)
+    return meaningfulLabel(deployLabel)
+      || revisionWords({ packageSig: sig })
+      || sig.slice(0, 8)
+  }
+
+  /** Land a participant-typed revision name on the same localStorage key the
+   *  installer's version-name editor writes. Display decoration only — it
+   *  never touches manifests, lineage, or the active pick. Empty name clears
+   *  the rename (falls back to minted words). */
+  async #handleNameRevision(msg: SentinelRequest & { type: 'name-revision' }, port: MessagePort): Promise<void> {
+    const fail = (error: string) => port.postMessage({ type: 'name-revision-result', rid: msg.rid, ok: false, error })
+    try {
+      const sig = String(msg.rootSig ?? '').trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(sig)) return fail('invalid signature format')
+      const name = String(msg.name ?? '').trim().slice(0, 200)
+      if (name) localStorage.setItem(`${LABEL_KEY_PREFIX}${sig}`, name)
+      else localStorage.removeItem(`${LABEL_KEY_PREFIX}${sig}`)
+      port.postMessage({ type: 'name-revision-result', rid: msg.rid, ok: true })
+    } catch (e) {
+      fail(String((e as { message?: string })?.message ?? e))
+    }
   }
 
   /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRevisionName, revisionName } from './revision-name.js'
+import { buildRevisionName, meaningfulLabel, revisionName, revisionWords } from './revision-name.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -64,5 +64,39 @@ describe('buildRevisionName', () => {
     const later = new Date(AT.getTime() + 60_000)
     expect(buildRevisionName({ packageSig: SIG_A, label: 'alpha', at: AT }))
       .not.toBe(buildRevisionName({ packageSig: SIG_A, label: 'alpha', at: later }))
+  })
+
+  it('treats a git-branch genesis label as no name at all', () => {
+    // Every deploy stamps the branch — a chain of "development · <time>"
+    // names nothing. The word pair must stand in instead.
+    const name = buildRevisionName({ packageSig: SIG_A, label: 'development', at: AT, locale: 'en' })
+    expect(name.split(' · ')[0]).not.toBe('development')
+    expect(name.split(' · ')[0].split(' ')).toHaveLength(2)
+  })
+})
+
+describe('meaningfulLabel', () => {
+  it('erases build machinery, keeps real names', () => {
+    for (const auto of ['development', 'Development', ' main ', 'master', 'genesis', 'HEAD']) {
+      expect(meaningfulLabel(auto)).toBe('')
+    }
+    expect(meaningfulLabel('alpha 0.9.4')).toBe('alpha 0.9.4')
+    expect(meaningfulLabel('  cigar lounge  ')).toBe('cigar lounge')
+    expect(meaningfulLabel(null)).toBe('')
+  })
+})
+
+describe('revisionWords', () => {
+  it('is the deterministic word pair alone — same sig, same words, no trailer', () => {
+    const words = revisionWords({ packageSig: SIG_A, locale: 'en', at: AT })
+    expect(words).toBe(revisionWords({ packageSig: SIG_A, locale: 'en', at: AT }))
+    expect(words).not.toContain('·')
+    expect(words.split(' ')).toHaveLength(2)
+    expect(words).toBe(revisionName({ packageSig: SIG_A, label: 'x', at: AT }).split(' · ')[0])
+  })
+
+  it('differs between signatures', () => {
+    expect(revisionWords({ packageSig: SIG_A, at: AT }))
+      .not.toBe(revisionWords({ packageSig: SIG_B, at: AT }))
   })
 })

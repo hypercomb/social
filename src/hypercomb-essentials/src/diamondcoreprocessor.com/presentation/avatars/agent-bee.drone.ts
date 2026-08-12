@@ -74,6 +74,21 @@ interface BeeSprite {
   facing: number
 }
 
+/** One hexagon on the orchestrator's board — an agent, as a thing on screen. */
+interface BoardHex {
+  id: string
+  /** Counter-scaled holder: everything inside is drawn in CSS px. */
+  node: Container
+  rim: Graphics
+  sprite: Sprite
+  /** Where the hexagon sits in SCREEN px — what the hit test compares against,
+   *  so the target is the same size at every zoom. */
+  screenX: number
+  screenY: number
+  /** Last status painted, so the rim is only redrawn when it changes. */
+  painted: string
+}
+
 /** Bee size on screen, in CSS pixels, regardless of zoom. Big enough that the
  *  NAME painted on the abdomen is a name and not a smudge — the bee carries its
  *  own branding, so the bee has to be worth reading. */
@@ -100,6 +115,56 @@ const BANK = 0.11
 const PERCH_X = 0.07
 const PERCH_Y = 0.2
 
+// ── THE BOARD ──────────────────────────────────────────────────────────
+//
+// One hexagon per unit of work in flight, laid out under the perched
+// orchestrator: the running commands as a thing you can look at, rather than a
+// list of names in a panel. Hover one and its window opens.
+//
+// RENDER-ONLY, and that is the whole discipline of it. These hexagons are not
+// tiles: nothing is minted, no layer is committed, no lineage marker is
+// written. An agent is ephemeral — it appears when a command runs and is gone
+// when the work ends — and minting a tile for one would leave a husk behind in
+// the participant's tree every time anything ran. So the board is drawn from
+// the registry every frame and disappears with it, exactly like the bees.
+//
+/** Circumradius of a board hexagon, in CSS px, at any zoom. */
+const BOARD_HEX_PX = 30
+/** Drawn a hair smaller than it is spaced, so neighbours read as separate. */
+const BOARD_HEX_GAP_PX = 3
+/** Hexes per row — a narrow strip down the left edge, clear of the hive. */
+const BOARD_COLUMNS = 2
+/** Where the board starts, below the perched orchestrator. */
+const BOARD_TOP_Y = PERCH_Y + 0.1
+/** Avatar size inside a hexagon, in CSS px. */
+const BOARD_AVATAR_PX = 34
+/** How long the pointer must SETTLE on a hexagon before its window opens.
+ *  Hover is the gesture asked for, and without a settle a sweep across the
+ *  board would open and discard every panel it crossed. */
+const BOARD_SETTLE_MS = 160
+
+/** The rim colour a hexagon wears — the agent's status, at a glance, in the
+ *  same vocabulary the panel uses. */
+const BOARD_STATUS_TINT: Record<string, number> = {
+  pending: 0x5a7d94,
+  working: 0x7edba0,
+  blocked: 0xffc266,
+  done: 0x4a5a66,
+  failed: 0xe24b4a,
+}
+
+/** Vertex ring of a POINTY-TOP hexagon — the same orientation the hive's own
+ *  grid uses (`#axialToPixel` is the pointy-top axial mapping), so the board
+ *  reads as made of the same material as the tiles behind it. */
+const hexPoints = (radius: number): number[] => {
+  const points: number[] = []
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 180) * (60 * i + 30)
+    points.push(Math.cos(angle) * radius, Math.sin(angle) * radius)
+  }
+  return points
+}
+
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
 
@@ -108,7 +173,8 @@ export class AgentBeeDrone extends Drone {
   override genotype = 'assistant'
 
   public override description =
-    'Draws a bee for every agent working in the hive, over the tiles it is working on, and opens the request when clicked.'
+    'Draws a bee for every agent working in the hive, over the tiles it is working on, and opens the request when clicked. '
+    + 'Opening the orchestrator raises a board of hexagons — one per running command — whose window opens on hover.'
   public override effects = ['render'] as const
 
   protected override listens = [
@@ -134,6 +200,10 @@ export class AgentBeeDrone extends Drone {
 
   /** Scratch point for pointer mapping — one allocation, not one per move. */
   readonly #probe = new Point()
+  /** Scratch pair for laying the board out — one allocation, not two per
+   *  hexagon per frame. */
+  readonly #boardIn = new Point()
+  readonly #boardOut = new Point()
   #tooltip: HTMLDivElement | null = null
   #hovering = ''
   /** A press landed on a bee: swallow the pointerup/click that follows it. */
@@ -145,6 +215,19 @@ export class AgentBeeDrone extends Drone {
    *  not be dancing over the tiles you are trying to read), but nothing here is
    *  specific to it. '' = nobody is perched. */
   #perched = ''
+
+  /** The board's container, and the hexagons in it by agent id. Both exist
+   *  only while the orchestrator is perched. */
+  #board: Container | null = null
+  readonly #hexes = new Map<string, BoardHex>()
+  /** The hexagon the pointer is currently over, '' for none. */
+  #boardHovering = ''
+  /** Pending settle — the pointer is on a hexagon but has not stayed long
+   *  enough to be asking for it. Cleared the moment it moves off. */
+  #settleTimer: ReturnType<typeof setTimeout> | null = null
+  /** The agent the board last opened, so re-settling on the same hexagon does
+   *  not reopen a panel that is already showing it. */
+  #boardOpened = ''
 
   protected override sense = (): boolean => true
 
@@ -170,9 +253,12 @@ export class AgentBeeDrone extends Drone {
     // of "this agent is open" — when the panel goes, the bee rejoins the hive
     // and its audit view is put down with it.
     this.onEffect<{ id?: string }>('agent:closed', ({ id }) => {
+      // Closing ONE agent's log, stepped into from the board, is not leaving
+      // the orchestrator — the board stays up and the watcher stays perched.
       if (!id || this.#perched !== id) return
       this.#perched = ''
       this.#lastAnchorAt = 0
+      this.#hideBoard()
       ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')?.clearAudit?.()
     })
 
@@ -241,6 +327,9 @@ export class AgentBeeDrone extends Drone {
     for (const [id, bee] of this.#bees) {
       if (!live.has(id)) bee.fadeTarget = 0
     }
+    // The board is the same set of agents, so it follows the same signal —
+    // work that starts while the board is up appears on it.
+    this.#syncBoard()
   }
 
   #spawn = (agent: Agent): void => {
@@ -450,6 +539,7 @@ export class AgentBeeDrone extends Drone {
     }
 
     this.#drawWaggleAreas(worldScale)
+    this.#drawBoard(worldScale)
   }
 
   /** THE BADGE — "this one is waiting on you", carried by the bee itself.
@@ -505,6 +595,181 @@ export class AgentBeeDrone extends Drone {
     }
   }
 
+  // ── the board ────────────────────────────────────────────────────────
+
+  /** Put the board up: one hexagon per unit of work in flight, under the
+   *  perched orchestrator. Called when the watcher is opened. */
+  #showBoard = (): void => {
+    if (this.#board || !this.#layer) return
+    const board = new Container()
+    // Named so it can be found in the scene graph (`__pixiDebug.find`) without
+    // reaching into this drone's private state.
+    board.label = 'orchestrator-board'
+    // Over the bees: the board is what you are reading while it is up, and a
+    // bee dancing across a hexagon must not take the press meant for it.
+    board.zIndex = 2
+    board.sortableChildren = true
+    this.#layer.addChild(board)
+    this.#board = board
+    this.#syncBoard()
+  }
+
+  /** Take the board down and release every hexagon. */
+  #hideBoard = (): void => {
+    this.#clearSettle()
+    this.#boardHovering = ''
+    this.#boardOpened = ''
+    for (const hex of this.#hexes.values()) hex.node.destroy({ children: true })
+    this.#hexes.clear()
+    this.#board?.destroy({ children: true })
+    this.#board = null
+  }
+
+  /** Reconcile the hexagons against the registry.
+   *
+   *  The orchestrator is left OFF its own board — it is the thing holding the
+   *  board up, it is already perched a few pixels above it, and a watcher
+   *  listed among the things it is watching reads as one more job. */
+  #syncBoard = (): void => {
+    const board = this.#board
+    if (!board) return
+    const agents = (this.#registry()?.list() ?? []).filter(a => a.kind !== 'orchestrator')
+    const live = new Set(agents.map(a => a.id))
+
+    for (const [id, hex] of this.#hexes) {
+      if (live.has(id)) continue
+      hex.node.destroy({ children: true })
+      this.#hexes.delete(id)
+    }
+
+    for (const agent of agents) {
+      if (this.#hexes.has(agent.id)) continue
+      const node = new Container()
+      node.label = `agent-hex:${agent.id}`
+      const rim = new Graphics()
+      const sprite = new Sprite(Texture.EMPTY)
+      sprite.anchor.set(0.5)
+      sprite.width = BOARD_AVATAR_PX
+      sprite.height = BOARD_AVATAR_PX
+      node.addChild(rim)
+      node.addChild(sprite)
+      board.addChild(node)
+      this.#hexes.set(agent.id, { id: agent.id, node, rim, sprite, screenX: 0, screenY: 0, painted: '' })
+
+      // The same avatar the bee wears, so the hexagon and the creature flying
+      // over the work are recognisably one agent.
+      void this.#avatars()?.frames(avatarKeyOf(agent), agent.kind).then(frames => {
+        const current = this.#hexes.get(agent.id)
+        if (!current || !frames?.length) return
+        current.sprite.texture = frames[0]
+        current.sprite.width = BOARD_AVATAR_PX
+        current.sprite.height = BOARD_AVATAR_PX
+      })
+    }
+  }
+
+  /** Lay the hexagons out and paint them. Positions are computed in SCREEN
+   *  space and mapped into the world, so the board holds its corner through a
+   *  pan or a zoom instead of being carried off with the hive — the same trick
+   *  the perch uses. */
+  #drawBoard = (worldScale: number): void => {
+    const board = this.#board
+    if (!board || !this.#app || !this.#world) return
+    board.visible = !this.#hiveHidden
+    if (!board.visible) return
+
+    const screen = this.#app.renderer.screen
+    const pitch = BOARD_HEX_PX + BOARD_HEX_GAP_PX
+    const spacingX = Math.sqrt(3) * pitch
+    const spacingY = 1.5 * pitch
+    const startX = screen.width * PERCH_X
+    const startY = screen.height * BOARD_TOP_Y
+
+    let index = 0
+    for (const [id, hex] of this.#hexes) {
+      const row = Math.floor(index / BOARD_COLUMNS)
+      const column = index % BOARD_COLUMNS
+      // Every other row shifted half a column, so the hexagons interlock the
+      // way the hive's own grid does rather than sitting in a bare table.
+      hex.screenX = startX + column * spacingX + (row % 2 ? spacingX / 2 : 0)
+      hex.screenY = startY + row * spacingY
+
+      this.#boardIn.set(hex.screenX, hex.screenY)
+      const world = this.#world.toLocal(this.#boardIn, undefined, this.#boardOut)
+      hex.node.position.set(world.x, world.y)
+      // Counter-scaled, so everything inside is drawn in CSS px and the board
+      // is the same size to read and to hit at any zoom.
+      hex.node.scale.set(1 / worldScale)
+
+      const agent = this.#registry()?.get(id)
+      const status = agent?.status ?? 'done'
+      const hovered = this.#boardHovering === id
+      const key = `${status}:${hovered ? 'on' : 'off'}`
+      if (hex.painted !== key) {
+        hex.painted = key
+        const tint = BOARD_STATUS_TINT[status] ?? BOARD_STATUS_TINT['pending']
+        hex.rim.clear()
+        hex.rim.poly(hexPoints(BOARD_HEX_PX - BOARD_HEX_GAP_PX / 2))
+        hex.rim.fill({ color: 0x0b1016, alpha: hovered ? 0.96 : 0.82 })
+        hex.rim.stroke({ color: tint, width: hovered ? 2.4 : 1.4, alpha: hovered ? 1 : 0.75 })
+      }
+      // A blocked agent is asking for something, so its hexagon breathes on
+      // the same slow clock its bee's badge does.
+      hex.node.alpha = status === 'blocked'
+        ? 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(this.#time * 2.2))
+        : 1
+      index++
+    }
+  }
+
+  /** The agent whose hexagon is under a client-space point, or ''. Compared in
+   *  SCREEN pixels, so the target is the same size at every zoom. */
+  #boardHit = (clientX: number, clientY: number): string => {
+    if (!this.#board?.visible || this.#hexes.size === 0 || !this.#app) return ''
+    const rect = this.#canvas?.getBoundingClientRect()
+    if (!rect) return ''
+    this.#app.renderer.events.mapPositionToPoint(this.#probe, clientX, clientY)
+    // The inscribed radius is the honest target for a hexagon: a circle at the
+    // circumradius would claim the gaps at the corners, which belong to the
+    // neighbour, and two hexagons would fight over the same pixels.
+    const reach = (BOARD_HEX_PX * Math.sqrt(3)) / 2
+    for (const [id, hex] of this.#hexes) {
+      const dx = this.#probe.x - hex.screenX
+      const dy = this.#probe.y - hex.screenY
+      if (dx * dx + dy * dy <= reach * reach) return id
+    }
+    return ''
+  }
+
+  #clearSettle = (): void => {
+    if (this.#settleTimer === null) return
+    clearTimeout(this.#settleTimer)
+    this.#settleTimer = null
+  }
+
+  /**
+   * Hovering a hexagon opens that agent's window.
+   *
+   * It waits for the pointer to SETTLE first. Hover is the gesture, but
+   * without a settle a sweep across the board would open and throw away a
+   * panel for every hexagon it crossed, and the one you were reaching for
+   * would arrive last after five that flickered past.
+   *
+   * `from` is what gives the panel its way back: opened out of the
+   * orchestrator, the agent's log grows a '‹' that returns to the report,
+   * rather than stranding the participant with only a close button.
+   */
+  #boardSettle = (id: string): void => {
+    this.#clearSettle()
+    if (!id || id === this.#boardOpened) return
+    this.#settleTimer = setTimeout(() => {
+      this.#settleTimer = null
+      if (this.#boardHovering !== id || !this.#board) return
+      this.#boardOpened = id
+      this.emitEffect('agent:open', { id, from: this.#perched })
+    }, BOARD_SETTLE_MS)
+  }
+
   // ── pointer ──────────────────────────────────────────────────────────
 
   /** The agent under a client-space point, or ''.
@@ -549,6 +814,23 @@ export class AgentBeeDrone extends Drone {
 
   #onPointerDown = (event: PointerEvent): void => {
     if (this.#hiveHidden) return
+
+    // THE BOARD TAKES THE PRESS FIRST. It is drawn over the bees and is what
+    // the participant is reading while it is up, so a bee that happens to
+    // dance across a hexagon must not steal the press meant for it. Pressing
+    // does what settling does, without the wait — you already know which one
+    // you want.
+    const onBoard = this.#boardHit(event.clientX, event.clientY)
+    if (onBoard) {
+      event.stopPropagation()
+      event.preventDefault()
+      this.#swallowPointer = event.pointerId
+      this.#clearSettle()
+      this.#boardOpened = onBoard
+      this.emitEffect('agent:open', { id: onBoard, from: this.#perched })
+      return
+    }
+
     const id = this.#hitTest(event.clientX, event.clientY)
     if (!id) return
     // Take the whole gesture: no pan, no tile navigation, no selection.
@@ -566,6 +848,7 @@ export class AgentBeeDrone extends Drone {
       const orchestrator = ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')
       if (this.#perched === id) {
         this.#perched = ''
+        this.#hideBoard()
         orchestrator?.clearAudit?.()
         this.emitEffect('agent:close', { id })
         return
@@ -575,10 +858,16 @@ export class AgentBeeDrone extends Drone {
       // dance centre is already the mechanism, so nothing else is needed.
       this.#lastAnchorAt = 0
       const gathered = orchestrator?.audit?.() ?? 0
-      if (gathered === 0) {
+      // THE BOARD — every running command as a hexagon under the watcher.
+      this.#showBoard()
+      // Only say "nothing to audit" when there is genuinely nothing. Work with
+      // no tile target gathers nothing but still gets a hexagon, and telling
+      // the participant there is nothing while a board of running commands is
+      // going up in front of them would be plainly untrue.
+      if (gathered === 0 && this.#hexes.size === 0) {
         this.emitEffect('toast:show', {
           type: 'tip',
-          message: 'No agent is working on a tile right now — nothing to audit.',
+          message: 'Nothing is running right now — no commands to watch.',
         })
       }
       this.emitEffect('agent:open', { id })
@@ -610,9 +899,32 @@ export class AgentBeeDrone extends Drone {
   }
 
   #onPointerMove = (event: PointerEvent): void => {
-    if (this.#hiveHidden) { this.#setHover(''); return }
+    if (this.#hiveHidden) { this.#setHover(''); this.#leaveBoard(); return }
+
+    // The board first, for the same reason it takes the press.
+    const onBoard = this.#boardHit(event.clientX, event.clientY)
+    if (onBoard !== this.#boardHovering) {
+      this.#boardHovering = onBoard
+      this.#boardSettle(onBoard)
+      // Moving OFF the board clears the "already showing" latch, so coming
+      // back to the same hexagon opens it again rather than doing nothing.
+      if (!onBoard) this.#boardOpened = ''
+    }
+    if (onBoard) {
+      this.#setHover(onBoard, event.clientX, event.clientY)
+      return
+    }
+
     const id = this.#hitTest(event.clientX, event.clientY)
     this.#setHover(id, event.clientX, event.clientY)
+  }
+
+  /** The pointer has left the board — drop the hover and any pending settle. */
+  #leaveBoard = (): void => {
+    if (!this.#boardHovering && this.#settleTimer === null) return
+    this.#boardHovering = ''
+    this.#boardOpened = ''
+    this.#clearSettle()
   }
 
   #setHover = (id: string, clientX = 0, clientY = 0): void => {
@@ -675,6 +987,7 @@ export class AgentBeeDrone extends Drone {
     }
     this.#registry()?.removeEventListener('change', this.#sync)
     this.#avatars()?.removeEventListener('change', this.#repaintAvatars)
+    this.#hideBoard()
     this.#tooltip?.remove()
     this.#tooltip = null
     if (this.#layer && this.#world) this.#world.removeChild(this.#layer)

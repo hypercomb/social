@@ -40,6 +40,39 @@ export interface ChatTurn {
   readonly at: number
 }
 
+/** One conversation, as the chat window lists it. Recovered from the pool —
+ *  there is no index file and there must not be one. A bucket is named
+ *  `sha256(convoId)`, which is one-way, but every turn inside it carries its
+ *  own `convoId`, so the thread describes itself. An index would be a second
+ *  copy of a fact the turns already hold, free to drift the first time a write
+ *  half-lands. */
+export interface ConversationSummary {
+  readonly convoId: string
+  readonly title: string
+  readonly turnCount: number
+  readonly lastAt: number
+}
+
+/** Conversations that belong to a PERSON, and so appear in the chat window.
+ *
+ *  An ALLOWLIST, deliberately — not a blocklist of machine ids. Headless
+ *  consumers mint conversations on this same channel (keyword-suggestions uses
+ *  `keywords:…`), and a blocklist has to be extended every time another one
+ *  appears; the day someone forgets, machine chatter turns up in the user's
+ *  chat list. Unrecognised means not shown, so a new headless consumer is
+ *  invisible here by default and has to opt in on purpose.
+ *
+ *  `convo-` is the retired ask screen's shape, kept so conversations from
+ *  before the chat window still list rather than being orphaned by the change. */
+const HUMAN_PREFIXES = ['chat:', 'convo-'] as const
+
+export const isHumanConversation = (convoId: string): boolean =>
+  HUMAN_PREFIXES.some(prefix => convoId.startsWith(prefix))
+
+/** A fresh conversation id. The `chat:` prefix is what marks it as a person's. */
+export const newConvoId = (): string =>
+  `chat:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
 }
@@ -101,6 +134,22 @@ export const appendTurn = async (
   }
 }
 
+/** Every turn in one bucket, oldest first. Shared by the single-thread read and
+ *  the conversation list, so both agree about what a thread contains. */
+const readBucket = async (bucket: FileSystemDirectoryHandle): Promise<ChatTurn[]> => {
+  const out: ChatTurn[] = []
+  const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
+  for await (const [, handle] of entries) {
+    if (handle.kind !== 'file') continue
+    try {
+      const file = await (handle as FileSystemFileHandle).getFile()
+      const turn = JSON.parse(await file.text()) as ChatTurn
+      if (turn?.kind === 'chat-turn' && turn.convoId) out.push(turn)
+    } catch { /* one unreadable turn must not hide the thread */ }
+  }
+  return out.sort((a, b) => a.at - b.at)
+}
+
 /** Every stored turn for a conversation, oldest first. What a window reads
  *  when it opens — which is why a closed window costs nothing. */
 export const readTurns = async (convoId: string): Promise<ChatTurn[]> => {
@@ -111,21 +160,73 @@ export const readTurns = async (convoId: string): Promise<ChatTurn[]> => {
   const pool = await store?.getPool?.(THREADS_POOL)
   if (!pool) return []
 
-  const out: ChatTurn[] = []
   try {
     const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
     const bucket = await pool.getDirectoryHandle(name, { create: false })
-    const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
-    for await (const [, handle] of entries) {
-      if (handle.kind !== 'file') continue
-      try {
-        const file = await (handle as FileSystemFileHandle).getFile()
-        const turn = JSON.parse(await file.text()) as ChatTurn
-        if (turn?.kind === 'chat-turn' && turn.convoId === id) out.push(turn)
-      } catch { /* one unreadable turn must not hide the thread */ }
-    }
+    return (await readBucket(bucket)).filter(turn => turn.convoId === id)
   } catch { /* no bucket yet — an empty conversation, not an error */ }
-  return out.sort((a, b) => a.at - b.at)
+  return []
+}
+
+/** The first line of the first thing the person said, which is what a
+ *  conversation is actually about. Falls back to the first turn of any role so
+ *  a thread that somehow starts with a reply still gets a name. */
+const titleOf = (turns: readonly ChatTurn[]): string => {
+  const lead = turns.find(turn => turn.role === 'user') ?? turns[0]
+  const line = String(lead?.text ?? '').split('\n').map(s => s.trim()).find(Boolean) ?? ''
+  return line.length > 72 ? line.slice(0, 71).trimEnd() + '…' : line
+}
+
+/**
+ * Every human conversation in the pool, most recently active first.
+ *
+ * Walks the buckets and reads them. There is no index to consult and no cache
+ * to invalidate: the turns ARE the list. That costs one pass over threads the
+ * participant has actually held, which is small, and it can never disagree
+ * with what opening a conversation shows.
+ */
+export const listConversations = async (): Promise<ConversationSummary[]> => {
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return []
+
+  const out: ConversationSummary[] = []
+  try {
+    const entries = (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
+    for await (const [, handle] of entries) {
+      if (handle.kind !== 'directory') continue
+      try {
+        const turns = await readBucket(handle as FileSystemDirectoryHandle)
+        const convoId = turns[0]?.convoId
+        if (!convoId || !isHumanConversation(convoId)) continue
+        out.push({
+          convoId,
+          title: titleOf(turns),
+          turnCount: turns.length,
+          lastAt: turns[turns.length - 1]?.at ?? 0,
+        })
+      } catch { /* one unreadable bucket must not hide the rest of the list */ }
+    }
+  } catch { /* no pool yet — no conversations, not an error */ }
+  return out.sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/** Drop a conversation and every turn in it. The one destructive act this
+ *  module has, and it is scoped to a single bucket inside the threads pool —
+ *  it never reaches the root, a lineage bag, or another pool. */
+export const deleteConversation = async (convoId: string): Promise<boolean> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return false
+
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return false
+
+  try {
+    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    await pool.removeEntry(name, { recursive: true })
+    return true
+  } catch { return false }
 }
 
 /** Store the turn, THEN announce it. The effect carries the convoId only —
@@ -143,3 +244,24 @@ export const deliverTurn = async (
   EffectBus.emit('ask:chat-reply', { convoId, text })
   return true
 }
+
+// ── IoC surface ─────────────────────────────────────────
+//
+// The chat window is shell UI (hypercomb-shared), which may never import a
+// module — the dependency runs the other way. So the module publishes these
+// functions and the window resolves them at call time, which is the sanctioned
+// way for a shell to consume a module.
+
+export class ChatThreads {
+  readonly appendTurn = appendTurn
+  readonly readTurns = readTurns
+  readonly deliverTurn = deliverTurn
+  readonly listConversations = listConversations
+  readonly deleteConversation = deleteConversation
+  readonly newConvoId = newConvoId
+  readonly isHumanConversation = isHumanConversation
+}
+
+export const CHAT_THREADS_IOC_KEY = '@diamondcoreprocessor.com/ChatThreads'
+
+window.ioc.register(CHAT_THREADS_IOC_KEY, new ChatThreads())

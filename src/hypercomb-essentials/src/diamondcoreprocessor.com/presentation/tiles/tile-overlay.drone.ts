@@ -183,17 +183,32 @@ const MAX_ICON_ROWS = 2
  *  doubled). The block is centred on ICON_Y, so a single row sits dead centre
  *  and two rows straddle it. */
 const ICON_ROW_PITCH = 10
+/** How far apart the OUTERMOST icon centres in a row may sit: the hex's
+ *  inradius (√3/2 × 32) less an edge margin, doubled. Mirrors
+ *  computeIconPositions. The action row compresses to fit it; the arrange pool
+ *  WRAPS at it. One constant, so the two surfaces cannot drift apart. */
+const ICON_ROW_AVAILABLE = (27.7 - 3) * 2
 
 // ── Arrange mode constants ────────────────────────────────────────
 
-// Follows ICON_Y (tile-actions.drone.ts) by hand so the arrange pool keeps its
-// spacing under the action rows — the name taking the band's top row pushed the
-// icon block down one half-row, and a wrapped second row now ends at +10.
-// Absolute, so it does NOT follow on its own.
+// The pool hangs UNDER the action rows. It no longer follows ICON_Y by hand:
+// #layoutIconRow reports where the icon block actually ends and #positionPool
+// hangs the pool off that, so a wrap moves the pool down with it instead of
+// leaving it riding up inside the band's bottom row. POOL_Y_OFFSET is only the
+// resting place used before any layout has run — with one icon row the derived
+// offset lands on exactly this number, which is what it always was.
 const POOL_Y_OFFSET = 16
 const POOL_ICON_SIZE = 5        // pool icons scaled proportionally
 const POOL_SPACING = 8         // tighter to match smaller pool icons
 const POOL_BG_PADDING = 2
+/** Centre-to-centre between wrapped pool rows. */
+const POOL_ROW_PITCH = POOL_ICON_SIZE + 2
+/** Clearance between the bottom of the icon block and the top of the pool. */
+const POOL_GAP = 3
+/** Pool icons per row — the same hex width the action rows respect. The pool
+ *  used to lay every parked icon out on ONE line, so a handful of them ran off
+ *  both sides of the tile, under a background drawn one row tall regardless. */
+const POOL_MAX_ROW_ICONS = Math.max(1, Math.floor(ICON_ROW_AVAILABLE / POOL_SPACING) + 1)
 const POOL_BG_COLOR = 0x222244
 const POOL_BG_ALPHA = 0.6
 const WIGGLE_SPEED = 4
@@ -278,6 +293,11 @@ export class TileOverlayDrone extends Drone {
    *  Travels with tile:hover so navigation cannot pair a fresh hover with a
    *  stale global row count. */
   #bandRows = 1
+  /** Y of the BOTTOM edge of the laid-out icon block, in overlay-local space.
+   *  Written by #layoutIconRow every pass; the arrange pool hangs off it so it
+   *  follows a wrap instead of being a constant copied from ICON_Y by hand.
+   *  Starts at a single row's bottom, which is where the pool has always sat. */
+  #iconBlockBottom = ICON_Y + DEFAULT_ICON_SIZE / 2
   /** Unhook for the ioc.onRegister watch that un-shades a feature affordance
    *  the moment its backing bee registers (feature-readiness shade). */
   #unregisterBackingWatch: (() => void) | undefined
@@ -1516,14 +1536,26 @@ export class TileOverlayDrone extends Drone {
     // does not grow at all. Emitted every layout so it tracks per-tile
     // visibility.
     this.#bandRows = 1 + rows.length
-    const bandLabel = this.#currentAxial
+    // The band's OWNER — the tile whose menu is on screen right now, or null
+    // when none is. This is the overlay stating the whole visual fact, not just
+    // a number: THIS tile is showing THESE rows. The renderer takes the hovered
+    // tile from it as well as the height, so the two cannot describe different
+    // tiles. Gated on the overlay actually being visible, so a layout run while
+    // the band is stood down (editing, selection, a takeover) reads as "nobody".
+    const bandLabel = this.#overlay?.visible && this.#currentAxial
       ? this.#occupiedByAxial.get(
           TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
         )?.label ?? null
       : null
     this.emitEffect('overlay:band-rows', { rows: this.#bandRows, label: bandLabel })
 
-    if (rows.length === 0) return
+    if (rows.length === 0) {
+      // No icons: leave the pool where a single row would have left it, so an
+      // empty menu does not jump the pool around.
+      this.#iconBlockBottom = ICON_Y + DEFAULT_ICON_SIZE / 2
+      this.#positionPool()
+      return
+    }
 
     // ONE origin for every row: the FIRST row is centred, and each row after it
     // starts at that same x and reads left to right. The lefts line up on a
@@ -1531,18 +1563,39 @@ export class TileOverlayDrone extends Drone {
     // one. Row 0 is always the widest (chunking fills it before wrapping), so
     // centring on it also centres the block — and a lone row is centred, which
     // is the same rule, not a special case.
-    // Hex horizontal bound (mirrors computeIconPositions) — the row compresses to fit.
-    const available = (27.7 - 3) * 2
+    // Hex horizontal bound — the row compresses to fit.
     let spacing = ICON_SPACING
-    if (rows[0].length > 1 && (rows[0].length - 1) * spacing > available) {
-      spacing = available / (rows[0].length - 1)
+    if (rows[0].length > 1 && (rows[0].length - 1) * spacing > ICON_ROW_AVAILABLE) {
+      spacing = ICON_ROW_AVAILABLE / (rows[0].length - 1)
     }
     const startX = Math.round(-(rows[0].length - 1) * spacing / 2)
     const top = ICON_Y - (rows.length - 1) * ICON_ROW_PITCH / 2
+    let lastRowY = top
     rows.forEach((items, r) => {
       const y = Math.round(top + r * ICON_ROW_PITCH)
+      lastRowY = y
       items.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), y))
     })
+
+    // Where the drawn block ACTUALLY ends — the pool hangs off this.
+    this.#iconBlockBottom = lastRowY + DEFAULT_ICON_SIZE / 2
+    this.#positionPool()
+  }
+
+  /** Hang the arrange pool under the icon block: its background's TOP edge —
+   *  padding included — clears the lowest icon row by POOL_GAP. A wrap pushes
+   *  the pool down instead of letting it overlap the band it sits below. */
+  #positionPool(): void {
+    if (!this.#poolContainer) return
+    this.#poolContainer.position.y =
+      this.#iconBlockBottom + POOL_GAP + POOL_BG_PADDING + POOL_ICON_SIZE / 2
+  }
+
+  /** Top edge of the pool background in overlay-local space — the boundary
+   *  between "dropped on the action rows" and "dropped in the pool". Derived,
+   *  so both drop hit-tests follow the pool wherever the layout put it. */
+  #poolTop(): number {
+    return (this.#poolContainer?.position.y ?? POOL_Y_OFFSET) - POOL_ICON_SIZE / 2 - POOL_BG_PADDING
   }
 
   // ── Per-tile icon visibility ───────────────────────────────────────
@@ -1650,10 +1703,13 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.visible = true
     }
 
-    // Make all action icons visible
-    for (const action of this.#actions) {
-      action.button.visible = true
-    }
+    // Arrange shows EVERY icon the profile carries, not just the ones this tile
+    // passes. Go through the one visibility+layout pass — its arrange branch
+    // makes them all visible AND lays them out — so the extra icons wrap into
+    // rows and the band is told how tall to draw. Flipping `visible` by hand
+    // left them at the positions of the smaller per-tile set, spilling out of a
+    // background still sized for it.
+    this.#updatePerTileVisibility()
 
     // Create pool container
     this.#createPoolContainer()
@@ -1794,28 +1850,49 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // Create pool icon buttons — center positions, symmetric about x=0
-    const startX = -(entries.length - 1) * POOL_SPACING / 2
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i]
-      const btn = new HexIconButton({
-        size: POOL_ICON_SIZE,
-        hoverTint: entry.hoverTint,
-      })
-      btn.position.set(startX + i * POOL_SPACING, 0)
-      btn.alpha = 0.5
-      this.#poolContainer.addChild(btn)
-      void btn.load(entry.svgMarkup)
-
-      this.#poolIcons.push({ name: entry.name, profile: entry.profile, button: btn })
+    // WRAP, like the action rows do. A pool row is bounded by the same hex
+    // width, and rows grow DOWNWARD from the container origin so the pool's top
+    // edge — the boundary both drop hit-tests read — stays put however many
+    // icons are parked in it.
+    const container = this.#poolContainer
+    const poolRows: IconRegistryEntry[][] = []
+    for (let i = 0; i < entries.length; i += POOL_MAX_ROW_ICONS) {
+      poolRows.push(entries.slice(i, i + POOL_MAX_ROW_ICONS))
     }
 
-    // Draw pool background — centered around the row
+    // Every row shares the FIRST row's left edge, so a wrap reads as one
+    // left-aligned block. Row 0 is always the widest (chunking fills it before
+    // wrapping), so centring on it centres the block — and a lone row comes out
+    // centred, which is the same rule rather than a special case.
+    const widest = poolRows[0].length
+    const startX = -(widest - 1) * POOL_SPACING / 2
+    poolRows.forEach((row, r) => {
+      const y = r * POOL_ROW_PITCH
+      row.forEach((entry, i) => {
+        const btn = new HexIconButton({
+          size: POOL_ICON_SIZE,
+          hoverTint: entry.hoverTint,
+        })
+        btn.position.set(startX + i * POOL_SPACING, y)
+        btn.alpha = 0.5
+        container.addChild(btn)
+        void btn.load(entry.svgMarkup)
+
+        this.#poolIcons.push({ name: entry.name, profile: entry.profile, button: btn })
+      })
+    })
+
+    // Background sized to the rows it HOLDS. Drawn one row tall whatever the
+    // pool contained, it left every wrapped row sitting outside its own
+    // backing — icons floating on the tile with nothing behind them.
     this.#poolBackground.clear()
-    const halfW = ((entries.length - 1) * POOL_SPACING) / 2 + POOL_ICON_SIZE / 2 + POOL_BG_PADDING
+    const halfW = ((widest - 1) * POOL_SPACING) / 2 + POOL_ICON_SIZE / 2 + POOL_BG_PADDING
     const halfH = POOL_ICON_SIZE / 2 + POOL_BG_PADDING
-    this.#poolBackground.roundRect(-halfW, -halfH, halfW * 2, halfH * 2, 1.5)
+    const height = (poolRows.length - 1) * POOL_ROW_PITCH + halfH * 2
+    this.#poolBackground.roundRect(-halfW, -halfH, halfW * 2, height, 1.5)
     this.#poolBackground.fill({ color: POOL_BG_COLOR, alpha: POOL_BG_ALPHA })
+
+    this.#positionPool()
   }
 
   // ── Arrange drag-and-drop ───────────────────────────────────────
@@ -1922,7 +1999,7 @@ export class TileOverlayDrone extends Drone {
     } else if (dragSource === 'pool') {
       // Check if dropped in the active area (above pool)
       const btnGlobalY = dragButton.position.y + (this.#poolContainer?.position.y ?? 0)
-      if (btnGlobalY < POOL_Y_OFFSET - POOL_BG_PADDING) {
+      if (btnGlobalY < this.#poolTop()) {
         this.#movePoolToActiveEnd(dragName)
       }
     }
@@ -1983,8 +2060,8 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    // Check if in the active icon row area (y near ICON_Y)
-    if (centerY < POOL_Y_OFFSET - POOL_BG_PADDING && centerY > ICON_Y - 10 && centerY < ICON_Y + 15) {
+    // Check if in the active icon row area (above the pool, around ICON_Y)
+    if (centerY < this.#poolTop() && centerY > ICON_Y - 10 && centerY < ICON_Y + 15) {
       return { type: 'active-area', name: '' }
     }
 
@@ -2028,25 +2105,26 @@ export class TileOverlayDrone extends Drone {
     order[idxA] = nameB
     order[idxB] = nameA
 
-    // Reposition buttons
-    const positions = computeIconPositions(order)
-    for (const action of this.#actions) {
-      const idx = order.indexOf(action.name)
-      if (idx >= 0 && positions[idx]) {
-        action.button.position.set(positions[idx].x, positions[idx].y)
-      }
-    }
+    // #actions carries the DRAWN sequence, so it has to follow the swap before
+    // anything is laid out again. Stable sort, so icons the order does not name
+    // keep their relative places.
+    const rank = new Map(order.map((name, i) => [name, i]))
+    this.#actions.sort((a, b) =>
+      (rank.get(a.name) ?? order.length) - (rank.get(b.name) ?? order.length))
 
-    // Update registered descriptors positions
+    // Re-lay out through the ONE layout that knows about wrapping. Placing
+    // these by hand put every icon back on a single line, so a swap silently
+    // un-wrapped a two-row menu — and left the band drawn for rows that were no
+    // longer there.
+    this.#layoutIconRow()
+
+    // Keep the registered descriptors' recorded positions in step with where
+    // the buttons actually ended up.
     for (const action of this.#actions) {
       const desc = this.#registeredDescriptors.get(action.name)
-      if (desc) {
-        const idx = order.indexOf(action.name)
-        if (idx >= 0 && positions[idx]) {
-          desc.x = positions[idx].x
-          desc.y = positions[idx].y
-        }
-      }
+      if (!desc) continue
+      desc.x = action.button.position.x
+      desc.y = action.button.position.y
     }
 
     this.#arrangeDirty = true

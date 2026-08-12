@@ -256,9 +256,12 @@
                    click to rename locally; sig stays inspectable via title. -->
               <div class="version-bar">
                 @if (editingLabelSig() === section.rootSig) {
+                  <!-- Prefill only a real rename: prefilling the deploy label
+                       made an untouched blur STORE "development" as an
+                       override. The minted handle shows as placeholder. -->
                   <input #labelInput class="version-name-edit"
-                    [value]="labelOverride(section.rootSig) || section.label || ''"
-                    [attr.placeholder]="section.label || ('dcp.version-name' | t)"
+                    [value]="labelOverride(section.rootSig)"
+                    [attr.placeholder]="displayLabel(section) || ('dcp.version-name' | t)"
                     [attr.aria-label]="'dcp.version-name' | t"
                     (keydown.enter)="commitLabelEdit(section, $event)"
                     (keydown.escape)="cancelLabelEdit()"

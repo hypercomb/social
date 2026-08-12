@@ -1,0 +1,120 @@
+@if (visible()) {
+  <aside
+    class="chat-panel"
+    hcDockInset="right"
+    hcDockedPanel="chat-window"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="300"
+    [maxWidth]="720"
+    [defaultWidth]="400"
+    data-consumes-wheel
+    (keydown)="onKey($event)"
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'chat.title' | t"
+  >
+    <header class="chat-header">
+      <span class="chat-title">{{ 'chat.title' | t }}</span>
+      <button class="chat-close" type="button" (click)="close()"
+        [attr.aria-label]="'chat.close' | t">×</button>
+    </header>
+
+    <!-- Which conversation you are in. The thread you came for is named here;
+         the others are one press away rather than permanently on screen. -->
+    <div class="chat-bar">
+      <button class="chat-current" type="button" (click)="toggleList()"
+        [attr.aria-expanded]="listOpen()"
+        [title]="'chat.list.toggle' | t">
+        <span class="mat-sym" aria-hidden="true">{{ listOpen() ? 'expand_more' : 'chevron_right' }}</span>
+        <span class="chat-current-name">{{ activeTitle() || ('chat.untitled' | t) }}</span>
+      </button>
+      <button class="chat-new" type="button" (click)="newChat()"
+        [title]="'chat.new' | t" [attr.aria-label]="'chat.new' | t">
+        <span class="mat-sym" aria-hidden="true">add</span>
+      </button>
+    </div>
+
+    @if (listOpen()) {
+      <ul class="chat-list">
+        @if (conversations().length === 0) {
+          <li class="chat-list-empty">{{ 'chat.list.empty' | t }}</li>
+        }
+        @for (conversation of conversations(); track conversation.convoId) {
+          <li class="chat-list-row" [class.on]="conversation.convoId === activeId()">
+            <button class="chat-list-body" type="button" (click)="pick(conversation.convoId)">
+              <span class="chat-list-name">{{ conversation.title || ('chat.untitled' | t) }}</span>
+              <span class="chat-list-meta">{{ 'chat.turns' | t: { count: conversation.turnCount } }}</span>
+            </button>
+            <!-- Arms on the first press, deletes on the second. -->
+            <button class="chat-list-del" type="button"
+              [class.armed]="armed() === conversation.convoId"
+              (click)="remove(conversation.convoId, $event)"
+              [title]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
+              [attr.aria-label]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
+            ><span class="mat-sym" aria-hidden="true">{{ armed() === conversation.convoId ? 'delete_forever' : 'close' }}</span></button>
+          </li>
+        }
+      </ul>
+    }
+
+    <div class="chat-thread" #scroller>
+      @if (empty()) {
+        <p class="chat-empty">{{ 'chat.empty' | t }}</p>
+      }
+      @for (turn of turns(); track trackTurn($index, turn)) {
+        <div class="chat-msg" [class.user]="turn.role === 'user'" [class.ai]="turn.role === 'assistant'">
+          <div class="chat-msg-text">{{ turn.text }}</div>
+        </div>
+      }
+      <!-- An answer arriving from the host tier, a chunk at a time. Not a turn
+           until the stream closes and the text is on disk. -->
+      @if (streaming()) {
+        <div class="chat-msg ai" aria-live="polite">
+          <div class="chat-msg-text">{{ streaming() }}</div>
+        </div>
+      } @else if (waiting()) {
+        <div class="chat-msg ai chat-think" aria-live="polite">
+          <span class="chat-msg-text">{{ (bridgeUp() ? 'chat.thinking' : 'chat.queued') | t }}</span>
+        </div>
+      }
+    </div>
+
+    <footer class="chat-foot">
+      <!-- Context, REPORTED. Where you are standing and what you have selected
+           is what the question carries — there is nothing to maintain here. -->
+      <div class="chat-status">
+        <select class="chat-model" (change)="onModelChange($event)"
+          [attr.aria-label]="'chat.model' | t" [title]="'chat.model' | t">
+          @for (name of models; track name) {
+            <option [value]="name" [selected]="name === model()">{{ name }}</option>
+          }
+        </select>
+        <span class="chat-where" [title]="path()">{{ path() }}</span>
+        @if (targets().length) {
+          <span class="chat-targets">{{ 'chat.selected' | t: { count: targets().length } }}</span>
+        }
+      </div>
+
+      <!-- Silence, named. Every reply arrives over the bridge; with nothing
+           listening a question is queued, not slow. -->
+      <div class="chat-link" [class.down]="!bridgeUp()">
+        <span class="chat-dot" aria-hidden="true"></span>
+        <span>{{ (bridgeUp() ? 'chat.link.up' : 'chat.link.down') | t }}</span>
+      </div>
+
+      <div class="chat-inputrow">
+        <textarea #input class="chat-input" rows="1"
+          [placeholder]="'chat.placeholder' | t"
+          [attr.aria-label]="'chat.placeholder' | t"
+          (keydown)="onInputKey($event)"
+          (input)="onInput($event)"></textarea>
+        <button class="chat-send" type="button" (click)="send()"
+          [title]="'chat.send' | t" [attr.aria-label]="'chat.send' | t">
+          <span class="mat-sym" aria-hidden="true">arrow_upward</span>
+        </button>
+      </div>
+    </footer>
+  </aside>
+}

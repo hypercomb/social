@@ -79,15 +79,29 @@ export class AgentPanelView extends EventTarget {
 
   constructor() {
     super()
-    EffectBus.on<{ id?: string }>('agent:open', payload => {
+    EffectBus.on<{ id?: string; from?: string }>('agent:open', payload => {
       const id = String(payload?.id ?? '')
-      if (id) this.open(id)
+      if (!id) return
+      // `from` means "opened out of that agent" — today, off the orchestrator's
+      // board of running commands. It has to be a STEP, not a fresh open: a
+      // fresh one closes the panel first, and `agent:closed` puts the perch and
+      // the board down, so hovering a hexagon would dismantle the board you
+      // hovered it on.
+      const from = String(payload?.from ?? '')
+      if (from && from !== id) { this.#stepTo(id, from); return }
+      this.open(id)
     })
     // Closed from outside — pressing a perched bee a second time puts its
     // panel down the same way its × would.
+    //
+    // `#returnTo` counts as well: stepping off the orchestrator's board into
+    // one agent's log is a TRIP, and putting the board down ends the trip. Left
+    // open, that log would still be offering "‹ Back to the orchestrator" after
+    // the orchestrator had unperched and its board had gone — a way back to
+    // somewhere that is no longer there.
     EffectBus.on<{ id?: string }>('agent:close', payload => {
       const id = String(payload?.id ?? '')
-      if (id && this.#id === id) this.close()
+      if (id && (this.#id === id || this.#returnTo === id)) this.close()
     })
     // The report is live. Findings clear on their own when work recovers, and
     // the orchestrator's running commentary lands on its own clock — neither
@@ -693,6 +707,24 @@ export class AgentPanelView extends EventTarget {
     EffectBus.emit('toast:show', stopped
       ? { type: 'tip', message: this.#t('agent.stopped', 'Stopped — the request is out of the hive.') }
       : { type: 'warning', message: this.#t('agent.stop-error', 'Could not stop it — try again.') })
+  }
+
+  /** Step to an agent from a NAMED origin, without closing the panel.
+   *
+   *  Unlike `#swap`, "back" is pinned to the origin rather than to whatever was
+   *  showing a moment ago. Sweeping a board of hexagons would otherwise build a
+   *  chain — hex A, then B, then C, with back walking you through B — when what
+   *  the participant means by back is, always, the report they came from.
+   *
+   *  `#returnTo` is set BEFORE opening because the head is built inside
+   *  `open()`, and `#swapping` keeps the close it performs from announcing
+   *  itself: `agent:closed` puts down the perch and the board, which is exactly
+   *  what a step must not do. */
+  #stepTo(id: string, from: string): void {
+    if (!id || id === this.#id) return
+    this.#swapping = true
+    this.#returnTo = from
+    try { this.open(id) } finally { this.#swapping = false }
   }
 
   /** Change which agent the panel is showing, WITHOUT closing it. Remembers

@@ -959,6 +959,35 @@ export class ShowCellDrone extends Drone {
    *  their background above and below. Restored with the other uniforms on
    *  every pass; see the setFlat/setPivot block in applyGeometry. */
   #bandRows = 1
+  /** The tile #bandRows was computed FOR. A row count is only ever true of one
+   *  tile, so it is stored with its owner and pushed at the shader only while
+   *  that tile is the hover (#applyBandRows). Navigating in used to carry the
+   *  LEAVING tile's count into the arriving level — a band drawn for one icon
+   *  row under a tile whose icons wrapped to two, which reads as the rows
+   *  collapsing the moment you go inside. */
+  #bandRowsLabel: string | null = null
+  /** Push the band height at the shader. The ONE place that decides it: the
+   *  stored count applies only to the tile it was computed for, and any other
+   *  tile — including one that merely shares a name with a tile on the level we
+   *  just left — gets the resting single row. Called from every path that can
+   *  change either half of that pair (row count, hover, geometry rebuild). */
+  #applyBandRows(): void {
+    const owned = this.#hoverRevealLabel !== null && this.#bandRowsLabel === this.#hoverRevealLabel
+    this.shader?.setBandRows(owned ? this.#bandRows : 1)
+  }
+  /** Put the hover on `label` (null = nothing hovered): the name reveal, the
+   *  band height, the lit cell and its shade lift. ONE path, so the band and
+   *  the icons can never end up describing different tiles — whichever message
+   *  carried the news. A shaded tile is NOT out of reach: hovering it lifts the
+   *  shade and lights its ring like any other, because "this isn't loaded yet"
+   *  must never become "you may not go here". */
+  #applyHover(label: string | null): void {
+    this.#setHoverReveal(label)
+    this.#applyBandRows()
+    if (!this.shader) return
+    this.shader.setHoveredIndex(label !== null ? this.#labelToIndex.get(label) ?? -1 : -1)
+    this.#setHoverOpaque(label)
+  }
   #substrateFadeStart: number | null = null
   #substrateFadeRaf = 0
   // Launcher motion (the games march) — a per-tile float driven in the vertex
@@ -2534,6 +2563,19 @@ export class ShowCellDrone extends Drone {
       return await this.#renderFromSynchronizeInner(lineage, locationKey, axial, passSegments)
     } finally {
       if (this.#activeRenderTarget === locationKey) this.#activeRenderTarget = null
+      // PUT THE HOVER BACK. Clearing it above is only correct for the DURATION
+      // of the pass — the index it names is stale while the map is being
+      // replaced. Leaving it cleared afterwards was the collapse: the pointer
+      // has not moved, so the overlay keeps the tile's icons on screen (two
+      // rows of them), while the renderer, told nothing is hovered, drops the
+      // band back to the resting one-row pill underneath them. Recovery used to
+      // depend entirely on a round trip — render:cell-count → the overlay's
+      // #recoverHover → tile:hover — which a pass that bails, or one whose
+      // recovery is refused mid-navigation, never completes. Re-deriving from
+      // the label we already hold needs no round trip and is correct whatever
+      // the pass did: by now #hoverRevealLabel is either the tile still under
+      // the cursor, or null because the level it belonged to is gone.
+      this.#applyHover(this.#hoverRevealLabel)
     }
   }
 
@@ -4384,7 +4426,7 @@ export class ShowCellDrone extends Drone {
     }
     this.shader.setFlat(this.#flat)
     this.shader.setPivot(this.#pivot)
-    this.shader.setBandRows(this.#bandRows)
+    this.#applyBandRows()
     this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
     this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
 
@@ -4556,7 +4598,7 @@ export class ShowCellDrone extends Drone {
     const restoredHoverIndex = this.#hoverRevealLabel
       ? this.#labelToIndex.get(this.#hoverRevealLabel)
       : undefined
-    this.shader.setBandRows(this.#bandRows)
+    this.#applyBandRows()
     this.shader.setHoveredIndex(restoredHoverIndex ?? -1)
     this.#emitRenderTags(cells)
   }
@@ -6107,13 +6149,23 @@ export class ShowCellDrone extends Drone {
     // it is told, so a tile whose icons fit one row keeps the text's own band
     // height instead of growing for nothing.
     this.onEffect<{ rows?: number; label?: string | null }>('overlay:band-rows', (payload) => {
-      // Row layout belongs to one hovered tile. Ignore a late layout from the
-      // level being replaced; tile:hover below carries the arriving tile's
-      // row count atomically and establishes the new owner.
       const owner = typeof payload?.label === 'string' ? payload.label : null
-      if (owner !== this.#hoverRevealLabel) return
+      this.#bandRowsLabel = owner
       this.#bandRows = Math.max(1, payload?.rows ?? 1)
-      this.shader?.setBandRows(this.#bandRows)
+
+      // THE OVERLAY OWNS HOVER — it does the hit-testing and the wrapping, and
+      // this message is it naming the tile whose menu is up and how tall that
+      // menu is. Take the hovered tile from it, not just the height.
+      //
+      // The hovered index used to come from `tile:hover` ALONE, which the
+      // overlay emits only when the hovered HEX CHANGES. Every other path that
+      // re-lays the menu out — arriving on a new level, an icon registering, a
+      // notes or decoration update — left the renderer holding the index a
+      // geometry rebuild had already reset to -1. The shader draws the tall
+      // band only for the hovered cell, so the icons stayed up on two rows over
+      // a background that had snapped back to the resting one-row pill: the
+      // rows collapsing, most visibly on the way into a tile.
+      this.#applyHover(owner !== null && this.renderedCells.has(owner) ? owner : null)
     })
 
     // q/r and label are absent on the "nothing hovered" broadcast (pointer
@@ -6135,31 +6187,24 @@ export class ShowCellDrone extends Drone {
         }
       }
 
-      // The band geometry and the hover target are one visual state. Applying
-      // the row count from this same payload FIRST means the background begins
-      // at its final height; the label and icons never paint into a one-row
-      // band that grows underneath them on the following update.
-      this.#bandRows = hoverLabel
-        ? Math.max(1, payload.bandRows ?? this.#bandRows)
-        : 1
-      this.shader?.setBandRows(this.#bandRows)
+      // The band geometry and the hover target are one visual state. The hover
+      // carries its own row count, so the background reaches its final height
+      // in the same update the hover lands in — the label and icons never paint
+      // into a one-row band that grows underneath them a frame later. Recorded
+      // against the arriving label, so it cannot be read for any other tile.
+      if (hoverLabel && payload.bandRows !== undefined) {
+        this.#bandRowsLabel = hoverLabel
+        this.#bandRows = Math.max(1, payload.bandRows)
+      }
 
-      // Reveal only after the background has its initial row count. The next
-      // geometry bake will then write the visible label UV immediately.
-      this.#setHoverReveal(hoverLabel)
-
+      // Same single path the band-rows message goes through, so the two can
+      // never leave the reveal, the band height and the lit cell disagreeing.
+      // (The old axial-index fallback here is gone: #axialToIndex and
+      // renderedCells are built from the same array in the same pass, so it
+      // could only ever fire when the q/r → label loop above had already found
+      // the tile.)
+      this.#applyHover(hoverLabel)
       if (!this.shader) return
-      const idx = hoverLabel !== null
-        ? this.#labelToIndex.get(hoverLabel)
-        : this.#axialToIndex.get(`${payload.q},${payload.r}`)
-
-      // A shaded tile is NOT out of reach. Hovering it lifts the shade — the
-      // tile comes back to full opacity under the pointer and lights its ring
-      // like any other — because being told "this isn't loaded yet" must never
-      // become "you may not go here". Click it and it loads on demand; you
-      // wait, but the choice stays yours.
-      this.shader.setHoveredIndex(idx ?? -1)
-      this.#setHoverOpaque(hoverLabel)
 
       // Drive the shimmer clock only while a reference/portal tile is hovered,
       // so u_time (and the magical hover animation) idles the rest of the time.
@@ -6472,8 +6517,11 @@ export class ShowCellDrone extends Drone {
     this.#pendingRecenter = false
     this.#pendingMeshOffsetRestore = null
     // The pointer is not on any tile of a mesh that no longer exists. Left
-    // set, a same-named tile on the NEXT layer would bake in revealed.
+    // set, a same-named tile on the NEXT layer would bake in revealed — and
+    // would inherit its band height with it, so drop the row count's owner on
+    // the same breath. The arriving level's own layout re-establishes both.
     this.#hoverRevealLabel = null
+    this.#bandRowsLabel = null
     this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: settledEmpty })
   }
 

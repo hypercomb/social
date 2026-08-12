@@ -17,7 +17,7 @@ import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
 import { RevisionListComponent, type RevisionRow } from '../revision-list/revision-list.component'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { defaultHostOrigin, devDefaultBootstrap } from '../core/default-host'
-import { EffectBus, I18N_IOC_KEY, revisionName, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, meaningfulLabel, revisionName, revisionWords, type I18nProvider } from '@hypercomb/core'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import { isCodeKind, defaultEnabled } from '../core/tree-node'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
@@ -1849,16 +1849,28 @@ export class HomeComponent implements OnDestroy {
   adoptPackage(section: DomainSection): void {
     if (this.packageState(section) === 'adopted') return
     this.adoptingPackageSig.set(section.rootSig)
-    this.adoptRestorePointName.set(
-      this.homeRevisions().length === 0
-        ? 'Default'
-        : revisionName({
-            packageSig: section.rootSig,
-            label: this.displayLabel(section),
-            locale: ((window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale,
-          }),
-    )
+    // Mint from the RAW deploy label, not displayLabel — the naming service
+    // ignores branch-machinery labels itself, and displayLabel may already BE
+    // the word pair, which would mint "Amber Meadow · Amber Meadow".
+    const minted = this.homeRevisions().length === 0
+      ? 'Default'
+      : revisionName({
+          packageSig: section.rootSig,
+          label: this.labelOverride(section.rootSig) || section.label,
+          locale: this.#locale(),
+        })
+    this.#adoptMintedName = minted
+    this.adoptRestorePointName.set(minted)
     this.adoptRestorePointError.set('')
+  }
+
+  // The name adoptPackage minted, so confirm can tell a typed CUSTOM name
+  // from an accepted default.
+  #adoptMintedName = ''
+
+  #locale(): string {
+    return String(((window as unknown as { ioc?: { get?: (k: string) => unknown } })
+      .ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale ?? 'en')
   }
 
   /** Save: keep installed but OFF — a saved revision to enable / change to later. */
@@ -1894,6 +1906,15 @@ export class HomeComponent implements OnDestroy {
       }
 
       if (!(await this.#setPackageEnabled(section, true))) throw new Error('package activation failed')
+
+      // A TYPED name is the participant's name for this revision — carry it
+      // onto the version row (the local rename), not only into home history.
+      // Accepted defaults are left alone: the row already reads as the same
+      // minted words, and 'Default' names the baseline, not the version.
+      if (name !== this.#adoptMintedName && name.toLowerCase() !== 'default') {
+        this.renameLabel(section, name)
+      }
+
       this.adoptingPackageSig.set(null)
       this.revisionStatus.set('saved')
       window.setTimeout(() => {
@@ -2183,10 +2204,14 @@ export class HomeComponent implements OnDestroy {
     try { return localStorage.getItem(LABEL_KEY_PREFIX + rootSig) ?? '' } catch { return '' }
   }
 
-  /** The handle shown for a version: local rename → deploy label → short sig. */
+  /** The handle shown for a version: local rename → the deploy label when it
+   *  is a real name (a git-branch stamp is not — meaningfulLabel) → the
+   *  signature's own word pair, so a chain of deploys never reads as
+   *  "development" repeated N times. */
   displayLabel(section: DomainSection): string {
     return this.labelOverride(section.rootSig)
-      || section.label
+      || meaningfulLabel(section.label)
+      || (section.rootSig ? revisionWords({ packageSig: section.rootSig, locale: this.#locale() }) : '')
       || (section.rootSig ? section.rootSig.slice(0, 10) : '')
   }
 

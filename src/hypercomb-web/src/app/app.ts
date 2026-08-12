@@ -253,6 +253,16 @@ export class App implements AfterViewInit {
           packageSig: detail?.packageSig,
           locale: String(window.ioc?.get<{ locale?: string }>('@hypercomb.social/I18n')?.locale ?? 'en'),
         })
+      // The typed (or minted) name names THIS deployed revision — land it on
+      // the installer's version row too, so DCP's revision list reads the
+      // same name the participant saw in the pill. Fire-and-forget BEFORE the
+      // upgrade: the success path ends in location.reload(), which would kill
+      // an in-flight port message. Best-effort — no bridge, no rename.
+      const packageSig = String(detail?.packageSig ?? '').trim().toLowerCase()
+      if (/^[a-f0-9]{64}$/.test(packageSig)) {
+        void (globalThis as { __sentinelBridge?: { nameRevision?: (sig: string, name: string) => Promise<boolean> } })
+          .__sentinelBridge?.nameRevision?.(packageSig, restorePointName)
+      }
       void this.upgradeFromBundledClicked(restorePointName, true)
     })
 

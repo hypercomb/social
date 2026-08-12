@@ -1,8 +1,22 @@
 // diamondcoreprocessor.com/assistant/llm.queen.ts
 //
-// /opus, /sonnet, /haiku — ask a live Claude Code (over the bridge) about the
-// selected tiles, and get the answer back IN THE HIVE. No API key, no direct
-// Anthropic call: the command writes an `ask` record into the participant-local
+// /opus, /sonnet, /haiku, /fable — open the CHAT WINDOW (ui/chat-window) on
+// that model and talk to a live Claude Code over the bridge. The model name is
+// the only thing that differs between the four commands; it is carried as a
+// hint and the conversation remembers it.
+//
+// Two ways a message leaves here, both content-addressed and both drained by
+// the same bridge loop:
+//
+//   submitChat — a turn of a conversation. The reply comes back through the
+//                `chat-reply` bridge op and lands in the window (and on disk,
+//                in the threads pool). This is what the chat window sends.
+//   submitAsk  — a standing request whose ANSWER IS A NOTE on a tile, for the
+//                routine to find later. Not a conversation; it survives the
+//                window being closed and the page being left.
+//
+// No API key, no direct Anthropic call: the command writes an `ask` record
+// into the participant-local
 // optimization inbox (the sign('optimization') pool via Store.putOptimization;
 // legacy `__optimization__/` is a read-fallback — kind:'ask'). A Claude Code instance
 // the participant is running (bridge-connected) drains the inbox
@@ -30,10 +44,11 @@ export class LlmQueenBee extends QueenBee {
   override genotype = 'assistant'
   readonly command = 'opus'
   override readonly aliases = []
-  override description = 'Ask a live Claude Code (via the bridge) about the selected tiles — /opus, /sonnet, /haiku, /fable'
+  override description = 'Open the chat with a live Claude Code (via the bridge) — /opus, /sonnet, /haiku, /fable'
   override options = ['<question>']
   override examples = [
-    { input: '/opus what links these tiles?', result: 'Queues the ask; answer lands as a tile note' },
+    { input: '/opus', result: 'Opens the chat on Opus, resuming your last conversation' },
+    { input: '/opus what links these tiles?', result: 'Opens the chat on Opus and asks, in a new conversation' },
   ]
 
   /** LlmProvider declares opus/sonnet/haiku manually — skip auto-wrap to avoid a duplicate /opus */
@@ -42,11 +57,12 @@ export class LlmQueenBee extends QueenBee {
   /** Set by the provider before invoke() — carried into the ask as a model hint. */
   activeModel = 'opus'
 
-  /** The command now OPENS THE ASK SCREEN (request first, tile context
-   *  second — see ask-screen.view.ts) with whatever was typed as the
-   *  prefill. Minting moved to `submitAsk`, which the screen calls on OK. */
+  /** The command OPENS THE CHAT WINDOW on this model. Anything typed after it
+   *  is asked straight away, in a new conversation; bare, it resumes the last
+   *  one. (It used to open the ask screen — a fullscreen draft-and-chips
+   *  harness, retired; see ui/chat-window for what replaced it and why.) */
   protected async execute(args: string): Promise<void> {
-    EffectBus.emit('ask:open', { model: this.activeModel, prefill: args.trim() })
+    EffectBus.emit('chat:open', { model: this.activeModel, prefill: args.trim() })
   }
 
   /** Mint a CHAT-mode ask — one turn of the ask screen's refinement
@@ -158,10 +174,10 @@ class LlmProvider implements SlashBehaviourProvider {
   // already is; the scheduled drain maps the hint to a real model id, see
   // scripts/bridge/drain-tick.cjs). Keep these names aligned with that map.
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'opus', description: 'Ask Claude Opus (via the bridge) about the selection', descriptionKey: 'slash.opus' },
-    { name: 'sonnet', description: 'Ask Claude Sonnet (via the bridge) about the selection', descriptionKey: 'slash.sonnet' },
-    { name: 'haiku', description: 'Ask Claude Haiku (via the bridge) about the selection', descriptionKey: 'slash.haiku' },
-    { name: 'fable', description: 'Ask Claude Fable (via the bridge) about the selection', descriptionKey: 'slash.fable' },
+    { name: 'opus', description: 'Open the chat with Claude Opus', descriptionKey: 'slash.opus' },
+    { name: 'sonnet', description: 'Open the chat with Claude Sonnet', descriptionKey: 'slash.sonnet' },
+    { name: 'haiku', description: 'Open the chat with Claude Haiku', descriptionKey: 'slash.haiku' },
+    { name: 'fable', description: 'Open the chat with Claude Fable', descriptionKey: 'slash.fable' },
   ]
 
   async execute(behaviourName: string, args: string): Promise<void> {

@@ -494,6 +494,34 @@
       "run": "node scripts/bridge/_mirror-welcome.cjs",
       "note": "Re-run of the welcome mirror after the room view landed: adds the room-view.drone.ts part tile and a second note (distinct first line — note dedupe is by first line, so the v2 gallery-wall note stays and the room note corrects the wall description to the flat grid). GUARD: must run against the REAL hive renderer — the script throws on /behaviors/views absence, which protects against a scratch-bucket renderer holding the broker slot.",
       "created": "2026-08-12",
+      "status": "done",
+      "completed": "2026-08-12"
+    },
+    {
+      "id": "dock-lanes",
+      "title": "Mirror the DOCK LANE, park-on-evict, and window pairing",
+      "run": null,
+      "note": "New behaviour in hypercomb-shared/ui/docked-panel/dock-lanes.ts + hc-docked-panel.directive.ts. Mirror needs: a collection gathering the parts; one tile per source resource (dock-lanes.ts, hc-docked-panel.directive.ts, panel-groups.ts pairing half, dock-lanes.spec.ts) marked 'part'; pheromones marking each for what it is; notes explaining (a) an edge holds LANE_SLOTS windows stacked inward, one on a narrow viewport, (b) a window pushed out of a full lane is PARKED not closed so staged work survives, (c) a window may declare a PAIR it opens alongside, conditional via pairWhen - notes pairs the pheromone panel only in fullscreen, (d) this made the already-written pheromone-onto-note drag reachable for the first time. Also mint a behaviors-deck glyph card per project_behaviors_mirror_theme. --manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-12",
+      "status": "pending"
+    },
+    {
+      "id": "revision-names-not-development",
+      "title": "Revision naming — branch labels count as nothing, typed names land on the version row",
+      "run": null,
+      "note": "Naming semantics changed in core revision-name.ts: meaningfulLabel() erases branch-machinery labels (development/main/master/genesis/head) so minted names never lead with 'development'; revisionWords() is the word pair alone. DCP version rows + the sentinel's version labels fall back rename -> meaningful deploy label -> word pair; a TYPED adopt name persists as the dcp:label rename; the upgrade pill's typed name reaches DCP over the new name-revision sentinel message. The behaviors deck's adopt-revisions/upgrade cards (mirror-adopt-revisions-and-backup.ts landed the doctrine note) describe the OLD naming; the stale note must be removed on the tile before re-sending or the roster lands twice (note-add is additive).",
+      "unattended": false,
+      "created": "2026-08-12",
+      "status": "pending"
+    },
+    {
+      "id": "hover-band-owner-note",
+      "title": "Corrective note on the hover-band behaviour: the band's row count and its hovered tile are ONE fact, carried by overlay:band-rows",
+      "run": null,
+      "note": "A render pass clears the shader's hovered index for the duration of the pass; it is now restored from #hoverRevealLabel in the pass's finally (show-cell.drone.ts renderFromSynchronize) instead of waiting on the render:cell-count -> #recoverHover -> tile:hover round trip, which a bailing pass never completes. overlay:band-rows now carries the band OWNER (null when the overlay is stood down) and show-cell takes the hovered tile from it via #applyHover. Note belongs on behaviors/presentation tile-overlay (and its show-cell part). note-add is additive - do not re-run.",
+      "unattended": false,
+      "created": "2026-08-12",
       "status": "pending"
     }
   ]

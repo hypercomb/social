@@ -4,17 +4,33 @@
        The strip is no longer driven by selection — the list is the primary way
        to find a tile to update; clicking a tile on the canvas just activates
        its row here (auxiliary, and unavailable for hidden tiles). -->
+  <!-- FULLSCREEN is the desk, not a docked panel, and the three bindings below
+       all turn on that difference:
+         • it YIELDS to whatever docks beside it (`--hc-inset-right`, see the
+           component SCSS) instead of reserving an edge itself — reserving one
+           would feed its own yield variable and collapse the desk against
+           itself, dragging the control bar and the left toolwindow out of line;
+         • it takes no place in the right LANE, because it owns its whole
+           geometry and a lane offset written on top of that pushes the desk's
+           left column off the screen — leaving the lane is also what frees the
+           slot the pheromone panel docks into;
+         • it is the ONE mode paired with the pheromone panel, which is the
+           desk's other half: marks drag from the panel onto note rows and list
+           lines. Docked, there is no room to yield and no pairing. -->
   <div class="notes-strip cv2-panel"
        [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
        [class.dock-right]="dockSide() === 'right'"
        #panel
        data-consumes-wheel
        hcDockInset="right"
-       [hcDockInsetActive]="dockSide() === 'right'"
+       [hcDockInsetActive]="dockSide() === 'right' && !isFullscreen()"
        hcDockedPanel="notes-strip" dockSide="right" [ownsSize]="false"
-       [dockExclusive]="dockSide() === 'right'"
+       [dockExclusive]="dockSide() === 'right' && !isFullscreen()"
        [hcSession]="session"
     (hcDockedPanelClose)="hide()"
+       pairWindow="tags-viewer" pairOpenEffect="tags:view-open"
+       pairCloseEffect="tags:view-close" [pairWhen]="isFullscreen()"
+       [pairLabel]="'tags.viewer.title' | t"
        [minWidth]="256" [maxWidth]="900"
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
        [style.transform]="panelTransformActive()"

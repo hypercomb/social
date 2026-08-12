@@ -1,0 +1,340 @@
+// hypercomb-shared/ui/chat-window/chat-window.component.scss
+//
+// Right-docked chat panel. Not a takeover: the hive stays visible and
+// interactive behind it, which is the whole reason this replaced a fullscreen
+// ask screen — you talk ABOUT what you are looking at, so you have to be able
+// to look at it.
+//
+// Steel accent, carried over from the retired ask screen: it was the
+// assistant's colour there and the conversation is the same conversation.
+//
+// Drag-resize + content-shrink come from the shared `hcDockedPanel` directive
+// (inline width + `--hc-panel-scale`). Content is sized in `em` so it shrinks
+// with the panel; dock GEOMETRY stays in rem so position is fixed.
+
+@use '../toolwindow' as tw;
+
+$accent: #7eb6d6;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.chat-panel {
+  pointer-events: auto;
+  position: absolute;
+  // Same anchor as the other right-docked panels so they align rather than
+  // stepping down each other.
+  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  min-width: 300px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  @include tw.panel($accent, right);
+}
+
+.chat-header {
+  @include tw.header;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba($accent, 0.25);
+}
+
+.chat-title {
+  font-size: 0.9em;
+  letter-spacing: 0.05em;
+  color: rgba($accent, 0.95);
+}
+
+.chat-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 1.2em;
+  line-height: 1;
+  padding: 0 0.25em;
+  cursor: pointer;
+
+  &:hover { color: #fff; }
+}
+
+// ── which conversation ────────────────────────────────────────────────────
+
+.chat-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.35em 0.5em 0.35em 0.35em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chat-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.35em 0.4em;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  font: inherit;
+  font-size: 0.8em;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--md-shape-xs, 4px);
+
+  .mat-sym { font-size: 1.1em; color: rgba(255, 255, 255, 0.45); }
+  &:hover { background: rgba($accent, 0.09); }
+}
+
+.chat-current-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-new {
+  flex: 0 0 auto;
+  @include tw.icon-button;
+  background: none;
+  border: 1px solid rgba($accent, 0.3);
+  color: rgba($accent, 0.9);
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.05em; }
+  &:hover { background: rgba($accent, 0.16); }
+}
+
+.chat-list {
+  flex: 0 1 auto;
+  list-style: none;
+  margin: 0;
+  padding: 0.2em 0;
+  overflow-y: auto;
+  max-height: 40%;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.chat-list-empty {
+  padding: 0.7em 0.9em;
+  font-size: 0.72em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.chat-list-row {
+  display: flex;
+  align-items: stretch;
+  padding: 0 0.35em;
+
+  &:hover { background: rgba($accent, 0.07); }
+  &.on { background: rgba($accent, 0.13); }
+}
+
+.chat-list-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+  padding: 0.45em 0.45em;
+  background: none;
+  border: none;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-list-name {
+  font-size: 0.78em;
+  color: #f3f3f3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-list-meta {
+  font-size: 0.65em;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.chat-list-del {
+  flex: 0 0 auto;
+  align-self: center;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.3);
+  padding: 0.3em;
+  cursor: pointer;
+  border-radius: var(--md-shape-xs, 4px);
+
+  .mat-sym { font-size: 1em; }
+  &:hover { color: rgba(255, 140, 140, 0.9); background: rgba(255, 120, 120, 0.12); }
+  // Armed: the next press destroys turns, so it stops being a quiet glyph.
+  &.armed { color: #fff; background: rgba(226, 75, 74, 0.85); }
+}
+
+// ── the conversation ──────────────────────────────────────────────────────
+
+.chat-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.7em 0.7em;
+}
+
+.chat-empty {
+  margin: auto 0;
+  padding: 1em 0.4em;
+  font-size: 0.75em;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.42);
+  text-align: center;
+}
+
+.chat-msg {
+  max-width: 92%;
+  padding: 0.5em 0.65em;
+  font-size: 0.8em;
+  line-height: 1.55;
+  color: rgba(238, 244, 250, 0.94);
+  @include tw.card;
+
+  &.user {
+    align-self: flex-end;
+    background: rgba($accent, 0.17);
+    border: 1px solid rgba($accent, 0.3);
+  }
+
+  &.ai {
+    align-self: flex-start;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+}
+
+.chat-msg-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-think {
+  color: rgba(216, 230, 238, 0.55);
+  animation: chat-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes chat-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-think { animation: none; }
+}
+
+// ── status + input ────────────────────────────────────────────────────────
+
+.chat-foot {
+  flex: 0 0 auto;
+  padding: 0.45em 0.6em 0.6em;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  min-width: 0;
+  font-size: 0.68em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.chat-model {
+  flex: 0 0 auto;
+  padding: 0.15em 0.2em;
+  font: inherit;
+  color: rgba($accent, 0.95);
+  background: rgba($accent, 0.1);
+  border: 1px solid rgba($accent, 0.3);
+  border-radius: var(--md-shape-xs, 4px);
+  cursor: pointer;
+}
+
+.chat-where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-targets {
+  flex: 0 0 auto;
+  color: rgba($accent, 0.85);
+}
+
+.chat-link {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  margin-top: 0.3em;
+  font-size: 0.65em;
+  color: rgba(140, 220, 170, 0.85);
+
+  &.down { color: rgba(255, 255, 255, 0.42); }
+}
+
+.chat-dot {
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: tw.$radius-pill;
+  background: currentColor;
+}
+
+.chat-inputrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4em;
+  margin-top: 0.45em;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  resize: none;
+  min-height: 2.3em;
+  max-height: 160px;
+  padding: 0.5em 0.6em;
+  font: inherit;
+  // 16px floor: anything smaller and iOS Safari zooms the page on focus.
+  font-size: max(0.8em, 16px);
+  line-height: 1.45;
+  color: whitesmoke;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: var(--md-shape-xs, 4px);
+  outline: none;
+
+  &:focus { border-color: rgba($accent, 0.6); }
+}
+
+.chat-send {
+  flex: 0 0 auto;
+  @include tw.icon-button;
+  background: rgba($accent, 0.9);
+  border: 1px solid rgba($accent, 0.9);
+  color: #0c1118;
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.05em; }
+  &:hover { background: $accent; }
+}

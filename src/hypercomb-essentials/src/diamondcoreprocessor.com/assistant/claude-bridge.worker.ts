@@ -130,6 +130,23 @@ export class ClaudeBridgeWorker extends Worker {
 
   #connected = false
 
+  /** Is a Claude Code actually listening right now?
+   *
+   *  Public because a chat surface has to be able to SAY so. Every reply in the
+   *  chat window arrives over this socket, so with nothing on the other end a
+   *  question is not slow — it is never going to be answered. A window that
+   *  showed a thinking indicator forever in that case would be lying, and
+   *  "I typed and nothing happened" is exactly the confusion the chat window
+   *  exists to remove. */
+  get connected(): boolean { return this.#connected }
+
+  /** Announce the socket's state. Emitted on every transition AND once on
+   *  connect, so a surface that opens later still learns the state from
+   *  EffectBus's last-value replay rather than having to poll. */
+  #announce(): void {
+    EffectBus.emit('bridge:status', { connected: this.#connected })
+  }
+
   #port(): number {
     try {
       const raw = new URLSearchParams(window.location.search).get(BRIDGE_PORT_QUERY_KEY)
@@ -147,6 +164,7 @@ export class ClaudeBridgeWorker extends Worker {
         this.#connected = true
         ws.send(JSON.stringify({ type: 'renderer' }))
         console.log('[claude-bridge] connected')
+        this.#announce()
       }
 
       ws.onmessage = (event) => {
@@ -157,6 +175,11 @@ export class ClaudeBridgeWorker extends Worker {
         const wasConnected = this.#connected
         this.#ws = null
         this.#connected = false
+        // Announced even when we never connected: "no Claude is listening" is
+        // the state a chat surface most needs to be told, and a failed FIRST
+        // attempt is precisely when nobody is. Staying silent here is what
+        // leaves a window with no way to tell "thinking" from "nothing there".
+        this.#announce()
         // Only reconnect if we previously had a successful connection.
         // Avoids spamming the console when the bridge server isn't running.
         if (wasConnected) {
@@ -171,7 +194,9 @@ export class ClaudeBridgeWorker extends Worker {
 
       this.#ws = ws
     } catch {
-      // Initial connection failed — bridge server not running, stay silent
+      // Initial connection failed — bridge server not running. Silent on the
+      // console, but still announced: a surface must not be left guessing.
+      this.#announce()
     }
   }
 

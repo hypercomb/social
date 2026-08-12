@@ -28,6 +28,15 @@
 // A window that already sizes itself stamps it with `[ownsSize]="false"` and
 // gets the settings half only — same gear, same group, its own size. That is
 // how the notes strip joins a group without surrendering its edge handles.
+// It still takes its place in the LANE: a window owning its width does not get
+// to own its position, or two of them would sit on top of each other.
+//
+// It also puts the panel in its edge's LANE (dock-lanes.ts). An edge holds more
+// than one window now — they stack inward from it in the order they were
+// opened — and a window pushed out of a full lane is PARKED, not closed, so it
+// keeps whatever it had staged. That is what makes gestures BETWEEN two tool
+// windows possible at all (dragging a pheromone onto a note being the one that
+// was already written on both ends and unreachable).
 //
 // Pairs with hcDockInset, whose ResizeObserver re-reports the reserved canvas
 // inset as the width changes — so resizing keeps every on-screen tile beside
@@ -37,7 +46,7 @@
 
 import {
   Directive, ElementRef, EventEmitter, Input, Output, inject,
-  type OnDestroy, type OnInit,
+  type OnChanges, type OnDestroy, type OnInit, type SimpleChanges,
 } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 
@@ -46,7 +55,17 @@ import { EffectBus } from '@hypercomb/core'
 import {
   type GroupAttrs, type GroupMember, STEEL,
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
+  readPairing, writePairing,
 } from './panel-groups'
+
+// The LANE model — how many windows an edge holds and where each one sits.
+// A side is no longer a single-window slot: it stacks inward from the edge,
+// and a window pushed out of a full lane is PARKED, not closed. See
+// dock-lanes.ts for why (a built-and-unreachable drag, and silent discard).
+import {
+  type LaneMember, type LaneSide,
+  claimLane, laneHasRoom, layoutLane, releaseLane,
+} from './dock-lanes'
 
 // The session — how a window is put away while the hive is covered (the
 // installer) and brought back on the way home. A docked window joins just by
@@ -63,8 +82,6 @@ const t = (key: string, fallback: string, params?: Record<string, unknown>): str
 /** Every mounted docked panel — the chrome-side view of `members`, used to
  *  repaint gears and popovers when grouping changes anywhere. */
 const live = new Set<HcDockedPanelDirective>()
-let sideClaimSequence = 0
-const latestSideClaim: Record<'left' | 'right', number> = { left: 0, right: 0 }
 
 /** A self-sizing window that holds its width in a SIGNAL rather than in the
  *  element's inline style. Such a window must be told, not written to — an
@@ -121,7 +138,7 @@ const installGearCss = (): void => {
   selector: '[hcDockedPanel]',
   standalone: true,
 })
-export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
+export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, GroupMember, LaneMember {
 
   /** Stable participant-local id → localStorage width key. */
   @Input('hcDockedPanel') id = ''
@@ -155,6 +172,34 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
    *  common settings gear offers Add/Remove from controls and persists through
    *  the controls bar's participant-local preference map. */
   @Input() launcherControlId = ''
+  /** A window this one brings up ALONGSIDE itself, because the two are halves
+   *  of one gesture — the notes window and the pheromone panel being the pair
+   *  that started this: a pheromone is dragged from one onto a row of the
+   *  other, so opening notes with no pheromones in reach opens half a tool.
+   *
+   *  The id of the window to bring; `pairOpenEffect` is how to bring it. On by
+   *  default, switched in this window's settings gear, and it only ever fills a
+   *  FREE place in the lane — a convenience does not get to push out a window
+   *  the participant opened themselves. Fires on open, so closing the pair
+   *  leaves it closed. */
+  @Input() pairWindow = ''
+  /** The EffectBus name that opens `pairWindow`. Supplied rather than looked up
+   *  because only the window itself knows what opening it means. */
+  @Input() pairOpenEffect = ''
+  /** The EffectBus name that closes `pairWindow`. Needed because a pairing that
+   *  is CONDITIONAL (see `pairWhen`) has to be able to take the pair away again
+   *  when the condition lapses — otherwise leaving the state that justified the
+   *  pair strands it on screen. */
+  @Input() pairCloseEffect = ''
+  /** When the pairing applies. `null` (the default) = whenever this window is
+   *  open. A window that is only half of the gesture in ONE of its modes binds
+   *  its own condition here — the notes window pairs with the pheromone panel
+   *  only while it is FULLSCREEN, because that is the mode whose desk yields
+   *  room for a panel beside it. Flipping to false takes the pair away. */
+  @Input() pairWhen: boolean | null = null
+  /** Human name for the paired window in the settings switch. Falls back to the
+   *  id, the way a group's membership line already labels its mates. */
+  @Input() pairLabel = ''
   /** How this window is PUT AWAY and BROUGHT BACK when the hive is covered —
    *  entering the installer parks every showing window, leaving unparks them.
    *  Supplied by the window itself because only the window knows what "stop
@@ -162,13 +207,17 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
    *  its content, which is exactly what a park must not do). Absent → the
    *  window simply doesn't take part. */
   @Input() hcSession: WindowSession | null = null
-  /** Side docks are single-window lanes. Set false only while a surface is
-   * genuinely floating or when a future multi-window host owns its layout. */
+  /** Does this window take a place in its edge's LANE? True for a docked
+   *  panel. Set false only while a surface is genuinely floating — a floating
+   *  window positions itself, so it neither takes a place nor offsets anyone.
+   *  Flipping it live is how the notes strip leaves and rejoins the rail. */
   @Input() set dockExclusive(value: boolean) {
     const next = value !== false
-    const joined = !this.#dockExclusive && next
+    if (next === this.#dockExclusive) return
     this.#dockExclusive = next
-    if (this.#initialized && joined) this.#scheduleSideClaim()
+    if (!this.#initialized) return
+    if (next) this.#scheduleLaneClaim()
+    else { releaseLane(this); this.#clearLanePlacement() }
   }
   /** The owning component handles this through its normal close method, keeping
    * its signal, launcher state, and teardown path authoritative. */
@@ -187,6 +236,8 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   #dockExclusive = true
   #initialized = false
   #claimQueued = false
+  /** Distance from the docked edge, handed down by the lane. 0 = flush. */
+  #laneOffset = 0
   /** Drops this window out of the "currently showing" set when it goes. */
   #releaseSession: (() => void) | null = null
   /** Only when `ownsSize` is false: watches the window's self-driven resize so
@@ -203,13 +254,55 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth }
   }
 
+  // ── LaneMember ─────────────────────────────────────────────────────
+  /** Which edge this window takes a place on. */
+  get laneSide(): LaneSide { return this.dockSide }
+
+  /** What the next window inboard is offset by. Measured rather than trusted:
+   *  a settings-only window may not have been sized yet when it joins, and
+   *  publishing 0 would stack the two panels on top of each other. */
+  laneWidth(): number {
+    if (this.ownsSize) return this.#width || this.#el.offsetWidth
+    return this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth
+  }
+
+  /** Sit this far in from the edge. Written as a `calc` over the controls-bar
+   *  reservation rather than a resolved number, so a bar that docks, undocks
+   *  or changes width keeps every window in the lane beside it with no
+   *  re-layout — the same variable owned panels already lay out against. */
+  placeInLane(offset: number): void {
+    this.#laneOffset = Math.max(0, Math.round(offset))
+    this.#position()
+  }
+
+  /** Pushed out of a full lane. PARK — the participant did not ask for this,
+   *  so it must cost them nothing: the window stops showing and keeps its
+   *  content, its scope, and anything it had staged. Only a window with no
+   *  session of its own falls back to closing, which is the old behaviour and
+   *  the only thing such a window can do. */
+  evictFromLane(): void {
+    if (!this.hcSession) { this.hcDockedPanelClose.emit(); return }
+    try { this.hcSession.park() }
+    catch (err) {
+      console.error('[hc-docked-panel] park failed, closing instead:', err)
+      this.hcDockedPanelClose.emit()
+    }
+  }
+
   ngOnInit(): void {
     live.add(this)
     members.add(this)
     this.#initialized = true
     // Showing, from now until this panel's element goes away.
     if (this.hcSession) this.#releaseSession = holdWindow(this.id, this.hcSession)
-    if (this.#dockExclusive) this.#scheduleSideClaim()
+    // Take a place in this edge's lane. Deferred a microtask so the width set
+    // below (or by the window's own first render) is what the lane measures.
+    if (this.#dockExclusive) this.#scheduleLaneClaim()
+    // Then bring the pair, if this window declares one. Queued AFTER the claim
+    // (and separately from it, since a window that owns its own geometry takes
+    // no place in the lane yet may still have a pair) so the room check sees
+    // the lane this window is actually leaving behind.
+    queueMicrotask(() => { if (live.has(this)) this.#openPairIfWanted() })
     this.#group = readMembership(this.id)
     // A grouped panel opens at its GROUP's width rather than its own remembered
     // one — that is what "shares attributes" has to mean for a window that
@@ -247,6 +340,8 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     this.#initialized = false
     live.delete(this)
     members.delete(this)
+    // Out of the lane — whoever is left slides outward to close the gap.
+    releaseLane(this)
     // Closed, or parked — either way it is no longer showing. A parked window's
     // session lives on in the parked list, which is what brings it back.
     this.#releaseSession?.()
@@ -259,26 +354,75 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     this.#gearBtn?.removeEventListener('click', this.#onGearClick)
   }
 
-  /** Claim this edge after the current Angular turn. That keeps sibling signal
-   * updates out of one another's initial change-detection pass while still
-   * closing the previous window before the browser paints. */
-  #scheduleSideClaim(): void {
+  /** Take a place in this edge's lane after the current Angular turn.
+   *
+   *  Deferred so sibling signal updates stay out of one another's initial
+   *  change-detection pass, and so the width this window opens at is settled
+   *  before the lane measures it — but still a microtask, so the placement
+   *  lands before the browser paints and nothing is seen at the wrong offset.
+   *
+   *  Two surfaces becoming visible in the same turn now BOTH get a place
+   *  (that is the point of a lane); only a third pushes the oldest out. */
+  #scheduleLaneClaim(): void {
     if (this.#claimQueued) return
     this.#claimQueued = true
-    const side = this.dockSide
-    const claim = ++sideClaimSequence
-    latestSideClaim[side] = claim
     queueMicrotask(() => {
       this.#claimQueued = false
       if (!this.#initialized || !this.#dockExclusive || !live.has(this)) return
-      // If two surfaces became visible in one Angular turn, the last launcher
-      // wins rather than whichever directive's microtask happened to run first.
-      if (latestSideClaim[side] !== claim) return
-      for (const panel of [...live]) {
-        if (panel === this || !panel.#dockExclusive || panel.dockSide !== side) continue
-        panel.hcDockedPanelClose.emit()
-      }
+      claimLane(this)
     })
+  }
+
+  /** Bring this window's declared pair up beside it.
+   *
+   *  Four guards, and each is a promise to the participant: only if the pair is
+   *  switched ON, only while the condition that justifies it holds, only if it
+   *  is not already up, and only into a place the lane actually has free — so a
+   *  pairing fills an empty slot and never closes a window somebody opened on
+   *  purpose. */
+  #openPairIfWanted(): void {
+    if (!this.pairWindow || !this.pairOpenEffect) return
+    if (this.pairWhen === false) return
+    if (!readPairing(this.id)) return
+    for (const panel of live) if (panel.id === this.pairWindow) return
+    if (!laneHasRoom(this.dockSide)) return
+    EffectBus.emit(this.pairOpenEffect, undefined)
+  }
+
+  /** Take the pair away — the condition that justified it has lapsed. Only ever
+   *  fired on that transition, so a pair the participant opened for their own
+   *  reasons in some other mode is not swept up by it. */
+  #closePair(): void {
+    if (!this.pairWindow || !this.pairCloseEffect) return
+    let up = false
+    for (const panel of live) if (panel.id === this.pairWindow) up = true
+    if (up) EffectBus.emit(this.pairCloseEffect, undefined)
+  }
+
+  /** React to the pairing CONDITION changing while the window is open: entering
+   *  the mode brings the pair, leaving it takes the pair away. The window's
+   *  mode is a signal on the component, so this arrives as an input change. */
+  ngOnChanges(changes: SimpleChanges): void {
+    const change = changes['pairWhen']
+    if (!change || change.firstChange || !this.#initialized) return
+    if (change.currentValue === true) this.#openPairIfWanted()
+    else if (change.previousValue === true) this.#closePair()
+  }
+
+  /** Re-measure the lane because THIS window's width changed — the window
+   *  inboard of it has to move with its edge. Cheap and idempotent; safe to
+   *  call from a drag's pointermove. */
+  #relayoutLane(): void {
+    if (this.#dockExclusive && this.#initialized) layoutLane(this.dockSide)
+  }
+
+  /** Hand the edge back to the window's own stylesheet. Called when it leaves
+   *  the lane while still on screen (docked → floating): a lingering inline
+   *  offset would displace a panel that is now positioning itself. */
+  #clearLanePlacement(): void {
+    this.#laneOffset = 0
+    this.#el.style.removeProperty(this.dockSide)
+    this.#el.style.removeProperty('--hc-lane-offset')
   }
 
   /** Self-sizing windows only: the window's own resize becomes the group's,
@@ -296,6 +440,9 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
       const w = this.sizeOwner ? this.sizeOwner.panelWidth() : this.#el.offsetWidth
       if (w <= 0 || w === this.#width) return
       this.#width = w
+      // Whatever the window did to its own edges, the lane has to follow — the
+      // window inboard of it sits at this width.
+      this.#relayoutLane()
       // First measurement of an ungrouped window is just bookkeeping — there
       // is nobody to tell. A grouped one defines/updates the shared width.
       if (this.#group) publishAttrs(this)
@@ -306,9 +453,11 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
   #key(): string { return `hc:docked-width:${this.id}` }
 
   #clamp(w: number): number {
-    // Never wider than the viewport (minus a gutter) so the close button can't
-    // be stranded off-screen on a narrow display.
-    const vpMax = Math.max(this.minWidth, window.innerWidth - 24)
+    // Never wider than the room actually left for it, so the close button can't
+    // be stranded off-screen — the viewport minus a gutter, minus whatever the
+    // lane put between this window and its edge. Without the lane term the
+    // inner window of a pair could be sized right off the far side.
+    const vpMax = Math.max(this.minWidth, window.innerWidth - 24 - this.#laneOffset)
     return Math.round(Math.max(this.minWidth, Math.min(w, Math.min(this.maxWidth, vpMax))))
   }
 
@@ -323,14 +472,28 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
 
   #apply(): void {
     this.#el.style.width = `${this.#width}px`
-    // Fit BESIDE the control bar, never over it. The bar is fixed to its edge
-    // and publishes what it occupies as `--hc-controls-<side>` (0 when it is
-    // free-floating, on the other edge, or on mobile), so a panel on the same
-    // edge starts just inboard of it. Set inline because panels hardcode
-    // `right: 0` / `left: 0` in their own SCSS.
-    this.#el.style[this.dockSide] = `var(--hc-controls-${this.dockSide}, 0px)`
+    this.#position()
     const scale = Math.min(this.maxScale, Math.max(this.minScale, this.#width / this.defaultWidth))
     this.#el.style.setProperty('--hc-panel-scale', String(scale))
+  }
+
+  /** Where this window sits against its edge: beside the control bar, then in
+   *  by whatever the lane gave it.
+   *
+   *  The bar is fixed to its edge and publishes what it occupies as
+   *  `--hc-controls-<side>` (0 when it is free-floating, on the other edge, or
+   *  on mobile), so a panel on the same edge starts just inboard of it. The
+   *  lane offset is added on top — 0 for the window flush to the edge, the
+   *  outer window's width for the one inboard of it.
+   *
+   *  Set inline because panels hardcode `right: 0` / `left: 0` in their own
+   *  SCSS. Unlike the width, this applies to SELF-SIZING windows too: a window
+   *  owning its width still does not get to own its place in the lane, or the
+   *  two would overlap. */
+  #position(): void {
+    const side = this.dockSide
+    this.#el.style[side] = `calc(var(--hc-controls-${side}, 0px) + ${this.#laneOffset}px)`
+    this.#el.style.setProperty('--hc-lane-offset', `${this.#laneOffset}px`)
   }
 
   // ── grip ───────────────────────────────────────────────────────────
@@ -507,6 +670,7 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     pop.addEventListener('pointerdown', (e) => { e.stopPropagation() })
 
     pop.appendChild(this.#groupSection())
+    if (this.pairWindow && this.pairOpenEffect) pop.appendChild(this.#pairSection())
     if (this.launcherControlId) pop.appendChild(this.#launcherSection())
 
     this.#el.appendChild(pop)
@@ -581,6 +745,50 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     return section
   }
 
+  /** The PAIR setting: one switch, for the window that declares a pair.
+   *
+   *  Phrased as what it does rather than as a feature name — "Open Pheromones
+   *  alongside" — because the participant is being asked about a habit, not
+   *  about a mechanism. Switching it ON also brings the pair up right now if
+   *  there is room: a setting that only takes effect next time is a setting you
+   *  cannot tell you have changed. */
+  #pairSection(): HTMLElement {
+    const section = document.createElement('div')
+    section.setAttribute('data-hc-setting', 'pair')
+    Object.assign(section.style, {
+      marginTop: '0.7rem', paddingTop: '0.65rem',
+      borderTop: `1px solid rgba(${STEEL}, 0.18)`,
+    } as Partial<CSSStyleDeclaration>)
+
+    const name = this.pairLabel || this.pairWindow.replace(/-(viewer|panel|strip)$/, '').replace(/-/g, ' ')
+    const row = document.createElement('label')
+    Object.assign(row.style, {
+      display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer',
+    } as Partial<CSSStyleDeclaration>)
+
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.checked = readPairing(this.id)
+    Object.assign(box.style, { margin: '0', accentColor: `rgb(${STEEL})`, cursor: 'pointer' } as Partial<CSSStyleDeclaration>)
+    box.addEventListener('change', () => {
+      writePairing(this.id, box.checked)
+      if (box.checked) this.#openPairIfWanted()
+    })
+
+    const text = document.createElement('span')
+    text.textContent = this.#t('panel.pair.open-alongside', `Open ${name} alongside`, { window: name })
+    row.appendChild(box)
+    row.appendChild(text)
+    section.appendChild(row)
+
+    const hint = document.createElement('div')
+    hint.textContent = this.#t('panel.pair.hint', 'They are two halves of one gesture — a mark is dragged from one onto the other.')
+    Object.assign(hint.style, { marginTop: '0.45rem', fontSize: '11px', color: '#7f95a3' } as Partial<CSSStyleDeclaration>)
+    section.appendChild(hint)
+
+    return section
+  }
+
   /** Optional launcher setting. UI placement is window chrome, so every
    *  slash-first tool window gets the same participant-configurable path. */
   #launcherSection(): HTMLElement {
@@ -637,6 +845,8 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     if (!pop) return
     const old = pop.querySelector('[data-hc-setting="group"]')
     if (old) pop.replaceChild(this.#groupSection(), old)
+    const pair = pop.querySelector('[data-hc-setting="pair"]')
+    if (pair) pop.replaceChild(this.#pairSection(), pair)
     const launcher = pop.querySelector('[data-hc-setting="launcher"]')
     if (launcher) pop.replaceChild(this.#launcherSection(), launcher)
   }
@@ -679,9 +889,11 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
         this.#el.style.width = `${next}px`
         this.#width = this.#el.offsetWidth || next
       }
+      this.#relayoutLane()
       return
     }
     this.#apply()
+    this.#relayoutLane()
     try { localStorage.setItem(this.#key(), String(next)) } catch { /* ignore */ }
   }
 
@@ -706,6 +918,9 @@ export class HcDockedPanelDirective implements OnInit, OnDestroy, GroupMember {
     const dx = this.dockSide === 'right' ? (this.#startX - event.clientX) : (event.clientX - this.#startX)
     this.#width = this.#clamp(this.#startWidth + dx)
     this.#apply()
+    // The window inboard rides this edge live, so the pair reads as one lane
+    // being resized rather than two panels drifting apart.
+    this.#relayoutLane()
     // Grouped: the other members track this drag live, so the grouping is
     // visible as you pull rather than snapping only on release.
     publishAttrs(this)

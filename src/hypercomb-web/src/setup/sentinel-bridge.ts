@@ -241,6 +241,30 @@ export class SentinelBridge {
   }
 
   /**
+   * Land a participant-typed name on a deployed revision — the same
+   * `dcp:label:<sig>` rename the installer's own version-name editor writes,
+   * so the name typed into the upgrade pill's restore-point field shows up on
+   * that revision's row in DCP (and in every list the sentinel labels).
+   * Display decoration only; best-effort — resolves false when DCP is
+   * unreachable. Empty name clears the rename.
+   */
+  async nameRevision(rootSig: string, name: string): Promise<boolean> {
+    const rid = this.#nextRid()
+    return new Promise((resolve) => {
+      this.#pending.set(rid, {
+        resolve: (v: boolean) => resolve(v === true),
+        reject: () => resolve(false),
+      })
+      try {
+        this.#port.postMessage({ type: 'name-revision', rid, rootSig, name })
+      } catch {
+        this.#pending.delete(rid)
+        resolve(false)
+      }
+    })
+  }
+
+  /**
    * The deploy chains DCP holds — every published revision per host, plus which
    * one is active. Read-only: this side renders a list it has no way to forge,
    * because the manifests, the trusted-domain list and the active pick all live
@@ -446,6 +470,13 @@ export class SentinelBridge {
       }
 
       case 'use-revision-result': {
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        pending?.resolve(msg.ok === true)
+        break
+      }
+
+      case 'name-revision-result': {
         const pending = this.#pending.get(rid)
         this.#pending.delete(rid)
         pending?.resolve(msg.ok === true)

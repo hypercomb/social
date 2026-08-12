@@ -3,58 +3,47 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 
 /**
- * /chat — multi-turn conversation with Claude.
+ * /chat — open the chat window (ui/chat-window).
  *
  * Syntax:
- *   /chat What is TypeScript?                    — start new thread
- *   /chat(threadId) Tell me about interfaces     — continue existing thread
- *   /chat --model sonnet What is TypeScript?     — specify model
+ *   /chat                          — open, resuming the last conversation
+ *   /chat What is TypeScript?      — open and ask, in a new conversation
+ *   /chat --model sonnet <message> — pick the tier for it
+ *
+ * It used to do something else: build a question TILE with a response child
+ * tile, over a direct Anthropic call that needed a pasted API key. That made
+ * `/chat` a third rival to `/opus` and `/ask`, each with its own transport, its
+ * own storage and its own idea of where an answer goes — which is most of why
+ * nobody could say what talking to Claude in this app actually did.
+ *
+ * Now all six commands open the same window. The conversation is the artifact,
+ * and it is durable on its own (the `sign('threads')` pool) without minting
+ * tiles nobody asked for.
  */
 export class ConversationQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
   readonly command = 'chat'
   override readonly aliases = []
-  override description = 'Multi-turn conversation with Claude — creates thread tiles with Q&A children'
+  override description = 'Open the chat — one conversation per chat, history kept'
   override descriptionKey = 'slash.chat'
-  override options = ['<message>', '(<threadId>) <message>', '--model <model> <message>']
+  override options = ['<message>', '--model <model> <message>']
   override examples = [
-    { input: '/chat What is TypeScript?', result: 'Starts a new thread tile with the answer' },
-    { input: '/chat(a1b2c3) Tell me more', result: 'Continues thread a1b2c3' },
+    { input: '/chat', result: 'Opens the chat where you left it' },
+    { input: '/chat What is TypeScript?', result: 'Opens the chat and asks, in a new conversation' },
   ]
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseChatArgs(args)
-    if (!parsed.message) {
-      console.warn('[chat] No message provided')
-      return
-    }
-
-    EffectBus.emit('conversation:send', {
-      threadId: parsed.threadId,
-      message: parsed.message,
-      model: parsed.model,
-    })
+    EffectBus.emit('chat:open', { prefill: parsed.message, ...(parsed.model ? { model: parsed.model } : {}) })
   }
 }
 
 // ── arg parsing ──────────────────────────────────────────
 
-function parseChatArgs(args: string): {
-  threadId?: string
-  model?: string
-  message: string
-} {
+function parseChatArgs(args: string): { model?: string; message: string } {
   let remaining = args.trim()
-  let threadId: string | undefined
   let model: string | undefined
-
-  // Extract (threadId) prefix
-  const threadMatch = remaining.match(/^\(([0-9a-f]+)\)\s*/)
-  if (threadMatch) {
-    threadId = threadMatch[1]
-    remaining = remaining.slice(threadMatch[0].length)
-  }
 
   // Extract --model flag
   const modelMatch = remaining.match(/--model\s+(\S+)\s*/)
@@ -63,7 +52,7 @@ function parseChatArgs(args: string): {
     remaining = remaining.replace(modelMatch[0], '').trim()
   }
 
-  return { threadId, model, message: remaining }
+  return { model, message: remaining }
 }
 
 // ── registration ────────────────────────────────────────

@@ -21,6 +21,20 @@ export interface RevisionNameParts {
   at?: Date
 }
 
+/** Labels that are BUILD MACHINERY, not names. build-module stamps the
+ *  current git branch as the genesis label, so every deploy of the same
+ *  repo carries the same word — a list of revisions all called
+ *  "development" names nothing. These read as "the build calls itself
+ *  nothing", and the word pair (or the date) stands in. */
+const AUTO_LABELS = new Set(['development', 'main', 'master', 'genesis', 'head'])
+
+/** The label, unless it is build machinery — then ''. The single gate every
+ *  revision-name consumer shares, so "development" can never lead a name. */
+export function meaningfulLabel(label: string | null | undefined): string {
+  const trimmed = String(label ?? '').trim()
+  return AUTO_LABELS.has(trimmed.toLowerCase()) ? '' : trimmed
+}
+
 /** Title-cased word pair from the signature — the deterministic half of
  *  every minted name. */
 function taggedWords(packageSig: string | null | undefined, locale: string, at: Date): string {
@@ -30,30 +44,42 @@ function taggedWords(packageSig: string | null | undefined, locale: string, at: 
     lead + ch.toLocaleUpperCase(locale))
 }
 
+/** `"Amber Meadow"` — the word pair alone, for list rows that already show
+ *  version number and time separately and only need the revision's NAME. */
+export function revisionWords({
+  packageSig,
+  locale = 'en',
+  at = new Date(),
+}: Omit<RevisionNameParts, 'label'> = {}): string {
+  return taggedWords(packageSig, locale, at)
+}
+
 /** `"Amber Meadow · 1 Aug 2026"` — two words from the signature, then whatever
- *  the build calls itself (or the date, when it calls itself nothing). */
+ *  the build calls itself (or the date, when it calls itself nothing — a git
+ *  branch label counts as nothing, see AUTO_LABELS). */
 export function revisionName({
   packageSig,
   label,
   locale = 'en',
   at = new Date(),
 }: RevisionNameParts = {}): string {
-  const trailer = String(label ?? '').trim() || at.toLocaleDateString(locale)
+  const trailer = meaningfulLabel(label) || at.toLocaleDateString(locale)
   return `${taggedWords(packageSig, locale, at)} · ${trailer}`
 }
 
 /** `"alpha 0.9.4 · Aug 4, 2026, 6:03 PM"` — the name of an incoming BUILD.
  *  The AUTHOR'S build name leads (the word pair stands in when the build
- *  calls itself nothing), and the date + time trail as the changing default:
- *  each new revision mints a later time, so every update the hive takes
- *  reads as its own line in the list. The participant types over any of it. */
+ *  calls itself nothing — and a git branch label counts as nothing), and the
+ *  date + time trail as the changing default: each new revision mints a later
+ *  time, so every update the hive takes reads as its own line in the list.
+ *  The participant types over any of it. */
 export function buildRevisionName({
   packageSig,
   label,
   locale = 'en',
   at = new Date(),
 }: RevisionNameParts = {}): string {
-  const head = String(label ?? '').trim() || taggedWords(packageSig, locale, at)
+  const head = meaningfulLabel(label) || taggedWords(packageSig, locale, at)
   const trailer = at.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
   return `${head} · ${trailer}`
 }
