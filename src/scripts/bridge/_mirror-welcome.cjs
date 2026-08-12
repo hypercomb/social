@@ -53,20 +53,20 @@ const SEG = ['behaviors', 'views', BEHAVIOR]
 const E = 'hypercomb-essentials/src/revolucionstyle.com'
 
 const NOTE = [
-  'Welcome — a 3D threshold page built from the layer itself. A cell carrying a `visual:revolucion:welcome` decoration opens into a full-viewport 3D scene (CSS perspective + a 2D canvas of embers and smoke — no dependencies, no fetching beyond the hive\'s own sig-addressed tile art) whose ELEMENTS are the cell\'s children: each child tile becomes a gilded panel in a colonnade that recedes into the dark, carrying that child\'s tile art and title. Scroll or drag dollies down the aisle; the pointer parallaxes the room; stepping through a panel navigates into that child — whose own view implementation owns the surface from there.',
+  'Welcome — a 3D threshold page built from the layer itself. A cell carrying a `visual:revolucion:welcome` decoration opens into a full-viewport 3D scene (CSS perspective + a 2D canvas of embers and smoke — no dependencies, no fetching beyond the hive\'s own sig-addressed tile art) whose ELEMENTS are the cell\'s children: each child tile is a gilded panel on a gently curved GALLERY WALL facing the visitor — every element visible at once, one row up to seven children, two rows beyond, the foil crest presiding above. The pointer parallaxes the room; hovering lifts a panel toward you; stepping through one navigates into that child — whose own view implementation owns the surface from there.',
   '',
   'One layer at a time: the view renders exactly the decorated layer. Children are doorways, not content — each child\'s own view comes later, built the same way.',
   '',
   'Command line: `/welcome here [tagline]` marks the current cell (one live record — replaceKind semantics), `/welcome remove` takes it off, `/welcome` toggles the view. Attachable (`name@revolucion-welcome`) — the content IS the children, so no authoring step. First instance: /revolucion.',
   '',
-  'Interaction doctrine paid forward: the dolly/parallax transform is written IMMEDIATELY in the input handlers (rAF starves in occluded tabs — render state on interaction, animate as garnish), and the entrance animation fills backwards from opacity 0 so a browser that never runs it still shows the panels.',
+  'Design lesson recorded: the first cut was a receding colonnade you dollied through — by the fourth rank panels were 70px specks, most of the layer invisible without walking. A welcome page shows the whole layer AT A GLANCE; depth is presence, not distance. Also paid forward: parallax is written IMMEDIATELY in the input handler (rAF starves in occluded tabs), and the entrance animation fills backwards from opacity 0 so a browser that never runs it still shows the panels.',
 ].join('\n')
 
 const PARTS = [
   ['welcome.queen.ts', `${E}/welcome/welcome.queen.ts`,
    'the /welcome command + VisualBeeRegistry declaration — kind visual:revolucion:welcome, view revolucion-welcome; mark/update via replaceDecoration, remove, view toggle; attachable, opens on tile click'],
   ['welcome-view.drone.ts', `${E}/welcome/welcome-view.drone.ts`,
-   'the 3D threshold renderer — reads the decorated layer\'s children (childNamesOf) and each child\'s tile art from its properties slot, builds the colonnade (CSS 3D panels flanking a centre aisle, foil crest at the end), drives dolly + parallax + ember canvas from one loop, steps through a panel via Navigation.goRaw; Escape / × returns to the hive'],
+   'the 3D threshold renderer — reads the decorated layer\'s children (childNamesOf) and each child\'s tile art from its properties slot, builds the curved gallery wall (CSS 3D panels on an amphitheater arc, one row to seven / two rows beyond, foil crest above), drives parallax + ember canvas from one loop, steps through a panel via Navigation.goRaw; Escape / × returns to the hive'],
 ]
 
 async function noted(segments, text) {

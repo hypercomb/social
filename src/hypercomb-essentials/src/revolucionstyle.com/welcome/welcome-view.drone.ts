@@ -1,11 +1,12 @@
 // The Revolución threshold — a 3D welcome page built from the layer itself.
 //
 // The decorated cell's CHILDREN are the elements of the page: each child
-// tile becomes a gilded panel in a colonnade that recedes into the dark,
-// carrying the child's own tile art and title. The visitor walks the aisle
-// (wheel / drag = dolly, pointer = parallax) and steps through a panel to
-// enter that child — whose own view implementation owns the surface from
-// there. This drone renders exactly ONE layer; children are doorways.
+// tile is a gilded panel on a gently curved GALLERY WALL facing the
+// visitor — every element visible at once, nothing hidden behind a walk.
+// One row up to seven children, two rows beyond. The pointer parallaxes
+// the room; hovering lifts a panel; stepping through one enters that
+// child — whose own view implementation owns the surface from there.
+// This drone renders exactly ONE layer; children are doorways.
 //
 // Everything is self-drawn: CSS 3D perspective for the room, a 2D canvas
 // for embers and smoke. No dependencies, no fetching beyond the hive's own
@@ -171,43 +172,55 @@ export class WelcomeViewDrone extends Drone {
     floor.className = 'wl-floor'
     stage.appendChild(floor)
 
-    // Panels flank a centre aisle, deepening two-by-two into the dark.
-    const STEP = 300, START = 260
-    panels.forEach((panel, index) => {
-      const side = index % 2 === 0 ? -1 : 1
-      const depth = START + Math.floor(index / 2) * STEP
-      const door = document.createElement('button')
-      door.type = 'button'
-      door.className = 'wl-panel'
-      door.style.setProperty('--i', String(index))
-      door.style.setProperty('--sx', String(side))
-      door.style.setProperty('--z', `${-depth}px`)
-      door.title = panel.title
-      if (panel.imageUrl) {
-        const img = document.createElement('img')
-        img.className = 'wl-art'
-        img.src = panel.imageUrl
-        img.alt = ''
-        img.draggable = false
-        door.appendChild(img)
-      } else {
-        const blank = document.createElement('span')
-        blank.className = 'wl-art wl-art-blank'
-        door.appendChild(blank)
-      }
-      const plaque = document.createElement('span')
-      plaque.className = 'wl-plaque'
-      plaque.textContent = panel.title
-      door.appendChild(plaque)
-      door.onclick = () => this.#enter([...segments, panel.label])
-      stage.appendChild(door)
+    // The gallery wall: one curved row up to seven, two rows beyond.
+    // Every panel is visible at once — the welcome page shows the whole
+    // layer at a glance, no walking required.
+    const twoRows = panels.length > 7
+    const topCount = twoRows ? Math.ceil(panels.length / 2) : 0
+    const rows: PanelData[][] = twoRows
+      ? [panels.slice(0, topCount), panels.slice(topCount)]
+      : [panels]
+    rows.forEach((row, rowIndex) => {
+      const rowClass = twoRows
+        ? (rowIndex === 0 ? 'wl-row-top' : 'wl-row-main')
+        : 'wl-row-solo'
+      const stepDeg = Math.min(13, row.length > 1 ? 84 / (row.length - 1) : 0)
+      row.forEach((panel, column) => {
+        const index = rowIndex === 0 ? column : topCount + column
+        const angle = (column - (row.length - 1) / 2) * stepDeg
+        const slot = document.createElement('div')
+        slot.className = `wl-slot ${rowClass}`
+        slot.style.setProperty('--a', `${angle}deg`)
+        const door = document.createElement('button')
+        door.type = 'button'
+        door.className = 'wl-panel'
+        door.style.setProperty('--i', String(index))
+        door.title = panel.title
+        if (panel.imageUrl) {
+          const img = document.createElement('img')
+          img.className = 'wl-art'
+          img.src = panel.imageUrl
+          img.alt = ''
+          img.draggable = false
+          door.appendChild(img)
+        } else {
+          const blank = document.createElement('span')
+          blank.className = 'wl-art wl-art-blank'
+          door.appendChild(blank)
+        }
+        const plaque = document.createElement('span')
+        plaque.className = 'wl-plaque'
+        plaque.textContent = panel.title
+        door.appendChild(plaque)
+        door.onclick = () => this.#enter([...segments, panel.label])
+        slot.appendChild(door)
+        stage.appendChild(slot)
+      })
     })
 
-    // The crest waits at the end of the aisle.
-    const crestDepth = START + Math.ceil(panels.length / 2) * STEP + 240
+    // The crest presides above the wall.
     const crest = document.createElement('div')
-    crest.className = 'wl-crest'
-    crest.style.transform = `translate(-50%,-50%) translate3d(0,-40px,${-crestDepth}px)`
+    crest.className = `wl-crest${panels.length ? '' : ' wl-crest-alone'}`
     const heading = document.createElement('h1')
     heading.className = 'wl-title'
     heading.textContent = title
@@ -222,7 +235,9 @@ export class WelcomeViewDrone extends Drone {
 
     const hint = document.createElement('p')
     hint.className = 'wl-hint'
-    hint.textContent = 'scroll to walk in · step through a panel'
+    hint.textContent = panels.length
+      ? 'step through a panel'
+      : 'nothing behind the threshold yet'
     host.appendChild(hint)
 
     const close = document.createElement('button')
@@ -233,7 +248,7 @@ export class WelcomeViewDrone extends Drone {
     close.onclick = () => this.#vm()?.setMode('hexagons')
     host.appendChild(close)
 
-    this.#animate(host, stage, atmo, crestDepth)
+    this.#animate(host, stage, atmo)
     return host
   }
 
@@ -245,54 +260,32 @@ export class WelcomeViewDrone extends Drone {
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(segments)
   }
 
-  // ── Motion: one loop drives dolly, parallax and atmosphere ───────────
+  // ── Motion: one loop drives parallax and atmosphere ──────────────────
 
-  #animate(host: HTMLElement, stage: HTMLElement, atmo: HTMLCanvasElement, maxDepth: number): void {
+  #animate(host: HTMLElement, stage: HTMLElement, atmo: HTMLCanvasElement): void {
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-    let dolly = 0, dollyTarget = 0
     let rotX = 0, rotY = 0, rotXTarget = 0, rotYTarget = 0
-    let dragY: number | null = null
 
     // Interaction must land even when rAF starves (occluded/uncomposited
     // tabs) — write the transform immediately, let the loop smooth it.
     const render = (): void => {
-      stage.style.transform = `translateZ(${dolly}px) rotateX(${rotX}deg) rotateY(${rotY}deg)`
+      stage.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`
     }
     const step = (rate: number): void => {
-      dolly += (dollyTarget - dolly) * rate
       rotX += (rotXTarget - rotX) * rate
       rotY += (rotYTarget - rotY) * rate
       render()
     }
-    const onWheel = (event: WheelEvent): void => {
-      event.preventDefault()
-      dollyTarget = Math.max(0, Math.min(maxDepth - 140, dollyTarget + event.deltaY * 0.9))
-      step(0.3)
-    }
     const onMove = (event: PointerEvent): void => {
-      if (dragY !== null && event.pointerType === 'touch') {
-        dollyTarget = Math.max(0, Math.min(maxDepth - 140, dollyTarget + (dragY - event.clientY) * 2.4))
-        dragY = event.clientY
-        step(0.3)
-        return
-      }
       if (still) return
-      rotYTarget = (event.clientX / window.innerWidth - 0.5) * 7
-      rotXTarget = (0.5 - event.clientY / window.innerHeight) * 3.5
+      const vw = window.innerWidth || 1
+      const vh = window.innerHeight || 1
+      rotYTarget = (event.clientX / vw - 0.5) * 5
+      rotXTarget = (0.5 - event.clientY / vh) * 2.5
       step(0.2)
     }
-    const onDown = (event: PointerEvent): void => { if (event.pointerType === 'touch') dragY = event.clientY }
-    const onUp = (): void => { dragY = null }
-    host.addEventListener('wheel', onWheel, { passive: false })
     host.addEventListener('pointermove', onMove)
-    host.addEventListener('pointerdown', onDown)
-    host.addEventListener('pointerup', onUp)
-    this.#cleanup.push(() => {
-      host.removeEventListener('wheel', onWheel)
-      host.removeEventListener('pointermove', onMove)
-      host.removeEventListener('pointerdown', onDown)
-      host.removeEventListener('pointerup', onUp)
-    })
+    this.#cleanup.push(() => host.removeEventListener('pointermove', onMove))
 
     // Embers rise, smoke drifts — modest counts, 2D canvas, no fetching.
     const context = atmo.getContext('2d')
@@ -311,7 +304,6 @@ export class WelcomeViewDrone extends Drone {
       const dt = Math.min(48, now - last || 16)
       last = now
 
-      dolly += (dollyTarget - dolly) * 0.08
       rotX += (rotXTarget - rotX) * 0.06
       rotY += (rotYTarget - rotY) * 0.06
       render()
@@ -368,34 +360,39 @@ export class WelcomeViewDrone extends Drone {
 // candle-light; panels are the only bright objects, the crest the only
 // words. Wide gradients, no images: the atmosphere canvas carries the rest.
 const SCENE_CSS = `
-.hc-welcome-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:hidden;background:radial-gradient(120% 90% at 50% 30%,#2a1c12 0%,#1a110a 46%,#0c0805 100%);touch-action:none}
+.hc-welcome-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:hidden;background:radial-gradient(120% 90% at 50% 30%,#2a1c12 0%,#1a110a 46%,#0c0805 100%)}
 .wl-atmo{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.wl-viewport{position:absolute;inset:0;perspective:1300px;perspective-origin:50% 46%}
+.wl-viewport{position:absolute;inset:0;perspective:1300px;perspective-origin:50% 42%}
 .wl-stage{position:absolute;inset:0;transform-style:preserve-3d;will-change:transform}
-.wl-floor{position:absolute;left:50%;top:50%;width:2600px;height:4200px;transform:translate(-50%,-50%) rotateX(90deg) translateZ(-300px);background:
+.wl-floor{position:absolute;left:50%;top:50%;width:2600px;height:4200px;transform:translate(-50%,-50%) rotateX(90deg) translateZ(-330px);background:
  repeating-linear-gradient(90deg,rgba(212,175,55,.05) 0 1px,transparent 1px 130px),
  repeating-linear-gradient(0deg,rgba(212,175,55,.05) 0 1px,transparent 1px 130px),
  radial-gradient(60% 45% at 50% 42%,rgba(212,175,55,.07),transparent 70%),
  linear-gradient(#150d07,#0b0704);
  -webkit-mask-image:radial-gradient(58% 46% at 50% 44%,#000 30%,transparent 78%);mask-image:radial-gradient(58% 46% at 50% 44%,#000 30%,transparent 78%)}
-.wl-panel{position:absolute;left:50%;top:50%;width:230px;height:310px;padding:0;--lane:330px;transform:translate(-50%,-50%) translate3d(calc(var(--sx,1) * var(--lane)),0,var(--z,0px)) rotateY(calc(var(--sx,1) * -26deg));border:1px solid rgba(212,175,55,.55);background:linear-gradient(170deg,#241710,#160e08);cursor:pointer;transform-style:preserve-3d;box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(212,175,55,.28);animation:wl-arrive .9s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.12s * var(--i,0));transition:box-shadow .25s ease,border-color .25s ease}
-.wl-panel:hover,.wl-panel:focus-visible{border-color:#e9c767;box-shadow:0 34px 80px rgba(0,0,0,.65),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(233,199,103,.7),0 0 46px rgba(212,175,55,.28);outline:none}
-.wl-art{position:absolute;inset:10px 10px 56px;object-fit:cover;display:block;background:#0e0906;filter:saturate(.92) brightness(.96)}
+.wl-slot{position:absolute;left:50%;top:50%;width:216px;height:292px;transform-style:preserve-3d;transform:translate(-50%,-50%) translateY(var(--ry,0px)) rotateY(var(--a,0deg)) translateZ(calc(-1 * var(--r,980px)))}
+.wl-row-solo{--r:980px;--ry:44px}
+.wl-row-top{--r:1060px;--ry:-152px}
+.wl-row-main{--r:980px;--ry:164px}
+.wl-panel{position:relative;width:100%;height:100%;padding:0;border:1px solid rgba(212,175,55,.55);background:linear-gradient(170deg,#241710,#160e08);cursor:pointer;transform-style:preserve-3d;box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(212,175,55,.28);animation:wl-arrive .9s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.08s * var(--i,0));transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease}
+.wl-panel:hover,.wl-panel:focus-visible{transform:translateZ(52px) scale(1.03);border-color:#e9c767;box-shadow:0 34px 80px rgba(0,0,0,.65),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(233,199,103,.7),0 0 46px rgba(212,175,55,.28);outline:none}
+.wl-art{position:absolute;inset:10px 10px 52px;object-fit:cover;display:block;background:#0e0906;filter:saturate(.92) brightness(.96)}
 .wl-panel:hover .wl-art{filter:saturate(1.05) brightness(1.05)}
 .wl-art-blank{background:
  radial-gradient(40% 40% at 50% 44%,rgba(212,175,55,.2),transparent 70%),
  conic-gradient(from 30deg,rgba(212,175,55,.12) 0 60deg,transparent 0 120deg,rgba(212,175,55,.12) 0 180deg,transparent 0 240deg,rgba(212,175,55,.12) 0 300deg,transparent 0),#140d08}
-.wl-plaque{position:absolute;left:10px;right:10px;bottom:10px;height:38px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#2b1c10,#1c1109);border-top:1px solid rgba(212,175,55,.4);color:#e8d9ae;font:600 .82rem/1.1 Georgia,'Times New Roman',serif;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 .5rem;box-sizing:border-box}
-.wl-crest{position:absolute;left:50%;top:50%;width:640px;text-align:center;transform-style:preserve-3d;pointer-events:none}
-.wl-title{margin:0;font:italic 700 4.4rem/1.05 Georgia,'Times New Roman',serif;letter-spacing:.06em;background:linear-gradient(100deg,#8a6a1f 0%,#e9c767 28%,#fff3c4 50%,#e9c767 72%,#8a6a1f 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 26px rgba(212,175,55,.25))}
-.wl-tagline{margin:.9rem 0 0;color:#cdb98a;font:400 1.05rem/1.5 Georgia,serif;letter-spacing:.22em;text-transform:uppercase}
+.wl-plaque{position:absolute;left:10px;right:10px;bottom:10px;height:34px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#2b1c10,#1c1109);border-top:1px solid rgba(212,175,55,.4);color:#e8d9ae;font:600 .78rem/1.1 Georgia,'Times New Roman',serif;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 .5rem;box-sizing:border-box}
+.wl-crest{position:absolute;left:50%;top:50%;width:760px;text-align:center;transform-style:preserve-3d;pointer-events:none;transform:translate(-50%,-50%) translate3d(0,-352px,-560px)}
+.wl-crest-alone{transform:translate(-50%,-50%) translate3d(0,-60px,-420px)}
+.wl-title{margin:0;font:italic 700 4rem/1.05 Georgia,'Times New Roman',serif;letter-spacing:.06em;background:linear-gradient(100deg,#8a6a1f 0%,#e9c767 28%,#fff3c4 50%,#e9c767 72%,#8a6a1f 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 26px rgba(212,175,55,.25))}
+.wl-tagline{margin:.8rem 0 0;color:#cdb98a;font:400 1rem/1.5 Georgia,serif;letter-spacing:.22em;text-transform:uppercase}
 .wl-hint{position:absolute;left:50%;bottom:calc(1.1rem + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:4;margin:0;color:rgba(205,185,138,.55);font:400 .78rem/1 Georgia,serif;letter-spacing:.24em;text-transform:uppercase;pointer-events:none;animation:wl-fade 1.2s ease .8s backwards}
 .wl-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(20,12,7,.82);border:1px solid rgba(212,175,55,.45);backdrop-filter:blur(6px);color:#e8d9ae;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.55;transition:opacity .16s ease}
 .wl-close:hover{opacity:1}
 @keyframes wl-arrive{from{opacity:0;translate:0 26px}to{opacity:1;translate:0 0}}
 @keyframes wl-fade{from{opacity:0}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.wl-panel{animation:none;opacity:1}.wl-hint{animation:none}}
-@media(max-width:720px){.wl-panel{width:164px;height:224px;--lane:172px}.wl-art{inset:7px 7px 42px}.wl-plaque{height:30px;font-size:.68rem;bottom:7px;left:7px;right:7px}.wl-title{font-size:2.6rem}.wl-crest{width:88vw}.wl-viewport{perspective:1000px}}
+@media(max-width:900px){.wl-slot{width:150px;height:206px}.wl-row-solo{--r:760px;--ry:30px}.wl-row-top{--r:830px;--ry:-112px}.wl-row-main{--r:760px;--ry:120px}.wl-art{inset:7px 7px 40px}.wl-plaque{height:28px;font-size:.66rem;bottom:7px;left:7px;right:7px}.wl-title{font-size:2.4rem}.wl-crest{width:88vw;transform:translate(-50%,-50%) translate3d(0,-252px,-460px)}.wl-viewport{perspective:1050px}}
 `
 
 const _welcomeView = new WelcomeViewDrone()
