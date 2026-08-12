@@ -469,6 +469,24 @@
       "created": "2026-08-09",
       "status": "done",
       "completed": "2026-08-12"
+    },
+    {
+      "id": "chat-window",
+      "title": "Mirror the chat window: tiles, collection, pheromones, notes",
+      "run": null,
+      "note": "NEW CREATION (replaces the ask screen). Mirror 1:1 with the source resources, each tile marked for what it IS:",
+      "unattended": false,
+      "created": "2026-08-12",
+      "status": "pending"
+    },
+    {
+      "id": "desk-yields-to-pheromones",
+      "title": "Fullscreen notes/lists desk yields its right edge to the pheromones window",
+      "run": null,
+      "note": "No live bridge this session. Owed under behaviors: a note on the annotations-window creation (and/or the pheromones window card) — in fullscreen, the desk now ends where a right-docked toolwindow begins (viewport:inset reservation mirrored into --hc-inset-right; notes-strip.component.scss :host.is-fullscreen right inset, guarded >=600x450 because below that panels are bottom sheets). Purpose: open the pheromones window beside the fullscreen desk and drag chips onto individual note rows and list lines (data-pheromone-note -> note:tag -> the note's own tags slot — the drop pipeline already existed; the desk just no longer gets covered). Source: hypercomb-shared/ui/notes-strip/notes-strip.component.scss + .ts (ensureViewportInsetVars belt-and-braces). Manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-12",
+      "status": "pending"
     }
   ]
 }

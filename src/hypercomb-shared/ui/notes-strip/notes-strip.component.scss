@@ -61,6 +61,18 @@
   bottom: 0;
   padding: 0;
 }
+// The desk YIELDS to a right-docked toolwindow. Docked panels reserve their
+// edge via `viewport:inset` (hcDockInset) and the shell mirrors the widest
+// reservation into `--hc-inset-right`; ending the desk where the panel
+// begins is what lets the pheromones window open BESIDE the fullscreen
+// notes/lists surface — chips drag from the panel onto individual note rows
+// and list lines (`data-pheromone-note`), instead of the panel covering the
+// reading pane it is aiming at. Guarded to the sizes where panels actually
+// dock: below 600×450 they become full-width bottom sheets, whose
+// reservation is the whole viewport and would squash the desk to nothing.
+@media (min-width: 600px) and (min-height: 450px) {
+  :host.is-fullscreen { right: var(--hc-inset-right, 0px); }
+}
 :host.is-fullscreen .notes-strip {
   // !important on size to override the inline width/height the
   // resize observer writes for the user's stored dock dimensions.

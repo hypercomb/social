@@ -27,6 +27,7 @@ import {
   type NoteMarksStore,
 } from '../../core/note-marks.store'
 import { requestIconPick } from '../../core/icon-pick'
+import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
 // The reading cycle's wrap arithmetic — shared with the standalone reader so
 // prev/next behave identically wherever notes are read.
 import { stepIndex } from '../notes-viewer/note-cycle'
@@ -2224,6 +2225,12 @@ export class NotesStripComponent implements OnDestroy {
   #hoverActive = false
 
   constructor() {
+    // The fullscreen desk consumes `--hc-inset-right` (its right edge yields
+    // to a docked toolwindow — the pheromones window opens BESIDE the desk).
+    // The singleton is normally started by shell bootstrap; calling it here
+    // too costs nothing and keeps the desk correct even if that ordering
+    // ever changes (same belt-and-braces as youtube-viewer).
+    ensureViewportInsetVars()
     // A different tile is a different document — the reading pane starts
     // back at its top. `untracked` so the write never joins the read graph.
     effect(() => {
