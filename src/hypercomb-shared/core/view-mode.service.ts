@@ -43,7 +43,7 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // has been removed and strand the participant on a blank canvas.
   'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
   'living-brief', 'evidence-atlas', 'knowledge-studio', 'postit',
-  'revolucion-welcome',
+  'revolucion-welcome', 'revolucion-room',
 ])
 
 export class ViewModeService extends EventTarget {

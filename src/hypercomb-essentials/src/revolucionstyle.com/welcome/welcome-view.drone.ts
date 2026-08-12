@@ -23,6 +23,7 @@ import { isKindGloballyOff } from '../../diamondcoreprocessor.com/sharing/behavi
 import { listDecorations } from '../../diamondcoreprocessor.com/commands/decoration-manifest.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../diamondcoreprocessor.com/history/layer-placement.js'
 import { WELCOME_KIND, WELCOME_VIEW, type WelcomePayload } from './welcome.queen.js'
+import { ROOM_VIEW } from './room-view.drone.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -258,12 +259,12 @@ export class WelcomeViewDrone extends Drone {
     return host
   }
 
-  /** Step through a doorway: real navigation into the child, back on the
-   *  hexagon canvas — the child's own view (when it exists) takes it from
-   *  there. */
+  /** Step through a doorway: real navigation into the child, then the
+   *  child's OWN view — the room mounts the cell's page as its presence,
+   *  and falls through to the hexagons when the cell has none. */
   #enter(segments: readonly string[]): void {
-    this.#vm()?.setMode('hexagons')
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(segments)
+    this.emitEffect('view:open-for-tile', { view: ROOM_VIEW, segments: [...segments] })
   }
 
   // ── Motion: one loop drives parallax and atmosphere ──────────────────

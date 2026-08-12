@@ -487,6 +487,14 @@
       "unattended": false,
       "created": "2026-08-12",
       "status": "pending"
+    },
+    {
+      "id": "welcome-room-mirror",
+      "title": "Mirror the room view — behaviors/views/welcome gains room-view.drone.ts + the room note",
+      "run": "node scripts/bridge/_mirror-welcome.cjs",
+      "note": "Re-run of the welcome mirror after the room view landed: adds the room-view.drone.ts part tile and a second note (distinct first line — note dedupe is by first line, so the v2 gallery-wall note stays and the room note corrects the wall description to the flat grid). GUARD: must run against the REAL hive renderer — the script throws on /behaviors/views absence, which protects against a scratch-bucket renderer holding the broker slot.",
+      "created": "2026-08-12",
+      "status": "pending"
     }
   ]
 }
