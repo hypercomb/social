@@ -1,12 +1,15 @@
 // The Revolución threshold — a 3D welcome page built from the layer itself.
 //
 // The decorated cell's CHILDREN are the elements of the page: each child
-// tile is a gilded panel on a gently curved GALLERY WALL facing the
-// visitor — every element visible at once, nothing hidden behind a walk.
-// One row up to seven children, two rows beyond. The pointer parallaxes
-// the room; hovering lifts a panel; stepping through one enters that
-// child — whose own view implementation owns the surface from there.
-// This drone renders exactly ONE layer; children are doorways.
+// tile is a gilded frame HUNG ON A WALL — a solid wood-and-wainscot plane
+// the frames sit proud of, every element visible at once, nothing hidden
+// behind a walk and nothing floating in space. One row up to seven
+// children, two rows beyond. The pointer pans the camera a few pixels
+// (translate parallax — near planes shift more than far ones, which reads
+// as solid depth; rotating the room read as floating); hovering lifts a
+// frame off the wall; stepping through one enters that child — whose own
+// view implementation owns the surface from there. This drone renders
+// exactly ONE layer; children are doorways.
 //
 // Everything is self-drawn: CSS 3D perspective for the room, a 2D canvas
 // for embers and smoke. No dependencies, no fetching beyond the hive's own
@@ -172,9 +175,14 @@ export class WelcomeViewDrone extends Drone {
     floor.className = 'wl-floor'
     stage.appendChild(floor)
 
-    // The gallery wall: one curved row up to seven, two rows beyond.
-    // Every panel is visible at once — the welcome page shows the whole
-    // layer at a glance, no walking required.
+    // The wall itself — the panels hang ON something, never in space.
+    const wall = document.createElement('div')
+    wall.className = 'wl-wall'
+    stage.appendChild(wall)
+
+    // The gallery wall: one row up to seven, two rows beyond, a flat
+    // architectural grid. Every panel is visible at once — the welcome
+    // page shows the whole layer at a glance, no walking required.
     const twoRows = panels.length > 7
     const topCount = twoRows ? Math.ceil(panels.length / 2) : 0
     const rows: PanelData[][] = twoRows
@@ -184,13 +192,11 @@ export class WelcomeViewDrone extends Drone {
       const rowClass = twoRows
         ? (rowIndex === 0 ? 'wl-row-top' : 'wl-row-main')
         : 'wl-row-solo'
-      const stepDeg = Math.min(13, row.length > 1 ? 84 / (row.length - 1) : 0)
       row.forEach((panel, column) => {
         const index = rowIndex === 0 ? column : topCount + column
-        const angle = (column - (row.length - 1) / 2) * stepDeg
         const slot = document.createElement('div')
         slot.className = `wl-slot ${rowClass}`
-        slot.style.setProperty('--a', `${angle}deg`)
+        slot.style.setProperty('--col', String(column - (row.length - 1) / 2))
         const door = document.createElement('button')
         door.type = 'button'
         door.className = 'wl-panel'
@@ -264,24 +270,27 @@ export class WelcomeViewDrone extends Drone {
 
   #animate(host: HTMLElement, stage: HTMLElement, atmo: HTMLCanvasElement): void {
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-    let rotX = 0, rotY = 0, rotXTarget = 0, rotYTarget = 0
+    // Translate parallax, never rotation: shifting the stage under a fixed
+    // perspective moves near planes more than far ones, so the room reads
+    // as SOLID depth — rotating the whole stage read as floating.
+    let panX = 0, panY = 0, panXTarget = 0, panYTarget = 0
 
     // Interaction must land even when rAF starves (occluded/uncomposited
     // tabs) — write the transform immediately, let the loop smooth it.
     const render = (): void => {
-      stage.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`
+      stage.style.transform = `translate3d(${panX}px, ${panY}px, 0)`
     }
     const step = (rate: number): void => {
-      rotX += (rotXTarget - rotX) * rate
-      rotY += (rotYTarget - rotY) * rate
+      panX += (panXTarget - panX) * rate
+      panY += (panYTarget - panY) * rate
       render()
     }
     const onMove = (event: PointerEvent): void => {
       if (still) return
       const vw = window.innerWidth || 1
       const vh = window.innerHeight || 1
-      rotYTarget = (event.clientX / vw - 0.5) * 5
-      rotXTarget = (0.5 - event.clientY / vh) * 2.5
+      panXTarget = (0.5 - event.clientX / vw) * 26
+      panYTarget = (0.5 - event.clientY / vh) * 12
       step(0.2)
     }
     host.addEventListener('pointermove', onMove)
@@ -304,8 +313,8 @@ export class WelcomeViewDrone extends Drone {
       const dt = Math.min(48, now - last || 16)
       last = now
 
-      rotX += (rotXTarget - rotX) * 0.06
-      rotY += (rotYTarget - rotY) * 0.06
+      panX += (panXTarget - panX) * 0.06
+      panY += (panYTarget - panY) * 0.06
       render()
 
       if (!context || still || document.hidden) return
@@ -362,28 +371,37 @@ export class WelcomeViewDrone extends Drone {
 const SCENE_CSS = `
 .hc-welcome-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:hidden;background:radial-gradient(120% 90% at 50% 30%,#2a1c12 0%,#1a110a 46%,#0c0805 100%)}
 .wl-atmo{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.wl-viewport{position:absolute;inset:0;perspective:1300px;perspective-origin:50% 42%}
-.wl-stage{position:absolute;inset:0;transform-style:preserve-3d;will-change:transform}
-.wl-floor{position:absolute;left:50%;top:50%;width:2600px;height:4200px;transform:translate(-50%,-50%) rotateX(90deg) translateZ(-330px);background:
+.wl-viewport{position:absolute;inset:0;perspective:1300px;perspective-origin:50% 42%;pointer-events:none}
+.wl-stage{position:absolute;inset:0;transform-style:preserve-3d;will-change:transform;pointer-events:none}
+.wl-floor{position:absolute;left:50%;top:50%;width:2600px;height:4200px;pointer-events:none;transform:translate(-50%,-50%) rotateX(90deg) translateZ(-330px);background:
  repeating-linear-gradient(90deg,rgba(212,175,55,.05) 0 1px,transparent 1px 130px),
  repeating-linear-gradient(0deg,rgba(212,175,55,.05) 0 1px,transparent 1px 130px),
  radial-gradient(60% 45% at 50% 42%,rgba(212,175,55,.07),transparent 70%),
  linear-gradient(#150d07,#0b0704);
  -webkit-mask-image:radial-gradient(58% 46% at 50% 44%,#000 30%,transparent 78%);mask-image:radial-gradient(58% 46% at 50% 44%,#000 30%,transparent 78%)}
-.wl-slot{position:absolute;left:50%;top:50%;width:216px;height:292px;transform-style:preserve-3d;transform:translate(-50%,-50%) translateY(var(--ry,0px)) rotateY(var(--a,0deg)) translateZ(calc(-1 * var(--r,980px)))}
+.wl-wall{position:absolute;left:50%;top:50%;width:2600px;height:1700px;pointer-events:none;transform:translate(-50%,-50%) translateZ(calc(-1 * var(--wz,1034px)));border-bottom:14px solid #0a0603;background:
+ radial-gradient(50% 40% at 50% 36%,rgba(212,175,55,.10),transparent 72%),
+ repeating-linear-gradient(90deg,rgba(0,0,0,.22) 0 2px,rgba(255,255,255,.014) 2px 4px,transparent 4px 240px),
+ linear-gradient(180deg,#241610 0%,#1b100a 55%,#130b06 100%);
+ box-shadow:inset 0 -120px 90px -60px rgba(0,0,0,.55);
+ -webkit-mask-image:radial-gradient(74% 64% at 50% 46%,#000 46%,transparent 94%);mask-image:radial-gradient(74% 64% at 50% 46%,#000 46%,transparent 94%)}
+.wl-wall::before,.wl-wall::after{content:'';position:absolute;left:5%;right:5%;height:2px;background:linear-gradient(90deg,transparent,rgba(212,175,55,.34) 12%,rgba(212,175,55,.34) 88%,transparent)}
+.wl-wall::before{top:17%}
+.wl-wall::after{top:74%;box-shadow:0 5px 0 rgba(0,0,0,.35)}
+.wl-slot{position:absolute;left:50%;top:50%;width:216px;height:292px;transform-style:preserve-3d;pointer-events:none;transform:translate(-50%,-50%) translate3d(calc(var(--col,0) * var(--gapx,252px)),var(--ry,0px),calc(-1 * var(--r,980px)))}
 .wl-row-solo{--r:980px;--ry:44px}
-.wl-row-top{--r:1060px;--ry:-152px}
+.wl-row-top{--r:980px;--ry:-152px}
 .wl-row-main{--r:980px;--ry:164px}
-.wl-panel{position:relative;width:100%;height:100%;padding:0;border:1px solid rgba(212,175,55,.55);background:linear-gradient(170deg,#241710,#160e08);cursor:pointer;transform-style:preserve-3d;box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(212,175,55,.28);animation:wl-arrive .9s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.08s * var(--i,0));transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease}
-.wl-panel:hover,.wl-panel:focus-visible{transform:translateZ(52px) scale(1.03);border-color:#e9c767;box-shadow:0 34px 80px rgba(0,0,0,.65),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(233,199,103,.7),0 0 46px rgba(212,175,55,.28);outline:none}
+.wl-panel{position:relative;width:100%;height:100%;padding:0;pointer-events:auto;border:1px solid rgba(212,175,55,.55);background:linear-gradient(170deg,#241710,#160e08);cursor:pointer;transform-style:preserve-3d;box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(212,175,55,.28);animation:wl-arrive .9s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.08s * var(--i,0));transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease}
+.wl-panel:hover,.wl-panel:focus-visible{transform:translateZ(34px) scale(1.02);border-color:#e9c767;box-shadow:0 34px 80px rgba(0,0,0,.65),0 0 0 5px rgba(20,12,7,.9),0 0 0 6px rgba(233,199,103,.7),0 0 46px rgba(212,175,55,.28);outline:none}
 .wl-art{position:absolute;inset:10px 10px 52px;object-fit:cover;display:block;background:#0e0906;filter:saturate(.92) brightness(.96)}
 .wl-panel:hover .wl-art{filter:saturate(1.05) brightness(1.05)}
 .wl-art-blank{background:
  radial-gradient(40% 40% at 50% 44%,rgba(212,175,55,.2),transparent 70%),
  conic-gradient(from 30deg,rgba(212,175,55,.12) 0 60deg,transparent 0 120deg,rgba(212,175,55,.12) 0 180deg,transparent 0 240deg,rgba(212,175,55,.12) 0 300deg,transparent 0),#140d08}
 .wl-plaque{position:absolute;left:10px;right:10px;bottom:10px;height:34px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#2b1c10,#1c1109);border-top:1px solid rgba(212,175,55,.4);color:#e8d9ae;font:600 .78rem/1.1 Georgia,'Times New Roman',serif;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 .5rem;box-sizing:border-box}
-.wl-crest{position:absolute;left:50%;top:50%;width:760px;text-align:center;transform-style:preserve-3d;pointer-events:none;transform:translate(-50%,-50%) translate3d(0,-352px,-560px)}
-.wl-crest-alone{transform:translate(-50%,-50%) translate3d(0,-60px,-420px)}
+.wl-crest{position:absolute;left:50%;top:50%;width:760px;text-align:center;transform-style:preserve-3d;pointer-events:none;transform:translate(-50%,-50%) translate3d(0,var(--cy,-352px),calc(-1 * var(--r,980px) + 6px))}
+.wl-crest-alone{--cy:-60px}
 .wl-title{margin:0;font:italic 700 4rem/1.05 Georgia,'Times New Roman',serif;letter-spacing:.06em;background:linear-gradient(100deg,#8a6a1f 0%,#e9c767 28%,#fff3c4 50%,#e9c767 72%,#8a6a1f 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 26px rgba(212,175,55,.25))}
 .wl-tagline{margin:.8rem 0 0;color:#cdb98a;font:400 1rem/1.5 Georgia,serif;letter-spacing:.22em;text-transform:uppercase}
 .wl-hint{position:absolute;left:50%;bottom:calc(1.1rem + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:4;margin:0;color:rgba(205,185,138,.55);font:400 .78rem/1 Georgia,serif;letter-spacing:.24em;text-transform:uppercase;pointer-events:none;animation:wl-fade 1.2s ease .8s backwards}
@@ -392,7 +410,7 @@ const SCENE_CSS = `
 @keyframes wl-arrive{from{opacity:0;translate:0 26px}to{opacity:1;translate:0 0}}
 @keyframes wl-fade{from{opacity:0}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.wl-panel{animation:none;opacity:1}.wl-hint{animation:none}}
-@media(max-width:900px){.wl-slot{width:150px;height:206px}.wl-row-solo{--r:760px;--ry:30px}.wl-row-top{--r:830px;--ry:-112px}.wl-row-main{--r:760px;--ry:120px}.wl-art{inset:7px 7px 40px}.wl-plaque{height:28px;font-size:.66rem;bottom:7px;left:7px;right:7px}.wl-title{font-size:2.4rem}.wl-crest{width:88vw;transform:translate(-50%,-50%) translate3d(0,-252px,-460px)}.wl-viewport{perspective:1050px}}
+@media(max-width:900px){.wl-slot{width:150px;height:206px;--gapx:172px}.wl-row-solo{--r:760px;--ry:30px}.wl-row-top{--r:760px;--ry:-112px}.wl-row-main{--r:760px;--ry:120px}.wl-wall{--wz:814px}.wl-art{inset:7px 7px 40px}.wl-plaque{height:28px;font-size:.66rem;bottom:7px;left:7px;right:7px}.wl-title{font-size:2.4rem}.wl-crest{width:88vw;--r:760px;--cy:-252px}.wl-viewport{perspective:1050px}}
 `
 
 const _welcomeView = new WelcomeViewDrone()
