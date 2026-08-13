@@ -31,6 +31,8 @@
     <h2 id="install-title">{{ 'install.title' | t }}</h2>
     @if (storageBlocked()) {
       <p class="install-blocked">{{ 'install.storage-blocked' | t }}</p>
+    } @else if (updateNeeded()) {
+      <p class="install-blocked">{{ 'install.update-needed' | t }}</p>
     } @else {
       <button class="install-cta" type="button" (click)="startWelcome()" [disabled]="upgrading()">
         @if (upgrading()) { {{ 'install.starting' | t }} } @else { {{ 'install.start' | t }} }

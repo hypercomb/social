@@ -1042,6 +1042,14 @@ export class TileViewDrone extends Drone {
     const faces: Partial<Record<FaceDir, Chip>> = {}
     if (viewers[0]) faces.ne = { ...viewers[0], accent: true }
     if (viewers[1]) faces.nw = { ...viewers[1], accent: true }
+    // A LINK TILE'S CONTENT IS ITS VIEW. A tile pointing at the internet (a
+    // video, an image, an article) usually carries no viewer decoration —
+    // but the thing a swipe up-and-right should do is obvious: open what it
+    // points at. Same 'link' chip the grid renders; the caption says the aim.
+    if (!faces.ne) {
+      const open = chips.find(c => c.action === 'link')
+      if (open) faces.ne = { ...open, labelKey: 'tile-view.open', fallback: 'open', accent: true }
+    }
     const edit = named('edit')
     if (edit) faces.e = edit
     // The features panel, wearing the name the face means: a face caption is
@@ -1195,6 +1203,17 @@ export class TileViewDrone extends Drone {
         // below TAKEOVER_Z from being covered by our own suspended card.
         if (action.name.startsWith(VIEW_ENTER_PREFIX)) {
           rememberCloseUpEntry(action.name.slice(VIEW_ENTER_PREFIX.length), label, this.#segments)
+          this.close()
+          overlay?.invokeActionForTile?.(action.name, label)
+          return
+        }
+        // OPENING THE TILE'S LINK IS A HANDOVER TOO. The content viewers it
+        // reaches (the photo view, the YouTube embed) mount at z 10000 — far
+        // below this card — so waiting suspended underneath would bury them
+        // behind the card the moment the watch resumed it. Close first;
+        // closing the content lands on the hive, exactly where the canvas
+        // tap that opens leaf links lands.
+        if (action.name === 'link') {
           this.close()
           overlay?.invokeActionForTile?.(action.name, label)
           return

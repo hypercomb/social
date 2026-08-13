@@ -55,7 +55,7 @@ import { EffectBus } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
-import { ensureInstall, resyncFromSentinel, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
+import { ensureInstall, opfsWritable, resyncFromSentinel, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
 import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
@@ -436,6 +436,14 @@ const bootstrap = async (): Promise<void> => {
     if (typeof navigator.storage?.getDirectory !== 'function') {
       console.warn('[main] persistent storage unavailable — install cannot proceed')
       EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
+      return
+    }
+    // iOS 16.4–18.3 passes the gate above but cannot WRITE (no
+    // createWritable until 18.4) — every install source would throw and the
+    // card would loop Start → Starting… forever. Explain instead.
+    if (!opfsWritable()) {
+      console.warn('[main] OPFS present but not writable — browser too old to install')
+      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-writable' } as BootStatus)
       return
     }
     void (async () => {

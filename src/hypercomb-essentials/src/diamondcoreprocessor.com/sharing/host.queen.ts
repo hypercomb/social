@@ -33,6 +33,7 @@ import {
   type HiveLinkBundle,
 } from './hive-link.js'
 import { fetchHiveManifest, putHiveManifest } from './hive-pointer.js'
+import { deliverLink } from './deliver-link.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
 
@@ -213,13 +214,19 @@ export class HostQueenBee {
     const linkHost = normalizeHost(window.location.host) || window.location.host
     const scheme = LOOPBACK_RE.test(linkHost) ? 'http' : 'https'
     const url = `${scheme}://${linkHost}/${bundleSig}`
-    let copied = false
-    try { await navigator.clipboard.writeText(url); copied = true }
-    catch { /* clipboard needs focus/permission — the toast carries the URL */ }
-
+    // The availability gate above can run for minutes, so this lands far
+    // outside the tap's activation — deliverLink descends sheet → clipboard →
+    // fresh-tap offer, and on phones that offer is the path that actually
+    // fires (mobile browsers refuse both sheet and clipboard this late).
+    const delivery = await deliverLink(url, name)
+    const linkText = delivery === 'shared'
+      ? 'Link shared — anyone who opens it can preview, then adopt.'
+      : delivery === 'copied'
+        ? 'Link copied — anyone who opens it can preview, then adopt.'
+        : url
     const doneMsg = receipted
-      ? this.#t(i18n, 'host.done', 'Branch hosted. {link}', { link: copied ? 'Link copied — anyone who opens it can preview, then adopt.' : url })
-      : this.#t(i18n, 'host.done-pending-link', 'Branch hosted; the link itself is still uploading (retries automatically). {link}', { link: copied ? 'Link copied.' : url })
+      ? this.#t(i18n, 'host.done', 'Branch hosted. {link}', { link: linkText })
+      : this.#t(i18n, 'host.done-pending-link', 'Branch hosted; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? url : 'Link ready.' })
     this.#toast('success', this.#t(i18n, 'host.title', 'Host branch'), doneMsg)
     console.log(`[host] "${name}" sealed=${sealed.slice(0, 12)}… index=${indexHost}/hive/${pubkey.slice(0, 12)}… link=${url}`)
   }

@@ -2374,6 +2374,32 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // back exactly what the user ran, ready to edit and run again.
     this.#recordHistory(original)
 
+    // A LINE THAT IS A URL IS A LINK, NOT A NAME. This is the phone's drop:
+    // on a touch device no drag ever fires, and pasting the address is the
+    // one intake gesture the platform offers — so it must reach the same
+    // pipeline a desktop drop does (safety check, title unfurl, poster
+    // thumbnail, auto-commit) instead of falling through to the cell parser,
+    // which splits on the URL's slashes and mints husk cells out of its
+    // scheme and host. Checked before tag extraction: a `#fragment` is part
+    // of the address, not a tag. Whole-line matches only — a URL mentioned
+    // inside a longer line is still just text.
+    const line = original.trim()
+    if (/^https?:\/\/\S+$/i.test(line) || /^www\.\S+\.\S+$/i.test(line)) {
+      // Except our OWN address: a pasted share/selection URL is a place in
+      // this hive, and PasteUrlNavigateBehavior (further down) is its owner.
+      // Absolute form only: a bare `www.…` line can never be this origin,
+      // and resolving it RELATIVE would claim it as ours by accident.
+      const ownOrigin = /^https?:\/\//i.test(line) && (() => {
+        try { return new URL(line).origin === window.location.origin }
+        catch { return false }
+      })()
+      if (!ownOrigin) {
+        EffectBus.emit('link:intake', { url: line })
+        this.clear()
+        return
+      }
+    }
+
     // A dropped resource is a "make THIS" gesture, so the line is a NAME —
     // the same rule `#completeOnEnter` already applies to the dropdown, held
     // one step further down. A video titles itself, and those titles carry

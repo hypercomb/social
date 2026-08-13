@@ -5,6 +5,7 @@
 import { Worker, EffectBus, requestConfirm } from '@hypercomb/core'
 import { parseYouTubeVideoId, fetchYouTubeOpenGraph, type YouTubeOpenGraph } from './youtube.js'
 import { fetchImageBlob, isImageUrl } from './photo.js'
+import { normalizeLink } from './normalize.js'
 import { defaultNameForLink } from './link-name.js'
 import { byDeadline, CARD_DEADLINE_MS, PICTURE_DEADLINE_MS, SAFETY_DEADLINE_MS } from './deadline.js'
 import { verifyLinkDropCard } from './link-drop-card.view.js'
@@ -63,6 +64,23 @@ export class LinkDropWorker extends Worker {
     // A drag can leave without dropping — the ring must go with it.
     document.addEventListener('dragleave', this.#onDragLeave)
     document.addEventListener('dragend', this.#endDrag)
+    // THE PHONE'S DROP. No drag event ever fires on a touch device, which
+    // for a long time meant this whole pipeline — safety check, title
+    // unfurl, poster thumbnail, auto-commit — was desktop-only, and the one
+    // thing a phone newcomer would try (pasting the URL into the command
+    // line) minted husk cells out of the URL's slashes instead. The command
+    // line now recognises a pasted/typed URL and hands it here; from this
+    // point it IS a canvas drop, same route end to end.
+    EffectBus.on<{ url?: unknown }>('link:intake', payload => {
+      const raw = typeof payload?.url === 'string' ? payload.url.trim() : ''
+      if (!raw) return
+      // Hand-typed links often lack a scheme ("www.x.com") — normalize
+      // before the scheme gate, exactly as the open path does.
+      const url = normalizeLink(raw)
+      if (!/^https?:\/\//i.test(url)) return
+      const targetSegments = [...(this.#lineage?.explorerSegments?.() ?? [])]
+      void this.#routeLink(url, null, targetSegments, null)
+    })
   }
 
   protected override act = async (): Promise<void> => { }

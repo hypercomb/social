@@ -189,6 +189,19 @@ export class PixiHostWorker extends Worker {
 
     ;(window as any).__hcBoot?.('PixiHostWorker.act → Application.init() starting')
     const tPixiInit = performance.now()
+    // PHONES GET A CAPPED RENDERER. A DPR-3 full-viewport canvas with MSAA is
+    // the recipe for WKWebView's "A problem repeatedly occurred" crash-reload
+    // on the very first render — the exact moment a newcomer decides whether
+    // the platform works. Cap resolution at 1.5 (hex edges stay crisp, memory
+    // quarters), drop antialias (the tiles are shader meshes; MSAA buys little
+    // over them), and let the ticker breathe at 30fps. Same phone predicate as
+    // MobileModeService (pointer:coarse + phone-shaped in either dimension) —
+    // checked inline because this runs on the boot path, before IoC
+    // registration order can be trusted.
+    const phone =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches &&
+      window.matchMedia('(max-width: 599px), (max-height: 449px)').matches
     await app.init({
       // Size to the host element, not the window, so anything that
       // narrows the host (the history sidebar taking a column on the
@@ -198,10 +211,11 @@ export class PixiHostWorker extends Worker {
       // pixels, with hit-testing still firing through the overlay.
       resizeTo: host,
       backgroundAlpha: 0,
-      resolution: devicePixelRatio || 1,
+      resolution: phone ? Math.min(1.5, devicePixelRatio || 1) : (devicePixelRatio || 1),
       autoDensity: true,
-      antialias: true,
+      antialias: !phone,
     })
+    if (phone) app.ticker.maxFPS = 30
     const pixiInitMs = performance.now() - tPixiInit
     console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
     ;(window as any).__hcBoot?.(`Application.init() done (${pixiInitMs.toFixed(0)}ms)`)

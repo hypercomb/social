@@ -21,6 +21,7 @@
 // still resolves in this browser; we say so rather than mint a dead link.
 
 import { EffectBus, get } from '@hypercomb/core'
+import { deliverLink } from './deliver-link.js'
 import {
   MEETING_INVITE_KIND,
   MEETING_INVITE_VERSION,
@@ -173,17 +174,19 @@ export class InviteQueenBee {
     const scheme = LOOPBACK_RE.test(host) ? 'http' : 'https'
     const url = `${scheme}://${host}/${linkSig}`
 
-    let copied = false
-    try { await navigator.clipboard.writeText(url); copied = true }
-    catch (err) { console.warn('[invite] clipboard write failed', err) }
+    // Sheet → clipboard → fresh-tap offer: the receipt wait above can leave
+    // the tap's activation stale, and on phones the invite is the link most
+    // likely to be TEXTED onward — the share sheet is its natural exit.
+    const delivery = await deliverLink(url, 'Hypercomb invite')
+    const handed = delivery === 'shared' ? 'Link shared' : delivery === 'copied' ? 'Link copied' : ''
 
     const stampNote = stamped > 0
       ? `Stamped ${stamped} tile${stamped === 1 ? '' : 's'} as a swarm junction. `
       : ''
     const linkNote = confirmed
-      ? (copied ? 'Link copied — anyone who opens it joins this meeting place.' : url)
-      : (copied
-          ? 'Link copied — the invite is still uploading to your host; it goes live for others once the upload confirms (retries automatically).'
+      ? (handed ? `${handed} — anyone who opens it joins this meeting place.` : url)
+      : (handed
+          ? `${handed} — the invite is still uploading to your host; it goes live for others once the upload confirms (retries automatically).`
           : url)
     this.#toast(confirmed ? 'success' : 'info', 'Meeting place invite', stampNote + linkNote)
     console.log(`[invite] ${stamped > 0 ? `stamped ${stamped} tile(s); ` : ''}${confirmed ? '' : '(receipt pending) '}${url}`)

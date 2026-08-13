@@ -22,6 +22,7 @@
 
 import { Drone } from '@hypercomb/core'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
+import { deliverLink } from './deliver-link.js'
 
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const VISUAL_BEE_REGISTRY_KEY = '@diamondcoreprocessor.com/VisualBeeRegistry'
@@ -125,16 +126,42 @@ export class ShareLinkDrone extends Drone {
     return `${window.location.origin}/${path}${intent}`
   }
 
+  /** Is this a phone-shaped session? Same predicate as MobileModeService
+   *  (pointer:coarse + phone-shaped in either dimension), checked inline so
+   *  the answer never depends on service registration order. */
+  #phone(): boolean {
+    return typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches &&
+      window.matchMedia('(max-width: 599px), (max-height: 449px)').matches
+  }
+
   async #mint(label: string): Promise<void> {
-    const url = this.#buildUrl(label)
-    try {
-      await navigator.clipboard.writeText(url)
-      this.emitEffect('activity:log', { message: `link copied — ${url}`, icon: '●' })
-    } catch {
-      // Clipboard needs focus/permission — surface the URL so it can still
-      // be copied by hand from the activity strip.
-      this.emitEffect('activity:log', { message: `copy blocked — ${url}`, icon: '○' })
+    // ON A PHONE, SHARE MEANS /host. The name-first address below resolves
+    // against the RECIPIENT'S hive — for the cold stranger a phone user is
+    // texting, that hive is empty and the link is dead on arrival. The one
+    // link a cold recipient can actually open is the sealed /host bundle, so
+    // the phone's share gesture runs that flow (its own consent dialog first
+    // — hosting publishes bytes) and hands the minted link to the share
+    // sheet. Desktop keeps the address link: its recipients are typically
+    // already in the swarm the address resolves against.
+    if (this.#phone()) {
+      const host = this.#ioc()?.get<{ invoke: (args: string) => Promise<void> }>(
+        '@diamondcoreprocessor.com/HostQueenBee')
+      if (host?.invoke) {
+        await host.invoke('')
+        return
+      }
+      // No host queen (boot order, stripped build) — fall through to the
+      // address link rather than a dead tap.
     }
+    const url = this.#buildUrl(label)
+    const delivery = await deliverLink(url, label)
+    this.emitEffect('activity:log', {
+      message: delivery === 'shared' ? `link shared — ${url}`
+        : delivery === 'copied' ? `link copied — ${url}`
+        : `link ready — ${url}`,
+      icon: delivery === 'offered' ? '○' : '●',
+    })
   }
 }
 

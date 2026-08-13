@@ -51,6 +51,14 @@ export class App implements AfterViewInit {
     const status = this.bootStatus()
     return status?.kind === 'install-needed' && status.reason === 'no-storage'
   })
+  /** Storage opens but cannot be written — iOS Safari 16.4–18.3, which has
+   *  getDirectory but not createWritable. A different message from
+   *  storageBlocked because the remedy is different: not a window to close
+   *  or a browser to restart, an OS/browser to update. */
+  protected readonly updateNeeded = computed(() => {
+    const status = this.bootStatus()
+    return status?.kind === 'install-needed' && status.reason === 'no-writable'
+  })
   /** What the install is doing right now, shown under "Starting…".
    *
    *  An unchanging "Starting…" is indistinguishable from a hang, and the

@@ -16,7 +16,18 @@ export type BootStatus =
   | { kind: 'cached' }
   | { kind: 'installing' }
   | { kind: 'installed' }
-  | { kind: 'install-needed'; reason: 'no-sentinel' | 'sentinel-empty' | 'no-storage' }
+  | { kind: 'install-needed'; reason: 'no-sentinel' | 'sentinel-empty' | 'no-storage' | 'no-writable' }
+
+/** Can this browser actually WRITE to OPFS? `getDirectory` alone is not the
+ *  answer: iOS Safari 16.4–18.3 has it, but every write in the store goes
+ *  through `FileSystemFileHandle.createWritable`, which Safari only added in
+ *  18.4. On those iPhones the storage gate passes, the install starts, every
+ *  write throws, and the welcome card loops Start → Starting… forever with no
+ *  message — the worst first-run stall we know of. One prototype check turns
+ *  that loop into an honest "update your browser" card. */
+export const opfsWritable = (): boolean =>
+  typeof FileSystemFileHandle !== 'undefined' &&
+  typeof FileSystemFileHandle.prototype.createWritable === 'function'
 
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
@@ -66,6 +77,13 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     // that can only loop: every install source needs OPFS to land bytes.
     console.warn('[ensure-install] OPFS unavailable — skipping install; app will boot without persistence')
     EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
+    return
+  }
+
+  if (!opfsWritable()) {
+    // OPFS opens but cannot be written (iOS 16.4–18.3): explain, don't loop.
+    console.warn('[ensure-install] OPFS present but createWritable missing — browser too old to install')
+    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-writable' } as BootStatus)
     return
   }
 

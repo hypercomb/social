@@ -62,6 +62,13 @@ export class YouTubeMetadataQueue extends EventTarget {
   constructor() {
     super()
     this.#load()
+    // The passive review offer: playing a video tile no longer preempts the
+    // tap with this screen — a toast offers it instead, and its button lands
+    // here (see link-open.worker.ts).
+    EffectBus.on<{ id?: unknown }>('youtube-meta:open', payload => {
+      const id = typeof payload?.id === 'string' ? payload.id : ''
+      if (id) this.open(id)
+    })
     queueMicrotask(() => {
       for (const entry of this.#entries.values()) {
         if (entry.status === 'pending') void this.#run(entry.id)

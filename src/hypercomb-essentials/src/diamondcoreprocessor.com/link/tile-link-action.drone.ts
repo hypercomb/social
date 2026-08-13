@@ -1,8 +1,11 @@
 // diamondcoreprocessor.com/link/tile-link-action.drone.ts
 //
 // Registers a link icon on the tile overlay.
-// Only visible when a tile has both a link and children — leaf tiles with
-// links are opened directly by clicking the tile itself.
+// Visible on ANY tile with a link. Leaf link tiles do open directly from a
+// click/tap on the tile itself — but that gesture exists only on the hive
+// canvas. The close-up (the phone's per-tile screen) and the desktop band
+// build their affordances from this registry, and without the descriptor a
+// leaf link tile's own screen had no way to open what the tile points at.
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { OverlayActionDescriptor } from '../presentation/tiles/tile-overlay.drone.js'
@@ -19,7 +22,7 @@ const LINK_ICON: OverlayActionDescriptor = {
   y: -7,
   hoverTint: 0xa8d8ff,
   profile: 'private',
-  visibleWhen: (ctx) => ctx.isBranch && ctx.hasLink,
+  visibleWhen: (ctx) => ctx.hasLink,
 }
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }

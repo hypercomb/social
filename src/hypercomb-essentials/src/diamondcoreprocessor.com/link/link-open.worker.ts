@@ -3,7 +3,7 @@
 // routes to the photo view (image URLs) or opens in a new tab (other URLs).
 
 import { Worker, EffectBus } from '@hypercomb/core'
-import { fetchImageBlob } from './photo.js'
+import { fetchImageBlob, isImageUrl } from './photo.js'
 import { normalizeLink } from './normalize.js'
 import { parseYouTubeVideoId } from './youtube.js'
 import { readCellProperties, readTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
@@ -41,16 +41,41 @@ export class LinkOpenWorker extends Worker {
     // how link tiles opened before the emit was lost; YoutubeViewerComponent
     // listens for `viewer:open` kind:'youtube' and shows the embed overlay.
     if (parseYouTubeVideoId(link)) {
+      // PLAY FIRST. The tap on a video tile promises the video; the metadata
+      // suggestions used to preempt it with a curation dialog, which read as
+      // a broken tap to a newcomer. The review is now a passive offer — a
+      // toast whose button opens the same screen — so curation is one tap
+      // away without ever standing in front of the content.
+      EffectBus.emit('viewer:open', { kind: 'youtube', url: link })
       const lineage = get('@hypercomb.social/Lineage') as
         { explorerSegments?: () => readonly string[] } | undefined
       const parentSegments = lineage?.explorerSegments?.() ?? []
       const queue = get('@diamondcoreprocessor.com/YouTubeMetadataQueue') as YouTubeMetadataQueue | undefined
-      if (queue?.openReadyForTile(parentSegments, label, link)) return
-      EffectBus.emit('viewer:open', { kind: 'youtube', url: link })
+      const ready = queue?.readyForTile(parentSegments, label, link)
+      if (ready) {
+        EffectBus.emit('toast:show', {
+          type: 'tip',
+          message: 'Title and picture suggestions are ready for this tile.',
+          actionLabel: 'Review',
+          actionEffect: 'youtube-meta:open',
+          actionPayload: { id: ready.id },
+        })
+      }
       return
     }
 
-    // Image URL → photo view (extension-based or HEAD probe fallback)
+    // Image URL → the photo view, BY URL when the extension already says
+    // image. `PhotoView.show(url)` renders through a plain <img>, which needs
+    // no CORS handshake — the fetch below does, and most image hosts refuse
+    // it, which used to drop the commonest internet tap (a .jpg link)
+    // through to a popup-blocked window.open: a silent dead end on phones.
+    if (isImageUrl(link)) {
+      this.#photoView?.show(link)
+      return
+    }
+
+    // Extensionless URL → probe (HEAD/fetch) still decides; same-origin and
+    // permissive hosts keep the richer blob path.
     const blob = await fetchImageBlob(link)
     if (blob) {
       this.#photoView?.showBlob(blob)
