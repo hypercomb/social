@@ -160,7 +160,6 @@ export async function listPublishRecords(): Promise<PublishLedgerEntry[]> {
   if (!dir) return []
   const out: PublishLedgerEntry[] = []
   try {
-    // @ts-expect-error — OPFS async iteration is not in the TS DOM lib yet.
     for await (const [name, handle] of dir.entries() as AsyncIterable<[string, FileSystemHandle]>) {
       if (!RECORD_RE.test(name) || handle.kind !== 'file') continue
       try {

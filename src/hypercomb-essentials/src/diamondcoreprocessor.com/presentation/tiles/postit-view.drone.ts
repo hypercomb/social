@@ -44,6 +44,7 @@ export class PostitViewDrone extends Drone {
     'Post-it renderer — small stickies for decorated tiles on the current layer; opening one mounts its page full-viewport.'
 
   #stickies: HTMLElement | null = null
+  #noteByKey = new Map<string, HTMLButtonElement>()
   #post: HTMLElement | null = null
   #targetSegments: string[] | null = null
   #bound = false
@@ -192,9 +193,10 @@ export class PostitViewDrone extends Drone {
         this.#wireDrag(note, cell)
         host.append(note)
       }
-      note.style.setProperty('--postit-tilt', )
+      note.style.setProperty('--postit-tilt', `${index % 2 ? 1.6 : -2.2}deg`)
       const title = titleForLabel(cell.label, navigator.language) || cell.label
-      note.title =       const heading = note.querySelector('.postit-sticky-title')
+      note.title = `Open the post-it on "${title}"`
+      const heading = note.querySelector('.postit-sticky-title')
       if (heading && heading.textContent !== title) heading.textContent = title
       // A PINNED note sits where it was dropped — viewport fractions from
       // the payload, applied EXACTLY. The only clamp is a rescue: keep a
@@ -204,7 +206,9 @@ export class PostitViewDrone extends Drone {
       if (pin && Number.isFinite(pin.x) && Number.isFinite(pin.y)) {
         note.classList.add('postit-pinned')
         const w = window.innerWidth, h = window.innerHeight
-        note.style.left =         note.style.top =       } else {
+        note.style.left = `${Math.min(pin.x * w, Math.max(0, w - 24))}px`
+        note.style.top = `${Math.min(pin.y * h, Math.max(0, h - 24))}px`
+      } else {
         note.classList.remove('postit-pinned')
         note.style.left = ''
         note.style.top = ''
