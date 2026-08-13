@@ -6,9 +6,9 @@
     [hcSession]="session"
     (hcDockedPanelClose)="close()"
     [ownsSize]="false" [sizeOwner]="this" [minWidth]="260" [maxWidth]="760"
+    [defaultWidth]="320" [maxScale]="1.5"
     [class.resizing]="resizing()"
     [style.width.px]="width()"
-    [style.--hc-panel-scale]="contentScale()"
     data-consumes-wheel
     (keydown)="$event.key === 'Escape' && close()"
     tabindex="-1"

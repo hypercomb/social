@@ -474,7 +474,7 @@
       "id": "chat-window",
       "title": "Mirror the chat window: tiles, collection, pheromones, notes",
       "run": null,
-      "note": "NEW CREATION (replaces the ask screen). Mirror 1:1 with the source resources, each tile marked for what it IS:",
+      "note": "NEW CREATION (replaces the ask screen). Mirror 1:1 with the source resources, each tile marked for what it IS: hypercomb-shared/ui/chat-window/chat-window.component.{ts,html,scss} (the window), assistant/chat-thread.ts (durable threads in sign('threads'), self-describing turns, no index), assistant/llm.queen.ts submitChat + conversation.queen.ts + commands/ask.queen.ts (the three doors), plus a note on the two tiers (bridge = deep, host AI = immediate, unreachable = QUEUED not slow). UPDATED 2026-08-12 (second pass, same entry): the window is now the DEFAULT VIEW — boots open beside the hive without stealing the command line's focus (constructor #resume, no focus; ioc whenReady re-hydrates when ChatThreads registers); FOCUS MODE (header expand_content button, Escape peels focus before close, click-the-dim exits) widens to min(62vw, 60rem) over a dim — hive dimmed never hidden, hcDockInsetActive off while focused so the grid does not reflow; the command line's tools rail gained the chat toggle as its LEADING icon (chat glyph, lit from chat:window-state; behaviour icons stay in their own group to the left), the controls bar carries an optional second opener (default OFF, like the magnifiers), and the FEEDBACK toggle moved OUT of the rail down to the bottom-right document cluster (edit-actions, immediately left of the rotate icon, forum glyph, lit from feedback:panel-state) — the feedback-window mirror note should say its opener now lives bottom-right. Notes owed on: the default-view doctrine (why boot-open + why the ask screen's fullscreen remains rejected), the focus/dock split, and the command-line chrome card should note the top bar is now a FLOATING rounded instrument (margin + radius in _header-bar.scss; phone portrait prompt stays flush/frameless).",
       "unattended": false,
       "created": "2026-08-12",
       "status": "pending"
@@ -522,6 +522,60 @@
       "note": "A render pass clears the shader's hovered index for the duration of the pass; it is now restored from #hoverRevealLabel in the pass's finally (show-cell.drone.ts renderFromSynchronize) instead of waiting on the render:cell-count -> #recoverHover -> tile:hover round trip, which a bailing pass never completes. overlay:band-rows now carries the band OWNER (null when the overlay is stood down) and show-cell takes the hovered tile from it via #applyHover. Note belongs on behaviors/presentation tile-overlay (and its show-cell part). note-add is additive - do not re-run.",
       "unattended": false,
       "created": "2026-08-12",
+      "status": "pending"
+    },
+    {
+      "id": "google-docs-bridge",
+      "title": "Mirror the Google Docs bridge: tile per part (google-docs.ts, google-docs.spec.ts, Code.gs, appsscript.json, google-docs-bridge.md), a collection gathering them, marks for what each part is, and a note explaining the markdown round-trip + stale-write refusal",
+      "run": null,
+      "note": "Creation is the link-domain Google Docs client + Apps Script bridge. Pool of meaning is sign('google:docs') (colon mandatory - bare 'google' would collide with a lineage sigbag). Not yet mirrored: no live renderer on the bridge at build time.",
+      "unattended": false,
+      "created": "2026-08-12",
+      "status": "pending"
+    },
+    {
+      "id": "label-atlas-flush-blast-radius",
+      "title": "Corrective note on the label-atlas behaviour: a retitle flushes ONE label, and any atlas wipe is an eviction the cells-key must see",
+      "run": null,
+      "note": "Missing tile names (label band drawn, no glyphs inside it). The shader gates the band on the baked UV rect, not on the pixels, so a wiped atlas leaves live rects over empty slots. Cause: title:indexed wiped ALL 256 slots and the navigation walk emits it once PER titled cell, mid-pass, where the repaint it asked for was swallowed by the same-target coalescing drop; the in-flight pass then wrote a fresh renderedCellsKey over the '' and applyGeometry took its unchanged-key early return forever. Now: HexLabelAtlas.invalidateLabel(label) flushes one slot, invalidateLabels()/setPivot() bump evictionGeneration (a wipe IS the maximal eviction, and buildCellsKey folds that generation in), and all three wipe sites arm #forceNextRender. Note belongs on behaviors/presentation show-cell (and its hex-label.atlas part). note-add is additive - do not re-run.",
+      "unattended": false,
+      "created": "2026-08-12",
+      "status": "pending"
+    },
+    {
+      "id": "portals-create-links",
+      "title": "Portals + now LINKS an existing tile instead of minting an empty root",
+      "run": null,
+      "note": "collections.source.ts create() changed: typing a name into the Portals field now resolves the name against the hive FIRST (manifest-first BFS from root, sets/ skipped, budget 4000 nodes) and references the existing tile wherever it lives — the old behavior always minted /<name>, so typing a nested folder's name made an empty top-level root and the row opened onto nothing. Mint path now also refuses pool addresses (isPoolAddress) and aborts on a cold head read instead of burying an existing root under a bare {name} layer. Mirror: note on the portals/collections behavior card (behaviors deck) explaining SAME NAME = SAME TILE — the + links before it mints. note-add is additive, hence manual.",
+      "unattended": false,
+      "created": "2026-08-12",
+      "status": "pending"
+    },
+    {
+      "id": "tool-window-text-size",
+      "title": "Tool window TEXT SIZE — one setting per group, auto or pinned",
+      "run": null,
+      "note": "Built 2026-08-12 in hypercomb-shared: the settings gear in every docked tool window now has a TEXT section (Auto / Small / Normal / Large / Larger). Auto is the old width-derived --hc-panel-scale; a picked size PINS it, so text no longer swells when a panel is dragged wider. It is a GROUP attribute — set it in one member of a group and every member takes it (GroupAttrs.text). Mirror owes: a collection 'tool-window-text-size' gathering one tile per part — panel-groups.ts (model: TEXT_SIZES ladder, hc:panel-text:<window> record, GroupAttrs.text), hc-docked-panel.directive.ts (#textSection gear UI + #applyScale, the single owner of --hc-panel-scale), clipboard-panel (its own contentScale computed REMOVED, directive now owns the var), notes-strip ([scalesText]=false — typeset in fixed rem, so the control is withheld rather than dead), i18n panel.text.* (en+ja), panel-groups.spec.ts (4 new cases). Mark each tile 'part', mark the collection for the tool-window/settings vocabulary, and note on each tile what it does. Queued --manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-13",
+      "status": "pending"
+    },
+    {
+      "id": "expert-lesson-collections-linking",
+      "title": "Expert lesson: collections window teaches SAME NAME = SAME TILE + doorway demands",
+      "run": null,
+      "note": "window-collections (expert.lessons.ts, order 80) gained two say() steps: 'Typing a name links before it makes' (the + resolves the name against the hive and binds to the existing tile at any depth; only an unanswered name mints) and 'One folder, many doorways' (references are incidences; /requires <cell> = <marks> puts the pheromone demand ON the doorway, stepping outside restores the lens). teaches now includes 'requires'. Mirror: extend the tutorials root's expert course cell for window-collections with a note carrying both teachings; note-add is additive, hence manual.",
+      "unattended": false,
+      "created": "2026-08-13",
+      "status": "pending"
+    },
+    {
+      "id": "rail-menus-clear-lane",
+      "title": "Anchored rail menus park same-side toolwindows before opening",
+      "run": null,
+      "note": "New rule + primitive: dock-lanes.ts clearLane(side) parks every occupant of one edge (evictFromLane — park never close, no auto-return; reopening restores state). controls-bar wires it into the three anchored menus — Ctrl/Cmd+click Home (recent portals), Ctrl/Cmd+click tutorial bee (course picker), and the fit flyout — via #clearLaneForMenu(x) choosing the side by which half of the screen the menu lands in. Default per Jaime: any modifier-click-opened interface closes same-side toolwindows unless otherwise stated. Mirror: note on the behaviors deck's toolwindow/chrome card naming the rule and the three menus; note-add is additive, hence manual.",
+      "unattended": false,
+      "created": "2026-08-13",
       "status": "pending"
     }
   ]

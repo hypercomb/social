@@ -12,11 +12,12 @@ $steel: rgb(126, 182, 214);
 :host { display: contents; }
 
 // ── bare undo/redo cluster, bottom-right corner ──
-// The old round feedback FAB that used to sit here has moved up into the
-// command-line chrome, freeing the corner. Undo now sits just inside the
-// breadcrumb's right edge and drops to the bottom band so it reads in line
-// with the pheromone opener at the bottom-left rather than floating above it.
-// Both offsets are eye-tuned against the live chrome.
+// Feedback lives here again — not as the old round FAB but as a quiet member
+// of the cluster, left of the rotate icon (its rail toggle in the command
+// line moved down 2026-08-12, taking the forum glyph with it). Undo sits just
+// inside the breadcrumb's right edge and drops to the bottom band so it reads
+// in line with the pheromone opener at the bottom-left rather than floating
+// above it. Both offsets are eye-tuned against the live chrome.
 .edit-actions {
   position: fixed;
   // Slides left of any right-docked toolwindow so the panel never paints over
@@ -65,6 +66,9 @@ $steel: rgb(126, 182, 214);
   &:active:not(:disabled) { transform: scale(0.9); }
   &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; border-radius: 6px; }
   &:disabled { opacity: 0.25; cursor: default; }
+
+  // Lit while the window a button opens is showing (the feedback toggle).
+  &.on { color: rgba($steel, 1); }
 }
 
 .ea-divider {

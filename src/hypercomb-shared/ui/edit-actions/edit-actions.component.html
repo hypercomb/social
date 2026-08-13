@@ -16,6 +16,21 @@
     <span class="mat-sym">crop_rotate</span>
   </button>
 
+  <!-- feedback — moved down from the command line's tools rail; row-reverse
+       places it immediately LEFT of the rotate icon. Lights while the
+       combined feedback panel is open. -->
+  <button
+    class="ea-btn"
+    [class.on]="feedbackOpen()"
+    type="button"
+    (click)="toggleFeedback()"
+    [attr.aria-label]="'feedback.button' | t"
+    [attr.aria-pressed]="feedbackOpen()"
+    [title]="'feedback.button' | t"
+  >
+    <span class="mat-sym">forum</span>
+  </button>
+
   <button
     class="ea-btn"
     type="button"

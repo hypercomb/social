@@ -23,6 +23,16 @@ $accent: #7eb6d6;
   pointer-events: none;
 }
 
+// Focus mode's veil over the hive: dimmed, never hidden. No backdrop blur —
+// it would tax the live canvas underneath every frame for pure decoration.
+.chat-dim {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: rgba(4, 8, 14, 0.55);
+  cursor: pointer;
+}
+
 .chat-panel {
   pointer-events: auto;
   position: absolute;
@@ -38,18 +48,49 @@ $accent: #7eb6d6;
   flex-direction: column;
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   @include tw.panel($accent, right);
+
+  // FOCUS: wide over the dim. `!important` because hcDockedPanel writes the
+  // docked width inline; the drag-set width is untouched underneath and comes
+  // straight back when focus lifts.
+  &.focus {
+    width: min(62vw, 60rem) !important;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  }
 }
 
 .chat-header {
   @include tw.header;
-  justify-content: space-between;
+  gap: 0.4em;
   border-bottom: 1px solid rgba($accent, 0.25);
+}
+
+.chat-glyph {
+  font-size: 1.05em;
+  color: rgba($accent, 0.8);
 }
 
 .chat-title {
   font-size: 0.9em;
   letter-spacing: 0.05em;
   color: rgba($accent, 0.95);
+}
+
+// Pushes the focus/close cluster hard right without space-between, so the
+// settings gear the dock directive pins beside close stays predictable.
+.chat-header-space {
+  flex: 1 1 auto;
+}
+
+.chat-focusbtn {
+  background: none;
+  border: none;
+  padding: 0 0.15em;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.1em; }
+  &:hover { color: rgba($accent, 0.95); }
+  &.on { color: rgba($accent, 0.95); }
 }
 
 .chat-close {
@@ -192,6 +233,14 @@ $accent: #7eb6d6;
   flex-direction: column;
   gap: 0.5em;
   padding: 0.7em 0.7em;
+  scrollbar-width: thin;
+  scrollbar-color: rgba($accent, 0.35) transparent;
+
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-thumb {
+    background: rgba($accent, 0.3);
+    border-radius: tw.$radius-pill;
+  }
 }
 
 .chat-empty {
@@ -219,9 +268,18 @@ $accent: #7eb6d6;
 
   &.ai {
     align-self: flex-start;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    // The steel hairline is the assistant's voice — a scannable edge that
+    // separates its cards from the participant's without loud color.
+    border-left: 2px solid rgba($accent, 0.55);
   }
+}
+
+// Focus mode: the wide panel earns wider cards a comfortable measure, not a
+// line that runs the full 60rem.
+.chat-panel.focus .chat-msg {
+  max-width: min(92%, 44em);
 }
 
 .chat-msg-text {
@@ -249,6 +307,7 @@ $accent: #7eb6d6;
   flex: 0 0 auto;
   padding: 0.45em 0.6em 0.6em;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.015);
 }
 
 .chat-status {
@@ -319,12 +378,17 @@ $accent: #7eb6d6;
   font-size: max(0.8em, 16px);
   line-height: 1.45;
   color: whitesmoke;
+  caret-color: rgba($accent, 0.95);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: var(--md-shape-xs, 4px);
   outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 
-  &:focus { border-color: rgba($accent, 0.6); }
+  &:focus {
+    border-color: rgba($accent, 0.6);
+    box-shadow: 0 0 0 1px rgba($accent, 0.18);
+  }
 }
 
 .chat-send {

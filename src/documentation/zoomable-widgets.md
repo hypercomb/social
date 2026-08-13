@@ -106,3 +106,36 @@ font-scaling — not this directive):
 
 Revisiting any of these means picking the right mechanism for its shape, not
 forcing `zoom`.
+
+## The docked tool windows: `--hc-panel-scale`, and the text-size setting
+
+The right-hand mechanism for a full-height docked panel was always the `calc()`
+multiplier — `hcDockedPanel` sets `--hc-panel-scale` on the panel's root and its
+SCSS sizes the body off it (`font-size: calc(1rem * var(--hc-panel-scale, 1))`),
+which scales the type without `zoom`'s glyph softening under a `backdrop-filter`.
+
+What changed: the multiplier used to be *only* a function of the panel's width,
+so widening a window to fit a long line also enlarged its type. Now it is a
+**setting** — the gear in every tool window's header carries a **Text size**
+section:
+
+| Choice | Scale |
+|---|---|
+| Auto | the width-derived multiplier (the old behaviour, still the default) |
+| Small · Normal · Large · Larger | pinned — the width no longer moves the type |
+
+It is **one setting per group**: tool windows sharing a group text share their
+width *and* their text size (`GroupAttrs.text` in
+`hypercomb-shared/ui/docked-panel/panel-groups.ts`), so setting it in any member
+sets it for all of them. A window in no group keeps its own, in
+`hc:panel-text:<window>`.
+
+Two rules for a window joining this:
+
+- **`hcDockedPanel` is the only writer of `--hc-panel-scale`.** A panel that
+  sizes itself hands the directive its width via `sizeOwner` and takes
+  `[defaultWidth]`/`[minScale]`/`[maxScale]` — it must not compute the var
+  itself, or a pinned size would be clobbered by the next resize.
+- A window typeset in fixed `rem`/`px`, which the var never reaches (the notes
+  strip), sets `[scalesText]="false"` and the section is left out of its gear
+  rather than offered as a control that does nothing.

@@ -225,15 +225,15 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly viewsPanelOpen = input<boolean>(false)
   readonly viewsLabel = input<string>('views')
 
+  /** The chat window's open state — its toggle LEADS the standing-tools group
+   *  (the chat window is the default companion view, so its switch comes
+   *  first; the per-cell behaviour icons stay in their own group to the left). */
+  readonly chatPanelOpen = input<boolean>(false)
+  readonly chatLabel = input<string>('chat')
+
   readonly showFeaturesToggle = input<boolean>(false)
   readonly featuresPanelOpen = input<boolean>(false)
   readonly featuresLabel = input<string>('features')
-
-  /** Whether the feedback panel is currently open — lights the feedback toggle. */
-  readonly feedbackPanelOpen = input<boolean>(false)
-
-  /** Aria-label / tooltip for the feedback toggle. */
-  readonly feedbackLabel = input<string>('feedback')
 
   /** Material Symbol readout of the current pheromone reach — page /
    *  children / global. Same vocabulary as the controls-bar tag-scope
@@ -360,11 +360,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   readonly viewsToggle = output<void>()
 
-  readonly featuresToggle = output<void>()
+  readonly chatToggle = output<void>()
 
-  /** Emitted when the feedback toggle is clicked. Parent flips the
-   *  share-feedback panel — the shell stays presentational. */
-  readonly feedbackToggle = output<void>()
+  readonly featuresToggle = output<void>()
 
   /** Emitted when the pheromones button is clicked. Parent toggles the
    *  pheromone panel (`tags:view-open` / `tags:view-close`) — the shell

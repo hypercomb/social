@@ -257,7 +257,7 @@ tutorialLessons.register({
   order: 80,
   title: 'The collections index',
   pheromones: ['tutorial', 'lesson', 'expert', 'meaning', 'structure', 'navigation'],
-  teaches: ['collections', 'hive'],
+  teaches: ['collections', 'hive', 'requires'],
   requires: () => hasBehaviour('collections') && hasWindow('hc-aggregate-index'),
   async run(stage) {
     await stage.flyToRect(stage.commandInput())
@@ -269,6 +269,16 @@ tutorialLessons.register({
     await stage.wait(1600)
     await stage.say('collections-window-drag', 'Drag to make meaning',
       'Dragging a tile in here files it into a collection. Add lends it a second doorway and leaves it where it lives; Move takes custody. The window is the same for every aggregate, so a new kind of index inherits all of this for free.')
+
+    // ── SAME NAME = SAME TILE ──────────────────────────────────────────
+    // One name names one tile. That is the convention the whole sharing
+    // model rests on — folders are SHARED and filtered, never copied — so
+    // the field's + must be taught as a LINKER first and a maker second.
+    await stage.say('collections-window-link', 'Typing a name links before it makes',
+      'The field on top is also the maker. Type a name and press + — and if a tile already answers to that name, anywhere and at any depth, the new row simply binds to THAT tile: same folder, same children, one more doorway. Only a name nothing answers to makes a new, empty collection.')
+
+    await stage.say('collections-window-doorways', 'One folder, many doorways',
+      'A row is a doorway, never a copy — the same folder can appear wherever it is useful, and adding through any doorway lands in the one real folder. A doorway can even DEMAND pheromones: /requires people = family makes a door that shows only the family subset, and stepping back outside returns your own lens untouched. The filter lives on the doorway; the folder stays whole.')
 
     await stage.say('collections-window-done', 'And naming a branch',
       'A branch can also be NAMED with /hive, and then taken by that name instead of a path — a handle onto a whole complete piece of your world, which commands, views and shares can all point at.')

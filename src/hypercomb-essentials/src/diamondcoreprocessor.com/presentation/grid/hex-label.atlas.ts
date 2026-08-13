@@ -127,6 +127,7 @@ export class HexLabelAtlas {
     this.map.clear()
     this.slotToLabel.fill(null)
     this.nextIndex = 0
+    this.#evictionGeneration++
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
   }
 
@@ -141,12 +142,49 @@ export class HexLabelAtlas {
   /**
    * Flush the entire label cache — all labels will re-render on next getLabelUV call.
    * Call this when the locale changes so labels re-resolve through the label resolver.
+   *
+   * A WIPE IS THE MAXIMAL EVICTION, so it bumps the generation like one. Every
+   * UV already baked into the fill geometry now points at a TRANSPARENT slot,
+   * and the shader's `labelPresent` gate reads the UV rect, not the pixels — so
+   * without the bump the tiles keep drawing their label band with no glyphs
+   * inside it (every name on the page silently gone). The generation is folded
+   * into show-cell's buildCellsKey, so bumping it here makes applyGeometry's
+   * "cells key unchanged" early-return impossible across a wipe, no matter what
+   * else set the key in between.
    */
   public invalidateLabels = (): void => {
     this.map.clear()
     this.slotToLabel.fill(null)
     this.nextIndex = 0
+    this.#evictionGeneration++
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
+  }
+
+  /**
+   * Flush ONE label — its slot's pixels and its cache entry — so the next
+   * getLabelUV re-resolves and re-bakes it. Returns false if the label held
+   * no slot (nothing to do).
+   *
+   * This is what a RETITLE wants. The glyphs are keyed by the raw label, so a
+   * changed title has to drop that one baked entry; wiping the whole atlas to
+   * do it (what invalidateLabels does) blanks every OTHER tile's name until a
+   * geometry rebuild re-bakes them — and the navigation walk emits its title
+   * event once PER titled cell, so a page of titled tiles used to wipe the
+   * atlas several times over while its own paint was still in flight.
+   *
+   * No `hex-label-atlas:evicted` here, unlike the ring allocator's own
+   * displacement: this flush is DELIBERATE, so the caller asking for it is the
+   * one repainting. The generation bump is what makes that repaint rebuild.
+   */
+  public invalidateLabel = (label: string): boolean => {
+    if (!label) return false
+    const slot = this.slotToLabel.indexOf(label)
+    const had = this.map.delete(label)
+    if (slot < 0) return had
+    this.slotToLabel[slot] = null
+    this.#evictionGeneration++
+    this.#clearSlot(slot % this.cols, Math.floor(slot / this.cols))
+    return true
   }
 
   public getAtlasTexture = (): Texture => {

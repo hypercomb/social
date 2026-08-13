@@ -23,6 +23,7 @@ import { EffectBus, consumePointerGesture } from '@hypercomb/core'
 import { iconOverrides } from '../../core/icon-override.store'
 import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
+import { clearLane } from '../docked-panel/dock-lanes'
 import { showHiveRoot } from '../../core/home-root'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
@@ -105,6 +106,10 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // documentation/entrances-and-sets.md). Not among the header aggregates — it
   // manages referenced hives on different roots; it is not a launch group.
   { id: 'pools',        label: 'collections-landing.title', action: 'openPools',      visibleWhen: 'always' },
+  // The chat window boots open (the default companion view). Its PRIMARY
+  // switch is the leading icon of the command line's tools rail; this rail
+  // entry is the optional second opener, off by default like the magnifiers.
+  { id: 'chat',         label: 'controls.chat',         action: 'toggleChat',         visibleWhen: 'always' },
   { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always' },
   { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always' },
   { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always' },
@@ -143,8 +148,9 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // pops as the JOIN step when the participant flips solo → public (see
   // toggleMeshPublic below): configure where, press start, you're in the swarm.
   { id: 'bees',         label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
-  // 'feedback' is gone from the bar — the command-line header's feedback
-  // toggle opens the combined panel (inbox list + share form) now.
+  // 'feedback' is gone from the bar — the bottom-right document cluster's
+  // feedback toggle (edit-actions, left of the rotate icon) opens the
+  // combined panel (inbox list + share form) now.
 ]
 
 // First-time defaults: items the previous primary-row had on stay enabled,
@@ -156,6 +162,7 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
   'text-only': false,
   'pools': true,
+  'chat': false,
   'sequences': false,
   // Selection verbs default ON (they only appear while a selection exists;
   // the retired floating menu was the old primary path).
@@ -470,6 +477,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // `clipboard:open` state event so the toolbar button can both toggle it
   // and light up while it's showing.
   #clipboardPanelOpen = signal(false)
+  // Whether the chat window is showing — its `chat:window-state` announcement,
+  // so the launcher lights while the default view is up.
+  #chatOpen = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -581,6 +591,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleTextOnly: () => this.toggleTextOnly(),
     openPools: () => this.openPools(),
+    toggleChat: () => EffectBus.emit('chat:toggle', {}),
     openSequences: () => EffectBus.emit('sequence:view-open', {}),
     cut: () => this.cut(),
     copy: () => this.copy(),
@@ -601,6 +612,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'clipboard': return this.#clipboardPanelOpen()
+      case 'chat': return this.#chatOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
       case 'text-only': return this.#textOnly()
@@ -643,6 +655,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // Not a map pin: Portals is a way OUT of this page into another root,
       // the same act as the installer beside it.
       case 'pools':        return 'nearby'
+      case 'chat':         return 'chat'
       case 'sequences':    return 'schema'
       case 'promote-to-parent': return 'arrow_upward'
       case 'clipboard':    return 'content_paste'
@@ -1143,6 +1156,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
+  #chatOpenUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -1329,6 +1343,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // replayed, so a late mount reflects the current panel state.
     this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
       this.#clipboardPanelOpen.set(!!open)
+    })
+
+    // Chat-window state light. Last-value replayed, so a bar mounting after
+    // the window's boot-open still shows it lit.
+    this.#chatOpenUnsub = EffectBus.on<{ open?: boolean }>('chat:window-state', ({ open }) => {
+      this.#chatOpen.set(!!open)
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -1603,6 +1623,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
+    this.#chatOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()
@@ -1747,14 +1768,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const x = rect ? rect.right + 10 : 12
     const flip = x + width > window.innerWidth - 8
     const maxHeight = Math.min(window.innerHeight * 0.7, 520)
+    const menuX = flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x
     this.homeMenuPos.set({
-      x: flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x,
+      x: menuX,
       y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - maxHeight - 8)),
       flip,
     })
+    this.#clearLaneForMenu(menuX)
     this.homeMenuOpen.set(true)
     window.addEventListener('pointerdown', this.#onHomeMenuOutside, true)
     window.addEventListener('keydown', this.#onHomeMenuKey, true)
+  }
+
+  /** An anchored rail interface is about to open at `x` — put away the tool
+   *  windows docked on that SAME side, so it never opens under (or over) a
+   *  panel. Same-side only, and a PARK, never a close (dock-lanes.clearLane):
+   *  the shell made this decision, so it costs the participant nothing, and
+   *  reopening a window from the rail restores whatever it held. */
+  #clearLaneForMenu(x: number): void {
+    clearLane(x < window.innerWidth / 2 ? 'left' : 'right')
   }
 
   readonly closeHomeMenu = (): void => {
@@ -1880,11 +1912,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // is the CSS cap (min(70vh, 620px)) rather than a few rows — clamping to a
     // fixed 260 would have let the expanded course run off the bottom.
     const maxHeight = Math.min(window.innerHeight * 0.7, 620)
+    const menuX = flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x
     this.tourMenuPos.set({
-      x: flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x,
+      x: menuX,
       y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - maxHeight - 8)),
       flip,
     })
+    this.#clearLaneForMenu(menuX)
     this.tourMenuOpen.set(true)
     window.addEventListener('pointerdown', this.#onTourMenuOutside, true)
     window.addEventListener('keydown', this.#onTourMenuKey, true)
@@ -1997,10 +2031,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const height = 240
     const x = rect ? rect.right + 10 : 12
     const flip = x + width > window.innerWidth - 8
+    const menuX = flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x
     this.fitMenuPos.set({
-      x: flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x,
+      x: menuX,
       y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - height - 8)),
     })
+    this.#clearLaneForMenu(menuX)
     this.fitMenuOpen.set(true)
     window.addEventListener('pointerdown', this.#onFitMenuOutside, true)
     window.addEventListener('keydown', this.#onFitMenuKey, true)

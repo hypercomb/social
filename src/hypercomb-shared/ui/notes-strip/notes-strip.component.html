@@ -24,7 +24,7 @@
        data-consumes-wheel
        hcDockInset="right"
        [hcDockInsetActive]="dockSide() === 'right' && !isFullscreen()"
-       hcDockedPanel="notes-strip" dockSide="right" [ownsSize]="false"
+       hcDockedPanel="notes-strip" dockSide="right" [ownsSize]="false" [scalesText]="false"
        [dockExclusive]="dockSide() === 'right' && !isFullscreen()"
        [hcSession]="session"
     (hcDockedPanelClose)="hide()"

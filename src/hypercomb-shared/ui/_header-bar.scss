@@ -54,25 +54,56 @@
   // (breadcrumb, dock-left rail, hint-bar, notes-strip, history-viewer,
   // format-painter) read the same factor so they stay flush at any size.
   zoom: var(--hc-header-zoom, 1.0);
-  padding: 0.1rem 0.25rem;
-  background: rgba(8, 16, 26, 0.72);
-  backdrop-filter: blur(10px);
+  // FLOATING BAR: inset from the viewport edges with rounded corners, so the
+  // prompt reads as an instrument laid on the hive rather than a wall across
+  // the top. Every below-the-bar offset follows automatically — the anchor is
+  // the MEASURED bottom edge (`--hc-header-bottom`, controls-bar's
+  // ResizeObserver), which includes this margin.
+  margin: 0.4rem 0.5rem 0;
+  padding: 0.1rem 0.3rem;
+  background: rgba(8, 16, 26, 0.78);
   // Resting border is a faint steel hairline; it firms up — never glares —
   // when the command line is active. `.input-open` is mobile-only (app.ts:
   // inputOpen = mobile && visible), so `:focus-within` is the real "active"
   // signal on desktop.
   border: 1px solid rgba(126, 182, 214, 0.22);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  border-radius: 9px;
+  // Clip children's hover fills to the rounded corner. Safe for the
+  // intellisense dropdown + hint surfaces — they position `fixed` and escape
+  // the clip, which is exactly why the frost lives on ::before below.
+  overflow: hidden;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28), inset 0 1px rgba(255, 255, 255, 0.03);
   position: relative;
   z-index: 60000;
-  transition: border-color var(--md-dur-medium, 200ms) var(--md-easing-standard, ease);
+  transition: border-color var(--md-dur-medium, 200ms) var(--md-easing-standard, ease),
+              box-shadow var(--md-dur-medium, 200ms) var(--md-easing-standard, ease);
+}
+
+// The frosted glass, on a pseudo-layer DELIBERATELY — never on the bar
+// itself. `backdrop-filter` makes its element the CONTAINING BLOCK for
+// fixed-position descendants (filter-effects-2; Chromium implements it), so
+// carrying it on the bar re-based the intellisense dropdown's fixed viewport
+// coordinates onto the bar's box AND handed it to the bar's overflow clip —
+// the completions rendered as a sliver inside the bar. The pseudo frosts the
+// same pixels; the bar stays out of the containing-block business, so the
+// dropdown's `position: fixed` means the viewport again.
+.header-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: blur(14px) saturate(1.05);
 }
 
 // Command line active — focused (desktop) or revealed on mobile. A restrained
-// firm-up of the steel hairline, not a bright glow.
+// firm-up of the steel hairline plus a one-pixel halo, not a bright glow.
 .header-bar:focus-within,
 .header-bar.input-open {
-  border-color: rgba(126, 182, 214, 0.5);
+  border-color: rgba(126, 182, 214, 0.55);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32),
+              0 0 0 1px rgba(126, 182, 214, 0.16),
+              inset 0 1px rgba(255, 255, 255, 0.03);
 }
 
 // ── hci icon font ────────────────────────────────────────
@@ -270,6 +301,9 @@
     // publishes `--hc-header-bottom` and `--hc-header-anchor` takes the max.
     height: auto;
     min-height: clamp(3.5rem, 11vh, 5.5rem);
+    // The pinned phone prompt is a full-width surface, not a floating bar.
+    margin: 0;
+    border-radius: 0;
   }
 
   .header-bar .mesh-header,
@@ -304,9 +338,14 @@
     // would make the icon rail look like it was still inside the command line.
     padding: 0;
     background: transparent;
-    backdrop-filter: none;
     border: 0;
     box-shadow: none;
+    // The GO button overlays the prompt row absolutely — the desktop bar's
+    // rounded-corner clip would shear it, and there is no frame to clip to.
+    overflow: visible;
+
+    // The frost rides ::before now (see above) — stand it down with the frame.
+    &::before { display: none; }
   }
 
   .header-bar:focus-within,

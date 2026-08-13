@@ -164,6 +164,21 @@
     }
 
     <div class="action-group tools">
+      <!-- chat — FIRST standing tool: the chat window is the default
+           companion view, so its switch leads the rail. Lights while the
+           window is up. -->
+      <button
+        class="rail-btn chat-toggle-btn"
+        [class.on]="chatPanelOpen()"
+        type="button"
+        (mousedown)="$event.preventDefault(); chatToggle.emit()"
+        [attr.aria-label]="chatLabel()"
+        [attr.aria-pressed]="chatPanelOpen()"
+        [title]="chatLabel()"
+      >
+        <span class="mat-sym" aria-hidden="true">chat</span>
+      </button>
+
       @if (showOpenForSubscribersToggle()) {
         <button
           class="rail-btn open-for-subscribers-btn"
@@ -249,24 +264,13 @@
         </button>
       }
 
-      <!-- feedback — opens the share-feedback panel (replaces the old
-           bottom-right FAB that sat on top of undo/redo) -->
-      <button
-        class="rail-btn feedback-toggle-btn"
-        [class.on]="feedbackPanelOpen()"
-        type="button"
-        (mousedown)="$event.preventDefault(); feedbackToggle.emit()"
-        [attr.aria-label]="feedbackLabel()"
-        [attr.aria-pressed]="feedbackPanelOpen()"
-        [title]="feedbackLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">forum</span>
-      </button>
+      <!-- feedback left this rail for the bottom-right document cluster
+           (edit-actions, beside the rotate icon) — the forum glyph went with
+           it, freeing the chat toggle to lead this group. -->
 
-      <!-- Beehaviors — the trailing landscape control, deliberately to the
-           right of Feedback so Feedback no longer crowds the rail's outer
-           divider. Opens the same context-sensitive Beehaviors window as a
-           tile's puzzle-piece action. -->
+      <!-- Beehaviors — the trailing landscape control. Opens the same
+           context-sensitive Beehaviors window as a tile's puzzle-piece
+           action. -->
       @if (showFeaturesToggle()) {
         <button
           class="rail-btn features-toggle-btn"

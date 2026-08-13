@@ -136,12 +136,11 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   readonly width = signal<number>(this.#restoreWidth())
   /** True while a left-grip drag is in progress (drives cursor/handle style). */
   readonly resizing = signal(false)
-  /** Content scale derived from width — the panel's em-sized content shrinks
-   *  as it narrows and grows as it widens. Bound to `--hc-panel-scale`.
-   *  Clamped so text stays readable and never balloons at max width. */
-  readonly contentScale = computed(() =>
-    Math.min(1.5, Math.max(0.82, this.width() / DEFAULT_WIDTH)),
-  )
+  // `--hc-panel-scale` is NOT computed here any more: hcDockedPanel owns it for
+  // every tool window, because it is now a SETTING (auto, or a picked text
+  // size) and not merely a function of the width. The panel hands the directive
+  // its width via `sizeOwner` and takes `[defaultWidth]`/`[maxScale]` in the
+  // template, which is the same curve this panel used to compute for itself.
 
   #cleanups: (() => void)[] = []
   // Live object-URLs by label, so they can be revoked on change/destroy.

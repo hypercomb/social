@@ -138,7 +138,16 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 })
 export class ChatWindowComponent implements OnDestroy {
 
-  readonly visible = signal(false)
+  /** Open from boot — the chat window is the hive's default companion view.
+   *  Closing it is a session choice, not a remembered one: every boot starts
+   *  with the conversation beside the tiles. */
+  readonly visible = signal(true)
+
+  /** FOCUS mode: the panel widens over the hive and a dim settles behind it.
+   *  The tiles stay visible — dimmed, never hidden (the fullscreen ask screen
+   *  was retired for hiding them) — and the panel stops reserving canvas
+   *  space while it lasts, so the grid does not reflow for a temporary mode. */
+  readonly focused = signal(false)
 
   /** Parked while the hive is covered and brought back intact — the thread is
    *  durable, but the scroll position and the half-typed message are not. */
@@ -234,6 +243,19 @@ export class ChatWindowComponent implements OnDestroy {
     // The processor's post-pulse beat — the app's canonical "something moved".
     // Cheaper and more honest than polling: the context line follows the hive.
     window.addEventListener('synchronize', this.#onSync)
+
+    // ── boot-open (the default view) ──────────────────────────────────────
+    // Deliberately NOT open(): that focuses the input, and boot focus belongs
+    // to the command line at the top. The threads bee (essentials) registers
+    // after this shell component constructs, so the resume runs now (usually a
+    // no-op — no service yet) and again the moment the service arrives.
+    EffectBus.emit('chat:window-state', { open: true })
+    this.#refreshContext()
+    void this.#resume()
+    ;(globalThis as { ioc?: { whenReady?: (k: string, cb: () => void) => void } }).ioc
+      ?.whenReady?.('@diamondcoreprocessor.com/ChatThreads', () => {
+        if (this.visible() && this.turns().length === 0 && !this.waiting()) void this.#resume()
+      })
   }
 
   ngOnDestroy(): void {
@@ -267,6 +289,9 @@ export class ChatWindowComponent implements OnDestroy {
   async open(payload?: { model?: string; prefill?: string; convoId?: string }): Promise<void> {
     const prefill = String(payload?.prefill ?? '').trim()
     this.visible.set(true)
+    // Announce symmetrically with close() — the controls-bar launcher light
+    // (and anything else watching) reads this state.
+    EffectBus.emit('chat:window-state', { open: true })
     this.#refreshContext()
     this.bridgeUp.set(!!(ioc()?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as BridgeLike | undefined)?.connected)
     await this.#refreshList()
@@ -287,16 +312,37 @@ export class ChatWindowComponent implements OnDestroy {
     this.#focus()
   }
 
+  /** Land on the most recent conversation without taking focus — the boot
+   *  path, and the re-run once the threads service registers. */
+  async #resume(): Promise<void> {
+    await this.#refreshList()
+    if (this.activeId() && this.turns().length) return
+    const recent = this.conversations()[0]
+    if (recent) await this.#load(recent.convoId)
+    else if (!this.activeId()) this.newChat(false)
+  }
+
   close(): void {
     if (!this.visible()) return
     this.visible.set(false)
+    this.focused.set(false)
     this.listOpen.set(false)
     this.armed.set('')
     EffectBus.emit('chat:window-state', { open: false })
   }
 
+  toggleFocus(): void {
+    this.focused.update(on => !on)
+    if (this.focused()) this.#focus()
+  }
+
   onKey(event: KeyboardEvent): void {
-    if (event.key === 'Escape') { event.preventDefault(); this.close() }
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    // Focus mode peels back before the window goes — two Escapes to fully
+    // dismiss a focused chat, matching the escape-cascade's outermost-first rule.
+    if (this.focused()) { this.focused.set(false); return }
+    this.close()
   }
 
   // ── conversations ───────────────────────────────────────────────────────
@@ -322,8 +368,10 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   /** Start a fresh thread. It does not appear in the list until it holds a
-   *  turn — an empty conversation is not yet a conversation. */
-  newChat(): void {
+   *  turn — an empty conversation is not yet a conversation. `focus` is false
+   *  only on the boot path: the default view opens beside the command line and
+   *  must not steal its cursor. */
+  newChat(focus = true): void {
     const threads = this.#threads()
     this.activeId.set(threads?.newConvoId() ?? '')
     this.turns.set([])
@@ -331,7 +379,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.waiting.set(false)
     this.listOpen.set(false)
     this.armed.set('')
-    this.#focus()
+    if (focus) this.#focus()
   }
 
   async pick(convoId: string): Promise<void> {

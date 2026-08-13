@@ -683,14 +683,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #viewsPanelOpen = signal(false)
   readonly viewsPanelOpen = this.#viewsPanelOpen.asReadonly()
 
-  // ── feedback toggle ───────────────────────────────────
-  //
-  // Mirrors the feedback panel's `feedback:panel-state` broadcast and routes
-  // clicks to `feedback:toggle`. This is the ONLY entry point to the combined
-  // right-docked panel (inbox list on top, share form at the bottom) — the
-  // controls-bar icon and the bottom-right FAB it replaced are both gone.
-  readonly #feedbackPanelOpen = signal(false)
-  readonly feedbackPanelOpen = this.#feedbackPanelOpen.asReadonly()
+  // Chat window open/closed — lights the rail's leading chat toggle. Mirrors
+  // `chat:window-state` (announced on boot-open, open() and close(); last-value
+  // replayed, so a late header mount reads the boot-open correctly).
+  readonly #chatPanelOpen = signal(false)
+  readonly chatPanelOpen = this.#chatPanelOpen.asReadonly()
+
+  // (The feedback toggle moved to the bottom-right document cluster —
+  //  edit-actions.component — taking the forum glyph and the
+  //  `feedback:toggle` / `feedback:panel-state` wiring with it.)
 
   // ── pheromones button ─────────────────────────────────
   //
@@ -777,9 +778,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       EffectBus.on<{ open?: boolean }>('views:state', ({ open }) => {
         this.#viewsPanelOpen.set(!!open)
       }),
-      // Share-feedback panel open/closed — lights the feedback toggle.
-      EffectBus.on<{ open?: boolean }>('feedback:panel-state', ({ open }) => {
-        this.#feedbackPanelOpen.set(!!open)
+      EffectBus.on<{ open?: boolean }>('chat:window-state', ({ open }) => {
+        this.#chatPanelOpen.set(!!open)
       }),
       // Pheromone panel open/closed — lights the pheromones toggle.
       EffectBus.on<{ open?: boolean }>('tags:view-state', ({ open }) => {
@@ -902,11 +902,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emit(this.#viewsPanelOpen() ? 'views:close' : 'views:open', {})
   }
 
-  /** Flip the feedback panel — FeedbackViewerComponent listens and
-   *  broadcasts state back via `feedback:panel-state`. */
-  onFeedbackToggle(): void {
-    EffectBus.emit('feedback:toggle', {})
+  onChatToggle(): void {
+    EffectBus.emit('chat:toggle', {})
   }
+
 
   /** Toggle the pheromone panel — open it when closed, close it when open.
    *  The panel owns reach selection and filtering, and mirrors its open-state

@@ -5141,11 +5141,24 @@ export class ShowCellDrone extends Drone {
 
     // title:indexed — a cell gained, changed or lost its display title. The
     // atlas keys baked glyphs by the RAW label, so the cached entry still holds
-    // the old text; flush it (same call the locale switch uses) before forcing
-    // the geometry rebuild, or the tile keeps drawing its previous name.
-    this.onEffect('title:indexed', () => {
-      this.atlas?.invalidateLabels()
+    // the old text; flush it before forcing the geometry rebuild, or the tile
+    // keeps drawing its previous name.
+    // ONE LABEL, not the whole atlas. The navigation walk emits this once per
+    // titled cell, DURING the arrival pass it belongs to — and a full wipe
+    // there blanked every name on the page, not just the retitled one: the
+    // repaint it asked for was swallowed by the same-target coalescing drop,
+    // the in-flight pass wrote a fresh renderedCellsKey over the '' set here,
+    // and nothing re-baked. The tiles kept their label bands with no names
+    // inside them (the band reads the UV rect, which is still valid — only the
+    // pixels behind it were gone). Flushing the one label leaves every other
+    // tile's glyphs alone; #forceNextRender keeps the repaint from being
+    // dropped, so the retitled cell actually re-bakes under its new name.
+    this.onEffect<{ label?: string }>('title:indexed', (payload) => {
+      const label = payload?.label
+      if (typeof label === 'string' && label) this.atlas?.invalidateLabel(label)
+      else this.atlas?.invalidateLabels()
       this.renderedCellsKey = ''
+      this.#forceNextRender = true
       this.requestRender()
     })
 
@@ -5763,12 +5776,15 @@ export class ShowCellDrone extends Drone {
       this.#updateCellHeat(payload.label, 0)
     })
 
-    // locale:changed — flush label atlas so all tile labels re-resolve through i18n
+    // locale:changed — flush label atlas so all tile labels re-resolve through i18n.
+    // Forced for the same reason as title:indexed: a wipe with a swallowed
+    // repaint leaves every name blank behind its band.
     this.onEffect<{ locale: string }>('locale:changed', () => {
       if (this.atlas) {
         this.atlas.invalidateLabels()
       }
       this.renderedCellsKey = ''
+      this.#forceNextRender = true
       this.requestRender()
     })
 
@@ -5778,6 +5794,7 @@ export class ShowCellDrone extends Drone {
         this.atlas.invalidateLabels()
       }
       this.renderedCellsKey = ''
+      this.#forceNextRender = true
       this.requestRender()
     })
 

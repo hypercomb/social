@@ -13,17 +13,23 @@
 //     side) — drag it to resize; a steel hairline brightens on hover/drag,
 //   • applies the width inline and PERSISTS it participant-local (localStorage,
 //     keyed by the id) so the panel reopens at the size you left it,
-//   • derives `--hc-panel-scale` from the width and sets it on the host, so the
-//     panel's em-sized content SHRINKS as it narrows / grows as it widens (the
-//     panel's SCSS consumes the var — see clipboard-panel for the pattern). A
+//   • sets `--hc-panel-scale` on the host — the multiplier every panel's SCSS
+//     sizes its body text off. It is DERIVED from the width (content shrinks as
+//     the panel narrows, grows as it widens) only while the window's text size
+//     is on AUTO; pick a size in the settings and the scale is PINNED there,
+//     because text that swells just because you dragged a panel wider is text
+//     you did not ask for. This is the only place the var is decided, so a
+//     window that sizes itself does not get a second opinion. A
 //     calc-multiplier, NOT `zoom`, to avoid softening glyphs under a panel's
 //     backdrop-filter (documentation/zoomable-widgets.md),
 //   • injects a SETTINGS gear into the panel's header — always visible, a hair
 //     left of the close button — opening a small popover of per-window
-//     settings. The one setting today is the window's GROUP: a plain text
-//     field. Windows whose group text MATCHES share attributes (the width, for
-//     now); a blank one is on its own. Nothing to create, name or delete — the
-//     text is the whole model.
+//     settings. The first is the window's GROUP: a plain text field. Windows
+//     whose group text MATCHES share attributes (the width and the text size);
+//     a blank one is on its own. Nothing to create, name or delete — the text
+//     is the whole model. The second is the TEXT SIZE itself, which is
+//     therefore ONE setting per group: set it in any member and every member
+//     takes it.
 //
 // A window that already sizes itself stamps it with `[ownsSize]="false"` and
 // gets the settings half only — same gear, same group, its own size. That is
@@ -53,9 +59,9 @@ import { EffectBus } from '@hypercomb/core'
 // The GROUP model — membership text and shared attributes — lives in
 // panel-groups.ts. This file is the chrome that drives it.
 import {
-  type GroupAttrs, type GroupMember, STEEL,
+  type GroupAttrs, type GroupMember, STEEL, TEXT_SIZES,
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
-  readPairing, writePairing,
+  readPairing, writePairing, readTextScale, writeTextScale,
 } from './panel-groups'
 
 // The LANE model — how many windows an edge holds and where each one sits.
@@ -148,9 +154,17 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   @Input() maxWidth = 680
   @Input() defaultWidth = 360
   /** Content-scale clamp. Floor keeps text readable; ceiling stops a wide panel
-   *  ballooning its content. */
+   *  ballooning its content. Bounds the PICKED size too, so a panel with a
+   *  tighter range is never asked for one it cannot render. */
   @Input() minScale = 0.82
   @Input() maxScale = 1.4
+  /** Does this window's body size off `--hc-panel-scale`? True for every panel
+   *  whose SCSS multiplies its root font by the var.
+   *
+   *  False for a window typeset in fixed rem/px (the notes strip), where the
+   *  var reaches nothing — and there the text setting is left OUT of the gear
+   *  entirely rather than offered as a control that does nothing. */
+  @Input() scalesText = true
   /** Does this directive OWN the window's size? True for the panels that have
    *  no sizing of their own — it injects the grip, restores/persists the width
    *  and pins the panel beside the control bar.
@@ -229,6 +243,8 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   #gearBtn: HTMLElement | null = null
   #popover: HTMLElement | null = null
   #group = ''
+  /** The picked text scale, or `null` for auto (derive it from the width). */
+  #text: number | null = null
   #width = 0
   #startX = 0
   #startWidth = 0
@@ -250,8 +266,12 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
    *  it joins a group, so ask its owner (or the element) rather than publishing
    *  0 and collapsing every mate. */
   attrs(): GroupAttrs {
-    if (this.ownsSize) return { width: this.#width }
-    return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth }
+    // `text: undefined` is deliberate, not an omission: publishing AUTO has to
+    // clear a size the group was holding, and the key being present is how a
+    // mate tells "the group says auto" from "the group has no opinion".
+    const text = this.#text ?? undefined
+    if (this.ownsSize) return { width: this.#width, text }
+    return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth, text }
   }
 
   // ── LaneMember ─────────────────────────────────────────────────────
@@ -307,13 +327,21 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     // A grouped panel opens at its GROUP's width rather than its own remembered
     // one — that is what "shares attributes" has to mean for a window that
     // wasn't mounted when the group's width last changed.
-    const shared = this.#group ? readGroupAttrs(this.#group).width : undefined
+    const groupAttrs = this.#group ? readGroupAttrs(this.#group) : {}
+    const shared = groupAttrs.width
+    // Same for the text size, except the window's own record already holds
+    // whatever the group last handed it — so it opens at the right size with no
+    // mate up, and the group's record only has to override a stale one.
+    this.#text = ('text' in groupAttrs) ? (groupAttrs.text ?? null) : readTextScale(this.id)
 
     if (!this.ownsSize) {
       // Settings-only: the window keeps its own size and store. Take the
       // group's width if the group has one, then track what the window does
-      // with its own edges so the mates follow.
+      // with its own edges so the mates follow. The scale is still ours to set
+      // — a window sizing itself does not get to typeset itself as well, or a
+      // group's text size would stop at its door.
       this.#installSettings()
+      this.#applyScale()
       if (shared === undefined) { this.#watchSize(); return }
       // The window restores its OWN width as it first renders, so take the
       // group's over it a tick later — and stay unwatched until then, or that
@@ -440,6 +468,8 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
       const w = this.sizeOwner ? this.sizeOwner.panelWidth() : this.#el.offsetWidth
       if (w <= 0 || w === this.#width) return
       this.#width = w
+      // On auto, the window's own resize is what the text reads.
+      this.#applyScale()
       // Whatever the window did to its own edges, the lane has to follow — the
       // window inboard of it sits at this width.
       this.#relayoutLane()
@@ -473,8 +503,28 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   #apply(): void {
     this.#el.style.width = `${this.#width}px`
     this.#position()
-    const scale = Math.min(this.maxScale, Math.max(this.minScale, this.#width / this.defaultWidth))
+    this.#applyScale()
+  }
+
+  /** THE decision about how big this window's text is, in one place.
+   *
+   *  Auto reads the width, which is the old behaviour and still the right
+   *  default for a panel you drag between a strip and a reading column. A
+   *  PICKED size ignores the width entirely — that is the whole point of
+   *  picking one. Either way it lands on `--hc-panel-scale`, so no panel needs
+   *  to know which of the two it is getting. */
+  #applyScale(): void {
+    const auto = this.#measuredWidth() / this.defaultWidth
+    const scale = Math.min(this.maxScale, Math.max(this.minScale, this.#text ?? auto))
     this.#el.style.setProperty('--hc-panel-scale', String(scale))
+  }
+
+  /** The width the auto scale reads. A self-sizing window may not have been
+   *  measured yet, so fall back through its owner and its box before the
+   *  default — never 0, which would floor every panel on first paint. */
+  #measuredWidth(): number {
+    if (this.ownsSize) return this.#width || this.defaultWidth
+    return this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth || this.defaultWidth
   }
 
   /** Where this window sits against its edge: beside the control bar, then in
@@ -670,6 +720,7 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     pop.addEventListener('pointerdown', (e) => { e.stopPropagation() })
 
     pop.appendChild(this.#groupSection())
+    if (this.scalesText) pop.appendChild(this.#textSection())
     if (this.pairWindow && this.pairOpenEffect) pop.appendChild(this.#pairSection())
     if (this.launcherControlId) pop.appendChild(this.#launcherSection())
 
@@ -743,6 +794,76 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     section.appendChild(hint)
 
     return section
+  }
+
+  /** The TEXT SIZE setting: a short ladder of buttons, Auto first.
+   *
+   *  It sits directly under the group field because it IS a group setting when
+   *  the window has a group — one size for the whole group, set from any member
+   *  — and the window's own only when it has none. A ladder rather than a
+   *  number: the participant is choosing how comfortable the reading is, not
+   *  authoring a stylesheet.
+   *
+   *  AUTO is the old behaviour kept as a choice, not a default nobody can
+   *  leave: the content scales with the window's width. Every other choice
+   *  pins it, which is the complaint this section answers — a panel dragged
+   *  wider to fit a long line should not also grow its type. */
+  #textSection(): HTMLElement {
+    const section = document.createElement('div')
+    section.setAttribute('data-hc-setting', 'text')
+    Object.assign(section.style, {
+      marginTop: '0.7rem', paddingTop: '0.65rem',
+      borderTop: `1px solid rgba(${STEEL}, 0.18)`,
+    } as Partial<CSSStyleDeclaration>)
+
+    const label = document.createElement('div')
+    label.textContent = this.#t('panel.text.label', 'Text size')
+    Object.assign(label.style, {
+      fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase',
+      color: '#7f95a3', marginBottom: '0.45rem',
+    } as Partial<CSSStyleDeclaration>)
+    section.appendChild(label)
+
+    const row = document.createElement('div')
+    Object.assign(row.style, { display: 'flex', flexWrap: 'wrap', gap: '0.3rem' } as Partial<CSSStyleDeclaration>)
+    for (const size of TEXT_SIZES) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      const on = size.scale === this.#text
+      btn.textContent = this.#t(`panel.text.${size.key}`, size.label)
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+      Object.assign(btn.style, {
+        flex: '1 1 auto', minHeight: '24px', padding: '0.2rem 0.45rem',
+        font: 'inherit', fontSize: '11px', cursor: 'pointer',
+        color: on ? '#dcecf5' : '#c8d6de',
+        background: on ? `rgba(${STEEL}, 0.22)` : 'rgba(255, 255, 255, 0.04)',
+        border: `1px solid rgba(${STEEL}, ${on ? 0.55 : 0.25})`, borderRadius: '4px',
+      } as Partial<CSSStyleDeclaration>)
+      btn.addEventListener('click', () => { this.#setText(size.scale) })
+      row.appendChild(btn)
+    }
+    section.appendChild(row)
+
+    const hint = document.createElement('div')
+    hint.textContent = this.#group
+      ? this.#t('panel.text.hint.group', `One size for every window in ${this.#group}.`, { group: this.#group })
+      : this.#t('panel.text.hint', 'Auto sizes the text with the window\'s width. A size holds it steady.')
+    Object.assign(hint.style, { marginTop: '0.5rem', fontSize: '11px', color: '#7f95a3' } as Partial<CSSStyleDeclaration>)
+    section.appendChild(hint)
+
+    return section
+  }
+
+  /** Pick a text size (or `null` for auto). Kept on the window itself so it
+   *  reopens at it, and published to the group so the group's other windows
+   *  take it too — the setting reads as one per group because it is. */
+  #setText(next: number | null): void {
+    if (next === this.#text) return
+    this.#text = next
+    writeTextScale(this.id, next)
+    this.#applyScale()
+    if (this.#group) publishAttrs(this)
+    this.#refreshPopover()
   }
 
   /** The PAIR setting: one switch, for the window that declares a pair.
@@ -845,6 +966,8 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     if (!pop) return
     const old = pop.querySelector('[data-hc-setting="group"]')
     if (old) pop.replaceChild(this.#groupSection(), old)
+    const text = pop.querySelector('[data-hc-setting="text"]')
+    if (text) pop.replaceChild(this.#textSection(), text)
     const pair = pop.querySelector('[data-hc-setting="pair"]')
     if (pair) pop.replaceChild(this.#pairSection(), pair)
     const launcher = pop.querySelector('[data-hc-setting="launcher"]')
@@ -852,8 +975,10 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   }
 
   // ── group membership ───────────────────────────────────────────────
-  /** Join a group (or leave, with `''`). Text that already has a shared width
-   *  TAKES it; text nobody has used yet DEFINES it from this window. */
+  /** Join a group (or leave, with `''`). Text that a group already stands for
+   *  hands this window its attributes; text nobody has used yet is DEFINED from
+   *  this window. Attributes the group has no opinion on are left alone —
+   *  joining for the width must not silently retypeset the window. */
   #setGroup(next: string): void {
     if (next === this.#group) return
     this.#group = next
@@ -861,7 +986,7 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
 
     if (next) {
       const attrs = readGroupAttrs(next)
-      if (attrs.width !== undefined) this.adopt(attrs)
+      if (Object.keys(attrs).length) this.adopt(attrs)
       else publishAttrs(this)
     }
     for (const panel of live) { panel.#renderGearState(); panel.#refreshPopover() }
@@ -871,6 +996,17 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
    *  window's own limits, so a panel that cannot go that wide sits at its limit
    *  rather than breaking layout. */
   adopt(attrs: GroupAttrs): void {
+    // The KEY, not the value: a group that says auto still says something, and
+    // it has to be able to take a pinned size back off its members.
+    if ('text' in attrs) {
+      const text = attrs.text ?? null
+      if (text !== this.#text) {
+        this.#text = text
+        writeTextScale(this.id, text)
+        this.#applyScale()
+        this.#refreshPopover()
+      }
+    }
     if (attrs.width === undefined) return
     const next = this.#clamp(attrs.width)
     if (next === this.#width) return

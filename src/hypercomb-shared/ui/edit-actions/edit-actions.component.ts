@@ -85,10 +85,18 @@ export class EditActionsComponent implements OnInit, OnDestroy {
    */
   readonly viewActive = signal(false)
 
+  // Share-feedback panel open/closed — lights the feedback button. The toggle
+  // moved here from the command line's tools rail (Jaime, 2026-08-12): the
+  // forum glyph belongs to feedback, and its home is the bottom-right corner
+  // the old FAB owned — now a proper member of the document cluster, left of
+  // the rotate icon.
+  readonly feedbackOpen = signal(false)
+
   #cursorUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #orientationUnsub: (() => void) | null = null
   #viewActiveUnsub: (() => void) | null = null
+  #feedbackUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // Start the shared inset→CSS-var bridge. edit-actions is template-mounted in
@@ -122,6 +130,10 @@ export class EditActionsComponent implements OnInit, OnDestroy {
     this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(!!active)
     })
+
+    this.#feedbackUnsub = EffectBus.on<{ open?: boolean }>('feedback:panel-state', ({ open }) => {
+      this.feedbackOpen.set(!!open)
+    })
   }
 
   ngOnDestroy(): void {
@@ -129,12 +141,19 @@ export class EditActionsComponent implements OnInit, OnDestroy {
     this.#selectionUnsub?.()
     this.#orientationUnsub?.()
     this.#viewActiveUnsub?.()
+    this.#feedbackUnsub?.()
   }
 
   // Reuse the keyboard command path so persistence, rendering and layout
   // history stay identical whether the participant clicks here or presses J.
   readonly toggleOrientation = (): void => {
     EffectBus.emit('keymap:invoke', { cmd: 'render.toggleOrientation' })
+  }
+
+  /** Flip the feedback panel — FeedbackViewerComponent listens and
+   *  broadcasts state back via `feedback:panel-state`. */
+  readonly toggleFeedback = (): void => {
+    EffectBus.emit('feedback:toggle', {})
   }
 
   // ── undo / redo ──────────────────────────────────────────

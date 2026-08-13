@@ -7,28 +7,40 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  type GroupAttrs, type GroupMember,
-  members, publishAttrs, readGroupAttrs, readMembership, writeMembership,
+  type GroupAttrs, type GroupMember, TEXT_SIZES,
+  members, publishAttrs, readGroupAttrs, readMembership, readTextScale, writeMembership, writeTextScale,
 } from './panel-groups'
 
-/** A tool window as the sharing sees one: a width, and its own limits to clamp
- *  an incoming one against — the directive's `adopt`, minus the DOM. */
+/** A tool window as the sharing sees one: a width and a text size, plus its own
+ *  limits to clamp an incoming width against — the directive's `adopt`, minus
+ *  the DOM. */
 class FakeWindow implements GroupMember {
   group = ''
   width: number
+  /** `null` = auto, i.e. the scale the panel derives from its own width. */
+  text: number | null = null
   constructor(readonly id: string, width: number, readonly max = 680, readonly min = 200) {
     this.width = width
   }
-  attrs(): GroupAttrs { return { width: this.width } }
+  attrs(): GroupAttrs { return { width: this.width, text: this.text ?? undefined } }
   adopt(attrs: GroupAttrs): void {
+    if ('text' in attrs) {
+      this.text = attrs.text ?? null
+      writeTextScale(this.id, this.text)
+    }
     if (attrs.width === undefined) return
     this.width = Math.max(this.min, Math.min(attrs.width, this.max))
+  }
+  setText(scale: number | null): void {
+    this.text = scale
+    writeTextScale(this.id, scale)
+    if (this.group) publishAttrs(this)
   }
   join(group: string): void {
     this.group = group
     writeMembership(this.id, group)
     const attrs = readGroupAttrs(group)
-    if (attrs.width !== undefined) this.adopt(attrs)
+    if (Object.keys(attrs).length) this.adopt(attrs)
     else publishAttrs(this)
   }
 }
@@ -92,6 +104,49 @@ describe('tool window groups', () => {
     win.group = 'reference'
     publishAttrs(win)
     expect(readGroupAttrs('reference')).toEqual({ width: 420, someFutureAttr: 'kept' })
+  })
+
+  it('shares ONE text size across the group, and back off it again', () => {
+    const files = mount(new FakeWindow('files-viewer', 360))
+    const tags = mount(new FakeWindow('tags-viewer', 360))
+    files.join('reference')
+    tags.join('reference')
+
+    files.setText(1.15)                        // set in one member…
+    expect(tags.text).toBe(1.15)               // …is the group's size
+    expect(readGroupAttrs('reference').text).toBe(1.15)
+
+    files.setText(null)                        // back to auto: the group follows
+    expect(tags.text).toBeNull()
+    expect(readGroupAttrs('reference').text).toBeUndefined()
+  })
+
+  it('a window remembers its own size for when it reopens', () => {
+    const loner = mount(new FakeWindow('files-viewer', 360))
+    loner.setText(0.85)
+    expect(readTextScale('files-viewer')).toBe(0.85)
+    expect(localStorage.getItem('hc:panel-group-attrs:')).toBeNull()   // published nothing
+
+    loner.setText(null)
+    expect(readTextScale('files-viewer')).toBeNull()
+  })
+
+  it('joining for the width does not retypeset a window the group has no size for', () => {
+    const files = mount(new FakeWindow('files-viewer', 360))
+    files.join('reference')                    // group now stands for a width only
+
+    const tags = mount(new FakeWindow('tags-viewer', 480))
+    tags.setText(1.32)                         // …and this one arrives with a size
+    tags.join('reference')
+    expect(tags.width).toBe(360)               // takes the width
+    expect(tags.text).toBe(1.32)               // keeps its size — the group has none
+  })
+
+  it('offers auto plus a ladder of sizes, auto first', () => {
+    expect(TEXT_SIZES[0]).toMatchObject({ key: 'auto', scale: null })
+    const scales = TEXT_SIZES.slice(1).map(s => s.scale as number)
+    expect(scales).toEqual([...scales].sort((a, b) => a - b))
+    expect(scales).toContain(1)                // a plain, unscaled size is reachable
   })
 
   it('remembers the text, trimmed, and clears it when blank', () => {

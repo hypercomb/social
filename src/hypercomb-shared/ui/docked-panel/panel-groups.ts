@@ -8,19 +8,41 @@
 // group objects, no badges — matching text IS the grouping, which is why a
 // group may span dock sides and needs no creating, naming or deleting.
 //
-// Windows in the same group share attributes — right now the width, and the
-// record is deliberately shaped so more attributes can join later without a new
-// storage key.
+// Windows in the same group share attributes — the width and the TEXT SIZE —
+// and the record is deliberately shaped so more attributes can join later
+// without a new storage key.
 //
-// Two records, both participant-local (localStorage — nothing here is content,
-// so nothing here is signed): each window's group text (`hc:panel-group:<window>`)
-// and each group's shared attributes (`hc:panel-group-attrs:<text>`). Module
-// scope, no service: the directive is already self-contained chrome.
+// Three records, all participant-local (localStorage — nothing here is content,
+// so nothing here is signed): each window's group text (`hc:panel-group:<window>`),
+// each group's shared attributes (`hc:panel-group-attrs:<text>`), and each
+// window's own text size for when it is in no group (`hc:panel-text:<window>`).
+// Module scope, no service: the directive is already self-contained chrome.
 
 /** Attributes a group shares across its members. New shared attributes are
  *  added HERE (and to a member's `adopt`) — stored as one JSON blob per group,
- *  so growing it needs no new key or migration. */
-export type GroupAttrs = { width?: number }
+ *  so growing it needs no new key or migration.
+ *
+ *  `text` is the content scale a window's body renders at. ABSENT means auto —
+ *  the scale the panel derives from its own width. A member reads the
+ *  difference between "no opinion" and "auto" from whether the KEY is there,
+ *  which is why `adopt` tests `'text' in attrs` rather than the value. */
+export type GroupAttrs = { width?: number; text?: number }
+
+/** The text sizes a window (or a group) can be set to. AUTO — `null` — is the
+ *  old behaviour: the content scales with the window's width. The rest hold it
+ *  steady, which is the point: a window widened to read a long note should not
+ *  also shout it.
+ *
+ *  A short fixed ladder rather than a slider or a px field: the number is a
+ *  MULTIPLIER over each panel's own base size, so panels stay in proportion to
+ *  each other, and there is nothing to type. */
+export const TEXT_SIZES: readonly { key: string; label: string; scale: number | null }[] = [
+  { key: 'auto', label: 'Auto', scale: null },
+  { key: 'small', label: 'Small', scale: 0.85 },
+  { key: 'normal', label: 'Normal', scale: 1 },
+  { key: 'large', label: 'Large', scale: 1.15 },
+  { key: 'larger', label: 'Larger', scale: 1.32 },
+]
 
 /** A live tool window, as the sharing cares about it. The directive implements
  *  this; `adopt` is where a member clamps an incoming attribute to its own
@@ -38,6 +60,29 @@ export const STEEL = '126, 182, 214'
 
 export const memberKey = (window: string): string => `hc:panel-group:${window}`
 export const attrsKey = (group: string): string => `hc:panel-group-attrs:${group}`
+export const textKey = (window: string): string => `hc:panel-text:${window}`
+
+// ── text size ────────────────────────────────────────────────────────
+//
+// A window's own text size, for the windows that are in no group. A grouped
+// window still keeps this record — it is what the group last handed it, so the
+// window reopens at its group's size even if no mate is up to publish it.
+
+/** This window's text scale, or `null` for auto (derive it from the width). */
+export const readTextScale = (window: string): number | null => {
+  try {
+    const raw = localStorage.getItem(textKey(window))
+    const n = raw ? parseFloat(raw) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  } catch { return null }
+}
+
+export const writeTextScale = (window: string, scale: number | null): void => {
+  try {
+    if (scale === null) localStorage.removeItem(textKey(window))
+    else localStorage.setItem(textKey(window), String(scale))
+  } catch { /* ignore */ }
+}
 
 // ── pairing ──────────────────────────────────────────────────────────
 //

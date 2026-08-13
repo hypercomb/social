@@ -109,6 +109,24 @@ export const releaseLane = (member: LaneMember): void => {
  *  wants to say what is on screen. */
 export const laneOccupants = (side: LaneSide): readonly LaneMember[] => [...lanes[side]]
 
+/** Clear an edge because an INTERFACE is about to open over it — an anchored
+ *  rail picker (the recent-portals list, the course picker, the fit flyout) or
+ *  any overlay that belongs to that side. Same-side only: the other edge's
+ *  windows are not in the way and are not touched.
+ *
+ *  Every occupant is PARKED, never closed — `evictFromLane` already draws that
+ *  line (the shell made this decision, so it must cost the participant
+ *  nothing; a window with no session of its own falls back to its close, the
+ *  only thing such a window can do). The windows do not auto-return when the
+ *  interface goes: reopening one from the rail restores whatever it held. */
+export const clearLane = (side: LaneSide): number => {
+  const lane = lanes[side]
+  if (lane.length === 0) return 0
+  const out = lane.splice(0, lane.length)
+  for (const member of out) member.evictFromLane()
+  return out.length
+}
+
 /** Is there a free place on this edge? Asked before a window brings its PAIR up
  *  alongside it: a pairing may fill an empty slot, but it must never push a
  *  third window out. The participant opened that one; the pairing is a
