@@ -92,6 +92,9 @@ type OverlayAction = {
   /** A FEATURE affordance — ⋮ reveals it BIGGER on the feature row(s),
    *  never the always-visible top row. */
   featureRow?: boolean
+  /** PINNED to the label row's left edge, beside the name — outside the
+   *  wrapping icon flow (see #layoutIconRow). Placement only. */
+  labelRow?: boolean
   /** If provided, called to determine per-tile visibility */
   visibleWhen?: OverlayVisibilityFn
   /** If provided, called to compute per-tile tint */
@@ -125,6 +128,9 @@ export type OverlayActionDescriptor = {
   /** Route into the FEATURE row(s) revealed by ⋮ — bigger icons showcasing
    *  what the tile carries (website, files, …). Never in the top row. */
   featureRow?: boolean
+  /** PIN to the label row's left edge, beside the name — outside the wrapping
+   *  icon flow. Placement only; pairs with `featureRow` for the press seam. */
+  labelRow?: boolean
   visibleWhen?: OverlayVisibilityFn
   /**
    * Per-tile dynamic tint. Returns the colour the icon should show when the
@@ -183,11 +189,29 @@ const MAX_ICON_ROWS = 2
  *  doubled). The block is centred on ICON_Y, so a single row sits dead centre
  *  and two rows straddle it. */
 const ICON_ROW_PITCH = 10
+/** The hex's horizontal half-extent (√3/2 × 32) — the bound every icon
+ *  surface measures against. */
+const HEX_INRADIUS = 27.7
 /** How far apart the OUTERMOST icon centres in a row may sit: the hex's
- *  inradius (√3/2 × 32) less an edge margin, doubled. Mirrors
- *  computeIconPositions. The action row compresses to fit it; the arrange pool
- *  WRAPS at it. One constant, so the two surfaces cannot drift apart. */
-const ICON_ROW_AVAILABLE = (27.7 - 3) * 2
+ *  inradius less an edge margin, doubled. Mirrors computeIconPositions. The
+ *  action row compresses to fit it; the arrange pool WRAPS at it. One
+ *  constant, so the two surfaces cannot drift apart. */
+const ICON_ROW_AVAILABLE = (HEX_INRADIUS - 3) * 2
+
+// ── The label row, for icons PINNED to it (`labelRow`) ────────────
+/** HALF-height of one band row in overlay-local units — the shader's
+ *  `rowH = u_radiusPx * 0.15` (hex-sdf.shader.ts) at the hex radius of 32.
+ *  The NAME's row centre sits (bandRows − 1) × this ABOVE the hex centre
+ *  (the shader's nameShift), which is where a pinned icon must land. */
+const NAME_ROW_HALF = 32 * 0.15
+/** Centre x of the first icon pinned to the label row: hard against the band's
+ *  LEFT edge, so it is LEFT OF THE NAME at every name length. The name is
+ *  centred and the widest one reaches about ±19.3 here — the shader maps the
+ *  quad's central half to the label cell (LABEL_BAND) and the bake fits text to
+ *  92 % of it (sdf-glyph.ts) — so hugging the inradius keeps the two apart
+ *  instead of letting a long name run under the handle. The icon's drawn ink is
+ *  a good deal narrower than its box, so the edge reads as a margin. */
+const LABEL_ROW_LEFT_X = Math.round(-(HEX_INRADIUS - DEFAULT_ICON_SIZE / 2))
 
 // ── Arrange mode constants ────────────────────────────────────────
 
@@ -1477,6 +1501,7 @@ export class TileOverlayDrone extends Drone {
         genotype: desc.genotype,
         dangerRow: desc.dangerRow,
         featureRow: desc.featureRow,
+        labelRow: desc.labelRow,
         visibleWhen: desc.visibleWhen,
         tintWhen: desc.tintWhen,
         labelKey: desc.labelKey,
@@ -1501,10 +1526,15 @@ export class TileOverlayDrone extends Drone {
 
   #layoutIconRow(): void {
     const base = this.#actions.filter(a => a.button.visible)
+    // Label-row icons are PINNED beside the name (placed at the bottom of this
+    // pass), outside the wrapping flow — they ride the row the band always
+    // has, so they never add a row or displace the centred block.
+    const pinned = base.filter(a => a.labelRow)
+    const flowing = base.filter(a => !a.labelRow)
     const ordered = [
-      ...base.filter(a => !a.featureRow && !a.dangerRow),
-      ...base.filter(a => a.featureRow),
-      ...base.filter(a => a.dangerRow),
+      ...flowing.filter(a => !a.featureRow && !a.dangerRow),
+      ...flowing.filter(a => a.featureRow),
+      ...flowing.filter(a => a.dangerRow),
     ]
 
     const rows: OverlayAction[][] = []
@@ -1528,7 +1558,8 @@ export class TileOverlayDrone extends Drone {
     }
 
     // Only what is laid out is shown, so hit-testing matches what is drawn.
-    const inSeq = new Set(rows.flat())
+    // Pinned icons are laid out too (below) — they stay.
+    const inSeq = new Set<OverlayAction>([...rows.flat(), ...pinned])
     for (const a of this.#actions) a.button.visible = inSeq.has(a)
 
     // Tell the renderer how tall to draw this tile's band: the NAME's own row
@@ -1548,6 +1579,14 @@ export class TileOverlayDrone extends Drone {
         )?.label ?? null
       : null
     this.emitEffect('overlay:band-rows', { rows: this.#bandRows, label: bandLabel })
+
+    // Pin label-row icons on the NAME's row, left-aligned. The name's row
+    // centre sits (bandRows − 1) × NAME_ROW_HALF above the hex centre — the
+    // shader's nameShift — so the pin lands beside the name at every band
+    // height, including the single-row band (no icon rows: y = 0).
+    const nameRowY = Math.round(-(this.#bandRows - 1) * NAME_ROW_HALF)
+    pinned.forEach((a, i) =>
+      a.button.position.set(LABEL_ROW_LEFT_X + i * ICON_SPACING, nameRowY))
 
     if (rows.length === 0) {
       // No icons: leave the pool where a single row would have left it, so an
@@ -2211,6 +2250,11 @@ export class TileOverlayDrone extends Drone {
         svgMarkup: entry.svgMarkup,
         hoverTint: entry.hoverTint,
         profile: entry.profile,
+        // Row placement survives an arrange re-register — dropping these sent
+        // feature icons back into the main flow (and unpinned label-row ones).
+        dangerRow: entry.dangerRow,
+        featureRow: entry.featureRow,
+        labelRow: entry.labelRow,
         visibleWhen: entry.visibleWhen,
         x: positions[i].x,
         y: positions[i].y,

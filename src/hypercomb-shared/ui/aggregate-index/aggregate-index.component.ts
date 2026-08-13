@@ -392,6 +392,12 @@ export class AggregateIndexComponent implements OnDestroy {
     if (!this.source()) return
     if (!this.open()) this.origin.set(this.#segments())
     this.open.set(true)
+    // Announce the SHOWN view. Surfaces outside this window key on it — the
+    // portal-carry drag handle rides tiles only while the portals view is up.
+    // EffectBus replays the last value, so a late subscriber still learns the
+    // current state; emitted on every open so switching aggregates while the
+    // window stays up also reaches them.
+    EffectBus.emit('aggregate:view-state', { id: this.source()?.id ?? null, open: true })
     void this.reload()
   }
 
@@ -441,6 +447,8 @@ export class AggregateIndexComponent implements OnDestroy {
   close(): void {
     if (!this.open()) return
     this.open.set(false)
+    // The counterpart announcement to openPanel's — see the note there.
+    EffectBus.emit('aggregate:view-state', { id: this.source()?.id ?? null, open: false })
     this.renaming.set(null)
     this.#closeVersions()
   }

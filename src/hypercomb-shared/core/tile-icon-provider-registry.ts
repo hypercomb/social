@@ -43,6 +43,15 @@ export type TileIconProvider = {
   featureRow?: boolean
   /** Ride the hidden row revealed by ⋮ — for destructive actions (delete). */
   dangerRow?: boolean
+  /**
+   * PIN to the band's LABEL ROW (the row carrying the tile's name), aligned to
+   * its left edge — outside the wrapping icon flow entirely, so it never adds
+   * a row or displaces the centred block. For grab-affordances that belong
+   * beside the name (the portal-carry drag handle). Combine with `featureRow`
+   * when the press seam (`overlay:feature-press`) is needed; `labelRow` then
+   * overrides only the PLACEMENT.
+   */
+  labelRow?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: any) => boolean
   tintWhen?: (ctx: any) => number | null | undefined

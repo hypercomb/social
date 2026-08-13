@@ -162,6 +162,10 @@ type IconProviderEntry = {
    *  row(s), never in the always-visible top row. See TileIconProvider in
    *  hypercomb-shared (the canonical contract). */
   featureRow?: boolean
+  /** PIN to the label row's left edge, beside the name — outside the wrapping
+   *  icon flow. Placement only; combine with `featureRow` for the press seam.
+   *  See TileIconProvider in hypercomb-shared (the canonical contract). */
+  labelRow?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
@@ -243,6 +247,9 @@ export type IconRegistryEntry = {
   /** A FEATURE affordance — ⋮ reveals it bigger on the feature row(s),
    *  never the always-visible top row. */
   featureRow?: boolean
+  /** PIN to the label row's left edge, beside the name — outside the wrapping
+   *  icon flow. Placement only (the portal-carry drag handle). */
+  labelRow?: boolean
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
@@ -501,6 +508,11 @@ export class TileActionsDrone extends Drone {
   #arrangement: IconArrangement = {}
   #substrateLabels = new Set<string>()
   #registryChangeTimer: ReturnType<typeof setTimeout> | null = null
+  /** What we last ANNOUNCED to the overlay, per profile. A re-register has to
+   *  withdraw these as well as the currently-available names — otherwise an
+   *  icon whose provider deregistered stays on the band forever (it is gone
+   *  from the merged catalog, so nothing names it in the unregister sweep). */
+  #announcedByProfile = new Map<OverlayProfileKey, Set<string>>()
   // Icon providers (edit, note, contact, view:website) self-register in the
   // IconProviderRegistry one at a time during boot. Reacting to each 'change'
   // immediately runs #reregisterAll's unregister-then-reregister churn, which
@@ -611,6 +623,7 @@ export class TileActionsDrone extends Drone {
           defaultActive: p.defaultActive,
           dangerRow: p.dangerRow,
           featureRow: p.featureRow,
+          labelRow: p.labelRow,
           visibleWhen: p.visibleWhen,
           tintWhen: p.tintWhen,
           labelKey: p.labelKey,
@@ -662,6 +675,7 @@ export class TileActionsDrone extends Drone {
           profile: entry.profile,
           dangerRow: entry.dangerRow,
           featureRow: entry.featureRow,
+          labelRow: entry.labelRow,
           visibleWhen: entry.visibleWhen,
           tintWhen: entry.tintWhen,
           labelKey: entry.labelKey,
@@ -673,6 +687,8 @@ export class TileActionsDrone extends Drone {
           y: positions[i].y,
         })
       }
+      this.#announcedByProfile.set(profile, new Set(
+        descriptors.filter(d => d.profile === profile).map(d => d.name)))
     }
 
     return descriptors
@@ -685,9 +701,16 @@ export class TileActionsDrone extends Drone {
     // overlay removes the name from THIS profile's order only — names shared
     // across profiles (remove/files/invite/break-apart/contact) would otherwise
     // be spliced out of the wrong profile (the bug that collapsed the set).
+    //
+    // Sweep what we ANNOUNCED as well as what is available now: a provider that
+    // called IconProviderRegistry.remove() is already gone from `merged`, so
+    // withdrawing only the merged names left its icon registered in the overlay
+    // — it kept rendering with no provider behind it (a registry `remove` was
+    // silently a no-op on the band). The union is the only complete set.
     const profileEntries = merged.filter(e => e.profile === profile)
-    for (const entry of profileEntries) {
-      EffectBus.emit('overlay:unregister-action', { name: entry.name, profile })
+    const stale = this.#announcedByProfile.get(profile) ?? new Set<string>()
+    for (const name of new Set([...stale, ...profileEntries.map(e => e.name)])) {
+      EffectBus.emit('overlay:unregister-action', { name, profile })
     }
 
     // Re-register with new positions
@@ -707,6 +730,7 @@ export class TileActionsDrone extends Drone {
         profile: entry.profile,
         dangerRow: entry.dangerRow,
         featureRow: entry.featureRow,
+        labelRow: entry.labelRow,
         visibleWhen: entry.visibleWhen,
         // Preserve tintWhen on re-registration — without it the world icons
         // (the only tintWhen users) lose their public-state color after any
@@ -721,6 +745,7 @@ export class TileActionsDrone extends Drone {
       })
     }
 
+    this.#announcedByProfile.set(profile, new Set(descriptors.map(d => d.name)))
     if (descriptors.length > 0) {
       this.emitEffect('overlay:register-action', descriptors)
     }

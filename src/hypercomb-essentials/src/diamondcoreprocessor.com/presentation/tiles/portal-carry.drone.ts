@@ -5,6 +5,11 @@
 // for "this belongs in there" — no selection, no staging, no walking into the
 // collection first.
 //
+// The handle shows ONLY while the Portals window is up (aggregate-index with
+// the 'collections' view): its provider is added/removed on the window's
+// `aggregate:view-state` announcements. On the band it is pinned to the LABEL
+// row's left edge (`labelRow`) — beside the name, not in the icon flow.
+//
 // Same choreography as EntrancePinDrone (the proven press-to-drag seam): the
 // overlay emits `overlay:feature-press` when a pointer goes down on a visible
 // feature icon. For our handle we arm a drag; past the threshold a small DOM
@@ -69,10 +74,12 @@ type IconProviderRegistryLike = {
     profiles?: readonly string[]
     defaultActive?: boolean
     featureRow?: boolean
+    labelRow?: boolean
     hoverTint?: number
     labelKey?: string
     descriptionKey?: string
   }): void
+  remove(name: string): void
 }
 
 export class PortalCarryDrone extends Drone {
@@ -82,7 +89,7 @@ export class PortalCarryDrone extends Drone {
     'Drag handle on tiles: pull it onto a Portals-window row to add the tile to that portal; a plain click opens the Portals window.'
 
   protected override deps = {}
-  protected override listens: string[] = ['overlay:feature-press', 'tile:action']
+  protected override listens: string[] = ['overlay:feature-press', 'tile:action', 'aggregate:view-state']
   protected override emits: string[] = ['portal-carry:drag-start', 'portal-carry:drop', 'portal-carry:drag-end', 'aggregate:view-open']
 
   #initialized = false
@@ -91,6 +98,9 @@ export class PortalCarryDrone extends Drone {
   #consumedPointerId: number | null = null
 
   #press: PressState | null = null
+  /** Whether the handle's icon provider is currently registered — it follows
+   *  the Portals window (see the view-state subscription in heartbeat). */
+  #handleShown = false
 
   protected override sense = () => true
 
@@ -98,21 +108,16 @@ export class PortalCarryDrone extends Drone {
     if (this.#initialized) return
     this.#initialized = true
 
-    // Contribute the handle through the ONE declarative extension point —
-    // no edit to tile-actions' core catalog. Feature row, so the overlay
-    // emits `overlay:feature-press` for it (the drag seam).
-    const iconRegistry = (window as { ioc?: { get?: (k: string) => unknown } })
-      .ioc?.get?.('@hypercomb.social/IconProviderRegistry') as IconProviderRegistryLike | undefined
-    iconRegistry?.add({
-      name: ACTION_NAME,
-      owner: this.iocKey,
-      svgMarkup: HANDLE_ICON_SVG,
-      profiles: ['private', 'public-own'],
-      defaultActive: true,
-      featureRow: true,
-      hoverTint: 0xa8c8ff,
-      labelKey: 'action.portal-carry',
-      descriptionKey: 'action.portal-carry.description',
+    // The handle RIDES the Portals window: it shows on tiles only while the
+    // aggregate index has the portals view up — a grab affordance without a
+    // drop surface is just noise. The window announces its shown view
+    // (`aggregate:view-state`, last-value replayed so a late-loading drone
+    // still learns the current state), and the provider is added/removed to
+    // follow it: the registry dispatches 'change' on both, which re-registers
+    // the whole icon set and repaints the band. Before the first announcement
+    // the window has never been opened — no handle.
+    this.onEffect<{ id?: string | null; open?: boolean }>('aggregate:view-state', (p) => {
+      this.#setHandleShown(p?.open === true && p?.id === PORTALS_VIEW_ID)
     })
 
     this.onEffect<FeaturePressPayload>('overlay:feature-press', (p) => this.#onFeaturePress(p))
@@ -128,6 +133,36 @@ export class PortalCarryDrone extends Drone {
     document.removeEventListener('click', this.#onClickCapture, true)
     this.#press?.ghost?.remove()
     this.#endPress()
+    this.#setHandleShown(false)
+  }
+
+  /** Add/remove the handle's icon provider through the ONE declarative
+   *  extension point — no edit to tile-actions' core catalog. `featureRow`
+   *  keeps the overlay's `overlay:feature-press` seam (the drag arm);
+   *  `labelRow` pins the icon to the label row's left edge, beside the name,
+   *  instead of the wrapping feature-row flow. */
+  #setHandleShown(show: boolean): void {
+    if (show === this.#handleShown) return
+    const iconRegistry = (window as { ioc?: { get?: (k: string) => unknown } })
+      .ioc?.get?.('@hypercomb.social/IconProviderRegistry') as IconProviderRegistryLike | undefined
+    if (!iconRegistry) return
+    this.#handleShown = show
+    if (!show) {
+      iconRegistry.remove(ACTION_NAME)
+      return
+    }
+    iconRegistry.add({
+      name: ACTION_NAME,
+      owner: this.iocKey,
+      svgMarkup: HANDLE_ICON_SVG,
+      profiles: ['private', 'public-own'],
+      defaultActive: true,
+      featureRow: true,
+      labelRow: true,
+      hoverTint: 0xa8c8ff,
+      labelKey: 'action.portal-carry',
+      descriptionKey: 'action.portal-carry.description',
+    })
   }
 
   #onFeaturePress(p: FeaturePressPayload): void {
