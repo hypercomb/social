@@ -18,7 +18,7 @@
 //      to the hexagons.
 
 import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
-import { hasDecorationKind, titleForLabel } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKindAt, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
 import { listDecorations } from '../../commands/decoration-manifest.js'
@@ -57,6 +57,10 @@ export class PostitViewDrone extends Drone {
       window.addEventListener('keydown', this.#key, true)
       window.addEventListener('synchronize', this.#change)
       this.onEffect('decorations:changed', this.#change)
+      // Cold session: the mark is discovered by the post-paint hydration walk,
+      // which fires no decorations:changed — without this the stickies wait
+      // for the next synchronize (first pan/zoom) to appear.
+      this.onEffect('takeover:indexed', this.#change)
       this.onEffect('feature:hidden', this.#change)
       this.onEffect('feature:restored', this.#change)
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
@@ -132,7 +136,10 @@ export class PostitViewDrone extends Drone {
 
     const decorated: Array<{ label: string; path: string[] }> = []
     for (const candidate of candidates) {
-      if (!hasDecorationKind(candidate.label, POSTIT_KIND)) continue
+      // Path-keyed lookup: a bare label resolves against the CURRENT page, so
+      // for the standing cell it would name the phantom child `…/own/own` and
+      // its sticky would never show.
+      if (!hasDecorationKindAt(candidate.path, POSTIT_KIND)) continue
       if (await isFeatureHidden(candidate.path, POSTIT_KIND)) continue
       decorated.push(candidate)
       if (decorated.length >= STICKY_LIMIT) break
@@ -299,19 +306,31 @@ export class PostitViewDrone extends Drone {
 // Sticky yellows deliberately read as PAPER pinned over the hive, not as
 // chrome — the one warm object in a cold shell. No text lives in tile art;
 // the sticky is DOM and carries the note's title.
+//
+// z 59990: the reparented Pixi canvas (#pixi-host, pixi-host.worker.ts) sits
+// at z 59989 with a pointer-events:auto <canvas> — anything below it still
+// PAINTS (the canvas is transparent) but has every click eaten. 59990 is the
+// established "above canvas, below chrome" slab (activity log, format
+// painter). Top rides --hc-header-anchor so header zoom or a wrapped icon
+// rail pushes the stack down instead of over it (never a bare rem — see
+// _header-size.scss).
 const STICKY_CSS = `
-.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(4.5rem + env(safe-area-inset-top,0px));z-index:60;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
+.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:59990;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
 .postit-sticky{pointer-events:auto;width:8.5rem;min-height:4.6rem;padding:.6rem .65rem .95rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#4a3f0f;box-shadow:0 6px 14px rgba(0,0,0,.35),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.18);transform:rotate(var(--postit-tilt,-2deg));transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
 .postit-sticky{position:relative}
 .postit-sticky:hover{transform:rotate(0deg) scale(1.04);box-shadow:0 10px 20px rgba(0,0,0,.42)}
 .postit-sticky-title{display:block;font-size:.8rem;font-weight:700;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .postit-sticky-cue{position:absolute;right:.55rem;bottom:.3rem;font-size:.62rem;opacity:.55}
-@media(max-width:640px){.hc-postit-stickies{top:calc(3.9rem + env(safe-area-inset-top,0px))}.postit-sticky{width:7rem;min-height:4rem}}
+@media(max-width:640px){.postit-sticky{width:7rem;min-height:4rem}}
 `
 
+// z 59992: above the canvas (59989) and its riders (activity log 59990,
+// preview banner / atomizer sidebar 59991), below edit-actions (59995) and
+// the header (60000). At the old 150 the mounted page painted through the
+// transparent canvas but every click and scroll inside it hit the canvas.
 const POST_CSS = `
-.hc-postit-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:auto;background:#101418}
+.hc-postit-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:59992;overflow:auto;background:#101418}
 .postit-page{min-height:100%;background:#fff}
 .postit-paper{box-sizing:border-box;width:min(680px,calc(100% - 2rem));margin:8vh auto;padding:3.2rem 3rem 4.4rem;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#3f350c;box-shadow:0 22px 60px rgba(0,0,0,.5),inset 0 -2.5rem 2rem -2rem rgba(120,90,10,.16);transform:rotate(-.6deg);font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-paper h1{margin:0 0 1.2rem;font-size:1.6rem;line-height:1.25}

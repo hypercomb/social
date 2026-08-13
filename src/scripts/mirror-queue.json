@@ -577,6 +577,23 @@
       "unattended": false,
       "created": "2026-08-13",
       "status": "pending"
+    },
+    {
+      "id": "tile-view-six-faces",
+      "title": "Tile close-up: six labelled hexagon faces, swipe-to-activate, icon-rail restyle",
+      "run": null,
+      "note": "tile-view.drone.ts: the close-up hexagon's six edges now carry captions (upper faces = the tile's own viewers e.g. photos/slides, right = edit, left = settings/features, lower-right = go inside on branches, lower-left = select) and a drag FROM the hexagon toward any face activates that option through the same chip run() as tapping it — suspend/handover rules unchanged; row-walk swipe stays on the backdrop. Portrait nudges the hexagon slightly down (zone marginTop 4vh). Menu cells restyled off the bordered-box look to bare glyph + caption (steel accent = colour not filled slab, pressed wash via injected VIEW_CSS). Mirror owes: a note on behaviors deck's views/tile-view card describing the six-face gesture + the face map, and an 'input' mark if the vocabulary wants the gesture classified. note-add is additive, hence hands-on.",
+      "created": "2026-08-13",
+      "status": "pending"
+    },
+    {
+      "id": "postit-takeover-fixes",
+      "title": "Post-it repairs — clicks above the canvas, header-anchored stickies, takeover nudge",
+      "run": "(no script yet — note-add pass on existing postit part tiles)",
+      "note": "Three defects fixed on the BUILT postit mirror's parts, notes owed on behaviors/views/postit: (1) stickies z 60 and post view z 150 sat UNDER the reparented pixi canvas (z 59989, pointer-events:auto) — visible through the transparent canvas but every click eaten (same trap as activity log / format painter); now 59990/59992. (2) sticky top was a blind 4.5rem — now rides --hc-header-anchor + 1rem so header zoom / wrapped icon rail push it down, never over it. (3) NEW EffectBus nudge takeover:indexed — decoration-kind-index emits it on live append, removeSig, and the post-paint hydration walk whenever a replacesTileRender kind is involved; show-cell rebuilds geometry (hex drops or returns), postit drone re-reconciles (stickies mount on cold boot without waiting for a synchronize). Also hasDecorationKindAt(segments) — bare-label lookup doubled the standing cell's path (a/b -> a/b/b) so the standing cell's sticky never showed. Note-add is ADDITIVE — hands-on pass, do not auto-drain. Files: commands/decoration-kind-index.ts, presentation/tiles/{postit-view,show-cell}.drone.ts",
+      "created": "2026-08-13",
+      "status": "pending",
+      "unattended": false
     }
   ]
 }

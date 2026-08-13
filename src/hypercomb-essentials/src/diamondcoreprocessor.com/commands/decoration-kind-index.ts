@@ -161,6 +161,15 @@ export function hasDecorationKind(label: string, kind: string): boolean {
   return (kindsByKey.get(key)?.has(kind) ?? false) && !isKindHidden(key, kind)
 }
 
+/** The same lookup by FULL PATH. A bare label resolves against the page being
+ *  rendered, which is wrong for the cell you are STANDING at: standing at
+ *  `/a/b`, `keyForLabel('b')` names the phantom child `/a/b/b`, so the
+ *  standing cell's own decorations always read as absent. */
+export function hasDecorationKindAt(segments: readonly string[], kind: string): boolean {
+  const key = locationKey(segments)
+  return (kindsByKey.get(key)?.has(kind) ?? false) && !isKindHidden(key, kind)
+}
+
 /** Iterate every decoration kind known for a cell. Useful for
  *  introspection / debug; not part of the visibleWhen hot path. */
 export function kindsForLabel(label: string): readonly string[] {
@@ -608,6 +617,17 @@ type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }
 
+/** Decoration kinds whose owner view REPLACES the tile's hex render
+ *  (visual-bee `replacesTileRender` — the post-it). Resolved through IoC per
+ *  call, the same loose seam Store/History use, so module load order never
+ *  matters; empty until the registry is up. */
+const EMPTY_KINDS: ReadonlySet<string> = new Set()
+function takeoverKinds(): ReadonlySet<string> {
+  const registry = window.ioc.get<{ kindsReplacingTileRender?: () => ReadonlySet<string> }>(
+    '@diamondcoreprocessor.com/VisualBeeRegistry')
+  return registry?.kindsReplacingTileRender?.() ?? EMPTY_KINDS
+}
+
 type DecorationShape = { kind?: string; payload?: unknown }
 
 async function fetchDecorationRecord(sig: string): Promise<DecorationShape | null> {
@@ -910,6 +930,14 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
         && JSON.stringify(titleByKey.get(key) ?? null) !== priorTitle) {
       EffectBus.emit('title:indexed', { label })
     }
+    // A takeover kind (visual-bee `replacesTileRender`) landing live: the
+    // synchronize-driven repaint raced past the async record fetch above, so
+    // the hex is already on screen and the union filter has already run.
+    // Same shape as the `tags:indexed` nudge — re-signal so show-cell
+    // rebuilds geometry with the cell now claimed by its view.
+    if (record.kind && takeoverKinds().has(record.kind)) {
+      EffectBus.emit('takeover:indexed', { label })
+    }
     // A reference minted LIVE (`/reference`, a drop) must resolve its face here
     // or never: the navigation walk memoizes each label+path and will not
     // re-walk this cell, so waiting for the next render would leave the tile
@@ -978,6 +1006,11 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     // Never delete `nameBySig[sig]` — other cells still share it.
     const name = nameBySig.get(sig)
     if (name) removeTag(key, name)
+    // Removing a takeover kind must bring the hexagon BACK — the union filter
+    // only runs during a geometry pass, so nudge one, same as the append side.
+    if (kind && takeoverKinds().has(kind)) {
+      EffectBus.emit('takeover:indexed', { label })
+    }
   }
 })
 
@@ -1086,6 +1119,17 @@ async function hydrateLabel(
     // Same post-paint race for a title found on this walk: the tile has already
     // painted under its raw label, so flush and repaint it under the title.
     if (nudge && titleByKey.has(pathKey)) EffectBus.emit('title:indexed', { label })
+    // A takeover kind discovered on this walk (visual-bee `replacesTileRender`):
+    // the hex painted before the index knew the cell was claimed, and unlike
+    // tags/launchers nothing else repaints — tile and sticky sat on screen
+    // together until the next navigation. Nudge a geometry rebuild so the
+    // union filter drops the hex.
+    if (nudge) {
+      const indexed = kindsByKey.get(pathKey)
+      if (indexed && [...takeoverKinds()].some(k => indexed.has(k))) {
+        EffectBus.emit('takeover:indexed', { label })
+      }
+    }
     // This cell turned out to be a REFERENCE: resolve the face it should wear
     // from its target. The walk above only reads the pointer; the picture lives
     // one hop away, at the target's own head. Same post-paint race as a title —
