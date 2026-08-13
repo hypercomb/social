@@ -107,6 +107,18 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Reserved here so every root walker knows the address is a pool and never
   // mistakes it for a lineage bag, in packed mode or out of it.
   'store:packed',
+  // What this participant has PUBLISHED, and what they last saw of it —
+  // written by sharing/publish-heads.ts. One bare `{sealedSig}` member per
+  // successful hive-index advance (segments, lineageKey, host, pubkey, the
+  // index `created_at` we signed), plus `{sealedSig}.{hostHash}.seen`
+  // observation sidecars that deliberately fail the record regex.
+  //
+  // TRUTH POOL, never minted from the optimize phase: "I advanced the index
+  // to head X at time T" is the record of a remote act, not a derivation of
+  // sig-addressed inputs, so a cold client could never rebuild it from layers
+  // (optimize-phase.md litmus). It is also what makes the index safe to
+  // rewrite — see the wipe guard in publish-branch.ts.
+  'publish:heads',
   // The changes repository — one append-only record per act that touched a
   // group of tiles (see assistant/changes.ts). Colon-scoped so it can never
   // collide with a tile slugged 'changes'.

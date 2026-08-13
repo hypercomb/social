@@ -31,13 +31,13 @@ $actions-corner: 12rem;
 .breadcrumb-top {
   position: fixed;
   // Dock below the header. The static term tracks the header size
-  // (3.25rem × the active header zoom); the measured term (`--hc-header-bottom`,
+  // (2.75rem × the active header zoom); the measured term (`--hc-header-bottom`,
   // the live bar bottom set by ControlsBar's ResizeObserver) wins only when the
   // header renders TALLER than the static assumption (high-DPI / narrow devices
   // like the Surface). `max()` can only push down, so well-behaved devices are
   // unchanged and the breadcrumb never rides up under the bar.
   top: max(
-    calc(3.25rem * var(--hc-header-zoom, 1.0)),
+    calc(2.75rem * var(--hc-header-zoom, 1.0)),
     calc(var(--hc-header-bottom, 0px) + 0.35rem)
   );
   // Sit BESIDE an open right-docked toolwindow (behaviors/features, tags,
@@ -469,7 +469,7 @@ $actions-corner: 12rem;
   min-width: 0;
   width: $rail-width;
   // clears the header bottom at any size: 2.8rem × the active header zoom
-  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 0;
   transform: none;
   align-items: stretch; // let the rail fill the full height
@@ -687,7 +687,7 @@ $actions-corner: 12rem;
 // folded into `--hc-header-zoom` (see `styles/_header-size.scss`), so no
 // per-band override is needed here.
 @include touch {
-  .pill-stage.dock-left { top: max(calc(3.85rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
+  .pill-stage.dock-left { top: max(calc(3.65rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
 }
 
 // Tooltips flip to the inner side of a docked bar so they don't spill off

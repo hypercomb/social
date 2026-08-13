@@ -12,7 +12,7 @@
 .hint-bar {
   position: fixed;
   // tracks the header size: 4.25rem × the active header zoom
-  top: max(calc(4.25rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.42rem));
+  top: max(calc(3.75rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.42rem));
   left: 0.6rem;
   z-index: 59999;
 

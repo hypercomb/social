@@ -66,7 +66,7 @@ $bp-phone-max: 599px;
   background: transparent;
   border: none;
   border-radius: 0;
-  padding: 0 0.25rem;
+  padding: 0 0.15rem;
   user-select: none;
   cursor: default;
 }
@@ -91,8 +91,8 @@ $bp-phone-max: 599px;
   justify-content: center;
   width: 1.35em;
   height: 1.35em;
-  margin-left: 0.8rem;
-  top: 2px;
+  margin-left: 0.4rem;
+  top: 1px;
   opacity: 0.9;
   transition: opacity var(--transition-speed) ease;
 
@@ -120,7 +120,7 @@ $bp-phone-max: 599px;
   // Outlined' font) — size + colour only here. Use font-size, NOT the
   // `font` shorthand, so we don't clobber the Material font-family.
   // Slightly larger than 1em to offset the glyph's built-in padding.
-  font-size: 1.4em;
+  font-size: 1.2em;
   color: var(--cmd-fg);
 }
 
@@ -172,12 +172,12 @@ $bp-phone-max: 599px;
 .command-input {
   grid-area: 1 / 1;
   box-sizing: border-box;
-  padding: 0 0.75rem;
+  padding: 0 0.4rem;
   margin: 0;
   background: transparent;
   border: none;
   outline: none;
-  font: 1.18em / 1 var(--terminal-font);
+  font: 1em / 1 var(--terminal-font);
   letter-spacing: 0.02em;
   text-indent: 0;
   white-space: nowrap;
@@ -570,7 +570,7 @@ $bp-phone-max: 599px;
   // The wrap point, expressed in the rail's own metrics so it can never
   // drift from the button size: N boxes + (N − 1) gaps.
   max-width: calc(
-    var(--hc-rail-cols, 5) * var(--hc-rail-btn, 1.85rem) +
+    var(--hc-rail-cols, 5) * var(--hc-rail-btn, 1.6rem) +
     (var(--hc-rail-cols, 5) - 1) * var(--hc-rail-gap, 0.3rem)
   );
 }
@@ -599,8 +599,8 @@ $bp-phone-max: 599px;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: var(--hc-rail-btn, 1.85rem);
-  height: var(--hc-rail-btn, 1.85rem);
+  width: var(--hc-rail-btn, 1.6rem);
+  height: var(--hc-rail-btn, 1.6rem);
   padding: 0;
   background: transparent;
   border: none;
@@ -620,7 +620,7 @@ $bp-phone-max: 599px;
   &.on {
     color: var(--glow-color);
     background: rgba(var(--glow-color-rgb), 0.18);
-    box-shadow: 0 0 6px rgba(var(--glow-color-rgb), 0.55);
+    box-shadow: 0 0 4px rgba(var(--glow-color-rgb), 0.55);
   }
 
   &.on:hover {
@@ -630,7 +630,7 @@ $bp-phone-max: 599px;
   svg { display: block; }
 
   .mat-sym {
-    font-size: var(--hc-rail-glyph, 1.2rem);
+    font-size: var(--hc-rail-glyph, 1.05rem);
     line-height: 1;
   }
 }
@@ -655,7 +655,7 @@ $bp-phone-max: 599px;
   &.on {
     color: rgb(255, 213, 79);
     background: rgba(255, 213, 79, 0.16);
-    box-shadow: 0 0 6px rgba(255, 213, 79, 0.5);
+    box-shadow: 0 0 4px rgba(255, 213, 79, 0.5);
   }
 
   &.on:hover {
@@ -673,7 +673,7 @@ $bp-phone-max: 599px;
     background: rgba(var(--glow-color-rgb), 0.24);
     box-shadow:
       inset 0 0 0 1px rgba(var(--glow-color-rgb), 0.72),
-      0 0 9px rgba(var(--glow-color-rgb), 0.72);
+      0 0 6px rgba(var(--glow-color-rgb), 0.72);
 
     .mat-sym { font-variation-settings: 'FILL' 1; }
   }
@@ -683,7 +683,7 @@ $bp-phone-max: 599px;
     background: rgba(var(--glow-color-rgb), 0.36);
     box-shadow:
       inset 0 0 0 1px var(--glow-color),
-      0 0 13px rgba(var(--glow-color-rgb), 0.9);
+      0 0 8px rgba(var(--glow-color-rgb), 0.9);
   }
 }
 
@@ -702,7 +702,7 @@ $bp-phone-max: 599px;
   &.on {
     color: rgb(255, 92, 92);
     background: rgba(255, 68, 68, 0.18);
-    box-shadow: 0 0 6px rgba(255, 68, 68, 0.45);
+    box-shadow: 0 0 4px rgba(255, 68, 68, 0.45);
 
     .mat-sym { font-variation-settings: 'FILL' 1; }
   }

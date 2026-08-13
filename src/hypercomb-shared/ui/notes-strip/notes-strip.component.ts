@@ -14,7 +14,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // keeps its own edge handles and width store (`ownsSize` false) — see the
 // directive's header.
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { type WindowSession } from '../window-session'
+import { type WindowSession, windowsParked } from '../window-session'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { fromRuntime } from '../../core/from-runtime'
 import {
@@ -2197,6 +2197,22 @@ export class NotesStripComponent implements OnDestroy {
     unpark: () => this.#parked.set(false),
   }
 
+  /** Turn the strip on. Every open path goes through here, because `#open` is
+   *  only half of `visible` — the park flag sits OVER it, and until the lane
+   *  existed the only thing that ever set that flag was the installer, which
+   *  always unparks on the way home. The lane parks too, and nothing unparks
+   *  THAT: without this, one displaced strip is a Notes toggle that does
+   *  nothing for the rest of the session.
+   *
+   *  Asking for the window is the participant taking the shell's decision
+   *  back, so an explicit open OVERRULES a lane park. The INSTALLER park still
+   *  stands — a strip that reappeared there would float over somebody else's
+   *  page with nothing left to put it away again (window-session.ts). */
+  #show(): void {
+    if (!windowsParked()) this.#parked.set(false)
+    this.#open.set(true)
+  }
+
   #cleanups: (() => void)[] = []
   #selectionListener: (() => void) | null = null
 
@@ -2476,7 +2492,7 @@ export class NotesStripComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ mode: string; target: string; editId?: string }>('command:enter-mode', (p) => {
       if (p?.mode !== 'note-capture' || !p.target) return
       this.#capturingFor.set(p.target)
-      this.#open.set(true)   // authoring turns the strip on (and lights the toggle)
+      this.#show()           // authoring turns the strip on (and lights the toggle)
     }))
     this.#cleanups.push(EffectBus.on<{ mode: string }>('command:exit-mode', (p) => {
       if (p?.mode !== 'note-capture') return
@@ -2511,7 +2527,10 @@ export class NotesStripComponent implements OnDestroy {
         this.draftText.set('')
         this.editingNoteId.set(null)
       }
-      this.#open.set(next)
+      // The header toggle is the participant asking for the window by name —
+      // the one gesture that must always be able to bring it back.
+      if (next) this.#show()
+      else this.#open.set(false)
     }))
 
     // Stale legacy localStorage key — the user's pinned-tools list no
@@ -2862,7 +2881,7 @@ export class NotesStripComponent implements OnDestroy {
   #openForm(cell: string, opts?: { editId?: string | null; prefill?: string; mark?: string | null }): void {
     if (!cell) return
     this.#capturingFor.set(cell)
-    this.#open.set(true)                       // authoring turns the strip on
+    this.#show()                               // authoring turns the strip on
     this.editingNoteId.set(opts?.editId ?? null)
     this.draftText.set(opts?.prefill ?? '')
     this.draftKind.set('note')

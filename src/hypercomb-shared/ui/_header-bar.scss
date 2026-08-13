@@ -26,8 +26,9 @@
   // `.action-group`), and a cell carrying several branch-scoped behaviours
   // takes two or three rows. The bar grows to hold them and everything below
   // follows via `--hc-header-anchor` (styles/_header-size.scss). A one-row
-  // rail — the common case — still renders at exactly 2.5rem.
-  min-height: 2.5rem;
+  // rail — the common case — renders at exactly this height: the rail button
+  // (1.85rem) plus a hair of air, and nothing else.
+  min-height: 2.2rem;
 
   // ── the icon rail's metrics ────────────────────────────
   // One box, one glyph size, one gap for EVERY icon on the right of the
@@ -36,8 +37,11 @@
   // quick links that follow them, which live in a separate component and
   // would otherwise drift. Anything new that lands on this rail reads
   // these; it never picks its own numbers.
-  --hc-rail-btn: 1.85rem;
-  --hc-rail-glyph: 1.2rem;
+  // Sized against the RULED bar: the button box IS the hover circle, so on a
+  // 2.2rem bar a 1.85rem circle all but touched the hairlines above and below.
+  // Smaller box, smaller glyph — the circle keeps clear air on both edges.
+  --hc-rail-btn: 1.6rem;
+  --hc-rail-glyph: 1.05rem;
   --hc-rail-gap: 0.3rem;
   // How many icons a group fits before wrapping to the next row. The rail
   // NEVER shrinks an icon to make room (that raggedness is what the rail
@@ -54,29 +58,40 @@
   // (breadcrumb, dock-left rail, hint-bar, notes-strip, history-viewer,
   // format-painter) read the same factor so they stay flush at any size.
   zoom: var(--hc-header-zoom, 1.0);
-  // FLOATING BAR: inset from the viewport edges with rounded corners, so the
-  // prompt reads as an instrument laid on the hive rather than a wall across
-  // the top. Every below-the-bar offset follows automatically — the anchor is
-  // the MEASURED bottom edge (`--hc-header-bottom`, controls-bar's
-  // ResizeObserver), which includes this margin.
-  margin: 0.4rem 0.5rem 0;
-  padding: 0.1rem 0.3rem;
+  // RULED BAR, not a floating pill: the prompt runs edge to edge and is
+  // separated from the hive by hairlines alone — one above, one below, and the
+  // same hairline down each side where the viewport doesn't already cut it off.
+  // No inset margin, no rounded corners, no drop shadow: the frame is the
+  // thinnest mark that still says "this row is chrome". Every below-the-bar
+  // offset follows automatically — the anchor is the MEASURED bottom edge
+  // (`--hc-header-bottom`, controls-bar's ResizeObserver).
+  margin: 0;
+  padding: 0 0.2rem;
   background: rgba(8, 16, 26, 0.78);
   // Resting border is a faint steel hairline; it firms up — never glares —
   // when the command line is active. `.input-open` is mobile-only (app.ts:
   // inputOpen = mobile && visible), so `:focus-within` is the real "active"
   // signal on desktop.
-  border: 1px solid rgba(126, 182, 214, 0.22);
-  border-radius: 9px;
-  // Clip children's hover fills to the rounded corner. Safe for the
-  // intellisense dropdown + hint surfaces — they position `fixed` and escape
-  // the clip, which is exactly why the frost lives on ::before below.
+  // Sub-pixel rules: half a pixel of a DARKER steel than the shell's accent
+  // (126,182,214 scaled down) — the line reads as a seam in the chrome rather
+  // than a lit edge drawn on top of it. The top and bottom carry the whole
+  // separation, so they sit a touch stronger than the sides.
+  //
+  // WEIGHT IS CARRIED BY ALPHA, NOT WIDTH. Chrome snaps a hairline border up
+  // to one device pixel, so `0.5px` and `1px` paint the same row — the only
+  // lever that actually thins the rule is lowering its contrast against the
+  // bar. Reach for these alphas, never a smaller px value.
+  border: 0.5px solid rgba(72, 104, 124, 0.16);
+  border-top-color: rgba(72, 104, 124, 0.38);
+  border-bottom-color: rgba(72, 104, 124, 0.38);
+  border-radius: 0;
+  // Clip children's hover fills to the frame. Safe for the intellisense
+  // dropdown + hint surfaces — they position `fixed` and escape the clip,
+  // which is exactly why the frost lives on ::before below.
   overflow: hidden;
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28), inset 0 1px rgba(255, 255, 255, 0.03);
   position: relative;
   z-index: 60000;
-  transition: border-color var(--md-dur-medium, 200ms) var(--md-easing-standard, ease),
-              box-shadow var(--md-dur-medium, 200ms) var(--md-easing-standard, ease);
+  transition: border-color var(--md-dur-medium, 200ms) var(--md-easing-standard, ease);
 }
 
 // The frosted glass, on a pseudo-layer DELIBERATELY — never on the bar
@@ -96,14 +111,14 @@
   backdrop-filter: blur(14px) saturate(1.05);
 }
 
-// Command line active — focused (desktop) or revealed on mobile. A restrained
-// firm-up of the steel hairline plus a one-pixel halo, not a bright glow.
+// Command line active — focused (desktop) or revealed on mobile. The rules
+// firm up and nothing else moves: no halo, no lift. A hairline that gets a
+// little brighter is the whole "active" signal on a bar this thin.
 .header-bar:focus-within,
 .header-bar.input-open {
-  border-color: rgba(126, 182, 214, 0.55);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32),
-              0 0 0 1px rgba(126, 182, 214, 0.16),
-              inset 0 1px rgba(255, 255, 255, 0.03);
+  border-color: rgba(84, 122, 146, 0.24);
+  border-top-color: rgba(84, 122, 146, 0.55);
+  border-bottom-color: rgba(84, 122, 146, 0.55);
 }
 
 // ── hci icon font ────────────────────────────────────────

@@ -211,7 +211,12 @@ export class ContextWindowComponent implements OnDestroy {
   }
 
   /** Ask about this tile. The window's reason to exist in one press: everything
-   *  listed here is what that question gets to draw on. */
+   *  listed here is what that question gets to draw on — TRUE since the wiring
+   *  pass, because the ask composers (llm.queen submitChat/submitAsk and the
+   *  chat window's host tier) re-derive `contextSignaturesFor(segments)` at
+   *  send. Nothing needs to travel from here: derivation is cheap, always
+   *  current, and re-deriving beats carrying a list that could go stale between
+   *  this press and the send. */
   ask(): void {
     EffectBus.emit('ask:open', { prefill: '' })
   }

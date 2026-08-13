@@ -158,32 +158,56 @@ export class PostitViewDrone extends Drone {
 
     if (!decorated.length) { this.#stickies?.remove(); this.#stickies = null; return }
 
-    const host = document.createElement('aside')
-    host.className = 'hc-postit-stickies'
-    host.innerHTML = `<style>${STICKY_CSS}</style>`
+    // KEYED, IN-PLACE update — the column is long-lived. Tearing every note
+    // down each pass (every synchronize) reset hover/settle transitions and
+    // made a drop land as a node swap mid-settle — the "clips into place"
+    // pop. Reusing the node by cell path keeps the paper continuous on
+    // screen; a re-render is a ≤1px nudge, not a rebuild.
+    let host = this.#stickies
+    if (!host) {
+      host = document.createElement('aside')
+      host.className = 'hc-postit-stickies'
+      host.innerHTML = `<style>${STICKY_CSS}</style>`
+      document.body.appendChild(host)
+      this.#stickies = host
+    }
+    const keep = new Set<string>()
     decorated.forEach((cell, index) => {
-      const note = document.createElement('button')
-      note.type = 'button'
-      note.className = 'postit-sticky'
-      note.style.setProperty('--postit-tilt', `${index % 2 ? 1.6 : -2.2}deg`)
+      // NUL join — the one character a tile name can never carry (same
+      // convention as the decoration index's location keys).
+      const key = cell.path.join(' ')
+      keep.add(key)
+      let note = this.#noteByKey.get(key)
+      if (!note || !note.isConnected) {
+        note = document.createElement('button')
+        note.type = 'button'
+        note.className = 'postit-sticky'
+        this.#noteByKey.set(key, note)
+        const heading = document.createElement('span')
+        heading.className = 'postit-sticky-title'
+        const cue = document.createElement('span')
+        cue.className = 'postit-sticky-cue'
+        cue.textContent = 'open ›'
+        note.append(heading, cue)
+        this.#wireDrag(note, cell)
+        host.append(note)
+      }
+      note.style.setProperty('--postit-tilt', )
       const title = titleForLabel(cell.label, navigator.language) || cell.label
-      note.title = `Open the post-it on "${title}"`
-      const heading = document.createElement('span')
-      heading.className = 'postit-sticky-title'
-      heading.textContent = title
-      const cue = document.createElement('span')
-      cue.className = 'postit-sticky-cue'
-      cue.textContent = 'open ›'
-      note.append(heading, cue)
-      // A PINNED note sits where it was dropped — viewport fractions from the
-      // payload, clamped so a resize can never strand it out of reach. No pin
-      // = the docked column, exactly as before.
+      note.title =       const heading = note.querySelector('.postit-sticky-title')
+      if (heading && heading.textContent !== title) heading.textContent = title
+      // A PINNED note sits where it was dropped — viewport fractions from
+      // the payload, applied EXACTLY. The only clamp is a rescue: keep a
+      // grabbable corner inside the viewport so a resize can never strand
+      // the note out of reach. No pin = the docked column.
       const pin = cell.payload?.pin
       if (pin && Number.isFinite(pin.x) && Number.isFinite(pin.y)) {
         note.classList.add('postit-pinned')
         const w = window.innerWidth, h = window.innerHeight
-        note.style.left = `${Math.min(Math.max(0, pin.x * w), Math.max(0, w - 72))}px`
-        note.style.top = `${Math.min(Math.max(0, pin.y * h), Math.max(0, h - 48))}px`
+        note.style.left =         note.style.top =       } else {
+        note.classList.remove('postit-pinned')
+        note.style.left = ''
+        note.style.top = ''
       }
       note.onclick = () => {
         // The click that tails a drag gesture is the drop, not an open.
@@ -194,12 +218,12 @@ export class PostitViewDrone extends Drone {
         this.#vm()?.setMode(POSTIT_VIEW)
         void this.#reconcile()
       }
-      this.#wireDrag(note, cell)
-      host.append(note)
     })
-    this.#stickies?.remove()
-    this.#stickies = host
-    document.body.appendChild(host)
+    for (const [key, note] of this.#noteByKey) {
+      if (keep.has(key)) continue
+      note.remove()
+      this.#noteByKey.delete(key)
+    }
   }
 
   // ── Dragging: pick a sticky up, and it stays where you leave it ──────

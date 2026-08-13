@@ -31,7 +31,7 @@ $steel: rgb(126, 182, 214);
   position: absolute;
   // Dock flush below the header bar and run to the viewport floor — the
   // same anchoring the features panel uses so the two share the right dock.
-  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   right: 0;
   bottom: 0;
   // The inline [style.width] (drag-resized, persisted) drives the actual

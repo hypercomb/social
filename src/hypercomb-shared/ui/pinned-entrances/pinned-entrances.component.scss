@@ -34,8 +34,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--hc-rail-btn, 1.85rem);
-  height: var(--hc-rail-btn, 1.85rem);
+  width: var(--hc-rail-btn, 1.6rem);
+  height: var(--hc-rail-btn, 1.6rem);
   padding: 0;
   background: none;
   border: none;
@@ -48,7 +48,7 @@
 
   .mat-sym {
     font-family: 'Material Symbols Outlined';
-    font-size: var(--hc-rail-glyph, 1.2rem);
+    font-size: var(--hc-rail-glyph, 1.05rem);
     line-height: 1;
   }
 
@@ -80,8 +80,8 @@
 // Drop slot — raised only while an entrance badge drag is in flight.
 .drop-slot {
   display: inline-flex;
-  width: var(--hc-rail-btn, 1.85rem);
-  height: var(--hc-rail-btn, 1.85rem);
+  width: var(--hc-rail-btn, 1.6rem);
+  height: var(--hc-rail-btn, 1.6rem);
   border-radius: 50%;
   border: 1px dashed rgba(126, 182, 214, 0.55);
   background: rgba(126, 182, 214, 0.08);

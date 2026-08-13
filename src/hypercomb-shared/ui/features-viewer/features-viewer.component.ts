@@ -422,8 +422,8 @@ export class FeaturesViewerComponent implements OnDestroy {
     )
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {
       if (!p?.cell) return
-      // Mutually exclusive with the Files panel — shared right-side dock.
-      EffectBus.emit('files:viewer-close', {})
+      // No sibling is closed here — see the note in files-viewer. The lane
+      // decides what fits on an edge, and it parks rather than closes.
       const group: FeatureGroup = {
         cell: p.cell,
         segments: Array.isArray(p.segments) ? p.segments : [],
@@ -457,7 +457,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     // ── THE STORE arriving (features:roster-open → show-features) ──
     this.#cleanups.push(EffectBus.on<{ rows?: StoreRow[] }>('features:roster', (p) => {
       const rows = Array.isArray(p?.rows) ? p!.rows! : []
-      EffectBus.emit('files:viewer-close', {})
       this.storeRows.set(rows)
       this.query.set('')
       this.selectedKeys.set(new Set())

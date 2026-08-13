@@ -27,11 +27,11 @@ $accent: #c8b8ff;
   position: absolute;
   // Dock flush BELOW the header bar (the right-side analog of the
   // controls-bar `dock-left` rail) and track the active header size:
-  // 2.8rem clears the ~2.83rem header bottom, × `--hc-header-zoom` so it
+  // 2.3rem clears the ~2.33rem header bottom, × `--hc-header-zoom` so it
   // stays flush across the small/medium/large presets (and the 13" band
   // bump folded into the same variable). `bottom: 0` carries the panel to
   // the viewport floor without recomputing a height per size.
-  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   right: 0;
   bottom: 0;
   // Width + --hc-panel-scale come from hcDockedPanel (inline). These are
@@ -343,7 +343,7 @@ $accent: #c8b8ff;
 // 13" laptop-band bump rides folded into `--hc-header-zoom` (see
 // `styles/_header-size.scss`), so no per-band override is needed.
 @include touch {
-  .features-panel { top: max(calc(3.85rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
+  .features-panel { top: max(calc(3.65rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
 }
 
 // ── phone: THE WHOLE PAGE, not a docked slab or a peeking sheet ────

@@ -31,6 +31,7 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
+import { resolveTileContext } from './tile-context.js'
 
 type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
 type SelectionLike = { selected: ReadonlySet<string> }
@@ -38,6 +39,50 @@ type LineageLike = { explorerSegments?: () => readonly string[] }
 
 /** Optimization kind for a user→Claude ask. The bridge ask-loop lists this. */
 const ASK_KIND = 'ask'
+
+/** Composed context budget for one ask — across ALL attached branches.
+ *
+ *  tile-context bounds each branch's walk (240 nodes), but nothing bounded the
+ *  UNION an ask carries; this is that deliberate ceiling rather than an
+ *  accident of the per-branch numbers. Sigs are pointers, not bytes — the
+ *  responder expands what it needs with `get-resource` — so the cap protects
+ *  the ask record's size, and `contextTruncated` rides along when it bites so
+ *  the responder knows there is more than the list shows. */
+const CONTEXT_SIG_CAP = 64
+
+/** The tile's attached context, resolved and capped — the wiring the context
+ *  system existed for. Never allowed to fail a send: context is a grade of
+ *  service, the question itself is the service.
+ *
+ *  Composed from the PER-BRANCH resolution, not the flat union, because
+ *  honesty composes too: `contextTruncated` must ride whenever the list is
+ *  incomplete for ANY reason — a branch's own walk hit its depth/node budget,
+ *  a branch resolved to an error (attached but unreadable), or the composed
+ *  cap below bit. The union call discards those flags, and a responder told
+ *  "this is everything" when it is not answers confidently out of ignorance —
+ *  the exact failure the context system's honesty doctrine exists to prevent. */
+const composeContext = async (
+  segments: readonly string[],
+): Promise<{ context?: string[]; contextTruncated?: boolean }> => {
+  try {
+    const branches = await resolveTileContext(segments)
+    if (!branches.length) return {}
+    const union = new Set<string>()
+    let incomplete = false
+    for (const branch of branches) {
+      if (branch.truncated || branch.error) incomplete = true
+      for (const sig of branch.signatures) union.add(sig)
+    }
+    const sigs = [...union]
+    if (!sigs.length) return incomplete ? { contextTruncated: true } : {}
+    return {
+      context: sigs.slice(0, CONTEXT_SIG_CAP),
+      ...(incomplete || sigs.length > CONTEXT_SIG_CAP ? { contextTruncated: true } : {}),
+    }
+  } catch {
+    return {}
+  }
+}
 
 export class LlmQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -85,6 +130,12 @@ export class LlmQueenBee extends QueenBee {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
 
+    // The tile's ATTACHED CONTEXT rides with the turn — the branches somebody
+    // dragged onto this tile, resolved to content sigs. This is the wire the
+    // whole context system was built toward: the responder no longer has to
+    // guess that a tile has curated material behind it.
+    const context = await composeContext(segments)
+
     const record = {
       kind: ASK_KIND,
       appliesTo: targets.length ? targets : segments,
@@ -96,6 +147,7 @@ export class LlmQueenBee extends QueenBee {
         model: this.activeModel,
         targets,
         segments,
+        ...context,
         status: 'pending',
         askedAt: Date.now(),
       },
@@ -129,6 +181,10 @@ export class LlmQueenBee extends QueenBee {
       return false
     }
 
+    // The tile's attached context — same wire as submitChat, so a note-bound
+    // ask reads from the same curated branches a chat turn does.
+    const context = await composeContext(segments)
+
     // The ask record — content-addressed, participant-local (never shared).
     // `appliesTo` is where the answer should land (the selection, else here).
     const record = {
@@ -139,6 +195,7 @@ export class LlmQueenBee extends QueenBee {
         model: this.activeModel,   // responder hint (opus / sonnet / haiku / fable)
         targets,                   // selected tile labels
         segments,                  // lineage of the current level
+        ...context,                // attached-context sigs (context / contextTruncated)
         ...(hiveScope ? { scope: 'hive' } : {}),
         status: 'pending',
         askedAt: Date.now(),

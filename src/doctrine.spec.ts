@@ -390,4 +390,42 @@ describe('doctrine ratchets', () => {
       'Give it a colon (e.g. "thing:records") instead of adding it to the list.\n',
     ).toEqual([])
   })
+
+  it('no tool window closes a SIBLING by name — the lane decides what fits, and it parks', () => {
+    // A window that shuts another one runs the OTHER's `close()`, which is the
+    // participant's own verb: it empties gathered lists, selections, brushes
+    // and drafts. Sharing an edge is the LANE's business (dock-lanes.ts), and
+    // the lane PARKS what it displaces so the displacement costs nothing.
+    //
+    // This rule has had to be deleted TWICE — once from the command line's
+    // notes/feedback/pheromones trio, once from files/features/observe — so it
+    // is mechanical from here. A window may still emit its OWN close (that is
+    // the channel the Escape cascade and the tutorial drive); what it may not
+    // do is emit somebody else's.
+    const UI = join(ROOT, 'hypercomb-shared/ui')
+    const offenders: string[] = []
+    let dirs: string[] = []
+    try { dirs = readdirSync(UI, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name) } catch { dirs = [] }
+
+    for (const dir of dirs) {
+      let files: string[] = []
+      try { files = walk(join(UI, dir)) } catch { continue }
+      // Scoped to LANE OCCUPANTS. Free-floating chrome (the controls bar, the
+      // format painter) legitimately closes the strip it launches — it is that
+      // strip's toggle, not a rival for its edge.
+      const isDockedWindow = files.some(f =>
+        f.endsWith('.html') && /hcDockedPanel/.test(readFileSync(f, 'utf8')))
+      if (!isDockedWindow) continue
+      // 'files-viewer' owns 'files:*'; 'notes-strip' owns 'notes:*'.
+      const own = dir.split('-')[0]
+      for (const file of files) {
+        if (file.endsWith('.spec.ts')) continue
+        const code = stripComments(readFileSync(file, 'utf8'))
+        for (const m of code.matchAll(/emit\s*(?:<[^>]*>)?\s*\(\s*['"`]([a-z-]+):(?:viewer-)?close['"`]/g)) {
+          if (m[1] !== own) offenders.push(`${relative(ROOT, file).replace(/\\/g, '/')} → ${m[1]}`)
+        }
+      }
+    }
+    assertRatchet(offenders.sort(), [], 'sibling window close')
+  })
 })

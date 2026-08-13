@@ -500,17 +500,52 @@ tutorialLessons.register({
   order: 160,
   title: 'The assistant',
   pheromones: ['tutorial', 'lesson', 'expert', 'assistant'],
+  requires: () => hasWindow('hc-chat-window'),
   async run(stage) {
     await stage.flyToRect(stage.commandInput())
-    await stage.say('assistant-window', 'Asking, with the tiles attached',
-      'You can ask for help from right here. /opus, /sonnet or /haiku open the ask screen: type the question, then tap tiles to send as context. No tiles tapped means the page you are on.')
+    await stage.say('assistant-window', 'The chat window',
+      'You can ask for help from right here. /opus, /sonnet, /haiku or /ask open the CHAT WINDOW — a conversation docked beside your tiles, so you talk ABOUT what you are looking at. Where you are standing and what you have selected is the context every question carries; the window’s footer reads it back to you.')
     stage.highlight(null)
+
+    await stage.say('assistant-window-context', 'Two kinds of context',
+      'Selecting tiles sends them with THIS question only. A branch dragged onto the tile as ATTACHED CONTEXT rides with EVERY question asked there — that is the paper-clip count in the chat footer, and the context window is where you manage it.')
 
     await stage.say('assistant-window-bees', 'Work you can watch',
       'While a question is in flight a bee flies over the tiles it is working on. Click the bee to see what was asked, where the answer will land, and add more context mid-flight.')
 
     await stage.say('assistant-window-done', 'Answers land as notes',
       'Answers come back as NOTES on the tiles they are about — never a chat log you have to keep somewhere else. /atomize asks it to break a tile into its pieces; /organize asks it to insert a level into a crowded page. Both hand back a plan the hive checks before it moves anything.')
+  },
+})
+
+// ── 165 · the context window ───────────────────────────────────────────
+// The believed-missing lesson (the feature shipped without it, breaking this
+// course's one-lesson-per-window rule): what ATTACHED CONTEXT is, where it is
+// managed, and the promise that what is listed is what a question reads.
+
+tutorialLessons.register({
+  id: 'window-context',
+  level: L,
+  order: 165,
+  title: 'The context window',
+  pheromones: ['tutorial', 'lesson', 'expert', 'assistant', 'structure'],
+  teaches: ['context'],
+  requires: () => hasBehaviour('context') && hasWindow('hc-context-window'),
+  async run(stage) {
+    await stage.flyToRect(stage.commandInput())
+    await stage.say('context-window', 'Context that stays attached',
+      'Drag a portal out of the Portals window onto a tile — an amber ring, not the teal one — and that whole branch becomes the tile’s ATTACHED CONTEXT: material every question asked there gets to read, tracking the branch as it grows. /context is the way back to what you attached.')
+    stage.highlight(null)
+
+    await stage.typeAndSubmit('/context', false)
+    await stage.wait(1800)
+    await stage.say('context-window-rows', 'Honest numbers',
+      'One row per attached branch: how many tiles it reaches and how many signatures that resolves to, recomputed live — never a stale snapshot. When a branch is too big to walk in full, the row SAYS so instead of pretending, and Visit takes you there; the small × takes one branch back off.')
+
+    await stage.say('context-window-done', 'It rides with every question',
+      'Everything listed here is what a question asked on this tile gets to draw on — in the chat window, that is the paper-clip count beside the path. Attach the branches that explain a tile once, and every future answer starts already knowing them.')
+    stage.emit('context:window-close', {})
+    await stage.wait(500)
   },
 })
 

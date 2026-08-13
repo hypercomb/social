@@ -40,7 +40,7 @@
 // Panels add their own air on top: `calc(var(--hc-header-anchor) + <air>)`.
 // Never go back to a bare `<base>rem * zoom` — that is the bug this replaces.
 :root {
-  --hc-header-nominal: 2.83rem;   // 2.5rem bar + padding + border, desktop
+  --hc-header-nominal: 2.33rem;   // 2.2rem bar + hairline borders, desktop
   --hc-header-anchor: max(
     calc(var(--hc-header-nominal) * var(--hc-header-zoom, 1.0)),
     var(--hc-header-bottom, 0px)
@@ -50,7 +50,7 @@
 // Touch chrome is the taller 3.5rem bar (see _header-bar.scss `@include touch`,
 // which expands to exactly this query).
 @media (pointer: coarse) {
-  :root { --hc-header-nominal: 3.83rem; }
+  :root { --hc-header-nominal: 3.63rem; }
 }
 
 :root                        { --hc-header-zoom: 1.0;  }  // size 1 / compact (default — slim)

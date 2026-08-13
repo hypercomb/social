@@ -32,6 +32,24 @@ export interface HiveManifest {
   pubkey: string
 }
 
+/** Why an index read produced no manifest. `fetchHiveManifest` collapses all
+ *  of these to `null` (its callers only ever asked "did I get one?"), but the
+ *  publish differential MUST tell them apart: an unreachable host is a quiet
+ *  "unknown", while a signature that does not verify is a host actively
+ *  serving something that is not the publisher's — the single most alarming
+ *  condition in the protocol, and the one a status panel exists to surface.
+ *
+ *  - `unreachable` — network/CORS/DNS failure. Nothing asserted.
+ *  - `http`        — the host answered, but not with 200 (404 = never published).
+ *  - `malformed`   — 200 with unparseable JSON, wrong kind, or bad roots.
+ *  - `forged`      — well-formed event whose schnorr signature does not verify
+ *                    against the pinned pubkey, or whose pubkey is not ours. */
+export type HiveIndexFailure = 'unreachable' | 'http' | 'malformed' | 'forged'
+
+export type HiveIndexResult =
+  | { ok: true; manifest: HiveManifest }
+  | { ok: false; reason: HiveIndexFailure; status?: number }
+
 const SIG_RE = /^[a-f0-9]{64}$/
 const NIP98_KIND = 27235
 // Loopback hosts use plain http (content-side analog of allow-loopback);
@@ -45,34 +63,57 @@ export function hiveIndexUrl(host: string, pubkey: string): string {
   return `${scheme}://${bare}/hive/${pubkey}`
 }
 
-/** Fetch + verify one host's copy of the publisher's hive index. Returns
- *  null on any failure — unreachable host, bad JSON, wrong kind, wrong
- *  pubkey, bad signature, malformed roots. Never throws. */
-export async function fetchHiveManifest(host: string, pubkey: string): Promise<HiveManifest | null> {
+/** Fetch + verify one host's copy of the publisher's hive index, REPORTING
+ *  WHY it failed. Never throws.
+ *
+ *  The distinction matters because callers act on it differently: a publish
+ *  MUST NOT rewrite the index off an `unreachable` read (doing so PUTs an
+ *  index missing every branch it could not see — see publish-branch.ts), and
+ *  a status surface must render `forged` loudly while rendering `unreachable`
+ *  as silence. */
+export async function fetchHiveIndex(host: string, pubkey: string): Promise<HiveIndexResult> {
   const key = String(pubkey ?? '').trim().toLowerCase()
-  if (!SIG_RE.test(key)) return null
-  let evt: Record<string, unknown>
+  if (!SIG_RE.test(key)) return { ok: false, reason: 'malformed' }
+  let res: Response
   try {
-    const res = await fetch(hiveIndexUrl(host, key), { cache: 'no-store' })
-    if (!res.ok) return null
-    evt = await res.json() as Record<string, unknown>
-  } catch { return null }
+    res = await fetch(hiveIndexUrl(host, key), { cache: 'no-store' })
+  } catch { return { ok: false, reason: 'unreachable' } }
+  if (!res.ok) return { ok: false, reason: 'http', status: res.status }
 
-  if (Number(evt?.['kind']) !== HIVE_INDEX_EVENT_KIND) return null
-  if (String(evt?.['pubkey'] ?? '').toLowerCase() !== key) return null
-  try { if (!verifyEvent(evt as never)) return null } catch { return null }
+  let evt: Record<string, unknown>
+  try { evt = await res.json() as Record<string, unknown> } catch { return { ok: false, reason: 'malformed' } }
+
+  if (Number(evt?.['kind']) !== HIVE_INDEX_EVENT_KIND) return { ok: false, reason: 'malformed' }
+  // Wrong pubkey and bad signature are BOTH substitution, not corruption:
+  // the host handed back an index that is not this publisher's.
+  if (String(evt?.['pubkey'] ?? '').toLowerCase() !== key) return { ok: false, reason: 'forged' }
+  try { if (!verifyEvent(evt as never)) return { ok: false, reason: 'forged' } }
+  catch { return { ok: false, reason: 'forged' } }
 
   let content: Record<string, unknown>
-  try { content = JSON.parse(String(evt['content'] ?? '')) as Record<string, unknown> } catch { return null }
+  try { content = JSON.parse(String(evt['content'] ?? '')) as Record<string, unknown> }
+  catch { return { ok: false, reason: 'malformed' } }
   const rawRoots = content?.['roots']
-  if (!rawRoots || typeof rawRoots !== 'object' || Array.isArray(rawRoots)) return null
+  if (!rawRoots || typeof rawRoots !== 'object' || Array.isArray(rawRoots)) return { ok: false, reason: 'malformed' }
   const roots: Record<string, string> = {}
   for (const [k, v] of Object.entries(rawRoots as Record<string, unknown>)) {
     const sig = String(v ?? '').trim().toLowerCase()
-    if (!k.trim() || !SIG_RE.test(sig)) return null
+    if (!k.trim() || !SIG_RE.test(sig)) return { ok: false, reason: 'malformed' }
     roots[k] = sig
   }
-  return { roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key }
+  return { ok: true, manifest: { roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key } }
+}
+
+/** Fetch + verify one host's copy of the publisher's hive index. Returns
+ *  null on any failure — unreachable host, bad JSON, wrong kind, wrong
+ *  pubkey, bad signature, malformed roots. Never throws.
+ *
+ *  Kept as the simple predicate for callers that genuinely only need "did I
+ *  get a verified index?"; anything that must act on WHY should call
+ *  `fetchHiveIndex`. */
+export async function fetchHiveManifest(host: string, pubkey: string): Promise<HiveManifest | null> {
+  const result = await fetchHiveIndex(host, pubkey)
+  return result.ok ? result.manifest : null
 }
 
 /** Try each host in order; first verified index wins. The signature check
@@ -89,6 +130,13 @@ export interface PutHiveResult {
   ok: boolean
   /** Own pubkey the index was written under ('' when signing failed). */
   pubkey: string
+  /** SECONDS-epoch `created_at` of the event we signed — 0 when signing
+   *  failed. Returned (not discarded) because it is the ONLY defence against
+   *  a stale-but-authentic index: a schnorr check proves an index is the
+   *  publisher's, never that it is the LATEST. A later read whose
+   *  `created_at` is older than one we ourselves signed proves the host (or
+   *  an edge in front of it) is serving a superseded index. */
+  createdAt: number
   reason?: string
 }
 
@@ -98,7 +146,7 @@ export interface PutHiveResult {
  *  /host queen). Never throws. */
 export async function putHiveManifest(host: string, roots: Record<string, string>): Promise<PutHiveResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
-  if (!signer?.signEvent) return { ok: false, pubkey: '', reason: 'no signer' }
+  if (!signer?.signEvent) return { ok: false, pubkey: '', createdAt: 0, reason: 'no signer' }
 
   let signed: Record<string, unknown>
   try {
@@ -108,13 +156,17 @@ export async function putHiveManifest(host: string, roots: Record<string, string
       tags: [],
       content: JSON.stringify({ v: HIVE_LINK_VERSION, roots }),
     })
-  } catch { return { ok: false, pubkey: '', reason: 'signing failed' } }
+  } catch { return { ok: false, pubkey: '', createdAt: 0, reason: 'signing failed' } }
   const pubkey = String(signed?.['pubkey'] ?? '').toLowerCase()
-  if (!SIG_RE.test(pubkey)) return { ok: false, pubkey: '', reason: 'signer returned no pubkey' }
+  // Read the stamp back off the SIGNED event rather than our own clock: a
+  // NIP-07 extension signs an event it composed, and the freshness compare is
+  // only meaningful against the value the host will actually serve.
+  const createdAt = Number(signed?.['created_at'] ?? 0) || 0
+  if (!SIG_RE.test(pubkey)) return { ok: false, pubkey: '', createdAt, reason: 'signer returned no pubkey' }
 
   const url = hiveIndexUrl(host, pubkey)
   const auth = await nip98Header(signer, url, 'PUT')
-  if (!auth) return { ok: false, pubkey, reason: 'nip-98 signing failed' }
+  if (!auth) return { ok: false, pubkey, createdAt, reason: 'nip-98 signing failed' }
 
   try {
     const res = await fetch(url, {
@@ -122,9 +174,9 @@ export async function putHiveManifest(host: string, roots: Record<string, string
       headers: { Authorization: auth, 'Content-Type': 'application/json' },
       body: JSON.stringify(signed),
     })
-    if (!res.ok) return { ok: false, pubkey, reason: `host said ${res.status}: ${res.headers.get('X-Reason') ?? ''}`.trim() }
-    return { ok: true, pubkey }
-  } catch { return { ok: false, pubkey, reason: 'host unreachable' } }
+    if (!res.ok) return { ok: false, pubkey, createdAt, reason: `host said ${res.status}: ${res.headers.get('X-Reason') ?? ''}`.trim() }
+    return { ok: true, pubkey, createdAt }
+  } catch { return { ok: false, pubkey, createdAt, reason: 'host unreachable' } }
 }
 
 /** NIP-98 Authorization header — same envelope HostSyncService signs for

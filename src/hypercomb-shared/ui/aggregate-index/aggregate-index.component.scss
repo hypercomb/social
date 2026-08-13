@@ -32,7 +32,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   // header-bottom offset every other tool window uses, for when there is no
   // left rail. Hardcoding the rail's own offsets here instead is how the two
   // drifted apart — the rail's top moves with the header zoom AND on touch.
-  top: var(--hc-controls-left-top, max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
+  top: var(--hc-controls-left-top, max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
   left: 0;
   bottom: 0;
   width: 280px;

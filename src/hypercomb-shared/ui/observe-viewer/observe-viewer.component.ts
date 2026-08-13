@@ -83,11 +83,8 @@ export class ObserveViewerComponent implements OnDestroy {
         this.showNames.set(p.filter.showNames !== false)
         this.groupBy.set(this.#normGrouping(p.filter.groupBy))
       }
-      // Share the right-side dock — opening Observe closes the sibling panels.
-      if (p.open) {
-        EffectBus.emit('files:viewer-close', {})
-        EffectBus.emit('features:viewer-close', {})
-      }
+      // No sibling is closed here — see the note in files-viewer. Sharing an
+      // edge is the lane's business, and it parks what it displaces.
       this.visible.set(!!p.open)
     }))
   }

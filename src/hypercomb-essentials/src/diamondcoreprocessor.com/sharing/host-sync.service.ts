@@ -1177,6 +1177,181 @@ export class HostSyncService extends EventTarget {
     return true
   }
 
+  /** True iff ANY enabled target has confirmed this sig. The honest public
+   *  read: `hasReceipt` deliberately tests only the bare self-domain filename,
+   *  so for a CDN-only publisher — which `/host` produces by default, since it
+   *  flips the public gate and never requires a self-domain — it answers false
+   *  for content the host demonstrably serves. Callers asking "is this
+   *  hosted?" (rather than "is it on MY domain?") want this one. */
+  public readonly hasAnyReceipt = async (sig: string): Promise<boolean> => {
+    const s = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(s)) return false
+    return await this.#anyTargetReceipted(s)
+  }
+
+  /** The unreceipted sigs inside a closure — the same walk
+   *  `#closureReceiptedUncached` performs, but COLLECTING the holes instead
+   *  of short-circuiting on the first one. This is what turns "this branch
+   *  isn't fully served" into "these three objects are missing", which is the
+   *  only form a participant can act on.
+   *
+   *  Bounded by `limit` (the walk stops once that many gaps are found) because
+   *  the caller is a status line, not an audit: knowing there are AT LEAST n
+   *  holes is enough to refuse a green light. Reads local bytes across the
+   *  closure, so it is on-demand only — never on a render path.
+   *
+   *  A ref whose bytes we do not hold locally and which is not receipted is
+   *  itself a gap; a receipted-but-unheld layer/resource is reported as a gap
+   *  too, matching the conservative verdict `#closureReceiptedUncached`
+   *  returns, so the two can never disagree about whether a branch is whole. */
+  public readonly closureGaps = async (
+    sig: string,
+    kind: HostSyncKind = 'layer',
+    closure = true,
+    limit = 24,
+  ): Promise<string[]> => {
+    const root = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(root)) return []
+    const gaps: string[] = []
+    const visited = new Set<string>()
+    const cap = Math.max(1, limit)
+
+    const walk = async (s: string, k: HostSyncKind): Promise<void> => {
+      if (gaps.length >= cap || visited.has(s)) return
+      visited.add(s)
+      if (!(await this.#anyTargetReceipted(s))) {
+        gaps.push(s)
+        // Unreceipted node: its refs are not independently actionable —
+        // staging the parent re-walks them. Stop descending here.
+        return
+      }
+      let bytes: ArrayBuffer | null = null
+      try { bytes = await this.#readLocalBytes(s, k) } catch { bytes = null }
+      if (!bytes) {
+        // Receipted but unheld: leaves are complete, containers cannot vouch
+        // for refs we cannot enumerate (the conservative verdict).
+        if (k !== 'bee' && k !== 'dependency') gaps.push(s)
+        return
+      }
+      if (k === 'layer') {
+        let layer: Record<string, unknown>
+        try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
+        if (!layer || typeof layer !== 'object') return
+        const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+        for (const [slot, value] of Object.entries(layer)) {
+          if (!Array.isArray(value)) continue
+          const isChildSlot = CHILD_SLOTS.has(slot)
+          if (isChildSlot && !closure) continue
+          const refKind: HostSyncKind = isChildSlot ? 'layer'
+            : slot === 'bees' ? 'bee'
+            : slot === 'dependencies' ? 'dependency'
+            : 'resource'
+          for (const raw of value) {
+            const ref = String(raw ?? '').trim().toLowerCase()
+            if (!SIG_RE.test(ref) || ref === s) continue
+            await walk(ref, refKind)
+            if (gaps.length >= cap) return
+          }
+        }
+      } else if (k === 'resource') {
+        const nested = [
+          ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
+          ...nestedResourceSigs(bytes),
+        ]
+        for (const ref of nested) {
+          if (!SIG_RE.test(ref) || ref === s) continue
+          await walk(ref, 'resource')
+          if (gaps.length >= cap) return
+        }
+      }
+    }
+
+    await walk(root, kind)
+    return gaps
+  }
+
+  // ── read-only served probe (status surfaces) ──────────────────────────
+  //
+  // DELIBERATELY SEPARATE from #receiptStillHonored. That one is the drain's
+  // self-domain freshness audit and is allowed to REVOKE receipts; this one
+  // answers "does host H serve sig S right now?" for a status panel and must
+  // never mutate receipt state. Three concrete reasons they cannot share
+  // machinery:
+  //
+  //   1. #verifyInFlight / #verifiedOnHost are keyed by SIG ALONE, because the
+  //      audit only ever talks to one host (the self-domain). A per-host probe
+  //      sharing those maps would hand back another host's verdict.
+  //   2. #noteProbeFailure marks a sig audited-for-the-session on ANY non-404.
+  //      One CORS rejection from a status panel would then suppress the
+  //      drain's own re-verification of that sig for the rest of the session.
+  //   3. The drain's breaker exists to stop IT from hammering a sick host.
+  //      Feeding it from a panel would let opening a window silently disable
+  //      receipt auditing — while the breaker is open #receiptStillHonored
+  //      returns true unconditionally.
+  //
+  // Shared with the audit: ONLY #acquireVerifySlot, the global 4-way
+  // concurrency cap. That is a semaphore, not a verdict.
+  #servedProbes = new Map<string, Promise<'served' | 'absent' | 'unknown'>>()
+  #servedFailStreak = 0
+  #servedPausedUntil = 0
+
+  /** Does `host` serve the bytes for `sig` right now? Tri-state, and the
+   *  distinction is the whole point:
+   *
+   *  - `served`  — 200. HONEST EVEN FROM A CACHE: the URL is the content hash,
+   *                so an intermediary can only hold that object under that
+   *                name because the origin served it.
+   *  - `absent`  — 404. The only condition that ASSERTS absence.
+   *  - `unknown` — offline, CORS, 5xx, timeout, or the local breaker. Nothing
+   *                asserted; callers must render silence, not a red light.
+   *
+   *  Never throws, never writes receipt state, never revokes. A 404 here does
+   *  NOT delete a granted-host receipt: an edge miss is far likelier than a
+   *  deletion, and coupling a read-only surface to receipt destruction would
+   *  let one bad response re-push an entire branch. */
+  public readonly probeServed = async (host: string, sig: string): Promise<'served' | 'absent' | 'unknown'> => {
+    const s = String(sig ?? '').trim().toLowerCase()
+    const h = String(host ?? '').trim().toLowerCase()
+      .replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '')
+    if (!SIG_RE.test(s) || !h) return 'unknown'
+    if (Date.now() < this.#servedPausedUntil) return 'unknown'
+    const key = `${h}:${s}`
+    const inFlight = this.#servedProbes.get(key)
+    if (inFlight) return await inFlight
+
+    const run = (async (): Promise<'served' | 'absent' | 'unknown'> => {
+      await this.#acquireVerifySlot()
+      try {
+        if (Date.now() < this.#servedPausedUntil) return 'unknown'
+        const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(h) ? 'http' : 'https'
+        const res = await fetch(`${scheme}://${h}/${s}`, { method: 'HEAD', cache: 'no-store' })
+        if (res.ok) { this.#servedFailStreak = 0; return 'served' }
+        if (res.status === 404) { this.#servedFailStreak = 0; return 'absent' } // host alive and asserting
+        this.#noteServedFailure()
+        return 'unknown'
+      } catch {
+        this.#noteServedFailure()
+        return 'unknown'
+      } finally {
+        this.#verifySlots--
+        // Verdicts are NOT memoized across calls: unlike a receipt audit this
+        // is a liveness question, and a panel refresh must be able to observe
+        // recovery. In-flight dedup only.
+        this.#servedProbes.delete(key)
+      }
+    })()
+    this.#servedProbes.set(key, run)
+    return await run
+  }
+
+  #noteServedFailure(): void {
+    if (++this.#servedFailStreak >= HostSyncService.#PROBE_FAIL_STREAK_MAX && Date.now() >= this.#servedPausedUntil) {
+      this.#servedPausedUntil = Date.now() + HostSyncService.#PROBE_PAUSE_MS
+      this.#servedFailStreak = 0
+      console.warn(`[host-sync] served-probe target unhealthy — pausing status probes for ${HostSyncService.#PROBE_PAUSE_MS / 60000}min`)
+    }
+  }
+
   /** Bounded wait for a sig's receipt on any enabled target — the invite
    *  mint's gate. Kicks a drain, then polls (receipts land via the
    *  drain's file write, not an awaitable). False on timeout or when no

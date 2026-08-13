@@ -38,7 +38,7 @@ $accent: #7eb6d6;
   position: absolute;
   // Same anchor as the other right-docked panels so they align rather than
   // stepping down each other.
-  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   right: 0;
   bottom: 0;
   width: 400px;
@@ -48,6 +48,15 @@ $accent: #7eb6d6;
   flex-direction: column;
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   @include tw.panel($accent, right);
+
+  // Breathing room from the screen edges — the same floating-instrument
+  // treatment the command bar got, so the window never reads as squished
+  // into the corner. Margin (not inset changes) so the dock directive's
+  // inline `right:` lane placement stays authoritative; the free-standing
+  // box completes its border and takes the shared floating radius.
+  margin: 0.35rem 0.4rem 0.45rem 0;
+  border-right: 1px solid rgba($accent, 0.38);
+  border-radius: tw.$radius-floating;
 
   // FOCUS: wide over the dim. `!important` because hcDockedPanel writes the
   // docked width inline; the drag-set width is untouched underneath and comes
@@ -232,7 +241,7 @@ $accent: #7eb6d6;
   display: flex;
   flex-direction: column;
   gap: 0.5em;
-  padding: 0.7em 0.7em;
+  padding: 0.85em 0.85em;
   scrollbar-width: thin;
   scrollbar-color: rgba($accent, 0.35) transparent;
 
@@ -305,7 +314,7 @@ $accent: #7eb6d6;
 
 .chat-foot {
   flex: 0 0 auto;
-  padding: 0.45em 0.6em 0.6em;
+  padding: 0.55em 0.75em 0.7em;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
   background: rgba(255, 255, 255, 0.015);
 }
@@ -339,6 +348,18 @@ $accent: #7eb6d6;
 .chat-targets {
   flex: 0 0 auto;
   color: rgba($accent, 0.85);
+}
+
+// Attached-context count — the branches dragged onto this tile, which ride
+// with every question. Honey-warm so it reads as cargo, not chrome.
+.chat-context {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  color: rgba(224, 180, 92, 0.9);
+
+  .mat-sym { font-size: 1.15em; }
 }
 
 .chat-link {

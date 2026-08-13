@@ -135,16 +135,33 @@ export const appendTurn = async (
 }
 
 /** Every turn in one bucket, oldest first. Shared by the single-thread read and
- *  the conversation list, so both agree about what a thread contains. */
-const readBucket = async (bucket: FileSystemDirectoryHandle): Promise<ChatTurn[]> => {
+ *  the conversation list, so both agree about what a thread contains.
+ *
+ *  `humanOnly` is the LIST walk's cost guard: bucket names are `sha256(convoId)`
+ *  (one-way), so which conversations are a person's is only knowable from the
+ *  turns INSIDE — but it is knowable from the FIRST one, because every turn in
+ *  a bucket carries the same convoId. The walk used to read every file of every
+ *  machine bucket (`keywords:…` chatter can dwarf the human threads) and throw
+ *  the lot away after; with the probe, a machine bucket costs one read. */
+const readBucket = async (
+  bucket: FileSystemDirectoryHandle,
+  humanOnly = false,
+): Promise<ChatTurn[] | null> => {
   const out: ChatTurn[] = []
+  let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
   for await (const [, handle] of entries) {
     if (handle.kind !== 'file') continue
     try {
       const file = await (handle as FileSystemFileHandle).getFile()
       const turn = JSON.parse(await file.text()) as ChatTurn
-      if (turn?.kind === 'chat-turn' && turn.convoId) out.push(turn)
+      if (turn?.kind !== 'chat-turn' || !turn.convoId) continue
+      // The first PARSEABLE turn names the whole bucket.
+      if (!decided) {
+        if (!isHumanConversation(turn.convoId)) return null
+        decided = true
+      }
+      out.push(turn)
     } catch { /* one unreadable turn must not hide the thread */ }
   }
   return out.sort((a, b) => a.at - b.at)
@@ -163,7 +180,7 @@ export const readTurns = async (convoId: string): Promise<ChatTurn[]> => {
   try {
     const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
     const bucket = await pool.getDirectoryHandle(name, { create: false })
-    return (await readBucket(bucket)).filter(turn => turn.convoId === id)
+    return (await readBucket(bucket) ?? []).filter(turn => turn.convoId === id)
   } catch { /* no bucket yet — an empty conversation, not an error */ }
   return []
 }
@@ -177,39 +194,61 @@ const titleOf = (turns: readonly ChatTurn[]): string => {
   return line.length > 72 ? line.slice(0, 71).trimEnd() + '…' : line
 }
 
+/** The list AND the newest thread's turns from one pass — see
+ *  listConversationsWithLatest. */
+export interface ConversationList {
+  conversations: ConversationSummary[]
+  /** The most recently active conversation's turns — the thread a window
+   *  opening onto "resume where you were" is about to ask for anyway. */
+  latestTurns: ChatTurn[]
+}
+
 /**
- * Every human conversation in the pool, most recently active first.
+ * Every human conversation in the pool, most recently active first — plus the
+ * newest one's turns.
  *
  * Walks the buckets and reads them. There is no index to consult and no cache
- * to invalidate: the turns ARE the list. That costs one pass over threads the
- * participant has actually held, which is small, and it can never disagree
- * with what opening a conversation shows.
+ * to invalidate: the turns ARE the list, and it can never disagree with what
+ * opening a conversation shows. Two costs are deliberately NOT paid any more:
+ * machine buckets (`keywords:…` and every future headless consumer) are
+ * probe-skipped after one read (see readBucket), and the newest thread's turns
+ * — which this walk necessarily read — ride out in the result instead of being
+ * discarded for the window to immediately re-read.
  */
-export const listConversations = async (): Promise<ConversationSummary[]> => {
+export const listConversationsWithLatest = async (): Promise<ConversationList> => {
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
-  if (!pool) return []
+  if (!pool) return { conversations: [], latestTurns: [] }
 
   const out: ConversationSummary[] = []
+  let latestTurns: ChatTurn[] = []
+  let latestAt = -1
   try {
     const entries = (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
     for await (const [, handle] of entries) {
       if (handle.kind !== 'directory') continue
       try {
-        const turns = await readBucket(handle as FileSystemDirectoryHandle)
+        const turns = await readBucket(handle as FileSystemDirectoryHandle, true)
+        if (!turns) continue   // a machine bucket, skipped after one read
         const convoId = turns[0]?.convoId
-        if (!convoId || !isHumanConversation(convoId)) continue
+        if (!convoId) continue
+        const lastAt = turns[turns.length - 1]?.at ?? 0
         out.push({
           convoId,
           title: titleOf(turns),
           turnCount: turns.length,
-          lastAt: turns[turns.length - 1]?.at ?? 0,
+          lastAt,
         })
+        if (lastAt > latestAt) { latestAt = lastAt; latestTurns = turns }
       } catch { /* one unreadable bucket must not hide the rest of the list */ }
     }
   } catch { /* no pool yet — no conversations, not an error */ }
-  return out.sort((a, b) => b.lastAt - a.lastAt)
+  return { conversations: out.sort((a, b) => b.lastAt - a.lastAt), latestTurns }
 }
+
+/** The list alone — for callers that only want the roster. */
+export const listConversations = async (): Promise<ConversationSummary[]> =>
+  (await listConversationsWithLatest()).conversations
 
 /** Drop a conversation and every turn in it. The one destructive act this
  *  module has, and it is scoped to a single bucket inside the threads pool —
@@ -257,6 +296,7 @@ export class ChatThreads {
   readonly readTurns = readTurns
   readonly deliverTurn = deliverTurn
   readonly listConversations = listConversations
+  readonly listConversationsWithLatest = listConversationsWithLatest
   readonly deleteConversation = deleteConversation
   readonly newConvoId = newConvoId
   readonly isHumanConversation = isHumanConversation

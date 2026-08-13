@@ -21,7 +21,7 @@ $types: (
   position: fixed;
   top: calc(
     max(
-      calc(3.25rem * var(--hc-header-zoom, 1.0)),
+      calc(2.75rem * var(--hc-header-zoom, 1.0)),
       calc(var(--hc-header-bottom, 0px) + 0.35rem)
     ) + 1.5rem
   );

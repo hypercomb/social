@@ -110,6 +110,14 @@
         @if (targets().length) {
           <span class="chat-targets">{{ 'chat.selected' | t: { count: targets().length } }}</span>
         }
+        <!-- Attached context (portal-drop branches) rides with every question —
+             a rider the participant can't see is a surprise, so it is counted
+             here beside the path it belongs to. -->
+        @if (contextCount() > 0) {
+          <span class="chat-context" [title]="'chat.context.title' | t: { count: contextCount() }">
+            <span class="mat-sym" aria-hidden="true">attach_file</span>{{ contextCount() }}
+          </span>
+        }
       </div>
 
       <!-- Silence, named. Every reply arrives over the bridge; with nothing

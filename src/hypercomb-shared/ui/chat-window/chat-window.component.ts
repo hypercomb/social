@@ -81,6 +81,9 @@ type ChatThreadsLike = {
   appendTurn(convoId: string, role: TurnRole, text: string): Promise<boolean>
   readTurns(convoId: string): Promise<ChatTurn[]>
   listConversations(): Promise<ConversationSummary[]>
+  /** One pass for the list AND the newest thread's turns — the resume path's
+   *  read, so opening never re-reads the bucket the list walk just read. */
+  listConversationsWithLatest?(): Promise<{ conversations: ConversationSummary[]; latestTurns: ChatTurn[] }>
   deleteConversation(convoId: string): Promise<boolean>
   newConvoId(): string
 }
@@ -102,8 +105,20 @@ type BridgeLike = { connected?: boolean }
 /** The host's AI — the SHALLOW immediate tier (assistant/host-ai.service.ts):
  *  a streamed answer from the operator's domain, no bridge involved. It is
  *  what `/ask` used before it folded in here, and its own header names "a
- *  future chat sheet" as a surface that should render it. */
-type HostAiLike = { ask?(question: string): AsyncGenerator<string, string, void> }
+ *  future chat sheet" as a surface that should render it. `contextSigs` is the
+ *  parameter it always accepted and nothing ever passed — the tile's attached
+ *  context, capped host-side. */
+type HostAiLike = {
+  ask?(question: string, opts?: { contextSigs?: readonly string[] }): AsyncGenerator<string, string, void>
+}
+
+/** The tile-context module (assistant/tile-context.ts), over IoC — the shell
+ *  may never import essentials. `branchesFor` is the cheap synchronous count
+ *  for the status chip; `signaturesFor` is the resolved union an ask carries. */
+type TileContextLike = {
+  branchesFor?(segments: readonly string[]): readonly string[][]
+  signaturesFor?(segments: readonly string[]): Promise<readonly string[]>
+}
 
 /** Model hints the bridge understands. The responder maps the name to a real
  *  model id (scripts/bridge/drain-tick.cjs); a parked session answers as
@@ -179,6 +194,11 @@ export class ChatWindowComponent implements OnDestroy {
   readonly here = signal<readonly string[]>([])
   readonly targets = signal<readonly string[]>([])
 
+  /** How many context branches are ATTACHED to this tile (the portal-drop
+   *  records) — they ride with every question, and a rider the participant
+   *  cannot see is a surprise, so the count is shown beside the path. */
+  readonly contextCount = signal(0)
+
   /** Deleting a thread destroys turns that cannot be dragged back, so the
    *  button ARMS on the first press and deletes on the second. A confirm
    *  dialog for a row action is too much furniture; doing it silently on one
@@ -196,11 +216,16 @@ export class ChatWindowComponent implements OnDestroy {
   readonly activeTitle = computed(() => {
     const id = this.activeId()
     const listed = this.conversations().find(c => c.convoId === id)?.title
-    if (listed) return listed
-    const lead = this.turns().find(t => t.role === 'user') ?? this.turns()[0]
+    return listed || this.#titleFrom(this.turns())
+  })
+
+  /** First line of the first user turn — the same naming rule the threads
+   *  module applies, so the in-memory list bump and a cold re-list agree. */
+  #titleFrom(turns: readonly ChatTurn[]): string {
+    const lead = turns.find(t => t.role === 'user') ?? turns[0]
     const line = String(lead?.text ?? '').split('\n').map(s => s.trim()).find(Boolean) ?? ''
     return line.length > 72 ? line.slice(0, 71).trimEnd() + '…' : line
-  })
+  }
 
   readonly path = computed(() => {
     const segments = this.here()
@@ -239,6 +264,12 @@ export class ChatWindowComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on<{ connected?: boolean }>(
       'bridge:status', payload => this.bridgeUp.set(!!payload?.connected)))
+
+    // Attach/detach of context lands between synchronize pulses — the chip
+    // must follow the act, not the next unrelated one.
+    this.#cleanups.push(EffectBus.on('context:tile-changed', () => {
+      if (this.visible()) this.#refreshContext()
+    }))
 
     // The processor's post-pulse beat — the app's canonical "something moved".
     // Cheaper and more honest than polling: the context line follows the hive.
@@ -294,15 +325,10 @@ export class ChatWindowComponent implements OnDestroy {
     EffectBus.emit('chat:window-state', { open: true })
     this.#refreshContext()
     this.bridgeUp.set(!!(ioc()?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as BridgeLike | undefined)?.connected)
-    await this.#refreshList()
 
-    if (payload?.convoId) await this.#load(payload.convoId)
-    else if (prefill) this.newChat()
-    else if (!this.activeId()) {
-      const recent = this.conversations()[0]
-      if (recent) await this.#load(recent.convoId)
-      else this.newChat()
-    }
+    if (payload?.convoId) { await this.#refreshList(); await this.#load(payload.convoId) }
+    else if (prefill) { await this.#refreshList(); this.newChat() }
+    else await this.#resume()
 
     // After the conversation is settled, so it is not overwritten by the
     // remembered model of the thread we just loaded.
@@ -313,13 +339,39 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   /** Land on the most recent conversation without taking focus — the boot
-   *  path, and the re-run once the threads service registers. */
+   *  path, the re-run once the threads service registers, and open()'s
+   *  no-payload branch. One pass: the list walk already read the newest
+   *  thread's turns, so resuming adopts them instead of re-reading the bucket. */
   async #resume(): Promise<void> {
+    const threads = this.#threads()
+    if (!threads) return
+    if (threads.listConversationsWithLatest) {
+      const { conversations, latestTurns } = await threads.listConversationsWithLatest()
+      this.conversations.set(conversations)
+      // ANY current conversation is kept — including a just-minted empty New
+      // chat, which is a thing the participant explicitly created and must
+      // survive a close/reopen. (Guarding on turns.length here silently threw
+      // that new chat away and landed back in the previous thread.)
+      if (this.activeId()) return
+      const recent = conversations[0]
+      if (recent) {
+        this.activeId.set(recent.convoId)
+        this.model.set(this.#rememberedModel(recent.convoId))
+        this.streaming.set('')
+        this.turns.set(latestTurns)
+        this.waiting.set(false)
+        this.#scrollDown()
+      } else if (!this.activeId()) {
+        this.newChat(false)
+      }
+      return
+    }
+    // Older module build without the one-pass read — the two-read path.
     await this.#refreshList()
-    if (this.activeId() && this.turns().length) return
+    if (this.activeId()) return
     const recent = this.conversations()[0]
     if (recent) await this.#load(recent.convoId)
-    else if (!this.activeId()) this.newChat(false)
+    else this.newChat(false)
   }
 
   close(): void {
@@ -353,16 +405,47 @@ export class ChatWindowComponent implements OnDestroy {
     this.conversations.set(await threads.listConversations())
   }
 
+  /** Move a conversation to the top of the IN-MEMORY list after a turn lands —
+   *  the pool is already the truth (the turn was stored before this), so a
+   *  full re-list per send/reply paid a walk over every thread to learn what
+   *  this window just did itself. Returns false when the conversation is not
+   *  in the list and cannot be derived here (a reply to a thread this session
+   *  has never listed) — the caller falls back to the real walk.
+   *
+   *  `added` is how many turns landed since the last bump, used only when the
+   *  conversation is NOT the active one (then the in-memory turns can't be
+   *  counted). The host tier stores TWO turns per send (question + streamed
+   *  answer) in one bump — a mid-stream switch to another thread must not
+   *  leave that row undercounting the pool it mirrors. */
+  #bumpList(convoId: string, added = 1): boolean {
+    const turnsHere = convoId === this.activeId() ? this.turns() : null
+    const list = this.conversations()
+    const index = list.findIndex(c => c.convoId === convoId)
+    if (index < 0 && !turnsHere) return false
+    const prev = index >= 0 ? list[index] : null
+    const summary: ConversationSummary = {
+      convoId,
+      title: prev?.title || this.#titleFrom(turnsHere ?? []),
+      turnCount: turnsHere ? turnsHere.length : (prev?.turnCount ?? 0) + added,
+      lastAt: turnsHere?.[turnsHere.length - 1]?.at ?? Date.now(),
+    }
+    const rest = index >= 0 ? [...list.slice(0, index), ...list.slice(index + 1)] : [...list]
+    this.conversations.set([summary, ...rest].sort((a, b) => b.lastAt - a.lastAt))
+    return true
+  }
+
   async #load(convoId: string): Promise<void> {
     const threads = this.#threads()
     if (!threads || !convoId) return
     this.activeId.set(convoId)
     this.model.set(this.#rememberedModel(convoId))
     this.streaming.set('')
-    this.turns.set(await threads.readTurns(convoId))
+    const turns = await threads.readTurns(convoId)
     // A slow read landing after the participant moved on must not paint one
-    // thread's turns under another thread's name.
+    // thread's turns under another thread's name — checked BEFORE the paint
+    // (it used to sit after the set, guarding only the scroll).
     if (this.activeId() !== convoId) return
+    this.turns.set(turns)
     this.waiting.set(false)
     this.#scrollDown()
   }
@@ -451,6 +534,22 @@ export class ChatWindowComponent implements OnDestroy {
 
     const selection = ioc()?.get('@diamondcoreprocessor.com/SelectionService') as SelectionLike | undefined
     this.targets.set([...(selection?.selected ?? [])])
+
+    // Attached context — the cheap unresolved read (decoration index verbatim).
+    try {
+      const tileContext = ioc()?.get('@diamondcoreprocessor.com/TileContext') as TileContextLike | undefined
+      this.contextCount.set(tileContext?.branchesFor?.(segments)?.length ?? 0)
+    } catch { this.contextCount.set(0) }
+  }
+
+  /** The tile's attached context, resolved to content sigs for the SHALLOW
+   *  tier (the host caps them server-side). Best-effort: context is a grade
+   *  of service, never a reason a question fails to leave. */
+  async #contextSigs(): Promise<readonly string[]> {
+    try {
+      const tileContext = ioc()?.get('@diamondcoreprocessor.com/TileContext') as TileContextLike | undefined
+      return await tileContext?.signaturesFor?.(this.here()) ?? []
+    } catch { return [] }
   }
 
   // ── sending ─────────────────────────────────────────────────────────────
@@ -503,7 +602,9 @@ export class ChatWindowComponent implements OnDestroy {
     // is durable, so a session that connects later picks it up. That is why
     // the status line says "queued" and not "thinking".
     if (!this.bridgeUp() && await this.#askHost(convoId, message)) {
-      await this.#refreshList()
+      // TWO turns landed (the question and the streamed answer) — the count
+      // matters only if the participant switched threads mid-stream.
+      if (!this.#bumpList(convoId, 2)) void this.#refreshList()
       return
     }
 
@@ -517,7 +618,7 @@ export class ChatWindowComponent implements OnDestroy {
       this.waiting.set(false)
       EffectBus.emit('toast:show', { type: 'warning', message: 'Could not send — try again.' })
     }
-    await this.#refreshList()
+    if (!this.#bumpList(convoId)) void this.#refreshList()
   }
 
   /**
@@ -534,9 +635,13 @@ export class ChatWindowComponent implements OnDestroy {
     const host = ioc()?.get('@diamondcoreprocessor.com/HostAi') as HostAiLike | undefined
     if (!host?.ask) return false
 
+    // The attached-context sigs the host inlines server-side from its own
+    // heap — the parameter host-ai always accepted and nothing ever passed.
+    const contextSigs = await this.#contextSigs()
+
     let full = ''
     try {
-      for await (const chunk of host.ask(message)) {
+      for await (const chunk of host.ask(message, contextSigs.length ? { contextSigs } : undefined)) {
         full += chunk
         if (this.activeId() !== convoId) continue
         this.streaming.set(full)
@@ -569,15 +674,19 @@ export class ChatWindowComponent implements OnDestroy {
     if (!convoId || !text) return
 
     // A reply for another thread: it is on disk, so all that is owed here is a
-    // list that shows it moved to the top.
-    if (convoId !== this.activeId()) { void this.#refreshList(); return }
+    // list that shows it moved to the top — a bump when the thread is listed,
+    // the real walk only when it is not.
+    if (convoId !== this.activeId()) {
+      if (!this.#bumpList(convoId)) void this.#refreshList()
+      return
+    }
 
     this.turns.update(list => [...list, {
       kind: 'chat-turn', convoId, role: 'assistant', text, at: Date.now(),
     }])
     this.waiting.set(false)
     this.#scrollDown()
-    void this.#refreshList()
+    if (!this.#bumpList(convoId)) void this.#refreshList()
   }
 
   // ── input ───────────────────────────────────────────────────────────────

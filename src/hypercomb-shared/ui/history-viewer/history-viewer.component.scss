@@ -19,7 +19,7 @@
   // header-bottom offset every other tool window uses, for when there is no
   // left rail. The shared hcDockedPanel directive pins `left` inline to
   // `var(--hc-controls-left)` so the panel sits BESIDE the rail, never over it.
-  top: var(--hc-controls-left-top, max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
+  top: var(--hc-controls-left-top, max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
   left: 0;
   bottom: 0;
   min-width: 240px;

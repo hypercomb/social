@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
 import { Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService } from '@hypercomb/core'
-import { deliverTurn } from './chat-thread.js'
+import { deliverTurn, readTurns } from './chat-thread.js'
 import { readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -247,6 +247,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
+      case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
@@ -384,6 +385,23 @@ export class ClaudeBridgeWorker extends Worker {
     const stored = await deliverTurn(convoId, 'assistant', text)
     if (!stored) return { id: req.id, ok: false, error: 'chat-reply could not be stored — reply NOT delivered' }
     return { id: req.id, ok: true }
+  }
+
+  // ─── thread-read ───────────────────────────────────────────────────
+  //
+  // The whole stored conversation, oldest first — the durable thread the ask
+  // record's inline transcript window only approximates. A responder that
+  // wants more history than the 12-turn window rides this instead of asking
+  // for fatter ask records; it is also the op the mid-stage doctrine pass
+  // (turns as contentSig manifests) will keep unchanged on the wire.
+  async #threadRead(req: BridgeRequest): Promise<BridgeResponse> {
+    const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
+    if (!convoId) return { id: req.id, ok: false, error: 'thread-read requires `cell` (the convoId)' }
+    const turns = await readTurns(convoId)
+    return {
+      id: req.id, ok: true,
+      data: { convoId, turns: turns.map(t => ({ role: t.role, text: t.text, at: t.at })) },
+    }
   }
 
   // ─── agent-progress ────────────────────────────────────────────────

@@ -29,7 +29,7 @@ $accent: #ffa866;
   position: absolute;
   // Flush below the header bar — same anchor as the other right-docked panels
   // so the three align rather than stepping down each other.
-  top: max(calc(2.8rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   right: 0;
   bottom: 0;
   width: 360px;

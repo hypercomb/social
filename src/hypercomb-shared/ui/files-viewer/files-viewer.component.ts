@@ -112,9 +112,11 @@ export class FilesViewerComponent implements OnDestroy {
     }))
     this.#cleanups.push(EffectBus.on<{ cellLabel: string; segments: string[]; files: FileItem[]; scope?: Scope; reach?: Reach }>('files:open', (p) => {
       if (!p) return
-      // Mutually exclusive with the Features panel — they share the right-side
-      // dock, so opening Files closes Features.
-      EffectBus.emit('features:viewer-close', {})
+      // No sibling is closed here. Sharing an edge is the LANE's business
+      // (dock-lanes.ts), and the lane PARKS what it displaces. Closing a
+      // sibling by name ran its `close()` — the participant's own verb — which
+      // empties the Features panel's group, selection, brush and paint note.
+      // The shell displacing a window must cost nothing.
       this.title.set(p.cellLabel ?? '')
       this.scope.set(p.scope ?? 'tile')
       // Mirror the reach the gather actually ran at, so opening from a tile

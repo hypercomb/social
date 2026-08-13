@@ -7,7 +7,7 @@
 .fp-panel {
   position: fixed;
   // clears the header at any size: 3.5rem × the active header zoom
-  top: max(calc(3.5rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.67rem));
+  top: max(calc(3rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.67rem));
   right: 0.75rem;
   // Above the reparented Pixi canvas (#pixi-host, z 59989, pointer-events:auto
   // — pixi-host.worker.ts): below it the drawer painted but its close ×, the

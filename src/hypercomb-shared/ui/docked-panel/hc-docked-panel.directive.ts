@@ -64,6 +64,14 @@ import {
   readPairing, writePairing, readTextScale, writeTextScale,
 } from './panel-groups'
 
+// The EDITOR — how a settings popover is drawn from declared rows, and the one
+// stylesheet the gear and the popover share. A new setting is a new row here,
+// not new DOM (panel-settings.ts).
+import {
+  type SettingRow, type SettingsView, type SettingsZone,
+  focusSnapshot, installSettingsCss, renderSettings, restoreFocus,
+} from './panel-settings'
+
 // The LANE model — how many windows an edge holds and where each one sits.
 // A side is no longer a single-window slot: it stacks inward from the edge,
 // and a window pushed out of a full lane is PARKED, not closed. See
@@ -102,43 +110,17 @@ export interface PanelSizeOwner {
   setPanelWidth(width: number): void
 }
 
-/** The gear's resting/hover colour. Bare glyph — no circle, no plate — standing
- *  ALWAYS, in every tool window's header, just left of its close button.
- *
- *  A real stylesheet, not inline style: `:hover` cannot be expressed inline, and
- *  the gear is created imperatively so a component's (emulated-encapsulation)
- *  SCSS never reaches it. The RESTING colour is per-window state (a grouped
- *  window's gear is steel, an ungrouped one dim), so the directive sets only the
- *  `--hc-gear` custom property inline and the sheet reads it — an inline
- *  `color` would outrank the `:hover` rule and kill the effect. It brightens on
- *  hover, while focused (keyboard reach) and while its popover is open.
- *
- *  It used to be hover-only. It is not any more: a control that is invisible
- *  until you happen to sweep the right band is a control nobody finds, and
- *  grouping is the one setting a window has. Dim-at-rest is the whole restraint
- *  — it sits below the close button's weight without disappearing. */
-const GEAR_CSS = `
-[data-hc-panel-settings] { color: var(--hc-gear, #6e8290); opacity: 1; pointer-events: auto; }
-[data-hc-panel-settings]:hover,
-[data-hc-panel-settings]:focus-visible,
-[data-hc-panel-settings][aria-expanded='true'] { color: #cfe3ef; }
-`
-
 /** The slot reserved for the gear immediately before a header's close button:
  *  the 22px glyph plus a hair of air on each side, so it reads as its own
- *  control rather than a second glyph stuck to the close button. */
+ *  control rather than a second glyph stuck to the close button.
+ *
+ *  The gear is a bare glyph — no circle, no plate — and it STANDS, always, in
+ *  every tool window's header. It used to appear on hover only: a control that
+ *  is invisible until you happen to sweep the right band is a control nobody
+ *  finds. Dim-at-rest is the whole restraint — it sits below the close button's
+ *  weight without disappearing. Its colours live in the editor's stylesheet
+ *  (panel-settings.ts), which is also what the popover is drawn from. */
 const GEAR_SLOT = 30
-
-let gearCssInstalled = false
-
-const installGearCss = (): void => {
-  if (gearCssInstalled || typeof document === 'undefined') return
-  gearCssInstalled = true
-  const style = document.createElement('style')
-  style.setAttribute('data-hc-panel-settings-css', '')
-  style.textContent = GEAR_CSS
-  document.head.appendChild(style)
-}
 
 @Directive({
   selector: '[hcDockedPanel]',
@@ -601,9 +583,9 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
    *  the top corner opposite their close button instead.
    *
    *  Just the glyph — no circle, no plate — and it STANDS, always (see
-   *  `GEAR_CSS`), a hair to the left of the close button. */
+   *  `GEAR_SLOT`), a hair to the left of the close button. */
   #installSettings(): void {
-    installGearCss()
+    installSettingsCss()
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.setAttribute('data-hc-panel-settings', '')
@@ -701,28 +683,29 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#openPopover()
   }
 
-  // ── settings popover ───────────────────────────────────────────────
+  // ── settings editor ────────────────────────────────────────────────
+  //
+  // The popover is DRAWN FROM DECLARED ROWS (panel-settings.ts). Adding a
+  // setting means adding a row to `#view()` below — no elements, no styling,
+  // and it lands in every tool window with the same shape and the same rhythm.
+
   #openPopover(): void {
     const pop = document.createElement('div')
+    pop.className = 'hc-settings'
     pop.setAttribute('data-hc-panel-settings-pop', '')
     pop.setAttribute('role', 'dialog')
     pop.setAttribute('aria-label', this.#t('panel.settings', 'Window settings'))
     const inner = this.dockSide === 'right' ? 'left' : 'right'
     Object.assign(pop.style, {
-      position: 'absolute', top: '2.6rem', [inner]: '10px',
-      width: 'min(248px, calc(100% - 20px))', boxSizing: 'border-box',
-      padding: '0.6rem 0.7rem 0.7rem', zIndex: '9',
-      background: 'rgba(12, 18, 24, 0.97)',
-      border: `1px solid rgba(${STEEL}, 0.35)`, borderRadius: '6px',
-      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
-      font: '400 12px/1.45 system-ui, sans-serif', color: '#c8d6de',
+      position: 'absolute', top: '2.6rem', [inner]: '10px', zIndex: '9',
     } as Partial<CSSStyleDeclaration>)
     pop.addEventListener('pointerdown', (e) => { e.stopPropagation() })
-
-    pop.appendChild(this.#groupSection())
-    if (this.scalesText) pop.appendChild(this.#textSection())
-    if (this.pairWindow && this.pairOpenEffect) pop.appendChild(this.#pairSection())
-    if (this.launcherControlId) pop.appendChild(this.#launcherSection())
+    // The editor is a place to TYPE — keys must not fall through to the hive's
+    // keymap, or naming a group "reference" would trip a dozen shortcuts on the
+    // way. Escape still closes it: that listener sits on the window in the
+    // CAPTURE phase, so it runs before this.
+    pop.addEventListener('keydown', (e) => { e.stopPropagation() })
+    pop.appendChild(renderSettings(this.#view()))
 
     this.#el.appendChild(pop)
     this.#popover = pop
@@ -753,105 +736,110 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#gearBtn?.focus()
   }
 
-  /** The GROUP setting: one text field. Type the same word in another window
-   *  and the two travel together. Committed on Enter/blur (`change`) rather
-   *  than per keystroke, so typing "team" doesn't briefly join "t". */
-  #groupSection(): HTMLElement {
-    const section = document.createElement('div')
-    section.setAttribute('data-hc-setting', 'group')
-
-    const label = document.createElement('div')
-    label.textContent = this.#t('panel.group.label', 'Tool window group')
-    Object.assign(label.style, {
-      fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase',
-      color: '#7f95a3', marginBottom: '0.45rem',
-    } as Partial<CSSStyleDeclaration>)
-    section.appendChild(label)
-
-    const input = document.createElement('input')
-    input.type = 'text'
-    input.value = this.#group
-    input.placeholder = this.#t('panel.group.placeholder', 'e.g. left rail')
-    input.setAttribute('aria-label', this.#t('panel.group.label', 'Tool window group'))
-    Object.assign(input.style, {
-      width: '100%', boxSizing: 'border-box', height: '24px', padding: '0 0.4rem',
-      font: 'inherit', color: '#c8d6de', background: 'rgba(255, 255, 255, 0.04)',
-      border: `1px solid rgba(${STEEL}, 0.25)`, borderRadius: '4px',
-    } as Partial<CSSStyleDeclaration>)
-    input.addEventListener('change', () => { this.#setGroup(normalizeGroup(input.value)) })
-    input.addEventListener('keydown', (e) => { e.stopPropagation() })
-    section.appendChild(input)
-
-    const hint = document.createElement('div')
-    const mates = [...live].filter(p => p !== this && p.#group !== '' && p.#group === this.#group)
+  /** WHAT THIS WINDOW'S SETTINGS EDITOR HOLDS — the whole surface, as data.
+   *
+   *  Three zones, in the order the idea reads:
+   *
+   *  1. The GROUP string, first, because it is the IDENTITY of everything
+   *     under it. Two windows carrying the same string are not "linked to each
+   *     other" — they are running the SAME SETTINGS. Committed on Enter/blur
+   *     (`change`), never per keystroke, so typing "team" doesn't pass through
+   *     "t", "te", "tea" as three different settings sets.
+   *  2. What that string carries, in a zone HEADED BY THE STRING — so the
+   *     answer to "who does this apply to?" is written directly above the
+   *     controls. Ungrouped, the same zone says "This window only".
+   *  3. The window's OWN. A pair and a launcher name this window's machinery
+   *     and could not be another window's if they tried; keeping them in the
+   *     shared zone would make the group's promise a lie.
+   *
+   *  Adding a setting is adding a row to one of these lists. */
+  #view(): SettingsView {
+    const group = this.#group
+    const mates = [...live].filter(p => p !== this && p.#group !== '' && p.#group === group)
     const names = mates.map(p => p.#label()).join(', ')
-    hint.textContent = !this.#group
-      ? this.#t('panel.group.hint', 'Windows sharing this text share their width.')
-      : mates.length
-        ? this.#t('panel.group.shared', `Shared with ${names}`, { panels: names })
-        : this.#t('panel.group.alone', 'No other open window is in this group yet.')
-    Object.assign(hint.style, { marginTop: '0.5rem', fontSize: '11px', color: '#7f95a3' } as Partial<CSSStyleDeclaration>)
-    section.appendChild(hint)
 
-    return section
-  }
+    const identity: SettingRow[] = [{
+      kind: 'text', key: 'group',
+      label: this.#t('panel.group.label', 'Tool window group'),
+      value: group,
+      placeholder: this.#t('panel.group.placeholder', 'e.g. left rail'),
+      hint: !group
+        ? this.#t('panel.group.hint', 'Windows sharing this text share these settings.')
+        : mates.length
+          ? this.#t('panel.group.shared', `Shared with ${names}`, { panels: names })
+          : this.#t('panel.group.alone', 'No other open window is in this group yet.'),
+      commit: (value) => { this.#setGroup(normalizeGroup(value)) },
+    }]
 
-  /** The TEXT SIZE setting: a short ladder of buttons, Auto first.
-   *
-   *  It sits directly under the group field because it IS a group setting when
-   *  the window has a group — one size for the whole group, set from any member
-   *  — and the window's own only when it has none. A ladder rather than a
-   *  number: the participant is choosing how comfortable the reading is, not
-   *  authoring a stylesheet.
-   *
-   *  AUTO is the old behaviour kept as a choice, not a default nobody can
-   *  leave: the content scales with the window's width. Every other choice
-   *  pins it, which is the complaint this section answers — a panel dragged
-   *  wider to fit a long line should not also grow its type. */
-  #textSection(): HTMLElement {
-    const section = document.createElement('div')
-    section.setAttribute('data-hc-setting', 'text')
-    Object.assign(section.style, {
-      marginTop: '0.7rem', paddingTop: '0.65rem',
-      borderTop: `1px solid rgba(${STEEL}, 0.18)`,
-    } as Partial<CSSStyleDeclaration>)
-
-    const label = document.createElement('div')
-    label.textContent = this.#t('panel.text.label', 'Text size')
-    Object.assign(label.style, {
-      fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase',
-      color: '#7f95a3', marginBottom: '0.45rem',
-    } as Partial<CSSStyleDeclaration>)
-    section.appendChild(label)
-
-    const row = document.createElement('div')
-    Object.assign(row.style, { display: 'flex', flexWrap: 'wrap', gap: '0.3rem' } as Partial<CSSStyleDeclaration>)
-    for (const size of TEXT_SIZES) {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      const on = size.scale === this.#text
-      btn.textContent = this.#t(`panel.text.${size.key}`, size.label)
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false')
-      Object.assign(btn.style, {
-        flex: '1 1 auto', minHeight: '24px', padding: '0.2rem 0.45rem',
-        font: 'inherit', fontSize: '11px', cursor: 'pointer',
-        color: on ? '#dcecf5' : '#c8d6de',
-        background: on ? `rgba(${STEEL}, 0.22)` : 'rgba(255, 255, 255, 0.04)',
-        border: `1px solid rgba(${STEEL}, ${on ? 0.55 : 0.25})`, borderRadius: '4px',
-      } as Partial<CSSStyleDeclaration>)
-      btn.addEventListener('click', () => { this.#setText(size.scale) })
-      row.appendChild(btn)
+    // Shared: everything the group's string carries. The width is here too —
+    // it just has a better control than a row, namely the grip on the edge.
+    const shared: SettingRow[] = []
+    if (this.scalesText) {
+      shared.push({
+        kind: 'choice', key: 'text',
+        label: this.#t('panel.text.label', 'Text size'),
+        value: this.#text === null ? 'auto' : String(this.#text),
+        options: TEXT_SIZES.map(size => ({
+          value: size.scale === null ? 'auto' : String(size.scale),
+          label: this.#t(`panel.text.${size.key}`, size.label),
+        })),
+        hint: this.#text === null
+          ? this.#t('panel.text.hint', 'Auto sizes the text with the window\'s width.')
+          : this.#t('panel.text.hint.pinned', 'Held at this size, whatever the window\'s width.'),
+        pick: (value) => { this.#setText(value === 'auto' ? null : parseFloat(value)) },
+      })
     }
-    section.appendChild(row)
 
-    const hint = document.createElement('div')
-    hint.textContent = this.#group
-      ? this.#t('panel.text.hint.group', `One size for every window in ${this.#group}.`, { group: this.#group })
-      : this.#t('panel.text.hint', 'Auto sizes the text with the window\'s width. A size holds it steady.')
-    Object.assign(hint.style, { marginTop: '0.5rem', fontSize: '11px', color: '#7f95a3' } as Partial<CSSStyleDeclaration>)
-    section.appendChild(hint)
+    // This window's own.
+    const own: SettingRow[] = []
+    if (this.pairWindow && this.pairOpenEffect) {
+      // Phrased as what it does rather than as a feature name — the
+      // participant is being asked about a habit, not about a mechanism.
+      // Switching it ON also brings the pair up right now if there is room: a
+      // setting that only takes effect next time is a setting you cannot tell
+      // you have changed.
+      const name = this.pairLabel || this.pairWindow.replace(/-(viewer|panel|strip)$/, '').replace(/-/g, ' ')
+      own.push({
+        kind: 'switch', key: 'pair',
+        label: this.#t('panel.pair.open-alongside', `Open ${name} alongside`, { window: name }),
+        checked: readPairing(this.id),
+        hint: this.#t('panel.pair.hint', 'They are two halves of one gesture — a mark is dragged from one onto the other.'),
+        toggle: (on) => {
+          writePairing(this.id, on)
+          if (on) this.#openPairIfWanted()
+        },
+      })
+    }
+    if (this.launcherControlId) {
+      // UI placement is window chrome, so every slash-first tool window gets
+      // the same participant-configurable path onto the controls rail.
+      const enabled = this.#launcherEnabled()
+      own.push({
+        kind: 'action', key: 'launcher',
+        label: enabled
+          ? this.#t('panel.launcher.remove', 'Remove from controls')
+          : this.#t('panel.launcher.add', 'Add to controls'),
+        on: enabled,
+        run: () => {
+          EffectBus.emit('controls:configure', { id: this.launcherControlId, enabled: !this.#launcherEnabled() })
+          this.#refreshPopover()
+        },
+      })
+    }
 
-    return section
+    const zones: SettingsZone[] = [{ key: 'identity', rows: identity }]
+    if (shared.length) {
+      zones.push({
+        key: 'shared',
+        title: group
+          ? this.#t('panel.settings.zone.shared', `Shared by “${group}”`, { group })
+          : this.#t('panel.settings.zone.alone', 'This window only'),
+        rows: shared,
+      })
+    }
+    if (own.length) zones.push({ key: 'window', title: this.#t('panel.settings.zone.window', 'This window'), rows: own })
+
+    return { eyebrow: this.#t('panel.settings.eyebrow', 'Settings'), title: this.#label(), zones }
   }
 
   /** Pick a text size (or `null` for auto). Kept on the window itself so it
@@ -866,91 +854,6 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#refreshPopover()
   }
 
-  /** The PAIR setting: one switch, for the window that declares a pair.
-   *
-   *  Phrased as what it does rather than as a feature name — "Open Pheromones
-   *  alongside" — because the participant is being asked about a habit, not
-   *  about a mechanism. Switching it ON also brings the pair up right now if
-   *  there is room: a setting that only takes effect next time is a setting you
-   *  cannot tell you have changed. */
-  #pairSection(): HTMLElement {
-    const section = document.createElement('div')
-    section.setAttribute('data-hc-setting', 'pair')
-    Object.assign(section.style, {
-      marginTop: '0.7rem', paddingTop: '0.65rem',
-      borderTop: `1px solid rgba(${STEEL}, 0.18)`,
-    } as Partial<CSSStyleDeclaration>)
-
-    const name = this.pairLabel || this.pairWindow.replace(/-(viewer|panel|strip)$/, '').replace(/-/g, ' ')
-    const row = document.createElement('label')
-    Object.assign(row.style, {
-      display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer',
-    } as Partial<CSSStyleDeclaration>)
-
-    const box = document.createElement('input')
-    box.type = 'checkbox'
-    box.checked = readPairing(this.id)
-    Object.assign(box.style, { margin: '0', accentColor: `rgb(${STEEL})`, cursor: 'pointer' } as Partial<CSSStyleDeclaration>)
-    box.addEventListener('change', () => {
-      writePairing(this.id, box.checked)
-      if (box.checked) this.#openPairIfWanted()
-    })
-
-    const text = document.createElement('span')
-    text.textContent = this.#t('panel.pair.open-alongside', `Open ${name} alongside`, { window: name })
-    row.appendChild(box)
-    row.appendChild(text)
-    section.appendChild(row)
-
-    const hint = document.createElement('div')
-    hint.textContent = this.#t('panel.pair.hint', 'They are two halves of one gesture — a mark is dragged from one onto the other.')
-    Object.assign(hint.style, { marginTop: '0.45rem', fontSize: '11px', color: '#7f95a3' } as Partial<CSSStyleDeclaration>)
-    section.appendChild(hint)
-
-    return section
-  }
-
-  /** Optional launcher setting. UI placement is window chrome, so every
-   *  slash-first tool window gets the same participant-configurable path. */
-  #launcherSection(): HTMLElement {
-    const section = document.createElement('div')
-    section.setAttribute('data-hc-setting', 'launcher')
-    Object.assign(section.style, {
-      marginTop: '0.7rem', paddingTop: '0.65rem',
-      borderTop: `1px solid rgba(${STEEL}, 0.18)`,
-    } as Partial<CSSStyleDeclaration>)
-
-    const label = document.createElement('div')
-    label.textContent = this.#t('panel.launcher.label', 'Controls shortcut')
-    Object.assign(label.style, {
-      fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase',
-      color: '#7f95a3', marginBottom: '0.4rem',
-    } as Partial<CSSStyleDeclaration>)
-    section.appendChild(label)
-
-    const button = document.createElement('button')
-    button.type = 'button'
-    const enabled = this.#launcherEnabled()
-    button.textContent = enabled
-      ? this.#t('panel.launcher.remove', 'Remove from controls')
-      : this.#t('panel.launcher.add', 'Add to controls')
-    Object.assign(button.style, {
-      width: '100%', minHeight: '28px', padding: '0.25rem 0.5rem',
-      font: 'inherit', color: '#c8d6de', cursor: 'pointer',
-      background: enabled ? `rgba(${STEEL}, 0.16)` : 'rgba(255, 255, 255, 0.04)',
-      border: `1px solid rgba(${STEEL}, 0.3)`, borderRadius: '4px',
-    } as Partial<CSSStyleDeclaration>)
-    button.addEventListener('click', () => {
-      EffectBus.emit('controls:configure', {
-        id: this.launcherControlId,
-        enabled: !this.#launcherEnabled(),
-      })
-      this.#refreshPopover()
-    })
-    section.appendChild(button)
-    return section
-  }
-
   #launcherEnabled(): boolean {
     if (!this.launcherControlId) return false
     try {
@@ -959,19 +862,21 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     } catch { return false }
   }
 
-  /** Repaint an open popover's group section — membership lines in OTHER
-   *  windows' popovers go stale the moment this one changes slot. */
+  /** Repaint an open editor from the current view.
+   *
+   *  It redraws WHOLE rather than patching sections: every row is derived from
+   *  state, the surface is a dozen elements, and a settings set that any window
+   *  in the group can change has to be able to follow a change made somewhere
+   *  else (a mate joining leaves the membership line stale in every open
+   *  popover). The caret is carried across, so a repaint triggered by another
+   *  window cannot throw you out of the field you are typing in. */
   #refreshPopover(): void {
     const pop = this.#popover
     if (!pop) return
-    const old = pop.querySelector('[data-hc-setting="group"]')
-    if (old) pop.replaceChild(this.#groupSection(), old)
-    const text = pop.querySelector('[data-hc-setting="text"]')
-    if (text) pop.replaceChild(this.#textSection(), text)
-    const pair = pop.querySelector('[data-hc-setting="pair"]')
-    if (pair) pop.replaceChild(this.#pairSection(), pair)
-    const launcher = pop.querySelector('[data-hc-setting="launcher"]')
-    if (launcher) pop.replaceChild(this.#launcherSection(), launcher)
+    const snap = focusSnapshot(pop)
+    const body = renderSettings(this.#view())
+    pop.replaceChildren(body)
+    restoreFocus(body, snap)
   }
 
   // ── group membership ───────────────────────────────────────────────
