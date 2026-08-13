@@ -379,7 +379,22 @@ export class HistoryService {
    *  bag, and promotion is idempotent. */
   private readonly getBag = async (signature: string): Promise<FileSystemDirectoryHandle> => {
     await this.#promoteBag(signature)
-    return await this.hiveRoot.getDirectoryHandle(signature, { create: true })
+    try {
+      return await this.hiveRoot.getDirectoryHandle(signature, { create: true })
+    } catch (err) {
+      // sha256('') addresses both the root lineage and zero-byte content.
+      // Older Store.putResource versions could create the latter as a FILE,
+      // permanently blocking the root history DIRECTORY and making every root
+      // add/delete fail with TypeMismatchError. The colliding file is safely
+      // recoverable: by definition its valid payload is exactly zero bytes.
+      const rootSig = await SignatureService.sign(new ArrayBuffer(0))
+      if (signature !== rootSig || !(err instanceof DOMException) || err.name !== 'TypeMismatchError') throw err
+      const collision = await this.hiveRoot.getFileHandle(signature, { create: false })
+      if ((await collision.getFile()).size !== 0) throw err
+      await this.hiveRoot.removeEntry(signature)
+      console.warn('[history] repaired empty-content file collision at the root lineage bag')
+      return await this.hiveRoot.getDirectoryHandle(signature, { create: true })
+    }
   }
 
   /** Resolve a lineage bag for READING. Union-promotes first (see

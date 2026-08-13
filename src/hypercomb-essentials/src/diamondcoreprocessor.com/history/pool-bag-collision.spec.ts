@@ -31,7 +31,10 @@ vi.hoisted(() => {
   }
 })
 
-type HistoryServiceCtor = new () => { purgeNonLayerFiles(sig: string): Promise<void> }
+type HistoryServiceCtor = new () => {
+  purgeNonLayerFiles(sig: string): Promise<void>
+  commitLayer(sig: string, layer: { name: string; children?: string[] }): Promise<string>
+}
 let HistoryService: HistoryServiceCtor
 
 // -------------------------------------------------
@@ -76,6 +79,7 @@ class MockDir {
   constructor(public name: string = '') {}
 
   async getFileHandle(name: string, opts: { create?: boolean } = {}): Promise<MockFile> {
+    if (this.dirs.has(name)) throw new DOMException('Type mismatch', 'TypeMismatchError')
     let h = this.files.get(name)
     if (!h) {
       if (!opts.create) throw new DOMException('NotFoundError', 'NotFoundError')
@@ -86,6 +90,7 @@ class MockDir {
   }
 
   async getDirectoryHandle(name: string, opts: { create?: boolean } = {}): Promise<MockDir> {
+    if (this.files.has(name)) throw new DOMException('Type mismatch', 'TypeMismatchError')
     let d = this.dirs.get(name)
     if (!d) {
       if (!opts.create) throw new DOMException('NotFoundError', 'NotFoundError')
@@ -224,6 +229,19 @@ describe('pool address / lineage bag address collision', () => {
     const history = new HistoryService()
     await history.purgeNonLayerFiles(address)
 
+    expect(names(bag)).toEqual(['00000000', '00000001'])
+  })
+
+  it('repairs a legacy empty-content FILE blocking the root lineage DIRECTORY', async () => {
+    const rootSig = await bagSignature([])
+    const collision = await root.getFileHandle(rootSig, { create: true })
+    expect((await collision.getFile()).size).toBe(0)
+
+    const history = new HistoryService()
+    await expect(history.commitLayer(rootSig, { name: '', children: ['a'.repeat(64)] })).resolves.toMatch(/^[0-9a-f]{64}$/)
+
+    expect(root.files.has(rootSig)).toBe(false)
+    const bag = await root.getDirectoryHandle(rootSig, { create: false })
     expect(names(bag)).toEqual(['00000000', '00000001'])
   })
 })

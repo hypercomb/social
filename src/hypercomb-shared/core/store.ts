@@ -729,6 +729,20 @@ export class Store extends EventTarget {
   public putResource = async (blob: Blob, options?: { emit?: boolean }): Promise<string> => {
     const bytes = await blob.arrayBuffer()
     const signature = await SignatureService.sign(bytes)
+    // sha256(empty bytes) is also the ROOT lineage bag address. The root
+    // namespace cannot hold both a file and a directory under that name;
+    // writing an empty resource here can therefore poison every subsequent
+    // root add/delete with TypeMismatchError (observed especially in WebKit
+    // OPFS). Empty content needs no durable bytes: its signature fully
+    // describes it, so keep the detached value in memory and leave the root
+    // address available to the history bag.
+    if (signature === EMPTY_CONTENT_SIG) {
+      this.#resourceCache.set(signature, new Blob([], { type: blob.type }))
+      if (options?.emit !== false) {
+        EffectBus.emit('content:wrote', { sig: signature, kind: 'resource' as const, bytes })
+      }
+      return signature
+    }
     // Content-addressed: same sig ⇒ same bytes, so if the file already
     // exists we're done. This is not just an optimisation — creating a
     // writable against an existing OPFS file and closing it atomically
@@ -1561,6 +1575,10 @@ export class Store extends EventTarget {
   }
 
   #loadResource = (signature: string): Promise<Blob | null> => {
+    // The empty-content signature is self-resolving. Its canonical root entry
+    // is the root history DIRECTORY, so attempting a file read is both
+    // unnecessary and guaranteed to TypeMismatch once history is initialized.
+    if (signature === EMPTY_CONTENT_SIG) return Promise.resolve(new Blob([]))
     const existing = this.#resourcePending.get(signature)
     if (existing) return existing
     const promise = (async () => {
