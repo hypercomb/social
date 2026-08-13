@@ -313,9 +313,11 @@ export class PostitViewDrone extends Drone {
 // established "above canvas, below chrome" slab (activity log, format
 // painter). Top rides --hc-header-anchor so header zoom or a wrapped icon
 // rail pushes the stack down instead of over it (never a bare rem — see
-// _header-size.scss).
+// _header-size.scss). Left adds --hc-controls-left, the side-docked control
+// bar's edge reservation (the anchor every docked panel lays out against) —
+// without it the column sits under the bar, which is chrome at 59999.
 const STICKY_CSS = `
-.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:59990;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
+.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:59990;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
 .postit-sticky{pointer-events:auto;width:8.5rem;min-height:4.6rem;padding:.6rem .65rem .95rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#4a3f0f;box-shadow:0 6px 14px rgba(0,0,0,.35),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.18);transform:rotate(var(--postit-tilt,-2deg));transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
 .postit-sticky{position:relative}
