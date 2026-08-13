@@ -21,7 +21,7 @@ import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { hasDecorationKindAt, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
-import { listDecorations } from '../../commands/decoration-manifest.js'
+import { listDecorations, replaceDecoration } from '../../commands/decoration-manifest.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
 import { POSTIT_KIND, POSTIT_VIEW, type PostitPayload } from '../../commands/postit.queen.js'
@@ -50,6 +50,12 @@ export class PostitViewDrone extends Drone {
   #active = false
   /** Re-entrancy generation for both reconcilers — latest wins. */
   #gen = 0
+  /** A sticky is mid-drag: reconciles hold off so the node under the pointer
+   *  is never torn down (the drop's own decoration write reconciles after). */
+  #dragging = false
+  /** The pointer gesture that just ended MOVED — the click that follows it
+   *  must not open the post. Cleared on the next pointerdown. */
+  #justDragged = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -96,6 +102,7 @@ export class PostitViewDrone extends Drone {
   }
 
   async #reconcile(): Promise<void> {
+    if (this.#dragging) return
     const gen = ++this.#gen
     const mode = this.#vm()?.mode
     if (mode === POSTIT_VIEW) {
@@ -134,14 +141,17 @@ export class PostitViewDrone extends Drone {
     }
     if (gen !== this.#gen) return
 
-    const decorated: Array<{ label: string; path: string[] }> = []
+    const decorated: Array<{ label: string; path: string[]; payload?: PostitPayload }> = []
     for (const candidate of candidates) {
       // Path-keyed lookup: a bare label resolves against the CURRENT page, so
       // for the standing cell it would name the phantom child `…/own/own` and
       // its sticky would never show.
       if (!hasDecorationKindAt(candidate.path, POSTIT_KIND)) continue
       if (await isFeatureHidden(candidate.path, POSTIT_KIND)) continue
-      decorated.push(candidate)
+      // The payload rides along for the PIN — where the participant dragged
+      // this note. Read only for cells that passed the gates above.
+      const records = await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments: candidate.path })
+      decorated.push({ ...candidate, payload: records.at(-1)?.record.payload })
       if (decorated.length >= STICKY_LIMIT) break
     }
     if (gen !== this.#gen) return
@@ -165,16 +175,108 @@ export class PostitViewDrone extends Drone {
       cue.className = 'postit-sticky-cue'
       cue.textContent = 'open ›'
       note.append(heading, cue)
+      // A PINNED note sits where it was dropped — viewport fractions from the
+      // payload, clamped so a resize can never strand it out of reach. No pin
+      // = the docked column, exactly as before.
+      const pin = cell.payload?.pin
+      if (pin && Number.isFinite(pin.x) && Number.isFinite(pin.y)) {
+        note.classList.add('postit-pinned')
+        const w = window.innerWidth, h = window.innerHeight
+        note.style.left = `${Math.min(Math.max(0, pin.x * w), Math.max(0, w - 72))}px`
+        note.style.top = `${Math.min(Math.max(0, pin.y * h), Math.max(0, h - 48))}px`
+      }
       note.onclick = () => {
+        // The click that tails a drag gesture is the drop, not an open.
+        // Consume the flag here too — a later KEYBOARD activation fires no
+        // pointerdown, so parking the reset there alone would deaden it.
+        if (this.#justDragged) { this.#justDragged = false; return }
         this.#targetSegments = cell.path
         this.#vm()?.setMode(POSTIT_VIEW)
         void this.#reconcile()
       }
+      this.#wireDrag(note, cell)
       host.append(note)
     })
     this.#stickies?.remove()
     this.#stickies = host
     document.body.appendChild(host)
+  }
+
+  // ── Dragging: pick a sticky up, and it stays where you leave it ──────
+  //
+  // The pin is PART OF THE NOTE (payload `pin`, viewport fractions), not
+  // shell state: it survives reloads, travels with the tile to whoever
+  // adopts it, and undoes like any other layer edit. A sub-threshold press
+  // stays a click (open); pointer capture keeps the gesture on the note so
+  // the canvas underneath never sees it.
+
+  #wireDrag(note: HTMLButtonElement, cell: { label: string; path: string[]; payload?: PostitPayload }): void {
+    note.addEventListener('pointerdown', down => {
+      if (down.pointerType === 'mouse' && down.button !== 0) return
+      this.#justDragged = false
+      const from = note.getBoundingClientRect()
+      const sx = down.clientX, sy = down.clientY
+      let moved = false
+      const move = (ev: PointerEvent): void => {
+        const dx = ev.clientX - sx, dy = ev.clientY - sy
+        if (!moved) {
+          if (Math.hypot(dx, dy) < 5) return
+          moved = true
+          this.#dragging = true
+          // Capture keeps the gesture on the note even at speed; a pointer
+          // that has already retired throws here, and the drag works anyway.
+          try { note.setPointerCapture(down.pointerId) } catch { /* retired pointer */ }
+          note.classList.add('postit-dragging')
+        }
+        note.style.position = 'fixed'
+        note.style.left = `${from.x + dx}px`
+        note.style.top = `${from.y + dy}px`
+        ev.preventDefault()
+      }
+      const done = (ev: PointerEvent): void => {
+        note.removeEventListener('pointermove', move)
+        note.removeEventListener('pointerup', done)
+        note.removeEventListener('pointercancel', done)
+        if (!moved) return
+        this.#dragging = false
+        this.#justDragged = true
+        note.classList.remove('postit-dragging')
+        if (ev.type === 'pointercancel') { void this.#reconcile(); return }
+        const rect = note.getBoundingClientRect()
+        void this.#persistPin(cell, rect.x, rect.y)
+      }
+      note.addEventListener('pointermove', move)
+      note.addEventListener('pointerup', done)
+      note.addEventListener('pointercancel', done)
+    })
+  }
+
+  /** Write the drop position into the note's decoration payload — the same
+   *  replace-one-live-record path `/postit here` uses, so a pin is one
+   *  ordinary layer edit and the reconcile that follows re-renders the
+   *  sticky already pinned. On a failed write, reconcile snaps it back to
+   *  the last committed truth rather than leaving a lie on screen. */
+  async #persistPin(cell: { path: string[] }, left: number, top: number): Promise<void> {
+    const w = window.innerWidth, h = window.innerHeight
+    // A collapsed viewport (hidden tab, mid-rotation) would mint a garbage
+    // fraction and teleport the note on the next real render — drop the
+    // write and let reconcile snap back to the last committed spot.
+    if (w < 50 || h < 50) { void this.#reconcile(); return }
+    const pin = {
+      x: Math.min(1, Math.max(0, left / w)),
+      y: Math.min(1, Math.max(0, top / h)),
+    }
+    try {
+      const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments: cell.path }))
+        .at(-1)?.record.payload
+      await replaceDecoration({
+        kind: POSTIT_KIND,
+        appliesTo: cell.path,
+        segments: cell.path,
+        payload: { ...(prior ?? { version: 1 }), pin },
+        mark: 'persistent',
+      })
+    } catch { void this.#reconcile() }
   }
 
   // ── Surface 2: the opened post ───────────────────────────────────────
@@ -318,7 +420,9 @@ export class PostitViewDrone extends Drone {
 // without it the column sits under the bar, which is chrome at 59999.
 const STICKY_CSS = `
 .hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:59990;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
-.postit-sticky{pointer-events:auto;width:8.5rem;min-height:4.6rem;padding:.6rem .65rem .95rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#4a3f0f;box-shadow:0 6px 14px rgba(0,0,0,.35),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.18);transform:rotate(var(--postit-tilt,-2deg));transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
+.postit-sticky{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;width:8.5rem;min-height:4.6rem;padding:.6rem .65rem .95rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#4a3f0f;box-shadow:0 6px 14px rgba(0,0,0,.35),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.18);transform:rotate(var(--postit-tilt,-2deg));transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
+.postit-sticky.postit-pinned{position:fixed}
+.postit-sticky.postit-dragging{transform:rotate(0deg) scale(1.05);box-shadow:0 16px 30px rgba(0,0,0,.5);cursor:grabbing;transition:none}
 .postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
 .postit-sticky{position:relative}
 .postit-sticky:hover{transform:rotate(0deg) scale(1.04);box-shadow:0 10px 20px rgba(0,0,0,.42)}

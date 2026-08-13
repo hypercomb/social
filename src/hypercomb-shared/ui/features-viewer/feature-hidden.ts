@@ -143,6 +143,36 @@ export async function restoreFeature(
   }
 }
 
+/** Restore every hide of `featKind` at exactly `segments`. Sig-free entry for
+ *  callers that know the feature, not the pool member — scans the pool for
+ *  matching records and removes each. Returns whether anything was restored. */
+export async function restoreFeatureAt(
+  featKind: string,
+  segments: readonly string[],
+): Promise<boolean> {
+  const key = hiddenKey(featKind, segments)
+  let any = false
+  for (const rec of await loadHidden()) {
+    if (hiddenKey(rec.featKind, rec.appliesTo) !== key) continue
+    const removed = await restoreFeature(rec.recordSig, {
+      featKind: rec.featKind, view: rec.view, segments: rec.appliesTo,
+    })
+    any = any || removed
+  }
+  return any
+}
+
+// The write surface, reachable from MODULES. Essentials may never import
+// shared, and this file is the pool's ONE writer — so a queen offering a
+// per-cell verb (`/postit tile` restores the hexagon by hiding the postit
+// HERE) resolves this seam the same loose way everything reaches Store.
+// Registered at module scope, exactly as the reader side registers
+// OverlapMetrics/ContextIndex for the shell.
+;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
+  '@hypercomb.social/FeatureHiddenWriter',
+  { hide: hideFeature, restore: restoreFeature, restoreAt: restoreFeatureAt },
+)
+
 /** Every hide record currently in the pool. Scans the substrate and keeps only
  *  `kind:'hidden'` members. Used by the panel to (a) filter hidden features out
  *  of the active lists and (b) populate the "show hidden" view with a restore

@@ -30,10 +30,22 @@ export interface PostitPayload {
   readonly text?: string
   /** A one-page HTML resource — the expanded view mounts it whole. */
   readonly htmlSig?: string
+  /** Where the sticky is PINNED, as viewport fractions (0..1 of width/height,
+   *  the note's top-left corner). Written by dragging the sticky; absent
+   *  means the note sits in the docked column. Riding the payload makes a
+   *  position one ordinary layer edit — it survives reloads, travels with
+   *  the tile, and undoes like anything else. */
+  readonly pin?: { readonly x: number; readonly y: number }
 }
 
 type ViewModeShape = { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
+/** The shell's feature-hidden WRITE surface (features-viewer/feature-hidden.ts),
+ *  resolved loosely — essentials never imports shared; the seam is IoC. */
+type FeatureHiddenWriterShape = {
+  hide?: (f: { featKind: string; view: string; label: string; segments: readonly string[] }) => Promise<string | null>
+  restoreAt?: (featKind: string, segments: readonly string[]) => Promise<boolean>
+}
 
 const get = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -43,10 +55,12 @@ export class PostitQueenBee extends QueenBee {
   readonly command = 'postit'
   override readonly aliases = ['sticky', 'note-view']
   override description = 'Post-it — a small sticky on the tile that opens into a full page'
-  override options = ['here <text>', 'remove', 'on', 'off']
+  override options = ['here <text>', 'tile', 'sticky', 'remove', 'on', 'off']
   override examples = [
     { input: '/postit here Call the venue before Saturday', result: 'Sticks that text on the current cell' },
     { input: '/postit', result: 'Opens or closes the post-it view' },
+    { input: '/postit tile', result: 'The tile renders again here — the note is kept, just dormant' },
+    { input: '/postit sticky', result: 'The post-it takes the cell back over' },
     { input: '/postit remove', result: 'Takes the post-it off the current cell' },
   ]
 
@@ -56,6 +70,14 @@ export class PostitQueenBee extends QueenBee {
 
     if (verb === 'here' || verb === 'mark' || verb === 'attach') {
       await this.#attach(trimmed.slice(verb.length).trim())
+      return
+    }
+    if (verb === 'tile' || verb === 'revert' || verb === 'hex') {
+      await this.#tile()
+      return
+    }
+    if (verb === 'sticky' || verb === 'restore') {
+      await this.#sticky()
       return
     }
     if (verb === 'remove' || verb === 'detach') {
@@ -79,10 +101,18 @@ export class PostitQueenBee extends QueenBee {
   }
 
   /** Attach or update — one live record per cell (`replaceDecoration`), so
-   *  re-sticking never piles superseded notes onto the manifest. */
+   *  re-sticking never piles superseded notes onto the manifest. A pin the
+   *  participant dragged into place is POSITION, not content — re-sticking
+   *  the text must not snap the note back to the dock, so it carries over. */
   async #attach(text: string): Promise<void> {
     const segments = this.#segments()
-    const payload: PostitPayload = { version: 1, ...(text ? { text } : {}) }
+    const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments }))
+      .at(-1)?.record.payload
+    const payload: PostitPayload = {
+      version: 1,
+      ...(text ? { text } : {}),
+      ...(prior?.pin ? { pin: prior.pin } : {}),
+    }
     await replaceDecoration({
       kind: POSTIT_KIND,
       appliesTo: segments,
@@ -100,6 +130,34 @@ export class PostitQueenBee extends QueenBee {
     await Promise.all(existing.map(record =>
       removeDecorationAndWait({ sig: record.sig, segments })))
     EffectBus.emit('activity:log', { message: 'Post-it removed', icon: 'sticky_note_2' })
+  }
+
+  /** `/postit tile` — the TILE renders again and the sticky stands down; the
+   *  note is KEPT, just dormant. Rides the feature-hidden pool (the
+   *  participant-local off every activation lens already reads), so nothing
+   *  leaves the layer and `/postit sticky` brings the takeover back. */
+  async #tile(): Promise<void> {
+    const segments = this.#segments()
+    const writer = get<FeatureHiddenWriterShape>('@hypercomb.social/FeatureHiddenWriter')
+    if (!writer?.hide) return
+    await writer.hide({
+      featKind: POSTIT_KIND, view: POSTIT_VIEW,
+      label: segments.at(-1) ?? '/', segments,
+    })
+    // Un-claim the hex NOW: the union filter only runs during a geometry
+    // pass, and the hidden write itself forces none.
+    EffectBus.emit('takeover:indexed', { label: segments.at(-1) ?? '' })
+    EffectBus.emit('activity:log', { message: 'Tile restored — the post-it stands down here', icon: 'sticky_note_2' })
+  }
+
+  /** `/postit sticky` — undo `tile`: the post-it takes the cell back over. */
+  async #sticky(): Promise<void> {
+    const segments = this.#segments()
+    const writer = get<FeatureHiddenWriterShape>('@hypercomb.social/FeatureHiddenWriter')
+    if (!writer?.restoreAt) return
+    if (!await writer.restoreAt(POSTIT_KIND, segments)) return
+    EffectBus.emit('takeover:indexed', { label: segments.at(-1) ?? '' })
+    EffectBus.emit('activity:log', { message: 'Post-it back on this cell', icon: 'sticky_note_2' })
   }
 }
 
