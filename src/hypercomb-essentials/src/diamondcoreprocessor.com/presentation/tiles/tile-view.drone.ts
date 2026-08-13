@@ -116,6 +116,50 @@ const HEX_RATIO = '0.866'
 /** Travel that makes a horizontal drag a step to the next tile. Roughly a
  *  thumb's width — under it, a finger resting and lifting is still a tap. */
 const SWIPE_PX = 56
+/** Travel that commits a drag FROM the hexagon to one of its six faces.
+ *  Shorter than the row-walk swipe: this gesture is AIMED at a labelled face,
+ *  not thrown across the screen. */
+const FACE_PX = 44
+/** Room the hex zone reserves around the hexagon for the face captions. */
+const FACE_PAD = '1.7rem'
+/** How far past its edge a face's caption sits, along the edge normal. */
+const FACE_OUT = '1.05rem'
+/** The six faces of the point-top hexagon, in swipe-sector order: the sector
+ *  index is `round(angle / 60°) mod 6` with 0° pointing east and angles
+ *  counter-clockwise, so the array IS the lookup table. */
+const FACE_DIRS = ['e', 'ne', 'nw', 'w', 'sw', 'se'] as const
+type FaceDir = (typeof FACE_DIRS)[number]
+/** Where each face's caption sits (percent of the hexagon's box), how the
+ *  text is rotated to lie along its edge, and which way "outward" is after
+ *  that rotation (translateY sign). Point-top hexagon: two vertical side
+ *  edges, four sloped ones at ±30°. */
+const FACE_GEOMETRY: Record<FaceDir, { x: number; y: number; rotate: number; out: 1 | -1 }> = {
+  ne: { x: 75, y: 12.5, rotate: 30, out: -1 },
+  e: { x: 100, y: 50, rotate: 90, out: -1 },
+  se: { x: 75, y: 87.5, rotate: -30, out: 1 },
+  sw: { x: 25, y: 87.5, rotate: 30, out: 1 },
+  w: { x: 0, y: 50, rotate: -90, out: -1 },
+  nw: { x: 25, y: 12.5, rotate: -30, out: -1 },
+}
+
+/** Chrome the inline styles cannot express — pressed feedback on the menu
+ *  cells and the hot-face brightening — installed once, document-wide. The
+ *  drone builds its DOM imperatively, so this is its stylesheet. */
+const VIEW_CSS = `
+#hc-tile-view-host [data-hc-tv-chip] { transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease; -webkit-tap-highlight-color: transparent; }
+#hc-tile-view-host [data-hc-tv-chip]:active { background: rgba(126,182,214,0.16); }
+#hc-tile-view-host [data-hc-tv-face] { transition: color 0.12s ease, opacity 0.12s ease; -webkit-tap-highlight-color: transparent; }
+#hc-tile-view-host [data-hc-tv-face][data-hot] { color: rgba(126,182,214,1); opacity: 1; }
+`
+let viewCssInstalled = false
+const installViewCss = (): void => {
+  if (viewCssInstalled || typeof document === 'undefined') return
+  viewCssInstalled = true
+  const style = document.createElement('style')
+  style.setAttribute('data-hc-tile-view-css', '')
+  style.textContent = VIEW_CSS
+  document.head.appendChild(style)
+}
 /** Icons per row. Five is what the desktop band chunks at, so a tile's set
  *  breaks in the same places on both surfaces. UNLIKE the band there is no row
  *  cap: a hexagon is only so tall, a screen is not, so the block simply keeps
@@ -561,6 +605,7 @@ export class TileViewDrone extends Drone {
   #mount(): void {
     const label = this.#label
     if (!label) return
+    installViewCss()
 
     const host = document.createElement('div')
     host.id = 'hc-tile-view-host'
@@ -607,12 +652,24 @@ export class TileViewDrone extends Drone {
     // close" rather than a separate screen about it. The outer element is the
     // 2px steel edge: clip-path erases borders, so the frame has to be a
     // second clipped box behind the first.
+    //
+    // THE ZONE around it is the hexagon's OWN control surface: the six face
+    // captions ride just outside the six edges, and a drag that starts here
+    // is a face activation, never a row-walk (the zone stops the pointer
+    // before the host's swipe sees it). The captions cannot be children of
+    // the frame — its clip-path would erase anything outside the hexagon —
+    // so they live on an overlay whose inset equals the zone's padding,
+    // which makes the overlay's percent-space exactly the hexagon's box.
+    const zone = document.createElement('div')
+    zone.dataset['role'] = 'hex-zone'
+    zone.style.cssText =
+      `flex:0 0 auto;position:relative;box-sizing:content-box;padding:${FACE_PAD};`
     const hexFrame = document.createElement('div')
     hexFrame.dataset['role'] = 'hex-frame'
     hexFrame.style.cssText =
       // border-box, or the 2px edge is ADDED to the sized box and the ratio
       // — and with it the hexagon — comes out slightly squashed.
-      `flex:0 0 auto;box-sizing:border-box;aspect-ratio:${HEX_RATIO};padding:2px;background:${STEEL};` +
+      `box-sizing:border-box;aspect-ratio:${HEX_RATIO};padding:2px;background:${STEEL};` +
       `clip-path:${HEX_CLIP};`
     const hex = document.createElement('div')
     hex.dataset['role'] = 'picture'
@@ -627,7 +684,11 @@ export class TileViewDrone extends Drone {
     initial.style.cssText = `font-size:4rem;font-weight:700;color:${DIM};opacity:0.5;`
     hex.appendChild(initial)
     hexFrame.appendChild(hex)
-    stage.appendChild(hexFrame)
+    zone.appendChild(hexFrame)
+    const faces = this.#hexFaces(label)
+    const faceSpans = this.#buildFaceLayer(zone, faces)
+    this.#bindHexGesture(zone, faces, faceSpans)
+    stage.appendChild(zone)
 
     // ── the column beside/below it ──
     const panel = document.createElement('div')
@@ -806,17 +867,19 @@ export class TileViewDrone extends Drone {
     if (!host) return
     const landscape = window.matchMedia('(orientation: landscape)').matches
     const stage = host.querySelector('[data-role="stage"]') as HTMLElement | null
+    const zone = host.querySelector('[data-role="hex-zone"]') as HTMLElement | null
     const frame = host.querySelector('[data-role="hex-frame"]') as HTMLElement | null
     const panel = host.querySelector('[data-role="panel"]') as HTMLElement | null
     const row = host.querySelector('[data-role="actions"]') as HTMLElement | null
-    if (!stage || !frame || !panel) return
+    if (!stage || !zone || !frame || !panel) return
 
     if (landscape) {
       stage.style.display = 'grid'
       stage.style.gridTemplateColumns = '1fr auto 1fr'
-      frame.style.gridColumn = '2'
+      zone.style.gridColumn = '2'
+      zone.style.marginTop = '0'
       panel.style.gridColumn = '3'
-      frame.style.height = 'min(72vh, 21rem)'
+      frame.style.height = 'min(66vh, 21rem)'
       frame.style.width = 'auto'
       panel.style.flex = ''
       panel.style.alignItems = 'flex-start'
@@ -825,7 +888,12 @@ export class TileViewDrone extends Drone {
     } else {
       stage.style.display = 'flex'
       stage.style.gridTemplateColumns = ''
-      frame.style.gridColumn = ''
+      zone.style.gridColumn = ''
+      // A LITTLE LOWER than dead centre, on request: the close-up is worked
+      // with a thumb, and a hexagon that hangs slightly toward the hand is
+      // the difference between reading it and reaching for it. Also air for
+      // the two upper face captions, which sit above the shape.
+      zone.style.marginTop = '4vh'
       panel.style.gridColumn = ''
       stage.style.flexDirection = 'column'
       // Narrower than the column it sits in, so the tile is inset in its own
@@ -868,22 +936,8 @@ export class TileViewDrone extends Drone {
 
     const chips: Chip[] = [
       // GO INSIDE leads: a branch's whole point is what is under it, and the
-      // close-up is reached by holding one. Emitted as a request rather than
-      // driven from here — every readiness gate, phantom-segment latch and
-      // guard that entering a tile needs already lives in the overlay, and a
-      // second implementation of it would be a second set of those bugs.
-      {
-        action: 'enter',
-        glyph: 'login',
-        labelKey: 'tile-view.enter',
-        fallback: 'go inside',
-        when: () => this.#branches.has(label),
-        accent: true,
-        run: () => {
-          this.emitEffect('tile:enter-request', { label })
-          this.close()
-        },
-      },
+      // close-up is reached by holding one.
+      this.#enterChip(label),
       // EVERYTHING THE BAND CARRIES — edit, note, share, features, adopt,
       // hide, block, files, invite, remove, the lot — resolved for THIS tile
       // by the surface that owns them. These used to be a hand-written subset
@@ -896,21 +950,7 @@ export class TileViewDrone extends Drone {
       // several, and every set verb (marking, removing, the clipboard, the
       // options ring) reads that one selection. Arming the picker on the way
       // out means the tile you were just looking at is the first one in.
-      {
-        action: 'select',
-        glyph: 'select_all',
-        labelKey: 'tile-view.select',
-        fallback: 'select',
-        run: () => {
-          const select = window.ioc?.get?.('@diamondcoreprocessor.com/SelectModeDrone') as
-            { arm(): void } | undefined
-          const selection = window.ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
-            { add(label: string): void } | undefined
-          select?.arm()
-          selection?.add(label)
-          this.close()
-        },
-      },
+      this.#selectChip(label),
     ]
 
     for (const chip of chips) {
@@ -933,6 +973,186 @@ export class TileViewDrone extends Drone {
     }
     row.appendChild(this.#exitChip())
     return row
+  }
+
+  /** GO INSIDE, as a chip. Emitted as a request rather than driven from here —
+   *  every readiness gate, phantom-segment latch and guard that entering a
+   *  tile needs already lives in the overlay, and a second implementation of
+   *  it would be a second set of those bugs. Shared by the menu grid and the
+   *  hexagon's bottom-right face, so the two can never disagree about what
+   *  entering means. */
+  #enterChip(label: string): Chip {
+    return {
+      action: 'enter',
+      glyph: 'login',
+      labelKey: 'tile-view.enter',
+      fallback: 'go inside',
+      when: () => this.#branches.has(label),
+      accent: true,
+      run: () => {
+        this.emitEffect('tile:enter-request', { label })
+        this.close()
+      },
+    }
+  }
+
+  /** PICK IT, as a chip — arms the picker with this tile already in. Shared by
+   *  the menu grid and the hexagon's bottom-left face. */
+  #selectChip(label: string): Chip {
+    return {
+      action: 'select',
+      glyph: 'select_all',
+      labelKey: 'tile-view.select',
+      fallback: 'select',
+      run: () => {
+        const select = window.ioc?.get?.('@diamondcoreprocessor.com/SelectModeDrone') as
+          { arm(): void } | undefined
+        const selection = window.ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
+          { add(label: string): void } | undefined
+        select?.arm()
+        selection?.add(label)
+        this.close()
+      },
+    }
+  }
+
+  // ── the six faces ──────────────────────────────────────────
+  //
+  // THE HEXAGON'S SIX EDGES ARE SIX OPTIONS. Each face carries a caption
+  // lying along its edge, and a drag from the hexagon toward a face — any of
+  // the six directions — activates it, exactly as tapping its caption does.
+  // The occupants are not invented for the gesture: every face resolves to a
+  // chip the view already renders, running through the same `run()` (so the
+  // suspend/handover rules hold whichever way an option is reached).
+  //
+  //   upper-right · upper-left — what the tile can be OPENED AS (its viewers:
+  //     photos, slides, a website …), the live question on arrival;
+  //   right — EDIT · left — SETTINGS (the features panel);
+  //   lower-right — GO INSIDE (branches; the thumb's easiest flick)
+  //   lower-left — SELECT.
+  //
+  // A face with no occupant (no second viewer, not a branch) renders nothing
+  // and swallows nothing: the swipe simply does not commit.
+
+  /** Which chip each face carries, for this tile. */
+  #hexFaces(label: string): Partial<Record<FaceDir, Chip>> {
+    const chips = this.#overlayChips(label)
+    const viewers = chips.filter(c => c.action.startsWith(VIEW_ENTER_PREFIX))
+    const named = (name: string): Chip | undefined => chips.find(c => c.action === name)
+    const faces: Partial<Record<FaceDir, Chip>> = {}
+    if (viewers[0]) faces.ne = { ...viewers[0], accent: true }
+    if (viewers[1]) faces.nw = { ...viewers[1], accent: true }
+    const edit = named('edit')
+    if (edit) faces.e = edit
+    // The features panel, wearing the name the face means: a face caption is
+    // an aim ("settings"), not the panel's own long title.
+    const settings = named('features')
+    if (settings) faces.w = { ...settings, labelKey: 'tile-view.settings', fallback: 'settings' }
+    if (this.#branches.has(label)) faces.se = this.#enterChip(label)
+    faces.sw = this.#selectChip(label)
+    return faces
+  }
+
+  /** The captions around the hexagon. Children of an overlay whose inset is
+   *  the zone's padding, so its percent-space is exactly the hexagon's box —
+   *  they cannot live in the frame, whose clip-path would erase them. */
+  #buildFaceLayer(
+    zone: HTMLElement,
+    faces: Partial<Record<FaceDir, Chip>>,
+  ): Partial<Record<FaceDir, HTMLElement>> {
+    const layer = document.createElement('div')
+    layer.dataset['role'] = 'face-layer'
+    layer.style.cssText = `position:absolute;inset:${FACE_PAD};pointer-events:none;`
+    const spans: Partial<Record<FaceDir, HTMLElement>> = {}
+    for (const dir of FACE_DIRS) {
+      const chip = faces[dir]
+      if (!chip) continue
+      const inert = !!chip.backingKey && !window.ioc?.has?.(chip.backingKey)
+      if (inert) continue
+      const geometry = FACE_GEOMETRY[dir]
+      const span = document.createElement('span')
+      span.setAttribute('data-hc-tv-face', dir)
+      span.textContent = this.#t(chip.labelKey, chip.fallback)
+      span.style.cssText =
+        `position:absolute;left:${geometry.x}%;top:${geometry.y}%;` +
+        `transform:translate(-50%,-50%) rotate(${geometry.rotate}deg) translateY(${geometry.out > 0 ? '' : '-'}${FACE_OUT});` +
+        'font-size:0.62rem;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;' +
+        'white-space:nowrap;cursor:pointer;pointer-events:auto;user-select:none;' +
+        `color:${chip.accent ? STEEL : DIM};opacity:0.85;`
+      span.addEventListener('click', e => {
+        e.stopPropagation()
+        chip.run ? chip.run() : this.emitEffect('tile:action', { action: chip.action, label: this.#label ?? '' })
+      })
+      layer.appendChild(span)
+      spans[dir] = span
+    }
+    zone.appendChild(layer)
+    return spans
+  }
+
+  /** The six-direction drag. Owned by the ZONE: a pointer that goes down on
+   *  the hexagon is aiming at a face, so it is stopped before the host's
+   *  row-walk swipe can claim it — the row is still walked from anywhere
+   *  else on the screen. Committed on release past FACE_PX; while the drag
+   *  is live the face it currently points at brightens, which is what makes
+   *  an invisible gesture learnable. */
+  #bindHexGesture(
+    zone: HTMLElement,
+    faces: Partial<Record<FaceDir, Chip>>,
+    spans: Partial<Record<FaceDir, HTMLElement>>,
+  ): void {
+    let start: { id: number; x: number; y: number } | null = null
+    let committed = false
+    const aim = (dx: number, dy: number): FaceDir | null => {
+      if (Math.hypot(dx, dy) < 12) return null
+      // Screen y grows downward; negate it so 0° is east and angles run
+      // counter-clockwise — the space FACE_DIRS indexes by 60° sectors.
+      const angle = (Math.atan2(-dy, dx) * 180 / Math.PI + 360) % 360
+      return FACE_DIRS[Math.round(angle / 60) % 6] ?? null
+    }
+    const paint = (hot: FaceDir | null): void => {
+      for (const dir of FACE_DIRS) {
+        const span = spans[dir]
+        if (!span) continue
+        if (dir === hot) span.setAttribute('data-hot', '')
+        else span.removeAttribute('data-hot')
+      }
+    }
+    zone.addEventListener('pointerdown', e => {
+      start = { id: e.pointerId, x: e.clientX, y: e.clientY }
+      committed = false
+      e.stopPropagation()
+      try { zone.setPointerCapture(e.pointerId) } catch { /* best effort */ }
+    })
+    zone.addEventListener('pointermove', e => {
+      if (!start || start.id !== e.pointerId) return
+      const dir = aim(e.clientX - start.x, e.clientY - start.y)
+      paint(dir && faces[dir] && spans[dir] ? dir : null)
+    })
+    zone.addEventListener('pointerup', e => {
+      if (!start || start.id !== e.pointerId) return
+      const dx = e.clientX - start.x
+      const dy = e.clientY - start.y
+      start = null
+      paint(null)
+      if (this.#suspended) return
+      if (Math.hypot(dx, dy) < FACE_PX) return
+      const dir = aim(dx, dy)
+      const chip = dir ? faces[dir] : undefined
+      if (!chip || (chip.when && !chip.when())) return
+      committed = true
+      chip.run ? chip.run() : this.emitEffect('tile:action', { action: chip.action, label: this.#label ?? '' })
+    })
+    zone.addEventListener('pointercancel', () => { start = null; paint(null) })
+    // The click a committed drag leaves behind would land on whatever caption
+    // the finger came up over. Capture phase, same reason the host swallows
+    // its row-walk's trailing click.
+    zone.addEventListener('click', e => {
+      if (!committed) return
+      committed = false
+      e.preventDefault()
+      e.stopPropagation()
+    }, true)
   }
 
   /**
@@ -1003,25 +1223,31 @@ export class TileViewDrone extends Drone {
     const text = this.#t(chip.labelKey, chip.fallback)
     btn.type = 'button'
     btn.setAttribute('aria-label', text)
+    btn.setAttribute('data-hc-tv-chip', '')
+    // NO PLATE, NO BORDER. A grid of outlined boxes reads as a settings form
+    // from another era; the cell is a bare glyph with its name under it — the
+    // same icon-rail language the header speaks — and the pressed state (a
+    // brief steel wash, from VIEW_CSS) is the only box that ever appears.
+    // What distinguishes an ACCENTED cell is now its colour: steel glyph
+    // instead of an inverse-filled slab.
     // Five across, exactly: the basis subtracts the four gaps between them, so
     // every cell in the block is the same width whatever row it lands on.
     btn.style.cssText =
-      `min-height:${TAP};padding:0.5rem 0.2rem;border-radius:${RADIUS};` +
+      `min-height:${TAP};padding:0.45rem 0.2rem;border-radius:${RADIUS};` +
       `flex:0 0 calc((100% - ${MENU_COLUMNS - 1} * ${TIGHT_GAP}) / ${MENU_COLUMNS});` +
       'box-sizing:border-box;' +
       'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-      'gap:0.3rem;cursor:pointer;' +
-      `background:${chip.accent ? STEEL : 'rgba(20,26,34,0.9)'};` +
-      `color:${chip.accent ? '#04121b' : 'rgba(245,245,245,0.9)'};` +
-      `border:1px solid ${chip.accent ? 'transparent' : 'rgba(255,255,255,0.12)'};` +
-      `opacity:${inert ? 0.4 : 1};pointer-events:${inert ? 'none' : 'auto'};`
+      'gap:0.35rem;cursor:pointer;' +
+      'background:transparent;border:none;' +
+      `color:${chip.accent ? STEEL : 'rgba(233,240,246,0.88)'};` +
+      `opacity:${inert ? 0.35 : 1};pointer-events:${inert ? 'none' : 'auto'};`
 
     const icon = document.createElement('span')
     icon.style.cssText =
-      'display:flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;'
+      'display:flex;align-items:center;justify-content:center;width:1.6rem;height:1.6rem;'
     if (chip.svg) {
       // Provider markup: 24×24, `fill="white"`. Sized down to the cell and
-      // recoloured through `currentColor` so an accent cell inverts with the
+      // recoloured through `currentColor` so an accent cell tints with the
       // rest of the button.
       icon.innerHTML = chip.svg
       const svg = icon.firstElementChild as SVGElement | null
@@ -1032,17 +1258,18 @@ export class TileViewDrone extends Drone {
       }
     } else {
       icon.textContent = chip.glyph ?? ''
-      icon.style.cssText += "font-family:'Material Symbols Outlined';font-size:1.4rem;line-height:1;"
+      icon.style.cssText += "font-family:'Material Symbols Outlined';font-size:1.5rem;line-height:1;"
     }
     btn.appendChild(icon)
 
     const caption = document.createElement('span')
     caption.textContent = text
     // One line, clipped rather than wrapped: a two-line caption makes one cell
-    // taller than its neighbours and the whole row goes ragged.
+    // taller than its neighbours and the whole row goes ragged. Dimmer than
+    // the glyph — the glyph is the control, the word is its footnote.
     caption.style.cssText =
-      'font-size:0.62rem;font-weight:600;line-height:1.1;max-width:100%;letter-spacing:0.01em;' +
-      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.82;'
+      'font-size:0.6rem;font-weight:600;line-height:1.1;max-width:100%;letter-spacing:0.05em;' +
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.62;text-transform:lowercase;'
     btn.appendChild(caption)
 
     btn.addEventListener('click', () => {

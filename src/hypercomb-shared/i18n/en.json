@@ -653,6 +653,7 @@
   "tile-view.creations": "available creations",
   "tile-view.enter": "go inside",
   "tile-view.select": "select",
+  "tile-view.settings": "settings",
   "tile-view.previous": "previous",
   "tile-view.next": "next",
   "tile-view.exit": "back",
