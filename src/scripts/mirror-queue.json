@@ -611,6 +611,14 @@
       "note": "Five creations, one pass (commit follows). (1) link:intake effect on link-drop.worker.ts — the command line recognises a whole-line external URL (own-origin excluded) and routes it through the SAME drop pipeline (safety, oEmbed title, poster thumbnail, auto-commit); the husk-cell paste trap is dead. (2) link-open.worker.ts: image-extension links go straight to PhotoView.show(url) (no CORS fetch), YouTube tiles PLAY on first tap — metadata review becomes a toast whose button emits youtube-meta:open. (3) tile-link-action visibleWhen drops isBranch — leaf link tiles carry 'open' in the close-up, and the six-face compass NE face falls back to it. (4) sharing/deliver-link.ts — navigator.share → clipboard → fresh-tap toast ladder; host.queen + invite.queen use it; share-link.drone routes PHONE shares through HostQueenBee (consent → seal → CDN → bundle link), desktop unchanged. (5) iOS: opfsWritable() probe (createWritable missing on iOS 16.4–18.3) routes to a new install.update-needed card instead of the infinite Start loop; Pixi capped res 1.5 / no AA / 30fps on phones. Mirror owes: notes on the behaviors deck cards for link intake (input), link-open (views), share-link + host (sharing), plus a new card for deliver-link if the vocabulary wants it. note-add is additive, hence hands-on.",
       "created": "2026-08-13",
       "status": "pending"
+    },
+    {
+      "id": "tile-view-legible-menu",
+      "title": "Close-up: pair-centred landscape + cells sized to be seen",
+      "run": null,
+      "note": "tile-view.drone.ts follow-up to the six-face compass. LANDSCAPE was a '1fr auto 1fr' grid whose empty first track centred the HEXAGON at the cost of a dead third of the screen (Jaime: 'completely unacceptable') — now a centred flex ROW: the hexagon+column PAIR is the object and sits in the middle, panel bounded at 26rem so it can never eat the width (the reason the grid existed), hexagon up to min(72vh,24rem). CELLS: fixed five-across replaced by flex 1 1 5.4rem / max 7.5rem — the width decides the column count (3 on a phone, 4-5 on a desktop column), glyph 1.5rem→2rem, caption 0.6rem→0.74rem, min-height 3.25rem→4.6rem, section titles 0.68→0.74rem, grid gap 0.7rem. ONE SCROLLER: the panel scrolls as a document (name, notes, viewers, creations, actions); the actions block no longer scrolls inside it, which is what made the last verbs unreachable. Mirror owes: update the views/tile-view card note with the legibility rule (cell minimum decides columns, never a fixed count) — additive, hands-on.",
+      "created": "2026-08-14",
+      "status": "pending"
     }
   ]
 }

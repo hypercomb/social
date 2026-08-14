@@ -106,8 +106,10 @@ const SIG = /^[0-9a-f]{64}$/
 const TAKEOVER_Z = 59990
 const STEEL = 'rgba(126,182,214,0.92)'
 const DIM = 'rgba(207,226,238,0.62)'
-/** Thumb-target floor. The desktop band's 3rem circles are a cursor size. */
-const TAP = '3.25rem'
+/** Thumb-target floor. The desktop band's 3rem circles are a cursor size —
+ *  and 3.25 was still a compromise: this is the only menu a phone gets, so a
+ *  cell is a comfortable target with room for a glyph you can actually see. */
+const TAP = '4.6rem'
 /** The hive's hexagon, exactly: point-top, √3/2 wide for its height. Same
  *  numbers the aggregate-index and collections-landing hexes use — a tile in
  *  close-up must be the same shape as the tile you tapped. */
@@ -160,11 +162,17 @@ const installViewCss = (): void => {
   style.textContent = VIEW_CSS
   document.head.appendChild(style)
 }
-/** Icons per row. Five is what the desktop band chunks at, so a tile's set
- *  breaks in the same places on both surfaces. UNLIKE the band there is no row
- *  cap: a hexagon is only so tall, a screen is not, so the block simply keeps
- *  adding rows downward and scrolls if it ever outgrows the panel. */
-const MENU_COLUMNS = 5
+/** THE CELL'S OWN SIZE DECIDES THE COLUMNS, not a fixed count.
+ *
+ *  A hard five-across meant every cell shrank as the column narrowed — on a
+ *  phone the glyphs ended up smaller than the words under them, which is a
+ *  menu you cannot read and cannot hit. Now each cell has a MINIMUM it will
+ *  not go below and grows to share whatever width there is: three across on a
+ *  narrow column, four or five on a wide one, always at a legible size. */
+const CELL_MIN = '5.4rem'
+/** Ceiling, so a wide desktop column gives more COLUMNS rather than a row of
+ *  enormous buttons. */
+const CELL_MAX = '7.5rem'
 /** ONE COLUMN, ONE WIDTH. The hexagon, the name, the notes and every row of
  *  icons are laid on the same axis at the same width — a close-up of a tile
  *  reads as one object, not a stack of differently-sized blocks. (Before this
@@ -696,9 +704,17 @@ export class TileViewDrone extends Drone {
     // THE COLUMN. Its `gap` is the entire vertical rhythm of the view — no
     // block below it carries a margin, so every join is the same height and
     // the column cannot go ragged when one of them happens to be absent.
+    // ONE SCROLLER, NOT THREE. The notes had their own scroll and the action
+    // block another, so a long menu was clipped by the panel while two inner
+    // boxes scrolled independently — the last row of verbs simply could not
+    // be reached. The COLUMN scrolls now, as one document: name, notes,
+    // viewers, creations, actions, in that order, all of it reachable.
     panel.style.cssText =
-      'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-      `gap:${STACK_GAP};min-width:0;min-height:0;width:${COLUMN};max-width:100%;`
+      'display:flex;flex-direction:column;align-items:center;justify-content:flex-start;' +
+      `gap:${STACK_GAP};min-width:0;min-height:0;width:${COLUMN};max-width:100%;` +
+      'overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;' +
+      // Room under the last row so it clears the screen edge when scrolled.
+      'padding-bottom:0.5rem;'
     stage.appendChild(panel)
 
     const name = document.createElement('div')
@@ -776,7 +792,7 @@ export class TileViewDrone extends Drone {
     const title = document.createElement('div')
     title.textContent = this.#t('tile-view.open-as', 'open as')
     title.style.cssText =
-      'font-size:0.68rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;' +
+      'font-size:0.74rem;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;' +
       `color:${DIM};opacity:0.75;width:100%;`
     section.appendChild(title)
 
@@ -812,7 +828,7 @@ export class TileViewDrone extends Drone {
     const title = document.createElement('div')
     title.textContent = this.#t('tile-view.creations', 'available creations')
     title.style.cssText =
-      'font-size:0.68rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;' +
+      'font-size:0.74rem;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;' +
       `color:${DIM};opacity:0.75;width:100%;`
     section.appendChild(title)
 
@@ -833,8 +849,10 @@ export class TileViewDrone extends Drone {
    */
   #iconGrid(): HTMLDivElement {
     const row = document.createElement('div')
+    // A hair more air than the old TIGHT_GAP: cells this size need to read as
+    // separate controls, not a solid block of glyphs.
     row.style.cssText =
-      `display:flex;flex-wrap:wrap;gap:${TIGHT_GAP};justify-content:center;width:100%;`
+      'display:flex;flex-wrap:wrap;gap:0.7rem 0.5rem;justify-content:center;width:100%;'
     return row
   }
 
@@ -874,20 +892,33 @@ export class TileViewDrone extends Drone {
     if (!stage || !zone || !frame || !panel) return
 
     if (landscape) {
-      stage.style.display = 'grid'
-      stage.style.gridTemplateColumns = '1fr auto 1fr'
-      zone.style.gridColumn = '2'
+      // THE PAIR IS THE OBJECT, AND IT SITS IN THE MIDDLE. This used to be a
+      // `1fr auto 1fr` grid whose empty first track mirrored the panel — it
+      // centred the HEXAGON, at the price of a dead third of the screen on
+      // the left and a column crushed against the right edge. Centring the
+      // pair instead uses the whole width: hexagon and column side by side,
+      // together in the middle, with the panel bounded so it can never eat
+      // the leftover space and shove the hexagon off (the reason the grid
+      // existed at all).
+      stage.style.display = 'flex'
+      stage.style.gridTemplateColumns = ''
+      stage.style.flexDirection = 'row'
+      stage.style.gap = '2.5rem'
+      zone.style.gridColumn = ''
       zone.style.marginTop = '0'
-      panel.style.gridColumn = '3'
-      frame.style.height = 'min(66vh, 21rem)'
+      panel.style.gridColumn = ''
+      frame.style.height = 'min(72vh, 24rem)'
       frame.style.width = 'auto'
-      panel.style.flex = ''
+      panel.style.flex = '0 1 26rem'
       panel.style.alignItems = 'flex-start'
       panel.style.textAlign = 'left'
+      panel.style.justifyContent = 'flex-start'
+      panel.style.maxHeight = '100%'
       if (row) row.style.justifyContent = 'flex-start'
     } else {
       stage.style.display = 'flex'
       stage.style.gridTemplateColumns = ''
+      stage.style.gap = STACK_GAP
       zone.style.gridColumn = ''
       // A LITTLE LOWER than dead centre, on request: the close-up is worked
       // with a thumb, and a hexagon that hangs slightly toward the hand is
@@ -903,6 +934,8 @@ export class TileViewDrone extends Drone {
       panel.style.flex = '0 1 auto'
       panel.style.alignItems = 'center'
       panel.style.textAlign = 'center'
+      panel.style.justifyContent = 'flex-start'
+      panel.style.maxHeight = ''
       if (row) row.style.justifyContent = 'center'
     }
   }
@@ -925,13 +958,11 @@ export class TileViewDrone extends Drone {
   #actionRow(label: string): HTMLElement {
     const row = this.#iconGrid()
     row.dataset['role'] = 'actions'
-    row.style.flex = '0 1 auto'
-    // Past a few rows the block scrolls rather than pushing the hexagon off
-    // the screen. `pan-y` so this scroll is possible at all while the host
-    // holds every other touch action (see #mount).
-    row.style.overflowY = 'auto'
-    row.style.overscrollBehavior = 'contain'
-    row.style.touchAction = 'pan-y'
+    // No scroll of its own — the PANEL is the scroller now (see `#mount`), so
+    // the block simply lays out however many rows it needs and the column
+    // carries them. A box that scrolled inside a box meant the last verbs
+    // were unreachable from either.
+    row.style.flex = '0 0 auto'
     row.style.alignContent = 'flex-start'
 
     const chips: Chip[] = [
@@ -1252,18 +1283,20 @@ export class TileViewDrone extends Drone {
     // Five across, exactly: the basis subtracts the four gaps between them, so
     // every cell in the block is the same width whatever row it lands on.
     btn.style.cssText =
-      `min-height:${TAP};padding:0.45rem 0.2rem;border-radius:${RADIUS};` +
-      `flex:0 0 calc((100% - ${MENU_COLUMNS - 1} * ${TIGHT_GAP}) / ${MENU_COLUMNS});` +
+      `min-height:${TAP};padding:0.5rem 0.25rem;border-radius:${RADIUS};` +
+      // Grow to share the row, never below the readable floor, never past the
+      // ceiling — the row count falls out of the width instead of being fixed.
+      `flex:1 1 ${CELL_MIN};min-width:${CELL_MIN};max-width:${CELL_MAX};` +
       'box-sizing:border-box;' +
       'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-      'gap:0.35rem;cursor:pointer;' +
+      'gap:0.45rem;cursor:pointer;' +
       'background:transparent;border:none;' +
       `color:${chip.accent ? STEEL : 'rgba(233,240,246,0.88)'};` +
       `opacity:${inert ? 0.35 : 1};pointer-events:${inert ? 'none' : 'auto'};`
 
     const icon = document.createElement('span')
     icon.style.cssText =
-      'display:flex;align-items:center;justify-content:center;width:1.6rem;height:1.6rem;'
+      'display:flex;align-items:center;justify-content:center;width:2.15rem;height:2.15rem;'
     if (chip.svg) {
       // Provider markup: 24×24, `fill="white"`. Sized down to the cell and
       // recoloured through `currentColor` so an accent cell tints with the
@@ -1277,18 +1310,19 @@ export class TileViewDrone extends Drone {
       }
     } else {
       icon.textContent = chip.glyph ?? ''
-      icon.style.cssText += "font-family:'Material Symbols Outlined';font-size:1.5rem;line-height:1;"
+      icon.style.cssText += "font-family:'Material Symbols Outlined';font-size:2rem;line-height:1;"
     }
     btn.appendChild(icon)
 
     const caption = document.createElement('span')
     caption.textContent = text
     // One line, clipped rather than wrapped: a two-line caption makes one cell
-    // taller than its neighbours and the whole row goes ragged. Dimmer than
-    // the glyph — the glyph is the control, the word is its footnote.
+    // taller than its neighbours and the whole row goes ragged. Quieter than
+    // the glyph — the glyph is the control, the word names it — but no longer
+    // a whisper: at 0.6rem it was smaller than any other text on the screen.
     caption.style.cssText =
-      'font-size:0.6rem;font-weight:600;line-height:1.1;max-width:100%;letter-spacing:0.05em;' +
-      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.62;text-transform:lowercase;'
+      'font-size:0.74rem;font-weight:600;line-height:1.15;max-width:100%;letter-spacing:0.02em;' +
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.78;text-transform:lowercase;'
     btn.appendChild(caption)
 
     btn.addEventListener('click', () => {
