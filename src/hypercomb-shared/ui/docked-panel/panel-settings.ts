@@ -65,7 +65,8 @@ const SETTINGS_CSS = `
 [data-hc-panel-settings] { color: var(--hc-gear, #6e8290); opacity: 1; pointer-events: auto; }
 [data-hc-panel-settings]:hover,
 [data-hc-panel-settings]:focus-visible,
-[data-hc-panel-settings][aria-expanded='true'] { color: #cfe3ef; }
+[data-hc-panel-settings][aria-expanded='true'] { color: #cfe3ef; background-color: rgba(${STEEL}, 0.09) !important; }
+[data-hc-panel-settings]:focus-visible { outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 1px; }
 
 .hc-settings {
   width: min(272px, calc(100% - 20px));

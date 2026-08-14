@@ -1,5 +1,8 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
-import { Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService } from '@hypercomb/core'
+import {
+  Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
+  isLocalClaudeBridgeConfigured,
+} from '@hypercomb/core'
 import { deliverTurn, readTurns } from './chat-thread.js'
 import { readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
@@ -11,13 +14,11 @@ import { mintBuildRecord } from '../history/builds-slot.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
-const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
 // Optional port override (`?claudeBridgePort=2411`) so a TEST stack — its own
 // broker + its own renderer tab — can run the full ask loop in isolation
 // without seizing the production broker's single renderer slot on 2401.
 // Query-only (never persisted): an override is a per-tab, per-session choice.
 const BRIDGE_PORT_QUERY_KEY = 'claudeBridgePort'
-const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
 
 /** Per-cell context bag slot — value is a sig array. Each entry is a
  *  resource sig (a content file at the flat OPFS root; legacy
@@ -87,7 +88,8 @@ export class ClaudeBridgeWorker extends Worker {
   #timer: ReturnType<typeof setTimeout> | null = null
 
   /** Warmup: subscribe to the explicit `claude-bridge:connect` event AND
-   *  attempt an auto-connect. The auto-connect is gated by `#isEnabled()`
+   *  attempt an auto-connect. The auto-connect is gated by the shared local
+   *  Claude capability
    *  (localhost + opt-in flag via URL query or localStorage), so users who
    *  haven't enabled the bridge see no WS attempt at all. Users who HAVE
    *  enabled it get a renderer registration on every page load — no manual
@@ -95,35 +97,17 @@ export class ClaudeBridgeWorker extends Worker {
    *  `_dolphin-revision.cjs`) to find a renderer. */
   protected override act = async (): Promise<void> => {
     this.onEffect('claude-bridge:connect', () => this.connect())
-    // Auto-connect when the opt-in flag is set; #isEnabled() short-circuits
-    // for everyone else, keeping the console clean in default dev sessions.
+    // Auto-connect when the shared opt-in says this local tab is configured;
+    // everyone else stays silent.
     this.connect()
   }
 
-  /** Open the bridge WebSocket. Gated by `#isEnabled()` (host + opt-in
-   *  flag) and idempotent — safe to call multiple times. */
+  /** Open the bridge WebSocket. Gated by the shared host + opt-in decision
+   *  and idempotent — safe to call multiple times. */
   public connect(): void {
     if (this.#ws) return
-    if (!this.#isEnabled()) return
+    if (!isLocalClaudeBridgeConfigured()) return
     this.#connect()
-  }
-
-  #isEnabled(): boolean {
-    try {
-      // bridge only operates on localhost — never attempt in production
-      const host = window.location.hostname
-      if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return false
-
-      const queryValue = new URLSearchParams(window.location.search).get(BRIDGE_ENABLED_QUERY_KEY)
-      if (queryValue !== null) return /^(1|true|yes|on)$/i.test(queryValue)
-
-      const storedValue = window.localStorage.getItem(BRIDGE_ENABLED_STORAGE_KEY)
-      if (storedValue !== null) return /^(1|true|yes|on)$/i.test(storedValue)
-    } catch {
-      return false
-    }
-
-    return false
   }
 
   // ------- WebSocket lifecycle -------

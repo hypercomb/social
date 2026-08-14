@@ -16,7 +16,14 @@ import type { TutorialLevel } from './tutorial-lesson.js'
 
 export type StagePoint = { x: number; y: number }
 
-export type StageRect = { left: number; top: number; width: number; height: number }
+export type StageRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+  /** Space between the target border and the tutorial ring. Defaults to 6px. */
+  highlightPadding?: number
+}
 
 /** A ring around a cell, or a box around a piece of chrome. */
 export type StageHighlight = { x: number; y: number; r: number } | StageRect | null
@@ -109,7 +116,7 @@ export interface TutorialStage {
   center(): StagePoint
   /** A controls-bar button by its i18n key (locale-proof aria-label lookup). */
   chrome(i18nKey: string): StageRect | null
-  /** The command line's input box. */
+  /** The command line's visible bordered surface. */
   commandInput(): StageRect | null
   /** The address bar (breadcrumb strip). */
   breadcrumb(): StageRect | null

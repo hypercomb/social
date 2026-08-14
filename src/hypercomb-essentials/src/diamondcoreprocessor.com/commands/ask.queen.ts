@@ -50,7 +50,10 @@ export class AskQueenBee extends QueenBee {
       }
       const domain = raw.slice(4).trim()
       if (!domain) {
-        EffectBus.emit('toast:show', { type: 'info', message: `AI host: ${svc.host}` })
+        EffectBus.emit('toast:show', {
+          type: 'info',
+          message: svc.configured ? `AI host: ${svc.host}` : 'AI host is not configured.',
+        })
         return
       }
       svc.setHost(domain)

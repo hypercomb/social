@@ -448,15 +448,15 @@ export class PostitViewDrone extends Drone {
 // without it the column sits under the bar, which is chrome at 59999.
 const STICKY_CSS = `
 .hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:59990;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
-.postit-sticky{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;width:8.5rem;min-height:4.6rem;padding:.6rem .65rem .95rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(178deg,#fef9c3 0%,#fde68a 100%);color:#4a3f0f;box-shadow:0 6px 14px rgba(0,0,0,.35),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.18);transform:rotate(var(--postit-tilt,-2deg));transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
+.postit-sticky{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;box-sizing:border-box;width:7.4rem;aspect-ratio:1/.94;padding:.75rem .72rem 1.05rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(174deg,#fffbcf 0%,#fde68a 72%,#e8c75f 100%);color:#4a3f0f;box-shadow:1px 2px 1px rgba(48,36,3,.25),4px 7px 7px rgba(0,0,0,.28),10px 16px 22px rgba(0,0,0,.24),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.75);transform:rotate(var(--postit-tilt,-2deg)) translateZ(0);transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-sticky.postit-pinned{position:fixed}
-.postit-sticky.postit-dragging{transform:rotate(0deg) scale(1.05);box-shadow:0 16px 30px rgba(0,0,0,.5);cursor:grabbing;transition:none}
+.postit-sticky.postit-dragging{transform:translateY(-7px) rotate(0deg) scale(1.055);box-shadow:2px 4px 2px rgba(48,36,3,.2),10px 20px 20px rgba(0,0,0,.38),20px 32px 38px rgba(0,0,0,.28);cursor:grabbing;transition:none}
 .postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
 .postit-sticky{position:relative}
-.postit-sticky:hover{transform:rotate(0deg) scale(1.04);box-shadow:0 10px 20px rgba(0,0,0,.42)}
+.postit-sticky:hover{transform:translateY(-4px) rotate(0deg) scale(1.035);box-shadow:1px 3px 2px rgba(48,36,3,.22),7px 13px 13px rgba(0,0,0,.34),15px 24px 28px rgba(0,0,0,.24)}
 .postit-sticky-title{display:block;font-size:.8rem;font-weight:700;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .postit-sticky-cue{position:absolute;right:.55rem;bottom:.3rem;font-size:.62rem;opacity:.55}
-@media(max-width:640px){.postit-sticky{width:7rem;min-height:4rem}}
+@media(max-width:640px){.postit-sticky{width:6.6rem}}
 `
 
 // z 59992: above the canvas (59989) and its riders (activity log 59990,

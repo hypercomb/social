@@ -712,8 +712,11 @@ export class HexSdfTextureShader {
         }
       }
 
-      // premultiplied alpha output for correct blending at hex edges
-      color.a *= hexAlpha;
+      // Let the surface behind the hive breathe through the tiles. Apply the
+      // translucency at the final composite so pictures, labels, borders, and
+      // hover treatments keep their relative contrast as one coherent tile.
+      const float HIVE_ALPHA = 0.88;
+      color.a *= hexAlpha * HIVE_ALPHA;
       color.rgb *= color.a;
       fragColor = color;
     }

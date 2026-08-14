@@ -29,7 +29,7 @@
 // tile names as context). The ask record IS the request; the Claude bridge loop
 // IS the response — a live service the user triggers from the hive.
 
-import { QueenBee, EffectBus } from '@hypercomb/core'
+import { QueenBee, EffectBus, isLocalClaudeBridgeConfigured } from '@hypercomb/core'
 import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
 import { resolveTileContext } from './tile-context.js'
 
@@ -122,6 +122,11 @@ export class LlmQueenBee extends QueenBee {
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
   ): Promise<boolean> {
+    // This method is specifically the durable LOCAL-BRIDGE queue seam. The
+    // chat window's participant-host path calls HostAi directly and never
+    // needs it. Guard direct/background callers too, or an unconfigured user
+    // can accumulate requests that nobody will ever drain.
+    if (!isLocalClaudeBridgeConfigured()) return false
     const prompt = message.trim()
     if (!prompt || !convoId) return false
     const store = get<StoreLike>('@hypercomb.social/Store')

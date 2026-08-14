@@ -32,8 +32,12 @@ $radius-pill: 999px;
 $button-padding-compact-block: 0.22em;
 $button-padding-compact-inline: 0.56em;
 
-/// The one common tool-window header height.
-$header-height: 2.8rem;
+/// The one common tool-window header height and action geometry. These values
+/// are deliberately rem-based so panel content scaling never moves the chrome.
+$header-height: 2.875rem;
+$header-padding-inline: 0.75rem;
+$header-action-size: 1.75rem;
+$header-action-gap: 0.25rem;
 
 /// Shared docked shell. Layout geometry and accent identity stay with the
 /// caller; material, edge, elevation, typography and shape live here.
@@ -88,9 +92,46 @@ $header-height: 2.8rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  height: $header-height;
   min-height: $header-height;
-  padding: 0 0.85rem;
-  background: rgba(255, 255, 255, 0.012);
+  padding: 0 $header-padding-inline;
+  line-height: 1;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.006));
+
+  // Header controls used to range from bare 15px glyphs to padded text-sized
+  // buttons. A fixed hit area gives every window the same baseline and optical
+  // spacing while leaving each panel's accent colour intact.
+  > button,
+  > [class*='actions'] > button {
+    box-sizing: border-box;
+    display: inline-grid;
+    place-items: center;
+    min-width: $header-action-size;
+    height: $header-action-size;
+    padding: 0 0.25rem;
+    border-radius: $radius-control;
+    line-height: 1;
+    transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+
+    &:hover { background-color: rgba(255, 255, 255, 0.055); }
+    &:focus-visible {
+      outline: 1px solid color-mix(in srgb, var(--hc-window-accent) 72%, white);
+      outline-offset: 1px;
+    }
+  }
+
+  // Close is the stable far-edge landmark in every tool window.
+  > button[class*='close'],
+  > button.close,
+  > [class*='actions'] > button[class*='close'] {
+    width: $header-action-size;
+    min-width: $header-action-size;
+    padding: 0;
+    font-size: 1.125rem;
+    color: rgba(238, 244, 248, 0.62);
+
+    &:hover { color: #fff; background-color: rgba(255, 255, 255, 0.075); }
+  }
 }
 
 @mixin control {

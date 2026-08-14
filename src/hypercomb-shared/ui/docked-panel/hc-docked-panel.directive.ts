@@ -111,7 +111,7 @@ export interface PanelSizeOwner {
 }
 
 /** The slot reserved for the gear immediately before a header's close button:
- *  the 22px glyph plus a hair of air on each side, so it reads as its own
+ *  the shared 28px action plus a precise 4px gap, so it reads as its own
  *  control rather than a second glyph stuck to the close button.
  *
  *  The gear is a bare glyph — no circle, no plate — and it STANDS, always, in
@@ -120,7 +120,9 @@ export interface PanelSizeOwner {
  *  finds. Dim-at-rest is the whole restraint — it sits below the close button's
  *  weight without disappearing. Its colours live in the editor's stylesheet
  *  (panel-settings.ts), which is also what the popover is drawn from. */
-const GEAR_SLOT = 30
+const HEADER_ACTION = 28
+const HEADER_ACTION_GAP = 4
+const GEAR_SLOT = HEADER_ACTION + HEADER_ACTION_GAP
 
 @Directive({
   selector: '[hcDockedPanel]',
@@ -592,16 +594,16 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     btn.setAttribute('aria-haspopup', 'dialog')
     btn.setAttribute('aria-expanded', 'false')
     Object.assign(btn.style, {
-      width: '22px', height: '22px', padding: '0',
+      width: `${HEADER_ACTION}px`, height: `${HEADER_ACTION}px`, padding: '0',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'transparent', border: 'none', borderRadius: '0',
-      cursor: 'pointer', zIndex: '7', transition: 'color 0.12s ease',
+      background: 'transparent', border: 'none', borderRadius: '2px',
+      cursor: 'pointer', zIndex: '7', transition: 'color 0.12s ease, background-color 0.12s ease',
     } as Partial<CSSStyleDeclaration>)
 
     const glyph = document.createElement('span')
     glyph.className = 'mat-sym'
     glyph.textContent = 'settings'
-    glyph.style.fontSize = '15px'
+    glyph.style.fontSize = '17px'
     glyph.style.pointerEvents = 'none'
     btn.appendChild(glyph)
     btn.addEventListener('click', this.#onGearClick)
@@ -632,7 +634,7 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
       const close = header.lastElementChild as HTMLElement | null
       let inset = pad
       if (close) {
-        inset = pad + (close.offsetWidth || 22) + (GEAR_SLOT - 22) / 2
+        inset = pad + (close.offsetWidth || HEADER_ACTION) + HEADER_ACTION_GAP
         close.style.marginLeft = `${GEAR_SLOT}px`
       }
       Object.assign(btn.style, {

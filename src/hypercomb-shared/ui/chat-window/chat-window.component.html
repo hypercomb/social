@@ -36,6 +36,24 @@
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
 
+    @if (!enabled()) {
+      <section class="chat-setup" role="status" aria-live="polite">
+        <span class="mat-sym chat-setup-glyph" aria-hidden="true">power_off</span>
+        <h2>{{ 'chat.setup.title' | t }}</h2>
+        <p>{{ 'chat.setup.body' | t }}</p>
+        <div class="chat-setup-options">
+          <p>
+            <span class="mat-sym" aria-hidden="true">terminal</span>
+            <span>{{ 'chat.setup.bridge' | t }}</span>
+          </p>
+          <p>
+            <span class="mat-sym" aria-hidden="true">dns</span>
+            <span>{{ 'chat.setup.host' | t }}</span>
+          </p>
+        </div>
+        <p class="chat-setup-note">{{ 'chat.setup.note' | t }}</p>
+      </section>
+    } @else {
     <!-- Which conversation you are in. The thread you came for is named here;
          the others are one press away rather than permanently on screen. -->
     <div class="chat-bar">
@@ -120,11 +138,11 @@
         }
       </div>
 
-      <!-- Silence, named. Every reply arrives over the bridge; with nothing
-           listening a question is queued, not slow. -->
-      <div class="chat-link" [class.down]="!bridgeUp()">
+      <!-- Availability, named. A host is ready now; a configured local bridge
+           may instead wait durably for its Claude session. -->
+      <div class="chat-link" [class.waiting]="!bridgeUp()">
         <span class="chat-dot" aria-hidden="true"></span>
-        <span>{{ (bridgeUp() ? 'chat.link.up' : 'chat.link.down') | t }}</span>
+        <span>{{ (bridgeUp() ? 'chat.link.up' : hostConfigured() ? 'chat.link.host' : 'chat.link.waiting') | t }}</span>
       </div>
 
       <div class="chat-inputrow">
@@ -139,5 +157,6 @@
         </button>
       </div>
     </footer>
+    }
   </aside>
 }

@@ -21,14 +21,18 @@
 // inline): pass sigs of resources already pushed to the host and the worker
 // inlines them server-side from its own heap.
 
-import { EffectBus } from '@hypercomb/core'
+import {
+  EffectBus,
+  PARTICIPANT_AI_HOST_STORAGE_KEY,
+  isParticipantAiHostConfigured,
+} from '@hypercomb/core'
 
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const NIP98_KIND = 27235
 
 /** localStorage key naming the AI host (domain only, no scheme). Defaults to
  *  the public content endpoint — the worker that actually runs /ai/ask. */
-export const AI_HOST_STORAGE_KEY = 'hc:ai-host'
+export const AI_HOST_STORAGE_KEY = PARTICIPANT_AI_HOST_STORAGE_KEY
 export const AI_HOST_DEFAULT = 'content.jwize.com'
 
 export const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
@@ -54,6 +58,11 @@ export type AskEvent = { id: string; chunk?: string; text?: string; done: boolea
 export class HostAiService extends EventTarget {
   #seq = 0
 
+  /** True only when the participant explicitly supplied an AI host. */
+  get configured(): boolean {
+    return isParticipantAiHostConfigured()
+  }
+
   /** The configured AI host (bare domain). */
   get host(): string {
     try {
@@ -71,6 +80,7 @@ export class HostAiService extends EventTarget {
       if (bare) localStorage.setItem(AI_HOST_STORAGE_KEY, bare)
       else localStorage.removeItem(AI_HOST_STORAGE_KEY)
     } catch { /* private mode — non-fatal */ }
+    EffectBus.emit('host-ai:configuration', { configured: this.configured, host: this.host })
   }
 
   /** Ask the host's AI. Yields text chunks as they stream; every chunk (and

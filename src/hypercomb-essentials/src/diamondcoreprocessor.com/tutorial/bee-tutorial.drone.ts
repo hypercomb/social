@@ -175,7 +175,7 @@ export class BeeTutorialDrone extends Drone {
     overlay.activate()
 
     try {
-      await this.#course(overlay, level, lessons)
+      await this.#course(overlay, level, lessons, request.lesson ? lessons[0]?.title : undefined)
       await overlay.waggle()
     } catch (err) {
       if (!(err instanceof TutorialAborted)) console.warn('[tutorial] tour ended early', err)
@@ -217,7 +217,12 @@ export class BeeTutorialDrone extends Drone {
   // the course
   // -----------------------------------------------
 
-  async #course(overlay: BeeTutorialOverlayElement, level: TutorialLevel, lessons: TutorialLesson[]): Promise<void> {
+  async #course(
+    overlay: BeeTutorialOverlayElement,
+    level: TutorialLevel,
+    lessons: TutorialLesson[],
+    requestedLesson?: string,
+  ): Promise<void> {
     // A selection URL (`/…/[a,b]`) is a filter, not a place. Scripted
     // navigation must never stack a path on top of a bracket segment
     // (phantom-path self-heal is deliberately off) — start from the real
@@ -238,10 +243,13 @@ export class BeeTutorialDrone extends Drone {
 
     // ---- welcome -------------------------------------------------------
     await overlay.flyTo(center.x - 120, Math.max(150, center.y * 0.55))
+    const courseName = level.charAt(0).toUpperCase() + level.slice(1)
+    const openingFallback = requestedLesson
+      ? `This flight is the “${requestedLesson}” lesson from the ${courseName} course. I’ll open a clean practice page, demonstrate that one skill, and tidy it away afterward.`
+      : `This is the ${courseName} course. I’ll open a clean practice page, guide you through its ${lessons.length} lessons, and tidy it away afterward.`
     const opening = await overlay.say({
-      chip: this.#t(`tutorial.chip.welcome.${level}`, this.#t('tutorial.chip.welcome', 'Welcome')),
-      text: this.#t(`tutorial.welcome.${level}`, this.#t('tutorial.welcome',
-        'Hi — I’m a beeing! This is Hypercomb, a world made of hexagonal tiles. Let me fly you around and show you how everything works.')),
+      chip: requestedLesson ?? this.#t(`tutorial.chip.welcome.${level}`, this.#t('tutorial.chip.welcome', 'Welcome')),
+      text: requestedLesson ? openingFallback : this.#t(`tutorial.welcome.${level}`, openingFallback),
       continueLabel: this.#t('tutorial.btn.start', 'Let’s go'),
       skipLabel: this.#t('tutorial.btn.not-now', 'Not now'),
     })
@@ -752,7 +760,11 @@ export class BeeTutorialDrone extends Drone {
   }
 
   #commandInputRect(): StageRect | null {
-    return this.#elementRect('hc-command-line input.command-input')
+    // The input itself is deliberately borderless; the ruled header is the
+    // command line's visible border. Trace that exact box (with no tutorial
+    // padding) so the amber line lands directly over the steel hairline.
+    const rect = this.#elementRect('.header-bar')
+    return rect ? { ...rect, highlightPadding: 0 } : null
   }
 
   /** The address bar — the breadcrumb strip in the controls bar (desktop). */

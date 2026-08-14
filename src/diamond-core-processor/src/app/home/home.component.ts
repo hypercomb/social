@@ -16,7 +16,7 @@ import { DcpCommandLineComponent } from '../command-line/dcp-command-line.compon
 import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
 import { RevisionListComponent, type RevisionRow } from '../revision-list/revision-list.component'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
-import { defaultHostOrigin, devDefaultBootstrap } from '../core/default-host'
+import { defaultHostOrigin, devDefaultBootstrap, isOnRealHost } from '../core/default-host'
 import { EffectBus, I18N_IOC_KEY, meaningfulLabel, revisionName, revisionWords, type I18nProvider } from '@hypercomb/core'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import { isCodeKind, defaultEnabled } from '../core/tree-node'
@@ -3008,6 +3008,18 @@ export class HomeComponent implements OnDestroy {
       const others = this.sections().filter(s =>
         s !== loading && !(s.domain === base && s.kind === 'package') && s.domain !== '@logical')
       this.sections.set([...others, ...siblings])
+
+      // A fresh localhost install has only the bundled PACKAGE sections at
+      // this point. The logical view deliberately contains adopted CONTENT
+      // only, so leaving the accordion on its default logical sibling makes
+      // the successfully-resolved feature tree look empty and gives the user
+      // no visible toggles. Open the first populated source library on that
+      // cold-start shape. Do not steal navigation once content exists or the
+      // participant has selected another group while the baseline loaded.
+      if (!isOnRealHost() && this.openGroup() === LOGICAL_VIEW_NAME && this.logicalViewItems().length === 0) {
+        const populated = siblings.find(section => section.items.length > 0)
+        if (populated) this.openGroup.set(populated.displayDomain)
+      }
       return true
     } catch {
       // This candidate failed — remove its loading row so the caller can

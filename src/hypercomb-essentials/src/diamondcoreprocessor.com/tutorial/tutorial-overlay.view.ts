@@ -172,6 +172,7 @@ const STYLE = `
 
 .ring {
   position: absolute;
+  box-sizing: border-box;
   border: 1.5px solid rgba(217, 164, 65, 0.6);
   box-shadow: 0 0 0 4px rgba(217, 164, 65, 0.12);
   opacity: 0;
@@ -573,7 +574,7 @@ export class BeeTutorialOverlayElement extends HTMLElement {
   }
 
   /** Circle {x, y, r}, a DOMRect-like box, or null to clear. */
-  highlight(target: { x: number; y: number; r: number } | { left: number; top: number; width: number; height: number } | null): void {
+  highlight(target: { x: number; y: number; r: number } | { left: number; top: number; width: number; height: number; highlightPadding?: number } | null): void {
     const ring = this.#ring
     if (!target) {
       ring.classList.remove('show')
@@ -586,7 +587,7 @@ export class BeeTutorialOverlayElement extends HTMLElement {
       ring.style.height = `${target.r * 2}px`
       ring.style.borderRadius = '50%'
     } else {
-      const pad = 6
+      const pad = target.highlightPadding ?? 6
       ring.style.left = `${target.left - pad}px`
       ring.style.top = `${target.top - pad}px`
       ring.style.width = `${target.width + pad * 2}px`

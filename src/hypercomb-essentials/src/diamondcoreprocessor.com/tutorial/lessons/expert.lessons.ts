@@ -31,8 +31,11 @@
 
 import { tutorialLessons, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
 import { hasBehaviour, hasWindow, subject, subjects } from './lesson-kit.js'
+import { isLocalClaudeBridgeConfigured, isParticipantAiHostConfigured } from '@hypercomb/core'
 
 const L = 'expert' as const
+const chatConfigured = (): boolean =>
+  isLocalClaudeBridgeConfigured() || isParticipantAiHostConfigured()
 
 /** Practice names, so every lesson stands alone with something to point at. */
 const names = (stage: { t(k: string, f: string): string }): string[] => [
@@ -500,7 +503,7 @@ tutorialLessons.register({
   order: 160,
   title: 'The assistant',
   pheromones: ['tutorial', 'lesson', 'expert', 'assistant'],
-  requires: () => hasWindow('hc-chat-window'),
+  requires: () => hasWindow('hc-chat-window') && chatConfigured(),
   async run(stage) {
     await stage.flyToRect(stage.commandInput())
     await stage.say('assistant-window', 'The chat window',
@@ -543,7 +546,7 @@ tutorialLessons.register({
       'One row per attached branch: how many tiles it reaches and how many signatures that resolves to, recomputed live — never a stale snapshot. When a branch is too big to walk in full, the row SAYS so instead of pretending, and Visit takes you there; the small × takes one branch back off.')
 
     await stage.say('context-window-done', 'It rides with every question',
-      'Everything listed here is what a question asked on this tile gets to draw on — in the chat window, that is the paper-clip count beside the path. Attach the branches that explain a tile once, and every future answer starts already knowing them.')
+      'Everything listed here is what a configured AI request on this tile gets to draw on — in the chat window, that is the paper-clip count beside the path. Attach the branches that explain a tile once, and every future answer starts already knowing them.')
     stage.emit('context:window-close', {})
     await stage.wait(500)
   },

@@ -43,16 +43,20 @@
 //
 // ── Silence is a state, and it is named ─────────────────────────────────────
 //
-// Every reply arrives over the Claude bridge. With no session listening, a
-// question is not slow — it is queued until one connects. The status line says
-// which, because a thinking indicator that never resolves is the single most
-// confusing thing this window could do.
+// Replies can arrive from a participant-configured host or the local Claude
+// bridge. A configured-but-disconnected bridge can durably queue a question;
+// an unreachable host cannot. The status line keeps those states distinct.
 //
 // Shell UI — resolves everything through `window.ioc` at call time and never
 // imports essentials.
 
 import { Component, ElementRef, computed, signal, viewChild, type OnDestroy } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import {
+  EffectBus,
+  PARTICIPANT_AI_HOST_STORAGE_KEY,
+  isLocalClaudeBridgeConfigured,
+  isParticipantAiHostConfigured,
+} from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
@@ -109,6 +113,7 @@ type BridgeLike = { connected?: boolean }
  *  parameter it always accepted and nothing ever passed — the tile's attached
  *  context, capped host-side. */
 type HostAiLike = {
+  readonly configured?: boolean
   ask?(question: string, opts?: { contextSigs?: readonly string[] }): AsyncGenerator<string, string, void>
 }
 
@@ -140,6 +145,25 @@ const DEFAULT_MODEL = 'opus'
 /** Turns carried to a stateless responder. The stored thread can be any
  *  length; this is the window into it the ask record can afford. */
 const TRANSCRIPT_TURNS = 12
+const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
+const CHAT_VISIBLE_STORAGE_KEY = 'hc:chat-visible'
+
+/** The participant's explicit open/closed choice wins on later page loads.
+ *  With no choice yet, preserve the configured local bridge's companion-view
+ *  default. Storage can be unavailable in private/locked-down browsers. */
+const rememberedChatVisibility = (fallback: boolean): boolean => {
+  try {
+    const stored = globalThis.localStorage?.getItem(CHAT_VISIBLE_STORAGE_KEY)
+    if (stored === '1') return true
+    if (stored === '0') return false
+  } catch { /* use the first-run fallback */ }
+  return fallback
+}
+
+const rememberChatVisibility = (visible: boolean): void => {
+  try { globalThis.localStorage?.setItem(CHAT_VISIBLE_STORAGE_KEY, visible ? '1' : '0') }
+  catch { /* visibility remains sticky for this in-memory session */ }
+}
 
 const ioc = (): { get(k: string): unknown } | undefined =>
   (globalThis as { ioc?: { get(k: string): unknown } }).ioc
@@ -153,10 +177,17 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 })
 export class ChatWindowComponent implements OnDestroy {
 
-  /** Open from boot — the chat window is the hive's default companion view.
-   *  Closing it is a session choice, not a remembered one: every boot starts
-   *  with the conversation beside the tiles. */
-  readonly visible = signal(true)
+  /** Chat stays discoverable, but only a participant-supplied responder makes
+   *  it interactive. `configured` is stable through a temporary disconnect;
+   *  `bridgeUp` below is merely the live transport state. */
+  readonly bridgeConfigured = signal(isLocalClaudeBridgeConfigured())
+  readonly hostConfigured = signal(isParticipantAiHostConfigured())
+  readonly enabled = computed(() => this.bridgeConfigured() || this.hostConfigured())
+
+  /** The participant's last explicit open/closed choice survives a refresh.
+   *  On the first visit only, a configured local bridge keeps the established
+   *  companion-view default; everyone else begins with the launcher. */
+  readonly visible = signal(rememberedChatVisibility(this.bridgeConfigured()))
 
   /** FOCUS mode: the panel widens over the hive and a dim settles behind it.
    *  The tiles stay visible — dimmed, never hidden (the fullscreen ask screen
@@ -237,6 +268,12 @@ export class ChatWindowComponent implements OnDestroy {
   #cleanups: (() => void)[] = []
 
   #onSync = (): void => { if (this.visible()) this.#refreshContext() }
+  #onStorage = (event: StorageEvent): void => {
+    if (event.key !== PARTICIPANT_AI_HOST_STORAGE_KEY && event.key !== null) return
+    const configured = isParticipantAiHostConfigured()
+    this.hostConfigured.set(configured)
+    if (configured && this.visible() && !this.activeId()) void this.#resume()
+  }
 
   constructor() {
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
@@ -263,7 +300,17 @@ export class ChatWindowComponent implements OnDestroy {
       'ask:chat-reply', payload => this.#onReply(payload)))
 
     this.#cleanups.push(EffectBus.on<{ connected?: boolean }>(
-      'bridge:status', payload => this.bridgeUp.set(!!payload?.connected)))
+      'bridge:status', payload => {
+        this.bridgeConfigured.set(isLocalClaudeBridgeConfigured())
+        this.bridgeUp.set(!!payload?.connected)
+      }))
+
+    this.#cleanups.push(EffectBus.on<{ configured?: boolean }>(
+      'host-ai:configuration', payload => {
+        const configured = !!payload?.configured
+        this.hostConfigured.set(configured)
+        if (configured && this.visible() && !this.activeId()) void this.#resume()
+      }))
 
     // Attach/detach of context lands between synchronize pulses — the chip
     // must follow the act, not the next unrelated one.
@@ -274,24 +321,32 @@ export class ChatWindowComponent implements OnDestroy {
     // The processor's post-pulse beat — the app's canonical "something moved".
     // Cheaper and more honest than polling: the context line follows the hive.
     window.addEventListener('synchronize', this.#onSync)
+    window.addEventListener('storage', this.#onStorage)
 
-    // ── boot-open (the default view) ──────────────────────────────────────
-    // Deliberately NOT open(): that focuses the input, and boot focus belongs
-    // to the command line at the top. The threads bee (essentials) registers
-    // after this shell component constructs, so the resume runs now (usually a
-    // no-op — no service yet) and again the moment the service arrives.
-    EffectBus.emit('chat:window-state', { open: true })
-    this.#refreshContext()
-    void this.#resume()
+    // ── configured bridge boot-open ───────────────────────────────────────
+    // A local-bridge participant keeps the existing boot-open behavior without
+    // stealing command-line focus. Everyone else opens chat deliberately; an
+    // unconfigured participant then sees the setup-required view.
+    this.#refreshAvailability()
+    EffectBus.emit('chat:window-state', { open: this.visible() })
+    if (this.visible()) {
+      this.#refreshContext()
+      void this.#resume()
+    }
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: () => void) => void } }).ioc
       ?.whenReady?.('@diamondcoreprocessor.com/ChatThreads', () => {
-        if (this.visible() && this.turns().length === 0 && !this.waiting()) void this.#resume()
+        if (this.enabled() && this.visible() && this.turns().length === 0 && !this.waiting()) void this.#resume()
+      })
+    ;(globalThis as { ioc?: { whenReady?: (k: string, cb: (value: unknown) => void) => void } }).ioc
+      ?.whenReady?.(HOST_AI_IOC_KEY, value => {
+        this.hostConfigured.set(!!(value as HostAiLike | undefined)?.configured)
       })
   }
 
   ngOnDestroy(): void {
     for (const cleanup of this.#cleanups) cleanup()
     window.removeEventListener('synchronize', this.#onSync)
+    window.removeEventListener('storage', this.#onStorage)
   }
 
   // ── services ────────────────────────────────────────────────────────────
@@ -302,6 +357,12 @@ export class ChatWindowComponent implements OnDestroy {
 
   #queen(): QueenLike | undefined {
     return ioc()?.get('@diamondcoreprocessor.com/LlmQueenBee') as QueenLike | undefined
+  }
+
+  #refreshAvailability(): void {
+    this.bridgeConfigured.set(isLocalClaudeBridgeConfigured())
+    const host = ioc()?.get(HOST_AI_IOC_KEY) as HostAiLike | undefined
+    this.hostConfigured.set(host ? !!host.configured : isParticipantAiHostConfigured())
   }
 
   // ── opening and closing ─────────────────────────────────────────────────
@@ -318,11 +379,14 @@ export class ChatWindowComponent implements OnDestroy {
    * reopening a chat window should do.
    */
   async open(payload?: { model?: string; prefill?: string; convoId?: string }): Promise<void> {
+    this.#refreshAvailability()
     const prefill = String(payload?.prefill ?? '').trim()
     this.visible.set(true)
+    rememberChatVisibility(true)
     // Announce symmetrically with close() — the controls-bar launcher light
     // (and anything else watching) reads this state.
     EffectBus.emit('chat:window-state', { open: true })
+    if (!this.enabled()) return
     this.#refreshContext()
     this.bridgeUp.set(!!(ioc()?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as BridgeLike | undefined)?.connected)
 
@@ -377,6 +441,7 @@ export class ChatWindowComponent implements OnDestroy {
   close(): void {
     if (!this.visible()) return
     this.visible.set(false)
+    rememberChatVisibility(false)
     this.focused.set(false)
     this.listOpen.set(false)
     this.armed.set('')
@@ -563,6 +628,8 @@ export class ChatWindowComponent implements OnDestroy {
    * was missing.
    */
   async send(text?: string): Promise<void> {
+    this.#refreshAvailability()
+    if (!this.enabled()) return
     const element = this.input()?.nativeElement
     const message = String(text ?? element?.value ?? '').trim()
     if (!message) return
@@ -597,14 +664,24 @@ export class ChatWindowComponent implements OnDestroy {
     // the host's AI answers immediately instead — that is what `/ask` did
     // before it folded in here, and folding it in must not cost it.
     //
-    // If the host tier is unreachable too (no signer, no AI configured, no
-    // network) the question is still QUEUED on the bridge channel: the record
-    // is durable, so a session that connects later picks it up. That is why
-    // the status line says "queued" and not "thinking".
+    // If the host tier is unreachable and a local bridge is configured, the
+    // question is QUEUED there: its durable record can be picked up when a
+    // session connects. Without that bridge, host failure is reported now.
     if (!this.bridgeUp() && await this.#askHost(convoId, message)) {
       // TWO turns landed (the question and the streamed answer) — the count
       // matters only if the participant switched threads mid-stream.
       if (!this.#bumpList(convoId, 2)) void this.#refreshList()
+      return
+    }
+
+    // A participant-host failure is retryable, but without a configured local
+    // bridge there is nobody who could ever drain the durable bridge queue.
+    if (!this.bridgeConfigured()) {
+      this.waiting.set(false)
+      EffectBus.emit('toast:show', {
+        type: 'warning',
+        message: 'Your AI host is unavailable. Check its setup and try again.',
+      })
       return
     }
 
@@ -624,16 +701,18 @@ export class ChatWindowComponent implements OnDestroy {
   /**
    * The shallow tier: stream an answer from the host's AI.
    *
-   * Returns false when the host cannot answer, so the caller falls through to
-   * queueing on the bridge — an unreachable host must never swallow a question.
+   * Returns false when the host cannot answer. The caller queues only when a
+   * local bridge is configured; otherwise it reports the retryable host failure.
    *
    * The text is accumulated whatever the participant does next: they may switch
    * conversations mid-stream, and the answer still belongs to the thread that
    * asked. Only the PAINTING is conditional on still being in that thread.
    */
   async #askHost(convoId: string, message: string): Promise<boolean> {
-    const host = ioc()?.get('@diamondcoreprocessor.com/HostAi') as HostAiLike | undefined
-    if (!host?.ask) return false
+    const host = ioc()?.get(HOST_AI_IOC_KEY) as HostAiLike | undefined
+    // The bundled address is not a shared/free allowance. Only a host the
+    // participant explicitly configured may be used as the shallow fallback.
+    if (!host?.configured || !host.ask) return false
 
     // The attached-context sigs the host inlines server-side from its own
     // heap — the parameter host-ai always accepted and nothing ever passed.
@@ -648,8 +727,8 @@ export class ChatWindowComponent implements OnDestroy {
         this.#scrollDown()
       }
     } catch {
-      // No signer, no AI on that host, or no network. Not an error the
-      // participant needs shown — the bridge queue is about to take it.
+      // No signer, no AI on that host, or no network. The caller either hands
+      // the question to a configured bridge or reports the host failure.
       this.streaming.set('')
       return false
     }

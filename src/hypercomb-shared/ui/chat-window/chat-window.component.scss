@@ -116,6 +116,71 @@ $accent: #7eb6d6;
 
 // ── which conversation ────────────────────────────────────────────────────
 
+.chat-setup {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75em;
+  padding: 2em 1.5em;
+  text-align: center;
+  color: rgba(238, 244, 250, 0.88);
+
+  h2 {
+    margin: 0;
+    font-size: 1em;
+    font-weight: 600;
+    color: rgba($accent, 0.98);
+  }
+
+  > p {
+    max-width: 29em;
+    margin: 0;
+    font-size: 0.78em;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.62);
+  }
+}
+
+.chat-setup-glyph {
+  font-size: 2.2em;
+  color: rgba($accent, 0.72);
+}
+
+.chat-setup-options {
+  width: min(100%, 30em);
+  display: grid;
+  gap: 0.55em;
+  margin: 0.35em 0;
+
+  p {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6em;
+    margin: 0;
+    padding: 0.75em 0.85em;
+    border: 1px solid rgba($accent, 0.2);
+    border-radius: var(--md-shape-sm, 8px);
+    background: rgba($accent, 0.07);
+    font-size: 0.75em;
+    line-height: 1.45;
+    text-align: left;
+  }
+
+  .mat-sym {
+    flex: 0 0 auto;
+    font-size: 1.25em;
+    color: rgba($accent, 0.88);
+  }
+}
+
+.chat-setup .chat-setup-note {
+  font-size: 0.68em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
 .chat-bar {
   flex: 0 0 auto;
   display: flex;
@@ -371,6 +436,7 @@ $accent: #7eb6d6;
   color: rgba(140, 220, 170, 0.85);
 
   &.down { color: rgba(255, 255, 255, 0.42); }
+  &.waiting { color: rgba(224, 180, 92, 0.88); }
 }
 
 .chat-dot {
