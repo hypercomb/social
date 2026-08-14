@@ -42,6 +42,11 @@ you deliberately bind wide **and** set a shared token (covered below).
 
 ---
 
+> **The hive walks you through this.** The chat window's setup state is a
+> guided checklist of these same steps — each one checks itself off as it
+> verifies (tab enabled, broker answering, first real answer landed). Open the
+> chat and follow it; this page is the same path in full detail.
+
 ## Path A — Claude Code subscription (recommended)
 
 ### Step 0 · Prerequisites

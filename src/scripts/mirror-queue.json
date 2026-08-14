@@ -680,6 +680,24 @@
       "unattended": false,
       "created": "2026-08-14",
       "status": "pending"
+    },
+    {
+      "id": "installer-simple-list",
+      "title": "Installer's simple list — one list, behaviors vs tiles, advanced behind a switch",
+      "run": null,
+      "note": "Mirror the installer's two faces: a tile for THE LIST (default face, one row per installed thing), tiles for its parts — the behaviors/tiles switch, the package row (adopt/save/discard + version switcher), the code drill-down (read before you trust), and the advanced view. Collection gathering them under the installer; pheromones marking each part for what it is; notes carrying WHY simple is the default (adoption) and why code drilling stays in the simple face (trust). Code: diamond-core-processor/src/app/home/{home.component.html,home.component.ts,home.list.scss}.",
+      "unattended": false,
+      "created": "2026-08-14",
+      "status": "pending"
+    },
+    {
+      "id": "chat-setup-wizard",
+      "title": "Mirror the guided AI-setup checklist: tiles for the four steps + completion, marks, notes with the exact commands",
+      "run": null,
+      "note": "Creation: chat window guided setup (chat-window.component). Tiles under behaviors/assistant for the wizard + its four steps, notes carry commands and the self-verification story. note-add is additive - manual.",
+      "unattended": false,
+      "created": "2026-08-14",
+      "status": "pending"
     }
   ]
 }

@@ -36,22 +36,133 @@
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
 
-    @if (!enabled()) {
+    @if (showSetup()) {
+      <!-- GUIDED SETUP — one step at a time, each checked off as it verifies
+           itself. Steps 2 and 3 are LIVE: enabling flips the config gate, and
+           the broker check completes on the worker's own bridge:status. The
+           final step completes when the first real answer lands — the
+           checklist is done exactly when the loop is proven, not before. -->
       <section class="chat-setup" role="status" aria-live="polite">
-        <span class="mat-sym chat-setup-glyph" aria-hidden="true">power_off</span>
-        <h2>{{ 'chat.setup.title' | t }}</h2>
-        <p>{{ 'chat.setup.body' | t }}</p>
-        <div class="chat-setup-options">
-          <p>
-            <span class="mat-sym" aria-hidden="true">terminal</span>
-            <span>{{ 'chat.setup.bridge' | t }}</span>
-          </p>
-          <p>
-            <span class="mat-sym" aria-hidden="true">dns</span>
-            <span>{{ 'chat.setup.host' | t }}</span>
-          </p>
-        </div>
-        <p class="chat-setup-note">{{ 'chat.setup.note' | t }}</p>
+        @if (setupStep() === 5) {
+          <div class="chat-complete">
+            <span class="mat-sym chat-complete-glyph" aria-hidden="true">task_alt</span>
+            <h2>{{ 'chat.setup.complete.title' | t }}</h2>
+            <p>{{ 'chat.setup.complete.body' | t }}</p>
+            <button class="chat-btn" type="button" (click)="finishSetup()">{{ 'chat.setup.complete.start' | t }}</button>
+          </div>
+        } @else {
+          <span class="mat-sym chat-setup-glyph" aria-hidden="true">rocket_launch</span>
+          <h2>{{ 'chat.setup.title' | t }}</h2>
+          <p>{{ 'chat.setup.body' | t }}</p>
+
+          <ol class="chat-wizard">
+            <!-- 1 · the tools (one-time; the only step that takes your word) -->
+            <li class="chat-step" [class.done]="toolsDone()" [class.current]="setupStep() === 1">
+              <div class="chat-step-head">
+                @if (toolsDone()) { <span class="mat-sym chat-step-check" aria-hidden="true">check_circle</span> }
+                @else { <span class="chat-step-n" aria-hidden="true">1</span> }
+                <span>{{ 'chat.setup.step.tools.title' | t }}</span>
+              </div>
+              @if (setupStep() === 1) {
+                <div class="chat-step-body">
+                  <p>{{ 'chat.setup.step.tools.body' | t }}</p>
+                  <div class="chat-cmd">
+                    <code>{{ commands.install }}</code>
+                    <button type="button" (click)="copyCmd('install', commands.install)">{{ (copied() === 'install' ? 'chat.setup.copied' : 'chat.setup.copy') | t }}</button>
+                  </div>
+                  <div class="chat-cmd">
+                    <code>{{ commands.clone }}</code>
+                    <button type="button" (click)="copyCmd('clone', commands.clone)">{{ (copied() === 'clone' ? 'chat.setup.copied' : 'chat.setup.copy') | t }}</button>
+                  </div>
+                  <div class="chat-cmd">
+                    <code>{{ commands.build }}</code>
+                    <button type="button" (click)="copyCmd('build', commands.build)">{{ (copied() === 'build' ? 'chat.setup.copied' : 'chat.setup.copy') | t }}</button>
+                  </div>
+                  <button class="chat-btn" type="button" (click)="markTools()">{{ 'chat.setup.step.tools.done' | t }}</button>
+                </div>
+              }
+            </li>
+
+            <!-- 2 · opt this tab in (verifies via the config gate) -->
+            <li class="chat-step" [class.done]="bridgeConfigured()" [class.current]="setupStep() === 2">
+              <div class="chat-step-head">
+                @if (bridgeConfigured()) { <span class="mat-sym chat-step-check" aria-hidden="true">check_circle</span> }
+                @else { <span class="chat-step-n" aria-hidden="true">2</span> }
+                <span>{{ 'chat.setup.step.enable.title' | t }}</span>
+              </div>
+              @if (setupStep() === 2) {
+                <div class="chat-step-body">
+                  <p>{{ 'chat.setup.step.enable.body' | t }}</p>
+                  @if (loopback) {
+                    <button class="chat-btn" type="button" (click)="enableBridge()">{{ 'chat.setup.step.enable.action' | t }}</button>
+                  } @else {
+                    <p class="chat-step-hint">{{ 'chat.setup.step.enable.loopback' | t }}</p>
+                  }
+                </div>
+              }
+            </li>
+
+            <!-- 3 · the broker (checks itself off on bridge:status) -->
+            <li class="chat-step" [class.done]="bridgeUp()" [class.current]="setupStep() === 3">
+              <div class="chat-step-head">
+                @if (bridgeUp()) { <span class="mat-sym chat-step-check" aria-hidden="true">check_circle</span> }
+                @else { <span class="chat-step-n" aria-hidden="true">3</span> }
+                <span>{{ 'chat.setup.step.broker.title' | t }}</span>
+              </div>
+              @if (setupStep() === 3) {
+                <div class="chat-step-body">
+                  <p>{{ 'chat.setup.step.broker.body' | t }}</p>
+                  <div class="chat-cmd">
+                    <code>{{ commands.broker }}</code>
+                    <button type="button" (click)="copyCmd('broker', commands.broker)">{{ (copied() === 'broker' ? 'chat.setup.copied' : 'chat.setup.copy') | t }}</button>
+                  </div>
+                  <p class="chat-step-hint chat-step-live">{{ 'chat.setup.step.broker.watching' | t }}</p>
+                </div>
+              }
+            </li>
+
+            <!-- 4 · park a session and prove the loop -->
+            <li class="chat-step" [class.done]="firstReply()" [class.current]="setupStep() === 4">
+              <div class="chat-step-head">
+                @if (firstReply()) { <span class="mat-sym chat-step-check" aria-hidden="true">check_circle</span> }
+                @else { <span class="chat-step-n" aria-hidden="true">4</span> }
+                <span>{{ 'chat.setup.step.listen.title' | t }}</span>
+              </div>
+              @if (setupStep() === 4) {
+                <div class="chat-step-body">
+                  <p>{{ 'chat.setup.step.listen.body' | t }}</p>
+                  <div class="chat-cmd">
+                    <code>{{ commands.claude }}</code>
+                    <button type="button" (click)="copyCmd('claude', commands.claude)">{{ (copied() === 'claude' ? 'chat.setup.copied' : 'chat.setup.copy') | t }}</button>
+                  </div>
+                  <div class="chat-cmd">
+                    <code>{{ commands.listen }}</code>
+                    <button type="button" (click)="copyCmd('listen', commands.listen)">{{ (copied() === 'listen' ? 'chat.setup.copied' : 'chat.setup.copy') | t }}</button>
+                  </div>
+                  @if (tried()) {
+                    <p class="chat-step-hint chat-step-live">{{ 'chat.setup.step.listen.waitingReply' | t }}</p>
+                  } @else {
+                    <button class="chat-btn" type="button" (click)="tryAsk()">{{ 'chat.setup.step.listen.try' | t }}</button>
+                  }
+                </div>
+              }
+            </li>
+          </ol>
+
+          <!-- The other door: a host you control, no install at all. -->
+          <div class="chat-host">
+            <p>{{ 'chat.setup.host.title' | t }}</p>
+            <div class="chat-host-row">
+              <input #hostInput type="text" [placeholder]="'chat.setup.host.placeholder' | t"
+                [attr.aria-label]="'chat.setup.host.title' | t"
+                (keydown.enter)="connectHost(hostInput.value)" (keydown)="$event.stopPropagation()" />
+              <button type="button" (click)="connectHost(hostInput.value)">{{ 'chat.setup.host.connect' | t }}</button>
+            </div>
+          </div>
+
+          <button class="chat-skip" type="button" (click)="finishSetup()">{{ 'chat.setup.skip' | t }}</button>
+          <p class="chat-setup-note">{{ 'chat.setup.note' | t }}</p>
+        }
       </section>
     } @else {
     <!-- Which conversation you are in. The thread you came for is named here;

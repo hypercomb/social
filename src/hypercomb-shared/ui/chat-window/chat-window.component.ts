@@ -52,6 +52,7 @@
 
 import { Component, ElementRef, computed, signal, viewChild, type OnDestroy } from '@angular/core'
 import {
+  CLAUDE_BRIDGE_ENABLED_STORAGE_KEY,
   EffectBus,
   PARTICIPANT_AI_HOST_STORAGE_KEY,
   isLocalClaudeBridgeConfigured,
@@ -115,6 +116,9 @@ type BridgeLike = { connected?: boolean }
 type HostAiLike = {
   readonly configured?: boolean
   ask?(question: string, opts?: { contextSigs?: readonly string[] }): AsyncGenerator<string, string, void>
+  /** Set (or clear with '') the participant's AI host — the guided setup's
+   *  host door calls this instead of telling people to type a command. */
+  setHost?(domain: string): void
 }
 
 /** The tile-context module (assistant/tile-context.ts), over IoC — the shell
@@ -147,6 +151,31 @@ const DEFAULT_MODEL = 'opus'
 const TRANSCRIPT_TURNS = 12
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 const CHAT_VISIBLE_STORAGE_KEY = 'hc:chat-visible'
+
+// ── guided setup ─────────────────────────────────────────────────────────
+//
+// The setup state is a CHECKLIST, not a notice. Each step verifies itself
+// where reality can be asked: enabling flips the config gate, the broker
+// step completes on the worker's own `bridge:status`, and the last step
+// completes only when a real answer lands — the checklist is done exactly
+// when the loop is proven. Only the tools step takes the participant's word.
+/** Set once the whole checklist has been completed (or skipped). */
+const SETUP_DONE_KEY = 'hc:bridge-setup-done'
+/** The one manual step — "I have Claude Code and the repo". */
+const SETUP_TOOLS_KEY = 'hc:bridge-setup-tools'
+/** A bridge answer has landed at least once — the loop is proven. */
+const FIRST_REPLY_KEY = 'hc:bridge-first-reply'
+/** A configured-but-down bridge re-dials on this cadence, so "start the
+ *  broker" checks itself off with zero clicks. The worker's connect() is
+ *  idempotent and silent, so the retry costs one refused socket at most. */
+const BRIDGE_RETRY_MS = 4_000
+
+const readFlag = (key: string): boolean => {
+  try { return globalThis.localStorage?.getItem(key) === '1' } catch { return false }
+}
+const writeFlag = (key: string): void => {
+  try { globalThis.localStorage?.setItem(key, '1') } catch { /* session-local */ }
+}
 
 /** The participant's explicit open/closed choice wins on later page loads.
  *  With no choice yet, preserve the configured local bridge's companion-view
@@ -238,6 +267,55 @@ export class ChatWindowComponent implements OnDestroy {
 
   readonly models = MODELS
 
+  // ── guided setup state ──────────────────────────────────────────────────
+
+  /** Checklist flags. `toolsDone` is the one manual step; the rest derive
+   *  live (config gate, socket state) or from the proven first reply. */
+  readonly setupDone = signal(readFlag(SETUP_DONE_KEY))
+  readonly toolsDone = signal(readFlag(SETUP_TOOLS_KEY))
+  readonly firstReply = signal(readFlag(FIRST_REPLY_KEY))
+
+  /** Which command's Copy button just fired — a transient "Copied" flash. */
+  readonly copied = signal('')
+
+  /** The step-4 starter question is out; completes when its answer lands. */
+  readonly tried = signal(false)
+
+  /** The local bridge only exists on loopback — elsewhere the step explains
+   *  instead of offering a button that could never work. */
+  readonly loopback = ((): boolean => {
+    try {
+      const host = String(globalThis.location?.hostname ?? '').toLowerCase()
+      return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+    } catch { return false }
+  })()
+
+  /** The commands the checklist hands out — copy targets, never typed. */
+  readonly commands = {
+    install: 'npm install -g @anthropic-ai/claude-code',
+    clone: 'git clone https://github.com/hypercomb/social.git',
+    build: 'cd social/src && npm install && npm run build:packages',
+    broker: 'npm run bridge',
+    claude: 'claude',
+    listen: 'listen for hive asks',
+  } as const
+
+  /** The wizard shows until the checklist completes (or is skipped). A
+   *  configured host needs no checklist; a veteran with existing threads is
+   *  grandfathered in `#resume`. */
+  readonly showSetup = computed(() =>
+    !this.enabled() || (this.bridgeConfigured() && !this.hostConfigured() && !this.setupDone()))
+
+  /** The one current step — everything before it is checked, everything
+   *  after it waits. 5 = complete. */
+  readonly setupStep = computed(() => {
+    if (!this.toolsDone()) return 1
+    if (!this.bridgeConfigured()) return 2
+    if (!this.bridgeUp()) return 3
+    if (!this.firstReply()) return 4
+    return 5
+  })
+
   readonly input = viewChild<ElementRef<HTMLTextAreaElement>>('input')
   readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller')
 
@@ -323,6 +401,15 @@ export class ChatWindowComponent implements OnDestroy {
     window.addEventListener('synchronize', this.#onSync)
     window.addEventListener('storage', this.#onStorage)
 
+    // A configured-but-down bridge re-dials quietly, so the checklist's
+    // broker step (and an ordinary dropped connection) recovers hands-free.
+    // The worker never retries a first attempt on its own — this is the nudge.
+    this.#retryTimer = setInterval(() => {
+      if (this.visible() && this.bridgeConfigured() && !this.bridgeUp()) {
+        EffectBus.emit('claude-bridge:connect', {})
+      }
+    }, BRIDGE_RETRY_MS)
+
     // ── configured bridge boot-open ───────────────────────────────────────
     // A local-bridge participant keeps the existing boot-open behavior without
     // stealing command-line focus. Everyone else opens chat deliberately; an
@@ -347,6 +434,72 @@ export class ChatWindowComponent implements OnDestroy {
     for (const cleanup of this.#cleanups) cleanup()
     window.removeEventListener('synchronize', this.#onSync)
     window.removeEventListener('storage', this.#onStorage)
+    if (this.#retryTimer) clearInterval(this.#retryTimer)
+  }
+
+  #retryTimer: ReturnType<typeof setInterval> | null = null
+
+  // ── guided setup actions ────────────────────────────────────────────────
+
+  /** Step 1 — the only step that takes the participant's word. */
+  markTools(): void {
+    this.toolsDone.set(true)
+    writeFlag(SETUP_TOOLS_KEY)
+  }
+
+  /** Step 2 — opt this tab in and dial the broker now. The worker's
+   *  connect() re-reads the gate, so no reload is needed. */
+  enableBridge(): void {
+    try { localStorage.setItem(CLAUDE_BRIDGE_ENABLED_STORAGE_KEY, '1') } catch { /* private mode */ }
+    this.bridgeConfigured.set(isLocalClaudeBridgeConfigured())
+    EffectBus.emit('claude-bridge:connect', {})
+  }
+
+  /** Step 4 — prove the loop with a real question. Completes when the
+   *  answer lands (`#onReply` sets the first-reply flag). */
+  tryAsk(): void {
+    const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?: (key: string) => string } | undefined
+    const starter = i18n?.t?.('chat.setup.starter') || 'What do you see in this hive?'
+    this.tried.set(true)
+    void this.send(starter)
+  }
+
+  /** Copy a checklist command; the button flashes "Copied" briefly. */
+  copyCmd(id: string, text: string): void {
+    void navigator.clipboard?.writeText(text).then(() => {
+      this.copied.set(id)
+      setTimeout(() => { if (this.copied() === id) this.copied.set('') }, 1_400)
+    }).catch(() => { /* clipboard unavailable — the text is still visible */ })
+  }
+
+  /** Complete (or skip) the checklist and land in the chat. */
+  finishSetup(): void {
+    this.setupDone.set(true)
+    writeFlag(SETUP_DONE_KEY)
+    this.#focus()
+  }
+
+  /** The host door — configure a participant-controlled AI host directly.
+   *  `setHost` announces `host-ai:configuration`, which this window already
+   *  follows into `hostConfigured` and a resume. */
+  connectHost(domain: string): void {
+    const bare = String(domain ?? '').trim()
+    if (!bare) return
+    const host = ioc()?.get(HOST_AI_IOC_KEY) as HostAiLike | undefined
+    if (!host?.setHost) {
+      EffectBus.emit('toast:show', { type: 'warning', message: 'Host service unavailable — try again in a moment.' })
+      return
+    }
+    host.setHost(bare)
+  }
+
+  /** A participant with existing conversations predates the checklist —
+   *  never greet them with a wizard for a loop they already run. */
+  #grandfather(): void {
+    if (!this.setupDone() && this.conversations().length > 0) {
+      this.setupDone.set(true)
+      writeFlag(SETUP_DONE_KEY)
+    }
   }
 
   // ── services ────────────────────────────────────────────────────────────
@@ -412,6 +565,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (threads.listConversationsWithLatest) {
       const { conversations, latestTurns } = await threads.listConversationsWithLatest()
       this.conversations.set(conversations)
+      this.#grandfather()
       // ANY current conversation is kept — including a just-minted empty New
       // chat, which is a thing the participant explicitly created and must
       // survive a close/reopen. (Guarding on turns.length here silently threw
@@ -432,6 +586,7 @@ export class ChatWindowComponent implements OnDestroy {
     }
     // Older module build without the one-pass read — the two-read path.
     await this.#refreshList()
+    this.#grandfather()
     if (this.activeId()) return
     const recent = this.conversations()[0]
     if (recent) await this.#load(recent.convoId)
@@ -751,6 +906,13 @@ export class ChatWindowComponent implements OnDestroy {
     const convoId = String(payload?.convoId ?? '')
     const text = String(payload?.text ?? '')
     if (!convoId || !text) return
+
+    // The loop is PROVEN — an answer came back over the bridge. This is the
+    // checklist's final verification, whichever thread it landed in.
+    if (!this.firstReply()) {
+      this.firstReply.set(true)
+      writeFlag(FIRST_REPLY_KEY)
+    }
 
     // A reply for another thread: it is on disk, so all that is owed here is a
     // list that shows it moved to the top — a bump when the thread is listed,
