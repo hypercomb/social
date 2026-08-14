@@ -31,7 +31,7 @@ document.querySelectorAll('[data-copy]').forEach(button => {
   button.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(button.dataset.copy)
-      announceCopy('SHA-256 copied')
+      announceCopy(button.dataset.copied ?? 'SHA-256 copied')
     } catch {
       announceCopy('Could not copy automatically')
     }

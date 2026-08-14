@@ -117,6 +117,7 @@ button, summary { font: inherit; }
 .menu-button { display: none; }
 
 .welcome,
+.setup,
 .downloads,
 .help,
 .site-footer {
@@ -221,6 +222,65 @@ button, summary { font: inherit; }
 .quick-content h2 { margin: 10px 0 5px; font: 700 28px/1.15 var(--serif); }
 .quick-content > span { display: block; color: var(--muted); font: 400 17px var(--serif); }
 .quick-content > a { min-height: 44px; margin-top: 17px; display: inline-flex; align-items: center; gap: 20px; color: var(--clay-dark); font-size: 15px; font-weight: 600; text-decoration: none; }
+
+.setup { padding: 84px 0 96px; border-top: 1px solid var(--line); }
+.setup-grid {
+  display: grid;
+  grid-template-columns: 0.82fr 1.18fr;
+  gap: clamp(40px, 6vw, 80px);
+  align-items: start;
+}
+.setup-video {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.setup-video video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--deep) url("assets/honeycomb-steel.png") center/320px;
+}
+.setup-video figcaption { padding: 17px 24px 19px; color: var(--sage); font: 12px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+.setup-steps { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line-strong); }
+.setup-step {
+  padding: 25px 0 29px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 18px;
+  border-bottom: 1px solid var(--line-strong);
+}
+.step-mark {
+  width: 42px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  clip-path: polygon(50% 0,94% 25%,94% 75%,50% 100%,6% 75%,6% 25%);
+  background: var(--sage-soft);
+  color: var(--clay-dark);
+  font: 700 20px var(--serif);
+}
+.step-body h3 { margin: 3px 0 6px; font: 700 24px/1.2 var(--serif); }
+.step-body > p:not(.step-note) { max-width: 640px; margin: 0 0 4px; color: var(--muted); font: 400 17px/1.5 var(--serif); }
+.step-body > p code { color: var(--clay-dark); font: 14px var(--mono); }
+.command {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.command code { min-width: 0; padding: 10px 12px; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-soft); color: #51483e; font: 13px/1.5 var(--mono); }
+.command code a { color: inherit; }
+.command button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 13px; cursor: pointer; }
+.command button:hover { border-color: var(--clay); }
+.step-note { margin: 12px 0 0; color: var(--clay-dark); font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.setup-tutorial { min-height: 44px; margin-top: 22px; display: inline-flex; align-items: center; gap: 14px; color: var(--clay-dark); font-size: 15px; font-weight: 600; text-decoration: none; }
+.setup-tutorial:hover { color: var(--ink); }
+.setup-tutorial b { color: var(--clay); font: 300 22px var(--sans); }
 
 .downloads { padding: 88px 0 104px; border-top: 1px solid var(--line); }
 .section-head {
@@ -359,6 +419,7 @@ button, summary { font: inherit; }
   .quick-access { display: grid; grid-template-columns: .8fr 1fr; }
   .quick-art { height: auto; min-height: 270px; }
   .section-head { grid-template-columns: 1fr; gap: 18px; }
+  .setup-grid { grid-template-columns: 1fr; gap: 44px; }
   .desktop { grid-template-columns: 1fr; gap: 30px; }
   .help { grid-template-columns: 1fr; gap: 35px; }
   .site-footer { grid-template-columns: 1fr 1fr; }
@@ -370,6 +431,7 @@ button, summary { font: inherit; }
   body::before { display: none; }
   .site-header,
   .welcome,
+  .setup,
   .downloads,
   .help,
   .site-footer { width: calc(100% - 32px); }
@@ -388,6 +450,12 @@ button, summary { font: inherit; }
   .trust-line { line-height: 1.8; }
   .quick-access { display: block; }
   .quick-art { height: 225px; min-height: 0; }
+  .setup { padding: 64px 0 74px; }
+  .setup-grid { gap: 36px; }
+  .setup-step { grid-template-columns: 36px 1fr; gap: 14px; }
+  .step-mark { width: 34px; height: 40px; font-size: 17px; }
+  .command { grid-template-columns: 1fr; }
+  .command button { width: max-content; }
   .downloads { padding: 72px 0 80px; }
   .section-head h2,
   .help h2 { font-size: clamp(42px, 13vw, 58px); }

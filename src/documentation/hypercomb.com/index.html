@@ -34,6 +34,7 @@
     </button>
     <nav id="site-nav" aria-label="Page navigation">
       <a href="https://diamondcoreprocessor.com">Use online</a>
+      <a href="#setup">Set up your AI</a>
       <a href="#downloads">Downloads</a>
       <a href="https://github.com/hypercomb/social/tree/main/documentation">Documentation</a>
       <a href="https://github.com/hypercomb/social">Source</a>
@@ -66,6 +67,67 @@
           <a href="https://diamondcoreprocessor.com">Enter the hive <b aria-hidden="true">↗</b></a>
         </div>
       </aside>
+    </section>
+
+    <section class="setup" id="setup" aria-labelledby="setup-heading">
+      <header class="section-head">
+        <div><p class="eyebrow"><span></span> Your AI</p><h2 id="setup-heading">Set up your AI</h2></div>
+        <p>Your Claude Code subscription becomes your hive’s AI. It reads your hive and answers as notes and chat — nothing leaves your machine, and there is no API key to manage.</p>
+      </header>
+
+      <div class="setup-grid">
+        <figure class="setup-video">
+          <!-- Walkthrough video pending: drop the file at assets/bridge-setup.mp4 and this player picks it up. -->
+          <video controls preload="none" playsinline aria-label="Setting up Claude Code with Hypercomb, start to finish">
+            <source src="assets/bridge-setup.mp4" type="video/mp4">
+          </video>
+          <figcaption><span class="live-dot"></span> The whole setup, on screen</figcaption>
+        </figure>
+
+        <div class="setup-copy">
+          <ol class="setup-steps">
+            <li class="setup-step">
+              <span class="step-mark" aria-hidden="true">1</span>
+              <div class="step-body">
+                <h3>Get the tools</h3>
+                <p>Install Claude Code, take a copy of Hypercomb, and build it once.</p>
+                <div class="command"><code>npm install -g @anthropic-ai/claude-code</code><button type="button" data-copy="npm install -g @anthropic-ai/claude-code" data-copied="Command copied">Copy</button></div>
+                <div class="command"><code>git clone https://github.com/hypercomb/social.git</code><button type="button" data-copy="git clone https://github.com/hypercomb/social.git" data-copied="Command copied">Copy</button></div>
+                <div class="command"><code>cd social/src &amp;&amp; npm install &amp;&amp; npm run build:packages</code><button type="button" data-copy="cd social/src &amp;&amp; npm install &amp;&amp; npm run build:packages" data-copied="Command copied">Copy</button></div>
+              </div>
+            </li>
+            <li class="setup-step">
+              <span class="step-mark" aria-hidden="true">2</span>
+              <div class="step-body">
+                <h3>Start your hive and the broker</h3>
+                <p>From <code>social/src</code>, in two terminals.</p>
+                <div class="command"><code>npm run start:dev</code><button type="button" data-copy="npm run start:dev" data-copied="Command copied">Copy</button></div>
+                <div class="command"><code>npm run bridge</code><button type="button" data-copy="npm run bridge" data-copied="Command copied">Copy</button></div>
+              </div>
+            </li>
+            <li class="setup-step">
+              <span class="step-mark" aria-hidden="true">3</span>
+              <div class="step-body">
+                <h3>Open one tab with the bridge on</h3>
+                <p>Your hive keeps a single writer, so open this address in one tab only.</p>
+                <div class="command"><code><a href="http://localhost:4250/?claudeBridge=1">http://localhost:4250/?claudeBridge=1</a></code><button type="button" data-copy="http://localhost:4250/?claudeBridge=1" data-copied="Address copied">Copy</button></div>
+                <p class="step-note">Exactly one tab</p>
+              </div>
+            </li>
+            <li class="setup-step">
+              <span class="step-mark" aria-hidden="true">4</span>
+              <div class="step-body">
+                <h3>Park Claude Code and ask</h3>
+                <p>In a Claude Code session at the repository root, say:</p>
+                <div class="command"><code>listen for hive asks</code><button type="button" data-copy="listen for hive asks" data-copied="Phrase copied">Copy</button></div>
+                <p>Then, in the hive’s command line, type:</p>
+                <div class="command"><code>/opus what is on this page?</code><button type="button" data-copy="/opus what is on this page?" data-copied="Command copied">Copy</button></div>
+              </div>
+            </li>
+          </ol>
+          <a class="setup-tutorial" href="https://github.com/hypercomb/social/blob/development/src/documentation/claude-bridge-setup.md">Read the full setup tutorial <b aria-hidden="true">↗</b></a>
+        </div>
+      </div>
     </section>
 
     <section class="downloads" id="downloads">
