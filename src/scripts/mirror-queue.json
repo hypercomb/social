@@ -619,6 +619,15 @@
       "note": "tile-view.drone.ts follow-up to the six-face compass. LANDSCAPE was a '1fr auto 1fr' grid whose empty first track centred the HEXAGON at the cost of a dead third of the screen (Jaime: 'completely unacceptable') — now a centred flex ROW: the hexagon+column PAIR is the object and sits in the middle, panel bounded at 26rem so it can never eat the width (the reason the grid existed), hexagon up to min(72vh,24rem). CELLS: fixed five-across replaced by flex 1 1 5.4rem / max 7.5rem — the width decides the column count (3 on a phone, 4-5 on a desktop column), glyph 1.5rem→2rem, caption 0.6rem→0.74rem, min-height 3.25rem→4.6rem, section titles 0.68→0.74rem, grid gap 0.7rem. ONE SCROLLER: the panel scrolls as a document (name, notes, viewers, creations, actions); the actions block no longer scrolls inside it, which is what made the last verbs unreachable. Mirror owes: update the views/tile-view card note with the legibility rule (cell minimum decides columns, never a fixed count) — additive, hands-on.",
       "created": "2026-08-14",
       "status": "pending"
+    },
+    {
+      "id": "escape-single-owner",
+      "title": "Mirror ESCAPE HAS ONE OWNER — the focus-gated cascade",
+      "run": null,
+      "note": "New RULE, not a repair. Source: hypercomb-shared/ui/tool-windows.ts (new IoC facade @hypercomb.social/ToolWindows), window-session.ts (WindowSession gains dismiss()/close(); holdWindow takes a root thunk; focusedWindow()), hc-docked-panel.directive.ts (dismissOpenPopover + popover takes focus), escape-cascade.ts (rungs 2e dismissFocused and 3b closeFocused, with the selection clear BETWEEN them). Mirror: a collection gathering the parts, one tile per source resource marked 'part', pheromones marking each for what it is, and notes stating (a) Escape acts on the window the FOCUS is in and nothing else, (b) a window declares dismiss()/close() and never registers a listener, (c) views-viewer and sequence-viewer previously used window-capture stopImmediatePropagation and killed the whole cascade whenever open, (d) the selection clear sits between the two rungs on purpose. Also mint a behaviors-deck glyph card per project_behaviors_mirror_theme. --manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-14",
+      "status": "pending"
     }
   ]
 }

@@ -126,6 +126,10 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // of the input) — notes ride along with every page, so their switch lives in
   // the top chrome now, not here.
   { id: 'sequences',    label: 'sequence.library',          action: 'openSequences',    visibleWhen: 'always' },
+  // The publish differential — what the world is serving, next to what has
+  // changed here since. Slash-first (`/publish`), so like `sequences` it stays
+  // off the rail until the participant enables it from inside its own window.
+  { id: 'publish',      label: 'controls.publish',      action: 'togglePublish',      visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
   // (documentation/selection-tool-windows.md); one-shot verbs live here on the
   // registry (user-toggleable like every control) while windowed responses
@@ -164,6 +168,7 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'pools': true,
   'chat': false,
   'sequences': false,
+  'publish': false,
   // Selection verbs default ON (they only appear while a selection exists;
   // the retired floating menu was the old primary path).
   'promote-to-parent': true,
@@ -593,6 +598,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     openPools: () => this.openPools(),
     toggleChat: () => EffectBus.emit('chat:toggle', {}),
     openSequences: () => EffectBus.emit('sequence:view-open', {}),
+    togglePublish: () => EffectBus.emit('publish:view-toggle', {}),
     cut: () => this.cut(),
     copy: () => this.copy(),
     remove: () => this.remove(),
@@ -657,6 +663,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'pools':        return 'nearby'
       case 'chat':         return 'chat'
       case 'sequences':    return 'schema'
+      case 'publish':      return 'cloud_upload'
       case 'promote-to-parent': return 'arrow_upward'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
@@ -673,7 +680,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #isControlVisible(ctrl: ControlItem): boolean {
     // Optional tool-window launchers are slash-first. They do not occupy the
     // normal rail until enabled from inside their window.
-    if (ctrl.id === 'sequences' && !this.#editMode() && !this.isEnabled(ctrl)) return false
+    if ((ctrl.id === 'sequences' || ctrl.id === 'publish')
+      && !this.#editMode() && !this.isEnabled(ctrl)) return false
     // In edit mode the user is picking which icons should be active — show
     // candidates that are normally state-gated so they can be toggled even
     // when their state isn't currently met (empty clipboard, no selection).
