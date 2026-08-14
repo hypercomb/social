@@ -176,7 +176,7 @@ export class PostitViewDrone extends Drone {
     decorated.forEach((cell, index) => {
       // NUL join — the one character a tile name can never carry (same
       // convention as the decoration index's location keys).
-      const key = cell.path.join(' ')
+      const key = cell.path.join('\u0000')
       keep.add(key)
       let note = this.#noteByKey.get(key)
       if (!note || !note.isConnected) {
@@ -206,8 +206,8 @@ export class PostitViewDrone extends Drone {
       if (pin && Number.isFinite(pin.x) && Number.isFinite(pin.y)) {
         note.classList.add('postit-pinned')
         const w = window.innerWidth, h = window.innerHeight
-        note.style.left = `${Math.min(pin.x * w, Math.max(0, w - 24))}px`
-        note.style.top = `${Math.min(pin.y * h, Math.max(0, h - 24))}px`
+        note.style.left = `${Math.min(Math.max(-112, pin.x * w), Math.max(0, w - 24))}px`
+        note.style.top = `${Math.min(Math.max(-56, pin.y * h), Math.max(0, h - 24))}px`
       } else {
         note.classList.remove('postit-pinned')
         note.style.left = ''
@@ -242,11 +242,19 @@ export class PostitViewDrone extends Drone {
     note.addEventListener('pointerdown', down => {
       if (down.pointerType === 'mouse' && down.button !== 0) return
       this.#justDragged = false
-      const from = note.getBoundingClientRect()
+      // The note's LAYOUT position, transform-free: a docked note reads its
+      // flex spot through offsetLeft/Top (a bounding rect is the tilted
+      // box's AABB — a few px off), a pinned one reads its own left/top.
+      // The drop lands at base + pointer delta, exactly under the hand.
+      const pinned = note.classList.contains('postit-pinned')
+      const hostRect = note.parentElement?.getBoundingClientRect()
+      const baseLeft = pinned ? parseFloat(note.style.left || '0') : (hostRect?.x ?? 0) + note.offsetLeft
+      const baseTop = pinned ? parseFloat(note.style.top || '0') : (hostRect?.y ?? 0) + note.offsetTop
       const sx = down.clientX, sy = down.clientY
+      let dx = 0, dy = 0
       let moved = false
       const move = (ev: PointerEvent): void => {
-        const dx = ev.clientX - sx, dy = ev.clientY - sy
+        dx = ev.clientX - sx; dy = ev.clientY - sy
         if (!moved) {
           if (Math.hypot(dx, dy) < 5) return
           moved = true
@@ -256,9 +264,10 @@ export class PostitViewDrone extends Drone {
           try { note.setPointerCapture(down.pointerId) } catch { /* retired pointer */ }
           note.classList.add('postit-dragging')
         }
-        note.style.position = 'fixed'
-        note.style.left = `${from.x + dx}px`
-        note.style.top = `${from.y + dy}px`
+        // Compositor-only while the paper is in hand: a translate, no layout
+        // pass, no transition — the note tracks the pointer 1:1. Same lift
+        // as the .postit-dragging class (inline transform overrides it).
+        note.style.transform = `translate(${dx}px, ${dy - 7}px) rotate(0deg) scale(1.055)`
         ev.preventDefault()
       }
       const done = (ev: PointerEvent): void => {
@@ -268,10 +277,22 @@ export class PostitViewDrone extends Drone {
         if (!moved) return
         this.#dragging = false
         this.#justDragged = true
+        if (ev.type === 'pointercancel') {
+          note.style.transform = ''
+          note.classList.remove('postit-dragging')
+          void this.#reconcile()
+          return
+        }
+        // Bake the delta into fixed left/top in the same frame the translate
+        // clears — the paper does not move — then the settle transition
+        // returns the tilt while the position stays put.
+        const left = baseLeft + dx, top = baseTop + dy
+        note.classList.add('postit-pinned')
+        note.style.left = `${left}px`
+        note.style.top = `${top}px`
+        note.style.transform = ''
         note.classList.remove('postit-dragging')
-        if (ev.type === 'pointercancel') { void this.#reconcile(); return }
-        const rect = note.getBoundingClientRect()
-        void this.#persistPin(cell, rect.x, rect.y)
+        void this.#persistPin(cell, left, top)
       }
       note.addEventListener('pointermove', move)
       note.addEventListener('pointerup', done)
@@ -290,10 +311,10 @@ export class PostitViewDrone extends Drone {
     // fraction and teleport the note on the next real render — drop the
     // write and let reconcile snap back to the last committed spot.
     if (w < 50 || h < 50) { void this.#reconcile(); return }
-    const pin = {
-      x: Math.min(1, Math.max(0, left / w)),
-      y: Math.min(1, Math.max(0, top / h)),
-    }
+    // UNCLAMPED — the note stops where the hand stops, a half-off-the-edge
+    // drop included. Fractions may run outside [0,1]; the render side keeps
+    // only a grabbable corner in reach, so nothing is ever stranded.
+    const pin = { x: left / w, y: top / h }
     try {
       const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments: cell.path }))
         .at(-1)?.record.payload
@@ -437,17 +458,18 @@ export class PostitViewDrone extends Drone {
 // chrome — the one warm object in a cold shell. No text lives in tile art;
 // the sticky is DOM and carries the note's title.
 //
-// z 59990: the reparented Pixi canvas (#pixi-host, pixi-host.worker.ts) sits
-// at z 59989 with a pointer-events:auto <canvas> — anything below it still
-// PAINTS (the canvas is transparent) but has every click eaten. 59990 is the
-// established "above canvas, below chrome" slab (activity log, format
-// painter). Top rides --hc-header-anchor so header zoom or a wrapped icon
-// rail pushes the stack down instead of over it (never a bare rem — see
-// _header-size.scss). Left adds --hc-controls-left, the side-docked control
-// bar's edge reservation (the anchor every docked panel lays out against) —
-// without it the column sits under the bar, which is chrome at 59999.
+// z 100005: a post-it sits ON TOP OF ANY LOCATION, like paper on the glass —
+// above the reparented Pixi canvas (59989, whose pointer-events:auto
+// <canvas> eats clicks below it), above shell chrome (controls 59999,
+// header 60000) and above the docked toolwindow layer (100002), so a note
+// dropped over a panel or the header stays visible and grabbable there.
+// The host stays pointer-events:none — only the notes themselves are solid.
+// Top rides --hc-header-anchor so header zoom or a wrapped icon rail pushes
+// the DOCKED stack down instead of over it (never a bare rem — see
+// _header-size.scss); left adds --hc-controls-left, the side-docked control
+// bar's edge reservation, so the dock clears the bar.
 const STICKY_CSS = `
-.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:59990;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
+.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:100005;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
 .postit-sticky{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;box-sizing:border-box;width:7.4rem;aspect-ratio:1/.94;padding:.75rem .72rem 1.05rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(174deg,#fffbcf 0%,#fde68a 72%,#e8c75f 100%);color:#4a3f0f;box-shadow:1px 2px 1px rgba(48,36,3,.25),4px 7px 7px rgba(0,0,0,.28),10px 16px 22px rgba(0,0,0,.24),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.75);transform:rotate(var(--postit-tilt,-2deg)) translateZ(0);transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-sticky.postit-pinned{position:fixed}
 .postit-sticky.postit-dragging{transform:translateY(-7px) rotate(0deg) scale(1.055);box-shadow:2px 4px 2px rgba(48,36,3,.2),10px 20px 20px rgba(0,0,0,.38),20px 32px 38px rgba(0,0,0,.28);cursor:grabbing;transition:none}
