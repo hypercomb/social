@@ -8,11 +8,13 @@
     <button class="install-toast-close" type="button" (click)="dismissInstallToast()" [attr.aria-label]="'dcp.toast-dismiss' | t">&times;</button>
   </div>
 }
-<div class="tree-home">
-    <div class="specbar">
-      <span>{{ 'dcp.spec-verified' | t }}</span>
-      <span>{{ 'dcp.spec-count' | t: { domains: domainGrouped().length, modules: allNodes().length } }}</span>
-    </div>
+<div class="tree-home" [class.simple]="!advancedView()">
+    @if (advancedView()) {
+      <div class="specbar">
+        <span>{{ 'dcp.spec-verified' | t }}</span>
+        <span>{{ 'dcp.spec-count' | t: { domains: domainGrouped().length, modules: allNodes().length } }}</span>
+      </div>
+    }
 
     <header class="mast">
       <div class="brand">
@@ -28,41 +30,65 @@
         </div>
       </div>
       <div class="top-bar-right">
-        <!-- PRIMARY axis: content vs functionality. Spelled out in words, not
-             icons, so it reads as the coarse choice the kind icons sit beneath. -->
-        <div class="scope-control" role="group" [attr.aria-label]="'dcp.scope' | t">
-          <button type="button" class="scope-seg"
-            [class.on]="isScopeActive('tiles')"
-            (click)="setScope('tiles')"
-            [title]="'dcp.scope-tiles-hint' | t">{{ 'dcp.scope-tiles' | t }}</button>
-          <button type="button" class="scope-seg"
-            [class.on]="isScopeActive('features')"
-            (click)="setScope('features')"
-            [title]="'dcp.scope-features-hint' | t">{{ 'dcp.scope-features' | t }}</button>
-        </div>
+        @if (!advancedView()) {
+          <!-- THE one switch: which of the two things the list holds. -->
+          <div class="scope-control" role="group" [attr.aria-label]="'dcp.list' | t">
+            <button type="button" class="scope-seg"
+              [class.on]="simpleList() === 'behaviors'"
+              (click)="setSimpleList('behaviors')"
+              [title]="'dcp.list-behaviors-hint' | t">{{ 'dcp.list-behaviors' | t }}</button>
+            <button type="button" class="scope-seg"
+              [class.on]="simpleList() === 'tiles'"
+              (click)="setSimpleList('tiles')"
+              [title]="'dcp.list-tiles-hint' | t">{{ 'dcp.list-tiles' | t }}</button>
+          </div>
+        } @else {
+          <!-- PRIMARY axis: content vs functionality. Spelled out in words, not
+               icons, so it reads as the coarse choice the kind icons sit beneath. -->
+          <div class="scope-control" role="group" [attr.aria-label]="'dcp.scope' | t">
+            <button type="button" class="scope-seg"
+              [class.on]="isScopeActive('tiles')"
+              (click)="setScope('tiles')"
+              [title]="'dcp.scope-tiles-hint' | t">{{ 'dcp.scope-tiles' | t }}</button>
+            <button type="button" class="scope-seg"
+              [class.on]="isScopeActive('features')"
+              (click)="setScope('features')"
+              [title]="'dcp.scope-features-hint' | t">{{ 'dcp.scope-features' | t }}</button>
+          </div>
 
-        <!-- Fine grain — only meaningful inside the features scope, so it only
-             exists there. Nothing to dim until a narrowing is actually on. -->
-        @if (isScopeActive('features')) {
-          @for (fk of filterKinds; track fk.key) {
-            <button class="tbtn"
-              [class.on]="isKindActive(fk.key)"
-              [class.dim]="kindFilters().size > 0 && !isKindActive(fk.key)"
-              (click)="toggleKindFilter(fk.key)"
-              [title]="fk.titleKey | t">
-              <dcp-diamond [kind]="fk.diamond" />
-            </button>
+          <!-- Fine grain — only meaningful inside the features scope, so it only
+               exists there. Nothing to dim until a narrowing is actually on. -->
+          @if (isScopeActive('features')) {
+            @for (fk of filterKinds; track fk.key) {
+              <button class="tbtn"
+                [class.on]="isKindActive(fk.key)"
+                [class.dim]="kindFilters().size > 0 && !isKindActive(fk.key)"
+                (click)="toggleKindFilter(fk.key)"
+                [title]="fk.titleKey | t">
+                <dcp-diamond [kind]="fk.diamond" />
+              </button>
+            }
           }
+
+          <span class="vsep"></span>
+
+          <button class="tbtn"
+            [class.on]="layersCollapsed()"
+            (click)="toggleCollapseAllLayers()"
+            [title]="(layersCollapsed() ? 'dcp.expand-layers' : 'dcp.collapse-layers') | t">
+            <dcp-diamond [kind]="'layer'" />
+          </button>
         }
 
         <span class="vsep"></span>
 
-        <button class="tbtn"
-          [class.on]="layersCollapsed()"
-          (click)="toggleCollapseAllLayers()"
-          [title]="(layersCollapsed() ? 'dcp.expand-layers' : 'dcp.collapse-layers') | t">
-          <dcp-diamond [kind]="'layer'" />
-        </button>
+        <!-- The expert machinery, behind one switch. Simple is the default:
+             a newcomer sees the installed list and nothing else. -->
+        <button type="button" class="advanced-toggle"
+          [class.on]="advancedView()"
+          [attr.aria-pressed]="advancedView()"
+          (click)="toggleAdvancedView()"
+          [title]="'dcp.advanced-hint' | t">{{ 'dcp.advanced' | t }}</button>
 
         <span class="vsep"></span>
 
@@ -71,6 +97,10 @@
       </div>
     </header>
 
+    <!-- The saved states of the install. In the simple view this IS the
+         behaviors mechanic — save where you are, or go back to where you
+         were — so it rides with the behaviors list and stays out of tiles. -->
+    @if (advancedView() || simpleList() === 'behaviors') {
     <section class="home-revisions" aria-label="DCP revision history">
       <button class="home-revisions-toggle" type="button"
         (click)="revisionsExpanded.set(!revisionsExpanded())"
@@ -109,12 +139,13 @@
         </div>
       }
     </section>
+    }
 
     <!-- Client registry — the client installs this DCP has seen (each
          browser, each native instance: separate storage worlds, separately
          versioned). Identity arrives via the handoff hash; the version is
          the client's last-reported package resolved to its generation. -->
-    @if (clients().length) {
+    @if (advancedView() && clients().length) {
       <section class="home-clients" aria-label="Client installs">
         <span class="home-clients-title">Clients</span>
         @for (client of clients(); track client.id) {
@@ -134,7 +165,7 @@
     <!-- First-run orientation — the visible tier of the explanation that
          otherwise lives only in hover hints. Dismiss persists locally
          (participant decoration, never in any lineage). -->
-    @if (!orientationDismissed()) {
+    @if (advancedView() && !orientationDismissed()) {
       <aside class="orientation">
         <p class="orientation-line orientation-lead">{{ 'dcp.orientation-what' | t }}</p>
         <p class="orientation-line">{{ 'dcp.orientation-install' | t }}</p>
@@ -152,7 +183,7 @@
     }
 
     <!-- command line -->
-    @if (sections().length) {
+    @if (advancedView() && sections().length) {
       <dcp-command-line
         [nodes]="allNodes()"
         (filterTerm)="onFilterTerm($event)"
@@ -186,7 +217,169 @@
       </a>
     }
 
-    <!-- domain sections -->
+    <!-- ── THE LIST ──────────────────────────────────────────────────
+         One list, one switch. Behaviors are packages: adopt one, save the
+         state you are in, go back to a state you saved. Tiles are content:
+         they keep their own revisions. Either row opens its CODE, because
+         reading a package is how you decide to trust it. -->
+    @if (!advancedView()) {
+      @if (simpleList() === 'behaviors') {
+        @if (!behaviorRows().length) {
+          <p class="empty">{{ 'dcp.list-behaviors-empty' | t }}</p>
+        }
+        @for (row of behaviorRows(); track row.section.rootSig) {
+          <article class="list-row" [class.open]="isCodeOpen(rowKey(row))">
+            <div class="list-head">
+              <button class="list-open" type="button"
+                (click)="toggleCode(rowKey(row))"
+                [attr.aria-expanded]="isCodeOpen(rowKey(row))"
+                [title]="'dcp.inspect-code-hint' | t">
+                <svg class="group-chevron" [class.open]="isCodeOpen(rowKey(row))" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                <span class="list-name">{{ row.group.domainName }}</span>
+              </button>
+              @if (row.section.generation) {
+                <span class="version-generation" [title]="'deploy version ' + row.section.generation">v{{ row.section.generation }}</span>
+              }
+              <span class="list-label" [title]="row.section.rootSig">{{ displayLabel(row.section) }}</span>
+              @if (deployedDisplay(row.section)) {
+                <span class="version-time">{{ deployedDisplay(row.section) }}</span>
+              }
+
+              <span class="list-spacer"></span>
+
+              @if (adoptingPackageSig() === row.section.rootSig) {
+                <div class="adopt-restore-point">
+                  <label [for]="'simple-restore-' + row.section.rootSig">Restore point</label>
+                  <input [id]="'simple-restore-' + row.section.rootSig" type="text" autofocus
+                    [value]="adoptRestorePointName()"
+                    [disabled]="revisionStatus() === 'saving'"
+                    (input)="adoptRestorePointName.set($any($event.target).value)"
+                    (keydown.enter)="confirmPackageAdopt(row.section)"
+                    (keydown.escape)="cancelPackageAdopt()" />
+                  <button type="button" class="adopt-confirm"
+                    [disabled]="revisionStatus() === 'saving' || !adoptRestorePointName().trim()"
+                    (click)="confirmPackageAdopt(row.section)">
+                    {{ revisionStatus() === 'saving' ? 'Saving…' : ('dcp.adopt' | t) }}
+                  </button>
+                  <button type="button" class="adopt-cancel" [disabled]="revisionStatus() === 'saving'"
+                    (click)="cancelPackageAdopt()">Cancel</button>
+                  @if (adoptRestorePointError()) {
+                    <span class="adopt-error">{{ adoptRestorePointError() }}</span>
+                  }
+                </div>
+              } @else {
+                <span class="adopt-state-note">{{ (packageState(row.section) === 'adopted' ? 'dcp.state-adopted' : 'dcp.state-saved') | t }}</span>
+                <div class="adopt-control" role="group" [attr.aria-label]="'dcp.adopt-state' | t">
+                  <button type="button" class="adopt-seg adopt"
+                    [class.on]="packageState(row.section) === 'adopted'"
+                    (click)="adoptPackage(row.section)" [title]="'dcp.adopt-hint' | t">{{ 'dcp.adopt' | t }}</button>
+                  <button type="button" class="adopt-seg save"
+                    [class.on]="packageState(row.section) === 'saved'"
+                    (click)="savePackage(row.section)" [title]="'dcp.save-hint' | t">{{ 'dcp.save' | t }}</button>
+                  <button type="button" class="adopt-seg discard"
+                    (click)="discardPackage(row.section)" [title]="'dcp.discard-hint' | t">{{ 'dcp.discard' | t }}</button>
+                </div>
+              }
+              <button class="domain-action download-toggle" (click)="downloadPackage(row.section)" [title]="'dcp.download-package' | t"><svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></button>
+            </div>
+
+            @if (row.section.loading || adoptResolvedCount(row.section) !== null) {
+              <div class="section-status">
+                <span class="resolve-track" aria-hidden="true"><span class="resolve-fill"></span></span>
+              </div>
+            }
+            @if (row.section.error) {
+              <div class="section-status error">{{ row.section.error }}</div>
+            }
+            @if (upgradeCount(row.section) > 0) {
+              <div class="upgrade-banner">
+                <span class="upgrade-banner-text">{{ 'dcp.upgrade-new' | t: { count: upgradeCount(row.section) } }}</span>
+                <button class="upgrade-optin-all" type="button" (click)="optInAllUpgrades(row.section)">
+                  {{ 'dcp.upgrade-optin-all' | t }}
+                </button>
+              </div>
+            }
+
+            <!-- Go back to a version you had. Self-hides at one version. -->
+            <dcp-revision-list
+              [revisions]="row.group.revisions"
+              [activeRootSig]="row.group.activeRootSig"
+              (switchRevision)="onSwitchRevision(row.section, $event)" />
+
+            @if (isCodeOpen(rowKey(row)) && row.section.items.length) {
+              <div class="list-code">
+                <dcp-tree-view
+                  [nodes]="row.section.items"
+                  [toggleState]="toggleMap()"
+                  [nodeMap]="nodeMap()"
+                  [activeSigs]="activeSigSet()"
+                  (toggle)="onToggle($event)"
+                  (toggleAll)="onToggleAll($event)"
+                  (open)="onOpen($event)"
+                  (openDetail)="onOpenDetail($event)"
+                  (expandToggle)="onExpandToggle($event)"
+                  (promoteToPackage)="promoteBranchToPackage($event, row.section)"
+                  (openEditor)="onOpenLayerEditor($event, row.section)"
+                  (hatch)="onHatchEgg($event)" />
+              </div>
+            }
+          </article>
+        }
+      } @else {
+        @if (!tileRows().length) {
+          <p class="empty">{{ 'dcp.list-tiles-empty' | t }}</p>
+        }
+        @for (row of tileRows(); track rowKey(row)) {
+          <article class="list-row tile" [class.open]="isCodeOpen(rowKey(row))">
+            <div class="list-head">
+              <button class="list-open" type="button"
+                (click)="toggleCode(rowKey(row))"
+                [attr.aria-expanded]="isCodeOpen(rowKey(row))"
+                [title]="'dcp.inspect-tiles-hint' | t">
+                <svg class="group-chevron" [class.open]="isCodeOpen(rowKey(row))" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                <span class="list-name">{{ row.section.adoptLabel || row.group.domainName }}</span>
+              </button>
+              @if (row.section.adoptLabel) {
+                <span class="list-label">{{ row.group.domainName }}/</span>
+              }
+              <span class="list-spacer"></span>
+              @if (row.section.rootSig) {
+                <span class="header-sig" [title]="row.section.rootSig">{{ displayLabel(row.section) }}</span>
+              }
+            </div>
+
+            @if (isCodeOpen(rowKey(row))) {
+              @if (row.section.items.length) {
+                <div class="list-code">
+                  <dcp-tree-view
+                    [nodes]="row.section.items"
+                    [toggleState]="toggleMap()"
+                    [nodeMap]="nodeMap()"
+                    [activeSigs]="activeSigSet()"
+                    (toggle)="onToggle($event)"
+                    (toggleAll)="onToggleAll($event)"
+                    (open)="onOpen($event)"
+                    (openDetail)="onOpenDetail($event)"
+                    (expandToggle)="onExpandToggle($event)"
+                    (promoteToPackage)="promoteBranchToPackage($event, row.section)"
+                    (openEditor)="onOpenLayerEditor($event, row.section)"
+                    (hatch)="onHatchEgg($event)" />
+                </div>
+              }
+              <!-- A tile's own revisions — the edits made to this content. -->
+              <dcp-patch-list
+                [patches]="row.section.patches"
+                [activeRootSig]="row.section.rootSig"
+                [originalRootSig]="row.section.originalRootSig"
+                (switchRoot)="onSwitchRoot(row.section, $event)" />
+            }
+          </article>
+        }
+      }
+    }
+
+    <!-- domain sections — the expert tree, one section per domain. -->
+    @if (advancedView()) {
     @for (group of domainGrouped(); track group.domainName) {
       <section class="domain-section" [attr.data-domain]="group.domain" [attr.data-zone]="groupZone(group)">
         <div class="zone-rail" aria-hidden="true">
@@ -386,8 +579,10 @@
         </div>
       </section>
     }
+    }
 
-    @if (!domainGrouped().length) {
+    <!-- The simple lists carry their own empty line — this is the tree's. -->
+    @if (advancedView() && !domainGrouped().length) {
       <p class="empty">{{ 'dcp.add-domain-prompt' | t }}</p>
     }
 

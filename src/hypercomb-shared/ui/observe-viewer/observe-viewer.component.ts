@@ -67,7 +67,7 @@ export class ObserveViewerComponent implements OnDestroy {
   /** Put away while the hive is covered. No `observe:close` — that stops the
    *  drone observing, and we are hiding a window, not ending an observation;
    *  the walk keeps feeding the panel so it is current when it comes back. */
-  readonly session = signalSession(this.visible)
+  readonly session = signalSession(this.visible, undefined, { close: () => this.close() })
 
   readonly groups = signal<ObservationGroup[]>([])
   readonly showNames = signal(true)
@@ -123,12 +123,6 @@ export class ObserveViewerComponent implements OnDestroy {
 
   hasPoints(): boolean {
     return this.groups().some(g => g.points.length > 0)
-  }
-
-  onKey(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    this.close()
   }
 
   #normGrouping(g: unknown): ObservationGrouping {

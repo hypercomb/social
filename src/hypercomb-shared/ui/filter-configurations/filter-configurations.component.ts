@@ -31,7 +31,7 @@ export class FilterConfigurationsComponent implements OnDestroy {
   /** Put away while the hive is covered. No `filter:view` — that would clear
    *  the filter the canvas is drawn through, and hiding the window must not
    *  change what the hive shows; the draft is still here on return. */
-  readonly session = signalSession(this.visible)
+  readonly session = signalSession(this.visible, undefined, { close: () => this.close() })
 
   readonly scope = signal<Scope>('local')
   readonly name = signal('')

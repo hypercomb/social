@@ -23,7 +23,7 @@ export class SequenceViewerComponent implements OnDestroy {
   readonly visible = signal(false)
 
   /** Put away while the hive is covered; back on the same sequence. */
-  readonly session = signalSession(this.visible)
+  readonly session = signalSession(this.visible, undefined, { close: () => this.close() })
 
   readonly active = signal('')
   readonly rows = signal<readonly Row[]>([])
@@ -38,18 +38,15 @@ export class SequenceViewerComponent implements OnDestroy {
       EffectBus.on('sequence:view-close', () => this.close()),
       EffectBus.on<{ id?: string }>('sequence:selected', ({ id }) => { if (id) this.active.set(id) }),
     )
-    window.addEventListener('keydown', this.#key, true)
     this.#bind()
   }
   ngOnDestroy(): void {
     this.#offs.forEach(off => off())
     this.#service?.removeEventListener('change', this.#changed)
-    window.removeEventListener('keydown', this.#key, true)
   }
-  readonly #key = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || !this.visible()) return
-    event.preventDefault(); event.stopImmediatePropagation(); this.close()
-  }
+  // Escape's window-CAPTURE listener is gone from here — see the note in
+  // views-viewer. Closing now hangs off the session and runs only when the
+  // focus is inside this window.
   #bind(): void {
     this.#service?.removeEventListener('change', this.#changed)
     this.#service = ioc<SequenceService>('@diamondcoreprocessor.com/SequenceService') ?? null

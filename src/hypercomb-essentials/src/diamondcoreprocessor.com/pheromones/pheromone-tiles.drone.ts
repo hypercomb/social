@@ -94,14 +94,25 @@ export class PheromoneTilesDrone extends Drone {
     if (this.#wired) return
     this.#wired = true
 
-    this.onEffect<{ open?: boolean }>('tags:view-state', (p) => {
+    this.onEffect<{ open?: boolean; parked?: boolean }>('tags:view-state', (p) => {
       const open = p?.open === true
       if (open === this.#windowOpen) return
       this.#windowOpen = open
-      // Closing the window drops the brush (staging discarded) and clears the
-      // card; both takeovers only make sense while the panel is up.
+      // CLOSING drops the brush — that is a decision the participant made, and
+      // an armed brush with no panel to disarm it would hijack every tile click.
+      //
+      // PARKING does not. The shell parks a window when it needs the edge (a
+      // lane pushing out its oldest occupant, a rail flyout borrowing the side,
+      // the installer covering the hive) and a shell decision must cost the
+      // participant nothing — which for this window means the bouquet they
+      // gathered and the tiles they had already staged. Park and close used to
+      // arrive here as the same `open:false`, so the panel's own promise to keep
+      // an armed brush across a park could not be kept.
+      //
+      // A parked brush is inert, not dangerous: the tile overlay drops entirely
+      // on `open === false`, so nothing is hijacked while the panel is away.
       if (!open) {
-        this.#disarm()
+        if (p?.parked !== true) this.#disarm()
         this.#hideHover()
       }
     })

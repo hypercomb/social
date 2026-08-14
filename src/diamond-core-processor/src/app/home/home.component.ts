@@ -29,6 +29,10 @@ const DOMAINS_KEY = 'dcp.domains'
 // (localStorage), same principle as domain visibility and label overrides.
 const ORIENTATION_DISMISSED_KEY = 'dcp.orientation-dismissed'
 
+// Expert-machinery opt-in — participant-local decoration (localStorage).
+// Absent/'0' ⇒ the simple list, which is what the installer opens on.
+const ADVANCED_VIEW_KEY = 'dcp.advanced-view'
+
 // Per-package branch-name OVERRIDE — participant-local decoration
 // (localStorage), keyed by root sig. The deploy-time `label` is the
 // placeholder; a typed name overrides it. Same principle as domain
@@ -163,7 +167,9 @@ export interface DomainGroup {
   standalone: true,
   imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, RevisionListComponent, DcpCommandLineComponent, LayerEditorComponent, DcpTranslatePipe],
   templateUrl: './home.component.html',
-  styleUrls: ['./home.component.scss']
+  // Two sheets, deliberately: the list is its own surface, and the
+  // per-sheet style budget is measured one sheet at a time.
+  styleUrls: ['./home.component.scss', './home.list.scss']
 })
 export class HomeComponent implements OnDestroy {
 
@@ -204,6 +210,25 @@ export class HomeComponent implements OnDestroy {
   readonly adoptingPackageSig = signal<string | null>(null)
   readonly adoptRestorePointName = signal('')
   readonly adoptRestorePointError = signal('')
+
+  // ── The two faces of the installer ───────────────────────────────────
+  //
+  // SIMPLE (the default, and what adoption depends on): ONE list. It shows
+  // what is installed and nothing else, with a single switch between the
+  // two things a list can hold — BEHAVIORS (packages) and TILES (content).
+  // Behaviors are managed strictly as packages: adopt one, save the state
+  // you are in, or go back to a state you saved. Tiles keep their own
+  // revisions, because a tile is content you edit.
+  //
+  // Drilling into a package's CODE is not an advanced act — it is how you
+  // decide to trust it — so the code tree opens from a row in the simple
+  // list too. What lives behind ADVANCED is the expert machinery: zones,
+  // kind filters, the logical overlay, backup choice, per-layer patches.
+  readonly advancedView = signal(this.#loadAdvancedView())
+  readonly simpleList = signal<'behaviors' | 'tiles'>('behaviors')
+  /** Package rootSigs whose code tree is open for inspection in the simple
+   *  list. Verification is per row and never sticky across sessions. */
+  readonly openCodeSigs = signal<Set<string>>(new Set())
 
   readonly receivedLayerSigs = signal<string[]>([])
   #fromHcChannel: BroadcastChannel | null = null
@@ -1651,6 +1676,77 @@ export class HomeComponent implements OnDestroy {
 
   isScopeActive(scope: 'tiles' | 'features'): boolean {
     return this.filterScope() === scope
+  }
+
+  // ── The simple list ──────────────────────────────────────────────────
+
+  /** Behaviors: ONE row per installed package — its active deploy version,
+   *  never the superseded ones (those live in the row's version switcher).
+   *  Domain groups collapse away: a package is a package, wherever it came
+   *  from. */
+  readonly behaviorRows = computed(() =>
+    this.domainGrouped()
+      .filter(group => group.domain !== '@logical')
+      .map(group => ({ group, section: group.sections.find(s => s.kind === 'package') }))
+      .filter((row): row is { group: DomainGroup; section: DomainSection } => !!row.section))
+
+  /** Tiles: the hypercomb.io view first — the merged content that actually
+   *  runs, which is the thing a newcomer came to see — then every adopted
+   *  tile under its own host. Content sections keep their tree and their
+   *  patch revisions; a tile is something you edit. */
+  readonly tileRows = computed(() => {
+    const groups = this.domainGrouped()
+    const logical = groups.find(g => g.domain === '@logical')
+    const rows: { group: DomainGroup; section: DomainSection }[] = []
+    if (logical?.sections[0]?.items.length) rows.push({ group: logical, section: logical.sections[0] })
+    for (const group of groups) {
+      if (group.domain === '@logical') continue
+      for (const section of group.sections) {
+        if (section.kind !== 'package') rows.push({ group, section })
+      }
+    }
+    return rows
+  })
+
+  setSimpleList(list: 'behaviors' | 'tiles'): void {
+    this.simpleList.set(list)
+    // The simple list is its own narrowing — the kind scope belongs to the
+    // advanced view and would prune these rows out from under it.
+    this.filterScope.set('all')
+    this.kindFilters.set(new Set())
+  }
+
+  /** Advanced is a participant decoration: this browser's preference for how
+   *  much machinery to show. It never enters a lineage. */
+  toggleAdvancedView(): void {
+    const next = !this.advancedView()
+    this.advancedView.set(next)
+    if (!next) { this.filterScope.set('all'); this.kindFilters.set(new Set()) }
+    try { localStorage.setItem(ADVANCED_VIEW_KEY, next ? '1' : '0') } catch { /* private mode — simple next boot */ }
+  }
+
+  #loadAdvancedView(): boolean {
+    try { return localStorage.getItem(ADVANCED_VIEW_KEY) === '1' } catch { return false }
+  }
+
+  /** A row's identity in the simple list. The logical view carries no root
+   *  sig, and the same tile name can be adopted at two locations, so the
+   *  key is (domain, tile name or sig) — the same (name, at) identity the
+   *  branch sigbag keys on. */
+  rowKey(row: { group: DomainGroup; section: DomainSection }): string {
+    return `${row.group.domainName} ${row.section.adoptLabel ?? row.section.rootSig}`
+  }
+
+  /** Open a row's code, so it can be read before it is trusted. */
+  toggleCode(key: string): void {
+    const next = new Set(this.openCodeSigs())
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    this.openCodeSigs.set(next)
+  }
+
+  isCodeOpen(key: string): boolean {
+    return this.openCodeSigs().has(key)
   }
 
   // kind filter toggles — the fine grain WITHIN the features scope

@@ -52,8 +52,11 @@ export class FilesViewerComponent implements OnDestroy {
   /** Put away while the hive is covered, brought back with the SAME gather —
    *  `close()` drops the file list, and a window that came back empty would
    *  read as "my files vanished". */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('files:viewer', { active: open }))
+  readonly session = signalSession(
+    this.visible,
+    open => EffectBus.emit('files:viewer', { active: open }),
+    { close: () => this.close() },
+  )
 
   readonly title = signal<string>('')
   readonly scope = signal<Scope>('tile')
@@ -221,10 +224,6 @@ export class FilesViewerComponent implements OnDestroy {
       ? file.path
       : (file.cell ? [...this.#segments(), file.cell] : this.#segments())
     EffectBus.emit('files:remove', { decorationSig: file.decorationSig, segments })
-  }
-
-  onKey(event: KeyboardEvent): void {
-    if (event.key === 'Escape') { event.preventDefault(); this.close() }
   }
 
   sizeLabel(bytes: number): string {

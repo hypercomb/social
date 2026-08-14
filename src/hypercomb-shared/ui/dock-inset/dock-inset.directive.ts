@@ -75,6 +75,27 @@ export class DockInsetDirective implements OnDestroy {
     if (!this.#active) { this.#emitClear(); return }
     const r = this.#host.nativeElement.getBoundingClientRect()
     if (r.width <= 0 || r.height <= 0) { this.#emitClear(); return }
+
+    // A FULL-BLEED sheet reserves nothing.
+    //
+    // On a phone several panels flip to a full-width bottom sheet in their own
+    // SCSS while still declaring `hcDockInset="right"` — so `innerWidth - left`
+    // measured the whole screen and the panel claimed the entire viewport as a
+    // right-edge reservation. Everything downstream trusts that number: the
+    // canvas host was squeezed to zero width, `--hc-inset-right` pushed the
+    // control bar and the edit cluster off-screen, and the full-surface view
+    // drones collapsed against it.
+    //
+    // Report NOTHING rather than guess a replacement edge. Saying `bottom`
+    // instead would unblock `resyncToHost` → `zoomToFit`, so opening the sheet
+    // would re-scale the whole hive into a letterbox and closing it would
+    // re-scale back, on every tap. Today the hive sits still above the sheet,
+    // which is what the sheet's own styling asks for. A window that genuinely
+    // wants a bottom reservation declares `hcDockInset="bottom"` itself.
+    const spansX = r.left <= 1 && r.right >= window.innerWidth - 1
+    const spansY = r.top <= 1 && r.bottom >= window.innerHeight - 1
+    const horizontal = this.#side === 'left' || this.#side === 'right'
+    if (horizontal ? spansX : spansY) { this.#emitClear(); return }
     // Reserve up to the panel's INNER edge against the viewport edge — robust
     // to gaps or a panel not flush to the edge.
     let size = 0

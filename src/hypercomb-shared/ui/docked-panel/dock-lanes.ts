@@ -35,6 +35,8 @@
 // Module scope, no service — the directive is already self-contained chrome,
 // exactly as panel-groups.ts is for the group text.
 
+import { isPhoneViewport } from '../breakpoints'
+
 export type LaneSide = 'left' | 'right'
 
 /** Windows per edge on a viewport with room for them. */
@@ -49,21 +51,40 @@ export const TWO_LANE_MIN_WIDTH = 900
 export interface LaneMember {
   /** Which edge this window docks against. */
   readonly laneSide: LaneSide
+  /** Stable window id — so an undo can tell whether this window came back on
+   *  its own before the undo was spent. */
+  readonly laneId: string
   /** Current outer width in px — what the next window inboard is offset by. */
   laneWidth(): number
   /** Sit this far in from the edge (0 = flush). */
   placeInLane(offset: number): void
   /** Pushed out of a full lane. PARK — keep everything, stop showing. */
   evictFromLane(): void
+  /** Come back from a park the shell owes an undo for (`clearLane`). Remounting
+   *  is what re-places it — `ngOnInit` claims a place the ordinary way. */
+  returnToLane(): void
 }
 
 /** Occupants per side, OLDEST FIRST. Position in the array IS the position in
  *  the lane: index 0 sits flush to the edge, each later one further inboard. */
 const lanes: Record<LaneSide, LaneMember[]> = { left: [], right: [] }
 
-/** How many windows this edge holds right now. */
-export const laneCapacity = (): number =>
-  (typeof window !== 'undefined' && window.innerWidth < TWO_LANE_MIN_WIDTH) ? 1 : LANE_SLOTS
+/** How many windows this edge holds right now.
+ *
+ *  TWO questions, deliberately not written as one threshold:
+ *    • `isPhoneViewport` — is the shell in SHEET mode, where a window takes the
+ *      whole screen? A landscape phone (932×430) is wide by any desktop measure
+ *      and still has no room: two occupants there are two full-bleed sheets
+ *      laid on top of each other, with registration order deciding which one
+ *      you can see.
+ *    • `TWO_LANE_MIN_WIDTH` — is there horizontal room for two docked panels
+ *      AND a strip of hive worth looking at?
+ *  A width-only test answers the second and silently gets the first wrong. */
+export const laneCapacity = (): number => {
+  if (typeof window === 'undefined') return LANE_SLOTS
+  if (isPhoneViewport()) return 1
+  return window.innerWidth < TWO_LANE_MIN_WIDTH ? 1 : LANE_SLOTS
+}
 
 /** Recompute every occupant's distance from the edge. Widths are read live, so
  *  this is also the resize path — the inner window tracks the outer one's grip
@@ -125,6 +146,38 @@ export const clearLane = (side: LaneSide): number => {
   const out = lane.splice(0, lane.length)
   for (const member of out) member.evictFromLane()
   return out.length
+}
+
+/** Clear an edge and hand back the UNDO.
+ *
+ *  `clearLane` alone is a borrow with no return: a rail flyout takes the side,
+ *  parks whatever was there, and nothing ever brings it back — and because the
+ *  park goes through the member directly, `unparkWindows()` cannot reach it
+ *  either. A window put away by a menu opening should come back when that menu
+ *  closes; anything else is the shell keeping what it borrowed.
+ *
+ *  The closure is SPENT ONCE and skips any window that is already back (the
+ *  participant may have reopened it by hand while the menu was up — restoring
+ *  it again would be a second copy of a decision they already made).
+ *
+ *  Deliberately NOT extended to `claimLane` eviction: there the participant
+ *  caused the displacement by opening something, and auto-resurrecting would
+ *  mean closing a window opens a window. */
+export const clearLaneWithUndo = (side: LaneSide, isShowing?: (id: string) => boolean): (() => void) => {
+  const lane = lanes[side]
+  if (lane.length === 0) return () => {}
+  const out = lane.splice(0, lane.length)
+  for (const member of out) member.evictFromLane()
+  let spent = false
+  return () => {
+    if (spent) return
+    spent = true
+    for (const member of out) {
+      if (isShowing?.(member.laneId)) continue
+      try { member.returnToLane() }
+      catch (err) { console.error('[dock-lanes] returnToLane failed:', err) }
+    }
+  }
 }
 
 /** Is there a free place on this edge? Asked before a window brings its PAIR up

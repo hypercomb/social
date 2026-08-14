@@ -25,7 +25,20 @@ export type GoogleDocRecord = {
   id: string
   /** Drive's version counter at the moment the hive last pulled. */
   pulledVersion: string | null
-  /** Signature of the body AS PULLED — the bytes Google's copy corresponds to. */
+  /**
+   * Signature of the body AS EXPORTED BY GOOGLE — never of the bytes we sent.
+   *
+   * The round trip is NOT byte-identical (verified against a live deployment):
+   * pushing `...**paragraph**.\n` exports back as `...**paragraph**.  \n`,
+   * because the converter re-emits markdown from the Doc's structure rather
+   * than storing our source. Recording the SENT bytes here would make
+   * `currentSig !== pulledSig` true forever, so every document would report
+   * unpushed edits immediately after a successful push, and every reconcile
+   * would return `push` in an endless loop.
+   *
+   * So a push must be followed by a re-read, and THAT content's signature is
+   * what lands here.
+   */
   pulledSig: string
   /** Signature of the hive's body NOW. Differs from pulledSig once edited here. */
   currentSig: string

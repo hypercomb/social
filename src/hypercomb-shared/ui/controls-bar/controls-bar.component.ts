@@ -23,7 +23,8 @@ import { EffectBus, consumePointerGesture } from '@hypercomb/core'
 import { iconOverrides } from '../../core/icon-override.store'
 import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
-import { clearLane } from '../docked-panel/dock-lanes'
+import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
+import { isWindowShowing } from '../window-session'
 import { showHiveRoot } from '../../core/home-root'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
@@ -1794,10 +1795,27 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  the shell made this decision, so it costs the participant nothing, and
    *  reopening a window from the rail restores whatever it held. */
   #clearLaneForMenu(x: number): void {
-    clearLane(x < window.innerWidth / 2 ? 'left' : 'right')
+    // Spend any undo still outstanding before taking a new one — two menus in a
+    // row must not strand the first menu's windows.
+    this.#laneRestore?.()
+    this.#laneRestore = clearLaneWithUndo(x < window.innerWidth / 2 ? 'left' : 'right', isWindowShowing)
+  }
+
+  /** The undo for the windows this bar's last anchored menu put away. A borrow
+   *  with no return is just keeping what you took: the menu closing is when the
+   *  edge goes back. Spent-once, and it skips any window the participant has
+   *  reopened by hand in the meantime. */
+  #laneRestore: (() => void) | null = null
+
+  /** Give the edge back. First line of every menu-close handler. */
+  #restoreLane(): void {
+    const undo = this.#laneRestore
+    this.#laneRestore = null
+    undo?.()
   }
 
   readonly closeHomeMenu = (): void => {
+    this.#restoreLane()
     if (!this.homeMenuOpen()) return
     this.homeMenuOpen.set(false)
     window.removeEventListener('pointerdown', this.#onHomeMenuOutside, true)
@@ -1933,6 +1951,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly closeTourMenu = (): void => {
+    this.#restoreLane()
     if (!this.tourMenuOpen()) return
     this.tourMenuOpen.set(false)
     window.removeEventListener('pointerdown', this.#onTourMenuOutside, true)
@@ -2051,6 +2070,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly closeFitMenu = (): void => {
+    this.#restoreLane()
     if (!this.fitMenuOpen()) return
     this.fitMenuOpen.set(false)
     window.removeEventListener('pointerdown', this.#onFitMenuOutside, true)

@@ -10,6 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
+import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
 import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
@@ -3695,7 +3696,14 @@ export class ShowCellDrone extends Drone {
       const takeoverKinds = beeRegistry?.kindsReplacingTileRender?.()
       if (takeoverKinds && takeoverKinds.size > 0) {
         for (const name of [...union]) {
-          if (!kindsForLabel(name).some(k => takeoverKinds.has(k))) continue
+          const claiming = kindsForLabel(name).filter(k => takeoverKinds.has(k))
+          if (!claiming.length) continue
+          // A takeover the participant switched OFF on the roster (or that a
+          // publisher withheld) is DORMANT — its view renders nothing, so the
+          // hexagon is the cell's presence again. Without this the claim held
+          // regardless and the cell vanished entirely when the behavior was
+          // turned off: no sticky, no tile, no way back.
+          if (claiming.every(k => isBehaviorDormant(k, [...passSegments, name]))) continue
           union.delete(name)
           ephemeralCellSet.delete(name)
           peerCellSet.delete(name)
@@ -5158,6 +5166,17 @@ export class ShowCellDrone extends Drone {
     // tile sat beside its sticky for the whole session. The claim and the
     // hex are mutually exclusive; a dropped repaint must not undo that.
     this.onEffect('takeover:indexed', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // A roster switch (or a wake-here) changes the ANSWER the takeover filter
+    // gets without touching a single decoration, so no index event fires.
+    // Re-filter on the same terms, or the hexagon a global-off just handed
+    // back stays missing until an unrelated pass.
+    this.onEffect(ENABLEMENT_CHANGED, () => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.#forceNextRender = true

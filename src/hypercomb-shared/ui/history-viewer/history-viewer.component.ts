@@ -233,7 +233,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
   readonly visible = this.#visible.asReadonly()
 
   /** Put away while the hive is covered; back at the same row, same slice. */
-  readonly session = signalSession(this.#visible)
+  readonly session = signalSession(this.#visible, undefined, { close: () => this.hide() })
   readonly total = this.#total.asReadonly()
   readonly position = this.#position.asReadonly()
   readonly groupStepEnabled = this.#groupStepEnabled.asReadonly()

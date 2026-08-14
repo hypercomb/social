@@ -96,6 +96,10 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   readonly session: WindowSession = {
     park: () => { this.visible.set(false); EffectBus.emit('clipboard:open', { open: false }) },
     unpark: () => { this.visible.set(true); EffectBus.emit('clipboard:open', { open: true }) },
+    // Escape's owner is the cascade; this is how the panel takes part. It also
+    // keeps its OWN cascade rung (clipboard mode is reachable with the focus out
+    // on the canvas, which is the whole point of a clipboard).
+    close: () => { this.close() },
   }
 
   readonly items = signal<ClipboardItem[]>([])

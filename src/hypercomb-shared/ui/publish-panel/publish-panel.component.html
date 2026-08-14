@@ -1,0 +1,187 @@
+@if (visible()) {
+  <aside
+    class="publish-panel"
+    hcDockInset="right"
+    hcDockedPanel="publish-panel"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="300"
+    [maxWidth]="640"
+    [defaultWidth]="380"
+    launcherControlId="publish"
+    data-consumes-wheel
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'publish.title' | t"
+  >
+    <header class="publish-header">
+      <span class="publish-title">{{ 'publish.title' | t }}</span>
+      <button
+        class="publish-chip"
+        type="button"
+        (click)="refresh()"
+        [disabled]="refreshing()"
+        [attr.title]="'publish.action.recheck' | t"
+        [attr.aria-label]="'publish.action.recheck' | t"
+      >{{ 'publish.action.recheck' | t }}</button>
+      <button class="publish-close" type="button" (click)="close()" [attr.aria-label]="'publish.title' | t">×</button>
+    </header>
+
+    <!-- What the index read says, and whether public hosting is even on.
+         With the gate off, marking a branch public is inert — so the chip is
+         stated once here rather than as a per-row failure. -->
+    <div class="publish-status">
+      <span class="publish-index" [class.quiet]="indexQuiet()">{{ indexKey() | t: indexParams() }}</span>
+      @if (!gateActive()) {
+        <span class="publish-gate">{{ 'publish.header.gate-off' | t }}</span>
+      }
+    </div>
+
+    <!-- THE ONE LOUD BANNER: a host serving an index that does not verify
+         against our key is not an outage, it is somebody else's index. -->
+    @if (forged()) {
+      <p class="publish-alarm" role="alert">{{ 'publish.header.index-forged' | t }}</p>
+    }
+
+    @if (keyMismatch()) {
+      <p class="publish-warn">{{ 'publish.header.key-mismatch' | t }}</p>
+    }
+
+    @for (collision of collisions(); track collision.key) {
+      <p class="publish-warn">{{ 'publish.header.collision' | t: collisionParams(collision) }}</p>
+    }
+
+    @if (!hasRows()) {
+      <p class="publish-empty">{{ 'publish.empty' | t }}</p>
+    } @else {
+      <div class="publish-scroll">
+
+        <!-- Rows whose local side is still being sealed. They paint at once
+             and drop into their section as the verdicts land; until then they
+             belong to no section, because none of them would be true yet. -->
+        @if (comparing().length > 0) {
+          <ul class="publish-list comparing">
+            @for (row of comparing(); track row.key) {
+              <li class="publish-row is-quiet" [attr.data-state]="row.state">
+                <div class="prow-head">
+                  <span class="prow-light" aria-hidden="true"></span>
+                  <div class="prow-meta">
+                    <span class="prow-path" [title]="row.path">{{ row.path }}</span>
+                    <span class="prow-state">{{ 'publish.state.comparing' | t }}</span>
+                  </div>
+                </div>
+              </li>
+            }
+          </ul>
+        }
+
+        @for (section of sections(); track section.key) {
+          <section class="publish-section">
+            <header class="psection-header">
+              <span class="psection-label">{{ section.titleKey | t }}</span>
+              <span class="psection-count">{{ section.rows.length }}</span>
+            </header>
+            <ul class="publish-list">
+              @for (row of section.rows; track row.key) {
+                <li
+                  class="publish-row"
+                  [class.is-quiet]="isQuiet(row)"
+                  [class.is-busy]="!!row.busyPhase"
+                  [class.expanded]="row.expanded"
+                  [attr.data-state]="row.state"
+                >
+                  <div
+                    class="prow-head"
+                    role="button"
+                    tabindex="0"
+                    [attr.aria-expanded]="row.expanded"
+                    (click)="toggle(row)"
+                    (keydown.enter)="toggle(row)"
+                    (keydown.space)="toggle(row); $event.preventDefault()"
+                  >
+                    <span
+                      class="prow-light"
+                      aria-hidden="true"
+                      [attr.title]="('publish.state.' + row.state) | t"
+                    ></span>
+                    <div class="prow-meta">
+                      <span class="prow-path" [title]="row.path">{{ row.path }}</span>
+                      <span class="prow-state">{{ ('publish.state.' + row.state) | t }}</span>
+                      @if (whyKey(row)) {
+                        <span class="prow-why">{{ whyKey(row) | t: whyParams(row) }}</span>
+                      }
+                    </div>
+                    @if (actionKey(row); as action) {
+                      <button
+                        class="prow-action"
+                        type="button"
+                        (click)="act(row); $event.stopPropagation()"
+                      >{{ action | t }}</button>
+                    }
+                  </div>
+
+                  @if (row.expanded) {
+                    <div class="prow-detail">
+                      @if (row.live) {
+                        <div class="pdet-line">
+                          <span class="pdet-label">{{ 'publish.row.live-head' | t }}</span>
+                          <code class="pdet-sig" [attr.title]="row.live">{{ short(row.live) }}</code>
+                        </div>
+                      }
+                      @if (row.here) {
+                        <div class="pdet-line">
+                          <span class="pdet-label">{{ 'publish.row.here-head' | t }}</span>
+                          <code class="pdet-sig" [attr.title]="row.here">{{ short(row.here) }}</code>
+                        </div>
+                      }
+                      @if (row.publishedAt) {
+                        <div class="pdet-line pdet-age">{{ 'publish.row.published-at' | t: { age: age(row.publishedAt) } }}</div>
+                      }
+
+                      <!-- Objects in the published closure that are not served:
+                           a visitor following this branch would get a 404. -->
+                      @if (row.gaps.length > 0) {
+                        <div class="pdet-line pdet-gaps">{{ 'publish.why.gaps' | t: { count: row.gaps.length } }}</div>
+                        <ul class="pdet-gaplist">
+                          @for (gap of gapsShown(row); track gap) {
+                            <li><code class="pdet-sig" [title]="gap">{{ short(gap) }}</code></li>
+                          }
+                        </ul>
+                      }
+
+                      <div class="pdet-actions">
+                        @if (row.link) {
+                          <button class="pdet-btn" type="button" (click)="copyLink(row)">{{ 'publish.action.copy-link' | t }}</button>
+                        }
+                        @if (row.segments.length > 0) {
+                          <button class="pdet-btn" type="button" (click)="visit(row)">{{ 'publish.action.visit' | t }}</button>
+                        }
+                      </div>
+
+                      @if (row.link) {
+                        <code class="pdet-link" [attr.title]="row.link">{{ row.link }}</code>
+                      }
+
+                      <!-- Unpublish states its honest limit ABOVE the button,
+                           every time: it stops the branch being advertised, it
+                           does not un-share what has already been shared. -->
+                      @if (row.segments.length > 0 && row.live) {
+                        <p class="pdet-warn">{{ 'publish.unpublish-warning' | t }}</p>
+                        <button
+                          class="pdet-btn pdet-unpublish"
+                          type="button"
+                          (click)="unpublish(row)"
+                        >{{ 'publish.action.unpublish' | t }}</button>
+                      }
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
+          </section>
+        }
+      </div>
+    }
+  </aside>
+}

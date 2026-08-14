@@ -1633,37 +1633,21 @@ export class NotesStripComponent implements OnDestroy {
   // hit our panel or somewhere else in the document.
   readonly #host = inject(ElementRef<HTMLElement>)
 
-  /** ESC cascades through the popovers and selection in priority order
-   *  so the user can "back out" of nested state without having to find
-   *  the right close button. Falls through to the global escape-cascade
-   *  (notes-viewer, command-line, etc.) if nothing here is dismissable. */
-  @HostListener('document:keydown.escape', ['$event'])
-  onEscape(event: Event): void {
-    if (!this.visible()) return
-    // Cascade — most local / transient state first, broader state
-    // last. Stop propagation once we've handled one level so the
-    // global escape-cascade doesn't ALSO fire for the same press.
-    if (this.pickerOpenForId() !== null) {
-      this.closePicker()
-      event.stopPropagation()
-      event.preventDefault()
-      return
-    }
-    if (this.kebabOpenId() !== null) {
-      this.closeKebab()
-      event.stopPropagation()
-      event.preventDefault()
-      return
-    }
-    if (this.isFullscreen()) {
-      this.isFullscreen.set(false)
-      event.stopPropagation()
-      event.preventDefault()
-      return
-    }
-    // Otherwise: leave the event alone so the surrounding escape-
-    // cascade (notes-viewer dismissal, command-line clear, etc.)
-    // keeps running. We're a non-modal panel — escape is shared.
+  /** One level back per press: the icon picker, then the kebab, then
+   *  fullscreen. False = nothing of ours was open, and the shell cascade
+   *  carries on past us.
+   *
+   *  This was a `document:keydown.escape` HostListener whose comment claimed it
+   *  stopped the global cascade for a handled press. It could not: the keymap
+   *  listens on the WINDOW in the capture phase, so by the time a document
+   *  bubble listener ran the cascade had already been asked to run. Escape has
+   *  one owner now and this is how the strip takes part in it. */
+  dismiss(): boolean {
+    if (!this.visible()) return false
+    if (this.pickerOpenForId() !== null) { this.closePicker(); return true }
+    if (this.kebabOpenId() !== null) { this.closeKebab(); return true }
+    if (this.isFullscreen()) { this.isFullscreen.set(false); return true }
+    return false
   }
 
   /** Click anywhere outside the strip closes the kebab popover and
@@ -2195,6 +2179,8 @@ export class NotesStripComponent implements OnDestroy {
   readonly session: WindowSession = {
     park: () => this.#parked.set(true),
     unpark: () => this.#parked.set(false),
+    dismiss: () => this.dismiss(),
+    close: () => this.hide(),
   }
 
   /** Turn the strip on. Every open path goes through here, because `#open` is

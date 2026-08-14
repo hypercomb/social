@@ -54,6 +54,9 @@ Hyper windows follow the same hierarchy:
 Accent colour identifies a tool family. It does not change the shell material,
 corner system, spacing rhythm, or interaction shapes.
 
-Each dock edge is a single-window lane. Opening a Hyper window closes every
-other window on that same side. A floating surface is outside the lane; any
-future multi-window layout must opt out explicitly and own its arrangement.
+Each dock edge is a LANE holding more than one window (`ui/docked-panel/
+dock-lanes.ts`). Windows stack inward from the edge in the order they were
+opened; a narrow viewport holds one. A window arriving at a full lane pushes out
+the OLDEST, and pushing out is a PARK, not a close — the shell made that
+decision, so it must cost the participant nothing. A floating surface is outside
+the lane and owns its own arrangement.

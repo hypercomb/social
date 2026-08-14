@@ -80,7 +80,7 @@ export class AggregateIndexComponent implements OnDestroy {
 
   /** Put away while the hive is covered; back on the same source, same filter,
    *  same origin — `close()` also drops a rename in progress, parking doesn't. */
-  readonly session = signalSession(this.open)
+  readonly session = signalSession(this.open, undefined, { dismiss: () => this.dismiss(), close: () => this.close() })
   readonly items = signal<readonly AggregateItem[]>([])
   /** The ONE field. There is no create mode — see `creatable`. */
   readonly query = signal('')
@@ -360,7 +360,6 @@ export class AggregateIndexComponent implements OnDestroy {
     // appeared). `navigate` is the shell-wide signal, so track that too — the
     // panel's location mirror has to be right or the way back is invisible.
     window.addEventListener('navigate', this.#onLineage)
-    window.addEventListener('keydown', this.#onKey, true)
     this.#ensureLineage()
     this.#refresh()
   }
@@ -371,7 +370,6 @@ export class AggregateIndexComponent implements OnDestroy {
     this.#boundSource?.changed?.removeEventListener('change', this.#sourceChanged)
     window.removeEventListener('synchronize', this.#sourceChanged)
     window.removeEventListener('navigate', this.#onLineage)
-    window.removeEventListener('keydown', this.#onKey, true)
     this.#lineage?.removeEventListener?.('change', this.#onLineage)
     this.#detachDrag()
   }
@@ -1140,15 +1138,18 @@ export class AggregateIndexComponent implements OnDestroy {
    *  Only the LOCAL query is cleared, never the keyword filter: that one is
    *  shared with the controls bar and the hive, so unwinding it from in here
    *  would silently unflatten the canvas too. */
-  #onKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape' || !this.open()) return
-    if (this.renaming()) { e.preventDefault(); this.renaming.set(null); return }
-    if (this.query()) { e.preventDefault(); this.query.set(''); return }
-    const target = e.target as Node | null
-    const panel = document.querySelector('hc-aggregate-index .ai-panel')
-    if (!panel || !target || !panel.contains(target)) return
-    e.preventDefault()
-    this.close()
+  /** One level back per press: the rename field, then the query. False = we
+   *  had nothing open, and the shell cascade carries on past us.
+   *
+   *  This used to be a window listener that ended with its own
+   *  `panel.contains(target)` test — the focus gate, hand-rolled, and the proof
+   *  the gate is the right rule. It is the cascade's job now, so the listener
+   *  and the test are both gone. */
+  dismiss(): boolean {
+    if (!this.open()) return false
+    if (this.renaming()) { this.renaming.set(null); return true }
+    if (this.query()) { this.query.set(''); return true }
+    return false
   }
 }
 

@@ -2,6 +2,10 @@
 // Responsive breakpoint mixins for all shared UI components.
 
 $bp-phone-max: 599px;
+// The SHORT axis. A landscape phone is wide and short: no room for a docked
+// panel, however many pixels across it is. Twin of PHONE_MAX_HEIGHT in
+// `breakpoints.ts` — keep the two files in step.
+$bp-phone-short: 449px;
 $bp-tablet: 600px;
 $bp-tablet-land: 1024px;
 $bp-desktop: 1367px;
@@ -10,6 +14,14 @@ $bp-desktop-ultrawide: 3440px; // 34" ultrawide
 
 @mixin phone-only {
   @media (max-width: $bp-phone-max) { @content; }
+}
+
+/** SHEET MODE — either axis phone-shaped. This is the one the tool windows
+ *  want: `phone-only` misses a landscape phone, which is wide and short and
+ *  still has no room to dock a panel beside the hive. Seventeen inline copies
+ *  of this query exist across the shell; migrate them here. */
+@mixin phone {
+  @media (max-width: $bp-phone-max), (max-height: $bp-phone-short) { @content; }
 }
 
 @mixin phone-land {

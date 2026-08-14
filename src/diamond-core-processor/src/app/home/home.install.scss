@@ -1,0 +1,146 @@
+/* src/app/home/home.install.scss */
+
+/* install bar — one joined sharp field + gold action */
+.domain-input {
+  display: flex;
+  margin-bottom: 30px;
+  border: 1px solid var(--dcp-line-2);
+}
+
+.domain-input input {
+  flex: 1;
+  padding: 0 16px;
+  height: 46px;
+  font-size: 13px;
+  font-family: var(--hc-mono);
+  letter-spacing: 0.02em;
+  color: var(--dcp-ink);
+  background: var(--dcp-surface);
+  border: 0;
+  outline: none;
+  cursor: text;
+}
+
+.domain-input input::placeholder { color: var(--dcp-ink-4); }
+.domain-input input:focus { background: var(--dcp-surface-2); }
+
+/* Install's decision step — the held scope reads back exactly what Allow
+   will trust; Cancel stays visually quieter than Allow. */
+.install-confirm-scope {
+  display: flex;
+  align-items: center;
+  max-width: 18rem;
+  padding: 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 11px/1 var(--hc-mono);
+  color: var(--dcp-ink-3);
+  background: var(--dcp-surface-2);
+}
+.btn.install-cancel { color: var(--dcp-ink-3); }
+
+.btn {
+  height: 46px;
+  padding: 0 26px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-family: var(--dcp-ui);
+  color: var(--dcp-on-accent);
+  border: 0;
+  background: var(--dcp-gold);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.btn:hover {
+  background: var(--dcp-gold-strong);
+}
+
+.sample-link {
+  display: block;
+  font-size: 12px;
+  color: var(--dcp-accent);
+  cursor: pointer;
+  margin: -10px 0 16px 2px;
+}
+
+.sample-link:hover {
+  text-decoration: underline;
+}
+
+/* command line */
+dcp-command-line {
+  margin-bottom: 16px;
+}
+
+/* PRIMARY filter axis — content vs functionality. A sharp segmented pair,
+   same language as the adopt control; the kind icons beside it are the fine
+   grain that only exists within Features. */
+.scope-control {
+  display: inline-flex;
+  height: 34px;
+  border: 1px solid var(--dcp-line-2);
+}
+
+.scope-seg {
+  padding: 0 12px;
+  font-family: var(--dcp-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dcp-ink-3);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--dcp-line-2);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+
+  &:first-child { border-left: none; }
+  &:hover { color: var(--dcp-ink); background: var(--dcp-hover); }
+
+  &.on {
+    color: var(--dcp-on-accent);
+    background: var(--dcp-accent);
+  }
+}
+
+.tbtn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: 1px solid var(--dcp-line);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, opacity 0.12s;
+}
+
+.tbtn:hover {
+  border-color: var(--dcp-line-2);
+  background: var(--dcp-surface-2);
+}
+
+.tbtn.on {
+  border-color: var(--dcp-gold-dim);
+  background: var(--dcp-gold-dim);
+}
+
+.tbtn.dim {
+  opacity: 0.35;
+}
+
+.tbtn dcp-diamond {
+  pointer-events: none;
+}
+
+.vsep {
+  width: 1px;
+  height: 20px;
+  background: var(--dcp-line);
+  flex-shrink: 0;
+  margin: 0 4px;
+}

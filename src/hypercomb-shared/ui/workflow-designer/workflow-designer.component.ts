@@ -124,8 +124,11 @@ export class WorkflowDesignerComponent implements OnDestroy {
 
   /** Put away while the hive is covered — the design on the board, the
    *  inspector and any run in flight are all still there on return. */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('workflow:view-state', { open }))
+  readonly session = signalSession(
+    this.visible,
+    open => EffectBus.emit('workflow:view-state', { open }),
+    { dismiss: () => this.dismiss(), close: () => this.close() },
+  )
 
   // ── what the drone tells us ───────────────────────────────────────
   readonly segments = signal<string[]>([])
@@ -536,14 +539,13 @@ export class WorkflowDesignerComponent implements OnDestroy {
     EffectBus.emit('workflow:view-state', { open: false })
   }
 
-  onKey(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    // One level back per press: shut the palette, then drop the inspector's
-    // focus, and only close the window once nothing is open inside it.
-    if (this.paletteOpen()) { this.paletteOpen.set(false); return }
-    if (this.selected()) { this.selected.set(null); return }
-    this.close()
+  /** One level back per press: shut the palette, then drop the inspector's
+   *  focus. False = nothing of ours was open, and the shell cascade carries on.
+   *  Reached from the session; there is no listener here. */
+  dismiss(): boolean {
+    if (this.paletteOpen()) { this.paletteOpen.set(false); return true }
+    if (this.selected()) { this.selected.set(null); return true }
+    return false
   }
 }
 

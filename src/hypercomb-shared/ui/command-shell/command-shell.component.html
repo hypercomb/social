@@ -213,6 +213,23 @@
         <span class="mat-sym" aria-hidden="true">view_quilt</span>
       </button>
 
+      <!-- Beehaviors — RIGHT OF VIEWS, its neighbour by meaning: views are
+           the ways a layer can be shown, beehaviors are what it can do.
+           Opens the same context-sensitive Beehaviors window a tile's
+           puzzle-piece opens, but with no tile in hand: the subject is the
+           layer you are standing on, and it follows you as you walk. -->
+      <button
+        class="rail-btn features-toggle-btn"
+        [class.on]="featuresPanelOpen()"
+        type="button"
+        (mousedown)="$event.preventDefault(); featuresToggle.emit()"
+        [attr.aria-label]="featuresPanelOpen() ? featuresLabel() + ' — open' : featuresLabel()"
+        [attr.aria-pressed]="featuresPanelOpen()"
+        [title]="featuresPanelOpen() ? featuresLabel() + ' — open' : featuresLabel()"
+      >
+        <span class="mat-sym" aria-hidden="true">extension</span>
+      </button>
+
       <button
         class="rail-btn notes-toggle-btn"
         [class.on]="notesPanelOpen()"
@@ -267,23 +284,6 @@
       <!-- feedback left this rail for the bottom-right document cluster
            (edit-actions, beside the rotate icon) — the forum glyph went with
            it, freeing the chat toggle to lead this group. -->
-
-      <!-- Beehaviors — the trailing landscape control. Opens the same
-           context-sensitive Beehaviors window as a tile's puzzle-piece
-           action. -->
-      @if (showFeaturesToggle()) {
-        <button
-          class="rail-btn features-toggle-btn"
-          [class.on]="featuresPanelOpen()"
-          type="button"
-          (mousedown)="$event.preventDefault(); featuresToggle.emit()"
-          [attr.aria-label]="featuresPanelOpen() ? featuresLabel() + ' — open' : featuresLabel()"
-          [attr.aria-pressed]="featuresPanelOpen()"
-          [title]="featuresPanelOpen() ? featuresLabel() + ' — open' : featuresLabel()"
-        >
-          <span class="mat-sym" aria-hidden="true">extension</span>
-        </button>
-      }
     </div>
 
   </div>

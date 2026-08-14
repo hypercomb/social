@@ -84,6 +84,21 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     return
   }
 
+  // Priority 2e: unwind ONE level inside the tool window the focus is IN — its
+  // settings popover, then whatever it considers its own innermost state.
+  //
+  // Gated on focus, which is the entire design. Tool windows used to bind their
+  // own Escape listeners; the two that bound them on the WINDOW in capture phase
+  // stopped this cascade dead whenever they were open, so an armed pheromone
+  // painter or a live selection out on the canvas could not be cancelled at all.
+  // Asking "is the focus in a window" makes one press mean one thing: focus on
+  // the canvas falls straight through to the selection clear below, and on to
+  // the InputGate recovery, exactly as if no panel were open.
+  const windows = window.ioc.get<{ dismissFocused(): boolean; closeFocused(): boolean }>(
+    '@hypercomb.social/ToolWindows',
+  )
+  if (windows?.dismissFocused()) return
+
   // Priority 3: clear selection (both service state and pixi overlays)
   const selection = window.ioc.get<{ count: number; clear(): void }>('@diamondcoreprocessor.com/SelectionService')
   const pixi = window.ioc.get<{ selectedAxialKeys: ReadonlySet<string>; clearSelection(): void }>('@diamondcoreprocessor.com/TileSelectionDrone')
@@ -93,6 +108,13 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     pixi?.clearSelection()
     return
   }
+
+  // Priority 3b: close the tool window the focus is in, once nothing is left
+  // inside it to unwind. Deliberately BELOW the selection clear: backing out of
+  // a panel's inner state must never cost a selection, and a window should not
+  // close while you still have one to clear. Two rungs with the clear between
+  // them is why this is two calls and not one.
+  if (windows?.closeFocused()) return
 
   // Priority 4: exit clipboard mode (parity with X button and right-click)
   if (clipboardActive) {

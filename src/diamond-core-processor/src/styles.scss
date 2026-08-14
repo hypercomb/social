@@ -1,162 +1,691 @@
 // Brand typography — defines --hc-font / --hc-mono (+ Source Sans Pro Light
-// @font-face), same single source of truth the web/dev shells use. Without
-// this every var(--hc-font) below resolved to nothing (serif fallback).
+// @font-face), same single source of truth the web/dev shells use.
 @use '../../hypercomb-shared/fonts/fonts';
-
-// NOTE: Angular Material's `mat.theme()` was removed here. Nothing in the
-// installer consumes a Material component or a `--mat-sys-*` token, so it
-// only shipped a dead rose/red palette (a #ba005c pink that fought the
-// installer's own navy accent) and extra CSS weight. The design system is
-// the `--dcp-*` tokens below — one source of truth, no second palette.
 
 html {
   height: 100%;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// DCP design tokens — one source of truth for the installer's surfaces,
-// ink, accent, radii, elevation, and provenance zones. Custom properties
-// inherit through Angular's view-encapsulated component styles, so defining
-// them once at :root themes every component (home, tree-row, toggle,
-// command-line, panels). DARK is the default — the installer lives inside
-// the hive's dark portal frame and the hive boots dark, so dark keeps the
-// whole adopt flow one continuous surface. Light is a real theme, not an
-// inversion, opt-in via [data-dcp-theme='light'] (a future in-app switch).
-// ─────────────────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════
+   DCP DESIGN TOKENS — "CALIPER"
 
-@mixin dcp-light {
-  --dcp-bg: #fdfdfd;
-  --dcp-surface: #ffffff;
-  --dcp-surface-2: #f4f5f6;
-  --dcp-raise: #eceef0;
-  --dcp-ink: #1b1b18;
-  --dcp-ink-2: #6f6e68;
-  --dcp-ink-3: #9a9a93;
-  --dcp-ink-4: #b8b7b0;
-  --dcp-line: rgba(28, 28, 24, 0.08);
-  --dcp-line-2: rgba(28, 28, 24, 0.14);
+   A machinist's bench instrument — cold slate body, hairline engraving, one
+   champagne-brass indicator lamp, mechanisms that seat and latch under your
+   hand. Cool = structure. Warm = LIVE. Nothing glows. Nothing loops. Nothing
+   breathes on hover. Motion happens only when the machine commits, and it is
+   over in under 500 ms.
 
-  --dcp-accent: #3d5a99;
-  --dcp-accent-strong: #34508a;
-  --dcp-accent-tint: #eff3fb;
-  --dcp-on-accent: #ffffff;
+   Dark is the DEFAULT and the priority. Light is a real theme at a second
+   lightness, not an inversion: the same steel identity and the same brass
+   identity, re-lightened. Opt in with data-dcp-theme="light" on <html>.
 
-  --dcp-shadow-1: 0 1px 2px rgba(28, 28, 24, 0.05), 0 1px 0 rgba(28, 28, 24, 0.03);
-  --dcp-shadow-2: 0 8px 28px rgba(28, 28, 24, 0.12);
-  --dcp-hover: rgba(28, 28, 24, 0.04);
+   This file is budgeted under Angular's `initial` budget (1 MB warn), NOT
+   under `anyComponentStyle` (32 kB warn / 48 kB error per sheet). Therefore
+   every token, every @keyframes, every shared primitive class and the
+   reduced-motion block lives here and costs zero component budget. Angular's
+   emulated encapsulation attribute-scopes RULES but does not rename
+   @keyframes declared in another sheet — every keyframe below is callable by
+   name from every component sheet and every inline `styles:` array.
+   ═══════════════════════════════════════════════════════════════════════ */
 
-  // "already active via another feature" — a quiet graphite cue, no zone color
-  --dcp-active-elsewhere: #8e8d85;
-  --dcp-active-elsewhere-soft: rgba(28, 28, 24, 0.045);
+// ── DARK (default) ─────────────────────────────────────────────────────
+@mixin dcp-dark {
+  /* GROUND. Cool slate cast (hue ~222), WIDE steps. surface→surface-2 is
+     ~7 L, so every :hover is actually perceptible. */
+  --dcp-sunken:           #06080d;   /* inset wells: inputs, off toggle track */
+  --dcp-bg:               #0a0c11;
+  --dcp-surface:          #11141b;
+  --dcp-surface-2:        #171b24;
+  --dcp-raise:            #1e2430;
+  --dcp-surface-inactive: #0e1117;   /* "off by design", replaces opacity states */
 
-  // provenance zones: a rail, a soft tint fill, a header tint, a label ink.
-  // keys mirror groupZone(): logical | default | current | host | package
-  --dcp-z-logical-rail: #2e9e75;  --dcp-z-logical-tint: #eef7f2;  --dcp-z-logical-head: #e3f1e8;  --dcp-z-logical-ink: #1f5c44;
-  --dcp-z-default-rail: #3faea2;  --dcp-z-default-tint: #ecf6f4;  --dcp-z-default-head: #ddf0ee;  --dcp-z-default-ink: #145249;
-  --dcp-z-current-rail: #7c5ac0;  --dcp-z-current-tint: #f3effb;  --dcp-z-current-head: #ece3f6;  --dcp-z-current-ink: #4a357c;
-  --dcp-z-host-rail: #c8932e;     --dcp-z-host-tint: #fbf5e9;     --dcp-z-host-head: #f8eed9;     --dcp-z-host-ink: #7a5712;
-  --dcp-z-package-rail: #3d5a99;  --dcp-z-package-tint: #f1f5fc;  --dcp-z-package-head: #eff3fb;  --dcp-z-package-ink: #2c447c;
+  /* frosted plates — popovers ONLY. NEVER on .domain-header. */
+  --dcp-glass:        rgba(23, 27, 36, 0.72);
+  --dcp-glass-strong: rgba(17, 20, 27, 0.90);
+  --dcp-glass-blur:   blur(18px) saturate(1.15);
+  --dcp-glass-hi:     rgba(226, 236, 255, 0.055);   /* 1px top highlight */
 
-  // kind inks (bee/worker/drone/dependency/queen) — used by tree-row labels
-  --dcp-k-bee: #9c7b3f;
-  --dcp-k-worker: #a05050;
-  --dcp-k-drone: #8f8a3d;
-  --dcp-k-dependency: #3f8a78;
-  --dcp-k-queen: #7c5ac0;
+  /* INK. ink-3 is the floor for any text (~5.2:1). ink-4 is NON-TEXT. */
+  --dcp-ink:          #e8ecf4;   /* ~14.5:1 on --dcp-surface */
+  --dcp-ink-2:        #a8b2c4;   /* ~8.7:1 */
+  --dcp-ink-3:        #7d879b;   /* ~5.2:1 — THE FLOOR FOR ANY TEXT */
+  --dcp-ink-4:        #5c6678;   /* ~3.2:1 — SVG strokes, borders, rails. NEVER text. */
+  --dcp-ink-muted:    #5c6578;   /* resting ink for "inactive by design" */
+  --dcp-ink-disabled: #57606f;   /* disabled control ink (replaces opacity:.35) */
+  --dcp-ink-ghost:    #6d7789;   /* command-line completion, at FULL opacity */
 
-  --dcp-danger: #c0392b;
+  /* HAIRLINES. Cool-tinted so they actually draw on slate. */
+  --dcp-line:          rgba(190, 205, 230, 0.10);
+  --dcp-line-2:        rgba(190, 205, 230, 0.18);
+  --dcp-line-3:        rgba(190, 205, 230, 0.30);   /* the editorial rule */
+  --dcp-line-inactive: rgba(190, 205, 230, 0.06);
+  --dcp-border:        rgba(190, 205, 230, 0.18);   /* BUGFIX: referenced, never defined */
+
+  /* PRIMARY ACCENT = PALE STEEL ICE. Every interactive and selection job:
+     focus rings, hover rings, selected segment indicators, active list rows,
+     primary buttons, links, chevrons. ~8.8:1 on surface — legible AS TEXT. */
+  --dcp-accent:        #8fb4e8;
+  --dcp-accent-strong: #b0cbf5;
+  --dcp-accent-deep:   #4d76b4;
+  --dcp-accent-tint:   rgba(143, 180, 232, 0.14);
+  --dcp-accent-tint-2: rgba(143, 180, 232, 0.24);
+  --dcp-accent-ring:   rgba(143, 180, 232, 0.42);   /* the focus ring */
+  --dcp-on-accent:     #0a1220;
+
+  /* GOLD = CHAMPAGNE / BRASS. ONE RESERVED MEANING: THIS IS LIVE.
+     Permitted call sites and no others: the brand spine, the adopt control's
+     sliding indicator, the toggle ON track, the version generation pill, the
+     `logical` (Running) zone rail, the toast's left rail, the "waiting" chip
+     dot. Gold is NEVER a large fill — only a 1px ring, a 4px rail, a text
+     ink, a ≤24px pill, or a ≤1.75px SVG stroke. */
+  --dcp-gold:        #e8c98a;
+  --dcp-gold-strong: #f5dcab;
+  --dcp-gold-deep:   #b08d45;
+  --dcp-gold-ink:    #f0d7a2;
+  --dcp-gold-dim:    rgba(232, 201, 138, 0.16);
+  --dcp-gold-tint:   rgba(232, 201, 138, 0.13);
+  --dcp-gold-tint-2: rgba(232, 201, 138, 0.24);
+  --dcp-gold-ring:   rgba(232, 201, 138, 0.40);
+  --dcp-on-gold:     #17110a;
+  --dcp-ice:         #cfe0fb;
+
+  /* ELEVATION. A black shadow on a black page is invisible. A plate floats
+     by a 1px TOP INNER HIGHLIGHT plus a large-radius low-alpha ambient. */
+  --dcp-shadow-1: inset 0 1px 0 rgba(255,255,255,0.045),
+                  0 1px 2px rgba(0,0,0,0.55),
+                  0 10px 22px -14px rgba(0,0,0,0.80);
+  --dcp-shadow-2: inset 0 1px 0 rgba(255,255,255,0.065),
+                  0 2px 6px rgba(0,0,0,0.50),
+                  0 24px 52px -20px rgba(0,0,0,0.88);
+  --dcp-shadow-inset: inset 0 1px 2px rgba(0,0,0,0.60),
+                      inset 0 0 0 1px rgba(0,0,0,0.28);
+  --dcp-hover: rgba(190, 205, 230, 0.055);
+  --dcp-press: rgba(0, 0, 0, 0.22);
+
+  --dcp-active-elsewhere:      #8794a8;
+  --dcp-active-elsewhere-soft: rgba(190, 205, 230, 0.055);
+
+  /* PROVENANCE ZONES. `logical` is the LIVE zone, so it carries the gold.
+     `default` is graphite — it is the base, it should recede. No zone tint
+     is ever washed across a card body; the tint is confined to the rail and
+     the header. */
+  --dcp-z-logical-rail: #d4ab63; --dcp-z-logical-tint: rgba(212,171,99,0.11); --dcp-z-logical-head: rgba(212,171,99,0.17); --dcp-z-logical-ink: #f0d7a2;
+  --dcp-z-default-rail: #7e8da6; --dcp-z-default-tint: rgba(126,141,166,0.10); --dcp-z-default-head: rgba(126,141,166,0.16); --dcp-z-default-ink: #b6c2d6;
+  --dcp-z-current-rail: #8a79d2; --dcp-z-current-tint: rgba(138,121,210,0.13); --dcp-z-current-head: rgba(138,121,210,0.20); --dcp-z-current-ink: #c3b6f2;
+  --dcp-z-host-rail:    #cf8a70; --dcp-z-host-tint:    rgba(207,138,112,0.12); --dcp-z-host-head:    rgba(207,138,112,0.19); --dcp-z-host-ink:    #f0b39c;
+  --dcp-z-package-rail: #6e97cf; --dcp-z-package-tint: rgba(110,151,207,0.12); --dcp-z-package-head: rgba(110,151,207,0.19); --dcp-z-package-ink: #a9c8ef;
+
+  /* KIND INKS — ONE family: equal lightness, evenly spaced hue, all ≥8:1.
+     They are MARK ink only (the coloured kind NAMES are deleted), so they
+     only have to be distinguishable as 18px glyphs. */
+  --dcp-k-layer:      #93b0d6;   /* steel  (215°) */
+  --dcp-k-bee:        #e3c07a;   /* brass/comb (40°) */
+  --dcp-k-worker:     #d59bc4;   /* orchid (320°) */
+  --dcp-k-drone:      #a8c98a;   /* sage (95°) */
+  --dcp-k-dependency: #6fc9c0;   /* aqua (175°) */
+  --dcp-k-queen:      #b3a4ea;   /* violet (255°) */
+  --dcp-k-domain:     #bcd4ff;   /* the brand crystal at glyph scale */
+
+  /* SEMANTICS. RED MEANS FAILURE AND NOTHING ELSE, ANYWHERE. */
+  --dcp-danger:      #ec7365;
+  --dcp-danger-ink:  #ffa79c;
+  --dcp-danger-tint: rgba(236,115,101,0.14);
+  --dcp-ok:          #5fc98f;
+  --dcp-ok-tint:     rgba(95,201,143,0.14);
+  --dcp-warn:        #e0b45f;
+  --dcp-warn-tint:   rgba(224,180,95,0.14);
+
+  /* DOMAIN IDENTITY — 8 curated stops. Replaces hsl(hash, 45%, 55%). Used
+     ONLY by the 2px `.tint` rail. NOT by the signature fingerprint — that is
+     monochrome. */
+  --dcp-dh-0:#8fb4e8; --dcp-dh-1:#6fc9c0; --dcp-dh-2:#e3c07a; --dcp-dh-3:#b3a4ea;
+  --dcp-dh-4:#a8c98a; --dcp-dh-5:#d59bc4; --dcp-dh-6:#7fc5da; --dcp-dh-7:#d9a67e;
+
+  /* CODE — ONE syntax map for highlight.js AND CodeMirror, so viewing a file
+     and editing the same file are literally the same surface. */
+  --dcp-code-bg:      #0d1016;
+  --dcp-code-gutter:  #6b7488;
+  --dcp-code-sel:     rgba(143,180,232,0.20);
+  --dcp-code-line:    rgba(190,205,230,0.045);
+  --dcp-code-plain:   #d3dce8;
+  --dcp-code-kw:      #b3a4ea;
+  --dcp-code-str:     #a8c98a;
+  --dcp-code-num:     #e3c07a;
+  --dcp-code-fn:      #8fb4e8;
+  --dcp-code-type:    #6fc9c0;
+  --dcp-code-comment: #6b7488;
+  --dcp-code-punc:    #a8b2c4;
+  --dcp-code-del:     #ec7365;
+
+  /* PAGE WASH — a single static radial, no tiling, no pattern, no motion. */
+  --dcp-wash: radial-gradient(120% 78% at 50% -12%,
+                rgba(143, 180, 232, 0.055) 0%,
+                rgba(143, 180, 232, 0.018) 38%,
+                rgba(0, 0, 0, 0) 72%);
 }
 
-// ── FOUNDRY (dark, default) ────────────────────────────────────────────
-// Near-black precision-instrument surface, molten-gold (hive/honey) accent,
-// an ice-cool brand mark. Zero-radius chrome; the warmth lives in the accent
-// and the kind inks, not in rounded corners.
-@mixin dcp-dark {
-  --dcp-bg: #0c0c0e;
-  --dcp-surface: #141417;
-  --dcp-surface-2: #17181c;
-  --dcp-raise: #1e1f24;
-  --dcp-ink: #f2f1ec;
-  --dcp-ink-2: #a6a59c;
-  --dcp-ink-3: #6d6c64;
-  --dcp-ink-4: #4c4b45;
-  --dcp-line: rgba(255, 255, 255, 0.08);
-  --dcp-line-2: rgba(255, 255, 255, 0.15);
+// ── LIGHT (opt-in) ─────────────────────────────────────────────────────
+// The same two identities at a second lightness. Steel stays steel and brass
+// stays brass across the flip; nothing changes hue.
+@mixin dcp-light {
+  --dcp-sunken:           #e6eaf1;
+  --dcp-bg:               #f4f6f9;
+  --dcp-surface:          #ffffff;
+  --dcp-surface-2:        #eef1f6;
+  --dcp-raise:            #e3e8f0;
+  --dcp-surface-inactive: #f0f2f5;
 
-  // accent = molten gold
-  --dcp-accent: #f5a623;
-  --dcp-accent-strong: #ffb838;
-  --dcp-accent-tint: #3a2c12;
-  --dcp-on-accent: #160e00;
+  --dcp-glass:        rgba(255, 255, 255, 0.78);
+  --dcp-glass-strong: rgba(255, 255, 255, 0.93);
+  --dcp-glass-blur:   blur(18px) saturate(1.05);
+  --dcp-glass-hi:     rgba(255, 255, 255, 0.92);
 
-  --dcp-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --dcp-shadow-2: 0 12px 38px rgba(0, 0, 0, 0.6);
-  --dcp-hover: rgba(255, 255, 255, 0.045);
+  --dcp-ink:          #12161d;   /* ~17.8:1 on white */
+  --dcp-ink-2:        #4a5468;   /* ~7.6:1 */
+  --dcp-ink-3:        #6b7688;   /* ~4.6:1 — the floor */
+  --dcp-ink-4:        #98a2b3;   /* ~2.9:1 — NON-TEXT ONLY */
+  --dcp-ink-muted:    #98a2b3;
+  --dcp-ink-disabled: #a4adba;
+  --dcp-ink-ghost:    #8b95a6;
 
-  --dcp-active-elsewhere: #8f8e85;
-  --dcp-active-elsewhere-soft: rgba(255, 255, 255, 0.05);
+  --dcp-line:          rgba(20, 30, 50, 0.10);
+  --dcp-line-2:        rgba(20, 30, 50, 0.16);
+  --dcp-line-3:        rgba(20, 30, 50, 0.28);
+  --dcp-line-inactive: rgba(20, 30, 50, 0.06);
+  --dcp-border:        rgba(20, 30, 50, 0.16);
 
-  --dcp-z-logical-rail: #5bbf80;  --dcp-z-logical-tint: rgba(91,191,128,0.12);  --dcp-z-logical-head: rgba(91,191,128,0.17);  --dcp-z-logical-ink: #8fe0b0;
-  --dcp-z-default-rail: #3fb59a;  --dcp-z-default-tint: rgba(63,181,154,0.12);  --dcp-z-default-head: rgba(63,181,154,0.17);  --dcp-z-default-ink: #7fe0cc;
-  --dcp-z-current-rail: #9a7ad6;  --dcp-z-current-tint: rgba(154,122,214,0.15); --dcp-z-current-head: rgba(154,122,214,0.22); --dcp-z-current-ink: #c9b6f0;
-  --dcp-z-host-rail: #d99a2e;     --dcp-z-host-tint: rgba(217,154,46,0.12);     --dcp-z-host-head: rgba(217,154,46,0.20);     --dcp-z-host-ink: #ffcf7a;
-  --dcp-z-package-rail: #5b7fb0;  --dcp-z-package-tint: rgba(91,127,176,0.13);  --dcp-z-package-head: rgba(91,127,176,0.20);  --dcp-z-package-ink: #a8c4ea;
+  --dcp-accent:        #2f5c96;   /* ~6.8:1 — the SAME steel identity, darker */
+  --dcp-accent-strong: #24487a;
+  --dcp-accent-deep:   #1b3861;
+  --dcp-accent-tint:   rgba(47, 92, 150, 0.10);
+  --dcp-accent-tint-2: rgba(47, 92, 150, 0.18);
+  --dcp-accent-ring:   rgba(47, 92, 150, 0.35);
+  --dcp-on-accent:     #ffffff;
 
-  --dcp-k-bee: #e6b968;
-  --dcp-k-worker: #e08a86;
-  --dcp-k-drone: #cfc86a;
-  --dcp-k-dependency: #66c8b0;
-  --dcp-k-queen: #b79ae6;
+  --dcp-gold:        #8a6218;   /* ~5.5:1 as ink on white */
+  --dcp-gold-strong: #6d4c10;
+  --dcp-gold-deep:   #573c0c;
+  --dcp-gold-ink:    #6d4c10;
+  --dcp-gold-dim:    rgba(138, 98, 24, 0.14);
+  --dcp-gold-tint:   rgba(138, 98, 24, 0.10);
+  --dcp-gold-tint-2: rgba(138, 98, 24, 0.20);
+  --dcp-gold-ring:   rgba(138, 98, 24, 0.34);
+  --dcp-on-gold:     #ffffff;
+  --dcp-ice:         #3f6ea8;
 
-  --dcp-danger: #e2564b;
+  --dcp-shadow-1: inset 0 1px 0 rgba(255,255,255,0.92),
+                  0 1px 2px rgba(18,28,48,0.07),
+                  0 6px 16px -10px rgba(18,28,48,0.28);
+  --dcp-shadow-2: inset 0 1px 0 rgba(255,255,255,0.92),
+                  0 2px 6px rgba(18,28,48,0.08),
+                  0 22px 46px -18px rgba(18,28,48,0.32);
+  --dcp-shadow-inset: inset 0 1px 2px rgba(18,28,48,0.10),
+                      inset 0 0 0 1px rgba(18,28,48,0.05);
+  --dcp-hover: rgba(20, 30, 50, 0.045);
+  --dcp-press: rgba(20, 30, 50, 0.08);
+
+  --dcp-active-elsewhere:      #78839a;
+  --dcp-active-elsewhere-soft: rgba(20, 30, 50, 0.045);
+
+  /* Zone tints stay rgba on light too (they were opaque hex), so the rail
+     textures composite identically in both themes. */
+  --dcp-z-logical-rail: #a9791f; --dcp-z-logical-tint: rgba(169,121,31,0.09); --dcp-z-logical-head: rgba(169,121,31,0.15); --dcp-z-logical-ink: #6f4f10;
+  --dcp-z-default-rail: #6b7a94; --dcp-z-default-tint: rgba(107,122,148,0.09); --dcp-z-default-head: rgba(107,122,148,0.15); --dcp-z-default-ink: #414c60;
+  --dcp-z-current-rail: #6b57bd; --dcp-z-current-tint: rgba(107,87,189,0.09);  --dcp-z-current-head: rgba(107,87,189,0.15);  --dcp-z-current-ink: #493588;
+  --dcp-z-host-rail:    #b8623f; --dcp-z-host-tint:    rgba(184,98,63,0.09);   --dcp-z-host-head:    rgba(184,98,63,0.15);   --dcp-z-host-ink:    #8a3f22;
+  --dcp-z-package-rail: #3a6bab; --dcp-z-package-tint: rgba(58,107,171,0.09);  --dcp-z-package-head: rgba(58,107,171,0.15);  --dcp-z-package-ink: #26497e;
+
+  --dcp-k-layer:      #3a5f8c;
+  --dcp-k-bee:        #8a6218;
+  --dcp-k-worker:     #9c4a78;
+  --dcp-k-drone:      #4f7333;
+  --dcp-k-dependency: #1e7a70;
+  --dcp-k-queen:      #5b46a8;
+  --dcp-k-domain:     #2c5580;
+
+  --dcp-danger:      #b83a2c;
+  --dcp-danger-ink:  #96291d;
+  --dcp-danger-tint: rgba(184, 58, 44, 0.10);
+  --dcp-ok:          #1d7a4e;
+  --dcp-ok-tint:     rgba(29, 122, 78, 0.10);
+  --dcp-warn:        #8a6218;
+  --dcp-warn-tint:   rgba(138, 98, 24, 0.10);
+
+  --dcp-dh-0:#2f5c96; --dcp-dh-1:#1e7a70; --dcp-dh-2:#8a6218; --dcp-dh-3:#5b46a8;
+  --dcp-dh-4:#4f7333; --dcp-dh-5:#9c4a78; --dcp-dh-6:#26657f; --dcp-dh-7:#9c5a2a;
+
+  --dcp-code-bg:      #fbfcfe;
+  --dcp-code-gutter:  #8b95a6;
+  --dcp-code-sel:     rgba(47, 92, 150, 0.16);
+  --dcp-code-line:    rgba(20, 30, 50, 0.035);
+  --dcp-code-plain:   #1b232e;
+  --dcp-code-kw:      #5b46a8;
+  --dcp-code-str:     #4f7333;
+  --dcp-code-num:     #8a6218;
+  --dcp-code-fn:      #2f5c96;
+  --dcp-code-type:    #1e7a70;
+  --dcp-code-comment: #7b8698;
+  --dcp-code-punc:    #4a5468;
+  --dcp-code-del:     #b83a2c;
+
+  --dcp-wash: radial-gradient(120% 78% at 50% -12%,
+                rgba(47, 92, 150, 0.055) 0%,
+                rgba(47, 92, 150, 0.020) 38%,
+                rgba(0, 0, 0, 0) 72%);
 }
 
 :root {
   @include dcp-dark;
   color-scheme: dark;
-  // FOUNDRY is zero-radius — sharp chrome throughout. Icon STROKES round via
-  // SVG stroke-linejoin (per-component), never border-radius.
-  --dcp-radius-sm: 0px;
-  --dcp-radius-md: 0px;
-  --dcp-radius-lg: 0px;
-  --dcp-radius-xl: 0px;
-  // brand constants — identical in both themes
-  --dcp-gold: #f5a623;
-  --dcp-gold-strong: #ffb838;
-  --dcp-gold-dim: #3a2c12;
-  --dcp-gold-ink: #ffcf7a;
-  --dcp-ice: #bcd4ff;
-  // UI type — a system grotesque stack with REAL weights (400–800). The
-  // bundled --hc-font is Source Sans Pro *Light* only (300), so heavy/medium
-  // weights synthesize badly; the installer's structural type needs genuine
-  // weight, so it uses this stack. Signatures/technical data use --hc-mono.
-  --dcp-ui: "Inter", "Helvetica Neue", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+
+  /* ═══ GEOMETRY. All four radii were literally `0px`; ~40 correct
+     `border-radius: var(--dcp-radius-*)` call sites were rendering
+     knife-edged rectangles.
+
+     THE RADIUS TIERING LAW (normative):
+       sm   3px  — the DEFAULT for all chrome: buttons, inputs, chips that
+                   are not pills, icon buttons, action buttons, focus-ring
+                   targets, segment indicators, code blocks
+       md   6px  — plates and popovers: the install bar plate, .dcp-pop,
+                   panels, the orientation panel, file panels
+       lg  10px  — ONLY the two full-screen takeovers and .domain-section
+       xl  16px  — ONLY the top corners of the mobile bottom-sheet
+       pill      — ONLY the toggle track, .dcp-chip, the revision count badge
+     Tie-breaker: if a surface cannot say which tier it is, it is `sm`.
+     Rows stay square — a list line is not a card. ═══ */
+  --dcp-radius-sm:   3px;
+  --dcp-radius-md:   6px;
+  --dcp-radius-lg:  10px;
+  --dcp-radius-xl:  16px;
+  --dcp-radius-pill: 999px;
+
+  --dcp-hit:       28px;    /* minimum pointer target for an icon button */
+  --dcp-hit-touch: 44px;
+
+  /* ═══ SPACING SCALE. Rhythm is the literal content of "dry". ═══ */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  /* ═══ TYPE — families. Windows 11 ships Segoe UI Variable, a genuine
+     variable family with an optical-size axis: all three optical cuts, zero
+     downloads, zero dependencies. ("Inter" was never installed; every 650/800
+     in the app was a synthesized fake bold.) ═══ */
+  --dcp-display: "Segoe UI Variable Display", "Segoe UI", system-ui,
+                 -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --dcp-ui:      "Segoe UI Variable Text", "Segoe UI", system-ui,
+                 -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --dcp-micro:   "Segoe UI Variable Small", "Segoe UI", system-ui,
+                 -apple-system, Arial, sans-serif;
+  --dcp-mono:    var(--hc-mono);
+
+  /* ═══ THE SCALE — EIGHT steps replace the SEVENTEEN in use today.
+     FLOOR: nothing structural below 11.5px. ═══ */
+  --fs-micro:   10.5px;  /* UPPERCASE + tracking. TWO ROLES ONLY. */
+  --fs-meta:    11.5px;  /* mono data: sigs, timestamps, crumbs, versions, chips */
+  --fs-label:   12.5px;  /* control labels, buttons, legend, prop labels */
+  --fs-body:    13.5px;  /* prose, descriptions, orientation lines */
+  --fs-name:    14.5px;  /* THE ENTRY LINE — tree-row titles, domain URL */
+  --fs-title:     17px;  /* panel headings, inspector name, section titles */
+  --fs-lede:      20px;  /* orientation lead, empty-state headline */
+  --fs-display:   30px;  /* the wordmark. exactly ONE element. */
+
+  --lh-tight: 1.15;
+  --lh-snug:  1.35;
+  --lh-body:  1.55;
+  --lh-loose: 1.70;
+
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;   /* HARD CEILING. 650 and 800 are BANNED everywhere. */
+
+  --tr-display: -0.015em;
+  --tr-title:   -0.008em;
+  --tr-none:     0;
+  --tr-caps:     0.09em;   /* the ONLY tracking above 0.02em in the app */
+
+  /* ═══ MOTION — "SEAT". Things seat, latch and settle. Everything is
+     user-triggered, one-shot, and over in under 500 ms. ═══ */
+  --dcp-e-seat:  cubic-bezier(0.16, 0.84, 0.24, 1);    /* arrivals: fast out, long calm tail, NO overshoot */
+  --dcp-e-latch: cubic-bezier(0.34, 1.32, 0.48, 1);    /* mechanisms: ONE crisp overshoot */
+  --dcp-e-state: cubic-bezier(0.40, 0.00, 0.20, 1);    /* reversible: hover, on/off, focus, chevrons */
+  --dcp-e-exit:  cubic-bezier(0.50, 0.00, 0.90, 0.35); /* leaving: accelerate away, never linger */
+  --dcp-e-track: linear;                               /* travel only: progress, drains */
+
+  /* 0.12s — today's universal value — is BELOW the threshold at which a
+     human reads a transition as movement. It is a smeared cut. */
+  --dcp-t-tap:     90ms;   /* :active depress ONLY */
+  --dcp-t-state:  180ms;   /* hover, on/off, focus, chevrons */
+  --dcp-t-latch:  240ms;   /* switch thumb, segmented indicator */
+  --dcp-t-arrive: 320ms;   /* one element entering or leaving the page */
+  --dcp-t-settle: 480ms;   /* a whole card arriving; the adopt payoff */
+  --dcp-t-sweep:  900ms;   /* HARD CAP on any cascade TOTAL, any tree size */
+  --dcp-t-caret: 1100ms;   /* indeterminate progress cycle */
+
+  /* THE UNIVERSAL STAGGER LAW — every stagger in this application is
+       animation-delay: calc(min(var(--i, 0), 8) * var(--dcp-stagger));
+     capped at 8 items; no cascade total may exceed --dcp-t-sweep. */
+  --dcp-stagger:   26ms;
 }
+
 // Light is OPT-IN only — dark is the default for everyone (the installer is
-// embedded in the hive's dark portal frame; a light installer on a dark
-// frame is the visual whiplash this overhaul removes). Set
-// data-dcp-theme="light" on <html> (a future in-app switch) to force light;
-// we intentionally do NOT auto-apply either mode from prefers-color-scheme.
+// embedded in the hive's dark portal frame). Set data-dcp-theme="light" on
+// <html>; we intentionally do NOT auto-apply either mode from
+// prefers-color-scheme.
 :root[data-dcp-theme='light'] {
   @include dcp-light;
   color-scheme: light;
 }
 
+/* ── BODY + THE PAGE WASH ───────────────────────────────────────────────
+   The wash is a single static radial gradient giving the page a top-lit
+   floor so plates have something to float on. Not a pattern, not tiled, not
+   animated, and it cannot moiré. You should read the page as lit from above
+   and never be able to point at a boundary. ── */
 body {
   background-color: var(--dcp-bg);
+  background-image: var(--dcp-wash);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   color: var(--dcp-ink);
   font-family: var(--dcp-ui);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-regular);
   margin: 0;
   height: 100%;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  font-feature-settings: "tnum" 1;
+  /* Fail loudly rather than smear a fake bold. This is the whole point of
+     the typeface commitment. */
+  font-synthesis-weight: none;
+  /* REMOVED: font-feature-settings: "tnum" 1 — it forced tabular figures
+     onto ALL proportional prose. Tabular is a DATA property: */
 }
 
-/* highlight.js theme for code viewer */
-@import 'highlight.js/styles/github-dark.css';
+/* Tabular figures + slashed zero — these surfaces are hashes and columns. */
+.sig, .header-sig, .hdr-sig, .hdr-meta, .crumb, .zone-idx,
+.version-time, .version-generation, .revision-count, .revision-version,
+.home-client-version, .chip.audit, .patch-sig, .patch-time,
+.install-confirm-scope, .props code, code, pre, .code, .pre {
+  font-family: var(--dcp-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  letter-spacing: 0;
+}
+
+/* ── CODE SURFACE ───────────────────────────────────────────────────────
+   highlight.js token structure, DCP colours. The app shipped three colour
+   systems — its own, GitHub Dark in the viewer, One Dark in the editor — so
+   switching from viewing a file to editing it visibly changed the background
+   AND the palette. One map now serves both. ── */
+.hljs { background: var(--dcp-code-bg); color: var(--dcp-code-plain); }
+.hljs-comment, .hljs-quote                                   { color: var(--dcp-code-comment); font-style: normal; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal,
+.hljs-section, .hljs-doctag, .hljs-type                      { color: var(--dcp-code-kw); }
+.hljs-string, .hljs-regexp, .hljs-addition                   { color: var(--dcp-code-str); }
+.hljs-number, .hljs-symbol, .hljs-bullet                     { color: var(--dcp-code-num); }
+.hljs-title, .hljs-name, .hljs-selector-id, .hljs-function   { color: var(--dcp-code-fn); }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable,
+.hljs-class .hljs-title, .hljs-built_in                      { color: var(--dcp-code-type); }
+.hljs-punctuation, .hljs-operator, .hljs-meta                { color: var(--dcp-code-punc); }
+.hljs-deletion                                               { color: var(--dcp-code-del); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong   { font-weight: 600; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE KEYFRAME LIBRARY. Declared here, callable BY NAME from every component
+   sheet — Angular does not rename keyframes declared in another sheet.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── ARRIVAL / DEPARTURE — one gesture, used by sections, chips, clients,
+   the toast, and the pending-clear on a row. ── */
+@keyframes dcp-seat      { from { opacity: 0; transform: translateY(6px) scale(0.994); }
+                           to   { opacity: 1; transform: none; } }
+@keyframes dcp-seat-out  { from { opacity: 1; transform: none; }
+                           to   { opacity: 0; transform: translateY(-6px) scale(0.994); } }
+
+/* ── POPOVERS — grows out of its toggle. transform-origin per call site. ── */
+@keyframes dcp-pop-in    { from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+                           to   { opacity: 1; transform: none; } }
+@keyframes dcp-pop-out   { from { opacity: 1; transform: none; }
+                           to   { opacity: 0; transform: translateY(-4px) scale(0.985); } }
+
+/* ── FULL-SCREEN TAKEOVER — ONE "go deeper" gesture for both drawers. ── */
+@keyframes dcp-takeover-in  { from { opacity: 0; transform: scale(0.985) translateY(10px); }
+                              to   { opacity: 1; transform: none; } }
+@keyframes dcp-takeover-out { from { opacity: 1; transform: none; }
+                              to   { opacity: 0; transform: scale(0.985) translateY(10px); } }
+
+/* ── MOBILE SHEET — replaces `animation: none` on the two full-screen panels ── */
+@keyframes dcp-sheet-up  { from { transform: translateY(100%); }
+                           to   { transform: none; } }
+
+/* ── THE LATCH — ONE clean ring, once, when a control lands in its committed
+   state. Replaces every glow in the app. --dcp-latch-ink is set by the call
+   site: steel for selection, gold for "now live". The ring ENDS transparent
+   with no blur radius — no colour bleed. ── */
+@keyframes dcp-latch-ring{ 0%   { box-shadow: 0 0 0 0  var(--dcp-latch-ink, var(--dcp-accent-ring)); }
+                           72%  { box-shadow: 0 0 0 5px rgba(0,0,0,0); }
+                           100% { box-shadow: 0 0 0 0  rgba(0,0,0,0); } }
+
+/* ── THE RAIL FILLING LIKE A SPIRIT LEVEL — a section's arrival ── */
+@keyframes dcp-rail-fill { from { transform: scaleY(0); }
+                           to   { transform: scaleY(1); } }
+
+/* ── AN EDITORIAL RULE DRAWING ACROSS ── */
+@keyframes dcp-rule-draw { from { transform: scaleX(0); }
+                           to   { transform: scaleX(1); } }
+
+/* ── HAIRLINE SCHEMATICS DRAWING THEMSELVES. Every path sets pathLength="1"
+   so --dash is always 1 — no per-path length measurement, no JS. ── */
+@keyframes dcp-draw      { from { stroke-dashoffset: 1; }
+                           to   { stroke-dashoffset: 0; } }
+
+/* ── INDETERMINATE PROGRESS THAT TRAVELS. transform, not `left` (which laid
+   out every frame). LINEAR — ease-in-out on a loop makes it appear to stall
+   at both ends, which reads as STUCK. ── */
+@keyframes dcp-travel    { from { transform: translateX(-110%); }
+                           to   { transform: translateX(360%); } }
+
+/* ── A COUNTDOWN THE USER CAN SEE COMING — the toast's auto-dismiss edge ── */
+@keyframes dcp-drain     { from { transform: scaleX(1); }
+                           to   { transform: scaleX(0); } }
+
+/* ── COMPLETION. One tick, then still. ── */
+@keyframes dcp-tick      { 0%   { opacity: 0; transform: scale(0.72); }
+                           55%  { opacity: 1; transform: scale(1.06); }
+                           100% { opacity: 1; transform: scale(1); } }
+
+/* ── THE BRAND MARK'S GOLD SIGNATURE AXIS running while the machine works.
+   Applied to the spine path's dash, not to the mark. ── */
+@keyframes dcp-spine-run { from { stroke-dashoffset: 1; }
+                           to   { stroke-dashoffset: -1; } }
+
+/* ── RESTORING is the reverse of saving — the gesture literally rewinds ── */
+@keyframes dcp-rewind    { from { transform: rotate(0deg); }
+                           to   { transform: rotate(-360deg); } }
+
+/* ── ERROR is a FIRM STOP. NO SHAKE — a shake reads as panic, and this app's
+   failures are safe failures ("Stopped — nothing changed"). ── */
+@keyframes dcp-hold      { 0%   { box-shadow: inset 0 0 0 0    var(--dcp-danger); }
+                           16%  { box-shadow: inset 0 0 0 1.5px var(--dcp-danger); }
+                           100% { box-shadow: inset 0 0 0 1.5px rgba(0,0,0,0); } }
+
+/* ── THE EGG HATCHING — blocked → running ── */
+@keyframes dcp-hatch     { 0%   { transform: scale(0.90); opacity: 0.55; }
+                           55%  { transform: scale(1.06); opacity: 1; }
+                           100% { transform: none;        opacity: 1; } }
+@keyframes dcp-shell-open{ from { stroke-dashoffset: 0; opacity: 0.75; }
+                           to   { stroke-dashoffset: 14; opacity: 0; } }
+
+/* ═══ THE REDUCED-MOTION COLLAPSE ═══ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Effects whose END state is not the resting state, or which must be
+     ABSENT rather than instant (a 1ms travel is a flash). */
+  .resolve-fill        { animation: none !important; transform: none !important;
+                         width: 100% !important; opacity: 0.45; }
+  .mark .spine-run,
+  .mark.is-working .s  { animation: none !important; transform: none !important;
+                         stroke-dashoffset: 0 !important; }
+  .dcp-resolving::after { animation: none !important; }
+  [class*="dcp-draw"],
+  .schematic path,
+  .empty-lattice path  { stroke-dashoffset: 0 !important; }
+
+  /* Do NOT strip .toggle.on's resting box-shadow here — that would remove
+     the ON state's definition. Only the RING animation is suppressed, and
+     the blanket rule above already collapses it. */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE FIVE SHARED PRIMITIVES. Every panel used to look like it came from a
+   different product: ~25 button styles, 10 chip variants, 4 popover
+   treatments, 5 bare-text empty states. Re-pointing components at these
+   REDUCES total CSS, and they cost zero component budget here.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. THE BUTTON ── */
+.dcp-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-2);
+  height: 32px; padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--dcp-radius-sm);
+  font: var(--fw-semibold) var(--fs-label)/1 var(--dcp-ui);
+  letter-spacing: 0.01em;
+  cursor: pointer; user-select: none;
+  background: var(--dcp-surface-2); color: var(--dcp-ink-2);
+  border-color: var(--dcp-line-2);
+  transition: background var(--dcp-t-state) var(--dcp-e-state),
+              border-color var(--dcp-t-state) var(--dcp-e-state),
+              color var(--dcp-t-state) var(--dcp-e-state),
+              box-shadow var(--dcp-t-state) var(--dcp-e-state),
+              transform var(--dcp-t-tap) var(--dcp-e-state);
+}
+.dcp-btn.sm { height: 28px; padding: 0 var(--sp-2); }
+.dcp-btn.lg { height: 44px; padding: 0 var(--sp-5); font-size: var(--fs-name); }
+
+.dcp-btn:hover  { background: var(--dcp-raise); color: var(--dcp-ink);
+                  border-color: var(--dcp-line-3); }
+/* THE PRESS — code-viewer had the app's ONLY press feedback. It is now global. */
+.dcp-btn:active:not(:disabled) { transform: translateY(1px); }
+.dcp-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--dcp-accent-ring); }
+.dcp-btn:disabled { color: var(--dcp-ink-disabled); background: var(--dcp-surface-inactive);
+                    border-color: var(--dcp-line-inactive); cursor: default; }
+
+.dcp-btn.primary { background: var(--dcp-accent); color: var(--dcp-on-accent);
+                   border-color: transparent; }
+.dcp-btn.primary:hover { background: var(--dcp-accent-strong); }
+
+.dcp-btn.ghost   { background: transparent; border-color: var(--dcp-line-2);
+                   color: var(--dcp-ink-2); }
+.dcp-btn.ghost:hover { background: var(--dcp-hover); }
+
+.dcp-btn.danger  { background: transparent; border-color: var(--dcp-line-2);
+                   color: var(--dcp-ink-2); }
+.dcp-btn.danger:hover { background: var(--dcp-danger-tint);
+                        border-color: var(--dcp-danger); color: var(--dcp-danger-ink); }
+
+/* icon-only */
+.dcp-btn.icon { width: var(--dcp-hit); height: var(--dcp-hit); padding: 0; }
+.dcp-btn.icon svg { width: 16px; height: 16px; stroke-width: 1.6; }
+@media (hover: none) { .dcp-btn.icon { width: 36px; height: 36px; } }
+
+/* ── 2. THE CHIP. The dot carries the colour; the label is always legible
+   ink. This is what lets the palette shrink without losing the signal, and
+   it is why a row with two chips stops reading as confetti.
+   DANGER RULE: `.failed` must always be accompanied by SHAPE — a warning
+   glyph or a struck outline — never colour alone. ── */
+.dcp-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 20px; padding: 0 9px 0 7px;
+  border-radius: var(--dcp-radius-pill);
+  background: var(--dcp-raise);
+  box-shadow: inset 0 0 0 1px var(--dcp-line);
+  color: var(--dcp-ink-2);
+  font: var(--fw-semibold) var(--fs-meta)/1 var(--dcp-ui);
+  letter-spacing: 0; text-transform: none;
+  white-space: nowrap;
+}
+.dcp-chip::before { content: ''; width: 5px; height: 5px; border-radius: 50%;
+                    flex: none; background: var(--chip-dot, var(--dcp-ink-3)); }
+.dcp-chip.info     { --chip-dot: var(--dcp-accent); }
+.dcp-chip.waiting  { --chip-dot: var(--dcp-gold); }
+.dcp-chip.verified { --chip-dot: var(--dcp-ok); }
+.dcp-chip.failed   { --chip-dot: var(--dcp-danger); }
+.dcp-chip.neutral  { --chip-dot: var(--dcp-ink-4); }
+
+/* ── 3. THE POPOVER ── */
+.dcp-pop {
+  position: absolute; z-index: 50;
+  border-radius: var(--dcp-radius-md);
+  background: var(--dcp-glass);
+  box-shadow: var(--dcp-shadow-2), inset 0 1px 0 var(--dcp-glass-hi);
+  border: 1px solid var(--dcp-line-2);
+  transform-origin: top center;
+  animation: dcp-pop-in var(--dcp-t-state) var(--dcp-e-seat);
+  overflow: hidden;
+}
+/* backdrop-filter goes on a ::before, NEVER on the element — it creates a
+   fixed containing block that captures absolutely-positioned descendants.
+   This codebase has a documented incident on exactly this. */
+.dcp-pop::before {
+  content: ''; position: absolute; inset: 0; z-index: -1;
+  backdrop-filter: var(--dcp-glass-blur);
+  -webkit-backdrop-filter: var(--dcp-glass-blur);
+}
+.dcp-pop.is-leaving { animation: dcp-pop-out 150ms var(--dcp-e-exit) both; }
+.dcp-pop > * { animation: dcp-seat var(--dcp-t-state) var(--dcp-e-seat) both;
+               animation-delay: calc(min(var(--i, 0), 8) * 24ms); }
+
+@media (max-width: 600px) {
+  .dcp-pop {
+    position: fixed; inset: auto 0 0 0; max-height: 88vh; overflow: auto;
+    border-radius: var(--dcp-radius-xl) var(--dcp-radius-xl) 0 0;
+    animation: dcp-sheet-up 220ms var(--dcp-e-seat);
+  }
+  .dcp-pop .sheet-handle { display: block; width: 36px; height: 4px; margin: 10px auto;
+                           border-radius: 999px; background: var(--dcp-line-3); }
+}
+
+/* ── 4. THE EMPTY STATE ── */
+.dcp-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--sp-3); padding: var(--sp-7) var(--sp-4);
+  color: var(--dcp-ink-3);
+}
+.dcp-empty__art  { width: 220px; max-width: 100%; height: auto; }
+.dcp-empty__art path { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.dcp-empty h2    { margin: 0; font: var(--fw-semibold) var(--fs-lede)/var(--lh-snug) var(--dcp-ui);
+                   letter-spacing: var(--tr-title); color: var(--dcp-ink); }
+.dcp-empty p     { margin: 0; font-size: var(--fs-body); color: var(--dcp-ink-3);
+                   max-width: 44ch; }
+
+/* ── 5. THE EDITORIAL RULE. One declaration of pure craft: a rule that
+   starts heavy for 28 px and then thins is the single most "well-set
+   document" mark available. Use it under every panel heading and above the
+   domain list. ── */
+.dcp-rule {
+  height: 1px; border: 0; margin: var(--sp-3) 0;
+  background: linear-gradient(90deg, var(--dcp-line-3) 0 28px, var(--dcp-line) 28px);
+  transform-origin: left;
+}
+.domain-section.just-adopted .dcp-rule { animation: dcp-rule-draw var(--dcp-t-settle) var(--dcp-e-seat) both; }
 
 @media (max-width: 600px) {
   input, textarea, select { font-size: 16px !important; }

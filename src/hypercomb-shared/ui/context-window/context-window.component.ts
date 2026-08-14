@@ -75,8 +75,11 @@ export class ContextWindowComponent implements OnDestroy {
   /** Parked while the hive is covered, and brought back with the same tile —
    *  `close()` drops the resolved list, and a window that returned empty would
    *  read as "my context vanished". */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('context:window-state', { open }))
+  readonly session = signalSession(
+    this.visible,
+    open => EffectBus.emit('context:window-state', { open }),
+    { close: () => this.close() },
+  )
 
   /** The tile being managed, absolute. Captured on open, NOT derived from
    *  wherever the hive has since wandered: this window's whole subject is one
@@ -227,9 +230,6 @@ export class ContextWindowComponent implements OnDestroy {
     return branch.segments.length ? '/' + branch.segments.join('/') : '/'
   }
 
-  onKey(event: KeyboardEvent): void {
-    if (event.key === 'Escape') { event.preventDefault(); this.close() }
-  }
 }
 
 // Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an

@@ -97,6 +97,18 @@ const t = (key: string, fallback: string, params?: Record<string, unknown>): str
  *  repaint gears and popovers when grouping changes anywhere. */
 const live = new Set<HcDockedPanelDirective>()
 
+/** Shut whichever settings popover is open, if any. Exported for the shell-wide
+ *  Escape owner (tool-windows.ts), which unwinds the INNERMOST thing first: a
+ *  popover belongs to a window, so it goes before the window does.
+ *
+ *  It reads the existing `live` set rather than minting a "which popover is
+ *  open" signal — the gear already guarantees at most one is open at a time
+ *  (`#onGearClick` closes the others), so the fact is already in the DOM. */
+export function dismissOpenPopover(): boolean {
+  for (const panel of live) if (panel.popoverOpen) return panel.dismissPopover()
+  return false
+}
+
 /** A self-sizing window that holds its width in a SIGNAL rather than in the
  *  element's inline style. Such a window must be told, not written to — an
  *  inline width would be clobbered by the next change detection, and the
@@ -262,6 +274,18 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   /** Which edge this window takes a place on. */
   get laneSide(): LaneSide { return this.dockSide }
 
+  /** Stable id, so an outstanding lane undo can tell whether this window came
+   *  back on its own before the undo was spent. */
+  get laneId(): string { return this.id }
+
+  /** Come back from a park the shell owes an undo for. Unpark is all this has
+   *  to do: showing again remounts the element, and `ngOnInit` claims a place in
+   *  the lane the ordinary way — the same path every other open takes. */
+  returnToLane(): void {
+    try { this.hcSession?.unpark() }
+    catch (err) { console.error('[hc-docked-panel] returnToLane failed:', err) }
+  }
+
   /** What the next window inboard is offset by. Measured rather than trusted:
    *  a settings-only window may not have been sized yet when it joins, and
    *  publishing 0 would stack the two panels on top of each other. */
@@ -298,7 +322,9 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     members.add(this)
     this.#initialized = true
     // Showing, from now until this panel's element goes away.
-    if (this.hcSession) this.#releaseSession = holdWindow(this.id, this.hcSession)
+    // The root thunk is what lets the shell-wide Escape owner ask "is the focus
+    // inside this window" — the gate that replaced every panel's own listener.
+    if (this.hcSession) this.#releaseSession = holdWindow(this.id, this.hcSession, () => this.#el)
     // Take a place in this edge's lane. Deferred a microtask so the width set
     // below (or by the window's own first render) is what the lane measures.
     if (this.#dockExclusive) this.#scheduleLaneClaim()
@@ -401,11 +427,31 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     EffectBus.emit(this.pairOpenEffect, undefined)
   }
 
-  /** Take the pair away — the condition that justified it has lapsed. Only ever
+  /** Put the pair away — the condition that justified it has lapsed. Only ever
    *  fired on that transition, so a pair the participant opened for their own
-   *  reasons in some other mode is not swept up by it. */
+   *  reasons in some other mode is not swept up by it.
+   *
+   *  It PARKS the pair where it can, rather than closing it: this is the shell
+   *  taking back a window the shell brought, so it must cost nothing — the same
+   *  rule the lane already follows when it pushes an occupant out. A pair with
+   *  no session of its own falls back to the close effect, which is all such a
+   *  window can do.
+   *
+   *  The `readPairing` guard matters as much as any of it: switch the pairing
+   *  off in the gear, open the pair yourself, and leaving the mode used to shut
+   *  it anyway — the exact asymmetry `#openPairIfWanted` does not have. */
   #closePair(): void {
-    if (!this.pairWindow || !this.pairCloseEffect) return
+    if (!this.pairWindow) return
+    if (!readPairing(this.id)) return
+    for (const panel of live) {
+      if (panel.id !== this.pairWindow) continue
+      if (panel.hcSession) {
+        try { panel.hcSession.park(); return }
+        catch (err) { console.error('[hc-docked-panel] pair park failed, closing instead:', err) }
+      }
+      break
+    }
+    if (!this.pairCloseEffect) return
     let up = false
     for (const panel of live) if (panel.id === this.pairWindow) up = true
     if (up) EffectBus.emit(this.pairCloseEffect, undefined)
@@ -541,7 +587,16 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     grip.setAttribute('aria-orientation', 'vertical')
     Object.assign(grip.style, {
       position: 'absolute', top: '0', bottom: '0', [inner]: '0',
-      width: '10px', cursor: 'ew-resize', zIndex: '6', touchAction: 'none',
+      // `pan-y`, NOT `none`. The grip is a full-height 10px strip down the
+      // inner edge, lying over the panel's scrolling list: with `none` a
+      // thumb-swipe there scrolled nothing AND silently rewrote the width,
+      // persisting it to localStorage and the whole group. `pan-y` lets the
+      // browser take a vertical drag — and when it does it fires
+      // `pointercancel`, which is ALREADY routed to `#onUp`, so the half-started
+      // resize aborts and the stored width is untouched. The disambiguation was
+      // written all along; this word is what kept it from ever running.
+      // Horizontal drag still resizes, and mouse input is unaffected.
+      width: '10px', cursor: 'ew-resize', zIndex: '6', touchAction: 'pan-y',
     } as Partial<CSSStyleDeclaration>)
 
     const line = document.createElement('div')
@@ -713,29 +768,45 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#popover = pop
     this.#gearBtn?.setAttribute('aria-expanded', 'true')
     window.addEventListener('pointerdown', this.#onOutside, true)
-    window.addEventListener('keydown', this.#onEscape, true)
+    // FOCUS THE CONTAINER, not the first control. Three things fall out of it:
+    // the popover becomes the innermost thing Escape can unwind (the cascade
+    // asks "which window holds the focus", and an unfocusable popover is never
+    // the answer); descendants come next in document order, so Tab walks in and
+    // then out normally — no trap, and no positive tabindex; and the editor's
+    // own `focusSnapshot` returns null for a container, so a settings repaint
+    // does not fight us for the caret.
+    pop.tabIndex = -1
+    pop.setAttribute('aria-modal', 'false')
+    pop.focus()
   }
 
   #closePopover(): void {
     if (!this.#popover) return
+    // Give the focus back to the gear, but ONLY if it is still ours to give —
+    // if the participant has clicked away, moving them is the rude thing.
+    const held = this.#initialized && this.#popover.contains(document.activeElement)
     this.#popover.remove()
     this.#popover = null
     this.#gearBtn?.setAttribute('aria-expanded', 'false')
     window.removeEventListener('pointerdown', this.#onOutside, true)
-    window.removeEventListener('keydown', this.#onEscape, true)
+    if (held) this.#gearBtn?.focus()
+  }
+
+  /** Is this window's settings popover open? Read by the shell-wide Escape
+   *  owner, which unwinds the innermost thing first. */
+  get popoverOpen(): boolean { return !!this.#popover }
+
+  /** Shut this window's popover. The Escape owner's innermost rung. */
+  dismissPopover(): boolean {
+    if (!this.#popover) return false
+    this.#closePopover()
+    return true
   }
 
   #onOutside = (event: PointerEvent): void => {
     const target = event.target as Node | null
     if (target && (this.#popover?.contains(target) || this.#gearBtn?.contains(target))) return
     this.#closePopover()
-  }
-
-  #onEscape = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || !this.#popover) return
-    event.stopPropagation()
-    this.#closePopover()
-    this.#gearBtn?.focus()
   }
 
   /** WHAT THIS WINDOW'S SETTINGS EDITOR HOLDS — the whole surface, as data.

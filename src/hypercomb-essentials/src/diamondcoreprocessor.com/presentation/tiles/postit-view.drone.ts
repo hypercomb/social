@@ -20,7 +20,7 @@
 import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { hasDecorationKindAt, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
-import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
+import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
 import { listDecorations, replaceDecoration } from '../../commands/decoration-manifest.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
@@ -91,6 +91,11 @@ export class PostitViewDrone extends Drone {
       this.onEffect('takeover:indexed', this.#change)
       this.onEffect('feature:hidden', this.#change)
       this.onEffect('feature:restored', this.#change)
+      // The roster switch writes localStorage and emits — nothing else. Without
+      // this the stickies stayed on screen after the behavior was switched off
+      // (and stayed missing after it was switched back on) until some unrelated
+      // pass happened to reconcile.
+      this.onEffect(ENABLEMENT_CHANGED, this.#change)
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
         if (payload?.view !== POSTIT_VIEW) return
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
@@ -151,7 +156,6 @@ export class PostitViewDrone extends Drone {
   // ── Surface 1: the small stickies ────────────────────────────────────
 
   async #renderStickies(gen: number): Promise<void> {
-    if (isKindGloballyOff(POSTIT_KIND)) { this.#stickies?.remove(); this.#stickies = null; return }
     const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     const segments = [...(lineage?.explorerSegments?.() ?? [])]
@@ -178,6 +182,10 @@ export class PostitViewDrone extends Drone {
       // for the standing cell it would name the phantom child `…/own/own` and
       // its sticky would never show.
       if (!hasDecorationKindAt(candidate.path, POSTIT_KIND)) continue
+      // Dormancy is PER CELL, not global: a global off can be overridden by a
+      // wake here, and an adopted root can carry the publisher's withheld mark.
+      // (This was a bare global-off check, which read neither.)
+      if (isBehaviorDormant(POSTIT_KIND, candidate.path)) continue
       if (await isFeatureHidden(candidate.path, POSTIT_KIND)) continue
       // The payload rides along for the PIN — where the participant dragged
       // this note. Read only for cells that passed the gates above.
@@ -214,17 +222,26 @@ export class PostitViewDrone extends Drone {
         note.type = 'button'
         note.className = 'postit-sticky'
         this.#noteByKey.set(key, note)
+        // The note is a SMALL STACK: a second sheet peeking out behind
+        // (the button's ::before), the written face on top, and a pink
+        // pushpin holding the pair to the glass.
+        const face = document.createElement('span')
+        face.className = 'postit-face'
         const heading = document.createElement('span')
         heading.className = 'postit-sticky-title'
         const cue = document.createElement('span')
         cue.className = 'postit-sticky-cue'
         cue.textContent = 'open ›'
+        face.append(heading, cue)
+        const pin = document.createElement('span')
+        pin.className = 'postit-pin'
+        pin.setAttribute('aria-hidden', 'true')
         // The bottom-right grip — the corner of the paper you pull. Its own
         // gesture, so grabbing it resizes instead of moving the note.
         const grip = document.createElement('span')
         grip.className = 'postit-grip'
         grip.setAttribute('aria-hidden', 'true')
-        note.append(heading, cue, grip)
+        note.append(face, pin, grip)
         this.#wireDrag(note, cell)
         this.#wireResize(note, grip, cell)
         host.append(note)
@@ -466,7 +483,7 @@ export class PostitViewDrone extends Drone {
   async #mountPost(gen: number): Promise<void> {
     const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
     const segments = this.#targetSegments ?? [...(lineage?.explorerSegments?.() ?? [])]
-    if (await isFeatureHidden(segments, POSTIT_KIND)) {
+    if (isBehaviorDormant(POSTIT_KIND, segments) || await isFeatureHidden(segments, POSTIT_KIND)) {
       // OFF means the ordinary hive owns the surface (see living-brief).
       this.#targetSegments = null
       this.#teardownPost()
@@ -602,21 +619,29 @@ export class PostitViewDrone extends Drone {
 // _header-size.scss); left adds --hc-controls-left, the side-docked control
 // bar's edge reservation, so the dock clears the bar.
 const STICKY_CSS = `
-.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:100005;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
-.postit-sticky{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;box-sizing:border-box;width:7.4rem;aspect-ratio:1/.94;padding:.75rem .72rem 1.05rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(174deg,#fffbcf 0%,#fde68a 72%,#e8c75f 100%);color:#4a3f0f;box-shadow:1px 2px 1px rgba(48,36,3,.25),4px 7px 7px rgba(0,0,0,.28),10px 16px 22px rgba(0,0,0,.24),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.75);transform:rotate(var(--postit-tilt,-2deg)) translateZ(0);transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
+.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:100005;display:flex;flex-direction:column;gap:.75rem;pointer-events:none}
+.postit-sticky{position:relative;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;box-sizing:border-box;width:7.4rem;aspect-ratio:1/.94;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:#4a3f0f;transform:rotate(var(--postit-tilt,-2deg)) translateZ(0);transition:transform .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-sticky.postit-pinned{position:fixed;margin:0}
 .postit-sticky.postit-settling{transition:none}
 .postit-sticky[style*="height"]{aspect-ratio:auto}
-.postit-grip{position:absolute;right:0;bottom:0;width:1.15rem;height:1.15rem;cursor:nwse-resize;touch-action:none;opacity:0;transition:opacity .14s ease}
+/* The sheet UNDER the top one — a pale second note peeking out bottom-right,
+   the way a pad sits when the top leaf is lifted a little askew. */
+.postit-sticky::before{content:'';position:absolute;left:8%;top:10%;right:-6%;bottom:-8%;background:linear-gradient(168deg,#fdf3b4 0%,#f2dd8a 100%);transform:rotate(5deg);box-shadow:2px 4px 6px rgba(0,0,0,.32),6px 12px 18px rgba(0,0,0,.26)}
+/* The written face — the note you actually read. Ruled lines sit under the
+   title so an empty note still reads as PAPER WITH WRITING on it. */
+.postit-face{position:absolute;left:0;top:0;right:8%;bottom:6%;box-sizing:border-box;padding:.8rem .7rem 1rem;background:linear-gradient(168deg,#fdf6b8 0%,#f7e58f 68%,#eed469 100%);box-shadow:1px 2px 2px rgba(48,36,3,.24),4px 8px 9px rgba(0,0,0,.3),10px 16px 22px rgba(0,0,0,.22),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.8);transform:rotate(-3deg)}
+.postit-face::after{content:'';position:absolute;left:.8rem;right:1.1rem;bottom:1.05rem;height:1.1rem;background:repeating-linear-gradient(to bottom,rgba(96,80,20,.5) 0 2px,transparent 2px 7px);opacity:.7}
+/* The pushpin — a pink head with a lit shoulder, its needle biting the paper. */
+.postit-pin{position:absolute;left:52%;top:.1rem;width:1.25rem;height:1.25rem;border-radius:50%;background:radial-gradient(circle at 34% 30%,#ffb3c8 0%,#f2617f 42%,#c2264a 100%);box-shadow:0 1px 2px rgba(0,0,0,.45),1px 3px 5px rgba(0,0,0,.35),inset -1px -2px 3px rgba(120,10,40,.5)}
+.postit-pin::after{content:'';position:absolute;left:50%;top:70%;width:.16rem;height:.5rem;transform:translateX(-50%);background:linear-gradient(to bottom,rgba(90,70,20,.55),rgba(90,70,20,0))}
+.postit-grip{position:absolute;right:8%;bottom:6%;width:1.15rem;height:1.15rem;cursor:nwse-resize;touch-action:none;opacity:0;transition:opacity .14s ease}
 .postit-grip::after{content:'';position:absolute;right:.2rem;bottom:.2rem;width:.5rem;height:.5rem;border-right:2px solid rgba(74,63,15,.5);border-bottom:2px solid rgba(74,63,15,.5)}
 .postit-sticky:hover .postit-grip,.postit-sticky:focus-within .postit-grip{opacity:1}
 @media(pointer:coarse){.postit-grip{opacity:.75;width:1.5rem;height:1.5rem}}
-.postit-sticky.postit-dragging{transform:translateY(-7px) rotate(0deg) scale(1.055);box-shadow:2px 4px 2px rgba(48,36,3,.2),10px 20px 20px rgba(0,0,0,.38),20px 32px 38px rgba(0,0,0,.28);cursor:grabbing;transition:none}
-.postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
-.postit-sticky{position:relative}
-.postit-sticky:hover{transform:translateY(-4px) rotate(0deg) scale(1.035);box-shadow:1px 3px 2px rgba(48,36,3,.22),7px 13px 13px rgba(0,0,0,.34),15px 24px 28px rgba(0,0,0,.24)}
-.postit-sticky-title{display:block;font-size:.8rem;font-weight:700;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
-.postit-sticky-cue{position:absolute;right:.55rem;bottom:.3rem;font-size:.62rem;opacity:.55}
+.postit-sticky.postit-dragging{transform:translateY(-7px) rotate(0deg) scale(1.055);cursor:grabbing;transition:none}
+.postit-sticky:hover{transform:translateY(-4px) rotate(0deg) scale(1.045)}
+.postit-sticky-title{display:block;position:relative;z-index:1;margin-top:.85rem;font-size:.76rem;font-weight:700;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.postit-sticky-cue{position:absolute;right:.5rem;bottom:.25rem;font-size:.6rem;opacity:.55}
 @media(max-width:640px){.postit-sticky{width:6.6rem}}
 `
 

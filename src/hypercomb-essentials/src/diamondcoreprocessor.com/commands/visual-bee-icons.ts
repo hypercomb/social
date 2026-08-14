@@ -47,6 +47,7 @@ import { EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
 import { hasDecorationKind } from './decoration-kind-index.js'
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
+import { resolveViewEntrance } from './view-entrance.js'
 import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
 
 /** IoC key for the shell-side icon registry. */
@@ -267,10 +268,17 @@ type LineageLike = { explorerSegments?: () => readonly string[] }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 type ViewModeLike = { setMode?: (next: string) => void }
 
-/** Dispatch a click on an ENTER icon: go to the clicked cell and open the
+/** Dispatch a click on an ENTER icon: go to the view's ENTRANCE and open the
  *  view there. Mirrors the websites launch group's activation — navigate
- *  first (synchronous lineage update) so the view renderer captures THIS
- *  cell as its entry floor when the surface flips. */
+ *  first (synchronous lineage update) so the view renderer captures that
+ *  cell as its entry floor when the surface flips.
+ *
+ *  The entrance is not always the cell that was clicked. A branch-scoped
+ *  behaviour (the website) is declared at a ROOT and every descendant is a
+ *  member of it, so clicking a member from OUTSIDE the site used to land on a
+ *  page-less cell and website mode came up empty — the home page lives at the
+ *  root. `resolveViewEntrance` walks up to that root; a node-scoped behaviour
+ *  resolves to the clicked cell unchanged. */
 function dispatchEnterAction(action: string, label: string | undefined): void {
   const view = action.slice(ENTER_ACTION_PREFIX.length)
   if (!view || !label) return
@@ -293,8 +301,13 @@ function dispatchEnterAction(action: string, label: string | undefined): void {
   const vm = window.ioc.get<ViewModeLike>('@hypercomb.social/ViewMode')
   if (!nav?.goRaw || !vm?.setMode) return
 
-  nav.goRaw([...here, label])
-  vm.setMode(bee.view)
+  // Async only because the entrance is read from layers; the pair stays
+  // ordered (navigate, then flip) so the renderer sees the entrance as its
+  // entry floor, exactly as the synchronous path did.
+  void resolveViewEntrance(bee, [...here, label]).then(entrance => {
+    nav.goRaw!(entrance)
+    vm.setMode!(bee.view)
+  })
 }
 
 // ── Wire up: listen to registry changes + tile:action events ──────────

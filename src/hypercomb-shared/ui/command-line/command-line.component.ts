@@ -683,6 +683,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #viewsPanelOpen = signal(false)
   readonly viewsPanelOpen = this.#viewsPanelOpen.asReadonly()
 
+  // Beehaviors window open/closed — lights the toggle right of views.
+  // Mirrors `features:viewer-state`, which the panel announces on open,
+  // close and park (last-value replayed, so a late header mount is correct).
+  readonly #featuresPanelOpen = signal(false)
+  readonly featuresPanelOpen = this.#featuresPanelOpen.asReadonly()
+
   // Chat window open/closed — lights the rail's leading chat toggle. Mirrors
   // `chat:window-state` (announced on boot-open, open() and close(); last-value
   // replayed, so a late header mount reads the boot-open correctly).
@@ -777,6 +783,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }),
       EffectBus.on<{ open?: boolean }>('views:state', ({ open }) => {
         this.#viewsPanelOpen.set(!!open)
+      }),
+      EffectBus.on<{ open?: boolean }>('features:viewer-state', ({ open }) => {
+        this.#featuresPanelOpen.set(!!open)
       }),
       EffectBus.on<{ open?: boolean }>('chat:window-state', ({ open }) => {
         this.#chatPanelOpen.set(!!open)
@@ -900,6 +909,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   onViewsToggle(): void {
     EffectBus.emit(this.#viewsPanelOpen() ? 'views:close' : 'views:open', {})
+  }
+
+  /** Flip the Beehaviors window. Opening from the rail carries NO tile, so
+   *  the panel opens on the context — the layer that is loaded — and follows
+   *  navigation from there. A tile's puzzle-piece is the other door, and it
+   *  puts that tile in the subject instead. */
+  onFeaturesToggle(): void {
+    EffectBus.emit(this.#featuresPanelOpen() ? 'features:viewer-close' : 'features:context-open', {})
   }
 
   onChatToggle(): void {

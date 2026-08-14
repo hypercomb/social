@@ -67,6 +67,14 @@ const SETTINGS_CSS = `
 [data-hc-panel-settings]:focus-visible,
 [data-hc-panel-settings][aria-expanded='true'] { color: #cfe3ef; background-color: rgba(${STEEL}, 0.09) !important; }
 [data-hc-panel-settings]:focus-visible { outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 1px; }
+/* Touch: widen the target into space the header ALREADY reserves for it (the
+   close button's margin is one gear slot), so nothing moves a pixel and the
+   glyph stays the same size — only the hit area grows, to a full-height band.
+   A rule rather than a JS branch: the gear is built imperatively and carries no
+   _ngcontent attribute, so no panel's own touch-target SCSS can reach it. */
+@media (pointer: coarse) {
+  [data-hc-panel-settings] { width: 30px; height: 100%; min-height: 38px; }
+}
 
 .hc-settings {
   width: min(272px, calc(100% - 20px));

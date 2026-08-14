@@ -3,18 +3,19 @@
 Links a participant's Google Docs into their hive as tiles, keeps the body as
 signed hive content, and pushes edits back to Google.
 
-> **Status: client built and tested; script still unrun.**
+> **Status: bridge DEPLOYED and verified end to end; hive wiring not built.**
 >
-> - **Built + green** — `diamondcoreprocessor.com/link/google-docs.ts` (doc-link
->   parsing, bridge client) and `google-docs-sync.ts` (reconciliation, folder
->   candidates). 23 passing specs, clean typecheck.
-> - **Unverified** — the Apps Script has never been deployed or executed. Every
->   client test runs against a stub fetcher, so the specs prove the client honours
->   the contract, **not** that the script implements it.
-> - **Not built** — no sync worker, no tiles, no pool records, no marks. A Google
->   Doc link already opens today through the generic new-tab path in
->   `link-open.worker.ts`; nothing routes it anywhere special yet, deliberately.
-> - **Mirror owed** — queued as `google-docs-bridge` (`npm run mirror:queue -- list`).
+> - **Verified against the live deployment** (tsiktech@gmail.com, "Hypercomb
+>   Connector", 2026-08-14): `list` returned 26 documents; `get` exported real
+>   markdown; `create` converted markdown into a real Doc; `update` refused a
+>   stale write and landed a correctly-versioned one.
+> - **Built + green** — `link/google-docs.ts` (parsing, bridge client),
+>   `link/google-docs-sync.ts` (reconciliation), `document/` (slot, edit rules,
+>   view drone). 34 passing specs, clean typecheck.
+> - **Not built** — no sync worker, no tiles, no pool records, no connect panel.
+>   Nothing yet imports a Doc into the hive; the view has no document to open.
+> - **Mirror owed** — `google-docs-bridge` and `document-view`
+>   (`npm run mirror:queue -- list`).
 
 ## Why Apps Script and not the Drive API
 
@@ -129,6 +130,28 @@ Two of those carry the weight:
 
 An unknown version reads as *moved*, not as safe. The bias is always toward
 asking rather than overwriting.
+
+### The round trip is not byte-identical
+
+Verified against the live deployment: pushing `...**paragraph**.\n` exports back
+as `...**paragraph**.  \n`. The converter re-emits markdown from the Doc's
+structure rather than storing the source it was given, so trailing spaces and
+line breaks are regenerated.
+
+Consequence: **`pulledSig` must record the bytes Google EXPORTS, never the bytes
+we sent.** A push therefore ends with a re-read. Skipping that makes
+`currentSig !== pulledSig` permanently true, so every document reports unpushed
+edits the instant after a successful push and the reconcile loops on `push`
+forever.
+
+### POST redirects
+
+A POST to `/exec` answers `302` to `script.googleusercontent.com` with a
+`user_content_key` — `doPost` has ALREADY RUN at that point and the redirect
+points at its result. In Node, following that redirect manually (`redirect:
+'manual'`, then GET the `Location`) is required; letting fetch auto-follow
+returned 404. Browsers follow it correctly on their own, which is why the
+in-page client uses a plain `fetch`.
 
 ## Reorganizing by pheromone
 

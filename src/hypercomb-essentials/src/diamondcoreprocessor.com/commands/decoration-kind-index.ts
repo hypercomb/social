@@ -623,9 +623,18 @@ type StoreLike = {
  *  matters; empty until the registry is up. */
 const EMPTY_KINDS: ReadonlySet<string> = new Set()
 
-/** Pending takeover-claim drops, keyed `<locationKey> <kind>`. A claim
+/** Pending takeover-claim drops, keyed `<locationKey> + SEP + <kind>`. A claim
  *  survives the removeSig half of a replace; see the removeSig branch. */
 const pendingTakeoverDrop = new Map<string, number>()
+
+/** When a takeover kind was last APPENDED at a location, same key shape.
+ *  The two halves of a replace are not ordered: the append can land FIRST,
+ *  and then there is no pending drop for it to cancel — the removeSig that
+ *  follows would arm one and quietly un-claim a cell that plainly still
+ *  carries the note (the tile reappearing and the sticky vanishing). So the
+ *  removeSig side also looks BACKWARD: a fresh append means this removal is
+ *  the other half of a replace, already superseded. */
+const lastTakeoverAppend = new Map<string, number>()
 
 /** How long a takeover claim outlives its removeSig before it really drops.
  *  Long enough to span a replace's two halves (one commit), short enough
@@ -811,15 +820,17 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
   if (!kind) return
   const key = locationKey(segments)
   segmentsByKey.set(key, segments)
-  // This append may be the second half of a replace whose removeSig left a
-  // pending claim-drop armed. Cancel it: the claim never lapsed, so nothing
-  // downstream should ever learn the cell was briefly unclaimed.
-  const pendingKey = `${key} ${kind}`
+  // This append may be one half of a REPLACE. Cancel any claim-drop the
+  // other half armed, and remember the moment either way: the halves are
+  // not ordered, so a removeSig arriving AFTER this one must be able to see
+  // that the claim has already been renewed and leave it alone.
+  const pendingKey = key + SEP + kind
   const armed = pendingTakeoverDrop.get(pendingKey)
   if (armed !== undefined) {
     clearTimeout(armed)
     pendingTakeoverDrop.delete(pendingKey)
   }
+  lastTakeoverAppend.set(pendingKey, Date.now())
   addKind(key, kind)
   kindBySig.set(sig, kind)
   if (kind === TAG_DECORATION_KIND) {
@@ -979,13 +990,26 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       // sticky. Hold the claim briefly instead: an append cancels the
       // pending drop (a replace nets to no change at all), while a genuine
       // removal lands a moment later and brings the hexagon back.
-      const pendingKey = `${key}\u0000${kind}`
-      clearTimeout(pendingTakeoverDrop.get(pendingKey))
-      pendingTakeoverDrop.set(pendingKey, window.setTimeout(() => {
-        pendingTakeoverDrop.delete(pendingKey)
-        removeKind(key, kind)
-        EffectBus.emit('takeover:indexed', { label })
-      }, TAKEOVER_DROP_GRACE_MS))
+      //
+      // The halves are NOT ordered. When the append lands first there is no
+      // pending drop to cancel, and arming one here would un-claim a cell
+      // that plainly still carries its note — the tile coming back while
+      // its sticky vanished. A recent append means exactly that case, so
+      // this removal is already superseded: leave the claim alone.
+      const pendingKey = key + SEP + kind
+      const renewedAt = lastTakeoverAppend.get(pendingKey) ?? 0
+      if (Date.now() - renewedAt >= TAKEOVER_DROP_GRACE_MS) {
+        clearTimeout(pendingTakeoverDrop.get(pendingKey))
+        pendingTakeoverDrop.set(pendingKey, window.setTimeout(() => {
+          pendingTakeoverDrop.delete(pendingKey)
+          // One last look: an append inside the grace window renews the
+          // claim without ever cancelling this timer if it raced the
+          // clearTimeout above.
+          if (Date.now() - (lastTakeoverAppend.get(pendingKey) ?? 0) < TAKEOVER_DROP_GRACE_MS) return
+          removeKind(key, kind)
+          EffectBus.emit('takeover:indexed', { label })
+        }, TAKEOVER_DROP_GRACE_MS))
+      }
     } else if (kind) {
       removeKind(key, kind)
       // `kindBySig` is a sig→kind cache, and a decoration resource is

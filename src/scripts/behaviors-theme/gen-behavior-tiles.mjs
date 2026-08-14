@@ -38,7 +38,7 @@ const GLYPHS = {
   'translate-sweep': 'translate', workflow: 'conversion_path',
   observe: 'travel_explore', domain: 'dns', 'block-peer': 'block',
   'clear-mesh': 'wifi_off', repush: 'sync', host: 'router', invite: 'person_add',
-  meeting: 'groups',
+  meeting: 'groups', publish: 'cloud_upload',
   accent: 'colorize', border: 'border_style', canvas: 'texture',
   backgrounds: 'image', substrate: 'grid_on', reroll: 'casino', theme: 'palette',
   heal: 'healing',

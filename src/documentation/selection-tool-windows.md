@@ -50,9 +50,16 @@ pattern.
   latch their own boolean off it. For mutual exclusivity between takeovers,
   claim through `@diamondcoreprocessor.com/ModeRegistry` (owner-counted) —
   do not hand-wire pairwise exclusion between windows.
-- **Escape** still clears selection at its fixed place in the cascade
-  (priority 3, `keyboard/escape-cascade.ts`); a window's own Escape ladder
-  (field → armed mode → close) runs inside the window first.
+- **Escape** has ONE owner: the cascade (`keyboard/escape-cascade.ts`), and it
+  is gated on FOCUS. A window never registers its own Escape listener. It
+  declares `dismiss()` (unwind one level of its own state — field, armed mode,
+  drill) and `close()` on its `WindowSession`, and the cascade calls them only
+  while the focus is inside that window. Focus out on the canvas means the press
+  belongs to the cascade's own rungs, so a live selection or a stuck InputGate
+  can always be cleared with a panel open. The order is: window dismiss
+  (priority 2e) → clear selection (3) → window close (3b). The selection clear
+  sits BETWEEN the two deliberately: backing out of a panel's inner state must
+  not cost a selection, and a window must not close while one is still up.
 
 ## Adding a selection response to a new window
 

@@ -10,9 +10,7 @@
     [class.resizing]="resizing()"
     [style.width.px]="width()"
     data-consumes-wheel
-    (keydown)="$event.key === 'Escape' && close()"
     tabindex="-1"
-    role="dialog"
     [attr.aria-label]="'clipboard.title' | t"
   >
     <div

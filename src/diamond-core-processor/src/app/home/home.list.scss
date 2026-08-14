@@ -1,0 +1,104 @@
+/* src/app/home/home.list.scss
+ *
+ * THE LIST — the installer's default face. One row per installed thing,
+ * one switch between behaviors and tiles. Rows borrow the package sheet's
+ * controls (version handle, adopt segments) so the two views never drift
+ * into two vocabularies; what lives here is the row itself.
+ */
+
+/* The one door to the expert view. Same chrome as the scope segments it
+   sits beside, so it reads as a peer switch and not as a page action. */
+.advanced-toggle {
+  height: 34px;
+  padding: 0 12px;
+  font-family: var(--dcp-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--dcp-ink-3);
+  background: none;
+  border: 1px solid var(--dcp-line-2);
+  cursor: pointer;
+  transition: color .12s ease, background .12s ease;
+
+  &:hover { color: var(--dcp-ink); background: var(--dcp-hover); }
+  &.on { color: var(--dcp-on-accent); background: var(--dcp-accent); }
+}
+
+.list-row {
+  border: 1px solid var(--dcp-line, rgba(255, 255, 255, .1));
+  border-radius: 8px;
+  margin: 0 0 8px;
+  padding: 0;
+  background: var(--dcp-panel, rgba(255, 255, 255, .02));
+  transition: border-color .14s ease, background .14s ease;
+
+  &:hover { border-color: var(--dcp-line-hi, rgba(255, 255, 255, .2)); }
+  /* An opened row is being READ — the code is out, so the row holds the
+     eye until it is closed again. */
+  &.open { background: var(--dcp-panel-hi, rgba(255, 255, 255, .045)); }
+}
+
+.list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
+}
+
+.list-open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  min-width: 0;
+
+  .group-chevron {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    opacity: .55;
+    transition: transform .14s ease, opacity .14s ease;
+    &.open { transform: rotate(90deg); opacity: 1; }
+  }
+  &:hover .group-chevron { opacity: 1; }
+}
+
+.list-name {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-label {
+  font-size: 12px;
+  opacity: .62;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pushes the state + verbs to the trailing edge, so every row's controls
+   line up in one column no matter how long the name runs. */
+.list-spacer { flex: 1 1 auto; min-width: 8px; }
+
+.list-code {
+  border-top: 1px solid var(--dcp-line, rgba(255, 255, 255, .1));
+  padding: 6px 10px 10px;
+}
+
+/* Narrow: the name keeps the first line, the controls wrap under it whole
+   rather than each verb dropping to its own row. */
+@media (max-width: 640px) {
+  .list-head { gap: 6px; }
+  .list-spacer { flex-basis: 100%; height: 0; min-width: 0; }
+}

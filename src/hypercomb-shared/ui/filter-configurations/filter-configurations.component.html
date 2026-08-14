@@ -3,7 +3,7 @@
     [hcSession]="session"
     (hcDockedPanelClose)="close()"
     dockSide="right" [minWidth]="260" [maxWidth]="520" [defaultWidth]="320"
-    data-consumes-wheel role="dialog" [attr.aria-label]="'filter.aria' | t">
+    data-consumes-wheel [attr.aria-label]="'filter.aria' | t">
     <header>
       <strong>{{ 'filter.title' | t }}</strong>
       <div class="scope" role="group" [attr.aria-label]="'filter.scope-aria' | t">

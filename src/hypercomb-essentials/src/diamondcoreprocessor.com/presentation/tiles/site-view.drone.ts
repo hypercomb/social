@@ -965,8 +965,9 @@ export class SiteViewDrone extends Drone {
 
   /**
    * True only when the cell at `segments` is DEFINITELY page-less: its layer
-   * resolves but carries no mountable page (neither a `visual:website:page`
-   * decoration nor a legacy `context` page). Returns false when we can't tell —
+   * resolves but carries no mountable page in any of the three slots (the
+   * first-class `website` slot, a `visual:website:page` decoration, or a
+   * legacy `context` page). Returns false when we can't tell —
    * no store/history, or the layer doesn't resolve (cold cache / not yet
    * committed) — so a momentary cold read never blocks a valid link; only a
    * confirmed dead-end is. Powers the #navigate guard below.
@@ -982,7 +983,12 @@ export class SiteViewDrone extends Drone {
     if (!locSig) return false
     const layer = await history.currentLayerAt(locSig).catch(() => null)
     if (!layer) return false   // unresolved (cold/missing) — don't block
-    let pageSig = await this.#findDecorationPage(segments, store)
+    // The SAME three-slot lookup #reconcile mounts with — the first-class
+    // `website` slot included. Omitting it judged a slot-only page a dead end,
+    // so the guard below silently swallowed every in-site link to a migrated
+    // cell.
+    let pageSig = await this.#findWebsitePage(segments)
+    if (!pageSig) pageSig = await this.#findDecorationPage(segments, store)
     if (!pageSig) pageSig = await this.#findContextPage(segments, store)
     return !pageSig            // layer present but no page → confirmed dead-end
   }

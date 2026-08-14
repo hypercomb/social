@@ -1,0 +1,66 @@
+/* src/app/home/home.shell.scss */
+
+.tree-home {
+  width: 100%;
+  max-width: 740px;
+  margin: 0 auto;
+  padding: 30px 22px 90px;
+  font-family: var(--dcp-ui);
+  color: var(--dcp-ink);
+}
+
+/* Large desktops — use the horizontal space instead of a narrow centered
+   column. Stepped so the tree stays scannable: ~27" displays get a roomier
+   column (long lineages/descriptions stop truncating), ~34"/ultrawide get
+   wider still, capped so a single row never sprawls edge-to-edge. Normal
+   laptops (<1600px) are unchanged. */
+@media (min-width: 1600px) { .tree-home { max-width: 960px; } }
+@media (min-width: 2200px) { .tree-home { max-width: 1200px; } }
+@media (min-width: 3000px) { .tree-home { max-width: 1440px; } }
+
+.install-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 480px;
+  padding: 13px 15px 13px 17px;
+  border-radius: var(--dcp-radius-md);
+  background: var(--dcp-accent);
+  color: var(--dcp-on-accent);
+  font-family: var(--dcp-ui);
+  box-shadow: var(--dcp-shadow-2);
+  animation: install-toast-in 0.18s ease-out;
+}
+
+.install-toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.install-toast-body strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.install-toast-close {
+  background: none;
+  border: none;
+  color: var(--dcp-on-accent);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.install-toast-close:hover {
+  opacity: 1;
+}

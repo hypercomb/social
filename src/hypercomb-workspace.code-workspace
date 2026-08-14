@@ -21,10 +21,6 @@
       "path": "hypercomb-core"
     },
     {
-      "name": "hypercomb-web",
-      "path": "hypercomb-web"
-    },
-    {
       "name": "hypercomb-shared",
       "path": "hypercomb-shared"
     },
@@ -39,10 +35,6 @@
     {
       "name": "hypercomb-extensions",
       "path": "hypercomb-extensions"
-    },
-    {
-      "name": "documentation",
-      "path": "documentation"
     }
   ],
   "launch": {

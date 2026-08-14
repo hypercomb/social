@@ -86,8 +86,11 @@ export class ViewsViewerComponent implements OnDestroy {
   readonly visible = signal(false)
 
   /** Put away while the hive is covered; back with the same list, no re-walk. */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('views:state', { open }))
+  readonly session = signalSession(
+    this.visible,
+    open => EffectBus.emit('views:state', { open }),
+    { close: () => this.close() },
+  )
 
   readonly loading = signal(false)
   readonly rows = signal<readonly ViewRow[]>([])
@@ -136,7 +139,6 @@ export class ViewsViewerComponent implements OnDestroy {
       featKind?: string; view?: string; segments?: readonly string[]
     }>('feature:restored', payload => this.#activationChanged(false, payload))
     this.#settledOff = EffectBus.on('feature:activation-settled', this.#changed)
-    window.addEventListener('keydown', this.#key, true)
     this.#bind()
   }
 
@@ -146,13 +148,14 @@ export class ViewsViewerComponent implements OnDestroy {
     this.#registry?.removeEventListener('change', this.#changed)
     this.#lineage?.removeEventListener('change', this.#changed)
     this.#mode?.removeEventListener('change', this.#changed)
-    window.removeEventListener('keydown', this.#key, true)
   }
 
-  readonly #key = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || !this.visible()) return
-    event.preventDefault(); event.stopImmediatePropagation(); this.close()
-  }
+  // Escape used to be a window-CAPTURE listener here that called
+  // `stopImmediatePropagation()`. While this window was open that killed the
+  // whole shell cascade — the tile editor could not be cancelled, a selection
+  // could not be cleared, the InputGate could not be unstuck — whether or not
+  // the participant was anywhere near this panel. The window's close now hangs
+  // off its session, and the cascade calls it only when the focus is IN here.
 
   #activationChanged(
     hidden: boolean,

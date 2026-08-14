@@ -3,78 +3,31 @@
 // `/host` — publish the CURRENT branch as a STATIC hive and mint its link.
 //
 // The publisher side of static hive hosting: no swarm, no relay, no
-// hc:mesh-public — the whole flow rides the HTTPS byte tier. Sequence:
+// hc:mesh-public — the whole flow rides the HTTPS byte tier.
+//
+// THE SEQUENCE ITSELF LIVES IN `publish-branch.ts`. This queen owns only the
+// gesture: consent, progress notes, the outcome toast, and link delivery. The
+// publish panel drives the same routine, so there is exactly one
+// implementation of "put a branch into the world" and the two surfaces can
+// never drift into publishing differently.
 //
 //   1. Consent — the operator confirms bytes go to the public content
 //      endpoint and that their Nostr key will sign the uploads + index.
-//   2. Mark the branch public (setBranchPublic) — /host IS the sanctioned
-//      public enumerator for this branch; the swarm walk (if ever on)
-//      agrees with it.
-//   3. sealSubtree — re-derive a merkle-coherent root from LIVE location
-//      heads (leaf-only-commit safe); heal + retry once on failure.
-//   4. markPublic + drain — HostSyncService stages the sealed closure to
-//      the public CDN (its own opt-in gate) and PUTs with confirmed
-//      read-back receipts.
-//   5. AVAILABILITY GATE — wait for the closure to be fully receipted.
-//      "Bytes before broadcast": the index NEVER advances to a head whose
-//      closure isn't confirmed served. On timeout the queue keeps retrying
-//      detached and the operator re-runs /host — the pointer stays honest.
-//   6. Sign + PUT the hive index (`/hive/<pubkey>`, kind 30564) with this
-//      branch's lineageKey → sealed head merged over the existing index.
-//   7. Mint the hive-link bundle (stable: segments + pubkey + hosts),
-//      receipt it, copy `https://<host>/<bundleSig>` to the clipboard.
+//   2..7 publishBranch(): mark public → seal (heal + retry) → stage + drain →
+//      availability gate → index PUT behind the wipe guard → link bundle →
+//      ledger record → confirmation round trip.
 
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import {
-  HIVE_LINK_KIND,
-  HIVE_LINK_VERSION,
-  PUBLIC_CONTENT_HOSTS,
-  encodeHiveLinkBundle,
-  type HiveLinkBundle,
-} from './hive-link.js'
-import { fetchHiveManifest, putHiveManifest } from './hive-pointer.js'
 import { deliverLink } from './deliver-link.js'
-import { lineageKey } from '../history/lineage-key.js'
-import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { publishBranch, type PublishProgress } from './publish-branch.js'
 
-const STORE_KEY = '@hypercomb.social/Store'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
-const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
-const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
-const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
-const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 
-const SIG_RE = /^[a-f0-9]{64}$/
-const LOOPBACK_RE = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
-// Availability wait: closure receipts normally land in seconds; a big
-// first-time branch can take longer. Past the deadline the drain keeps
-// retrying detached — /host just declines to advance the pointer yet.
-const AVAILABILITY_DEADLINE_MS = 120_000
-const AVAILABILITY_POLL_MS = 2_500
+/** How often the availability wait prints a progress note. The wait itself
+ *  can run for minutes on a big first-time branch. */
 const PROGRESS_NOTE_MS = 15_000
 
-interface StoreLike { putResource: (b: Blob) => Promise<string> }
 interface LineageLike { explorerSegments?: () => readonly string[] }
-interface HistoryLike {
-  sealSubtree: (segments: readonly string[]) => Promise<string | null>
-  healSubtreeBags: (segments: readonly string[]) => Promise<unknown>
-}
-interface HostSyncLike {
-  isEnabled?: () => boolean
-  isPublicHostEnabled?: () => boolean
-  enablePublicHost?: () => void
-  markPublic?: (sig: string, kind?: string, closure?: boolean) => Promise<void>
-  drain?: () => Promise<void>
-  isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
-  ensureReceipt?: (sig: string, timeoutMs?: number) => Promise<boolean>
-}
-interface SignerLike { getPublicKeyHex?: () => Promise<string | null> }
-
-function normalizeHost(raw: string): string {
-  return String(raw ?? '').trim()
-    .replace(/^wss?:\/\//i, '').replace(/^https?:\/\//i, '')
-    .replace(/\/+$/, '').toLowerCase()
-}
 
 export class HostQueenBee {
   readonly command = 'host'
@@ -85,15 +38,7 @@ export class HostQueenBee {
 
   async invoke(_args: string): Promise<void> {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
-    const store = get<StoreLike>(STORE_KEY)
     const lineage = get<LineageLike>(LINEAGE_KEY)
-    const history = get<HistoryLike>(HISTORY_KEY)
-    const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
-    const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
-    if (!store?.putResource || !history?.sealSubtree || !hostSync?.markPublic || !signer?.getPublicKeyHex) {
-      this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'Core services are not ready yet.')
-      return
-    }
 
     const segments = (lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
@@ -103,7 +48,7 @@ export class HostQueenBee {
         this.#t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
       return
     }
-    const name = segments[segments.length - 1]
+    const name = segments[segments.length - 1] ?? ''
 
     // 1. Consent — names the CDN and the signer before anything happens.
     const confirmed = await requestConfirm({
@@ -115,124 +60,94 @@ export class HostQueenBee {
     })
     if (!confirmed) return
 
-    // 2. /host IS the sanctioned public enumerator for this branch.
-    const parentLocation = '/' + segments.slice(0, -1).join('/')
-    if (!isBranchPublic(parentLocation, name)) setBranchPublic(parentLocation, name, true)
-    hostSync.enablePublicHost?.()
-
-    // 3. A merkle-coherent root from live heads; heal once, retry, else
-    //    fail LOUD — never publish a lossy seal.
-    let sealed = await history.sealSubtree(segments)
-    if (!sealed) {
-      try { await history.healSubtreeBags(segments) } catch { /* heal is best-effort */ }
-      sealed = await history.sealSubtree(segments)
-    }
-    if (!sealed || !SIG_RE.test(sealed)) {
-      this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
-        this.#t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then run /host again.'))
-      return
-    }
-
-    // 4. Stage the sealed closure to the CDN and start pushing.
-    this.#activity(this.#t(i18n, 'host.uploading', 'uploading branch to the public host…'), '●')
-    await hostSync.markPublic(sealed, 'layer', true)
-    void hostSync.drain?.()
-
-    // 5. THE AVAILABILITY GATE — the index only ever names a served head.
-    let pending = -1
-    const offSync = EffectBus.on<{ pending?: number }>('sync:state', p => {
-      if (typeof p?.pending === 'number') pending = p.pending
-    })
-    let available = false
-    const deadline = Date.now() + AVAILABILITY_DEADLINE_MS
-    let nextNote = Date.now() + PROGRESS_NOTE_MS
-    try {
-      for (;;) {
-        available = (await hostSync.isClosureAvailable?.(sealed, 'layer', true)) === true
-        if (available || Date.now() >= deadline) break
-        if (Date.now() >= nextNote) {
-          nextNote = Date.now() + PROGRESS_NOTE_MS
-          this.#activity(
-            pending >= 0
-              ? this.#t(i18n, 'host.progress', `still uploading — ${pending} pending`, { pending })
-              : this.#t(i18n, 'host.progress-quiet', 'still uploading…'),
-            '○')
-        }
-        await new Promise(r => setTimeout(r, AVAILABILITY_POLL_MS))
+    let nextNote = 0
+    const onProgress = (p: PublishProgress): void => {
+      if (p.phase === 'staging') {
+        this.#activity(this.#t(i18n, 'host.uploading', 'uploading branch to the public host…'), '●')
+        nextNote = Date.now() + PROGRESS_NOTE_MS
+        return
       }
-    } finally { offSync() }
-    if (!available) {
-      this.#toast('info', this.#t(i18n, 'host.title', 'Host branch'),
-        this.#t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced (no dead links). Uploads retry automatically; run /host again once the sync pill clears.'))
-      return
+      if (p.phase !== 'waiting' || Date.now() < nextNote) return
+      nextNote = Date.now() + PROGRESS_NOTE_MS
+      this.#activity(
+        typeof p.pending === 'number'
+          ? this.#t(i18n, 'host.progress', `still uploading — ${p.pending} pending`, { pending: p.pending })
+          : this.#t(i18n, 'host.progress-quiet', 'still uploading…'),
+        '○')
     }
 
-    // 6. Merge + sign + PUT the index. The index is replaceable, not
-    //    mergeable on the host — carry every previously-published root.
-    const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
-    if (!SIG_RE.test(pubkey)) {
-      this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'No signing key available — the hive index must be signed.')
-      return
-    }
-    const key = lineageKey(segments)
-    const indexHost = PUBLIC_CONTENT_HOSTS[0]
-    const existing = await fetchHiveManifest(indexHost, pubkey)
-    const roots = { ...(existing?.roots ?? {}), [key]: sealed }
-    const put = await putHiveManifest(indexHost, roots)
-    if (!put.ok) {
-      this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
-        this.#t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — run /host again to retry the index.', { reason: put.reason ?? 'unknown' }))
-      return
+    const result = await publishBranch(segments, { onProgress })
+
+    if (!result.ok) {
+      switch (result.failure) {
+        case 'services':
+          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'Core services are not ready yet.')
+          return
+        case 'no-branch':
+          this.#toast('tip', this.#t(i18n, 'host.title', 'Host branch'),
+            this.#t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
+          return
+        case 'seal-failed':
+          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
+            this.#t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then run /host again.'))
+          return
+        case 'no-signer':
+          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'No signing key available — the hive index must be signed.')
+          return
+        case 'not-available':
+          this.#toast('info', this.#t(i18n, 'host.title', 'Host branch'),
+            this.#t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced (no dead links). Uploads retry automatically; run /host again once the sync pill clears.'))
+          return
+        case 'index-unsafe':
+          // The refusal that protects every OTHER branch: rewriting the index
+          // off a read we could not verify would drop the ones we cannot see.
+          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
+            this.#t(i18n, 'host.index-unsafe',
+              'Your hive index could not be read back ({reason}), so it was left untouched — the bytes are hosted; run /host again when the host answers.',
+              { reason: result.reason ?? 'unreachable' }))
+          return
+        case 'index-failed':
+          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
+            this.#t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — run /host again to retry the index.', { reason: result.reason ?? 'unknown' }))
+          return
+        default:
+          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'Could not create the link bundle resource.')
+          return
+      }
     }
 
-    // 7. The stable bearer link: segments + pubkey + hosts (+ the sealed
-    //    head as a cold-index fallback hint).
-    const selfDomain = this.#selfDomain()
-    const hosts = [
-      ...(hostSync.isEnabled?.() && selfDomain ? [selfDomain] : []),
-      ...PUBLIC_CONTENT_HOSTS,
-    ]
-    const bundle: HiveLinkBundle = {
-      kind: HIVE_LINK_KIND,
-      v: HIVE_LINK_VERSION,
-      segments,
-      pubkey,
-      hosts,
-      rootSig: sealed,
-      createdAt: Date.now(),
-    }
-    let bundleSig: string
-    try {
-      bundleSig = await store.putResource(encodeHiveLinkBundle(bundle))
-    } catch {
-      this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'Could not create the link bundle resource.')
-      return
-    }
-    await hostSync.markPublic(bundleSig, 'resource')
-    const receipted = (await hostSync.ensureReceipt?.(bundleSig, 12_000)) === true
-
-    const linkHost = normalizeHost(window.location.host) || window.location.host
-    const scheme = LOOPBACK_RE.test(linkHost) ? 'http' : 'https'
-    const url = `${scheme}://${linkHost}/${bundleSig}`
     // The availability gate above can run for minutes, so this lands far
     // outside the tap's activation — deliverLink descends sheet → clipboard →
     // fresh-tap offer, and on phones that offer is the path that actually
     // fires (mobile browsers refuse both sheet and clipboard this late).
-    const delivery = await deliverLink(url, name)
+    const delivery = await deliverLink(result.url, name)
     const linkText = delivery === 'shared'
       ? 'Link shared — anyone who opens it can preview, then adopt.'
       : delivery === 'copied'
         ? 'Link copied — anyone who opens it can preview, then adopt.'
-        : url
-    const doneMsg = receipted
+        : result.url
+    const doneMsg = result.linkReceipted
       ? this.#t(i18n, 'host.done', 'Branch hosted. {link}', { link: linkText })
-      : this.#t(i18n, 'host.done-pending-link', 'Branch hosted; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? url : 'Link ready.' })
-    this.#toast('success', this.#t(i18n, 'host.title', 'Host branch'), doneMsg)
-    console.log(`[host] "${name}" sealed=${sealed.slice(0, 12)}… index=${indexHost}/hive/${pubkey.slice(0, 12)}… link=${url}`)
-  }
+      : this.#t(i18n, 'host.done-pending-link', 'Branch hosted; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? result.url : 'Link ready.' })
+    this.#toast(result.status === 'confirmed' ? 'success' : 'info',
+      this.#t(i18n, 'host.title', 'Host branch'),
+      result.status === 'confirmed'
+        ? doneMsg
+        : this.#t(i18n, 'host.done-unconfirmed',
+          'Branch published — the public host has not served it back yet. Open /publish to watch it go live. {link}',
+          { link: linkText }))
 
-  #selfDomain = (): string => {
-    try { return normalizeHost(localStorage.getItem(SELF_DOMAIN_KEY) ?? '') } catch { return '' }
+    // Evidence of a past index wipe (or a publish from another device): our
+    // own ledger names branches the live index does not carry. Reported, never
+    // silently re-asserted — republishing them is the participant's call.
+    if (result.missingFromIndex.length > 0) {
+      this.#toast('info', this.#t(i18n, 'host.title', 'Host branch'),
+        this.#t(i18n, 'host.index-gaps',
+          '{count} branch(es) you published before are missing from your hive index — open /publish to republish them.',
+          { count: result.missingFromIndex.length }))
+    }
+
+    console.log(`[host] "${name}" sealed=${result.sealed.slice(0, 12)}… index=${result.host}/hive/${result.pubkey.slice(0, 12)}… link=${result.url} status=${result.status}`)
   }
 
   #t = (i18n: I18nProvider | undefined, key: string, fallback: string, params?: Record<string, unknown>): string =>

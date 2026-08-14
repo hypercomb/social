@@ -52,7 +52,8 @@ import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { signalSession } from '../window-session'
+import { type WindowSession } from '../window-session'
+import { PHONE_QUERY, isPhoneViewport } from '../breakpoints'
 import { looseMarks, namespaceGroupsOf } from './tag-grouping'
 
 interface TagRow {
@@ -125,10 +126,28 @@ export class TagsViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
 
-  /** Put away while the hive is covered. Only the showing stops: a staged
-   *  removal or an armed brush stays armed, where `close()` disarms them. */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('tags:view-state', { open }))
+  /** Put away while the hive needs the edge. Only the showing stops: a staged
+   *  removal or an armed brush stays armed, where `close()` disarms them.
+   *
+   *  Built by hand rather than with `signalSession` for ONE reason — the park
+   *  has to be distinguishable from a close ON THE WIRE. Both announce
+   *  `open:false`, and the drone that owns the tile-side brush cannot read our
+   *  intent from that alone, so it disarmed on either and the promise above was
+   *  quietly broken for every park the shell made (lane eviction, a rail flyout,
+   *  the installer). `parked:true` is the whole fix; the drone leaves an armed
+   *  brush alone when it sees it. */
+  readonly session: WindowSession = {
+    park: () => {
+      this.visible.set(false)
+      EffectBus.emit('tags:view-state', { open: false, parked: true })
+    },
+    unpark: () => {
+      this.visible.set(true)
+      EffectBus.emit('tags:view-state', { open: true })
+    },
+    dismiss: () => this.dismiss(),
+    close: () => this.close(),
+  }
 
   /** Per-page tag counts, last value from `render:tags`. */
   readonly #counts = signal<Map<string, number>>(new Map())
@@ -319,6 +338,7 @@ export class TagsViewerComponent implements OnDestroy {
   }
 
   constructor() {
+    this.#phoneQuery?.addEventListener('change', this.#phoneHandler)
     this.#cleanups.push(onSelection(({ selected }) => {
       this.#canvasSelection.set(selected)
       this.#cdr.markForCheck()
@@ -393,6 +413,7 @@ export class TagsViewerComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
+    this.#phoneQuery?.removeEventListener('change', this.#phoneHandler)
   }
 
   #registry(): TagRegistryLike | undefined {
@@ -432,11 +453,20 @@ export class TagsViewerComponent implements OnDestroy {
   #hoverLabel: string | null = null
 
   /** Phone-shaped viewport — small in EITHER dimension (a phone on its side is
-   *  wide but short). Matches the app-wide mobile detection. */
-  #isPhone(): boolean {
-    try { return window.matchMedia('(max-width: 599px), (max-height: 449px)').matches }
-    catch { return false }
-  }
+   *  wide but short). One spelling, shared with the lane (breakpoints.ts).
+   *
+   *  Public and a SIGNAL because the template binds it: on a phone this panel
+   *  is a full-bleed sheet, and a sheet has no business holding a place in the
+   *  lane or an offset it ignores. */
+  readonly isPhone = signal(isPhoneViewport())
+
+  #isPhone(): boolean { return this.isPhone() }
+
+  /** Keep the sheet-mode signal current — rotating a phone crosses the
+   *  threshold in both directions, and a lane place held by a full-bleed sheet
+   *  is a place nothing can use. */
+  readonly #phoneQuery = typeof window !== 'undefined' ? window.matchMedia(PHONE_QUERY) : null
+  readonly #phoneHandler = (e: MediaQueryListEvent): void => { this.isPhone.set(e.matches) }
 
   onRowPointerDown(event: PointerEvent, row: TagRow): void {
     if (event.button !== 0) return
@@ -859,16 +889,16 @@ export class TagsViewerComponent implements OnDestroy {
     EffectBus.emit('tags:view-state', { open: false })
   }
 
-  onKey(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    // Escape steps back exactly one level: shut the naming field, then the
-    // painter (discarding its staging — Done is the only save), then drop an
-    // armed removal, and only close the panel once nothing is open inside it.
-    if (this.#naming()) { this.cancelNaming(); return }
-    if (this.#painterOpen()) { this.closePainter(); return }
-    if (this.#removalTag()) { this.cancelRemoval(); return }
-    this.close()
+  /** One level back per press: shut the naming field, then the painter
+   *  (discarding its staging — Done is the only save), then drop an armed
+   *  removal. False means nothing of ours was open, and the shell cascade
+   *  carries on past us — clearing a selection before it ever closes this
+   *  window. Reached from the session; there is no listener here. */
+  dismiss(): boolean {
+    if (this.#naming()) { this.cancelNaming(); return true }
+    if (this.#painterOpen()) { this.closePainter(); return true }
+    if (this.#removalTag()) { this.cancelRemoval(); return true }
+    return false
   }
 }
 

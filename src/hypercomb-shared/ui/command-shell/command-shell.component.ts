@@ -231,7 +231,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly chatPanelOpen = input<boolean>(false)
   readonly chatLabel = input<string>('chat')
 
-  readonly showFeaturesToggle = input<boolean>(false)
+  /** The Beehaviors window's open state — lights the toggle that sits
+   *  immediately right of views. Standing tool, never gated: the layer you
+   *  are on always has beehaviors to look at, even if the answer is none. */
   readonly featuresPanelOpen = input<boolean>(false)
   readonly featuresLabel = input<string>('features')
 

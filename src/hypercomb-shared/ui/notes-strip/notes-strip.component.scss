@@ -67,30 +67,41 @@
 // begins is what lets the pheromones window open BESIDE the fullscreen
 // notes/lists surface — chips drag from the panel onto individual note rows
 // and list lines (`data-pheromone-note`), instead of the panel covering the
-// reading pane it is aiming at. Guarded to the sizes where panels actually
-// dock: below 600×450 they become full-width bottom sheets, whose
-// reservation is the whole viewport and would squash the desk to nothing.
-@media (min-width: 600px) and (min-height: 450px) {
-  :host.is-fullscreen { right: var(--hc-inset-right, 0px); }
-}
-:host.is-fullscreen .notes-strip {
-  // !important on size to override the inline width/height the
-  // resize observer writes for the user's stored dock dimensions.
-  width: 100% !important;
+// reading pane it is aiming at.
+//
+// This used to be fenced behind `(min-width: 600px) and (min-height: 450px)`,
+// because below that a panel becomes a full-width sheet whose reservation was
+// the WHOLE viewport — and yielding to that squashed the desk to nothing. The
+// reservation is honest now (dock-inset.directive.ts: a full-bleed sheet
+// reports nothing at all), so the fence is gone and the desk yields correctly
+// at every size. On a phone the sheet reserves 0, the desk stays full width,
+// and the sheet sits over it — exactly what the sheet's own styling asks for.
+:host.is-fullscreen { right: var(--hc-inset-right, 0px); }
+// FILL THE HOST, do not re-anchor to the viewport.
+//
+// The docked panel is `position: fixed`, so its containing block is the
+// VIEWPORT — `width: 100%` resolved to the full screen and `right: 0` pinned it
+// to the screen's edge, both of them straight through the host's inset. The
+// host shrank to leave room for the pheromone panel and the desk inside it did
+// not, so the panel covered the reading pane it was aiming at. (It also made
+// `height: 100%` the whole viewport height while the panel starts below the
+// header, pushing the footer and the end of the tile list off the bottom.)
+//
+// `absolute` + `inset: 0` makes the host the containing block instead: one
+// element owns the fullscreen geometry — the host, which is where the yield is
+// expressed — and the desk simply fills whatever it is given, at every size.
+:host.is-fullscreen .notes-strip,
+:host.is-fullscreen .notes-strip.dock-right {
+  position: absolute;
+  inset: 0;
+  // !important to override the inline width/height the resize observer writes
+  // for the participant's stored dock dimensions.
+  width: auto !important;
   max-width: none !important;
-  height: 100% !important;
+  height: auto !important;
   max-height: none !important;
   border-radius: 0;
   transform: none !important; // override panel-offset translate
-}
-// The docked panel is `position: fixed` against the VIEWPORT, so the
-// `height: 100%` above resolves to the full viewport height while the panel
-// starts below the header — pushing its last ~50px (footer, end of the tile
-// list) off the bottom of the screen. Span the edges instead and let the
-// height fall out of top/bottom.
-:host.is-fullscreen .notes-strip.dock-right {
-  bottom: 0;
-  height: auto !important;
 }
 :host.is-fullscreen .cv2-list {
   max-height: none;

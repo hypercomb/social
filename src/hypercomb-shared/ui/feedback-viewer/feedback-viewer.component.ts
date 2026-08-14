@@ -129,8 +129,11 @@ export class FeedbackViewerComponent implements OnDestroy {
 
   /** Put away while the hive is covered — including anything half-typed in the
    *  composer, which a reload-free return must not throw away. */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('feedback:panel-state', { open }))
+  readonly session = signalSession(
+    this.visible,
+    open => EffectBus.emit('feedback:panel-state', { open }),
+    { close: () => this.close() },
+  )
 
   readonly loading = signal(false)
   readonly items = signal<FeedbackItem[]>([])

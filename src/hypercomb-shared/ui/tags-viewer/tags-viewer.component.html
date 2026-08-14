@@ -3,6 +3,7 @@
     class="tags-panel"
     hcDockInset="right"
     hcDockedPanel="tags-viewer"
+    [dockExclusive]="!isPhone()"
     [hcSession]="session"
     (hcDockedPanelClose)="close()"
     dockSide="right"
@@ -10,9 +11,7 @@
     [maxWidth]="560"
     [defaultWidth]="320"
     data-consumes-wheel
-    (keydown)="onKey($event)"
     tabindex="-1"
-    role="dialog"
     [attr.aria-label]="'tags.viewer.title' | t"
   >
     <!-- Reach rides in the header, the same segmented trio the feedback panel

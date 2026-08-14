@@ -4,6 +4,7 @@
     [class.reviewing]="isPhone() && !!reviewTarget()"
     hcDockInset="right"
     hcDockedPanel="features-viewer"
+    [dockExclusive]="!isPhone()"
     [hcSession]="session"
     (hcDockedPanelClose)="close()"
     dockSide="right"
@@ -11,9 +12,7 @@
     [maxWidth]="680"
     [defaultWidth]="404"
     data-consumes-wheel
-    (keydown)="onKey($event)"
     tabindex="-1"
-    role="dialog"
     [attr.aria-label]="'features.viewer.title' | t"
   >
     <header class="features-header">
@@ -63,14 +62,46 @@
       />
     </div>
 
-    <!-- The ONE tile the panel is scoped to. -->
+    <!-- WHAT THE PANEL IS DESCRIBING — self, or a tile on self.
+         Two steps at most: the loaded layer (always there, always the way
+         back) and, when a tile's puzzle-piece put one in the subject, that
+         tile. Walking the hive re-targets the panel at the layer you arrive
+         on, so the second step only exists while you deliberately asked
+         about a child. -->
     @if (!isStore() && group(); as g) {
-      <div class="features-context" [title]="g.cell">
+      <nav class="features-context" [attr.aria-label]="'features.context.aria' | t">
         <span class="features-context-icon" aria-hidden="true">
-          <span class="mat-sym">grid_view</span>
+          <span class="mat-sym">{{ subjectIsSelf() ? 'layers' : 'grid_view' }}</span>
         </span>
-        <strong class="features-tile">{{ g.cell }}</strong>
-      </div>
+        <div class="features-context-copy">
+          <span class="features-context-label">{{ 'features.context.label' | t }}</span>
+          <div class="features-crumbs">
+            <button
+              class="features-crumb self"
+              type="button"
+              [class.current]="subjectIsSelf()"
+              [disabled]="subjectIsSelf()"
+              (click)="goSelf()"
+              [attr.aria-current]="subjectIsSelf() ? 'true' : null"
+              [title]="(subjectIsSelf() ? 'features.context.self.here' : 'features.context.self.hint') | t: { cell: selfName() }"
+            >
+              <span class="mat-sym" aria-hidden="true">layers</span>
+              <span class="crumb-name">{{ selfName() }}</span>
+            </button>
+            @if (!subjectIsSelf()) {
+              <span class="features-crumb-sep" aria-hidden="true">›</span>
+              @if (subjectGap(); as gap) {
+                <span class="features-crumb-sep" aria-hidden="true">{{ gap }}</span>
+                <span class="features-crumb-sep" aria-hidden="true">›</span>
+              }
+              <span class="features-crumb current" [title]="g.cell" aria-current="true">
+                <span class="mat-sym" aria-hidden="true">grid_view</span>
+                <span class="crumb-name">{{ g.cell }}</span>
+              </span>
+            }
+          </div>
+        </div>
+      </nav>
       @if (isPhone() && !reviewTarget() && g.segments.length) {
         <button class="features-select-tile" type="button" (click)="selectTile()">
           <span class="mat-sym" aria-hidden="true">select_all</span>

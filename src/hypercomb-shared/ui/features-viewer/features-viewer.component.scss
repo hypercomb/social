@@ -78,18 +78,6 @@ $accent: #c8b8ff;
 
 // The ONE tile the panel is scoped to — its own subject line under the header
 // (moved out of the header to make room for the search). Ellipsizes.
-.features-tile {
-  flex: 0 0 auto;
-  padding: 0.45em 0.75em 0;
-  font-size: 0.86em;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: rgba($accent, 0.8);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .features-select-tile {
   display: none;
 }
@@ -387,7 +375,6 @@ $accent: #c8b8ff;
   // tap the first button. Everything else stands down until it is answered.
   .features-panel.reviewing {
     .features-header,
-    .features-tile,
     .features-selection,
     .paint-bar,
     .bulk-bar,
@@ -1132,14 +1119,59 @@ $path-fail: #e08a8a;     // failed terminal
   color: rgba(255, 255, 255, 0.4);
 }
 
-.features-context .features-tile {
+// ── the subject crumb: self › tile ────────────────────────────────
+// Two steps at most. The self step is a BUTTON whenever it isn't the
+// subject — the one-press way back to the loaded layer — and goes inert
+// (not hidden, not removed) once you are on it, so the row never reflows
+// as the subject changes.
+.features-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.features-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-width: 0;
   padding: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 0.84rem;
   font-weight: 620;
   letter-spacing: 0;
-  color: rgba(249, 247, 255, 0.9);
+  color: rgba(233, 228, 255, 0.62);
+  cursor: pointer;
+  transition: color 140ms ease;
+
+  .mat-sym { font-size: 0.9em; opacity: 0.75; }
+
+  .crumb-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover:not(:disabled) { color: #f6f3ff; }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 2px; border-radius: 2px; }
+
+  // The step you are on: full weight, no affordance.
+  &.current {
+    color: rgba(249, 247, 255, 0.9);
+    cursor: default;
+
+    .mat-sym { opacity: 1; color: rgba($accent, 0.9); }
+  }
+}
+
+.features-crumb-sep {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.28);
 }
 
 .features-scroll {

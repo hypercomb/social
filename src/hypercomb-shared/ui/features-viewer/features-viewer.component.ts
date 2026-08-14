@@ -35,6 +35,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
+import { PHONE_QUERY } from '../breakpoints'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
 import { setKindGlobalOn, ENABLEMENT_CHANGED } from './behavior-enablement'
@@ -175,11 +176,69 @@ export class FeaturesViewerComponent implements OnDestroy {
   /** Put away while the hive is covered, brought back on the way home — the
    *  panel's rows, selection and query all survive, which `close()` would not
    *  (it empties the panel on purpose). */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('features:viewer-state', { open }))
+  readonly session = signalSession(
+    this.visible,
+    open => EffectBus.emit('features:viewer-state', { open }),
+    { dismiss: () => this.dismiss(), close: () => this.close() },
+  )
 
   /** The ONE tile the panel is describing. Null = closed / store only. */
   readonly group = signal<FeatureGroup | null>(null)
+
+  // ── SELF and CHILD ────────────────────────────────────────────────
+  //
+  // The panel has TWO doors and they mean different things:
+  //
+  //   • the top rail's switch — no tile in hand, so the subject is the
+  //     CONTEXT: the layer that is loaded. Walk deeper and the subject walks
+  //     with you; every arrival lands on self again.
+  //   • a tile's puzzle-piece — that TILE becomes the subject, a child of
+  //     self, and it stays there. Standing on the parent does not drag the
+  //     panel back up; you asked about the tile.
+  //
+  // The crumb above the rows says which of the two you are looking at, and
+  // its self step is the way back — no navigation required.
+
+  /** Where the participant is STANDING — the loaded layer's path. Kept fresh
+   *  even while the panel is closed, so the crumb is right the moment it
+   *  opens. Empty = the hive root. */
+  readonly contextPath = signal<readonly string[]>([])
+
+  /** The loaded layer's display name — its last segment, the hive at `/`. */
+  readonly selfName = computed(() => {
+    const segs = this.contextPath()
+    return segs.length ? segs[segs.length - 1] : this.#t('features.context.hive', 'the hive')
+  })
+
+  /** True while the subject IS the loaded layer rather than a tile on it. */
+  readonly subjectIsSelf = computed(() => {
+    const g = this.group()
+    if (!g) return true
+    const here = this.contextPath()
+    // Step by step: a tile name may hold any character, so no joined-string
+    // key is safe as an identity test here.
+    return g.segments.length === here.length && here.every((s, i) => g.segments[i] === s)
+  })
+
+  /** Ellipsis crumb between self and the subject — raised when the subject is
+   *  more than one hop down, or off this branch entirely (the adopt fold can
+   *  point the panel anywhere). '' = the subject is a direct child. */
+  readonly subjectGap = computed(() => {
+    const g = this.group()
+    if (!g || this.subjectIsSelf()) return ''
+    const here = this.contextPath()
+    const beneath = g.segments.length > here.length
+      && here.every((s, i) => g.segments[i] === s)
+    if (!beneath) return '…'
+    return g.segments.length - here.length > 1 ? '…' : ''
+  })
+
+  /** Put the subject back on the LOADED LAYER — the crumb's self step. Same
+   *  pipeline navigation uses, so the arrival is indistinguishable. */
+  readonly goSelf = (): void => {
+    if (this.subjectIsSelf()) return
+    this.#openAt(this.contextPath())
+  }
 
   /** A foreign feature the participant has been asked to REVIEW before
    *  enabling — set from `feature:review:open` (the website gate). */
@@ -190,7 +249,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   /** Phone-shaped viewport (narrow OR short). */
   readonly isPhone = signal(
     typeof window !== 'undefined'
-      ? window.matchMedia('(max-width: 599px), (max-height: 449px)').matches
+      ? window.matchMedia(PHONE_QUERY).matches
       : false,
   )
   #phoneQuery: MediaQueryList | null = null
@@ -276,16 +335,32 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** Re-request the current group so the drone re-marks its rows (fresh
-   *  dormant/global-off state). Same pipeline follow-navigation uses; the
-   *  root group re-targets with `root: true` (segments [] is the hive). */
+   *  dormant/global-off state). Same pipeline follow-navigation uses. */
   #refreshGroup(): void {
     const g = this.group()
     if (!g) return
-    if (g.segments.length === 0) {
-      EffectBus.emit('tile:action', { action: 'features', label: g.cell, segments: [], root: true })
+    this.#openAt(g.segments, g.cell)
+  }
+
+  /** Ask the drone to describe a LOCATION — the one way this panel changes
+   *  subject, whether the trigger is navigation, the rail switch, the crumb's
+   *  self step or a roster flip. Empty segments are the hive ROOT and must
+   *  say so: `root: true` is what tells the drone not to resolve the label as
+   *  a tile at the current location. */
+  #openAt(segments: readonly string[], rootLabel = 'hypercomb'): void {
+    const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segs.length === 0) {
+      EffectBus.emit('tile:action', { action: 'features', label: rootLabel, segments: [], root: true })
       return
     }
-    EffectBus.emit('tile:action', { action: 'features', label: g.cell, segments: [...g.segments] })
+    EffectBus.emit('tile:action', { action: 'features', label: segs[segs.length - 1], segments: segs })
+  }
+
+  /** Where the participant is standing, read fresh from lineage. */
+  #currentSegments(): string[] {
+    const lineage = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
   }
 
   /** The behaviour kinds loaded in the brush (paint mode). */
@@ -368,7 +443,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   #lastNavKey = ''
 
   constructor() {
-    this.#phoneQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
+    this.#phoneQuery = window.matchMedia(PHONE_QUERY)
     this.isPhone.set(this.#phoneQuery.matches)
     this.#phoneQuery.addEventListener('change', this.#phoneHandler)
 
@@ -468,31 +543,41 @@ export class FeaturesViewerComponent implements OnDestroy {
       }
     }))
 
+    // ── the top rail's Beehaviors switch ──────────────────────────────
+    //
+    // No tile in hand, so the subject is the CONTEXT — the loaded layer.
+    // Everything after that is the ordinary pipeline: the drone answers with
+    // `features:open`, and that is what raises the panel.
+    this.#cleanups.push(EffectBus.on('features:context-open', () => {
+      const segs = this.#currentSegments()
+      this.contextPath.set(segs)
+      this.#openAt(segs)
+    }))
+
     // ── the panel FOLLOWS NAVIGATION ──────────────────────────────────
+    //
+    // Arriving on a layer makes it the subject — SELF — even when a tile's
+    // puzzle-piece had pinned a child before the walk. The context is tracked
+    // whether the panel is open or shut, so the crumb is already right the
+    // moment it opens.
     const lineage = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<EventTarget & { explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    this.contextPath.set(this.#currentSegments())
     if (lineage?.addEventListener) {
       this.#lastNavKey = (lineage.explorerSegments?.() ?? []).join('\u0000')
       const onNav = (): void => {
-        const segs = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+        const segs = this.#currentSegments()
         const key = segs.join('\u0000')
         if (key === this.#lastNavKey) return
         this.#lastNavKey = key
+        this.contextPath.set(segs)
         if (!this.visible()) return
         // Root is a context too — the hive itself. Leaving the panel on the
         // previous tile's group after backing out to `/` showed a subject the
-        // participant is no longer standing on. `root: true` tells the drone
-        // to describe the hive root (segments []) rather than resolving the
-        // label as a tile at the current location.
-        if (segs.length === 0) {
-          EffectBus.emit('tile:action', { action: 'features', label: 'hypercomb', segments: [], root: true })
-          return
-        }
-        EffectBus.emit('tile:action', {
-          action: 'features',
-          label: segs[segs.length - 1],
-          segments: segs,
-        })
+        // participant is no longer standing on. (#openAt raises `root: true`
+        // for the empty path, which is what tells the drone to describe the
+        // hive rather than resolve the label at the current location.)
+        this.#openAt(segs)
       }
       lineage.addEventListener('change', onNav)
       this.#cleanups.push(() => lineage.removeEventListener('change', onNav))
@@ -1023,7 +1108,11 @@ export class FeaturesViewerComponent implements OnDestroy {
     }
     const nav = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ go?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
-    nav?.go?.([...group.segments])
+    // A CASCADE row is the scope's behaviour seen from a member cell — its
+    // surface lives at the scope root (a website's home page), not here.
+    // Navigating to the clicked cell mounted a page-less member and the view
+    // came up empty; `scopeSegments` is the root the row was minted from.
+    nav?.go?.([...(feat.scopeSegments?.length ? feat.scopeSegments : group.segments)])
     EffectBus.emit('view:toggle', { view: feat.view, mode: 'on' })
     this.close()
   }
@@ -1096,16 +1185,15 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#armRowLeash(key)
   }
 
-  onKey(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    // Escape backs out of a review first, then paint, then the search,
-    // then the store, and only then closes.
-    if (this.reviewTarget()) { this.cancelReview(); return }
-    if (this.mode() === 'paint') { this.toggleMode(); return }
-    if (this.query()) { this.query.set(''); return }
-    if (this.mode() === 'store') { this.closeStore(); return }
-    this.close()
+  /** One level back per press: a review, then paint, then the search, then the
+   *  store. False = nothing of ours was open, and the shell cascade carries on.
+   *  Reached from the session; there is no listener here. */
+  dismiss(): boolean {
+    if (this.reviewTarget()) { this.cancelReview(); return true }
+    if (this.mode() === 'paint') { this.toggleMode(); return true }
+    if (this.query()) { this.query.set(''); return true }
+    if (this.mode() === 'store') { this.closeStore(); return true }
+    return false
   }
 }
 

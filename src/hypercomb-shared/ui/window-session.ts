@@ -29,18 +29,45 @@
 // `hcDockedPanel`'s `hcSession` input; floating ones (the pinnable hover stack,
 // the notes reader, the rewind window) call `holdWindow` themselves.
 
-/** What a window has to be able to do to take part in the session. */
+/** What a window has to be able to do to take part in the session.
+ *
+ *  `park`/`unpark` are the shell putting a window away and bringing it back.
+ *  `dismiss`/`close` are ESCAPE — the participant backing out — and they are
+ *  optional because a window that offers neither simply is not something Escape
+ *  can act on (the pinnable hover stack registers no dismiss, and that is how it
+ *  keeps its own cascade rung). */
 export interface WindowSession {
   /** Stop showing, WITHOUT forgetting anything. */
   park(): void
   /** Show again, exactly as park() left it. */
   unpark(): void
+  /** Unwind ONE level of my own state — a naming field, an armed mode, a drill
+   *  down. Return true if the press was CONSUMED; false means "nothing of mine
+   *  was open" and Escape carries on down the cascade. One level per press: a
+   *  window that unwound everything at once would make Escape unpredictable. */
+  dismiss?(): boolean
+  /** The participant's own close verb — the same thing the × does, including
+   *  whatever state that window considers itself finished with. */
+  close?(): void
+}
+
+/** A held window: its session, and how to find its element. The root is a
+ *  THUNK because the element is remounted freely (parking takes the DOM with
+ *  it) and a captured reference would go stale on the first park. */
+interface HeldWindow {
+  session: WindowSession
+  root?: () => HTMLElement | null
 }
 
 /** Currently-showing windows, by id. One entry per window — a re-registration
  *  under the same id replaces the old one (a window remounting is the same
- *  window, not a second one). */
-const showing = new Map<string, WindowSession>()
+ *  window, not a second one).
+ *
+ *  Insertion order matters and is subtler than it looks: `Map.set` on an
+ *  EXISTING key keeps the original index, so a park→unpark round trip returns a
+ *  window to the rank it held before, rather than to the end. That is the
+ *  wanted behaviour — say so here rather than let someone rediscover it. */
+const showing = new Map<string, HeldWindow>()
 
 /** The parked set, in the order it was parked. Empty = we are in the hive. */
 let parked: { id: string; session: WindowSession }[] = []
@@ -48,9 +75,37 @@ let parked: { id: string; session: WindowSession }[] = []
 /** Register a window as SHOWING. Call when it opens; call the returned release
  *  when it closes (or is parked — parking takes its DOM with it, and the parked
  *  list holds what it needs from then on). */
-export function holdWindow(id: string, session: WindowSession): () => void {
-  showing.set(id, session)
-  return () => { if (showing.get(id) === session) showing.delete(id) }
+export function holdWindow(
+  id: string,
+  session: WindowSession,
+  root?: () => HTMLElement | null,
+): () => void {
+  showing.set(id, { session, root })
+  return () => { if (showing.get(id)?.session === session) showing.delete(id) }
+}
+
+/** The showing window that CONTAINS the focus, or null.
+ *
+ *  This is the whole gate behind Escape ownership. Escape used to be claimed by
+ *  whichever window happened to have registered a listener, whether or not the
+ *  participant was anywhere near it — so an open panel could swallow the press
+ *  that was meant to cancel the tile editor or clear the selection out on the
+ *  canvas. Asking "is the focus IN this window" turns that into one rule with a
+ *  visible answer.
+ *
+ *  Windows registered without a root can never match, which is correct: a
+ *  surface that does not say where it is has not claimed the keyboard. Focus on
+ *  <body> (the canvas) matches nothing, so the cascade runs as if no window
+ *  were open — which is exactly what the participant means by that press. */
+export function focusedWindow(): { id: string; session: WindowSession } | null {
+  if (typeof document === 'undefined') return null
+  const active = document.activeElement
+  if (!active || active === document.body) return null
+  for (const [id, held] of showing) {
+    const root = held.root?.()
+    if (root && root.contains(active)) return { id, session: held.session }
+  }
+  return null
 }
 
 /** Put every showing window away. Idempotent while parked — a second call (a
@@ -59,7 +114,7 @@ export function holdWindow(id: string, session: WindowSession): () => void {
  *  on screen by then. Returns how many were parked. */
 export function parkWindows(): number {
   if (parked.length) return 0
-  parked = [...showing].map(([id, session]) => ({ id, session }))
+  parked = [...showing].map(([id, held]) => ({ id, session: held.session }))
   for (const { session } of parked) {
     try { session.park() }
     catch (err) { console.error('[window-session] park failed:', err) }
@@ -79,6 +134,12 @@ export function unparkWindows(): number {
   }
   return list.length
 }
+
+/** Is this window on screen right now? Asked by a lane undo before it restores
+ *  something: a window the participant reopened by hand while a menu was up is
+ *  already back, and restoring it again would replay a decision they have
+ *  already made. */
+export function isWindowShowing(id: string): boolean { return showing.has(id) }
 
 /** True while windows are put away (we are not in the hive). */
 export function windowsParked(): boolean { return parked.length > 0 }
@@ -105,9 +166,17 @@ export interface BooleanSignal { (): boolean; set(value: boolean): void }
 export function signalSession(
   visible: BooleanSignal,
   announce?: (open: boolean) => void,
+  /** The window's ESCAPE behaviour, when it has any. `dismiss` unwinds one
+   *  level of its own state and says whether it consumed the press; `close` is
+   *  its own close verb. Supplied here so a window declares its keyboard
+   *  behaviour in the same breath as its session, rather than hand-rolling a
+   *  listener that competes with the cascade. */
+  escape?: { dismiss?: () => boolean; close?: () => void },
 ): WindowSession {
   return {
     park: () => { visible.set(false); announce?.(false) },
     unpark: () => { visible.set(true); announce?.(true) },
+    ...(escape?.dismiss ? { dismiss: escape.dismiss } : {}),
+    ...(escape?.close ? { close: escape.close } : {}),
   }
 }
