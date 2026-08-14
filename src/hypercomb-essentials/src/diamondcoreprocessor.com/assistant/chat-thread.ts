@@ -38,6 +38,37 @@ export interface ChatTurn {
   readonly role: TurnRole
   readonly text: string
   readonly at: number
+  /** The text's root-resource signature — present on doctrine-shape turns
+   *  (see below), absent on legacy inline turns. */
+  readonly contentSig?: string
+}
+
+/** A turn as it sits ON DISK since the doctrine pass: the TEXT is a root
+ *  content resource and the turn is a small manifest pointing at it —
+ *  `{ "role", "contentSig" }` is CLAUDE.md's own worked example, and thread
+ *  turns are explicitly on signature-system.md's must-be-a-resource list.
+ *  What that buys: the bytes are stored ONCE however many windows, asks or
+ *  notes carry them (an answer pasted into a note and the turn dedup to one
+ *  resource); the list walk reads small manifests instead of whole
+ *  conversations; and the text can be shared/expanded by sig anywhere.
+ *  LEGACY turns (inline `text`, no `contentSig`) remain readable forever —
+ *  a thread is whatever its bucket holds, in either shape. */
+type TurnManifest = {
+  readonly kind: 'chat-turn'
+  readonly convoId: string
+  readonly role: TurnRole
+  readonly at: number
+  readonly contentSig: string
+}
+
+/** A parsed bucket file before its text is materialized: either a legacy
+ *  inline turn (text present) or a manifest (contentSig present). */
+type RawTurn = {
+  readonly convoId: string
+  readonly role: TurnRole
+  readonly at: number
+  readonly text?: string
+  readonly contentSig?: string
 }
 
 /** One conversation, as the chat window lists it. Recovered from the pool —
@@ -75,6 +106,8 @@ export const newConvoId = (): string =>
 
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  putResource?: (blob: Blob) => Promise<string>
+  getResource?: (sig: string) => Promise<Blob | null>
 }
 
 const hex = (buf: ArrayBuffer): string =>
@@ -119,11 +152,25 @@ export const appendTurn = async (
   }
 
   try {
-    const turn: ChatTurn = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body }
-    const bytes = new TextEncoder().encode(JSON.stringify(turn)).buffer as ArrayBuffer
+    // THE TEXT IS A RESOURCE, THE TURN IS A MANIFEST (signature doctrine —
+    // see TurnManifest above). The bytes land once at the content root and
+    // dedup against every other holder of the same text; the bucket file is
+    // a small pointer record, which is also what makes the list walk cheap.
+    // Falls back to the legacy inline shape only when the store cannot mint
+    // resources (a partial runtime) — losing the turn entirely would be
+    // worse than storing it in the old shape.
     const bucket = await bucketFor(pool, id)
-    // Named by its own content hash: append-only, and the same turn written
-    // twice (a retry) lands on one file instead of duplicating.
+    let record: ChatTurn | TurnManifest
+    if (store?.putResource) {
+      const contentSig = await store.putResource(new Blob([body], { type: 'text/plain' }))
+      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig }
+    } else {
+      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body }
+    }
+    const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
+    // Named by its own content hash: append-only. (Two deliberate repeats of
+    // the same words are two manifests — `at` differs — while the TEXT bytes
+    // behind them are one deduped resource.)
     const handle = await bucket.getFileHandle(await sha256(bytes), { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
@@ -134,8 +181,9 @@ export const appendTurn = async (
   }
 }
 
-/** Every turn in one bucket, oldest first. Shared by the single-thread read and
- *  the conversation list, so both agree about what a thread contains.
+/** Every turn record in one bucket, oldest first, texts NOT yet materialized —
+ *  shared by the single-thread read and the conversation list, so both agree
+ *  about what a thread contains.
  *
  *  `humanOnly` is the LIST walk's cost guard: bucket names are `sha256(convoId)`
  *  (one-way), so which conversations are a person's is only knowable from the
@@ -143,19 +191,21 @@ export const appendTurn = async (
  *  a bucket carries the same convoId. The walk used to read every file of every
  *  machine bucket (`keywords:…` chatter can dwarf the human threads) and throw
  *  the lot away after; with the probe, a machine bucket costs one read. */
-const readBucket = async (
+const readBucketRaw = async (
   bucket: FileSystemDirectoryHandle,
   humanOnly = false,
-): Promise<ChatTurn[] | null> => {
-  const out: ChatTurn[] = []
+): Promise<RawTurn[] | null> => {
+  const out: RawTurn[] = []
   let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
   for await (const [, handle] of entries) {
     if (handle.kind !== 'file') continue
     try {
       const file = await (handle as FileSystemFileHandle).getFile()
-      const turn = JSON.parse(await file.text()) as ChatTurn
+      const turn = JSON.parse(await file.text()) as RawTurn & { kind?: string }
       if (turn?.kind !== 'chat-turn' || !turn.convoId) continue
+      // Either shape: legacy inline text, or a manifest pointing at it.
+      if (typeof turn.text !== 'string' && typeof turn.contentSig !== 'string') continue
       // The first PARSEABLE turn names the whole bucket.
       if (!decided) {
         if (!isHumanConversation(turn.convoId)) return null
@@ -166,6 +216,33 @@ const readBucket = async (
   }
   return out.sort((a, b) => a.at - b.at)
 }
+
+/** The text behind one raw turn: inline (legacy) or resolved from the content
+ *  root by sig. An unresolvable resource yields '' — the turn's existence
+ *  (role, time) is still true, and hiding the whole turn would silently
+ *  shorten a conversation. */
+const resolveText = async (raw: RawTurn, store: StoreLike): Promise<string> => {
+  if (typeof raw.text === 'string') return raw.text
+  if (!raw.contentSig || !store.getResource) return ''
+  try {
+    const blob = await store.getResource(raw.contentSig)
+    return blob ? await blob.text() : ''
+  } catch { return '' }
+}
+
+/** Raw records → the ChatTurn shape every consumer reads (text materialized). */
+const materializeTurns = async (
+  raw: readonly RawTurn[],
+  store: StoreLike,
+): Promise<ChatTurn[]> =>
+  Promise.all(raw.map(async r => ({
+    kind: 'chat-turn' as const,
+    convoId: r.convoId,
+    role: r.role,
+    at: r.at,
+    text: await resolveText(r, store),
+    ...(r.contentSig ? { contentSig: r.contentSig } : {}),
+  })))
 
 /** Every stored turn for a conversation, oldest first. What a window reads
  *  when it opens — which is why a closed window costs nothing. */
@@ -180,17 +257,22 @@ export const readTurns = async (convoId: string): Promise<ChatTurn[]> => {
   try {
     const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
     const bucket = await pool.getDirectoryHandle(name, { create: false })
-    return (await readBucket(bucket) ?? []).filter(turn => turn.convoId === id)
+    const raw = (await readBucketRaw(bucket) ?? []).filter(turn => turn.convoId === id)
+    return await materializeTurns(raw, store!)
   } catch { /* no bucket yet — an empty conversation, not an error */ }
   return []
 }
 
 /** The first line of the first thing the person said, which is what a
  *  conversation is actually about. Falls back to the first turn of any role so
- *  a thread that somehow starts with a reply still gets a name. */
-const titleOf = (turns: readonly ChatTurn[]): string => {
-  const lead = turns.find(turn => turn.role === 'user') ?? turns[0]
-  const line = String(lead?.text ?? '').split('\n').map(s => s.trim()).find(Boolean) ?? ''
+ *  a thread that somehow starts with a reply still gets a name. Takes RAW
+ *  turns and resolves exactly ONE text — the lead's — so naming a thread in
+ *  the list walk costs one resource read, not a whole-conversation read. */
+const titleOfRaw = async (raw: readonly RawTurn[], store: StoreLike): Promise<string> => {
+  const lead = raw.find(turn => turn.role === 'user') ?? raw[0]
+  if (!lead) return ''
+  const text = await resolveText(lead, store)
+  const line = text.split('\n').map(s => s.trim()).find(Boolean) ?? ''
   return line.length > 72 ? line.slice(0, 71).trimEnd() + '…' : line
 }
 
@@ -218,32 +300,38 @@ export interface ConversationList {
 export const listConversationsWithLatest = async (): Promise<ConversationList> => {
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
-  if (!pool) return { conversations: [], latestTurns: [] }
+  if (!pool || !store) return { conversations: [], latestTurns: [] }
 
   const out: ConversationSummary[] = []
-  let latestTurns: ChatTurn[] = []
+  let latestRaw: RawTurn[] = []
   let latestAt = -1
   try {
     const entries = (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
     for await (const [, handle] of entries) {
       if (handle.kind !== 'directory') continue
       try {
-        const turns = await readBucket(handle as FileSystemDirectoryHandle, true)
-        if (!turns) continue   // a machine bucket, skipped after one read
-        const convoId = turns[0]?.convoId
+        const raw = await readBucketRaw(handle as FileSystemDirectoryHandle, true)
+        if (!raw) continue   // a machine bucket, skipped after one read
+        const convoId = raw[0]?.convoId
         if (!convoId) continue
-        const lastAt = turns[turns.length - 1]?.at ?? 0
+        const lastAt = raw[raw.length - 1]?.at ?? 0
         out.push({
           convoId,
-          title: titleOf(turns),
-          turnCount: turns.length,
+          // One resource read per thread — the lead turn's text names it;
+          // counts and recency come from the manifests alone.
+          title: await titleOfRaw(raw, store),
+          turnCount: raw.length,
           lastAt,
         })
-        if (lastAt > latestAt) { latestAt = lastAt; latestTurns = turns }
+        if (lastAt > latestAt) { latestAt = lastAt; latestRaw = raw }
       } catch { /* one unreadable bucket must not hide the rest of the list */ }
     }
   } catch { /* no pool yet — no conversations, not an error */ }
-  return { conversations: out.sort((a, b) => b.lastAt - a.lastAt), latestTurns }
+  return {
+    conversations: out.sort((a, b) => b.lastAt - a.lastAt),
+    // Only the thread the window is about to show pays full materialization.
+    latestTurns: await materializeTurns(latestRaw, store),
+  }
 }
 
 /** The list alone — for callers that only want the roster. */
@@ -252,7 +340,11 @@ export const listConversations = async (): Promise<ConversationSummary[]> =>
 
 /** Drop a conversation and every turn in it. The one destructive act this
  *  module has, and it is scoped to a single bucket inside the threads pool —
- *  it never reaches the root, a lineage bag, or another pool. */
+ *  it never reaches the root, a lineage bag, or another pool. The turn
+ *  MANIFESTS go with the bucket; the text RESOURCES they pointed at stay at
+ *  the content root — they are content-addressed and possibly shared (a note
+ *  may carry the same bytes), so their lifecycle belongs to root-resource GC,
+ *  never to this delete. */
 export const deleteConversation = async (convoId: string): Promise<boolean> => {
   const id = String(convoId ?? '').trim()
   if (!id) return false
