@@ -74,8 +74,71 @@ type ContextIndexLike = {
   sigFor(label: string, target: readonly string[], segments?: readonly string[]): string | undefined
 }
 
+type ColdHistoryLike = {
+  sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
+  currentLayerAt(locationSig: string): Promise<unknown | null>
+}
+type ColdStoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
+
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: <U>(k: string) => U | undefined } }).ioc?.get?.<T>(key)
+
+/** NUL-joined target key — the one join a segment can never fake. */
+const targetKey = (target: readonly string[]): string => target.join('\u0000')
+
+/** One attachment as the COLD path reads it: target route, the decoration's
+ *  own sig, and the stored lineage address (read back at last — it rode every
+ *  record since the drop gesture began minting it and nothing ever read it). */
+type ColdAttachment = { target: string[]; decorationSig: string; targetSig: string }
+
+/**
+ * COLD-PATH attachments — read from the tile's own LAYER, not the hot index.
+ *
+ * The ContextIndex only learns a tile's decorations when something renders
+ * them: the parent page's `render:cell-count` hydration walk, or a live
+ * `decorations:changed`. So an ask composed in a session where the tile's
+ * parent page never rendered — a deep link, a boot straight onto the page, a
+ * bridge script — silently missed the attached context, and a root-level
+ * attachment never indexed at all. The LAYER is the persistent carrier
+ * (`layer.decorations: sig[]`, the same slot the hydration walk parses), and
+ * it is readable regardless of what happened to be painted this session. The
+ * ask path must never depend on paint history.
+ */
+const coldContextAttachments = async (
+  segments: readonly string[],
+  history: ColdHistoryLike,
+  store: ColdStoreLike,
+): Promise<Map<string, ColdAttachment>> => {
+  const out = new Map<string, ColdAttachment>()
+  if (!store.getResource) return out
+  try {
+    const locationSig = await history.sign({ explorerSegments: () => [...segments] })
+    const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
+    const decorations = layer?.decorations
+    if (!Array.isArray(decorations)) return out
+    for (const sig of decorations) {
+      if (typeof sig !== 'string' || !SIG.test(sig)) continue
+      try {
+        const blob = await store.getResource(sig)
+        if (!blob) continue
+        const record = JSON.parse(await blob.text()) as {
+          kind?: string
+          payload?: { targetSegments?: unknown; targetSig?: unknown }
+        }
+        if (record?.kind !== 'context') continue
+        const target = (Array.isArray(record.payload?.targetSegments) ? record.payload.targetSegments : [])
+          .map(s => String(s ?? '').trim()).filter(Boolean)
+        if (!target.length) continue
+        const storedSig = String(record.payload?.targetSig ?? '')
+        out.set(targetKey(target), {
+          target, decorationSig: sig,
+          targetSig: SIG.test(storedSig) ? storedSig : '',
+        })
+      } catch { /* one unreadable decoration must not hide the rest */ }
+    }
+  } catch { /* no layer readable here — nothing cold to add */ }
+  return out
+}
 
 /** The branches attached to a tile, unresolved — the cheap read, for a count
  *  or a badge. Synchronous: it is the decoration index verbatim. */
@@ -97,17 +160,49 @@ export const resolveTileContext = async (
   const history = ioc<WalkHistory>('@diamondcoreprocessor.com/HistoryService')
   const store = ioc<WalkStore>('@hypercomb.social/Store')
   const index = ioc<ContextIndexLike>('@diamondcoreprocessor.com/ContextIndex')
-  if (!history || !store || !index) return []
+  if (!history || !store) return []
 
+  // HOT ∪ COLD. The hot index answers instantly but only knows what has
+  // rendered or changed this session; the layer read answers from the
+  // persistent slot regardless of paint history. Union, keyed by target, so
+  // a branch is resolved once whichever side knew it — and an attachment made
+  // seconds ago (hot, its layer commit maybe still in the committer's FIFO)
+  // is as visible as one from last month (cold, parent never rendered).
   const label = segments[segments.length - 1] ?? ''
-  const targets = index.targetsForSegments(segments)
+  const merged = new Map<string, { target: string[]; decorationSig: string; storedTargetSig: string }>()
+  for (const target of index?.targetsForSegments(segments) ?? []) {
+    merged.set(targetKey(target), {
+      target: [...target],
+      decorationSig: index?.sigFor(label, target, segments) ?? '',
+      storedTargetSig: '',
+    })
+  }
+  const cold = await coldContextAttachments(
+    segments,
+    history as unknown as ColdHistoryLike,
+    store as unknown as ColdStoreLike,
+  )
+  for (const [key, attachment] of cold) {
+    const hot = merged.get(key)
+    if (!hot) {
+      merged.set(key, {
+        target: attachment.target,
+        decorationSig: attachment.decorationSig,
+        storedTargetSig: attachment.targetSig,
+      })
+    } else {
+      if (!hot.decorationSig) hot.decorationSig = attachment.decorationSig
+      hot.storedTargetSig = attachment.targetSig
+    }
+  }
 
-  return Promise.all(targets.map(async (target): Promise<ContextBranch> => {
-    const decorationSig = index.sigFor(label, target, segments) ?? ''
+  return Promise.all([...merged.values()].map(async ({ target, decorationSig, storedTargetSig }): Promise<ContextBranch> => {
     const name = target.length ? target[target.length - 1] : 'hive'
     const base: ContextBranch = {
       segments: [...target],
-      targetSig: '',
+      // The stored lineage address, read back at last — so an ERROR row still
+      // names the bag it points at instead of ''.
+      targetSig: storedTargetSig,
       decorationSig,
       label: name,
       nodeCount: 0,
