@@ -3678,17 +3678,27 @@ export class ShowCellDrone extends Drone {
 
     // TILES ARE ASSETS for takeover views (visual-bee `replacesTileRender`):
     // a cell claimed by such a view — the post-it whose sticky, not hexagon,
-    // is its whole presence — leaves the hex render entirely. Same union
-    // filter as hides, so the show-hidden toggle stays the X-ray that
-    // reveals the underlying tile. Registry-driven: no view is named here.
+    // is its whole presence — leaves the hex render entirely.
+    //
+    // UNCONDITIONAL, unlike a hide: the claim and the hexagon are MUTUALLY
+    // EXCLUSIVE, so this filter is not subject to the show-hidden toggle.
+    // (It was, on the theory that show-hidden doubles as an X-ray onto the
+    // underlying tile. In practice that just put the tile and its sticky on
+    // screen together — the one thing the flag exists to prevent — and the
+    // participant has no way to tell an X-ray from a bug. The tile is still
+    // reachable: `/postit tile` stands the view down and the hexagon is
+    // back.) Registry-driven: no view is named here.
     try {
       const beeRegistry = (window as any).ioc?.get?.('@diamondcoreprocessor.com/VisualBeeRegistry') as
         | { kindsReplacingTileRender?: () => ReadonlySet<string> }
         | undefined
       const takeoverKinds = beeRegistry?.kindsReplacingTileRender?.()
       if (takeoverKinds && takeoverKinds.size > 0) {
-        for (const name of union) {
-          if (kindsForLabel(name).some(k => takeoverKinds.has(k))) hiddenSet.add(name)
+        for (const name of [...union]) {
+          if (!kindsForLabel(name).some(k => takeoverKinds.has(k))) continue
+          union.delete(name)
+          ephemeralCellSet.delete(name)
+          peerCellSet.delete(name)
         }
       }
     } catch { /* registry not up yet — tiles render this pass; the next synchronize re-filters */ }
@@ -5143,10 +5153,14 @@ export class ShowCellDrone extends Drone {
     // or the post-paint hydration walk) that a cell's hex render is REPLACED
     // by a visual-bee view (`replacesTileRender` — the post-it's sticky), or
     // that the claim was lifted. The union filter only runs during a geometry
-    // pass, so force one; without it the tile and its view's surface sit on
-    // screen together until the next navigation.
+    // pass, so force one — and FORCE it like title:indexed does: on a busy
+    // hive an in-flight stream's dedup swallowed the bare request, and the
+    // tile sat beside its sticky for the whole session. The claim and the
+    // hex are mutually exclusive; a dropped repaint must not undo that.
     this.onEffect('takeover:indexed', () => {
+      this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
+      this.#forceNextRender = true
       this.requestRender()
     })
 

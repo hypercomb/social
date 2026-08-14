@@ -54,6 +54,11 @@ export class PostitViewDrone extends Drone {
   /** A sticky is mid-drag: reconciles hold off so the node under the pointer
    *  is never torn down (the drop's own decoration write reconciles after). */
   #dragging = false
+  /** A pin write is in flight. `replaceDecoration` is removeSig THEN append,
+   *  and a reconcile landing in that gap reads a cell with NO post-it: the
+   *  column tore itself down and rebuilt fresh nodes a beat later, which is
+   *  what threw a just-dropped note back to the dock until the next pass. */
+  #writing = false
   /** The pointer gesture that just ended MOVED — the click that follows it
    *  must not open the post. Cleared on the next pointerdown. */
   #justDragged = false
@@ -90,7 +95,16 @@ export class PostitViewDrone extends Drone {
     this.#teardownPost()
   }
 
-  readonly #change = (): void => { void this.#reconcile() }
+  #changeTimer = 0
+  readonly #change = (): void => {
+    // Coalesce event bursts into ONE trailing pass. replaceDecoration lands
+    // as removeSig THEN append: reconciling on the removeSig half saw no
+    // decorated cells, so every pin drop tore the column down and rebuilt
+    // it a beat later — a visible blink, on a node that could also read the
+    // mid-write record. Sixty ms trailing reads settled state instead.
+    clearTimeout(this.#changeTimer)
+    this.#changeTimer = window.setTimeout(() => { void this.#reconcile() }, 60)
+  }
   readonly #key = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || this.#vm()?.mode !== POSTIT_VIEW) return
     event.preventDefault()
@@ -103,7 +117,7 @@ export class PostitViewDrone extends Drone {
   }
 
   async #reconcile(): Promise<void> {
-    if (this.#dragging) return
+    if (this.#dragging || this.#writing) return
     const gen = ++this.#gen
     const mode = this.#vm()?.mode
     if (mode === POSTIT_VIEW) {
@@ -283,15 +297,26 @@ export class PostitViewDrone extends Drone {
           void this.#reconcile()
           return
         }
-        // Bake the delta into fixed left/top in the same frame the translate
-        // clears — the paper does not move — then the settle transition
-        // returns the tilt while the position stays put.
+        // Bake the delta into fixed left/top and drop the translate in the
+        // same frame — net visual movement zero. The transform TRANSITION
+        // must be off across that swap: left/top jump instantly while
+        // transform would animate from the drag offset, so for 140ms the
+        // note painted at position+offset (a visible leap to double the
+        // distance) before sliding back. Settle the tilt on the next frame,
+        // once the new position is the one being transitioned FROM.
         const left = baseLeft + dx, top = baseTop + dy
+        note.classList.add('postit-settling')
         note.classList.add('postit-pinned')
         note.style.left = `${left}px`
         note.style.top = `${top}px`
         note.style.transform = ''
         note.classList.remove('postit-dragging')
+        // rAF is the right moment, but a hidden/throttled tab never fires it
+        // — and a stuck `settling` leaves that note's transitions dead for
+        // the rest of the session. Whichever lands first wins.
+        const settled = (): void => note.classList.remove('postit-settling')
+        requestAnimationFrame(settled)
+        window.setTimeout(settled, 120)
         void this.#persistPin(cell, left, top)
       }
       note.addEventListener('pointermove', move)
@@ -315,6 +340,7 @@ export class PostitViewDrone extends Drone {
     // drop included. Fractions may run outside [0,1]; the render side keeps
     // only a grabbable corner in reach, so nothing is ever stranded.
     const pin = { x: left / w, y: top / h }
+    this.#writing = true
     try {
       const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments: cell.path }))
         .at(-1)?.record.payload
@@ -325,7 +351,16 @@ export class PostitViewDrone extends Drone {
         payload: { ...(prior ?? { version: 1 }), pin },
         mark: 'persistent',
       })
-    } catch { void this.#reconcile() }
+      this.#writing = false
+      // A reconcile that fell inside the window above returned early, so ask
+      // for one now that the record is settled — otherwise the note keeps
+      // only its inline position and the next unrelated pass is the first to
+      // read the pin back.
+      this.#change()
+    } catch {
+      this.#writing = false
+      void this.#reconcile()
+    }
   }
 
   // ── Surface 2: the opened post ───────────────────────────────────────
@@ -471,7 +506,8 @@ export class PostitViewDrone extends Drone {
 const STICKY_CSS = `
 .hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:100005;display:flex;flex-direction:column;gap:.55rem;pointer-events:none}
 .postit-sticky{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;box-sizing:border-box;width:7.4rem;aspect-ratio:1/.94;padding:.75rem .72rem 1.05rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(174deg,#fffbcf 0%,#fde68a 72%,#e8c75f 100%);color:#4a3f0f;box-shadow:1px 2px 1px rgba(48,36,3,.25),4px 7px 7px rgba(0,0,0,.28),10px 16px 22px rgba(0,0,0,.24),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.75);transform:rotate(var(--postit-tilt,-2deg)) translateZ(0);transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
-.postit-sticky.postit-pinned{position:fixed}
+.postit-sticky.postit-pinned{position:fixed;margin:0}
+.postit-sticky.postit-settling{transition:none}
 .postit-sticky.postit-dragging{transform:translateY(-7px) rotate(0deg) scale(1.055);box-shadow:2px 4px 2px rgba(48,36,3,.2),10px 20px 20px rgba(0,0,0,.38),20px 32px 38px rgba(0,0,0,.28);cursor:grabbing;transition:none}
 .postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
 .postit-sticky{position:relative}
