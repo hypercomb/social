@@ -24,7 +24,7 @@ import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
 import { listDecorations, replaceDecoration } from '../../commands/decoration-manifest.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
-import { POSTIT_KIND, POSTIT_VIEW, type PostitPayload } from '../../commands/postit.queen.js'
+import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY, type PostitPayload } from '../../commands/postit.queen.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -36,6 +36,22 @@ const SIG_RE = /^[0-9a-f]{64}$/
 type StoreShape = { getResource(sig: string): Promise<Blob | null> }
 
 const STICKY_LIMIT = 5
+
+/** Smallest a sticky may be dragged to — below this the title has nowhere to
+ *  live and the grip starts to eat the note. */
+const STICKY_MIN = { w: 84, h: 64 }
+
+/** The size the participant last dragged a sticky to, which becomes the
+ *  default for every note that carries no size of its own. A malformed or
+ *  absent value reads as "no preference" so the CSS default stands. */
+function lastChosenSize(): { w: number; h: number } | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(POSTIT_SIZE_KEY) ?? 'null') as { w?: unknown; h?: unknown } | null
+    const w = Number(raw?.w), h = Number(raw?.h)
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return null
+    return { w: Math.max(STICKY_MIN.w, w), h: Math.max(STICKY_MIN.h, h) }
+  } catch { return null }
+}
 
 export class PostitViewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -203,11 +219,27 @@ export class PostitViewDrone extends Drone {
         const cue = document.createElement('span')
         cue.className = 'postit-sticky-cue'
         cue.textContent = 'open ›'
-        note.append(heading, cue)
+        // The bottom-right grip — the corner of the paper you pull. Its own
+        // gesture, so grabbing it resizes instead of moving the note.
+        const grip = document.createElement('span')
+        grip.className = 'postit-grip'
+        grip.setAttribute('aria-hidden', 'true')
+        note.append(heading, cue, grip)
         this.#wireDrag(note, cell)
+        this.#wireResize(note, grip, cell)
         host.append(note)
       }
       note.style.setProperty('--postit-tilt', `${index % 2 ? 1.6 : -2.2}deg`)
+      // The note's OWN size wins; otherwise the size this participant last
+      // pulled a sticky to; otherwise the CSS default.
+      const size = cell.payload?.size ?? lastChosenSize()
+      if (size && Number.isFinite(size.w) && Number.isFinite(size.h)) {
+        note.style.width = `${Math.max(STICKY_MIN.w, size.w)}px`
+        note.style.height = `${Math.max(STICKY_MIN.h, size.h)}px`
+      } else {
+        note.style.width = ''
+        note.style.height = ''
+      }
       const title = titleForLabel(cell.label, navigator.language) || cell.label
       note.title = `Open the post-it on "${title}"`
       const heading = note.querySelector('.postit-sticky-title')
@@ -325,6 +357,63 @@ export class PostitViewDrone extends Drone {
     })
   }
 
+  /** The bottom-right grip: pull the corner, the paper grows. The size is
+   *  remembered on the note AND as this participant's default, so the next
+   *  note you stick comes up the size you last chose. */
+  #wireResize(
+    note: HTMLButtonElement,
+    grip: HTMLElement,
+    cell: { label: string; path: string[]; payload?: PostitPayload },
+  ): void {
+    grip.addEventListener('pointerdown', down => {
+      if (down.pointerType === 'mouse' && down.button !== 0) return
+      // The grip lives inside the note, whose own pointerdown starts a MOVE.
+      // Stop here: one corner, one meaning.
+      down.stopPropagation()
+      down.preventDefault()
+      const rect = note.getBoundingClientRect()
+      const w0 = note.offsetWidth, h0 = note.offsetHeight
+      const sx = down.clientX, sy = down.clientY
+      let w = w0, h = h0
+      let moved = false
+      const move = (ev: PointerEvent): void => {
+        const dx = ev.clientX - sx, dy = ev.clientY - sy
+        if (!moved) {
+          if (Math.hypot(dx, dy) < 4) return
+          moved = true
+          this.#dragging = true
+          try { grip.setPointerCapture(down.pointerId) } catch { /* retired pointer */ }
+          note.classList.add('postit-settling')
+        }
+        // Cap at the viewport so the paper can't grow past the glass; the
+        // note keeps its top-left, exactly like a window resized by its
+        // bottom-right corner.
+        w = Math.min(Math.max(STICKY_MIN.w, w0 + dx), Math.max(STICKY_MIN.w, window.innerWidth - rect.x))
+        h = Math.min(Math.max(STICKY_MIN.h, h0 + dy), Math.max(STICKY_MIN.h, window.innerHeight - rect.y))
+        note.style.width = `${w}px`
+        note.style.height = `${h}px`
+        ev.preventDefault()
+      }
+      const done = (): void => {
+        grip.removeEventListener('pointermove', move)
+        grip.removeEventListener('pointerup', done)
+        grip.removeEventListener('pointercancel', done)
+        if (!moved) return
+        this.#dragging = false
+        // The grip's press ends on the NOTE's click too — suppress that open.
+        this.#justDragged = true
+        const settled = (): void => note.classList.remove('postit-settling')
+        requestAnimationFrame(settled)
+        window.setTimeout(settled, 120)
+        try { localStorage.setItem(POSTIT_SIZE_KEY, JSON.stringify({ w, h })) } catch { /* private mode — the note still keeps its own size */ }
+        void this.#persistPatch(cell, { size: { w, h } })
+      }
+      grip.addEventListener('pointermove', move)
+      grip.addEventListener('pointerup', done)
+      grip.addEventListener('pointercancel', done)
+    })
+  }
+
   /** Write the drop position into the note's decoration payload — the same
    *  replace-one-live-record path `/postit here` uses, so a pin is one
    *  ordinary layer edit and the reconcile that follows re-renders the
@@ -339,7 +428,16 @@ export class PostitViewDrone extends Drone {
     // UNCLAMPED — the note stops where the hand stops, a half-off-the-edge
     // drop included. Fractions may run outside [0,1]; the render side keeps
     // only a grabbable corner in reach, so nothing is ever stranded.
-    const pin = { x: left / w, y: top / h }
+    await this.#persistPatch(cell, { pin: { x: left / w, y: top / h } })
+  }
+
+  /** Fold a change into the note's live decoration payload — the same
+   *  replace-one-live-record path `/postit here` uses, so a pin or a size is
+   *  one ordinary layer edit. Reads the prior payload first and spreads over
+   *  it, so moving a note never forgets its size (or its text). On a failed
+   *  write, reconcile snaps back to the last committed truth rather than
+   *  leaving a lie on screen. */
+  async #persistPatch(cell: { path: string[] }, patch: Partial<PostitPayload>): Promise<void> {
     this.#writing = true
     try {
       const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments: cell.path }))
@@ -348,14 +446,14 @@ export class PostitViewDrone extends Drone {
         kind: POSTIT_KIND,
         appliesTo: cell.path,
         segments: cell.path,
-        payload: { ...(prior ?? { version: 1 }), pin },
+        payload: { ...(prior ?? { version: 1 }), ...patch },
         mark: 'persistent',
       })
       this.#writing = false
       // A reconcile that fell inside the window above returned early, so ask
       // for one now that the record is settled — otherwise the note keeps
-      // only its inline position and the next unrelated pass is the first to
-      // read the pin back.
+      // only its inline styling and the next unrelated pass is the first to
+      // read the change back.
       this.#change()
     } catch {
       this.#writing = false
@@ -508,6 +606,11 @@ const STICKY_CSS = `
 .postit-sticky{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;box-sizing:border-box;width:7.4rem;aspect-ratio:1/.94;padding:.75rem .72rem 1.05rem;border:0;text-align:left;cursor:pointer;background:linear-gradient(174deg,#fffbcf 0%,#fde68a 72%,#e8c75f 100%);color:#4a3f0f;box-shadow:1px 2px 1px rgba(48,36,3,.25),4px 7px 7px rgba(0,0,0,.28),10px 16px 22px rgba(0,0,0,.24),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.75);transform:rotate(var(--postit-tilt,-2deg)) translateZ(0);transition:transform .14s ease,box-shadow .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
 .postit-sticky.postit-pinned{position:fixed;margin:0}
 .postit-sticky.postit-settling{transition:none}
+.postit-sticky[style*="height"]{aspect-ratio:auto}
+.postit-grip{position:absolute;right:0;bottom:0;width:1.15rem;height:1.15rem;cursor:nwse-resize;touch-action:none;opacity:0;transition:opacity .14s ease}
+.postit-grip::after{content:'';position:absolute;right:.2rem;bottom:.2rem;width:.5rem;height:.5rem;border-right:2px solid rgba(74,63,15,.5);border-bottom:2px solid rgba(74,63,15,.5)}
+.postit-sticky:hover .postit-grip,.postit-sticky:focus-within .postit-grip{opacity:1}
+@media(pointer:coarse){.postit-grip{opacity:.75;width:1.5rem;height:1.5rem}}
 .postit-sticky.postit-dragging{transform:translateY(-7px) rotate(0deg) scale(1.055);box-shadow:2px 4px 2px rgba(48,36,3,.2),10px 20px 20px rgba(0,0,0,.38),20px 32px 38px rgba(0,0,0,.28);cursor:grabbing;transition:none}
 .postit-sticky::before{content:'';position:absolute;top:-.34rem;left:50%;width:2.2rem;height:.7rem;transform:translateX(-50%) rotate(-1deg);background:rgba(255,255,255,.45);border:1px solid rgba(0,0,0,.07)}
 .postit-sticky{position:relative}

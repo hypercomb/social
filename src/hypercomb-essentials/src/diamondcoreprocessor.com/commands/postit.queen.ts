@@ -36,7 +36,20 @@ export interface PostitPayload {
    *  position one ordinary layer edit — it survives reloads, travels with
    *  the tile, and undoes like anything else. */
   readonly pin?: { readonly x: number; readonly y: number }
+  /** How big the sticky is, in px — written by the bottom-right grip.
+   *  Absent means the participant's last chosen size (see POSTIT_SIZE_KEY),
+   *  and failing that the CSS default. Px, not viewport fractions: a note is
+   *  chrome-scale paper, so it should keep its size on a bigger screen
+   *  rather than grow with it (unlike `pin`, which is a PLACE on the glass). */
+  readonly size?: { readonly w: number; readonly h: number }
 }
+
+/** Where the last size a participant resized a sticky to is remembered, so
+ *  it becomes the default for every note that has not been resized itself.
+ *  Participant-local presentation preference — the same class of setting as
+ *  `hc:world-mode`, and deliberately NOT in the layer: it is about this
+ *  person's screen, not about the note, so it must not travel on adoption. */
+export const POSTIT_SIZE_KEY = 'hc:postit:size'
 
 type ViewModeShape = { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }

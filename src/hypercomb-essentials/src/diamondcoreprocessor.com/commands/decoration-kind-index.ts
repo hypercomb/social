@@ -622,6 +622,16 @@ type StoreLike = {
  *  call, the same loose seam Store/History use, so module load order never
  *  matters; empty until the registry is up. */
 const EMPTY_KINDS: ReadonlySet<string> = new Set()
+
+/** Pending takeover-claim drops, keyed `<locationKey> <kind>`. A claim
+ *  survives the removeSig half of a replace; see the removeSig branch. */
+const pendingTakeoverDrop = new Map<string, number>()
+
+/** How long a takeover claim outlives its removeSig before it really drops.
+ *  Long enough to span a replace's two halves (one commit), short enough
+ *  that a real `/postit remove` reads as immediate. */
+const TAKEOVER_DROP_GRACE_MS = 400
+
 function takeoverKinds(): ReadonlySet<string> {
   const registry = window.ioc.get<{ kindsReplacingTileRender?: () => ReadonlySet<string> }>(
     '@diamondcoreprocessor.com/VisualBeeRegistry')
@@ -801,6 +811,15 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
   if (!kind) return
   const key = locationKey(segments)
   segmentsByKey.set(key, segments)
+  // This append may be the second half of a replace whose removeSig left a
+  // pending claim-drop armed. Cancel it: the claim never lapsed, so nothing
+  // downstream should ever learn the cell was briefly unclaimed.
+  const pendingKey = `${key} ${kind}`
+  const armed = pendingTakeoverDrop.get(pendingKey)
+  if (armed !== undefined) {
+    clearTimeout(armed)
+    pendingTakeoverDrop.delete(pendingKey)
+  }
   addKind(key, kind)
   kindBySig.set(sig, kind)
   if (kind === TAG_DECORATION_KIND) {
@@ -951,7 +970,23 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     }
   } else if (payload.op === 'removeSig') {
     const kind = kindBySig.get(sig)
-    if (kind) {
+    if (kind && takeoverKinds().has(kind)) {
+      // A TAKEOVER claim is not dropped on the spot. `replaceDecoration` is
+      // removeSig THEN append (editing a post-it's text or dragging it to a
+      // new pin is a replace), and between the halves this cell carries no
+      // post-it at all — so any repaint in that gap legitimately draws the
+      // hexagon, and the tile FLICKERS back for a frame under its own
+      // sticky. Hold the claim briefly instead: an append cancels the
+      // pending drop (a replace nets to no change at all), while a genuine
+      // removal lands a moment later and brings the hexagon back.
+      const pendingKey = `${key}\u0000${kind}`
+      clearTimeout(pendingTakeoverDrop.get(pendingKey))
+      pendingTakeoverDrop.set(pendingKey, window.setTimeout(() => {
+        pendingTakeoverDrop.delete(pendingKey)
+        removeKind(key, kind)
+        EffectBus.emit('takeover:indexed', { label })
+      }, TAKEOVER_DROP_GRACE_MS))
+    } else if (kind) {
       removeKind(key, kind)
       // `kindBySig` is a sig→kind cache, and a decoration resource is
       // content-addressed: the SAME sig can sit in many cells' slots. Dropping
@@ -1006,11 +1041,9 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     // Never delete `nameBySig[sig]` — other cells still share it.
     const name = nameBySig.get(sig)
     if (name) removeTag(key, name)
-    // Removing a takeover kind must bring the hexagon BACK — the union filter
-    // only runs during a geometry pass, so nudge one, same as the append side.
-    if (kind && takeoverKinds().has(kind)) {
-      EffectBus.emit('takeover:indexed', { label })
-    }
+    // NOTE: the takeover nudge for a removal is NOT emitted here — it rides
+    // the grace timer above, so a replace's two halves never un-claim the
+    // cell and the hexagon cannot flash back between them.
   }
 })
 
