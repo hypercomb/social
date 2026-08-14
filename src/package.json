@@ -20,6 +20,11 @@
   },
   "scripts": {
     "audit-imports": "tsx scripts/audit-imports.ts",
+    "bridge": "node scripts/bridge/run-bridge.cjs",
+    "bridge:watch": "node scripts/bridge/watch-asks.cjs",
+    "bridge:watch:once": "node scripts/bridge/watch-asks.cjs --once",
+    "bridge:drain": "node scripts/bridge/drain-tick.cjs",
+    "bridge:check": "node scripts/bridge/bridge-cli.cjs list",
     "docs": "npx -y http-server documentation -p 4290 -c-1",
     "docs:links": "node documentation/check-links.mjs",
     "build:core": "npm --prefix hypercomb-core run build",

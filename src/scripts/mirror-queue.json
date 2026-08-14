@@ -654,6 +654,32 @@
       "unattended": false,
       "created": "2026-08-14",
       "status": "pending"
+    },
+    {
+      "id": "beehaviors-context-crumb",
+      "title": "Beehaviors rail switch + self/child subject crumb",
+      "run": null,
+      "note": "The Beehaviors window gained a second door and a subject model, with no mirror pass (no renderer session this change). Owed under behaviors/views/beehaviors (extend, do not mint a second collection): (1) a part tile for the TOP RAIL SWITCH — hypercomb-shared/ui/command-shell/command-shell.component.{html,ts} + command-line.component.{html,ts}; it sits immediately right of views, is a standing tool with no gate, lights off features:viewer-state, and emits features:context-open / features:viewer-close; (2) a part tile for the SUBJECT CRUMB — hypercomb-shared/ui/features-viewer/features-viewer.component.{ts,html,scss}; contextPath tracks the loaded layer whether the panel is open or shut, subjectIsSelf/subjectGap derive the crumb, goSelf re-targets, and #openAt is the ONE way the panel changes subject; (3) a note on the beehaviors cell stating the rule in plain words: the rail door opens on SELF (the loaded layer) and follows navigation, a tile's puzzle-piece pins that CHILD as the subject and standing on the parent does not drag it back, and every arrival on a new layer lands on self again. New i18n keys: features.context.{aria,label,hive,self.hint,self.here} in en.json + ja.json.",
+      "created": "2026-08-14",
+      "status": "pending"
+    },
+    {
+      "id": "document-view",
+      "title": "Mirror the document view: tiles for document-slot.ts, document-edit.ts, document-view.drone.ts, document-edit.spec.ts, a collection gathering them, marks for what each part is, and a note on why the body is a slot (history/undo come free) and why sync state is NOT in the layer",
+      "run": null,
+      "note": "New creation: first-class 'document' slot (source-agnostic body), full-viewport markdown editor mounted on ViewMode 'document', VisualBeeRegistry toggle so it is point-and-click. Sibling of tutor/website views. --manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-14",
+      "status": "pending"
+    },
+    {
+      "id": "claude-bridge-tutorial",
+      "title": "Mirror the Claude Code + bridge setup tutorial: tiles for each setup step under tutorials, marks, notes carrying the commands",
+      "run": null,
+      "note": "Source: documentation/claude-bridge-setup.md + documentation/ai-first-class-plan.md. Build a collection of step tiles (prereqs, hive, broker, renderer tab, verify, park, ask, drive, drain, remote) with the exact commands as notes; mark with tutorial vocabulary. note-add is additive - manual.",
+      "unattended": false,
+      "created": "2026-08-14",
+      "status": "pending"
     }
   ]
 }
