@@ -296,6 +296,16 @@
                     @if (row.foreign) {
                       <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
                     }
+                    <!-- BOUND: this behavior belongs to a tile, not to the
+                         hive. The store is the only place every binding is
+                         visible at once — everywhere else the behavior has
+                         simply withdrawn. -->
+                    @if (row.bound?.length) {
+                      <span class="feature-bound">
+                        <span class="mat-sym" aria-hidden="true">link</span>
+                        {{ 'features.bound.to' | t: { cell: boundTo(row.bound) } }}
+                      </span>
+                    }
                     @if (row.description) {
                       <span class="feature-desc">{{ row.description }}</span>
                     }
@@ -315,6 +325,9 @@
       </div>
       <footer class="features-foot">
         {{ 'features.roster.hint' | t: { on: storeOnCount(), total: storeRows().length } }}
+        @if (storeBoundCount() > 0) {
+          <span class="foot-bound">{{ 'features.roster.bound' | t: { count: storeBoundCount() } }}</span>
+        }
       </footer>
     } @else if (group(); as group) {
       <div class="features-scroll">
@@ -409,6 +422,18 @@
                       @if (feat.foreign) {
                         <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
                       }
+                      <!-- BELONGS HERE: bound to this tile's location
+                           signature. The same record that withdrew it from
+                           every other tile is what marks it as this one's. -->
+                      @if (feat.bound; as bound) {
+                        <span
+                          class="feature-bound"
+                          [attr.title]="'features.bound.hint' | t: { sig: boundSigShort(bound) }"
+                        >
+                          <span class="mat-sym" aria-hidden="true">link</span>
+                          {{ 'features.bound.here' | t: { cell: bound.name ?? bound.path } }}
+                        </span>
+                      }
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
                       }
@@ -488,6 +513,16 @@
                           <code class="feature-cmd">{{ feat.slashCommand }}</code>
                         }
                       </span>
+                      <!-- Offered here BECAUSE this is where it belongs. -->
+                      @if (feat.bound; as bound) {
+                        <span
+                          class="feature-bound"
+                          [attr.title]="'features.bound.hint' | t: { sig: boundSigShort(bound) }"
+                        >
+                          <span class="mat-sym" aria-hidden="true">link</span>
+                          {{ 'features.bound.here' | t: { cell: bound.name ?? bound.path } }}
+                        </span>
+                      }
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
                       }

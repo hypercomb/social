@@ -958,6 +958,32 @@ $path-fail: #e08a8a;     // failed terminal
   color: rgba(255, 255, 255, 0.6);
 }
 
+// BOUND — this behavior belongs to one tile. Warmer than the awaiting chip
+// and quieter than a verb: it is a statement of ownership, not an action, so
+// it reads as a label on the row rather than something to press.
+.feature-bound {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  font-size: 0.62em;
+  letter-spacing: 0.04em;
+  padding: 0.1em 0.45em;
+  border: 1px solid rgba(255, 214, 138, 0.34);
+  border-radius: 3px;
+  color: rgba(255, 214, 138, 0.82);
+
+  .mat-sym {
+    font-size: 1.1em;
+    line-height: 1;
+  }
+}
+
+.foot-bound {
+  margin-left: 0.6em;
+  opacity: 0.7;
+}
+
 // ── Extension-manager surface ────────────────────────────────────────────────
 // The original panel exposed the right information but gave every datum the
 // same visual weight. This layer turns the catalogue into a manager: identity,

@@ -62,7 +62,10 @@ import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { kindsForLabel, countLabelsWithKind } from '../../commands/decoration-kind-index.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
-import { isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds } from '../../sharing/behavior-enablement.js'
+import {
+  isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds,
+  bindingAt, bindingsFor, isWithdrawnByBinding, allBindings, type BehaviorBinding,
+} from '../../sharing/behavior-enablement.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
@@ -257,6 +260,12 @@ interface FeatureItem {
    *  with no wake exception covering the tile. The panel renders the switch
    *  off with an "off everywhere" chip and offers "wake here". */
   dormant?: boolean
+  /** Set when this behaviour is BOUND to a tile that covers this location —
+   *  it belongs HERE in particular, rather than to the hive at large. The
+   *  panel marks the row with the tile it belongs to. A row bound to some
+   *  OTHER tile never reaches the panel: it is dormant, and dormant means
+   *  gone. */
+  bound?: BehaviorBinding
 }
 
 /** A feature AVAILABLE to add — registered in the app but not yet on this
@@ -278,9 +287,13 @@ interface AvailableItem {
    *  are NOT addable here — their slash commands TOGGLE a view; "adding" one
    *  means authoring content (a page, a deck), which no switch can conjure. */
   addable?: boolean
-  /** True when this kind is off on the GLOBAL roster — a dormant behavior is
-   *  not offered for adding (dormant means gone, not "available"). */
+  /** True when this kind is off on the GLOBAL roster, or bound to another
+   *  tile — a dormant behavior is not offered for adding (dormant means gone,
+   *  not "available"). */
   globalOff?: boolean
+  /** Set when this behaviour is bound to a tile covering this location: it is
+   *  offered here because this is where it belongs. */
+  bound?: BehaviorBinding
 }
 
 interface FeaturesOpenPayload {
@@ -470,7 +483,18 @@ export class ShowFeaturesDrone extends Drone {
       view: string; icon: string; kind: string; label: string; description: string
       category: string; slashCommand?: string; foreign?: boolean; module?: string
       on: boolean; used: number
+      /** Where this behaviour BELONGS, when it has been bound. The store is
+       *  the one surface that must show every binding at once — it is the
+       *  census, and a behaviour that is invisible on every tile but one
+       *  would otherwise look simply missing. */
+      bound?: readonly BehaviorBinding[]
     }> = []
+    /** Bindings for a row, omitted entirely when the kind is unbound (the
+     *  default — it belongs to the whole hive). */
+    const boundOf = (kind: string): { bound?: readonly BehaviorBinding[] } => {
+      const bindings = bindingsFor(kind)
+      return bindings.length > 0 ? { bound: bindings } : {}
+    }
     for (const bee of registry?.all?.() ?? []) {
       if (!bee.decorationKind || seen.has(bee.decorationKind)) continue
       seen.add(bee.decorationKind)
@@ -487,6 +511,7 @@ export class ShowFeaturesDrone extends Drone {
         // has seen this session, never stored (complete-or-absent honesty:
         // an unvisited branch's uses simply aren't counted yet).
         used: countLabelsWithKind(bee.decorationKind),
+        ...boundOf(bee.decorationKind),
       })
     }
     for (const [kind, cap] of Object.entries(CAPABILITIES)) {
@@ -502,12 +527,15 @@ export class ShowFeaturesDrone extends Drone {
         ...(cap.slashCommand ? { slashCommand: cap.slashCommand } : {}),
         on: !off.has(kind),
         used: countLabelsWithKind(kind),
+        ...boundOf(kind),
       })
     }
-    // Off-kinds nobody here declares (a community module's behavior turned
-    // off before the module left, or on another device) — named from the
-    // kind, still switchable, so an off exception can always be undone.
-    for (const kind of off) {
+    // Off-kinds and BOUND kinds nobody here declares (a community module's
+    // behavior turned off before the module left, or on another device, or an
+    // author who scoped a kind to a tile ahead of its module arriving) — named
+    // from the kind, still switchable and still freeable, so neither exception
+    // can strand itself.
+    for (const kind of new Set([...off, ...Object.keys(allBindings())])) {
       if (seen.has(kind)) continue
       seen.add(kind)
       const moduleName = moduleFromKind(kind)
@@ -520,8 +548,11 @@ export class ShowFeaturesDrone extends Drone {
         category: 'foreign',
         foreign: true,
         ...(moduleName ? { module: moduleName } : {}),
-        on: false,
+        // A kind reaching this loop only because it is BOUND is still ON —
+        // binding scopes a behaviour, it never switches it off.
+        on: !off.has(kind),
         used: countLabelsWithKind(kind),
+        ...boundOf(kind),
       })
     }
     this.emitEffect('features:roster', { rows })
@@ -903,15 +934,30 @@ export class ShowFeaturesDrone extends Drone {
     await this.#stampGates(applied, segments, records)
 
     // ── 5. ENABLEMENT — the global-roster lens ──
-    // A kind held dormant HERE (globally off / publisher-withheld, no wake
-    // covering this tile) keeps its row — the honest-switch rule — but the
-    // panel renders it off with the "off everywhere" chip and a "wake here"
-    // action. Available rows lose their offer entirely: dormant means gone.
+    // A kind held dormant HERE (globally off / publisher-withheld / bound to
+    // another tile, no wake covering this tile) keeps its row — the
+    // honest-switch rule — but the panel renders it off with the "off
+    // everywhere" chip and a "wake here" action. Available rows lose their
+    // offer entirely: dormant means gone.
+    //
+    // BINDING is the one that also has something POSITIVE to say. A kind
+    // bound to a tile covering this location belongs HERE, so its row carries
+    // the binding and the panel marks it as this tile's own — the same record
+    // that withdraws it from every other tile is what identifies it on this
+    // one.
     for (const row of applied) {
-      if (row.kind && isBehaviorDormant(row.kind, segments)) row.dormant = true
+      if (!row.kind) continue
+      if (isBehaviorDormant(row.kind, segments)) row.dormant = true
+      const binding = bindingAt(row.kind, segments)
+      if (binding) row.bound = binding
     }
     for (const row of available) {
-      if (row.kind && isKindGloballyOff(row.kind)) row.globalOff = true
+      if (!row.kind) continue
+      if (isKindGloballyOff(row.kind) || isWithdrawnByBinding(row.kind, segments)) row.globalOff = true
+      else {
+        const binding = bindingAt(row.kind, segments)
+        if (binding) row.bound = binding
+      }
     }
 
     this.emitEffect<FeaturesOpenPayload>('features:open', {

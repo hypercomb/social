@@ -82,6 +82,18 @@ interface FeatureRow {
   /** True when the global light is off for this kind. The store is where it
    *  comes back — a dormant row is filtered from the tile view entirely. */
   dormant?: boolean
+  /** Set when this behaviour BELONGS to this tile — bound to its location
+   *  signature, so it shows here and is withdrawn everywhere else. The row
+   *  says whose it is. */
+  bound?: BehaviorBinding
+}
+
+/** Where a behaviour belongs — the bound tile's LOCATION signature (stable
+ *  across every edit of that tile), its canonical path, and its name. */
+interface BehaviorBinding {
+  sig: string
+  path: string
+  name?: string
 }
 
 /** One row of THE STORE — every behavior the app knows. `on` is the light;
@@ -98,6 +110,10 @@ interface StoreRow {
   module?: string
   on: boolean
   used?: number
+  /** Present when the behaviour is bound to one or more tiles — the store is
+   *  the census, so it is the one surface that names every binding at once.
+   *  Absent means it belongs to the whole hive (the default). */
+  bound?: BehaviorBinding[]
 }
 
 /** A behavior the app knows but this tile doesn't carry yet. */
@@ -112,8 +128,12 @@ interface AvailableRow {
   /** True when the panel can ADD this feature mechanically. View bees whose
    *  content must be authored carry the slash-command chip instead. */
   addable?: boolean
-  /** True when this kind's light is off — the row is not offered at all. */
+  /** True when this kind's light is off, or it belongs to another tile — the
+   *  row is not offered at all. */
   globalOff?: boolean
+  /** Set when this behaviour belongs to this tile: it is offered HERE because
+   *  this is the one place it means anything. */
+  bound?: BehaviorBinding
 }
 
 /** Minimal shape the selection / bulk helpers need. */
@@ -305,6 +325,21 @@ export class FeaturesViewerComponent implements OnDestroy {
   })
 
   readonly storeOnCount = computed(() => this.storeRows().filter(r => r.on).length)
+
+  /** How many behaviours belong to one tile rather than to the whole hive. */
+  readonly storeBoundCount = computed(() =>
+    this.storeRows().filter(r => (r.bound?.length ?? 0) > 0).length)
+
+  /** The tiles a behaviour belongs to, as one plain phrase. Names, not paths:
+   *  the signature is the identity, but nobody reads a hash — the name is how
+   *  the author said it and how the panel says it back. */
+  readonly boundTo = (bindings: readonly BehaviorBinding[] | undefined): string =>
+    (bindings ?? []).map(b => b.name || b.path).join(', ')
+
+  /** The short form of a binding's location signature — enough to recognise
+   *  it, and to check it against a tile without reading 64 characters. */
+  readonly boundSigShort = (binding: BehaviorBinding | undefined): string =>
+    (binding?.sig ?? '').slice(0, 8)
 
   /** Flip one light. Optimistic row update — the writer emits
    *  `behavior:enablement-changed`, so every other surface reacts at once.

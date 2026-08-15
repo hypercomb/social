@@ -734,6 +734,15 @@
       "unattended": false,
       "created": "2026-08-15",
       "status": "pending"
+    },
+    {
+      "id": "behavior-binding-signature",
+      "title": "Behaviour binding — a behaviour can belong to one tile's signature",
+      "run": null,
+      "note": "New: bind a decoration kind to a tile's LOCATION signature (sha256(lineageKey(segments)), HistoryService.sign — stable across every edit, unlike a content sig). Bound = awake at that sig and its subtree, dormant everywhere else; the panel row there is marked 'belongs to <tile>'. Mirror owed: (1) a tile under behaviors for the /behavior queen (glyph card, per the behaviors-mirror theme) with its note — bind/free/where, and WHY the location sig rather than the content sig; (2) note-add on the existing postit behavior tile recording that it is the first bound behaviour (bound to /revolucion/meetup); (3) note-add on the behaviors-roster tile: binding is the FIFTH dormancy source in behavior-enablement.ts, and wake still outranks it. Code: hypercomb-essentials/src/diamondcoreprocessor.com/sharing/behavior-enablement.ts, commands/behavior.queen.ts, presentation/tiles/show-features.drone.ts, hypercomb-shared/ui/features-viewer/*. note-add is additive - manual.",
+      "unattended": false,
+      "created": "2026-08-15",
+      "status": "pending"
     }
   ]
 }
