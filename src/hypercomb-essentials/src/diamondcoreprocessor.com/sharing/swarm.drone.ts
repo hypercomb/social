@@ -211,6 +211,13 @@ const PEER_STALE_MS = EVENT_TTL_SECS * 1500  // 90s * 1.5 = 135s
 // own slot or evicts a peer who hasn't kept theirs alive.
 const PEER_STALE_SWEEP_INTERVAL_MS = 30_000
 
+// Cooldown between mesh probes for the SAME composed sig via
+// primePeerTilesAt. The divergence scan re-runs on every peer burst,
+// and a child location that answered (or answered empty) seconds ago
+// won't answer differently now — without this every heartbeat would
+// re-ask the mesh for every held tile's child slot.
+const PRIME_COOLDOWN_MS = 60_000
+
 // Resource events get a longer TTL than layer events — image bytes
 // are heavier and don't change with every navigation, so we want
 // them to persist longer in the relay's cache for new joiners. A
@@ -1797,7 +1804,16 @@ export class SwarmDrone extends Drone {
       const pubkey = String(entry.pubkey ?? '').toLowerCase()
       if (!/^[0-9a-f]{64}$/.test(pubkey)) continue
       if (this.#myPubkey && pubkey === this.#myPubkey) continue   // self-echo
-      if (bag?.has(pubkey)) continue                              // live data wins
+      // Live data wins — but only while it's FRESH. A cached entry past
+      // PEER_STALE_MS is already invisible to peerTilesAtSig's read-time
+      // filter; skipping it here would make a once-primed location
+      // permanently unrefreshable (the stale husk blocks every re-inject
+      // while the read filter hides it). Recovered visuals are a live
+      // mesh answer from just now, so they replace a stale husk.
+      if (bag?.has(pubkey)) {
+        const seenMs = this.#peerLastSeenMsBySig.get(sig)?.get(pubkey)
+        if (seenMs !== undefined && Date.now() - seenMs <= PEER_STALE_MS) continue
+      }
       let raw: unknown
       try { raw = JSON.parse(entry.content) } catch { continue }
       const visualsRaw = (raw as { visuals?: unknown })?.visuals
@@ -1844,6 +1860,52 @@ export class SwarmDrone extends Drone {
       slog(`[swarm] late-join recovery injected ${injected} peer visual(s) at ${sig.slice(0, 8)}`)
       this.emitEffect('swarm:peers-changed', { sig, reason: 'late-join-recovery' })
     }
+  }
+
+  // -----------------------------------------------------------------
+  // On-demand peer-cache priming (the divergence probe)
+  // -----------------------------------------------------------------
+
+  // Fill the peer cache at an ARBITRARY composed sig from the swarm's
+  // cached-visuals protocol — the read the divergence scan and additive
+  // adopt need to look one level INTO a held tile without navigating
+  // there. Publishers broadcast MAX_PUBLISH_DEPTH levels deep, but a
+  // receiver only ever subscribed at its CURRENT sig, so a child
+  // location's cache was empty unless the user happened to walk into it
+  // — which made the held-tile adopt affordance almost never light.
+  //
+  // Same fetch + inject as late-joiner recovery (#recoverVisualsAt),
+  // minus the current-sig pin. WITNESS ONLY — visuals land in the peer
+  // cache; no byte is ever adopted here. Injection emits
+  // swarm:peers-changed, which re-triggers the debounced scan — the
+  // convergence loop that turns a cold probe into a lit adopt icon.
+  // Coalesced per sig (shared in-flight set) and cooled down so a scan
+  // re-running on every heartbeat doesn't re-ask locations that just
+  // answered; `force` (a user gesture behind it) skips the cooldown,
+  // never the in-flight dedup.
+  #lastPrimeMsBySig = new Map<string, number>()
+
+  public primePeerTilesAt = async (sig: string, opts?: { force?: boolean }): Promise<void> => {
+    const s = String(sig ?? '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(s)) return
+    // Private mode witnesses nothing — same gate as the sync path.
+    let meshPublic = false
+    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
+    if (!meshPublic) return
+    if (this.#visualsRecoveryInFlight.has(s)) return
+    if (!opts?.force) {
+      const last = this.#lastPrimeMsBySig.get(s) ?? 0
+      if (Date.now() - last < PRIME_COOLDOWN_MS) return
+    }
+    this.#lastPrimeMsBySig.set(s, Date.now())
+    this.#visualsRecoveryInFlight.add(s)
+    try {
+      const broker = this.#getBroker()
+      if (!broker?.fetchVisualsAt) return
+      const entries = await broker.fetchVisualsAt(s)
+      if (entries && entries.length > 0) this.#injectRecoveredVisuals(s, entries)
+    } catch { /* witness-only optimization — never fatal */ }
+    finally { this.#visualsRecoveryInFlight.delete(s) }
   }
 
   // A LIVE layer event under our own pubkey that we did not publish this

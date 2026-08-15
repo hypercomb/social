@@ -743,6 +743,24 @@
       "unattended": false,
       "created": "2026-08-15",
       "status": "pending"
+    },
+    {
+      "id": "visuals-across-lineages-design",
+      "title": "Visuals-across-lineages design doc — mirror as notes on the visuals/superimposition tiles",
+      "run": null,
+      "note": "documentation/visuals-across-lineages.md written 2026-08-14: diagnosis (wipe lives in location-keyed indexes, never sig-keyed pools) + 4-move design (layer-sig-keyed props index, stack of heads per address, (label,lineage) caches, substrate picks as decorations) + imagePool shape. Owes notes on the superimposition/participant-stack cells under behaviors/swarm and a design tile if none fits. note-add is additive — manual.",
+      "unattended": false,
+      "created": "2026-08-15",
+      "status": "pending"
+    },
+    {
+      "id": "swarm-adopt-divergence-probe",
+      "title": "Adopt-in-swarm detection overhaul — mesh probe + announced-sig watch",
+      "run": null,
+      "note": "swarm-adopt.drone.ts + swarm.drone.ts: held-tile adopt almost never lit because the name-diff rule read a child-location peer cache nothing ever filled (receiver subscribes only at its current sig). Added SwarmDrone.primePeerTilesAt (mesh cached-visuals probe, witness-only, cooled down) wired into the divergence scan and additive adopt, plus scan rule 2: an in-memory announced-sig watch that lights adopt on AUTHORED held tiles when the publisher's branch sig changes mid-session. Mirror: note-add on the behaviors mirror's adopt/swarm cards explaining the three detection rules; note-add is additive so manual.",
+      "unattended": false,
+      "created": "2026-08-15",
+      "status": "pending"
     }
   ]
 }

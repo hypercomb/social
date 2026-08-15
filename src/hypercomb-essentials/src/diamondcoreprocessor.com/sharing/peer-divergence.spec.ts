@@ -36,6 +36,11 @@ let committer: { update: ReturnType<typeof vi.fn>; importTree: ReturnType<typeof
 let peerTiles: Record<string, unknown>[]
 /** What peers publish INSIDE a tile, keyed by the composed child-location sig. */
 let peerTilesByLoc: Map<string, Record<string, unknown>[]>
+/** Sigs the scan asked the mesh to prime (probe calls). */
+let primedSigs: string[]
+/** What the mesh WOULD answer for a primed sig — moved into the live cache
+ *  when primePeerTilesAt is called, mimicking the recovery injection. */
+let primeable: Map<string, Record<string, unknown>[]>
 
 const history = {
   sign: vi.fn(async (l: { explorerSegments: () => readonly string[] }) => 'loc:' + l.explorerSegments().join('/')),
@@ -50,6 +55,11 @@ const iocRegistry = (): Record<string, unknown> => ({
     subscribedTiles: () => [],
     peerTilesAtSig: (sig: string) => peerTilesByLoc.get(sig) ?? [],
     composeSigForSegments: async () => PEER_LOC_SIG,
+    primePeerTilesAt: async (sig: string) => {
+      primedSigs.push(sig)
+      const pending = primeable.get(sig)
+      if (pending) peerTilesByLoc.set(sig, pending)
+    },
   },
   '@hypercomb.social/Lineage': { explorerSegments: () => [], domain: () => 'hypercomb.io' },
   '@diamondcoreprocessor.com/ContentBrokerDrone': {
@@ -80,6 +90,8 @@ const world = (
   layersBySig = new Map()
   headByLoc = new Map()
   peerTilesByLoc = new Map()
+  primedSigs = []
+  primeable = new Map()
   committer = { update: vi.fn(async () => 'f'.repeat(64)), importTree: vi.fn(async () => void 0) }
 
   const myKids = opts.myKids ?? []
@@ -181,6 +193,43 @@ describe('peer divergence — detect, never apply', () => {
 
     expect(peerDivergesAt('dolphin')).toBe(false)
     expect(committer.importTree).not.toHaveBeenCalled()
+  })
+
+  it('a child location never visited is PROBED — blindness is asked about, not settled for', async () => {
+    // Their extra child lives on the mesh; the local cache for the child
+    // location is cold (the receiver never subscribed there — the exact
+    // state that used to make this rule silent forever).
+    world('atlas', { myKids: ['bread'], theirKids: [] })
+    primeable.set(PEER_LOC_SIG, [{ name: 'pasta', peerPubkey: 'pk1' }])
+
+    await runScan()
+    // Cold pass: honest silence (no evidence yet) — but the probe went out.
+    expect(peerDivergesAt('atlas')).toBe(false)
+    expect(primedSigs).toContain(PEER_LOC_SIG)
+
+    // The injected answer emits peers-changed in production; the next burst
+    // re-scans against the now-warm cache and the name diff lights.
+    await runScan()
+    expect(peerDivergesAt('atlas')).toBe(true)
+    expect(committer.importTree).not.toHaveBeenCalled()
+    expect(committer.update).not.toHaveBeenCalled()
+  })
+
+  it('a publisher changing an AUTHORED held tile lights adopt — the announced-sig watch', async () => {
+    // Same children on both sides (no name diff), no adopted root, no
+    // receipt — the tile exists independently on both hives. First sight
+    // baselines; a CHANGED announced sig afterwards is news.
+    world('meadow', { myKids: ['bread'], theirKids: ['bread'] })
+
+    await runScan()
+    expect(peerDivergesAt('meadow')).toBe(false)   // joining is not news
+
+    peerTiles = [{ name: 'meadow', peerPubkey: 'pk1', layerSig: SIG_OLD }]
+    await runScan()
+    expect(peerDivergesAt('meadow')).toBe(true)
+    // Detection NEVER applies — still the whole point.
+    expect(committer.importTree).not.toHaveBeenCalled()
+    expect(committer.update).not.toHaveBeenCalled()
   })
 
   it('leaving the location drops the answer — it is never carried elsewhere', async () => {

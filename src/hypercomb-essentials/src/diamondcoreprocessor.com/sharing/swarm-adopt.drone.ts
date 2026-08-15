@@ -108,6 +108,11 @@ interface SwarmDroneLike {
   /** Compose the swarm sig for a path (same bytes the publisher used), so
    *  the scan can address a child location's peer cache. */
   composeSigForSegments?: (segments: readonly string[]) => Promise<string>
+  /** Ask the mesh for cached visuals at a composed sig and inject them into
+   *  the peer cache — fills a CHILD location's cache the receiver never
+   *  subscribed at, so the scan/additive-adopt can read one level in.
+   *  Witness only; injection emits swarm:peers-changed. */
+  primePeerTilesAt?: (sig: string, opts?: { force?: boolean }) => Promise<void>
   /** Decoration kinds this publisher withholds from the swarm (their global
    *  roster's off list, broadcast on wire kind 30208). */
   withheldByPeer?: (pubkey: string) => readonly string[]
@@ -196,16 +201,21 @@ export class SwarmAdoptDrone extends Drone {
     // automation is DETECTION, which lights the adopt affordance and
     // applies nothing.
     //
-    // Two rules mark a HELD tile as having something to take, both
-    // ADDITIVE ("they have children you don't") and never "yours is
+    // Three rules mark a HELD tile as having something to take, all
+    // ADDITIVE ("they have something you don't") and never "yours is
     // stale":
     //   1. adopted root whose publisher sig differs from our receipt —
     //      the merkle handle covers their whole subtree, so this catches
     //      changes at any depth beneath it;
-    //   2. any held tile a peer publishes children for that we lack —
-    //      the name diff, which is the only comparison that works for
-    //      tiles we AUTHORED (no receipt exists) and the only unit the
-    //      participant can act on.
+    //   2. announced-sig watch — the same comparison for tiles we
+    //      AUTHORED (no receipt exists): the publisher's branch sig for
+    //      a held tile CHANGED since we first saw them this session.
+    //      In-memory, first sight baselines, acked when an adopt lands;
+    //   3. any held tile a peer publishes children for that we lack —
+    //      the name diff, the unit the participant can act on. A child
+    //      location the receiver never subscribed at is PROBED via
+    //      primePeerTilesAt (mesh cached-visuals ask), so this rule
+    //      works without ever having navigated into the tile.
     // Debounced off the peers-changed burst; the result is a sync-readable
     // set the overlay reads, never a commit.
     this.onEffect('swarm:peers-changed', () => this.#scheduleDivergenceScan())
@@ -681,7 +691,14 @@ export class SwarmAdoptDrone extends Drone {
 
     // Their direct children of the held tile (from the live peer cache at the
     // held tile's OWN location sig — the same read the divergence scan used).
+    // A cold cache is PRIMED first (forced — a user gesture is behind this):
+    // the receiver never subscribed at the child sig, so without the probe
+    // this read was empty unless the user had walked into the tile earlier,
+    // and the adopt reported "already has everything" against no evidence.
     const theirSig = await swarm.composeSigForSegments(childLoc).catch(() => '')
+    if (theirSig && swarm.primePeerTilesAt && swarm.peerTilesAtSig(theirSig).length === 0) {
+      await swarm.primePeerTilesAt(theirSig, { force: true }).catch(() => undefined)
+    }
     const theirs = theirSig ? swarm.peerTilesAtSig(theirSig) : []
 
     // My direct children — resolved THROUGH the parent so a cold own-bag never
@@ -732,7 +749,11 @@ export class SwarmAdoptDrone extends Drone {
 
     const added = missing.length - failed
     if (missing.length === 0) {
-      this.#rowOutcome(branch.label, undefined, true, `"${branch.label}" already has everything shared here`)
+      // Nothing to add AT THIS LEVEL. The icon lit because the publisher's
+      // branch sig moved (their merkle handle covers the whole subtree), so
+      // when their top-level children all match ours the change lives deeper
+      // — say where to go instead of claiming there's nothing.
+      this.#rowOutcome(branch.label, undefined, true, `"${branch.label}" matches what they share at this level — any update is deeper inside; step in and adopt where it lights up`)
     } else if (failed === 0) {
       this.#rowOutcome(branch.label, undefined, true, `added ${added} to "${branch.label}"`)
     } else {
@@ -1055,18 +1076,29 @@ export class SwarmAdoptDrone extends Drone {
     } catch { return {} }
   }
   #recordSyncReceipt = (segments: readonly string[], publisherSig: string): void => {
+    const pathKey = segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+    // The adopt landed — ack the announced-sig watch for this path. Next
+    // scan re-baselines from whatever the publisher currently announces
+    // (which includes the sig just folded), so the light clears without
+    // ever clearing on its own.
+    this.#peerSigWatch.delete(pathKey)
     try {
       const receipts = this.#loadSyncReceipts()
-      receipts[segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')] = publisherSig
+      receipts[pathKey] = publisherSig
       localStorage.setItem(SYNC_RECEIPTS_KEY, JSON.stringify(receipts))
     } catch { /* no localStorage — auto-sync degrades to once-per-session */ }
   }
   /** Forget receipts at/beneath `segments` — delete-side hygiene so a stale
    *  receipt can't shadow the fresh baseline of a future explicit re-adopt. */
   #dropSyncReceipts = (segments: readonly string[]): void => {
+    const key = segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+    if (!key) return
+    // Same hygiene for the in-memory watch — a deleted path's baselines
+    // must not shadow a future re-adopt's fresh first sight.
+    for (const k of this.#peerSigWatch.keys()) {
+      if (k === key || k.startsWith(key + '/')) this.#peerSigWatch.delete(k)
+    }
     try {
-      const key = segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
-      if (!key) return
       const receipts = this.#loadSyncReceipts()
       let changed = false
       for (const k of Object.keys(receipts)) {
@@ -1075,6 +1107,13 @@ export class SwarmAdoptDrone extends Drone {
       if (changed) localStorage.setItem(SYNC_RECEIPTS_KEY, JSON.stringify(receipts))
     } catch { /* no localStorage — nothing recorded to forget */ }
   }
+
+  // Announced-sig watch (scan rule 2): path → publisher pubkey → the branch
+  // sig we FIRST saw them announce for a held tile this session. A later
+  // broadcast with a different sig means they changed something beneath it.
+  // In-memory by doctrine (peer-divergence.ts header) — never persisted;
+  // acked by #recordSyncReceipt when an adopt lands on the path.
+  readonly #peerSigWatch = new Map<string, Map<string, string>>()
 
   #divergenceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -1092,10 +1131,11 @@ export class SwarmAdoptDrone extends Drone {
    * or fetches. Its only output is the sync-readable set the overlay
    * reads to decide whether `adopt` appears on a tile you already hold.
    *
-   * Depth: rule 1 (receipt) covers an adopted root at ANY depth, because
-   * the publisher's handle seals their whole subtree. Rule 2 (name diff)
-   * sees ONE level into a held tile — deeper differences surface as the
-   * participant navigates in, which is also where they'd act on them.
+   * Depth: rules 1 and 2 (receipt / announced-sig watch) cover a held
+   * tile at ANY depth, because the publisher's handle seals their whole
+   * subtree. Rule 3 (name diff) sees ONE level into a held tile — deeper
+   * differences surface as the participant navigates in, which is also
+   * where they'd act on them.
    */
   #divergenceScanPass = async (): Promise<void> => {
     const ioc = this.#ioc()
@@ -1159,7 +1199,31 @@ export class SwarmAdoptDrone extends Drone {
         if (receipt !== sig) { diverged.add(name); continue }
       }
 
-      // ── rule 2: name diff one level in ────────────────────────────────
+      // ── rule 2: announced-sig watch (held tiles with no receipt) ──────
+      // Rule 1's comparison, generalized to tiles that were never adopted —
+      // the AUTHORED-on-both-hives case, where no receipt can exist. Every
+      // peer visual carries the publisher's branch sig, a merkle handle
+      // over their whole subtree, so a CHANGED sig on a held tile means
+      // they changed something beneath it since we first saw them. First
+      // sight BASELINES (joining a swarm is not news) and falls through to
+      // the name diff; the baseline is acked only when an adopt lands
+      // (#recordSyncReceipt drops the path), so the light stays on until
+      // acted on rather than flickering out on the next heartbeat. IN
+      // MEMORY ONLY — a swarm-scoped judgement must not outlive the swarm
+      // (the peer-divergence doctrine); a fresh session re-baselines.
+      if (SIG_RE.test(sig) && !isWithinAdoptedRoot(target)) {
+        const pubkey = String(tile.peerPubkey ?? '').trim().toLowerCase()
+        if (pubkey) {
+          const pathKey = target.join('/')
+          let byPub = this.#peerSigWatch.get(pathKey)
+          if (!byPub) { byPub = new Map(); this.#peerSigWatch.set(pathKey, byPub) }
+          const prev = byPub.get(pubkey)
+          if (prev === undefined) byPub.set(pubkey, sig)
+          else if (prev !== sig) { diverged.add(name); continue }
+        }
+      }
+
+      // ── rule 3: name diff one level in ────────────────────────────────
       // The only rule that works for tiles we AUTHORED (no receipt can
       // exist) and the only unit the participant can act on: children they
       // publish that we don't hold. Additive by construction — children we
@@ -1203,7 +1267,18 @@ export class SwarmAdoptDrone extends Drone {
     const childSig = await swarm.composeSigForSegments(target).catch(() => '')
     if (!childSig) return false
     const theirs = swarm.peerTilesAtSig(childSig)
-    if (!theirs || theirs.length === 0) return false
+    if (!theirs || theirs.length === 0) {
+      // The receiver only ever subscribes at its CURRENT sig, so a child
+      // location's cache is empty unless the user once navigated into it —
+      // which made this rule almost never fire. PROBE the mesh for cached
+      // visuals there, fire-and-forget: an answer injects into the peer
+      // cache and emits swarm:peers-changed, which re-runs this scan with
+      // the cache warm; no answer = nothing published there = correctly
+      // silent. (Cooldown inside primePeerTilesAt keeps heartbeat-driven
+      // rescans from re-asking the same empty location every burst.)
+      void swarm.primePeerTilesAt?.(childSig).catch(() => undefined)
+      return false
+    }
     const { names, coldMiss } = await childNamesOfStrict(history, heldChild)
       .catch(() => ({ names: [] as string[], coldMiss: true }))
     if (coldMiss) return false
