@@ -203,26 +203,79 @@
       </ul>
     }
 
-    <div class="chat-thread" #scroller>
+    <!-- The scroller and the pill that rides over its bottom edge — the wrap
+         exists to give the pill something to be positioned against that is not
+         the whole panel (whose footer height moves with the panel scale). -->
+    <div class="chat-threadwrap">
+    <!-- ONE delegated click for the whole transcript: rendered markdown is not
+         a template, so its hive-path chips, code-copy buttons and links carry
+         data attributes and are routed in the component. -->
+    <div class="chat-thread" #scroller (scroll)="onScroll()" (click)="onThreadClick($event)">
       @if (empty()) {
         <p class="chat-empty">{{ 'chat.empty' | t }}</p>
       }
-      @for (turn of turns(); track trackTurn($index, turn)) {
-        <div class="chat-msg" [class.user]="turn.role === 'user'" [class.ai]="turn.role === 'assistant'">
-          <div class="chat-msg-text">{{ turn.text }}</div>
+      @for (entry of rendered(); track entry.key) {
+        <div class="chat-msg"
+          [class.user]="entry.turn.role === 'user'"
+          [class.ai]="entry.turn.role === 'assistant'">
+          <div class="chat-msg-text" [innerHTML]="entry.html"></div>
+
+          <!-- What you can DO with an answer. Quiet until the message is
+               hovered or focused; always reachable by keyboard. -->
+          <div class="chat-acts">
+            <button type="button" (click)="copyTurn(entry.turn, entry.key)"
+              [title]="'chat.act.copy' | t" [attr.aria-label]="'chat.act.copy' | t">
+              <span class="mat-sym" aria-hidden="true">{{ copiedTurn() === entry.key ? 'check' : 'content_copy' }}</span>
+            </button>
+            @if (entry.turn.role === 'assistant') {
+              <button type="button" (click)="noteTurn(entry.turn)"
+                [title]="'chat.act.note' | t" [attr.aria-label]="'chat.act.note' | t">
+                <span class="mat-sym" aria-hidden="true">sticky_note_2</span>
+              </button>
+            } @else {
+              <button type="button" (click)="editTurn(entry.turn)"
+                [title]="'chat.act.edit' | t" [attr.aria-label]="'chat.act.edit' | t">
+                <span class="mat-sym" aria-hidden="true">edit</span>
+              </button>
+            }
+            <button type="button" (click)="retryTurn(entry.turn)" [disabled]="waiting()"
+              [title]="'chat.act.retry' | t" [attr.aria-label]="'chat.act.retry' | t">
+              <span class="mat-sym" aria-hidden="true">refresh</span>
+            </button>
+          </div>
         </div>
       }
       <!-- An answer arriving from the host tier, a chunk at a time. Not a turn
-           until the stream closes and the text is on disk. -->
+           until the stream closes and the text is on disk. `data-streaming`
+           keeps the highlighter off a block that is still being written. -->
       @if (streaming()) {
-        <div class="chat-msg ai" aria-live="polite">
-          <div class="chat-msg-text">{{ streaming() }}</div>
+        <div class="chat-msg ai" data-streaming aria-live="polite">
+          <div class="chat-msg-text" [innerHTML]="streamHtml()"></div>
         </div>
       } @else if (waiting()) {
-        <div class="chat-msg ai chat-think" aria-live="polite">
-          <span class="chat-msg-text">{{ (bridgeUp() ? 'chat.thinking' : 'chat.queued') | t }}</span>
+        <!-- THE WAIT, TOLD HONESTLY. How long it has been, whether anything is
+             actually listening, and a way out of it. -->
+        <div class="chat-msg ai chat-wait" role="status" aria-live="polite">
+          <span class="chat-msg-text" [class.chat-think]="!unattended()">{{
+            (unattended() ? 'chat.unattended' : bridgeUp() ? 'chat.thinking' : 'chat.queued') | t
+          }}</span>
+          <span class="chat-wait-clock">{{ elapsedLabel() }}</span>
         </div>
+        @if (unattended()) {
+          <p class="chat-wait-hint">{{ 'chat.unattended.hint' | t }}</p>
+        }
       }
+    </div>
+
+    <!-- Scrolled up to read something: arrivals stop moving the view, and this
+         is the way back to the newest turn. -->
+    @if (!atBottom()) {
+      <button class="chat-pill" type="button" (click)="scrollToBottom()"
+        [attr.aria-label]="'chat.scrollDown' | t">
+        <span class="mat-sym" aria-hidden="true">arrow_downward</span>
+        <span>{{ 'chat.scrollDown' | t }}</span>
+      </button>
+    }
     </div>
 
     <footer class="chat-foot">
@@ -262,10 +315,21 @@
           [attr.aria-label]="'chat.placeholder' | t"
           (keydown)="onInputKey($event)"
           (input)="onInput($event)"></textarea>
-        <button class="chat-send" type="button" (click)="send()"
-          [title]="'chat.send' | t" [attr.aria-label]="'chat.send' | t">
-          <span class="mat-sym" aria-hidden="true">arrow_upward</span>
-        </button>
+        <!-- STOP means two different acts, because the tiers fail differently:
+             a live host stream is aborted, a queued bridge ask is withdrawn
+             from the pool. The label says which one this press would be. -->
+        @if (canStop()) {
+          <button class="chat-send chat-stop" type="button" (click)="stop()"
+            [title]="(hostStreaming() ? 'chat.stop' : 'chat.withdraw') | t"
+            [attr.aria-label]="(hostStreaming() ? 'chat.stop' : 'chat.withdraw') | t">
+            <span class="mat-sym" aria-hidden="true">stop</span>
+          </button>
+        } @else {
+          <button class="chat-send" type="button" (click)="send()"
+            [title]="'chat.send' | t" [attr.aria-label]="'chat.send' | t">
+            <span class="mat-sym" aria-hidden="true">arrow_upward</span>
+          </button>
+        }
       </div>
     </footer>
     }

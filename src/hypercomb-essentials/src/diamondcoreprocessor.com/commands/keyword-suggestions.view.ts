@@ -22,12 +22,14 @@ type TagRegistryLike = { ensureLoaded(): Promise<void>; add(name: string): Promi
 type ModeRegistryLike = { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void }
 type LlmQueenLike = {
   activeModel: string
+  /** The queued ask's record signature, or null. Read here only for whether
+   *  the question left at all — this view does not withdraw one. */
   submitChat(
     convoId: string,
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
-  ): Promise<boolean>
+  ): Promise<string | null>
 }
 
 export interface KeywordReviewJob {

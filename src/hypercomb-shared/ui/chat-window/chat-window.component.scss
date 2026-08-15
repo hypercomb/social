@@ -585,10 +585,10 @@ $accent: #7eb6d6;
   max-width: min(92%, 44em);
 }
 
-.chat-msg-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+// The message body is styled in chat-markdown.scss — turns are rendered
+// markdown now, so `white-space: pre-wrap` moved out with the plain text it
+// used to lay out (it would have doubled every paragraph gap against the real
+// block margins the renderer produces).
 
 .chat-think {
   color: rgba(216, 230, 238, 0.55);

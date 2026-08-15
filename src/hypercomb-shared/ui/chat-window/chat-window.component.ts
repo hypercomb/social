@@ -47,10 +47,38 @@
 // bridge. A configured-but-disconnected bridge can durably queue a question;
 // an unreachable host cannot. The status line keeps those states distinct.
 //
+// And a wait is REPORTED, not implied. The row that used to say "Thinking…"
+// forever now carries a clock, says "nothing is listening yet" when that is
+// the truth (no session on the bridge to drain the durable queue), and offers
+// a way out — because a question you cannot call back is a question you are
+// stuck with. Stop means two different acts, one per tier: a live host stream
+// is ABORTED (`host-ai.service.ts` always accepted an AbortSignal and nothing
+// ever passed one), a queued bridge ask is WITHDRAWN from the optimization
+// pool. A partial host answer survives the abort — the host really said it.
+//
+// ── An answer is read, and then acted on ────────────────────────────────────
+//
+// Turns render as markdown (chat-markdown.ts): headings, lists, tables, fenced
+// code with a language label and a copy button, autolinked URLs, and hive-path
+// chips that navigate — an answer naming `dolphin/site` takes you there. The
+// rendered HTML is trusted past Angular's sanitizer, so the renderer's
+// escape-first discipline is load-bearing; read its header before touching it.
+//
+// Every message carries copy, retry, and either "put this on the tile" (an
+// answer) or "edit and send again" (a question). Nothing rewrites the thread:
+// editing sends a NEW turn, because a thread is append-only like everything
+// else in the hive.
+//
+// The transcript follows the newest turn only while you are AT the newest
+// turn. Scroll up to read something and arrivals stop moving the view under
+// you; a pill offers the way back. (It used to pin `scrollTop` on every chunk,
+// which made a streaming answer impossible to read from the top.)
+//
 // Shell UI — resolves everything through `window.ioc` at call time and never
 // imports essentials.
 
-import { Component, ElementRef, computed, signal, viewChild, type OnDestroy } from '@angular/core'
+import { Component, ElementRef, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core'
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import {
   CLAUDE_BRIDGE_ENABLED_STORAGE_KEY,
   EffectBus,
@@ -63,6 +91,8 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
+import { highlightBlocks } from './chat-highlight'
+import { hivePathSegments, renderChatMarkdown } from './chat-markdown'
 
 type TurnRole = 'user' | 'assistant'
 
@@ -95,17 +125,42 @@ type ChatThreadsLike = {
 
 type QueenLike = {
   activeModel: string
+  /** The queued ask's record SIGNATURE — what withdrawing it needs. Older
+   *  essentials builds (hypercomb-web loads its bees from OPFS, so the module
+   *  can lag the shell) return a bare boolean; then the ask is still queued,
+   *  it simply cannot be taken back from here. */
   submitChat(
     convoId: string,
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
-  ): Promise<boolean>
+  ): Promise<string | boolean | null>
 }
 
 type LineageLike = { explorerSegments?(): readonly string[] }
 type SelectionLike = { selected: ReadonlySet<string> }
 type BridgeLike = { connected?: boolean }
+type NavigationLike = { goRaw?(segments: readonly string[]): void }
+
+/** The optimization pool, over the shared Store — the durable inbox a queued
+ *  ask lives in until a Claude session drains it. Withdrawing is removing it. */
+type StoreLike = {
+  removeOptimization?(signature: string): Promise<boolean>
+  putOptimization?(blob: Blob): Promise<string>
+}
+
+/** The notes module (notes/notes.drone.ts), over IoC. `addAtSegments` takes an
+ *  EXPLICIT path — the `note:commit` effect writes to a child of wherever the
+ *  participant is standing, which is not necessarily the tile they meant. */
+type NotesLike = {
+  addAtSegments?(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    text: string,
+    shape?: unknown,
+    mark?: string | null,
+  ): Promise<void>
+}
 
 /** The host's AI — the SHALLOW immediate tier (assistant/host-ai.service.ts):
  *  a streamed answer from the operator's domain, no bridge involved. It is
@@ -115,7 +170,10 @@ type BridgeLike = { connected?: boolean }
  *  context, capped host-side. */
 type HostAiLike = {
   readonly configured?: boolean
-  ask?(question: string, opts?: { contextSigs?: readonly string[] }): AsyncGenerator<string, string, void>
+  ask?(
+    question: string,
+    opts?: { contextSigs?: readonly string[]; signal?: AbortSignal },
+  ): AsyncGenerator<string, string, void>
   /** Set (or clear with '') the participant's AI host — the guided setup's
    *  host door calls this instead of telling people to type a command. */
   setHost?(domain: string): void
@@ -151,6 +209,20 @@ const DEFAULT_MODEL = 'opus'
 const TRANSCRIPT_TURNS = 12
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 const CHAT_VISIBLE_STORAGE_KEY = 'hc:chat-visible'
+
+/** How close to the bottom still counts as reading the newest turn. Below it,
+ *  the transcript stops chasing arrivals and offers the pill instead. One line
+ *  of slack, so a stray wheel notch does not unpin the view. */
+const NEAR_BOTTOM_PX = 56
+
+/** The waiting row's clock. One second is the resolution people read; anything
+ *  finer is a flicker and anything coarser feels stopped. */
+const ELAPSED_TICK_MS = 1_000
+
+/** Rendered turns are memoized by their text — a thread of 200 turns must not
+ *  re-parse every one of them each time a chunk lands. Bounded, because a long
+ *  session's cache is otherwise a slow leak of everything ever said. */
+const RENDER_CACHE_MAX = 240
 
 // ── guided setup ─────────────────────────────────────────────────────────
 //
@@ -202,7 +274,12 @@ const ioc = (): { get(k: string): unknown } | undefined =>
   standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './chat-window.component.html',
-  styleUrls: ['./chat-window.component.scss'],
+  // TWO SHEETS, in source order. Angular's `anyComponentStyle` budget is
+  // measured per compiled stylesheet and one output is emitted per `styleUrls`
+  // entry — so splitting is the only thing that lowers the number a `@use`'d
+  // partial cannot. The markdown sheet is last because it styles the message
+  // bodies the first sheet lays out.
+  styleUrls: ['./chat-window.component.scss', './chat-markdown.scss'],
 })
 export class ChatWindowComponent implements OnDestroy {
 
@@ -241,6 +318,20 @@ export class ChatWindowComponent implements OnDestroy {
    *  global — asking in one conversation must not make another look busy. */
   readonly waiting = signal(false)
 
+  /** When the outstanding question left, and how long ago that was. A wait
+   *  with no clock on it is indistinguishable from a wait that has died. */
+  readonly askedAt = signal(0)
+  readonly elapsed = signal(0)
+
+  /** The host tier is mid-stream: interrupting it means aborting a live fetch.
+   *  A bridge ask, by contrast, is a durable record — see `pendingSig`. */
+  readonly hostStreaming = signal(false)
+
+  /** The QUEUED bridge ask's record signature. Withdrawing an ask is removing
+   *  that record from the optimization pool, so this is the whole handle on a
+   *  question that has left but not been picked up. */
+  readonly pendingSig = signal('')
+
   readonly bridgeUp = signal(false)
   readonly model = signal<string>(DEFAULT_MODEL)
 
@@ -264,6 +355,14 @@ export class ChatWindowComponent implements OnDestroy {
    *  dialog for a row action is too much furniture; doing it silently on one
    *  press is too little. */
   readonly armed = signal('')
+
+  /** The transcript is following the newest turn. False once the participant
+   *  has scrolled up to read something — then arrivals stop moving the view
+   *  under them and the scroll-to-bottom pill appears instead. */
+  readonly atBottom = signal(true)
+
+  /** Which message's Copy just fired — a transient tick on that one row. */
+  readonly copiedTurn = signal('')
 
   readonly models = MODELS
 
@@ -343,7 +442,74 @@ export class ChatWindowComponent implements OnDestroy {
 
   readonly empty = computed(() => this.turns().length === 0 && !this.streaming())
 
+  // ── markdown ────────────────────────────────────────────────────────────
+  //
+  // Answers arrive as markdown, so they are read as markdown. The rendering is
+  // a pure function (chat-markdown.ts) whose entire safety story is escape-
+  // first — nothing unescaped from a model ever reaches the string — which is
+  // what makes bypassing Angular's sanitizer sound here. The bypass is needed
+  // at all because the sanitizer strips the `data-` attributes the hive-path
+  // chips and code-copy buttons are addressed by.
+
+  readonly #sanitizer = inject(DomSanitizer)
+
+  /** text → rendered HTML. Bounded; keyed by content, so an identical turn
+   *  reaching two threads is parsed once. */
+  readonly #rendered = new Map<string, SafeHtml>()
+
+  #markdown(text: string): SafeHtml {
+    const hit = this.#rendered.get(text)
+    if (hit) return hit
+    const html = this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(text))
+    if (this.#rendered.size >= RENDER_CACHE_MAX) {
+      // Oldest first — Map preserves insertion order, and the oldest turn in a
+      // long thread is the one furthest from the screen.
+      const oldest = this.#rendered.keys().next().value
+      if (oldest !== undefined) this.#rendered.delete(oldest)
+    }
+    this.#rendered.set(text, html)
+    return html
+  }
+
+  /** The thread, rendered. Recomputed when a turn lands; the cache above makes
+   *  that a lookup per existing turn rather than a re-parse. */
+  readonly rendered = computed(() =>
+    this.turns().map((turn, index) => ({
+      turn,
+      key: `${turn.at}:${index}`,
+      html: this.#markdown(turn.text),
+    })))
+
+  /** The half-arrived answer. Its own computed and deliberately NOT cached —
+   *  every chunk is a new string, and caching them would be a leak with a
+   *  hit rate of zero. */
+  readonly streamHtml = computed(() =>
+    this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(this.streaming())))
+
+  // ── waiting honesty ─────────────────────────────────────────────────────
+
+  /** Something can be called back: a live stream can be aborted, a queued ask
+   *  can be taken out of the pool. */
+  readonly canStop = computed(() => this.waiting() && (this.hostStreaming() || !!this.pendingSig()))
+
+  /** NOBODY IS LISTENING. The question is a durable record in the optimization
+   *  pool and no Claude session is connected to drain it — so it is not slow,
+   *  it is unattended, and saying "Thinking…" would be a lie. */
+  readonly unattended = computed(() =>
+    this.waiting() && !this.hostStreaming() && !this.bridgeUp() && this.bridgeConfigured())
+
+  /** m:ss once past a minute — a bare "127s" makes people do arithmetic. */
+  readonly elapsedLabel = computed(() => {
+    const seconds = this.elapsed()
+    if (seconds < 60) return `${seconds}s`
+    return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
+  })
+
   #cleanups: (() => void)[] = []
+  #elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+  /** The live fetch behind a host-tier answer, so Stop has something to pull. */
+  #abort: AbortController | null = null
 
   #onSync = (): void => { if (this.visible()) this.#refreshContext() }
   #onStorage = (event: StorageEvent): void => {
@@ -354,6 +520,15 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   constructor() {
+    // Code blocks are highlighted AFTER the turn is in the DOM — highlight.js
+    // works on live elements, and the loader is lazy, so the first fenced block
+    // in a session pays for the library and none of the later ones do.
+    effect(() => {
+      this.rendered()
+      this.streaming()
+      setTimeout(() => void highlightBlocks(this.scroller()?.nativeElement), 0)
+    })
+
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
 
@@ -435,9 +610,85 @@ export class ChatWindowComponent implements OnDestroy {
     window.removeEventListener('synchronize', this.#onSync)
     window.removeEventListener('storage', this.#onStorage)
     if (this.#retryTimer) clearInterval(this.#retryTimer)
+    this.#stopClock()
+    this.#abort?.abort()
   }
 
   #retryTimer: ReturnType<typeof setInterval> | null = null
+
+  // ── the wait, told honestly ─────────────────────────────────────────────
+
+  /** Begin waiting: the clock starts, and every state that describes a
+   *  previous wait is cleared so nothing from it can be read as current. */
+  #startWait(): void {
+    this.waiting.set(true)
+    this.askedAt.set(Date.now())
+    this.elapsed.set(0)
+    this.pendingSig.set('')
+    this.#stopClock()
+    this.#elapsedTimer = setInterval(() => {
+      if (!this.waiting()) { this.#stopClock(); return }
+      this.elapsed.set(Math.max(0, Math.round((Date.now() - this.askedAt()) / 1000)))
+    }, ELAPSED_TICK_MS)
+  }
+
+  /** Stop waiting, whatever ended it — an answer, a failure, a withdrawal. */
+  #endWait(): void {
+    this.waiting.set(false)
+    this.hostStreaming.set(false)
+    this.pendingSig.set('')
+    this.#stopClock()
+  }
+
+  #stopClock(): void {
+    if (!this.#elapsedTimer) return
+    clearInterval(this.#elapsedTimer)
+    this.#elapsedTimer = null
+  }
+
+  /**
+   * Call the question back.
+   *
+   * The two tiers fail differently and so they are stopped differently. A host
+   * answer is a live HTTP stream: aborting it is all there is, and whatever had
+   * already arrived is kept, because the host really did say it. A bridge ask
+   * is a durable RECORD sitting in the optimization pool — stopping it means
+   * taking that record out, so no session can ever pick it up, plus the same
+   * `mode:'stop'` marker AgentRegistry leaves for a responder already mid-flight.
+   */
+  async stop(): Promise<void> {
+    if (this.hostStreaming()) {
+      this.#abort?.abort()
+      // #askHost's abort branch stores the partial and ends the wait.
+      return
+    }
+    await this.withdraw()
+  }
+
+  /** Retire a queued ask. Idempotent, and safe when the record is already
+   *  gone — a responder that drained it a moment ago simply answers anyway. */
+  async withdraw(): Promise<void> {
+    const sig = this.pendingSig()
+    this.#endWait()
+    if (!sig) return
+
+    const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
+    if (!store?.removeOptimization) return
+    try {
+      await store.removeOptimization(sig)
+      // The courtesy marker: a responder that already has this ask in hand
+      // learns it was withdrawn. Same shape AgentRegistry.#retireAsk writes.
+      if (store.putOptimization) {
+        const marker = {
+          kind: 'ask',
+          appliesTo: [...this.targets()],
+          payload: { mode: 'stop', askSig: sig, status: 'stopped', askedAt: Date.now() },
+          mark: 'persistent',
+        }
+        await store.putOptimization(new Blob([JSON.stringify(marker)], { type: 'application/json' }))
+      }
+    } catch { /* the ask is out of the pool or was never in it — either way, done */ }
+  }
 
   // ── guided setup actions ────────────────────────────────────────────────
 
@@ -577,8 +828,8 @@ export class ChatWindowComponent implements OnDestroy {
         this.model.set(this.#rememberedModel(recent.convoId))
         this.streaming.set('')
         this.turns.set(latestTurns)
-        this.waiting.set(false)
-        this.#scrollDown()
+        this.#endWait()
+        this.#scrollDown(true)
       } else if (!this.activeId()) {
         this.newChat(false)
       }
@@ -666,8 +917,10 @@ export class ChatWindowComponent implements OnDestroy {
     // (it used to sit after the set, guarding only the scroll).
     if (this.activeId() !== convoId) return
     this.turns.set(turns)
-    this.waiting.set(false)
-    this.#scrollDown()
+    this.#endWait()
+    // Switching threads re-pins: you are arriving at a conversation, and its
+    // newest turn is where arriving means.
+    this.#scrollDown(true)
   }
 
   /** Start a fresh thread. It does not appear in the list until it holds a
@@ -679,9 +932,10 @@ export class ChatWindowComponent implements OnDestroy {
     this.activeId.set(threads?.newConvoId() ?? '')
     this.turns.set([])
     this.streaming.set('')
-    this.waiting.set(false)
+    this.#endWait()
     this.listOpen.set(false)
     this.armed.set('')
+    this.atBottom.set(true)
     if (focus) this.#focus()
   }
 
@@ -806,8 +1060,10 @@ export class ChatWindowComponent implements OnDestroy {
 
     const turn: ChatTurn = { kind: 'chat-turn', convoId, role: 'user', text: message, at: Date.now() }
     this.turns.update(list => [...list, turn])
-    this.waiting.set(true)
-    this.#scrollDown()
+    this.#startWait()
+    // Sending is the one arrival the participant caused, so it re-pins the
+    // transcript even if they had scrolled up to read something.
+    this.#scrollDown(true)
 
     const stored = await threads.appendTurn(convoId, 'user', message)
     if (!stored) console.warn('[chat] the question was not stored — it will be missing after a reload')
@@ -822,17 +1078,26 @@ export class ChatWindowComponent implements OnDestroy {
     // If the host tier is unreachable and a local bridge is configured, the
     // question is QUEUED there: its durable record can be picked up when a
     // session connects. Without that bridge, host failure is reported now.
-    if (!this.bridgeUp() && await this.#askHost(convoId, message)) {
-      // TWO turns landed (the question and the streamed answer) — the count
-      // matters only if the participant switched threads mid-stream.
-      if (!this.#bumpList(convoId, 2)) void this.#refreshList()
-      return
+    if (!this.bridgeUp()) {
+      const outcome = await this.#askHost(convoId, message)
+      if (outcome === 'answered') {
+        // TWO turns landed (the question and the streamed answer) — the count
+        // matters only if the participant switched threads mid-stream.
+        if (!this.#bumpList(convoId, 2)) void this.#refreshList()
+        return
+      }
+      // STOPPED BY THE PARTICIPANT. Handing a question they just called back
+      // to the durable bridge queue would be the opposite of what Stop means.
+      if (outcome === 'aborted') {
+        if (!this.#bumpList(convoId, 2)) void this.#refreshList()
+        return
+      }
     }
 
     // A participant-host failure is retryable, but without a configured local
     // bridge there is nobody who could ever drain the durable bridge queue.
     if (!this.bridgeConfigured()) {
-      this.waiting.set(false)
+      this.#endWait()
       EffectBus.emit('toast:show', {
         type: 'warning',
         message: 'Your AI host is unavailable. Check its setup and try again.',
@@ -845,10 +1110,15 @@ export class ChatWindowComponent implements OnDestroy {
       .map(t => ({ role: t.role, text: t.text }))
 
     queen.activeModel = this.model()
-    const ok = await queen.submitChat(convoId, message, [...this.targets()], transcript)
-    if (!ok) {
-      this.waiting.set(false)
+    const queued = await queen.submitChat(convoId, message, [...this.targets()], transcript)
+    if (!queued) {
+      this.#endWait()
       EffectBus.emit('toast:show', { type: 'warning', message: 'Could not send — try again.' })
+    } else if (typeof queued === 'string') {
+      // The ask's record signature: the handle Withdraw pulls on. An older
+      // essentials build answers `true` instead, and then the question is
+      // queued but not recallable from here.
+      this.pendingSig.set(queued)
     }
     if (!this.#bumpList(convoId)) void this.#refreshList()
   }
@@ -856,50 +1126,76 @@ export class ChatWindowComponent implements OnDestroy {
   /**
    * The shallow tier: stream an answer from the host's AI.
    *
-   * Returns false when the host cannot answer. The caller queues only when a
-   * local bridge is configured; otherwise it reports the retryable host failure.
+   * Three outcomes, because two are not enough to route the caller correctly:
+   *
+   *   'answered'  the host said something and it is stored
+   *   'declined'  the host cannot answer — fall through to the bridge queue
+   *   'aborted'   the PARTICIPANT stopped it — never re-queue a recalled ask
+   *
+   * `host-ai.service.ts` has always accepted an AbortSignal and nothing ever
+   * passed one; this is that wire. A partial answer is KEPT on abort: the host
+   * really did say those words, and throwing them away punishes the person for
+   * stopping a stream they had already read half of.
    *
    * The text is accumulated whatever the participant does next: they may switch
    * conversations mid-stream, and the answer still belongs to the thread that
    * asked. Only the PAINTING is conditional on still being in that thread.
    */
-  async #askHost(convoId: string, message: string): Promise<boolean> {
+  async #askHost(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
     const host = ioc()?.get(HOST_AI_IOC_KEY) as HostAiLike | undefined
     // The bundled address is not a shared/free allowance. Only a host the
     // participant explicitly configured may be used as the shallow fallback.
-    if (!host?.configured || !host.ask) return false
+    if (!host?.configured || !host.ask) return 'declined'
 
     // The attached-context sigs the host inlines server-side from its own
     // heap — the parameter host-ai always accepted and nothing ever passed.
     const contextSigs = await this.#contextSigs()
 
+    const controller = new AbortController()
+    this.#abort = controller
+    this.hostStreaming.set(true)
+
     let full = ''
+    let aborted = false
     try {
-      for await (const chunk of host.ask(message, contextSigs.length ? { contextSigs } : undefined)) {
+      const options = { signal: controller.signal, ...(contextSigs.length ? { contextSigs } : {}) }
+      for await (const chunk of host.ask(message, options)) {
         full += chunk
         if (this.activeId() !== convoId) continue
         this.streaming.set(full)
         this.#scrollDown()
       }
     } catch {
-      // No signer, no AI on that host, or no network. The caller either hands
-      // the question to a configured bridge or reports the host failure.
-      this.streaming.set('')
-      return false
+      // No signer, no AI on that host, no network — or the participant pressed
+      // Stop, which arrives here as the fetch's own abort.
+      aborted = controller.signal.aborted
+      if (!aborted) {
+        this.streaming.set('')
+        this.hostStreaming.set(false)
+        this.#abort = null
+        return 'declined'
+      }
+    } finally {
+      if (this.#abort === controller) this.#abort = null
     }
 
     this.streaming.set('')
-    if (!full.trim()) return false
+    this.hostStreaming.set(false)
+
+    if (!full.trim()) {
+      if (aborted) this.#endWait()
+      return aborted ? 'aborted' : 'declined'
+    }
 
     await this.#threads()?.appendTurn(convoId, 'assistant', full)
     if (this.activeId() === convoId) {
       this.turns.update(list => [...list, {
         kind: 'chat-turn', convoId, role: 'assistant', text: full, at: Date.now(),
       }])
-      this.waiting.set(false)
+      this.#endWait()
       this.#scrollDown()
     }
-    return true
+    return aborted ? 'aborted' : 'answered'
   }
 
   #onReply(payload?: { convoId?: string; text?: string }): void {
@@ -925,7 +1221,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.turns.update(list => [...list, {
       kind: 'chat-turn', convoId, role: 'assistant', text, at: Date.now(),
     }])
-    this.waiting.set(false)
+    this.#endWait()
     this.#scrollDown()
     if (!this.#bumpList(convoId)) void this.#refreshList()
   }
@@ -964,17 +1260,188 @@ export class ChatWindowComponent implements OnDestroy {
     setTimeout(() => this.input()?.nativeElement?.focus(), 0)
   }
 
-  /** After the turn is in the DOM, not before. */
-  #scrollDown(): void {
+  // ── scroll anchoring ────────────────────────────────────────────────────
+  //
+  // The transcript used to pin `scrollTop` to the bottom on every chunk, which
+  // meant a streaming answer could not be read from the top and scrolling up to
+  // check what you asked was physically impossible — the next chunk snatched
+  // the view back. So: follow the bottom only while the participant is AT the
+  // bottom, and when they are not, say so with a pill instead of overruling them.
+
+  onScroll(): void {
+    const element = this.scroller()?.nativeElement
+    if (!element) return
+    const distance = element.scrollHeight - element.scrollTop - element.clientHeight
+    this.atBottom.set(distance <= NEAR_BOTTOM_PX)
+  }
+
+  /** After the turn is in the DOM, not before. `force` is for arrivals the
+   *  participant caused — their own message, a thread they just opened. */
+  #scrollDown(force = false): void {
+    if (!force && !this.atBottom()) return
     setTimeout(() => {
       const element = this.scroller()?.nativeElement
-      if (element) element.scrollTop = element.scrollHeight
+      if (!element) return
+      element.scrollTop = element.scrollHeight
+      this.atBottom.set(true)
     }, 0)
   }
 
-  // ── template helpers ────────────────────────────────────────────────────
+  /** The pill. Back to the newest turn, and following again from here. */
+  scrollToBottom(): void {
+    this.#scrollDown(true)
+  }
 
-  trackTurn = (index: number, turn: ChatTurn): string => `${turn.at}:${index}`
+  // ── per-message actions ─────────────────────────────────────────────────
+  //
+  // An answer you cannot act on is a screenshot. Copy takes it out of the hive,
+  // note puts it IN — and retry and edit exist because the first phrasing of a
+  // question is usually not the good one.
+  //
+  // Nothing here rewrites history: a thread is append-only (the same rule the
+  // rest of the hive keeps), so editing a question sends a NEW turn rather than
+  // silently replacing the one above it and orphaning the answer it produced.
+
+  /** The question that produced this turn: itself, if it is the question. */
+  #questionFor(turn: ChatTurn): string {
+    if (turn.role === 'user') return turn.text
+    const list = this.turns()
+    const index = list.indexOf(turn)
+    for (let i = (index < 0 ? list.length : index) - 1; i >= 0; i--) {
+      if (list[i].role === 'user') return list[i].text
+    }
+    return ''
+  }
+
+  copyTurn(turn: ChatTurn, key: string): void {
+    void navigator.clipboard?.writeText(turn.text).then(() => {
+      this.copiedTurn.set(key)
+      setTimeout(() => { if (this.copiedTurn() === key) this.copiedTurn.set('') }, 1_400)
+    }).catch(() => {
+      EffectBus.emit('toast:show', { type: 'warning', message: 'Could not reach the clipboard.' })
+    })
+  }
+
+  /** Ask it again, unchanged. The answer lands as a new turn. */
+  retryTurn(turn: ChatTurn): void {
+    const question = this.#questionFor(turn)
+    if (question) void this.send(question)
+  }
+
+  /** Put it back in the composer to be rewritten. Explicitly NOT a truncation
+   *  of the thread — send it and it appends, like anything else you type. */
+  editTurn(turn: ChatTurn): void {
+    const element = this.input()?.nativeElement
+    if (!element) return
+    element.value = turn.text
+    this.autosize(element)
+    element.focus()
+    element.setSelectionRange(element.value.length, element.value.length)
+  }
+
+  /**
+   * Put this answer on the tile it is about, as a note.
+   *
+   * The tile is the ONE selected tile if there is exactly one, else the page
+   * the participant is standing in. `NotesService.addAtSegments` takes an
+   * explicit path for exactly this reason — the `note:commit` effect writes to
+   * a child of the current location, which is a different tile than the one the
+   * status line above the composer has been naming all along.
+   */
+  async noteTurn(turn: ChatTurn): Promise<void> {
+    const here = [...this.here()]
+    const selected = this.targets()
+    const [parents, label] = selected.length === 1
+      ? [here, selected[0]]
+      : [here.slice(0, -1), here[here.length - 1] ?? '']
+
+    if (!label) {
+      EffectBus.emit('toast:show', {
+        type: 'warning',
+        message: 'Stand on a tile (or select one) to put this answer on it.',
+      })
+      return
+    }
+
+    const notes = ioc()?.get('@diamondcoreprocessor.com/NotesService') as NotesLike | undefined
+    if (!notes?.addAtSegments) {
+      EffectBus.emit('toast:show', { type: 'warning', message: 'Notes are not available yet.' })
+      return
+    }
+
+    try {
+      await notes.addAtSegments(parents, label, turn.text, null, null)
+      EffectBus.emit('toast:show', { type: 'tip', message: `Noted on ${label}.` })
+    } catch {
+      EffectBus.emit('toast:show', { type: 'warning', message: `Could not write the note on ${label}.` })
+    }
+  }
+
+  // ── links inside an answer ──────────────────────────────────────────────
+
+  /**
+   * One delegated click for the whole transcript.
+   *
+   * Rendered markdown is not a template, so its interactive parts cannot carry
+   * Angular bindings; they carry `data-` attributes and this reads them. The
+   * anchor branch is the important one: an `<a href>` left to itself navigates
+   * the shell document, which on the native client means the window is gone and
+   * on the web means every drone unloads (see document-view-links.ts).
+   */
+  onThreadClick(event: MouseEvent): void {
+    const target = event.target as Element | null
+    if (!target?.closest) return
+
+    const chip = target.closest('[data-hive-path]')
+    if (chip) {
+      event.preventDefault()
+      this.goPath(chip.getAttribute('data-hive-path') ?? '')
+      return
+    }
+
+    const copy = target.closest('[data-copy-code]')
+    if (copy) {
+      event.preventDefault()
+      const code = copy.closest('.chat-code')?.querySelector('code')?.textContent ?? ''
+      void navigator.clipboard?.writeText(code).then(() => {
+        copy.textContent = 'copied'
+        setTimeout(() => { copy.textContent = 'copy' }, 1_400)
+      }).catch(() => { /* the code is still on screen and selectable */ })
+      return
+    }
+
+    const anchor = target.closest('a')
+    if (!anchor) return
+    // Prevented first and unconditionally — whatever we decide below, the
+    // shell's own document must not act on this click.
+    event.preventDefault()
+    event.stopPropagation()
+    this.#openExternal(anchor.getAttribute('href') ?? '')
+  }
+
+  /** Go where the answer said. Raw segments: an answer names a place with the
+   *  characters it is spelled with, not a normalized guess at them. */
+  goPath(path: string): void {
+    const segments = hivePathSegments(path)
+    if (!segments.length) return
+    const navigation = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
+    navigation?.goRaw?.(segments)
+  }
+
+  /** Outside the hive: the OS browser on native, a new tab on the web. Never
+   *  this document, on either. */
+  #openExternal(href: string): void {
+    if (!/^(https?:|mailto:)/i.test(href)) return
+    const invoke = (globalThis as { __TAURI__?: { core?: { invoke?: (cmd: string, args: unknown) => unknown } } })
+      .__TAURI__?.core?.invoke
+    if (typeof invoke === 'function') {
+      void Promise.resolve(invoke('open_external', { url: href }))
+        .catch(err => console.warn('[chat] host could not open', href, err))
+      return
+    }
+    window.open(href, '_blank', 'noopener,noreferrer')
+  }
+
 }
 
 // Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an

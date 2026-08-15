@@ -707,6 +707,15 @@
       "unattended": false,
       "created": "2026-08-14",
       "status": "pending"
+    },
+    {
+      "id": "chat-p0",
+      "title": "Chat P0 — markdown turns, per-message actions, Stop/Withdraw, waiting honesty, scroll anchoring",
+      "run": null,
+      "note": "ai-first-class-plan.md section 3, phase 4. Mirror the five parts as tiles under a 'chat window' collection: chat-markdown.ts (the renderer + its escape-first safety rule), chat-highlight.ts (lazy highlight.js), the per-message action row, the two-tier Stop (host abort vs bridge optimization-remove), and the near-bottom scroll anchor. Pheromones: part on each, plus the chat/assistant marks the existing chat tiles carry. Notes must record WHY hive-path chips are buttons not anchors (document-view-links policy) and why the renderer escapes before formatting.",
+      "unattended": false,
+      "created": "2026-08-14",
+      "status": "pending"
     }
   ]
 }

@@ -115,22 +115,29 @@ export class LlmQueenBee extends QueenBee {
    *  (surfaced as `ask:chat-reply`), never as a note, so this deliberately
    *  emits NO `ask:queued` pill and NO toast: the conversation window owns
    *  its own thinking indicator. `transcript` carries the recent turns so a
-   *  stateless responder still has the thread. */
+   *  stateless responder still has the thread.
+   *
+   *  Returns the ask record's SIGNATURE, or null when it could not be queued.
+   *  A queued question that cannot be named cannot be WITHDRAWN, and a durable
+   *  record nobody can take back is a question you are stuck with — so the
+   *  handle comes back to the caller rather than being logged and dropped.
+   *  (Callers that only asked "did it leave?" still read correctly: a signature
+   *  is truthy, null is not.) */
   async submitChat(
     convoId: string,
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     // This method is specifically the durable LOCAL-BRIDGE queue seam. The
     // chat window's participant-host path calls HostAi directly and never
     // needs it. Guard direct/background callers too, or an unconfigured user
     // can accumulate requests that nobody will ever drain.
-    if (!isLocalClaudeBridgeConfigured()) return false
+    if (!isLocalClaudeBridgeConfigured()) return null
     const prompt = message.trim()
-    if (!prompt || !convoId) return false
+    if (!prompt || !convoId) return null
     const store = get<StoreLike>('@hypercomb.social/Store')
-    if (!store?.putOptimization) return false
+    if (!store?.putOptimization) return null
 
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
@@ -160,7 +167,7 @@ export class LlmQueenBee extends QueenBee {
     }
     const sig = await store.putOptimization(new Blob([JSON.stringify(record)], { type: 'application/json' }))
     console.log(`[ask] chat turn queued (${this.activeModel}) convo=${convoId} [${sig.slice(0, 12)}…]`)
-    return true
+    return sig
   }
 
   /** Mint the ask record. Called by the ask screen with the CHOSEN targets

@@ -1,0 +1,346 @@
+// hypercomb-shared/ui/chat-window/chat-markdown.scss
+//
+// The READING SURFACE — rendered answers, their code blocks and tables, the
+// per-message actions, the wait row and the scroll pill.
+//
+// A separate sheet from chat-window.component.scss and listed AFTER it in
+// `styleUrls`. Angular measures the `anyComponentStyle` budget per COMPILED
+// SHEET (one output per styleUrls entry), so this split is what keeps either
+// half well under the ceiling — a `@use`'d partial would merge back into the
+// parent's output and lower nothing. Order is preserved, so the cascade is
+// exactly what one concatenated file would have produced.
+//
+// ── Why half of this is `::ng-deep` ─────────────────────────────────────────
+//
+// Emulated encapsulation works by stamping `_ngcontent-*` onto elements the
+// TEMPLATE creates and rewriting every selector to require it. A rendered
+// answer is written with `[innerHTML]`, so none of its elements carry that
+// attribute and none of these rules would ever match — the first pass of this
+// sheet styled nothing at all and had to be caught in the browser.
+//
+// So: everything under `:host ::ng-deep` is markdown the renderer produced,
+// and everything outside it is chrome this component's template owns. The
+// `:host` prefix keeps the deep rules inside this panel rather than loose in
+// the document.
+
+@use '../toolwindow' as tw;
+
+$accent: #7eb6d6;
+
+// ── rendered markdown ─────────────────────────────────────────────────────
+//
+// `pre-wrap` is gone from the message body: the renderer now produces real
+// blocks, and keeping it would have doubled every paragraph gap with the
+// newlines the markdown already consumed.
+
+:host ::ng-deep .chat-msg-text {
+  word-break: break-word;
+
+  > :first-child { margin-top: 0; }
+  > :last-child { margin-bottom: 0; }
+
+  p { margin: 0 0 0.7em; }
+
+  h1, h2, h3, h4, h5, h6 {
+    margin: 1.1em 0 0.45em;
+    font-weight: 600;
+    line-height: 1.3;
+    color: rgba($accent, 0.95);
+  }
+
+  h1 { font-size: 1.15em; }
+  h2 { font-size: 1.08em; }
+  h3 { font-size: 1em; }
+  h4, h5, h6 { font-size: 0.95em; color: rgba(238, 244, 250, 0.9); }
+
+  ul, ol {
+    margin: 0 0 0.7em;
+    padding-left: 1.35em;
+  }
+
+  li { margin: 0.15em 0; }
+  // A nested list belongs to the item above it, not to the gap after it.
+  li > ul, li > ol, > ul ul, > ul ol, > ol ul, > ol ol { margin-bottom: 0; }
+
+  blockquote {
+    margin: 0 0 0.7em;
+    padding: 0.1em 0 0.1em 0.8em;
+    border-left: 2px solid rgba($accent, 0.4);
+    color: rgba(238, 244, 250, 0.72);
+    font-style: italic;
+  }
+
+  hr {
+    margin: 1em 0;
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  strong { font-weight: 650; color: #fff; }
+  del { opacity: 0.6; }
+
+  // An inline code span, not a block: no scroller, just a tint.
+  code {
+    padding: 0.1em 0.32em;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.9em;
+    background: rgba(6, 10, 16, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--md-shape-xs, 4px);
+  }
+}
+
+// A link out of the hive. Underlined rather than coloured-only, so it survives
+// being read by someone who cannot tell the steel from the body text.
+:host ::ng-deep .chat-link-out {
+  color: rgba($accent, 0.95);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+
+  &:hover { color: #fff; }
+}
+
+// A PLACE IN THE HIVE. A button, never an anchor — an href here would navigate
+// the shell document, which is how the native window dies.
+:host ::ng-deep .chat-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  padding: 0.05em 0.4em 0.05em 0.3em;
+  font: inherit;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.88em;
+  color: rgba(224, 180, 92, 0.95);
+  background: rgba(224, 180, 92, 0.1);
+  border: 1px solid rgba(224, 180, 92, 0.35);
+  border-radius: tw.$radius-pill;
+  cursor: pointer;
+  vertical-align: baseline;
+
+  &:hover {
+    color: #fff;
+    background: rgba(224, 180, 92, 0.24);
+  }
+
+  .chat-path-glyph { font-size: 0.95em; opacity: 0.8; }
+}
+
+// ── fenced code ───────────────────────────────────────────────────────────
+
+:host ::ng-deep .chat-code {
+  margin: 0 0 0.7em;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--md-shape-xs, 4px);
+  background: rgba(6, 10, 16, 0.78);
+  overflow: hidden;
+
+  pre {
+    // The block scrolls itself. Without this a single long line widens the
+    // whole panel and the conversation loses its measure to one paste.
+    margin: 0;
+    padding: 0.6em 0.7em;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba($accent, 0.3) transparent;
+  }
+
+  code {
+    display: block;
+    padding: 0;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.88em;
+    line-height: 1.5;
+    color: #d9e4ee;
+    background: none;
+    border: none;
+    white-space: pre;
+  }
+
+  .chat-code-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.2em 0.4em 0.2em 0.6em;
+    background: rgba(255, 255, 255, 0.035);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .chat-code-lang {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.7em;
+    letter-spacing: 0.06em;
+    text-transform: lowercase;
+    color: rgba(255, 255, 255, 0.42);
+  }
+
+  .chat-code-copy {
+    flex: 0 0 auto;
+    padding: 0.15em 0.5em;
+    font: inherit;
+    font-size: 0.68em;
+    letter-spacing: 0.04em;
+    color: rgba($accent, 0.85);
+    background: none;
+    border: 1px solid rgba($accent, 0.28);
+    border-radius: var(--md-shape-xs, 4px);
+    cursor: pointer;
+
+    &:hover { background: rgba($accent, 0.15); color: #fff; }
+  }
+
+  // highlight.js tokens, in the panel's own palette rather than an imported
+  // theme — the answer should look like it belongs to this window.
+  .hljs-comment, .hljs-quote { color: rgba(255, 255, 255, 0.35); font-style: italic; }
+  .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag { color: #c99bf0; }
+  .hljs-string, .hljs-regexp, .hljs-addition { color: #9fd6a0; }
+  .hljs-number, .hljs-symbol, .hljs-bullet { color: #e0b45c; }
+  .hljs-title, .hljs-name, .hljs-section, .hljs-selector-id { color: #7eb6d6; }
+  .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #86cdd6; }
+  .hljs-type, .hljs-built_in { color: #d6b98a; }
+  .hljs-meta { color: rgba(255, 255, 255, 0.45); }
+  .hljs-deletion { color: #e08a8a; }
+  .hljs-emphasis { font-style: italic; }
+  .hljs-strong { font-weight: 600; }
+}
+
+// ── tables ────────────────────────────────────────────────────────────────
+
+:host ::ng-deep .chat-table {
+  margin: 0 0 0.7em;
+  // Its own horizontal scroller. A four-column table in a 300px panel is the
+  // normal case, not the pathological one.
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba($accent, 0.3) transparent;
+
+  table {
+    border-collapse: collapse;
+    font-size: 0.92em;
+    // Not 100%: a wide table should scroll at its natural width rather than
+    // crush every column to fit a narrow panel.
+    min-width: 100%;
+  }
+
+  th, td {
+    padding: 0.32em 0.6em;
+    text-align: left;
+    white-space: nowrap;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  th {
+    font-weight: 600;
+    color: rgba($accent, 0.92);
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+// ── per-message actions ───────────────────────────────────────────────────
+//
+// Present, not loud. They fade in on hover and on keyboard focus — a row of
+// permanently-lit buttons under every message turns a conversation into a
+// control panel. Template-owned, so no ::ng-deep from here down.
+
+.chat-msg { position: relative; }
+
+.chat-acts {
+  position: absolute;
+  top: -0.55em;
+  right: 0.35em;
+  display: flex;
+  gap: 0.1em;
+  padding: 0.1em;
+  border-radius: var(--md-shape-xs, 4px);
+  background: rgba(10, 16, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transition: opacity 120ms ease;
+
+  button {
+    padding: 0.15em 0.25em;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    border-radius: var(--md-shape-xs, 4px);
+
+    .mat-sym { font-size: 0.95em; display: block; }
+    &:hover { color: rgba($accent, 0.98); background: rgba($accent, 0.14); }
+    &:disabled { opacity: 0.35; cursor: default; background: none; }
+  }
+}
+
+.chat-msg:hover .chat-acts,
+.chat-acts:focus-within { opacity: 1; }
+
+// Touch has no hover. Rather than hide the actions behind a gesture nobody
+// discovers, they simply stay visible where pointing is coarse.
+@media (hover: none) {
+  .chat-acts { opacity: 0.75; }
+}
+
+// ── the wait ──────────────────────────────────────────────────────────────
+
+.chat-wait {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  color: rgba(216, 230, 238, 0.6);
+}
+
+.chat-wait-clock {
+  flex: 0 0 auto;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+// Nobody is listening. Honey-warm, like every other "this needs you" in the
+// window — not red, because nothing is broken.
+.chat-wait-hint {
+  align-self: flex-start;
+  max-width: 92%;
+  margin: -0.2em 0 0;
+  padding: 0 0.2em;
+  font-size: 0.72em;
+  line-height: 1.5;
+  color: rgba(224, 180, 92, 0.85);
+}
+
+// ── scroll-to-bottom pill ─────────────────────────────────────────────────
+
+// The scroller and its pill. `min-height: 0` at both levels, or the flex child
+// refuses to shrink and the transcript pushes the footer off the panel.
+.chat-threadwrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 0.7em;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.3em 0.75em;
+  font: inherit;
+  font-size: 0.7em;
+  color: #0c1118;
+  background: rgba($accent, 0.94);
+  border: none;
+  border-radius: tw.$radius-pill;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.15em; }
+  &:hover { background: $accent; }
+}
