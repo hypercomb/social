@@ -25,6 +25,7 @@
     "bridge:watch:once": "node scripts/bridge/watch-asks.cjs --once",
     "bridge:drain": "node scripts/bridge/drain-tick.cjs",
     "bridge:check": "node scripts/bridge/bridge-cli.cjs list",
+    "deploy:hypercomb.com": "node scripts/presentation/build.cjs && node scripts/presentation/deploy-azure.cjs",
     "docs": "npx -y http-server documentation -p 4290 -c-1",
     "docs:links": "node documentation/check-links.mjs",
     "build:core": "npm --prefix hypercomb-core run build",
