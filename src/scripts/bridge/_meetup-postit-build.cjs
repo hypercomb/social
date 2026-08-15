@@ -18,8 +18,8 @@ const WebSocket = require('ws')
 
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const DRY = process.argv.includes('--dry')
-const SCRATCH = path.join(process.env.LOCALAPPDATA || '', 'Temp', 'claude',
-  'C--Projects-hypercomb-social-src', 'c9a3d569-83f1-4f3c-9db4-5d6a92d028fe', 'scratchpad')
+// Page + art live next to this script — a session scratchpad does not survive.
+const ASSETS = path.join(__dirname, '_meetup-postit')
 const SEGMENTS = ['revolucion', 'meetup']
 const KIND = 'visual:postit:note'
 const MARKER = 'own your corner of the internet'
@@ -121,9 +121,19 @@ async function attachLists(segments, trees) {
   for (const t of trees) roots.push(await putNoteTree(t))
   const layer = await ask({ op: 'layer-at', segments })
   const existing = (layer.ok && Array.isArray(layer.data?.notes)) ? layer.data.notes.map(String) : []
-  const merged = [...existing]
-  for (const s of roots) if (!merged.includes(s)) merged.push(s)
-  if (merged.length === existing.length) return 'present'
+  // Editing a list mints a NEW root — carry the old one and the tile shows the
+  // list twice. Titles are the identity: a new root REPLACES its namesake.
+  const titles = new Set(trees.map(t => t.note))
+  const kept = []
+  for (const sig of existing) {
+    if (roots.includes(sig)) continue
+    const r = await ask({ op: 'get-resource', sig })
+    let title = null
+    if (r.ok) { try { title = JSON.parse(r.data.text)?.note } catch {} }
+    if (!titles.has(title)) kept.push(sig)
+  }
+  const merged = [...kept, ...roots]
+  if (merged.length === existing.length && merged.every((s, i) => s === existing[i])) return 'present'
   if (DRY) return 'would-attach'
   const r = await ask({ op: 'bag-set', segments, slot: 'notes', cells: merged })
   return r.ok ? `attached ${roots.length}` : 'ERR ' + r.error
@@ -183,6 +193,7 @@ const LISTS = [
     item('Description: everything above the Details block of the post-it page, hook line first.'),
     item('First two lines are the search preview — the hook question stays the opening sentence.', 'bolt'),
     item('Keep the tech invisible: say ownership, permanence, exploration — never signatures, OPFS, relays.', 'bolt'),
+    item('Cover photo: the page banner — a hive of tiles holding pictures, notes and collections (scripts/bridge/_meetup-postit/meetup-banner.png, regenerate with gen-banner.cjs).'),
     item('Add photos: one screenshot of a real populated hive, one of the room or a laptop showing the comb.'),
     item('Keep "Buzz 500, 5th floor" in How-to-find-us unchanged.'),
   ]),
@@ -207,7 +218,7 @@ async function main() {
   }
 
   // The post-it page
-  const html = fs.readFileSync(path.join(SCRATCH, 'meetup-page.html'), 'utf8')
+  const html = fs.readFileSync(path.join(ASSETS, 'meetup-page.html'), 'utf8')
   let htmlSig = '(dry)'
   if (!DRY) {
     const put = await ask({ op: 'put-resource', text: html })
@@ -230,7 +241,7 @@ async function main() {
   log('  instruction:', await ensureNote(SEGMENTS, INSTRUCTION))
   log('  note       :', await ensureNote(SEGMENTS, NOTE))
   log('  lists      :', await attachLists(SEGMENTS, LISTS))
-  log('  art        :', await paintArt(SEGMENTS, path.join(SCRATCH, 'meetup-tile.png')))
+  log('  art        :', await paintArt(SEGMENTS, path.join(ASSETS, 'meetup-tile.png')))
 
   // Verify by read-back FROM the hive (never trust our own console line).
   if (!DRY) {
