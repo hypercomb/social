@@ -3614,6 +3614,35 @@ export class TileOverlayDrone extends Drone {
     return this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))?.label ?? null
   }
 
+  /** Where the tile named `label` sits ON SCREEN: its hex centre in client
+   *  (viewport) coordinates plus its on-screen circumradius. The inverse of
+   *  labelAtClient, for chrome that wants to stand BESIDE a tile rather than
+   *  under the cursor (the pheromone card anchors with this). Null when the
+   *  tile isn't on the current render. */
+  clientAnchorForLabel(label: string): { x: number; y: number; radius: number } | null {
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return null
+    let coord: Axial | undefined
+    for (let i = 0; i < this.#cellCount; i++) {
+      if (this.#cellLabels[i] === label) { coord = this.#cellCoords[i]; break }
+    }
+    if (!coord) return null
+    const px = this.#axialToPixel(coord.q, coord.r)
+    const global = this.#renderContainer.toGlobal(
+      new Point(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y),
+    )
+    // Pixi screen space → CSS client space (the canvas can render at a
+    // different resolution than it displays), then offset by the canvas rect.
+    const rect = this.#canvas.getBoundingClientRect()
+    const screen = this.#renderer.screen
+    const sx = rect.width / screen.width
+    const wt = this.#renderContainer.worldTransform
+    return {
+      x: rect.left + global.x * sx,
+      y: rect.top + global.y * (rect.height / screen.height),
+      radius: this.#geo.circumRadiusPx * Math.hypot(wt.a, wt.b) * sx,
+    }
+  }
+
   /** Start a paint stroke at the press. Stages the tile under the cursor and
    *  fixes the stroke's intent: pressing an unpainted tile PAINTS (add), a
    *  painted one LIFTS (remove) — and a drag then applies that same intent to

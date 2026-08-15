@@ -761,6 +761,15 @@
       "unattended": false,
       "created": "2026-08-15",
       "status": "pending"
+    },
+    {
+      "id": "notes-font-settings",
+      "title": "Notes window font settings — text size joins the ladder, and a reading face",
+      "run": null,
+      "note": "Mirror the two settings the annotations window gained. Tiles under the behaviors mirror (one per part, marked `part`): scaled() in _notes-strip-shared.scss (the rem/px sweep that let --hc-panel-scale reach the strip's type at all), the sizeOwner/dock-width fix (the desk no longer publishes a screen-wide width or a ballooned auto size), defaultText on hcDockedPanel (a window declares the size it opens at; explicit Auto now survives a reload because writeTextScale WRITES 'auto' instead of erasing the key), ownSettings on hcDockedPanel (a window declares its own rows and the editor draws them, repaint wrapped), and the reading face itself (mono/sans/serif on the prose only, chrome stays mono). Collection gathering them + notes explaining the rule 'text scales, a glyph in a fixed box does not'. Mint the glyph card in the themed behaviors deck. --manual: note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-15",
+      "status": "pending"
     }
   ]
 }

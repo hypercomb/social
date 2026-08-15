@@ -32,7 +32,7 @@
   align-items: center;
   gap: 0.4rem;
   font-family: var(--hc-mono, monospace);
-  font-size: 0.85rem;
+  font-size: scaled(0.85rem);
   font-weight: 600;
   letter-spacing: 0.02em;
   color: rgba(206, 224, 240, 0.96);
@@ -62,7 +62,7 @@
   padding: 0.32rem 0.7rem 0.28rem;
   margin: 0;
   font-family: var(--hc-mono, monospace);
-  font-size: 0.78rem;
+  font-size: scaled(0.78rem);
   font-weight: 600;
   letter-spacing: 0.03em;
   color: rgba(206, 224, 240, 0.55);
@@ -116,7 +116,7 @@
   border-radius: 999px;
   color: var(--md-secondary);
   font-family: var(--md-font-mono);
-  font-size: 10.5px;
+  font-size: scaled(10.5px);
   letter-spacing: 0.04em;
   cursor: pointer;
   margin-right: 4px;

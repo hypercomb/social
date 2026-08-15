@@ -68,20 +68,31 @@ export const textKey = (window: string): string => `hc:panel-text:${window}`
 // window still keeps this record — it is what the group last handed it, so the
 // window reopens at its group's size even if no mate is up to publish it.
 
-/** This window's text scale, or `null` for auto (derive it from the width). */
-export const readTextScale = (window: string): number | null => {
+/** This window's text scale: a number if it is pinned, `null` if the
+ *  participant chose AUTO, `undefined` if they have never chosen at all.
+ *
+ *  The third case is not pedantry — it is the same distinction the group
+ *  record already draws with `'text' in attrs`. A window that reads for a
+ *  living declares a default (`defaultText`), and "never chosen" is the only
+ *  state that default may fill: picking Auto has to survive a reload, not be
+ *  read back as "no opinion" and overwritten by the default every time. */
+export const readTextScale = (window: string): number | null | undefined => {
   try {
     const raw = localStorage.getItem(textKey(window))
-    const n = raw ? parseFloat(raw) : NaN
-    return Number.isFinite(n) && n > 0 ? n : null
-  } catch { return null }
+    if (raw === null) return undefined
+    if (raw === AUTO_TEXT) return null
+    const n = parseFloat(raw)
+    return Number.isFinite(n) && n > 0 ? n : undefined
+  } catch { return undefined }
 }
 
+/** Auto is WRITTEN, not erased. Removing the key would put the window back in
+ *  "never chosen" and hand it its default again on the next open. */
+const AUTO_TEXT = 'auto'
+
 export const writeTextScale = (window: string, scale: number | null): void => {
-  try {
-    if (scale === null) localStorage.removeItem(textKey(window))
-    else localStorage.setItem(textKey(window), String(scale))
-  } catch { /* ignore */ }
+  try { localStorage.setItem(textKey(window), scale === null ? AUTO_TEXT : String(scale)) }
+  catch { /* ignore */ }
 }
 
 // ── pairing ──────────────────────────────────────────────────────────

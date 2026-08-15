@@ -12,8 +12,9 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // Settings-only: the gear + group chrome every tool window carries. The strip
 // keeps its own edge handles and width store (`ownsSize` false) — see the
-// directive's header.
-import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+// directive's header — and hands the directive its width as a `sizeOwner`.
+import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
+import type { SettingRow } from '../docked-panel/panel-settings'
 import { type WindowSession, windowsParked } from '../window-session'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { fromRuntime } from '../../core/from-runtime'
@@ -62,6 +63,30 @@ const HOVER_LIST_MAX = 10
 // pixel strings; missing/non-numeric values fall back to the CSS defaults
 // (28rem wide, content-height tall).
 const NOTES_STRIP_WIDTH_KEY = 'hc:notes-strip-width'
+
+// The width the strip docks at when it has no stored one. Also what the
+// shared chrome is told to treat as this window's natural size, so the
+// gear's AUTO text size means "the size it reads at when docked normally".
+const NOTES_STRIP_BASE_WIDTH = 500
+
+// The narrowest the strip goes — matches the `.notes-strip` CSS min-width
+// floor, so a stored, dragged or group-adopted width can never render it
+// narrower than its own stylesheet allows.
+const MIN_PANEL_WIDTH = 256
+
+// ── The reading FACE ──────────────────────────────────────
+// The one window in the hive you read and write PROSE in, and until now it
+// was set in the same mono the chrome is — which is right for a signature
+// and wrong for a paragraph. The face is a participant-local viewing
+// preference (like the mode and the width), so it lives in localStorage and
+// never enters a layer.
+//
+// It applies to the prose ONLY — note text, the editor, list lines, the note
+// tabs' labels. The chrome around it stays mono, because the chrome is the
+// window and the window is not what changed.
+const NOTES_STRIP_FACE_KEY = 'hc:notes-face'
+const NOTES_FACES = ['mono', 'sans', 'serif'] as const
+type NotesFace = typeof NOTES_FACES[number]
 
 // Translate delta from the panel's natural (centered) position. Persisted
 // across reloads so the strip stays where the user dropped it.
@@ -184,7 +209,7 @@ type InputModeStackLike = {
     './notes-strip.desk.scss',
   ],
 })
-export class NotesStripComponent implements OnDestroy {
+export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   readonly #activeCell = signal<string | null>(null)
   readonly #capturingFor = signal<string | null>(null)
@@ -268,6 +293,93 @@ export class NotesStripComponent implements OnDestroy {
     try { localStorage.setItem('hc:annotations-tab', next) } catch { /* ignore */ }
   }
 
+  // ── Font settings ─────────────────────────────────────────
+  // Two of them, and they arrive from different places on purpose:
+  //
+  //   TEXT SIZE is the ladder every docked tool window has (the gear's
+  //   shared zone). The strip used to be withheld from it because it was
+  //   typeset in fixed rem/px; every size here is `scaled()` now, so the
+  //   window simply joins — nothing to declare, and a group that sets its
+  //   size sets this window's too.
+  //
+  //   The FACE is this window's alone: prose is what the notes window holds
+  //   and prose is not what a files list holds, so it is declared here and
+  //   drawn in the gear's "This window" zone (`ownSettings` on the shared
+  //   directive).
+
+  /** Which face the note prose is set in. Participant-local — a viewing
+   *  preference, never content. */
+  readonly face = signal<NotesFace>(
+    (() => {
+      try {
+        const stored = localStorage.getItem(NOTES_STRIP_FACE_KEY) as NotesFace | null
+        return stored && (NOTES_FACES as readonly string[]).includes(stored) ? stored : 'mono'
+      } catch { return 'mono' }
+    })()
+  )
+
+  setFace(next: NotesFace): void {
+    if (next === this.face()) return
+    this.face.set(next)
+    try { localStorage.setItem(NOTES_STRIP_FACE_KEY, next) } catch { /* ignore */ }
+  }
+
+  /** What the gear shows under "This window". A thunk, read at paint time, so
+   *  the lit segment is always the face actually in use. Bound as a field so
+   *  the directive can call it without a `this` of its own. */
+  readonly settingsRows = (): SettingRow[] => [{
+    kind: 'choice',
+    key: 'notes-face',
+    label: this.#t('notes.face.label', 'Note face'),
+    value: this.face(),
+    options: NOTES_FACES.map(face => ({
+      value: face,
+      label: this.#t(`notes.face.${face}`, face === 'mono' ? 'Mono' : face === 'sans' ? 'Sans' : 'Serif'),
+    })),
+    hint: this.#t('notes.face.hint', 'The face notes are read and written in. The window keeps its own.'),
+    pick: (value) => { this.setFace(value as NotesFace) },
+  }]
+
+  #t(key: string, fallback: string): string {
+    const i18n = window.ioc?.get<I18nProvider>('@hypercomb.social/I18n')
+    return i18n?.t(key) ?? fallback
+  }
+
+  // ── PanelSizeOwner — the width this window SHARES ─────────
+  // The docked width, always. Fullscreen is the desk: the panel's box is the
+  // whole screen there, and reporting that would (a) let a group's mates
+  // adopt a 1500px width and sit at their maximum, and (b) make the gear's
+  // AUTO text size read the desk instead of the dock. Neither is a size the
+  // participant set.
+
+  /** The last width the strip was DOCKED at — seeded from the store so the
+   *  first read is right even before the observer has fired once. */
+  #dockWidth = (() => {
+    try {
+      const raw = localStorage.getItem(NOTES_STRIP_WIDTH_KEY)
+      const n = raw ? parseInt(raw, 10) : NaN
+      if (Number.isFinite(n) && n > 0) return n
+    } catch { /* ignore */ }
+    return NOTES_STRIP_BASE_WIDTH
+  })()
+
+  panelWidth(): number { return this.#dockWidth }
+
+  /** Take a width from the group. Clamped and persisted exactly as the edge
+   *  drag does — the store stays this window's, which is the whole point of
+   *  owning the size. Ignored while fullscreen, where the width is forced by
+   *  the desk's rules and would be written back as a preference nobody set. */
+  setPanelWidth(width: number): void {
+    if (this.isFullscreen()) return
+    const el = this.panel()?.nativeElement
+    const max = Math.max(MIN_PANEL_WIDTH, window.innerWidth - 32)
+    const next = Math.round(Math.max(MIN_PANEL_WIDTH, Math.min(width, max)))
+    if (next === this.#dockWidth && el?.style.width) return
+    this.#dockWidth = next
+    if (el) el.style.width = `${next}px`
+    this.#measurePanel()
+    try { localStorage.setItem(NOTES_STRIP_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+  }
 
   // ── Reading pane (fullscreen) ─────────────────────────────
   // Fullscreen is the desk: navigator left, tree centre, and THIS on the
@@ -1464,7 +1576,7 @@ export class NotesStripComponent implements OnDestroy {
     // the strip past its dock bounds.
     const host = this.#host.nativeElement
     const hostRect = host.getBoundingClientRect()
-    const minW = 256  // ~16rem — matches the .notes-strip CSS min-width floor
+    const minW = MIN_PANEL_WIDTH  // matches the .notes-strip CSS min-width floor
     const minH = 80   // ~5rem
     const maxW = Math.max(minW, hostRect.width - 16)
     const maxH = Math.max(minH, hostRect.height - 4)
@@ -2776,6 +2888,11 @@ export class NotesStripComponent implements OnDestroy {
         const w = Math.round(entry.contentRect.width)
         // Width only — see #applyStoredDimensions for why height is not
         // persisted (it would lock the float panel to a full-height box).
+        // This is also the DOCKED width the shared chrome shares with the
+        // window's group and reads its auto text size off (`panelWidth`),
+        // which is why it is recorded here — past the fullscreen guard —
+        // and not off the raw box.
+        this.#dockWidth = w
         try {
           localStorage.setItem(NOTES_STRIP_WIDTH_KEY, String(w))
         } catch { /* ignore */ }

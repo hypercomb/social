@@ -367,16 +367,23 @@ export class PheromoneTilesDrone extends Drone {
   }
 
   /** `pheromones` overrides the index read for callers that already know the
-   *  tile's set — see #drop, where the index can lag the write by a beat. */
+   *  tile's set — see #drop, where the index can lag the write by a beat.
+   *  `anchor` is the tile's screen geometry (centre + radius, client coords):
+   *  the card stands BESIDE the hex, in one stable spot per tile, rather than
+   *  wherever the cursor happened to be when the hover fired. */
   #emitHover(
     effect: 'pheromone:hover-show',
     label: string,
     pheromones?: readonly string[],
   ): void {
+    const overlay = ioc<{ clientAnchorForLabel?(label: string): { x: number; y: number; radius: number } | null }>(
+      '@diamondcoreprocessor.com/TileOverlayDrone',
+    )
     this.emitEffect(effect, {
       label,
       segments: this.#segmentsFor(label),
       pheromones: [...(pheromones ?? tagsForLabel(label))],
+      anchor: overlay?.clientAnchorForLabel?.(label) ?? null,
     })
   }
 

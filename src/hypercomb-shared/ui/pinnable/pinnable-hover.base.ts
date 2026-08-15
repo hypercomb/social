@@ -59,6 +59,13 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   /** Panel width (px) — clamp + dock geometry. Override per feature. */
   protected get panelWidth(): number { return 300 }
 
+  /** When false, a dragged position lives only as long as the panel is up —
+   *  move a pin and it stays put, but closing it forgets the spot, so the next
+   *  open computes the default anchor again ("move it and it sticks; hide it
+   *  and it resets"). Default on: docked hover features keep their arrangement
+   *  across opens. */
+  protected get stickyPositions(): boolean { return true }
+
   /** Opt in to surviving a refresh. When true, pinned panels are persisted
    *  (key + data + pos) participant-local and RE-OPENED on the next mount —
    *  the "keep it always showing even after I come back" behaviour. Default
@@ -280,7 +287,10 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   #onDragEnd = (): void => {
     if (this.#dragId === null) return
     const panel = this.panels().find(x => x.id === this.#dragId)
-    if (panel) { this.#savedPos[panel.key] = panel.pos; this.#savePos(); this.#saveOpen() }
+    if (panel) {
+      if (this.stickyPositions) { this.#savedPos[panel.key] = panel.pos; this.#savePos() }
+      this.#saveOpen()
+    }
     this.#dragId = null
     this.#detachDrag()
   }
@@ -300,7 +310,7 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
     return { x, y: 96 }
   }
   #nextPinPos(key: string): { x: number; y: number } {
-    const saved = this.#savedPos[key]
+    const saved = this.stickyPositions ? this.#savedPos[key] : undefined
     if (saved) return this.#clamp(saved.x, saved.y)
     // Anchored features pin where the user is looking (the hover spot);
     // docked features cascade from the top-right base.

@@ -1,11 +1,12 @@
 // hypercomb-shared/ui/pheromone-tiles/pheromone-tiles.component.ts
 //
 // The on-tile pheromone card. While the Pheromones window is open, hovering a
-// tile that carries keywords pops an ephemeral card of coloured chips next to
-// the cursor; the ⌖ in its header PINS it (draggable, per the shared pin stack)
-// so the ×'s are easy to hit. An × takes that keyword off that one tile. This
-// is the surgical counterpart to the panel's bulk staged removal: "this tile,
-// this keyword, gone."
+// tile that carries keywords pops an ephemeral card of coloured chips BESIDE
+// THE HEX — to its right, or its left when the viewport runs out — in one
+// stable spot per tile, however the cursor wanders; the ⌖ in its header PINS
+// it (draggable, per the shared pin stack) so the ×'s are easy to hit. An ×
+// takes that keyword off that one tile. This is the surgical counterpart to
+// the panel's bulk staged removal: "this tile, this keyword, gone."
 //
 // The pin used to be an icon on the tile's hover band. That band no longer
 // shows while this window is open — it sat on top of this card and swallowed
@@ -33,12 +34,18 @@ export interface PheromoneTileData {
   chips: PheromoneChip[]
 }
 
-type HoverPayload = { label?: string; segments?: string[]; pheromones?: string[] }
+/** The tile's screen geometry, sent by PheromoneTilesDrone: hex centre +
+ *  circumradius in client coordinates. */
+type TileAnchor = { x: number; y: number; radius: number }
+type HoverPayload = { label?: string; segments?: string[]; pheromones?: string[]; anchor?: TileAnchor | null }
 type TagRegistryLike = { color(name: string): string }
 
 const DEFAULT_CHIP = '#7eb6d6'
-/** Small gap so the card lands beside the cursor, not under it. */
+/** Small gap so the card lands beside the cursor, not under it — the fallback
+ *  when no tile anchor arrived with the hover. */
 const CURSOR_GAP = { x: 16, y: 12 }
+/** Breathing room between the hex's edge and the card. */
+const TILE_GAP = 18
 
 @Component({
   selector: 'hc-pheromone-tiles',
@@ -55,8 +62,18 @@ export class PheromoneTilesComponent extends PinnableHoverBase<PheromoneTileData
   // Chips belong to the page they were pinned on — hide on navigate-away, come
   // back on return. A pheromone session is a session; no refresh persistence.
   protected override get pageScoped(): boolean { return true }
+  // Move a pinned card and it stays put — but hiding it forgets the spot, so
+  // the next hover lands back at the tile-side default.
+  protected override get stickyPositions(): boolean { return false }
 
-  /** Last pointer position — the anchor that lands the card at the tile. */
+  /** The hovered tile's screen geometry, from the drone. While it is known the
+   *  card anchors to the TILE — one stable spot per hex — never the cursor. */
+  #anchor: TileAnchor | null = null
+  /** Chip count of the incoming card — feeds the height estimate that keeps
+   *  the card vertically centred on the hex. */
+  #chipCount = 1
+
+  /** Last pointer position — the fallback anchor when no tile geometry came. */
   #mouse = { x: 24, y: 96 }
   #onMove = (e: PointerEvent): void => { this.#mouse = { x: e.clientX, y: e.clientY } }
 
@@ -70,8 +87,22 @@ export class PheromoneTilesComponent extends PinnableHoverBase<PheromoneTileData
     super.ngOnDestroy()
   }
 
+  /** Beside the hex: to its right, vertically centred — or to its left when
+   *  the right side would run off the viewport. Falls back to the cursor only
+   *  when the hover carried no tile geometry. */
   protected override anchorPos(): { x: number; y: number } {
-    return { x: this.#mouse.x + CURSOR_GAP.x, y: this.#mouse.y + CURSOR_GAP.y }
+    const a = this.#anchor
+    if (!a) return { x: this.#mouse.x + CURSOR_GAP.x, y: this.#mouse.y + CURSOR_GAP.y }
+    const rightX = a.x + a.radius + TILE_GAP
+    const fitsRight = rightX + this.panelWidth <= window.innerWidth - 8
+    const x = fitsRight ? rightX : a.x - a.radius - TILE_GAP - this.panelWidth
+    return { x, y: a.y - this.#estimatedHeight() / 2 }
+  }
+
+  /** Rough card height from the chip count (~2 chips per row at this width) —
+   *  only used to centre on the hex, so rough is fine. */
+  #estimatedHeight(): number {
+    return 58 + Math.ceil(Math.max(1, this.#chipCount) / 2) * 34
   }
 
   /** Leaving the card is what dismisses it (the drone deliberately does NOT
@@ -93,6 +124,10 @@ export class PheromoneTilesComponent extends PinnableHoverBase<PheromoneTileData
     if (!p?.label) return null
     const names = Array.isArray(p.pheromones) ? p.pheromones.filter(n => typeof n === 'string' && n) : []
     if (names.length === 0) return null
+    if (p.anchor && typeof p.anchor.x === 'number') {
+      this.#anchor = p.anchor
+      this.#chipCount = names.length
+    }
     const segments = Array.isArray(p.segments) ? p.segments.map(String) : []
     return {
       key: p.label,

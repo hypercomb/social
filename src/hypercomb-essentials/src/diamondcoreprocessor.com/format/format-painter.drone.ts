@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/format/format-painter.drone.ts
 import { EffectBus } from '@hypercomb/core'
 import type { FormatEntry, FormatProvider } from './format.provider.js'
-import { cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt, seedLayerKeyedTileProps } from '../editor/tile-properties.js'
+import { cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 // ── built-in providers ──────────────────────────────────
 
@@ -179,22 +179,14 @@ export class FormatPainterDrone extends EventTarget {
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     const segments = lineage?.explorerSegments?.() ?? []
     const index = readTilePropsIndex()
-    const layerSeeds: Array<[string, string]> = []
 
     for (const cell of selection.selected) {
       // skip source tile
       if (cell === this.#sourceCell) continue
 
-      // Index entries are keyed by full lineage (sigbag key); bare-label
-      // entries are legacy fallback on read, never written.
-      const cellKey = await cellLocationSig(segments, cell)
-
-      // 1. read current props — CANONICAL SLOT FIRST, index as a fast path.
-      // The index is a derived cache and must never be load-bearing: this
-      // path merges the painted entries into what it reads and writes the
-      // result back, so resolving through the cache alone meant an index
-      // miss silently REPLACED the layer's properties with just the painted
-      // ones. Same order as tile-editor.drone.ts.
+      // 1. read current props — CANONICAL SLOT FIRST, the index as a
+      // legacy drain fallback (an old index-only tile the reconciler
+      // hasn't stamped yet still deserves a correct merge base).
       let props: Record<string, unknown> = {}
       try {
         const layerProps = await readTilePropertiesAt(segments, cell)
@@ -202,6 +194,7 @@ export class FormatPainterDrone extends EventTarget {
         props = layerProps
       } catch {
         try {
+          const cellKey = await cellLocationSig(segments, cell)
           const propsSig = lookupTilePropsSig(index, cellKey, cell)
           if (!propsSig) throw new Error('no index entry')
           const propsBlob = await store.getResource(propsSig)
@@ -213,36 +206,34 @@ export class FormatPainterDrone extends EventTarget {
       }
 
       // 2. apply each enabled entry via its provider
+      let painted: Record<string, unknown> = props
       for (const entry of enabled) {
         const provider = this.#providers.find(p => p.key === entry.key)
         if (provider) {
-          props = provider.apply(props, entry.value)
+          painted = provider.apply(painted, entry.value)
         }
       }
 
-      // 3. write as content-addressed resource
-      const json = JSON.stringify(props, null, 2)
-      const blob = new Blob([json], { type: 'application/json' })
-      const propsSig = await store.putResource(blob)
+      // 3. commit the CHANGED fields canonically (Phase B,
+      // visuals-across-lineages.md): the paint becomes a normal layer
+      // commit — undoable, it travels, it survives canonical heals (an
+      // index-only paint used to revert on the next reconcile) — and the
+      // props index follows via the central layer-keyed seed. Passing
+      // only the diff keeps concurrent writers' untouched fields intact
+      // through writeTilePropertiesAt's read-merge-commit.
+      const updates: Record<string, unknown> = {}
+      for (const k of Object.keys(painted)) {
+        if (JSON.stringify(painted[k]) !== JSON.stringify(props[k])) updates[k] = painted[k]
+      }
+      for (const k of Object.keys(props)) {
+        if (!(k in painted)) updates[k] = undefined     // provider removed it
+      }
+      if (Object.keys(updates).length === 0) continue
+      await writeTilePropertiesAt(segments, cell, updates)
 
-      // 4. update index
-      index[cellKey || cell] = propsSig
-      if (cellKey) layerSeeds.push([cellKey, propsSig])
-
-      // 5. notify renderer
+      // 4. notify renderer
       EffectBus.emit<{ cell: string }>('tile:saved', { cell })
     }
-
-    // persist updated index
-    writeTilePropsIndex(index)
-
-    // Layer-keyed twin AFTER the map write above (each seed re-reads the
-    // index; seeding first would be clobbered by the snapshot write). The
-    // paint is an index-only override — no canonical commit — so the
-    // head-keyed entry must move WITH it, or layer-first paint
-    // (show-cell, visuals-across-lineages.md Phase A) would keep serving
-    // the pre-paint canonical.
-    for (const [locSig, sig] of layerSeeds) seedLayerKeyedTileProps(locSig, sig)
   }
 
   // ── emit state ──────────────────────────────────────────

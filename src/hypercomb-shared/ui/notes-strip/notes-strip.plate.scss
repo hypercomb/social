@@ -58,7 +58,7 @@
 // instead of reading as a failed image.
 .cv2-plate-initial {
   font-family: var(--hc-mono, system-ui);
-  font-size: 1rem;
+  font-size: scaled(1rem);
   font-weight: 600;
   color: color-mix(in srgb, var(--md-secondary) 85%, white);
   line-height: 1;
@@ -72,7 +72,7 @@
   gap: 0.15rem;
 }
 .cv2-plate-name {
-  font-size: 0.9rem;
+  font-size: scaled(0.9rem);
   font-weight: 600;
   color: var(--md-on-surface);
   overflow: hidden;
@@ -86,7 +86,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.15rem 0.3rem;
-  font-size: 0.66rem;
+  font-size: scaled(0.66rem);
   color: color-mix(in srgb, var(--md-on-surface) 48%, transparent);
   overflow: hidden;
 }
@@ -107,7 +107,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem 0.5rem;
-  font-size: 0.68rem;
+  font-size: scaled(0.68rem);
   color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
   font-variant-numeric: tabular-nums;
 }
@@ -138,9 +138,9 @@
   padding: 0.75rem 0.85rem;
 
   .cv2-plate-hex { width: 62px; height: 71px; }
-  .cv2-plate-initial { font-size: 1.7rem; }
-  .cv2-plate-name { font-size: 1.05rem; }
-  .cv2-plate-stats { font-size: 0.72rem; }
+  .cv2-plate-initial { font-size: scaled(1.7rem); }
+  .cv2-plate-name { font-size: scaled(1.05rem); }
+  .cv2-plate-stats { font-size: scaled(0.72rem); }
 }
 
 // ── Tile hover card (navigator peek) ─────────────────────
@@ -228,10 +228,10 @@
   margin-bottom: 0.3rem;
   border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
 
-  .hex-mark { font-size: 0.75rem; }
+  .hex-mark { font-size: scaled(0.75rem); }
 }
 .cv2-peek-name {
-  font-size: 0.78rem;
+  font-size: scaled(0.78rem);
   font-weight: 600;
   color: var(--md-on-surface);
   overflow: hidden;
@@ -250,7 +250,7 @@
   align-items: baseline;
   gap: 0.4rem;
   padding: 0.13rem 0;
-  font-size: 0.72rem;
+  font-size: scaled(0.72rem);
   line-height: 1.35;
   color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
 
@@ -261,7 +261,7 @@
 }
 .cv2-peek-mark {
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: scaled(13px);
   line-height: 1;
   transform: translateY(2px);
   color: color-mix(in srgb, var(--md-secondary) 75%, var(--md-on-surface));
@@ -278,7 +278,7 @@
 .cv2-peek-more,
 .cv2-peek-empty {
   padding-top: 0.3rem;
-  font-size: 0.68rem;
+  font-size: scaled(0.68rem);
   font-style: italic;
   color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
 }
@@ -287,6 +287,6 @@
 .cv2-empty-hint {
   padding: 0.7rem 0.8rem;
   color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
-  font-size: 0.8rem;
+  font-size: scaled(0.8rem);
 }
 

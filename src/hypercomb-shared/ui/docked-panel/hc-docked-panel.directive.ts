@@ -154,13 +154,16 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
    *  tighter range is never asked for one it cannot render. */
   @Input() minScale = 0.82
   @Input() maxScale = 1.4
-  /** Does this window's body size off `--hc-panel-scale`? True for every panel
-   *  whose SCSS multiplies its root font by the var.
+  /** The text size this window opens at when the participant has never picked
+   *  one — `null` (the default) meaning AUTO, the width-derived multiplier.
    *
-   *  False for a window typeset in fixed rem/px (the notes strip), where the
-   *  var reaches nothing — and there the text setting is left OUT of the gear
-   *  entirely rather than offered as a control that does nothing. */
-  @Input() scalesText = true
+   *  A window declares a number here when width-derived type would be a change
+   *  nobody asked for. The notes window is the case: it is dragged wide to
+   *  read a long note, not to be shouted at, and it was typeset at a fixed
+   *  size for its whole life — so it opens at exactly that size, with Auto one
+   *  press away. Only ever consulted for a window with NO record of its own;
+   *  choosing Auto is a choice, and it sticks. */
+  @Input() defaultText: number | null = null
   /** Does this directive OWN the window's size? True for the panels that have
    *  no sizing of their own — it injects the grip, restores/persists the width
    *  and pins the panel beside the control bar.
@@ -182,6 +185,17 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
    *  common settings gear offers Add/Remove from controls and persists through
    *  the controls bar's participant-local preference map. */
   @Input() launcherControlId = ''
+  /** Settings only THIS window has — declared by the window, drawn by the
+   *  shared editor. A thunk rather than an array so the rows are read at the
+   *  moment the popover paints and show the window's current state.
+   *
+   *  It exists because some settings cannot be hoisted into the shared chrome
+   *  without lying: the notes window's reading FACE is typography for prose,
+   *  and prose is not what a files list or a history rail holds. They land in
+   *  the "This window" zone, beside the pair and the launcher, and their
+   *  callbacks are wrapped so a pick repaints the editor — the window changes
+   *  its own state and never has to know a popover exists. */
+  @Input() ownSettings: (() => SettingRow[]) | null = null
   /** A window this one brings up ALONGSIDE itself, because the two are halves
    *  of one gesture — the notes window and the pheromone panel being the pair
    *  that started this: a pheromone is dragged from one onto a row of the
@@ -341,8 +355,13 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     const shared = groupAttrs.width
     // Same for the text size, except the window's own record already holds
     // whatever the group last handed it — so it opens at the right size with no
-    // mate up, and the group's record only has to override a stale one.
-    this.#text = ('text' in groupAttrs) ? (groupAttrs.text ?? null) : readTextScale(this.id)
+    // mate up, and the group's record only has to override a stale one. With no
+    // record at all the window's declared default stands in (`defaultText`);
+    // an explicit Auto is a record, so it is never overwritten by it.
+    const ownText = readTextScale(this.id)
+    this.#text = ('text' in groupAttrs)
+      ? (groupAttrs.text ?? null)
+      : (ownText === undefined ? this.defaultText : ownText)
 
     if (!this.ownsSize) {
       // Settings-only: the window keeps its own size and store. Take the
@@ -846,22 +865,26 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
 
     // Shared: everything the group's string carries. The width is here too —
     // it just has a better control than a row, namely the grip on the edge.
-    const shared: SettingRow[] = []
-    if (this.scalesText) {
-      shared.push({
-        kind: 'choice', key: 'text',
-        label: this.#t('panel.text.label', 'Text size'),
-        value: this.#text === null ? 'auto' : String(this.#text),
-        options: TEXT_SIZES.map(size => ({
-          value: size.scale === null ? 'auto' : String(size.scale),
-          label: this.#t(`panel.text.${size.key}`, size.label),
-        })),
-        hint: this.#text === null
-          ? this.#t('panel.text.hint', 'Auto sizes the text with the window\'s width.')
-          : this.#t('panel.text.hint.pinned', 'Held at this size, whatever the window\'s width.'),
-        pick: (value) => { this.#setText(value === 'auto' ? null : parseFloat(value)) },
-      })
-    }
+    //
+    // The text size is offered UNCONDITIONALLY. There used to be a
+    // `scalesText` opt-out for a window typeset in fixed rem/px, where the
+    // var reached nothing — the notes strip, its only user. Making that
+    // window scale (one `scaled()` function over its sheets) turned out to be
+    // the answer, not withholding the control, and a flag no window sets is
+    // one more thing to keep true. Every tool window sizes off the var now.
+    const shared: SettingRow[] = [{
+      kind: 'choice', key: 'text',
+      label: this.#t('panel.text.label', 'Text size'),
+      value: this.#text === null ? 'auto' : String(this.#text),
+      options: TEXT_SIZES.map(size => ({
+        value: size.scale === null ? 'auto' : String(size.scale),
+        label: this.#t(`panel.text.${size.key}`, size.label),
+      })),
+      hint: this.#text === null
+        ? this.#t('panel.text.hint', 'Auto sizes the text with the window\'s width.')
+        : this.#t('panel.text.hint.pinned', 'Held at this size, whatever the window\'s width.'),
+      pick: (value) => { this.#setText(value === 'auto' ? null : parseFloat(value)) },
+    }]
 
     // This window's own.
     const own: SettingRow[] = []
@@ -900,6 +923,12 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
       })
     }
 
+    // …and what only this window has, declared by the window itself.
+    if (this.ownSettings) {
+      try { for (const row of this.ownSettings()) own.push(this.#repainting(row)) }
+      catch (err) { console.error('[hc-docked-panel] ownSettings failed:', err) }
+    }
+
     const zones: SettingsZone[] = [{ key: 'identity', rows: identity }]
     if (shared.length) {
       zones.push({
@@ -913,6 +942,22 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     if (own.length) zones.push({ key: 'window', title: this.#t('panel.settings.zone.window', 'This window'), rows: own })
 
     return { eyebrow: this.#t('panel.settings.eyebrow', 'Settings'), title: this.#label(), zones }
+  }
+
+  /** A window-declared row, with the repaint the shared rows do by hand.
+   *
+   *  The editor draws from state, so a pick that changes a window's state has
+   *  to redraw or the strip you just pressed keeps the old segment lit. Doing
+   *  it here — once, for every shape — is what lets a window declare a plain
+   *  data row and nothing else. */
+  #repainting(row: SettingRow): SettingRow {
+    const after = <T>(run: (value: T) => void) => (value: T): void => { run(value); this.#refreshPopover() }
+    switch (row.kind) {
+      case 'choice': return { ...row, pick: after(row.pick) }
+      case 'switch': return { ...row, toggle: after(row.toggle) }
+      case 'text': return { ...row, commit: after(row.commit) }
+      case 'action': return { ...row, run: () => { row.run(); this.#refreshPopover() } }
+    }
   }
 
   /** Pick a text size (or `null` for auto). Kept on the window itself so it

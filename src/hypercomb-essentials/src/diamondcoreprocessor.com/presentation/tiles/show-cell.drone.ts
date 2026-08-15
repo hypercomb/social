@@ -599,6 +599,12 @@ export class ShowCellDrone extends Drone {
   // cache: cell label → small image signature (avoids re-reading 0000 on every render)
   private readonly cellImageCache = new Map<string, string | null>()
 
+  /** Head layer sigs whose canonical CONCLUDED "no properties" — the
+   *  derive-on-miss pass skips these instead of re-asking every render.
+   *  Keyed by HEAD SIG, so any edit (new head) re-derives automatically;
+   *  session-only, bounded by distinct propless heads seen. */
+  readonly #propslessHeads = new Set<string>()
+
   /** Sigs with a detached host-fill in flight. Render passes NEVER await
    *  the network (tile creation is a dequeue): a local miss paints
    *  label-only NOW, and the full cascade (memory → OPFS → host,
@@ -7750,7 +7756,14 @@ export class ShowCellDrone extends Drone {
         if (head) headSigByLabel.set(label, head)
       }
     }
-    const remintLabels = new Set<string>()
+    // Labels whose layer-keyed entry was ABSENT, with the sig the pass
+    // served instead (a location/label fallback) or null (total miss).
+    // Both resolve against CANONICAL after the batch — derive-on-miss
+    // (Phase B, visuals-across-lineages.md): the entry seeds so the next
+    // pass hits layer-first, and a serve that DISAGREES with canonical
+    // repaints this pass, not the next one. No pre-seeded index is ever
+    // required for a tile to show its picture.
+    const unresolvedByLabel = new Map<string, string | null>()
 
     const propsSigForLabel = (label: string): string | undefined => {
       const override = this.#cursorPropsOverride?.get(label)
@@ -7762,7 +7775,7 @@ export class ShowCellDrone extends Drone {
       }
       const key = indexKeyByLabel.get(label) ?? ''
       const sig = (key ? livePropsIndex[key] : undefined) ?? livePropsIndex[label]
-      if (sig && headSig) remintLabels.add(label)
+      if (headSig) unresolvedByLabel.set(label, sig ?? null)
       return sig
     }
 
@@ -8055,24 +8068,48 @@ export class ShowCellDrone extends Drone {
     // are warm, so readTilePropsSigAt is map lookups — no resource
     // fetches. Fire-and-forget: a lost re-mint is just a fallback read
     // on the next pass.
-    if (remintLabels.size > 0 && !prepareOnly) {
+    if (unresolvedByLabel.size > 0 && !prepareOnly) {
       void (async () => {
         try {
           const pairs: Array<[string, string]> = []
-          for (const label of remintLabels) {
+          let repaint = false
+          for (const [label, served] of unresolvedByLabel) {
             const headSig = headSigByLabel.get(label)
-            if (!headSig) continue
+            if (!headSig || this.#propslessHeads.has(headSig)) continue
+            // Heads are warm, so each canonical ask is map lookups — no
+            // resource fetches, no OPFS walks.
             const canonical = await readTilePropsSigAt(renderSegments, label)
-            if (canonical) pairs.push([headSig, canonical])
+            if (!canonical) {
+              // Concluded absence, memoised BY HEAD SIG — an edit mints a
+              // new head, so the memo can never mask a later props write.
+              if (served === null) this.#propslessHeads.add(headSig)
+              continue
+            }
+            pairs.push([headSig, canonical])
+            // The pass painted nothing (total miss) or painted a fallback
+            // that disagrees with canonical (stale location entry — the
+            // adopt-sync/restore shape): shed the cached derivation and
+            // repaint with the canonical answer now, not next pass.
+            if (served !== canonical) {
+              this.cellImageCache.delete(label)
+              repaint = true
+            }
           }
-          if (pairs.length === 0) return
-          const freshIndex = readTilePropsIndex()
-          let dirty = false
-          for (const [headSig, sig] of pairs) {
-            if (!freshIndex[headSig]) { freshIndex[headSig] = sig; dirty = true }
+          if (pairs.length > 0) {
+            // Fill-if-empty against a FRESH read, so a deliberate entry
+            // written during the batch always wins over this derivation.
+            const freshIndex = readTilePropsIndex()
+            let dirty = false
+            for (const [headSig, sig] of pairs) {
+              if (!freshIndex[headSig]) { freshIndex[headSig] = sig; dirty = true }
+            }
+            if (dirty) writeTilePropsIndex(freshIndex)
           }
-          if (dirty) writeTilePropsIndex(freshIndex)
-        } catch { /* cache re-mint is best-effort */ }
+          if (repaint) {
+            this.#forceNextRender = true
+            this.requestRender()
+          }
+        } catch { /* cache derivation is best-effort */ }
       })()
     }
 

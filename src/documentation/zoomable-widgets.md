@@ -135,7 +135,32 @@ Two rules for a window joining this:
 - **`hcDockedPanel` is the only writer of `--hc-panel-scale`.** A panel that
   sizes itself hands the directive its width via `sizeOwner` and takes
   `[defaultWidth]`/`[minScale]`/`[maxScale]` — it must not compute the var
-  itself, or a pinned size would be clobbered by the next resize.
-- A window typeset in fixed `rem`/`px`, which the var never reaches (the notes
-  strip), sets `[scalesText]="false"` and the section is left out of its gear
-  rather than offered as a control that does nothing.
+  itself, or a pinned size would be clobbered by the next resize. A window with
+  a mode whose box is not its docked box (the notes strip's fullscreen desk)
+  reports the **docked** width, or the group adopts a screen-wide one and Auto
+  reads the desk.
+- **A window typeset in fixed `rem`/`px` is made to scale, not excused.** The
+  notes strip was the one holdout and had a `scalesText="false"` opt-out; both
+  are gone. Its sheets multiply every text size through one Sass function
+  (`scaled()` in `_notes-strip-shared.scss`, `calc(#{$size} * var(--hc-panel-scale, 1))`)
+  — which works on `rem` and `px` alike and cannot compound the way `em` would
+  inside its nested rows. Glyphs bound to a fixed-size box (hex marks, the
+  26px rail buttons, the drag ghost) stay fixed; text scales.
+
+A window may also declare **`[defaultText]`** — the size it opens at before the
+participant has picked one. The notes strip declares `1`, because width-derived
+type on a window you drag wide to read a long note is a change nobody asked
+for. Picking Auto is a choice and it sticks: `writeTextScale` records `'auto'`
+rather than erasing the key, so "never chose" and "chose Auto" stay distinct.
+
+## Settings a single window has
+
+The gear's rows are shared chrome, but a window can declare its own through
+**`[ownSettings]`** — a thunk returning `SettingRow[]`, drawn in the "This
+window" zone with their callbacks wrapped so a pick repaints the editor. It is
+for settings that cannot be hoisted without lying: the notes window's **Note
+face** (Mono · Sans · Serif) is typography for *prose*, and prose is not what a
+files list holds. The face reaches the prose only — note text, the reading
+pane, the composer, list lines — while the window's chrome stays mono
+(`--hc-notes-face`, resolved on the component host, above the panel's own
+mono remap of `--md-font-ui`/`--md-font-display`).

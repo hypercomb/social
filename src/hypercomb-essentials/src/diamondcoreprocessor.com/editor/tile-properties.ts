@@ -145,6 +145,16 @@ const imageSigsOf = (props: unknown): string[] => {
 /** Does this props bag carry a picture at all? */
 export const hasTileImage = (props: unknown): boolean => imageSigsOf(props).length > 0
 
+/** The sig of the picture a props bag DISPLAYS — `small.image`, falling
+ *  back to `flat.small.image` (the two orientations' baked smalls).
+ *  Undefined when the bag carries no display picture. The one projection
+ *  every "what is this tile wearing" question should share. */
+export const primaryTileImageSig = (props: unknown): string | undefined => {
+  const p = props as any
+  const sig = p?.small?.image ?? p?.flat?.small?.image
+  return isSignature(sig) ? sig as string : undefined
+}
+
 /**
  * Is this tile's picture the PARTICIPANT'S — untouchable by any default,
  * theme or force? Three ways to be theirs, and any one is enough:

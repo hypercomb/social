@@ -631,20 +631,17 @@ const STICKY_CSS = `
    title so an empty note still reads as PAPER WITH WRITING on it. */
 .postit-face{position:absolute;left:0;top:0;right:8%;bottom:6%;box-sizing:border-box;padding:.8rem .7rem 1rem;background:linear-gradient(168deg,#fdf6b8 0%,#f7e58f 68%,#eed469 100%);box-shadow:1px 2px 2px rgba(48,36,3,.24),4px 8px 9px rgba(0,0,0,.3),10px 16px 22px rgba(0,0,0,.22),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.8);transform:rotate(-3deg)}
 .postit-face::after{content:'';position:absolute;left:.8rem;right:1.1rem;bottom:1.05rem;height:1.1rem;background:repeating-linear-gradient(to bottom,rgba(96,80,20,.5) 0 2px,transparent 2px 7px);opacity:.7}
-/* The pushpin — a real object, not a dot: a glossy pink dome lit from the
-   upper left, a dark rim where it turns away from the light, a shadow cast
-   down-right onto the paper, and a tapered steel needle driven through it.
-   The needle emerges from under the dome and ends in a bite mark, so the
-   pin reads as pressed INTO the note rather than drawn on it. */
-.postit-pin{position:absolute;left:52%;top:.16rem;width:1.35rem;height:1.35rem;border-radius:50%;
-background:
-  radial-gradient(circle at 30% 24%,rgba(255,255,255,.95) 0 6%,rgba(255,255,255,0) 34%),
-  radial-gradient(circle at 68% 78%,rgba(255,150,180,.5) 0 12%,rgba(255,150,180,0) 42%),
-  radial-gradient(circle at 36% 30%,#ff9cba 0%,#f4557b 38%,#cf2a52 66%,#8e1235 100%);
-box-shadow:0 .28rem .38rem -.14rem rgba(20,6,10,.55),0 .1rem .16rem rgba(0,0,0,.4),inset -.09rem -.13rem .22rem rgba(96,6,32,.6),inset .06rem .07rem .14rem rgba(255,255,255,.45)}
-/* The steel under the dome — a short collar, then the taper into the paper. */
-.postit-pin::before{content:'';position:absolute;left:50%;top:74%;width:.3rem;height:.34rem;transform:translateX(-50%);border-radius:0 0 .1rem .1rem;background:linear-gradient(100deg,#8d949c 0%,#e6ecf1 38%,#aab2ba 62%,#5f666e 100%);box-shadow:0 .06rem .1rem rgba(0,0,0,.35)}
-.postit-pin::after{content:'';position:absolute;left:50%;top:96%;width:.22rem;height:.42rem;transform:translateX(-46%) rotate(4deg);clip-path:polygon(0 0,100% 0,58% 100%);background:linear-gradient(102deg,#767d85 0%,#dfe5ea 42%,#8b9299 72%,#4d545b 100%);filter:drop-shadow(.03rem .05rem .06rem rgba(60,45,10,.5))}
+/* The pushpin — a steel dome head, narrow and tall, standing off the paper
+   with NO visible stem: the soft ellipse of shadow underneath (::after) is
+   what says it is pressed in. Chosen from the colorway strip (the steel
+   one); the flat-cap push_pin build and the tilted variant were tried and
+   retired. Lit from the upper left — a white streak on the shoulder
+   (::before), chrome falling to near-black where the head turns away. */
+.postit-pin{position:absolute;left:50%;top:.06rem;width:.92rem;height:1.12rem;margin-left:-.46rem;border-radius:46% 46% 40% 40% / 58% 58% 42% 42%;
+background:linear-gradient(168deg,#ffffff 0%,#cfd8df 30%,#8d979f 66%,#4c545b 100%);
+box-shadow:0 .3rem .36rem -.16rem rgba(14,20,26,.55),0 .1rem .14rem rgba(0,0,0,.32),inset 0 .06rem .1rem rgba(255,255,255,.55),inset -.07rem -.12rem .2rem rgba(50,58,64,.5)}
+.postit-pin::before{content:'';position:absolute;left:26%;top:12%;width:.2rem;height:.42rem;border-radius:50%;background:linear-gradient(160deg,rgba(255,255,255,.9),rgba(255,255,255,0))}
+.postit-pin::after{content:'';position:absolute;left:50%;bottom:-.16rem;width:.8rem;height:.24rem;transform:translateX(-46%);border-radius:50%;background:radial-gradient(ellipse at 50% 50%,rgba(60,42,6,.5),rgba(60,42,6,0) 70%)}
 .postit-grip{position:absolute;right:8%;bottom:6%;width:1.15rem;height:1.15rem;cursor:nwse-resize;touch-action:none;opacity:0;transition:opacity .14s ease}
 .postit-grip::after{content:'';position:absolute;right:.2rem;bottom:.2rem;width:.5rem;height:.5rem;border-right:2px solid rgba(74,63,15,.5);border-bottom:2px solid rgba(74,63,15,.5)}
 .postit-sticky:hover .postit-grip,.postit-sticky:focus-within .postit-grip{opacity:1}

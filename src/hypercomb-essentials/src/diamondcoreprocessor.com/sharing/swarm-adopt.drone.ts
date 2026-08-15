@@ -39,8 +39,6 @@ import {
 } from '../history/layer-placement.js'
 import {
   cellLocationSig,
-  readTilePropsIndex,
-  writeTilePropsIndex,
   seedLayerKeyedTileProps,
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
@@ -1480,36 +1478,21 @@ export class SwarmAdoptDrone extends Drone {
       // new top.
       const treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
 
-      // Seed the participant-local props index from each adopted node's
-      // CANONICAL `properties` slot — the mirror of substrate's
-      // reconcileCanonicalImageStamps (index → canonical), run here in the
-      // OTHER direction (canonical → index) for the freshly-folded subtree.
-      // flattenLayerTree carries the publisher's `properties` sig verbatim,
-      // but show-cell's render path AND the substrate's blank-detection both
-      // read ONLY the localStorage index (`hc:tile-props-index`). Without
-      // this seed the adopted tile looks blank to both: the substrate fills
-      // it with a random pool image and writes its OWN index entry,
-      // permanently displacing the publisher's real image (the
-      // "image recycled to a random one on adopt" bug). Seeding here — BEFORE
-      // importTree emits `cell:added` — makes the real image render and makes
-      // the substrate skip the tile (no longer blank). Keyed by location sig,
-      // the exact key show-cell + substrate resolve with.
-      //
-      // FILL-IF-EMPTY for FOLD; SYNC overwrites it (the explicit authoritative
-      // "pull their latest" refresh, gated on `mode` below). Fold seeds only a
-      // location with NO index entry. The existence guard (`existing.includes(name)` -> 'exists')
-      // bails for tiles already local — but it relies on childNamesOf, which
-      // silently drops a child whose layer bytes don't resolve under a cold
-      // pool, so a same-named local tile CAN slip past it. If that tile already
-      // has an image entry here, overwriting would change an image already
-      // present (the invariant we must not break). The substrate-side fix
-      // (peer/witnessed tiles excluded from substrate) stops stale random picks
-      // at their source, so there is nothing legitimate to "heal" by replacing
-      // — skip any occupied slot.
+      // Layer-sig-keyed props seeds ONLY (visuals-across-lineages.md,
+      // Phase B — the location-keyed fill-if-empty/sync SEED-DANCE IS
+      // DELETED). Each entry is keyed by the folded node's NEW head and
+      // is a pure derivation of the adopted layer (its `properties[0]`),
+      // so it can neither wipe another lineage's entry nor go stale — the
+      // occupied-slot and sync-overwrite special cases have nothing left
+      // to protect. A same-named local tile keeps its own head sig, so
+      // both lineages' entries COEXIST and the paint path serves
+      // whichever head is current; the substrate's blank test reads
+      // canonical (a cold read counts as an image), so an adopted tile
+      // can no longer be mistaken for blank and randomly re-dressed —
+      // the old "image recycled to a random one on adopt" class is
+      // closed at the model, not by seeding order.
       const layerSeeds: Array<[string, string]> = []
       try {
-        const index = readTilePropsIndex()
-        let seeded = false
         for (const u of treeUpdates) {
           const props = (u.layer as { properties?: unknown }).properties
           const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
@@ -1518,23 +1501,10 @@ export class SwarmAdoptDrone extends Drone {
           if (segs.length === 0) continue
           const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
           if (!key) continue
-          // Layer-sig-keyed twin (visuals-across-lineages.md, Phase A):
-          // seeded UNCONDITIONALLY after the commit below — keyed by the
-          // folded node's new head, it is a pure derivation of the adopted
-          // layer (its properties[0]) and can neither wipe another
-          // lineage's entry nor go stale. A same-named local tile keeps
-          // its own head sig, so both lineages' entries COEXIST and the
-          // paint path serves whichever head is current.
           layerSeeds.push([key, propSig])
-          // Fold fills empty slots only; sync overwrites so the publisher's
-          // refreshed image wins (paired with the tile:saved cache-bust).
-          if (index[key] && mode !== 'sync') continue
-          index[key] = propSig
-          seeded = true
         }
-        if (seeded) writeTilePropsIndex(index)
       } catch (err) {
-        console.warn('[swarm-adopt] props-index seed skipped', err)
+        console.warn('[swarm-adopt] props seed prep skipped', err)
       }
 
       await committer.importTree([

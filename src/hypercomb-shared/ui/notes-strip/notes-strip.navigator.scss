@@ -20,7 +20,7 @@
   border-top: 1px solid rgba($steel, 0.18);
   background: rgba(255, 255, 255, 0.02);
   font-family: var(--hc-mono, monospace);
-  font-size: 10.5px;
+  font-size: scaled(10.5px);
   color: var(--md-on-surface-faint);
   // Flush with the square-cornered dock (no rounded bottom on a full-height panel).
   border-radius: 0;
@@ -66,7 +66,7 @@
   outline: none;
   color: var(--md-on-surface);
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: scaled(0.8rem);
 
   &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 45%, transparent); }
 }
@@ -114,7 +114,7 @@
   font-family: inherit;
   // The cloud weighted each row by note count with an inline font-size; in a
   // list that reads as noise, so every row takes one size.
-  font-size: 0.8rem !important;
+  font-size: scaled(0.8rem) !important;
   text-align: left;
   cursor: pointer;
   transition: background var(--md-dur-short) var(--md-easing-standard),
@@ -156,7 +156,7 @@
     linear-gradient(160deg, rgba($steel, 0.26), rgba($steel, 0.07) 60%),
     rgba(255, 255, 255, 0.03);
   color: color-mix(in srgb, #{$steel} 75%, white);
-  font-size: 0.6rem;
+  font-size: scaled(0.6rem);
   font-weight: 600;
   line-height: 1;
 
@@ -179,7 +179,7 @@
   flex: 0 0 auto;
   min-width: 1.2em;
   text-align: center;
-  font-size: 0.66rem;
+  font-size: scaled(0.66rem);
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--md-on-surface) 65%, transparent);
   background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
@@ -195,7 +195,7 @@
   list-style: none;
   padding: 0.6rem 0.7rem;
   color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
-  font-size: 0.78rem;
+  font-size: scaled(0.78rem);
   font-style: italic;
 }
 

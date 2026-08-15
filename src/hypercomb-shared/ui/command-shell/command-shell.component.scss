@@ -541,9 +541,33 @@ $bp-phone-max: 599px;
 //
 // Rule: never give a rail button its own width, glyph size, or margin.
 // A special-cased icon mid-row is what made this look ragged before.
+// THE RAIL IS ONE WRAP CONTEXT, NOT TWO.
+//
+// The groups below are semantic (`.behaviours`, `.tools`), never layout: they
+// are `display: contents`, so every icon on the rail — both groups and the
+// divider between them — is a direct child of this box and wraps on ONE
+// budget, in one rhythm, on one baseline.
+//
+// It used to be a group each, wrapping on its own `--hc-rail-cols` budget.
+// That splits the rail into two centred blocks, and the moment they are
+// different heights they stagger: a hive in the swarm carries a sixth standing
+// tool (the antenna, which only exists while the hive is public), so the tools
+// took two rows against the behaviours' one and the header rendered three
+// ragged baselines — the behaviours floating half a row above a lone orphaned
+// icon. There is no per-group budget to get out of step now.
+//
+// The rail wraps rather than squeezing: `--hc-rail-cols` boxes per row, then
+// the next row, same box, same gap, same baseline. Rows fill from the RIGHT
+// (`justify-content: flex-end`) so the rail stays flush against the edge it
+// lives on and a half-full last row reads as part of the same block instead of
+// a stray icon adrift on the left. `align-content` keeps a multi-row rail
+// centred in the bar — `align-items` only centres within a row.
 .shell-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
+  align-content: center;
   flex-shrink: 0;
   gap: var(--hc-rail-gap, 0.3rem);
   margin-left: var(--hc-rail-gap, 0.3rem);
@@ -551,33 +575,22 @@ $bp-phone-max: 599px;
   // follows the command line. Match the rail's leading gap so the row is
   // visually balanced at both ends.
   padding-right: var(--hc-rail-gap, 0.3rem);
-}
-
-// A group wraps rather than squeezing. `--hc-rail-cols` icons per row, then
-// the next row — one, two, three rows deep as the cell's behaviours pile up.
-// Rows fill from the RIGHT (`justify-content: flex-end`) so the rail stays
-// flush against the edge it lives on and a half-full last row reads as part
-// of the same block instead of a stray icon adrift on the left.
-.action-group {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  // Multi-row groups need align-CONTENT to stay centred in the bar;
-  // align-items only centres within a single row.
-  align-content: center;
-  gap: var(--hc-rail-gap, 0.3rem);
   // The wrap point, expressed in the rail's own metrics so it can never
   // drift from the button size: N boxes + (N − 1) gaps.
   max-width: calc(
-    var(--hc-rail-cols, 5) * var(--hc-rail-btn, 1.6rem) +
-    (var(--hc-rail-cols, 5) - 1) * var(--hc-rail-gap, 0.3rem)
+    var(--hc-rail-cols, 10) * var(--hc-rail-btn, 1.6rem) +
+    (var(--hc-rail-cols, 10) - 1) * var(--hc-rail-gap, 0.3rem)
   );
 }
 
+// Groups carry meaning and stay in the accessibility tree; they own no
+// geometry. Every metric belongs to the rail above.
+.action-group { display: contents; }
+
 // Hairline group separator — the same steel the header frame and the
 // mesh toggle's border use, shortened to a centred tick so it divides
-// without drawing attention.
+// without drawing attention. It rides the row like any other rail item, so
+// a wrap can never leave it hanging on a line of its own.
 .rail-divider {
   width: 1px;
   height: 1.15em;
@@ -627,7 +640,16 @@ $bp-phone-max: 599px;
     background: rgba(var(--glow-color-rgb), 0.28);
   }
 
-  svg { display: block; }
+  // An inline-SVG glyph (the swarm antenna) takes the SAME box as the
+  // icon-font ones: the rail's glyph metric, never its own attributes. A
+  // hardcoded 14×14 stayed 14px while every neighbour grew with
+  // `--hc-rail-glyph` — 1.6rem on a portrait phone — which is precisely the
+  // odd-icon-out this rail exists to prevent.
+  svg {
+    display: block;
+    width: var(--hc-rail-glyph, 1.05rem);
+    height: var(--hc-rail-glyph, 1.05rem);
+  }
 
   .mat-sym {
     font-size: var(--hc-rail-glyph, 1.05rem);
@@ -816,7 +838,11 @@ $bp-phone-max: 599px;
     justify-content: flex-start;
     gap: 0;
     // One line, scrolled — never a second wrapped row. A wrapped rail eats
-    // the viewport; a scrolled one holds as many icons as we ever add.
+    // the viewport; a scrolled one holds as many icons as we ever add. Both
+    // levers, or neither works: the desktop wrap budget would still cap this
+    // strip at ten boxes and force the wrap `nowrap` just forbade.
+    flex-wrap: nowrap;
+    max-width: none;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
@@ -825,15 +851,9 @@ $bp-phone-max: 599px;
     &::-webkit-scrollbar { display: none; }
   }
 
-  // Groups stop wrapping and stop hugging the right edge: on its own row the
-  // rail reads left-to-right like everything else, and the scroll carries the
-  // overflow the wrap used to.
-  .action-group {
-    display: contents;
-  }
-
   // Group semantics remain in the DOM/accessibility tree, but the portrait
-  // rail is one uninterrupted five-slot rhythm.
+  // rail is one uninterrupted five-slot rhythm — the divider that splits the
+  // groups on desktop would cost a slot and buy nothing here.
   .rail-divider { display: none; }
 
   .rail-btn {

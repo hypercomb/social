@@ -63,10 +63,10 @@
     padding: 1rem 1.2rem;
 
     .cv2-plate-hex { width: 96px; height: 110px; }
-    .cv2-plate-initial { font-size: 2.6rem; }
-    .cv2-plate-name { font-size: 1.35rem; }
-    .cv2-plate-path { font-size: 0.72rem; }
-    .cv2-plate-stats { font-size: 0.78rem; gap: 0.35rem 0.8rem; }
+    .cv2-plate-initial { font-size: scaled(2.6rem); }
+    .cv2-plate-name { font-size: scaled(1.35rem); }
+    .cv2-plate-path { font-size: scaled(0.72rem); }
+    .cv2-plate-stats { font-size: scaled(0.78rem); gap: 0.35rem 0.8rem; }
   }
 
   // ── The reading pane — the desk scale of the shared pane (see the
@@ -79,11 +79,11 @@
       $hex-h: 124px,
       $hex-icon: 46px,
       $shape: 2.4,
-      $text: 1.05rem,
+      $text: scaled(1.05rem),
       $cycle-pad: 0.55rem 0.9rem,
       $btn: 30px,
       $ed-pad: 1.6rem 1.8rem 1.1rem,
-      $ed-font: 1.02rem
+      $ed-font: scaled(1.02rem)
     );
     grid-column: 3;
     grid-row: 4;
@@ -93,10 +93,10 @@
   // The lists interface gets the desk scale too — a list read across a
   // room is still a list, just with room for longer lines.
   :host.is-fullscreen .cv2-listpane-head { padding: 0.8rem 1rem; }
-  :host.is-fullscreen .cv2-list-title { font-size: 1.15rem; }
+  :host.is-fullscreen .cv2-list-title { font-size: scaled(1.15rem); }
   :host.is-fullscreen .cv2-list-lines { padding: 0.8rem 1.2rem 1.6rem; }
   :host.is-fullscreen .cv2-line-text,
-  :host.is-fullscreen .cv2-line-input { font-size: 0.95rem; }
+  :host.is-fullscreen .cv2-line-input { font-size: scaled(0.95rem); }
 }
 
 

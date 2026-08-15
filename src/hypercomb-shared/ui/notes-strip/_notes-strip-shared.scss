@@ -19,6 +19,26 @@ $steel: #7eb6d6;
 $indent-step: 18px;
 $guide: color-mix(in srgb, var(--md-on-surface) 13%, transparent);
 
+// ── TEXT SIZE — how a size joins the window's scale ──────
+// The strip is the one window you READ and WRITE in, and it used to be the
+// one window with no text size: every size here was a fixed `rem`/`px`, so
+// `--hc-panel-scale` (the multiplier hcDockedPanel puts on every docked
+// panel, from the gear's Text size ladder) reached nothing and the setting
+// was withheld rather than offered as a dead control.
+//
+// `scaled()` is what joins one size to that ladder. It multiplies rather
+// than re-basing, so it works on `rem` and `px` alike and NEVER compounds:
+// a nested row's size is the var times its own number, not times its
+// parent's — which is exactly what `em` would have got wrong here, where
+// text sits inside rows that are themselves sized.
+//
+// The rule for using it: TEXT scales. A glyph bound to a fixed-size box —
+// a hex mark, a 26px rail button, the drag ghost — does NOT, or it grows
+// straight out of its hexagon.
+@function scaled($size) {
+  @return calc(#{$size} * var(--hc-panel-scale, 1));
+}
+
 // ── Marks are HEXAGONS ───────────────────────────────────
 // A mark is a meaning the participant assigned to an icon, and the shape
 // that means "a thing in this hive" is the hexagon — so a mark reads as a

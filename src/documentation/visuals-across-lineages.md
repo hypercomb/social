@@ -205,7 +205,21 @@ per-lineage copies of anything.
   cases stay until Phase B moves the substrate off the index; only then
   can the location seeds go.
 - **Phase B — substrate write-path move** (move 4). Closes the last
-  non-derive author of the index.
+  non-derive author of the index. **Built 2026-08-15**: every substrate
+  pick is a CANONICAL COMMIT (`#commitDefault`; `#rollOne` is the shared
+  reroll/restyle skeleton; clears strip the layer), gated on canonical
+  ownership with cold ⇒ conservative; format-painter commits its diff
+  canonically (paints are now undoable and survive heals); show-cell is
+  fully derive-on-miss (a total miss asks canonical post-batch, seeds the
+  layer key, repaints — `#propslessHeads` memoises concluded absence by
+  head sig); the adopt seed-dance IS deleted (layer seeds only). The
+  index's remaining writers are all one kind — derivations of canonical
+  (central seed, paint derive, reconciler heal) — plus deletions as
+  drain. Location entries persist only as read-fallback for the
+  reconciler-pending legacy population; the scattered location writers
+  left (clipboard, move, website-archive, youtube, resource-attach,
+  tile-editor, image-choice — all canonical-paired or new-head) sweep in
+  Phase C.
 - **Phase C — stack heads at resolution** (move 2) + cache re-key (move 3).
   The superimposition payoff: several lineages coexist at an address, each
   with its own visuals, filter/roll/spotlight choosing what paints.

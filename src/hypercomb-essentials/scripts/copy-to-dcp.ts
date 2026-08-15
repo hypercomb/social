@@ -151,7 +151,43 @@ const readTargetManifest = (targetDir: string): ContentManifest | null => {
   }
 }
 
-const syncTarget = (targetDir: string, additive: boolean, manifestJson: string): { copied: number; skipped: number; removed: number; drained: number } => {
+/** Every signature the chained manifest advertises: the package sigs
+ *  themselves plus everything each package references. This is the RETENTION
+ *  AUTHORITY — see the prune in syncTarget. */
+const advertisedSigs = (manifest: ContentManifest): Set<string> => {
+  const out = new Set<string>()
+  const packages = (manifest as { packages?: Record<string, Record<string, unknown>> }).packages ?? {}
+  for (const [sig, pkg] of Object.entries(packages)) {
+    out.add(sig)
+    for (const field of ['layers', 'bees', 'dependencies', 'resources']) {
+      for (const ref of (pkg[field] as string[] | undefined) ?? []) out.add(ref)
+    }
+  }
+  return out
+}
+
+/** Copy one sig entry (file or bag dir) into the target from the first source
+ *  that holds it. Sources are tried in order; the additive pool is passed
+ *  first because it never prunes, so it is the complete one. */
+const backfillFrom = (sources: string[], name: string, targetDir: string): boolean => {
+  for (const src of sources) {
+    const srcPath = join(src, name)
+    if (!existsSync(srcPath)) continue
+    const tgtPath = join(targetDir, name)
+    if (statSync(srcPath).isDirectory()) copyDirRecursive(srcPath, tgtPath)
+    else copyFileSync(srcPath, tgtPath)
+    return true
+  }
+  return false
+}
+
+const syncTarget = (
+  targetDir: string,
+  additive: boolean,
+  manifestJson: string,
+  keep: Set<string>,
+  peers: string[],
+): { copied: number; skipped: number; removed: number; drained: number; healed: number } => {
   mkdirSync(targetDir, { recursive: true })
 
   let copied = 0
@@ -183,6 +219,23 @@ const syncTarget = (targetDir: string, additive: boolean, manifestJson: string):
     copied++
   }
 
+  // BACKFILL — the manifest is CHAINED (every past version stays listed), but
+  // dist only ever holds the NEWEST build's bytes. A mirrored target that has
+  // only ever seen dist therefore advertises ~20 historical versions whose
+  // layer bytes it never received (or pruned in an earlier run, before the
+  // retention rule below existed): selecting any revision but the newest gave
+  // a permanent "No content found" — the row could not heal, because the
+  // bytes really were gone. Restore anything the manifest advertises from
+  // whichever peer target still holds it (the additive pool is complete).
+  let healed = 0
+  for (const name of keep) {
+    if (srcEntries.has(name) || tgtEntries.has(name)) continue
+    if (backfillFrom(peers, name, targetDir)) {
+      tgtEntries.add(name)
+      healed++
+    }
+  }
+
   // manifest.json: every target receives the SAME chained manifest (computed
   // once in main against the deepest existing chain), compare-first so an
   // unchanged re-deploy writes nothing.
@@ -211,16 +264,23 @@ const syncTarget = (targetDir: string, additive: boolean, manifestJson: string):
   // (index.html, worker scripts, manifest.json) are untouchable. Recursive
   // rm handles bag directories. SKIPPED for additive (persistent) pools so
   // a rebuild never deletes user-authored or adopted content sharing the dir.
+  //
+  // RETENTION AUTHORITY IS THE MANIFEST, not dist. "Stale" means nothing
+  // advertises it — a sig referenced by ANY package in the chained manifest is
+  // live content, however old the version that references it. Pruning by dist
+  // alone deleted every historical version's bytes on the next build while the
+  // chain kept offering those versions to install, which is how a target came
+  // to advertise 23 revisions it could only serve one of.
   if (!additive) {
     for (const name of tgtEntries) {
-      if (!srcEntries.has(name)) {
+      if (!srcEntries.has(name) && !keep.has(name)) {
         rmSync(join(targetDir, name), { recursive: true, force: true })
         removed++
       }
     }
   }
 
-  return { copied, skipped, removed, drained }
+  return { copied, skipped, removed, drained, healed }
 }
 
 const main = () => {
@@ -262,10 +322,17 @@ const main = () => {
     console.log(`[copy-to-dcp] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
   }
 
+  // What the shipped manifest advertises — the retention set every target must
+  // be able to serve. Backfill sources are ordered additive-first: those pools
+  // never prune, so they carry the full deploy history.
+  const keep = advertisedSigs(chained.manifest)
+  const sourceOrder = [...TARGETS].sort((a, b) => Number(b.additive) - Number(a.additive)).map(t => t.dir)
+
   for (const { dir, additive } of TARGETS) {
-    const { copied, skipped, removed, drained } = syncTarget(dir, additive, manifestJson)
+    const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
+    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, keep, peers)
     console.log(`[copy-to-dcp] ${dir}${additive ? ' (additive/persistent)' : ''}`)
-    console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${drained ? `, ${drained} drained from legacy dirs` : ''}`)
+    console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }
 }
 

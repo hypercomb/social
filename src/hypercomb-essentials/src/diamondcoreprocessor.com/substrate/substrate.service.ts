@@ -44,7 +44,7 @@ import {
   readImagesFromHandle,
   isFolderAccessSupported,
 } from './folder-handles.js'
-import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, isParticipantImage, isSignature } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, isParticipantImage, isSignature, seedLayerKeyedTileProps, primaryTileImageSig } from '../editor/tile-properties.js'
 import { renderTileSmall } from './tile-small-render.js'
 
 const PROPS_FILE = '0000'                    // legacy per-hive dir props (read-fallback)
@@ -731,7 +731,6 @@ export class SubstrateService extends EventTarget {
     const store = this.#store()
     if (!store) return []
     const images: string[] = []
-    const propsIndex = readTilePropsIndex()
     const pathSegments = layerPath.split('/').filter(Boolean)
     try {
       // Named tile dirs live in the (undrained) legacy content roots — the
@@ -741,13 +740,11 @@ export class SubstrateService extends EventTarget {
       for await (const [name, handle] of (dir as any).entries()) {
         if (handle.kind !== 'directory') continue
         try {
-          const propsSig = lookupTilePropsSig(propsIndex, await cellLocationSig(pathSegments, name), name)
-          if (!propsSig) continue
-          const blob = await store.getResource(propsSig)
-          if (!blob) continue
-          const props = JSON.parse(await blob.text())
-          const sig = props?.small?.image ?? props?.flat?.small?.image
-          if (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) {
+          // CANONICAL read — the source hive's layers are the truth about
+          // what its tiles wear; the local index may not even hold entries
+          // for a path we're not standing on.
+          const sig = primaryTileImageSig(await readTilePropertiesAt(pathSegments, name))
+          if (sig) {
             this.#imageNames.set(sig, friendlyImageName(name))
             images.push(sig)
           }
@@ -1095,6 +1092,120 @@ export class SubstrateService extends EventTarget {
     this.#usageCounts.set(propsSig, Math.max(0, current - 1))
   }
 
+  // ── canonical assignment (visuals-across-lineages.md, Phase B) ───────
+  //
+  // A pick lands as a CANONICAL COMMIT — content-addressed, undoable, it
+  // travels with the tree — never as a props-index write. The index is fed
+  // by the central layer-keyed seed inside writeTilePropertiesAt and by
+  // the paint path's derive-on-miss; this service only ever READS it (as a
+  // legacy drain guard) and DELETES stale entries it is retiring. The
+  // pointer-displacement class of bug — a local pick outranking the tile's
+  // real picture — cannot recur, because there is no local pointer left to
+  // move: what the tile wears IS what its layer says, per head, per
+  // lineage.
+
+  /** Pool props blob JSON by propsSig — the projection source for
+   *  canonical commits. Pool blobs are tiny and heavily shared. */
+  #poolPropsMemo = new Map<string, { small?: { image?: string }; flat?: { small?: { image?: string } } }>()
+
+  /** Commit a pool default INTO the tile's canonical layer. Returns false
+   *  (without counting usage — callers release their pick) when the pool
+   *  blob is unreadable or the commit path isn't up yet. */
+  async #commitDefault(
+    label: string,
+    entry: { imageSig: string; propsSig: string },
+    segments?: readonly string[],
+  ): Promise<boolean> {
+    try {
+      let props = this.#poolPropsMemo.get(entry.propsSig)
+      if (!props) {
+        const blob = await this.#store()?.getResource(entry.propsSig)
+        if (!blob) return false
+        props = JSON.parse(await blob.text()) as { small?: { image?: string }; flat?: { small?: { image?: string } } }
+        this.#poolPropsMemo.set(entry.propsSig, props)
+      }
+      const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+      await writeTilePropertiesAt([...segs], label, {
+        ...(props?.small?.image ? { small: { image: props.small.image } } : {}),
+        ...(props?.flat?.small?.image ? { flat: { small: { image: props.flat.small.image } } } : {}),
+        substrate: true,
+      })
+      return true
+    } catch { return false }
+  }
+
+  /** The tile's canonical DEFAULT, when its picture is a pool default of
+   *  ours: the resolved props + the pool entry it wears (matched by image
+   *  sig; `entry` undefined for an older pool's default — still ours, the
+   *  mark travels). Null when blank, the participant's, or COLD — cold
+   *  must never roll: the pick would overwrite a picture that just hasn't
+   *  resolved yet. */
+  async #canonicalDefaultOf(
+    label: string,
+    segments?: readonly string[],
+  ): Promise<{ props: Record<string, unknown>; entry?: { imageSig: string; propsSig: string } } | null> {
+    const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+    const stats: { cold?: boolean } = {}
+    try {
+      const props = await readTilePropertiesAt([...segs], label, stats) as any
+      if (stats.cold) return null
+      if (props?.substrate !== true || isParticipantImage(props)) return null
+      const img = primaryTileImageSig(props)
+      if (!img) return null
+      return { props, entry: this.#propsPool.find(e => e.imageSig === img) }
+    } catch { return null }
+  }
+
+  /** Retire a tile's LOCAL index entries (lineage-keyed always; the bare
+   *  label only when it still holds `releasedSig` — legacy label entries
+   *  are shared across same-named locations and are otherwise left for
+   *  their other readers). Deletion is drain, not authorship: the entry
+   *  being retired described an assignment that now lives canonically. */
+  async #dropLocalEntries(label: string, releasedSig?: string, segments?: readonly string[]): Promise<void> {
+    try {
+      const key = await this.#indexKeyFor(label, segments)
+      const index = readTilePropsIndex()
+      let dirty = false
+      if (key && index[key] !== undefined) { delete index[key]; dirty = true }
+      if (releasedSig && index[label] === releasedSig) { delete index[label]; dirty = true }
+      if (dirty) writeTilePropsIndex(index)
+    } catch { /* drain is best-effort */ }
+  }
+
+  /** Roll ONE tile to a fresh pool pick — the shared skeleton under
+   *  rerollCells and restyle. Ownership gate first (canonical default of
+   *  ours, or a legacy index-only pick in `owned`/substrate-marked with a
+   *  non-participant canonical), then pick-avoiding-current, commit
+   *  canonically, settle the usage ledger, retire local entries. Returns
+   *  false when the tile isn't ours to roll or the pool ran dry (`null`
+   *  from the picker distinguishes dry — callers may stop the batch). */
+  async #rollOne(
+    label: string,
+    segments: readonly string[] | undefined,
+    owned: ReadonlySet<string>,
+  ): Promise<boolean | null> {
+    const cur = await this.#canonicalDefaultOf(label, segments)
+    let legacySig: string | undefined
+    if (!cur) {
+      const key = await this.#indexKeyFor(label, segments)
+      legacySig = lookupTilePropsSig(readTilePropsIndex(), key, label)
+      if (!legacySig) return false
+      if (await this.#canonicalIsParticipants(label, segments)) return false
+      if (!owned.has(legacySig) && !await this.#isSubstrateProps(legacySig)) return false
+    }
+    const prevPoolSig = cur?.entry?.propsSig ?? legacySig
+    const next = this.#pickBalanced(prevPoolSig)
+    if (!next) return null
+    if (!await this.#commitDefault(label, next, segments)) {
+      this.#releaseUsage(next.propsSig)
+      return false
+    }
+    this.#releaseUsage(prevPoolSig)
+    await this.#dropLocalEntries(label, prevPoolSig, segments)
+    this.#recordAssigned(next.propsSig)
+    return true
+  }
+
   pickRandomImageSync(): string | null {
     const pool = this.#enabledPool()
     if (pool.length === 0) return null
@@ -1264,71 +1375,25 @@ export class SubstrateService extends EventTarget {
     segments?: readonly string[],
   ): Promise<string[]> {
     if (labels.length === 0) return []
-    const index = readTilePropsIndex()
     const redressed: string[] = []
     for (const label of labels) {
-      const key = await this.#indexKeyFor(label, segments)
-      const current = lookupTilePropsSig(index, key, label)
-      if (!current) continue
-      // THE CANONICAL SLOT IS ASKED FIRST, and a "theirs" answer is final.
-      // The index is a participant-local cache that can hold a stale
-      // substrate sig long after a person put their own picture on the tile
-      // — reading only the index is how a hive-wide force overwrote
-      // hand-made tiles while the editor still showed the original.
-      // Canonical is where the participant's picture lives, so canonical
-      // decides ownership, and an unreadable canonical counts as theirs.
-      if (await this.#canonicalIsParticipants(label, segments)) continue
-      if (!ownedSigs.has(current) && !await this.#isSubstrateProps(current)) continue
-
-      // REPLACE IN PLACE — do not clear and hand the tile to the blank path.
-      // That was the bug that made every re-dress a no-op: applyToAllBlanks
-      // refuses a tile whose CANONICAL slot holds an image, and a default we
-      // placed earlier is exactly such an image, so the cleared entry was
-      // never refilled — and the reconciler then healed it straight back from
-      // canonical. The picture never moved, on any path, and the pass looked
-      // like it had done its work. A tile with no entry at all is still the
-      // blank path's job; this one already has a picture and is ours to swap.
-      const next = this.#pickBalanced(current)
-      if (!next) break
-      this.#releaseUsage(current)
-      delete index[key || label]
-      if (index[label] === current) delete index[label]
-      index[key || label] = next.propsSig
-      this.#recordAssigned(next.propsSig)
-      await this.#restampCanonicalDefault(label, next.propsSig, segments)
-      redressed.push(label)
+      // CANONICAL DECIDES OWNERSHIP, and a "theirs" answer is final — an
+      // unreadable or cold canonical counts as theirs. A canonical default
+      // of ours re-rolls in place (REPLACE, never clear-then-refill: the
+      // blank path refuses a tile whose canonical holds an image, so a
+      // cleared default would never refill). A legacy index-only pick in
+      // `ownedSigs` upgrades here — the new pick commits canonically and
+      // the stale local entry retires.
+      const rolled = await this.#rollOne(label, segments, ownedSigs)
+      if (rolled === null) break            // pool ran dry
+      if (rolled) redressed.push(label)
     }
-    if (redressed.length > 0) writeTilePropsIndex(index)
     return [...redressed, ...await this.applyToAllBlanks(labels, segments)]
   }
 
-  /**
-   * Move the CANONICAL slot onto the new default too, when what it holds is a
-   * default of ours (`substrate: true`). Index and canonical must not drift:
-   * the renderer resolves through the index, the editor reads canonical, and
-   * the reconciler heals a missing index entry FROM canonical — so a stale
-   * canonical default is a picture waiting to come back. An intentional
-   * canonical image is never touched, and neither is a tile whose canonical
-   * slot could not be read.
-   */
-  async #restampCanonicalDefault(label: string, propsSig: string, segments?: readonly string[]): Promise<void> {
-    const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
-    try {
-      const canonical = await readTilePropertiesAt([...segs], label) as { substrate?: unknown } | null
-      if (canonical?.substrate !== true) return
-      // Marked ours AND owned by them — a pre-mark edit that inherited the
-      // substrate mark through the merge. Theirs wins; leave it alone.
-      if (isParticipantImage(canonical)) return
-      const blob = await this.#store()?.getResource(propsSig)
-      if (!blob) return
-      const props = JSON.parse(await blob.text()) as { small?: { image?: string }; flat?: { small?: { image?: string } } }
-      await writeTilePropertiesAt([...segs], label, {
-        ...(props?.small?.image ? { small: { image: props.small.image } } : {}),
-        ...(props?.flat?.small?.image ? { flat: { small: { image: props.flat.small.image } } } : {}),
-        substrate: true,
-      })
-    } catch { /* canonical unreadable — the index pick still stands */ }
-  }
+  // `#restampCanonicalDefault` — the old model's index-first write with a
+  // canonical echo — is deleted: `#commitDefault` IS the write now, and
+  // there is no index pick for canonical to trail behind.
 
   /**
    * Re-dress the WHOLE hive — every location, each with its own segments.
@@ -1401,6 +1466,9 @@ export class SubstrateService extends EventTarget {
     let scanned = 0
     const index = readTilePropsIndex()
     let indexDirty = false
+    // Layer-keyed seeds land AFTER the snapshot write below — seeding
+    // mid-walk would be clobbered when the held snapshot persists.
+    const layerSeeds: Array<[string, string]> = []
 
     for (const place of places) {
       for (const label of place.names) {
@@ -1431,8 +1499,12 @@ export class SubstrateService extends EventTarget {
           healed.push(label)
           if (dryRun) continue
           this.#releaseUsage(current)
-          index[key || label] = canonicalSig
-          if (key && index[label]) delete index[label]
+          // RETIRE the displaced entry (drain) and seed the layer-keyed
+          // one from canonical — the paint path reads layer-first, so the
+          // picture comes back this render without a location write.
+          if (key && index[key] !== undefined) delete index[key]
+          if (index[label] === current) delete index[label]
+          if (key) layerSeeds.push([key, canonicalSig])
           indexDirty = true
           EffectBus.emit('substrate:rerolled', { cell: label })
           continue
@@ -1482,13 +1554,14 @@ export class SubstrateService extends EventTarget {
             flat: { ...(props?.flat ?? {}), small: { image: flatSig } },
             substrate: undefined,
           })
-          const healedSig = await readTilePropsSigAt([...place.segments], label)
-          if (healedSig) {
+          // The canonical write above already seeded the NEW head's
+          // layer-keyed entry (central seed). Retire the displaced local
+          // entries; the paint path resolves layer-first from here on.
+          {
             const key = await this.#indexKeyFor(label, place.segments)
             this.#releaseUsage(lookupTilePropsSig(index, key, label))
-            index[key || label] = healedSig
-            if (key && index[label]) delete index[label]
-            indexDirty = true
+            if (key && index[key] !== undefined) { delete index[key]; indexDirty = true }
+            if (index[label] !== undefined) { delete index[label]; indexDirty = true }
           }
           healed.push(label)
           EffectBus.emit('substrate:rerolled', { cell: label })
@@ -1497,6 +1570,7 @@ export class SubstrateService extends EventTarget {
     }
 
     if (indexDirty) writeTilePropsIndex(index)
+    for (const [k, sig] of layerSeeds) seedLayerKeyedTileProps(k, sig)
     return { healed, unrecoverable, scanned }
   }
 
@@ -1582,6 +1656,9 @@ export class SubstrateService extends EventTarget {
     const index = readTilePropsIndex()
     const stale: string[] = []
     for (const label of labels) {
+      // Canonical wear first; legacy index entries as drain fallback.
+      const cur = await this.#canonicalDefaultOf(label, segments)
+      if (cur?.entry && this.#disabledImages.has(cur.entry.imageSig)) { stale.push(label); continue }
       const key = await this.#indexKeyFor(label, segments)
       const current = lookupTilePropsSig(index, key, label)
       if (current && disabledProps.has(current)) stale.push(label)
@@ -1631,8 +1708,7 @@ export class SubstrateService extends EventTarget {
       // shape as reconcileCanonicalImageStamps' imageOf helper.
       const props = await readTilePropertiesAt([...segs], label, stats) as any
       if (stats.cold) return true          // unresolved — never overwrite blind
-      const img = props?.small?.image ?? props?.flat?.small?.image
-      return typeof img === 'string' && /^[0-9a-f]{64}$/.test(img)
+      return primaryTileImageSig(props) !== undefined
     } catch { return true }                // read threw — same reasoning
   }
 
@@ -1657,17 +1733,22 @@ export class SubstrateService extends EventTarget {
 
   async applyToCell(label: string, segments?: readonly string[]): Promise<boolean> {
     if (this.#propsPool.length === 0) return false
+    // Legacy drain guard (READ only): an index-only assignment from the
+    // old model still renders through the location fallback — dressing
+    // over it canonically would swap a picture already on screen. The
+    // reconciler stamps those into canonical; until then, not blank.
     const key = await this.#indexKeyFor(label, segments)
-    const index = readTilePropsIndex()
-    if (lookupTilePropsSig(index, key, label)) return false
-    // Not blank if the canonical slot already holds an image (index entry
-    // merely lost) — never re-roll a present image (e.g. revert-remove re-add).
+    if (lookupTilePropsSig(readTilePropsIndex(), key, label)) return false
+    // Not blank if the canonical slot already holds an image — and a COLD
+    // read counts as an image: never dress blind.
     if (await this.#hasCanonicalImage(label, segments)) return false
     const entry = this.#pickBalanced()
     if (!entry) return false
-    index[key || label] = entry.propsSig
+    if (!await this.#commitDefault(label, entry, segments)) {
+      this.#releaseUsage(entry.propsSig)
+      return false
+    }
     this.#recordAssigned(entry.propsSig)
-    writeTilePropsIndex(index)
     return true
   }
 
@@ -1681,33 +1762,51 @@ export class SubstrateService extends EventTarget {
    */
   async rerollCells(labels: string[], segments?: readonly string[]): Promise<string[]> {
     if (this.#propsPool.length === 0 || labels.length === 0) return []
-    const index = readTilePropsIndex()
     const rerolled: string[] = []
     for (const label of labels) {
-      const key = await this.#indexKeyFor(label, segments)
-      const current = lookupTilePropsSig(index, key, label)
-      if (!current) continue
-      this.#releaseUsage(current)
-      delete index[key || label]
-      const entry = this.#pickBalanced(current)
-      if (!entry) break
-      index[key || label] = entry.propsSig
-      this.#recordAssigned(entry.propsSig)
-      rerolled.push(label)
+      // Canonical decides what the tile wears — blank, theirs, or cold is
+      // not ours to roll; a legacy index-only pick still rolls so the
+      // affordance keeps working on tiles the reconciler hasn't reached.
+      const rolled = await this.#rollOne(label, segments, this.defaultSigs)
+      if (rolled === null) break            // pool ran dry
+      if (rolled) rerolled.push(label)
     }
-    if (rerolled.length > 0) writeTilePropsIndex(index)
     return rerolled
   }
 
   async clearCell(label: string, segments?: readonly string[]): Promise<void> {
-    const key = await this.#indexKeyFor(label, segments)
-    const index = readTilePropsIndex()
-    if (key && index[key] === undefined) {
-      // No lineage-scoped assignment. Whatever the label resolves to is a
-      // legacy SHARED entry — same-named tiles at other locations may
-      // still render from it, so removal here must not touch it.
+    // A clear now strips the default FROM THE LAYER — the pick lives
+    // canonically, so removing it must too (and travels, like the pick
+    // did). Gated hard on the substrate mark: only a default of ours
+    // strips; a participant's picture, a blank, or a cold read is
+    // untouchable.
+    const cur = await this.#canonicalDefaultOf(label, segments)
+    if (cur) {
+      const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+      const flat = cur.props['flat']
+      const flatRest = (() => {
+        if (!flat || typeof flat !== 'object') return undefined
+        const rest = { ...(flat as Record<string, unknown>) }
+        delete rest['small']
+        return Object.keys(rest).length > 0 ? rest : undefined
+      })()
+      await writeTilePropertiesAt([...segs], label, {
+        small: undefined,
+        imageSig: undefined,
+        point: undefined,
+        substrate: undefined,
+        flat: flatRest,
+      })
+      this.#releaseUsage(cur.entry?.propsSig)
+      await this.#dropLocalEntries(label, cur.entry?.propsSig, segments)
       return
     }
+    // Legacy drain: an index-only assignment clears locally, as it always
+    // did — lineage-keyed entry only (the bare label is shared across
+    // same-named locations and is not this location's to remove).
+    const key = await this.#indexKeyFor(label, segments)
+    const index = readTilePropsIndex()
+    if (key && index[key] === undefined) return
     this.#releaseUsage(index[key || label])
     delete index[key || label]
     writeTilePropsIndex(index)
@@ -1718,17 +1817,21 @@ export class SubstrateService extends EventTarget {
     const index = readTilePropsIndex()
     const applied: string[] = []
     for (const label of labels) {
+      // Legacy drain guard (READ only) — an old index-only assignment
+      // still renders via the location fallback; not blank.
       const key = await this.#indexKeyFor(label, segments)
       if (lookupTilePropsSig(index, key, label)) continue
-      // Canonical already holds an image (index entry lost) -> not blank.
+      // Canonical already holds an image (or is COLD) -> not blank.
       if (await this.#hasCanonicalImage(label, segments)) continue
       const entry = this.#pickBalanced()
       if (!entry) break
-      index[key || label] = entry.propsSig
+      if (!await this.#commitDefault(label, entry, segments)) {
+        this.#releaseUsage(entry.propsSig)
+        continue
+      }
       this.#recordAssigned(entry.propsSig)
       applied.push(label)
     }
-    if (applied.length > 0) writeTilePropsIndex(index)
     return applied
   }
 
@@ -1741,6 +1844,9 @@ export class SubstrateService extends EventTarget {
     if (rewarm) await this.warmUp()
     if (this.#propsPool.length === 0) return 0
 
+    // Legacy drain: index-only assignments from the old model drop here
+    // (releasing their usage) so the blank pass below re-dresses them
+    // canonically — an explicit refresh is the natural upgrade moment.
     const index = readTilePropsIndex()
     const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
     let cleared = 0
@@ -1749,10 +1855,6 @@ export class SubstrateService extends EventTarget {
       const current = lookupTilePropsSig(index, key, label)
       if (current && substrateSigs.has(current)) {
         this.#releaseUsage(current)
-        // Explicit refresh rerolls the visible view: drop the scoped entry,
-        // and the legacy one too when that's where the pick lives — it's a
-        // substrate-pool (random) image by the guard above, so same-named
-        // tiles elsewhere just re-fill with a fresh random pick.
         delete index[key || label]
         if (index[label] === current) delete index[label]
         cleared++
@@ -1760,7 +1862,10 @@ export class SubstrateService extends EventTarget {
     }
     if (cleared > 0) writeTilePropsIndex(index)
 
-    return (await this.applyToAllBlanks(visibleLabels)).length
+    // Canonical defaults reroll in place; genuine blanks (and the legacy
+    // entries just dropped) fill fresh.
+    const rolled = (await this.rerollCells(visibleLabels)).length
+    return rolled + (await this.applyToAllBlanks(visibleLabels)).length
   }
 
   // ───────────── canonical image stamping (reconciler) ─────────────

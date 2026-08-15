@@ -131,6 +131,22 @@ describe('tool window groups', () => {
     expect(readTextScale('files-viewer')).toBeNull()
   })
 
+  it('tells "never chose" from "chose Auto"', () => {
+    // The distinction a declared default hangs off (hcDockedPanel's
+    // `defaultText`): a window that has never been set takes its default,
+    // and a window whose participant PICKED auto keeps auto — a reload must
+    // not read that back as "no opinion" and hand it the default again.
+    expect(readTextScale('notes-strip')).toBeUndefined()
+
+    const notes = mount(new FakeWindow('notes-strip', 500))
+    notes.setText(null)                        // an explicit Auto…
+    expect(readTextScale('notes-strip')).toBeNull()          // …is a record
+    expect(localStorage.getItem('hc:panel-text:notes-strip')).toBe('auto')
+
+    notes.setText(1.15)
+    expect(readTextScale('notes-strip')).toBe(1.15)
+  })
+
   it('joining for the width does not retypeset a window the group has no size for', () => {
     const files = mount(new FakeWindow('files-viewer', 360))
     files.join('reference')                    // group now stands for a width only

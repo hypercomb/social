@@ -42,8 +42,10 @@
   border: 1px solid var(--md-outline-variant);
   border-radius: 8px;
   color: var(--md-on-surface);
-  font-family: var(--md-font-display, Inter, system-ui);
-  font-size: 14px;
+  // Written in the same face it will be read in — the composer and the note
+  // are one surface, so they must not be set in two different types.
+  font-family: var(--hc-notes-face);
+  font-size: scaled(14px);
   line-height: 1.4;
   outline: none;
   transition: border-color var(--md-dur-short) var(--md-easing-standard),
@@ -66,7 +68,7 @@
   border-radius: 8px;
   color: var(--md-on-secondary, #15151c);
   font-family: var(--md-font-ui, Inter, system-ui);
-  font-size: 13px;
+  font-size: scaled(13px);
   font-weight: 600;
   cursor: pointer;
   transition: opacity var(--md-dur-short) var(--md-easing-standard),
@@ -93,7 +95,7 @@
   border-radius: 5px;
   color: var(--md-on-surface-faint);
   font-family: var(--md-font-ui);
-  font-size: 12px;
+  font-size: scaled(12px);
   cursor: pointer;
 
   &:hover {
@@ -139,7 +141,7 @@
   cursor: pointer;
   color: var(--md-on-surface-var);
   font-family: var(--md-font-mono);
-  font-size: 10px;
+  font-size: scaled(10px);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   line-height: 1;
@@ -194,7 +196,7 @@
   border-radius: 999px;
   color: var(--md-on-surface-var);
   font-family: var(--md-font-mono);
-  font-size: 10.5px;
+  font-size: scaled(10.5px);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;

@@ -43,11 +43,21 @@
   --hc-rail-btn: 1.6rem;
   --hc-rail-glyph: 1.05rem;
   --hc-rail-gap: 0.3rem;
-  // How many icons a group fits before wrapping to the next row. The rail
-  // NEVER shrinks an icon to make room (that raggedness is what the rail
-  // exists to prevent) — it takes another row instead, same box, same gap,
-  // same baseline. Matches the tile icon band's rhythm.
-  --hc-rail-cols: 5;
+  // How many icon boxes THE WHOLE RAIL fits before it wraps to the next row.
+  // The rail NEVER shrinks an icon to make room (that raggedness is what the
+  // rail exists to prevent) — it takes another row instead, same box, same
+  // gap, same baseline. Matches the tile icon band's rhythm.
+  //
+  // Counted over the rail, NOT per group: when each group wrapped on its own
+  // budget the groups ended up different heights, and two centred blocks of
+  // different heights stagger — a hive in the swarm (whose standing tools grow
+  // to six with the antenna) rendered three ragged baselines, the behaviours
+  // floating half a row above the orphaned sixth tool. One budget, one wrap
+  // context, one block (command-shell `.shell-actions`). Ten boxes is what two
+  // full five-icon groups plus their divider already occupied, so the widest
+  // the rail can get — and the least the command line is ever left — is
+  // unchanged; the icons simply pack instead of splitting into short rows.
+  --hc-rail-cols: 10;
 
   // Switchable size: `--hc-header-zoom` (1.0 / 1.15 / 1.45, see
   // `styles/_header-size.scss`) scales the box AND every child
@@ -348,6 +358,10 @@
     --hc-rail-btn: 2.6rem;
     --hc-rail-glyph: 1.6rem;
     --hc-rail-gap: 0.35rem;
+    // Not a wrap budget here — the portrait rail is one scrolled line, never
+    // two rows (command-shell's matching query turns the wrap off). Five is
+    // how many boxes a phone shows at rest; `.rail-btn { flex: 0 0 20% }` is
+    // what actually cuts the slots.
     --hc-rail-cols: 5;
     // The prompt and GO draw their own frame. Keeping the header frame here
     // would make the icon rail look like it was still inside the command line.

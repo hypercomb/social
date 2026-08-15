@@ -38,7 +38,7 @@
   align-items: flex-start;
   gap: 0.7rem;
   padding: 0.7rem 0.6rem;
-  font-size: 0.76rem;
+  font-size: scaled(0.76rem);
   font-style: italic;
   line-height: 1.5;
   color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
@@ -59,9 +59,9 @@
   background: transparent;
   color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
   font-family: inherit;
-  font-size: 0.76rem;
+  font-size: scaled(0.76rem);
   cursor: pointer;
-  .mat-sym { font-size: 15px; }
+  .mat-sym { font-size: scaled(15px); }
   &:hover {
     border-color: rgba($steel, 0.55);
     color: color-mix(in srgb, #{$steel} 85%, white);
@@ -90,7 +90,7 @@
   outline: none;
   color: var(--md-on-surface);
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: scaled(0.8rem);
 
   &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 45%, transparent); }
 }
@@ -99,7 +99,7 @@
 .cv2-cloud-empty {
   padding: 0.6rem 0.7rem;
   color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
-  font-size: 0.8rem;
+  font-size: scaled(0.8rem);
   font-style: italic;
 }
 
@@ -166,7 +166,7 @@
     padding-top: 5px;
 
     .cv2-note-text {
-      font-size: 0.84rem;
+      font-size: scaled(0.84rem);
       font-weight: 600;
       letter-spacing: 0.03em;
       color: var(--md-on-surface);
@@ -271,7 +271,7 @@
   align-items: center;
   gap: 5px;
   font-family: var(--md-font-mono);
-  font-size: 9.5px;
+  font-size: scaled(9.5px);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--md-secondary);
@@ -287,8 +287,8 @@
   // is display:none), so its text still starts flush at the row's edge.
   grid-column: 2;
   margin: 0;
-  font-family: var(--md-font-display);
-  font-size: 14px;
+  font-family: var(--hc-notes-face);
+  font-size: scaled(14px);
   line-height: 1.5;
   color: var(--md-on-surface);
   text-wrap: pretty;
@@ -432,7 +432,7 @@
   border-radius: 6px;
   box-shadow: var(--md-elev-3);
   font-family: var(--md-font-ui);
-  font-size: 12px;
+  font-size: scaled(12px);
 }
 
 .cv2-kebab-item {
@@ -473,14 +473,14 @@
   border-radius: 6px;
   box-shadow: var(--md-elev-3);
   font-family: var(--md-font-ui);
-  font-size: 12px;
+  font-size: scaled(12px);
   overflow-y: auto;
 }
 
 .cv2-nest-picker-head {
   padding: 4px 8px 6px;
   font-family: var(--md-font-mono);
-  font-size: 9.5px;
+  font-size: scaled(9.5px);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--md-on-surface-faint);
@@ -513,7 +513,7 @@
 // Mark icon on a candidate row — same idea as the note row: the mark when
 // the note has one, the legacy shape glyph otherwise.
 .cv2-nest-picker-mark {
-  font-size: 14px;
+  font-size: scaled(14px);
   flex-shrink: 0;
   color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
 }
@@ -563,7 +563,7 @@
   border-radius: 8px;
   color: var(--md-on-surface-faint);
   font-family: var(--md-font-mono);
-  font-size: 11px;
+  font-size: scaled(11px);
   letter-spacing: 0.04em;
   cursor: pointer;
 

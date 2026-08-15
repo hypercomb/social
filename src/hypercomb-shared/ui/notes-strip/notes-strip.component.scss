@@ -28,6 +28,16 @@
 @use '../../styles/notes-shapes';
 
 :host {
+  // ── The three faces, captured OUT HERE ────────────────────
+  // `.notes-strip` remaps `--md-font-ui` / `--md-font-display` to the mono
+  // for its chrome, so a face read from those tokens INSIDE the panel is
+  // mono three times over. The host is above that remap, where the tokens
+  // are still the shell's — so the faces are resolved here and inherited
+  // down already substituted.
+  --hc-face-mono: var(--hc-mono, ui-monospace, monospace);
+  --hc-face-sans: var(--md-font-ui);
+  --hc-face-serif: var(--md-font-display);
+
   position: fixed;
   // The strip is a dock-style panel: it fills the entire vertical
   // space between the header (top) and the controls-bar pill (bottom)
@@ -183,7 +193,7 @@
   background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
   color: color-mix(in srgb, var(--md-on-surface) 78%, transparent);
   font-family: inherit;
-  font-size: 0.74rem;
+  font-size: scaled(0.74rem);
   line-height: 1.3;
   cursor: pointer;
   transition: background var(--md-dur-short) var(--md-easing-standard),
@@ -246,6 +256,15 @@
   --md-on-secondary: #0e0e16;
   --md-font-ui: var(--hc-mono, system-ui);
   --md-font-display: var(--hc-mono, system-ui);
+
+  // ── The reading FACE ─────────────────────────────────────
+  // Set in the window's own settings (the gear's "This window" zone) and
+  // read by the PROSE only — note text, the reading pane, the editor, list
+  // lines and their titles. The chrome around them stays mono: the window
+  // did not change, the writing in it did.
+  --hc-notes-face: var(--hc-face-mono);
+  &[data-face='sans'] { --hc-notes-face: var(--hc-face-sans); }
+  &[data-face='serif'] { --hc-notes-face: var(--hc-face-serif); }
 
   display: flex;
   flex-direction: column;

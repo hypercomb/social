@@ -21,11 +21,11 @@
     $hex-h: 74px,
     $hex-icon: 28px,
     $shape: 1.5,
-    $text: 0.92rem,
+    $text: scaled(0.92rem),
     $cycle-pad: 0.45rem 0.6rem,
     $btn: 26px,
     $ed-pad: 0.85rem 0.95rem 0.7rem,
-    $ed-font: 0.95rem
+    $ed-font: scaled(0.95rem)
   );
 }
 

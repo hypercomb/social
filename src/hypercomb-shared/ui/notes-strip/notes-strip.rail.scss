@@ -134,7 +134,7 @@
   border-left: 1px solid color-mix(in srgb, var(--md-on-surface) 14%, transparent);
 }
 .cv2-rail-kind-label {
-  font-size: 0.6rem;
+  font-size: scaled(0.6rem);
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--md-on-surface-faint);
@@ -155,7 +155,7 @@
   align-items: center;
   gap: 6px;
   padding-bottom: 5px;
-  font-size: 0.72rem;
+  font-size: scaled(0.72rem);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
@@ -182,7 +182,7 @@
   padding: 3px 6px;
   color: var(--md-on-surface);
   font-family: inherit;
-  font-size: 0.76rem;
+  font-size: scaled(0.76rem);
   outline: none;
 
   &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 40%, transparent); }
@@ -205,7 +205,7 @@
     padding: 3px 6px;
     color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
     font-family: inherit;
-    font-size: 0.68rem;
+    font-size: scaled(0.68rem);
     letter-spacing: 0.04em;
     cursor: pointer;
 
@@ -239,7 +239,7 @@
   border-radius: 4px;
   color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
   font-family: inherit;
-  font-size: 0.74rem;
+  font-size: scaled(0.74rem);
   cursor: pointer;
 
   &:hover {
@@ -250,7 +250,7 @@
 .cv2-rail-empty {
   padding: 4px 0 2px;
   color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
-  font-size: 0.75rem;
+  font-size: scaled(0.75rem);
   font-style: italic;
 }
 
