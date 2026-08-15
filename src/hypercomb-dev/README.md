@@ -65,11 +65,36 @@ trick, not a smaller app) or forces bee startup behind an `await` — a boot-ord
 change in the shell every other verification leans on. The budget was raised
 instead, on purpose.
 
+**What is actually in there.** Attributing real emitted bytes across the initial
+chunks (decode `main-*.js.map`'s `mappings`, charge each segment's span to its
+source — *not* `sourcesContent` length, which counts comments and badly
+overstates essentials):
+
+| Area | Initial bytes | In web's initial? |
+|---|---|---|
+| `hypercomb-essentials` | ~1.58 MB | no — installed to OPFS, imported at runtime |
+| `hypercomb-shared` | ~1.35 MB | yes |
+| `node_modules/pixi.js` | ~0.50 MB | no — built to `public/` as a vendor bundle |
+| `@angular/*` | ~0.24 MB | yes |
+| everything else | ~0.14 MB | mostly |
+| `hypercomb-core` | ~0.03 MB | no — copied to `public/core/` |
+
+The delta reconciles exactly: 3.88 MB − 1.58 (essentials) − 0.50 (pixi) ≈ 1.80 MB,
+against web's measured 1.77 MB. **Two mechanisms, not one** — essentials is the
+famous half, but pixi is half a megabyte of it and is easy to forget, because
+`hypercomb-web/src` imports pixi nowhere at all (`runtime:pixi` builds it into
+`public/` and the import map resolves it) while dev picks it up transitively
+through the presentation drones.
+
+Note `hypercomb-shared` is nearly as large as essentials and is *not* explained
+by the dev/web split — it is in both. A handful of shared components dominate it
+(`notes-strip` ~148 kB, `controls-bar` ~97 kB, `command-line` ~70 kB,
+`features-viewer` ~71 kB). If dev's budget needs real relief rather than a
+higher ceiling, that is where the reusable wins are, and they help web too.
+
 **The budget still guards against regressions.** Measured initial total is
-**4.07 MB** (`main-*.js` 3.53 MB + ~14 shared chunks), so the warning has ~135 kB
-of headroom and the error ~450 kB. Bucketing `main-*.js.map` by source package
-confirms where it goes: `hypercomb-essentials` 55.8%, `hypercomb-shared` 23.2%,
-`@angular/*` ~12%, everything else under 2% each — no single rogue dependency.
+**4.07 MB** as Angular counts it, so the warning has ~135 kB of headroom and the
+error ~450 kB.
 Adding a drone or two moves it by single-digit kB; accidentally pulling a heavy library
 into the *initial* graph (a second renderer, a parser, a polyfill bundle) trips
 it immediately. If the error starts firing from honest drone growth rather than
