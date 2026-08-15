@@ -391,6 +391,42 @@ describe('doctrine ratchets', () => {
     ).toEqual([])
   })
 
+  it('no plaintext credential in a content-addressed write, a decoration payload, or an EffectBus payload', () => {
+    // A KEY IS NEVER CONTENT. An API key that reaches `putResource` is
+    // signed, deduplicated, and cached forever under an address anyone
+    // holding the signature can fetch; one that reaches a decoration payload
+    // or a layer slot rides the merkle tree into every peer that adopts the
+    // tile; one that reaches an EffectBus payload is replayed to every late
+    // subscriber, including surfaces that log what they receive. All three
+    // are unrecoverable — content is immutable, and a shared hive cannot be
+    // un-shared. Rotating the key is the only remedy, and only if anyone
+    // notices.
+    //
+    // So credentials have exactly ONE home: the core LlmKeyStore
+    // (hypercomb-core/src/core/llm-keys.ts), which writes localStorage and
+    // nothing else. This ratchet is the negative half of that contract,
+    // enforced mechanically before the hive learns to hold N provider keys.
+    //
+    // Heuristic: a credential-shaped identifier appearing inside the argument
+    // list of a write that leaves the device's own volatile memory. `[^)]`
+    // bounds each match to the first close-paren, so a later unrelated
+    // `apiKey` in the same function cannot trip it. Reads (`getItem`) and
+    // storage-key CONSTANTS (`*_KEY`/`*_STORAGE`, matched as whole words that
+    // these patterns deliberately do not contain) are not credentials.
+    //
+    // Empty allowlist, and it stays empty. If you need to persist something
+    // key-shaped, it belongs in LlmKeyStore; if you need to ANNOUNCE that a
+    // key changed, emit the provider id and let the listener re-read.
+    const SINKS =
+      'putResource|putPoolDoc|putBee|putLayer|commitLayer|commitSlot[A-Za-z]*|writeChildrenManifest'
+      + '|emitEffect|EffectBus\\.emit(?:Transient)?|decorationAdd|addDecoration'
+    const CREDENTIALS = 'apiKey|api_key|apikey|secretValue|password|credential|bearerToken|accessToken|authToken'
+    const actual = filesMatching(
+      new RegExp(`(?:${SINKS})\\s*(?:<[^>]*>)?\\s*\\([^)]{0,400}?\\b(?:${CREDENTIALS})\\b`, 'i'),
+    )
+    assertRatchet(actual, [], 'plaintext credential in a persisted or broadcast payload')
+  })
+
   it('no tool window closes a SIBLING by name — the lane decides what fits, and it parks', () => {
     // A window that shuts another one runs the OTHER's `close()`, which is the
     // participant's own verb: it empties gathered lists, selections, brushes

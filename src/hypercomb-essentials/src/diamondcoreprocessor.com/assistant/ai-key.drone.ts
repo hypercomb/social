@@ -1,51 +1,68 @@
 // diamondcoreprocessor.com/assistant/ai-key.drone.ts
 //
-// Surfaces a command-line indicator whenever the Anthropic API key is present
-// in localStorage. Gives the user a visible signal that any feature which
-// would call the Claude API (translation, expand, chat) is currently live —
-// so unintended spend doesn't happen invisibly.
+// SPEND MUST NEVER BE INVISIBLE.
+//
+// One command-line indicator per CONFIGURED provider. If a key is on this
+// device, something in this hive can spend the participant's money without
+// asking again — translation, expand, atomize, chat — so the fact that it
+// CAN is always on screen, one light per vendor, labelled with the vendor's
+// own name.
+//
+// This used to be a single hardcoded "Claude API key active" light reading
+// one localStorage key. It is now the LlmKeyStore's `configured()` roster
+// crossed with the provider registry for labels, so the day a descriptor
+// registers and a key is pasted, its light appears with no code change here.
+// A key for a provider the registry has never heard of still lights up — an
+// unknown vendor that can spend is exactly the case you most want shown.
 
-import { Drone, EffectBus } from '@hypercomb/core'
-import { API_KEY_STORAGE } from './llm-api.js'
+import { Drone, EffectBus, llmKeyStore } from '@hypercomb/core'
+import { llmProviderRegistry } from './llm-provider-registry.js'
+import './providers/builtin-providers.js'
 
-const INDICATOR_KEY = 'ai-active'
+const INDICATOR_PREFIX = 'ai-active:'
 const INDICATOR_ICON = 'auto_awesome'
-const INDICATOR_LABEL = 'Claude API key active'
 
 export class AiKeyIndicatorDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
-  override description = 'shows a command-line indicator when a Claude API key is set'
+  override description = 'shows one command-line indicator per configured AI provider'
 
   protected override listens = []
   protected override emits = ['indicator:set', 'indicator:clear']
 
   #initialized = false
-  #storageHandler: ((event: StorageEvent) => void) | null = null
+  /** Provider ids currently lit — so a cleared key clears its own light. */
+  #shown = new Set<string>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#initialized) return
     this.#initialized = true
 
     this.#sync()
-
-    this.#storageHandler = (event: StorageEvent) => {
-      if (event.key === API_KEY_STORAGE || event.key === null) this.#sync()
-    }
-    window.addEventListener('storage', this.#storageHandler)
+    // The store already folds in cross-tab `storage` events and re-reads
+    // itself, so one listener on it covers both this tab and the others.
+    llmKeyStore.addEventListener('change', () => this.#sync())
+    // A provider registering late (a module loaded after boot) changes only
+    // the LABEL of a light, but a light with the wrong name is worse than
+    // none — relabel when the roster moves.
+    llmProviderRegistry().addEventListener('change', () => this.#sync())
   }
 
   #sync(): void {
-    const hasKey = !!localStorage.getItem(API_KEY_STORAGE)
-    if (hasKey) {
+    const registry = llmProviderRegistry()
+    const configured = new Set(llmKeyStore.configured())
+
+    for (const id of configured) {
       EffectBus.emit('indicator:set', {
-        key: INDICATOR_KEY,
+        key: `${INDICATOR_PREFIX}${id}`,
         icon: INDICATOR_ICON,
-        label: INDICATOR_LABEL,
+        label: `${registry.get(id)?.label ?? id} API key active`,
       })
-    } else {
-      EffectBus.emit('indicator:clear', { key: INDICATOR_KEY })
     }
+    for (const id of this.#shown) {
+      if (!configured.has(id)) EffectBus.emit('indicator:clear', { key: `${INDICATOR_PREFIX}${id}` })
+    }
+    this.#shown = configured
   }
 }
 

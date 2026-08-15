@@ -698,6 +698,15 @@
       "unattended": false,
       "created": "2026-08-14",
       "status": "pending"
+    },
+    {
+      "id": "llm-provider-registry",
+      "title": "Mirror the LLM provider registry + key store (AI first-class phase 2)",
+      "run": null,
+      "note": "One tile per source resource, marked 'part': hypercomb-core/src/core/llm-keys.ts (LlmKeyStore — device-local credentials, hc:llm:<id>:key), assistant/llm-provider-registry.ts, assistant/llm-dispatch.ts (callModel/streamModel seam), assistant/providers/llm-provider.types.ts, openai-shape.ts, and one tile per vendor adapter (anthropic, openai, google, xai, deepseek, mistral, local). Gather them in a collection 'llm:providers'. Pheromones: 'part' on each file tile, 'provider' + the vendor word on each adapter tile, 'registry' on the registry tile. Notes: the three transports (browser-http / host-relay / agent-bridge), the one-colour-source rule (vendor keys into VENDOR_BODY in presentation/avatars/agent-model.ts), and KEYS ARE NEVER CONTENT (doctrine ratchet in src/doctrine.spec.ts). Mint a glyph card in the themed behaviors mirror for the registry. Manual: note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-14",
+      "status": "pending"
     }
   ]
 }

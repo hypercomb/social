@@ -76,6 +76,17 @@ shipping N keys: no plaintext credential in any content-addressed write.
 `ai-key.drone.ts` generalizes: one command-line indicator per configured
 provider (spend must never be invisible).
 
+**Shipped (phase 2).** `hypercomb-core/src/core/llm-keys.ts` is the one place
+a credential is written; `assistant/providers/` holds seven descriptors
+(anthropic, openai, google, xai, deepseek, mistral, local/ollama — four of
+them sharing `openai-shape.ts`, which is where the de-facto wire format lives
+once); `assistant/llm-dispatch.ts` is the seam; `llm-api.ts` is a deprecated
+shim over it. The registry REJECTS a vendor `agent-model.ts` does not know,
+so a second palette cannot be minted by accident. The credential ratchet
+(`doctrine.spec.ts`, empty allowlist) fails the suite on any credential-shaped
+identifier inside a content-addressed write, a decoration payload, or an
+EffectBus payload.
+
 ---
 
 ## 2. The provider picker — a branded hexagon page at `/providers`
@@ -211,7 +222,7 @@ ladders, easiest first:
 | Phase | Ships | Depends on |
 |---|---|---|
 | 1 | Tutorial + npm bridge scripts (**done** — this pass) | — |
-| 2 | LlmKeyStore (core) + registry + anthropic/openai/google/xai adapters + dispatch seam + credential ratchet | — |
+| 2 | LlmKeyStore (core) + registry + anthropic/openai/google/xai/deepseek/mistral/local adapters + dispatch seam + credential ratchet (**done**) | — |
 | 3 | `/providers` launch page + guided key setup + logo art pass + marks | 2 |
 | 4 | Chat P0 (markdown, actions, stop, waiting, scroll) | — (parallel with 2–3) |
 | 5 | Chat P1 + mobile sheet | 4 |
