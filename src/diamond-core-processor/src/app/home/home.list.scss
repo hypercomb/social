@@ -31,6 +31,9 @@
   border-radius: 8px;
   margin: 0 0 8px;
   padding: 0;
+  /* Full-bleed children (tree stripes, provenance rails) clip at the
+     rounded corner instead of poking through the border. */
+  overflow: hidden;
   background: var(--dcp-panel, rgba(255, 255, 255, .02));
   transition: border-color .14s ease, background .14s ease;
 
@@ -90,6 +93,11 @@
 /* Pushes the state + verbs to the trailing edge, so every row's controls
    line up in one column no matter how long the name runs. */
 .list-spacer { flex: 1 1 auto; min-width: 8px; }
+
+/* The revision switcher mounts as a direct child of the (unpadded) row card,
+   so it carries the head's gutter itself — otherwise its toggle and rows sit
+   flush against the card border. */
+.list-row > dcp-revision-list { display: block; padding: 0 10px; }
 
 .list-code {
   border-top: 1px solid var(--dcp-line, rgba(255, 255, 255, .1));
