@@ -25,10 +25,16 @@ fs.copyFileSync(path.join(ROOT, 'og.png'), path.join(stage, 'og.png'))
 // /setup — the Claude Code + bridge checklist, linked from the splash
 fs.mkdirSync(path.join(stage, 'setup'), { recursive: true })
 fs.copyFileSync(path.join(ROOT, 'setup.html'), path.join(stage, 'setup', 'index.html'))
+// the walkthrough video — one canonical copy lives with the downloads site
+fs.copyFileSync(
+  path.join(ROOT, '..', '..', 'documentation', 'hypercomb.com', 'assets', 'bridge-setup.mp4'),
+  path.join(stage, 'setup', 'bridge-setup.mp4'))
 fs.writeFileSync(path.join(stage, 'staticwebapp.config.json'), JSON.stringify({
   navigationFallback: { rewrite: '/index.html' },
   globalHeaders: { 'cache-control': 'public, max-age=300, must-revalidate' },
-  mimeTypes: { '.html': 'text/html; charset=utf-8' },
+  // .mp4 must be declared or SWA serves it as octet-stream — Safari/iOS
+  // refuses to play a <video> whose bytes arrive without a video/* type.
+  mimeTypes: { '.html': 'text/html; charset=utf-8', '.mp4': 'video/mp4' },
 }, null, 2))
 
 const az = (...args) => execFileSync('az', args, { encoding: 'utf8', shell: true }).trim()
