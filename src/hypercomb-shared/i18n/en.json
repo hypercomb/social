@@ -1058,6 +1058,7 @@
   "dcp.adopt": "Adopt",
   "dcp.save": "Save",
   "dcp.discard": "Discard",
+  "dcp.retry": "Retry",
   "dcp.adopt-state": "Package state",
   "dcp.adopt-hint": "Install and enable this package — live in your view now",
   "dcp.save-hint": "Keep installed but off — a saved revision you can enable later",

@@ -254,6 +254,28 @@
 
 .section-status.error {
   color: var(--dcp-danger);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The way out of a fossilized failure — an error is a state, not a verdict. */
+.error-retry {
+  flex: 0 0 auto;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--dcp-ink-2);
+  background: transparent;
+  border: 1px solid var(--dcp-line, rgba(255, 255, 255, 0.18));
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--dcp-ink-1, #fff);
+    border-color: var(--dcp-ink-2);
+  }
 }
 
 /* Package-update review banner — sits above a section's tree when it carries

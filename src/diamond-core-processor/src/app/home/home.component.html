@@ -289,7 +289,10 @@
               </div>
             }
             @if (row.section.error) {
-              <div class="section-status error">{{ row.section.error }}</div>
+              <div class="section-status error">
+                <span>{{ row.section.error }}</span>
+                <button class="error-retry" type="button" (click)="retrySection(row.section)">{{ 'dcp.retry' | t }}</button>
+              </div>
             }
             @if (upgradeCount(row.section) > 0) {
               <div class="upgrade-banner">
@@ -525,7 +528,10 @@
             }
 
             @if (section.error) {
-              <div class="section-status error">{{ section.error }}</div>
+              <div class="section-status error">
+                <span>{{ section.error }}</span>
+                <button class="error-retry" type="button" (click)="retrySection(section)">{{ 'dcp.retry' | t }}</button>
+              </div>
             }
 
             @if (upgradeCount(section) > 0) {

@@ -183,6 +183,29 @@ const syncTarget = (targetDir: string, additive: boolean, manifestJson: string):
     copied++
   }
 
+  // manifest.json: every target receives the SAME chained manifest (computed
+  // once in main against the deepest existing chain), compare-first so an
+  // unchanged re-deploy writes nothing.
+  //
+  // ORDER MATTERS — files above, manifest here, stale removal LAST. A target
+  // is often being SERVED while this mirror runs (ng serve on DCP public, the
+  // relay's content dir), and a reader resolves manifest → sig files with no
+  // lock. Written in this order, every instant is consistent: the new files
+  // land while the old manifest still points only at old files, the new
+  // manifest lands once everything it references is present, and only then do
+  // the entries nothing references anymore go. The old order removed stale
+  // sigs BEFORE the manifest swap — a reader in that window fetched a
+  // manifest that advertised just-deleted bytes, failed the install, and the
+  // installer row fossilized "No content found" (2026-08-14).
+  const tgtManifest = join(targetDir, MANIFEST_FILE)
+  const existing = existsSync(tgtManifest) ? readFileSync(tgtManifest, 'utf8') : null
+  if (existing === manifestJson) {
+    skipped++
+  } else {
+    writeFileSync(tgtManifest, manifestJson, 'utf8')
+    copied++
+  }
+
   // remove stale entries (signatures no longer in source) — STRICTLY
   // whitelisted to 64-hex names so app assets sharing the target root
   // (index.html, worker scripts, manifest.json) are untouchable. Recursive
@@ -195,18 +218,6 @@ const syncTarget = (targetDir: string, additive: boolean, manifestJson: string):
         removed++
       }
     }
-  }
-
-  // manifest.json: every target receives the SAME chained manifest (computed
-  // once in main against the deepest existing chain), compare-first so an
-  // unchanged re-deploy writes nothing.
-  const tgtManifest = join(targetDir, MANIFEST_FILE)
-  const existing = existsSync(tgtManifest) ? readFileSync(tgtManifest, 'utf8') : null
-  if (existing === manifestJson) {
-    skipped++
-  } else {
-    writeFileSync(tgtManifest, manifestJson, 'utf8')
-    copied++
   }
 
   return { copied, skipped, removed, drained }

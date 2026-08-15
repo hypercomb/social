@@ -3235,6 +3235,20 @@ export class HomeComponent implements OnDestroy {
       this.#refreshSections()
     }
 
+    // ONE automatic retry per domain. An install that failed during a
+    // TRANSIENT window — the mirror mid-restage, a dev server answering
+    // /manifest.json with index.html while it recompiles — must heal itself
+    // rather than fossilize "No content found" onto the row (a week-old error
+    // sat on a row on 2026-08-14 while every advertised file served 200). One
+    // retry, not a loop: a second failure is a real outage and stays visible;
+    // the row's retry button remains for the participant after that.
+    const failedDomains = [...new Set(results.filter(s => s.error).map(s => s.domain))]
+      .filter(domain => !this.#autoRetried.has(domain))
+    for (const domain of failedDomains) {
+      this.#autoRetried.add(domain)
+      setTimeout(() => { void this.#loadAllDomains([domain]) }, 8_000)
+    }
+
     // Tell the sentinel that DCP's content set has changed so any
     // connected hypercomb-web tab resyncs against our latest OPFS
     // state. Without this, installing a new domain leaves web frozen
@@ -3245,6 +3259,23 @@ export class HomeComponent implements OnDestroy {
 
     // Check for navigate query param (from structure atomizer drop in Hypercomb.io)
     this.#handleNavigateQueryParam()
+  }
+
+  /** Domains that already spent their one automatic error retry — after
+   *  that, failing again means a real outage and the row keeps its error
+   *  (with the retry button as the manual path). */
+  #autoRetried = new Set<string>()
+
+  /** Re-run a failed section's install — the row's retry button. The load
+   *  path replaces this domain's package sections wholesale, so a recovered
+   *  source repaints the row completely; a still-broken one repaints the
+   *  error, which is the truth. */
+  retrySection(section: DomainSection): void {
+    if (section.loading) return
+    section.error = null
+    section.loading = true
+    this.#refreshSections()
+    void this.#loadAllDomains([section.domain])
   }
 
   #handleNavigateQueryParam(): void {
