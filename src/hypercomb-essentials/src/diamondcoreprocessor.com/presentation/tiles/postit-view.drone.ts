@@ -631,9 +631,20 @@ const STICKY_CSS = `
    title so an empty note still reads as PAPER WITH WRITING on it. */
 .postit-face{position:absolute;left:0;top:0;right:8%;bottom:6%;box-sizing:border-box;padding:.8rem .7rem 1rem;background:linear-gradient(168deg,#fdf6b8 0%,#f7e58f 68%,#eed469 100%);box-shadow:1px 2px 2px rgba(48,36,3,.24),4px 8px 9px rgba(0,0,0,.3),10px 16px 22px rgba(0,0,0,.22),inset 0 -1.4rem 1rem -1.2rem rgba(120,90,10,.22),inset 0 1px rgba(255,255,255,.8);transform:rotate(-3deg)}
 .postit-face::after{content:'';position:absolute;left:.8rem;right:1.1rem;bottom:1.05rem;height:1.1rem;background:repeating-linear-gradient(to bottom,rgba(96,80,20,.5) 0 2px,transparent 2px 7px);opacity:.7}
-/* The pushpin — a pink head with a lit shoulder, its needle biting the paper. */
-.postit-pin{position:absolute;left:52%;top:.1rem;width:1.25rem;height:1.25rem;border-radius:50%;background:radial-gradient(circle at 34% 30%,#ffb3c8 0%,#f2617f 42%,#c2264a 100%);box-shadow:0 1px 2px rgba(0,0,0,.45),1px 3px 5px rgba(0,0,0,.35),inset -1px -2px 3px rgba(120,10,40,.5)}
-.postit-pin::after{content:'';position:absolute;left:50%;top:70%;width:.16rem;height:.5rem;transform:translateX(-50%);background:linear-gradient(to bottom,rgba(90,70,20,.55),rgba(90,70,20,0))}
+/* The pushpin — a real object, not a dot: a glossy pink dome lit from the
+   upper left, a dark rim where it turns away from the light, a shadow cast
+   down-right onto the paper, and a tapered steel needle driven through it.
+   The needle emerges from under the dome and ends in a bite mark, so the
+   pin reads as pressed INTO the note rather than drawn on it. */
+.postit-pin{position:absolute;left:52%;top:.16rem;width:1.35rem;height:1.35rem;border-radius:50%;
+background:
+  radial-gradient(circle at 30% 24%,rgba(255,255,255,.95) 0 6%,rgba(255,255,255,0) 34%),
+  radial-gradient(circle at 68% 78%,rgba(255,150,180,.5) 0 12%,rgba(255,150,180,0) 42%),
+  radial-gradient(circle at 36% 30%,#ff9cba 0%,#f4557b 38%,#cf2a52 66%,#8e1235 100%);
+box-shadow:0 .28rem .38rem -.14rem rgba(20,6,10,.55),0 .1rem .16rem rgba(0,0,0,.4),inset -.09rem -.13rem .22rem rgba(96,6,32,.6),inset .06rem .07rem .14rem rgba(255,255,255,.45)}
+/* The steel under the dome — a short collar, then the taper into the paper. */
+.postit-pin::before{content:'';position:absolute;left:50%;top:74%;width:.3rem;height:.34rem;transform:translateX(-50%);border-radius:0 0 .1rem .1rem;background:linear-gradient(100deg,#8d949c 0%,#e6ecf1 38%,#aab2ba 62%,#5f666e 100%);box-shadow:0 .06rem .1rem rgba(0,0,0,.35)}
+.postit-pin::after{content:'';position:absolute;left:50%;top:96%;width:.22rem;height:.42rem;transform:translateX(-46%) rotate(4deg);clip-path:polygon(0 0,100% 0,58% 100%);background:linear-gradient(102deg,#767d85 0%,#dfe5ea 42%,#8b9299 72%,#4d545b 100%);filter:drop-shadow(.03rem .05rem .06rem rgba(60,45,10,.5))}
 .postit-grip{position:absolute;right:8%;bottom:6%;width:1.15rem;height:1.15rem;cursor:nwse-resize;touch-action:none;opacity:0;transition:opacity .14s ease}
 .postit-grip::after{content:'';position:absolute;right:.2rem;bottom:.2rem;width:.5rem;height:.5rem;border-right:2px solid rgba(74,63,15,.5);border-bottom:2px solid rgba(74,63,15,.5)}
 .postit-sticky:hover .postit-grip,.postit-sticky:focus-within .postit-grip{opacity:1}

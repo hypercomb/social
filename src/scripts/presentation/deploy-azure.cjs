@@ -22,6 +22,9 @@ fs.mkdirSync(stage, { recursive: true })
 fs.copyFileSync(dist, path.join(stage, 'index.html'))
 // the link card social platforms fetch when the URL is posted
 fs.copyFileSync(path.join(ROOT, 'og.png'), path.join(stage, 'og.png'))
+// /setup — the Claude Code + bridge checklist, linked from the splash
+fs.mkdirSync(path.join(stage, 'setup'), { recursive: true })
+fs.copyFileSync(path.join(ROOT, 'setup.html'), path.join(stage, 'setup', 'index.html'))
 fs.writeFileSync(path.join(stage, 'staticwebapp.config.json'), JSON.stringify({
   navigationFallback: { rewrite: '/index.html' },
   globalHeaders: { 'cache-control': 'public, max-age=300, must-revalidate' },

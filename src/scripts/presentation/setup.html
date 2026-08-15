@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Connect your Claude Code subscription to a live Hypercomb hive — point-and-click, no API key.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐝</text></svg>">
+<title>Hypercomb Bridge Setup</title>
+<style>
+  :root {
+    --ground: #faf7f1;
+    --ink: #241e12;
+    --muted: #6f6752;
+    --accent: #b3830c;
+    --accent-ink: #8a6407;
+    --card: #ffffff;
+    --line: #e6dfd0;
+    --term-bg: #191408;
+    --term-ink: #ede3cc;
+    --term-line: #2e2614;
+    --ok: #57804a;
+    --term-ok: #a4c48f;
+    --warn-bg: #f6edd8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #16120a;
+      --ink: #ece3d0;
+      --muted: #a1957a;
+      --accent: #e6b73c;
+      --accent-ink: #e6b73c;
+      --card: #1e1910;
+      --line: #332b1a;
+      --term-bg: #100d06;
+      --term-ink: #e6dcc4;
+      --term-line: #2b2312;
+      --ok: #9ec287;
+      --term-ok: #9ec287;
+      --warn-bg: #251e0f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #16120a;
+    --ink: #ece3d0;
+    --muted: #a1957a;
+    --accent: #e6b73c;
+    --accent-ink: #e6b73c;
+    --card: #1e1910;
+    --line: #332b1a;
+    --term-bg: #100d06;
+    --term-ink: #e6dcc4;
+    --term-line: #2b2312;
+    --ok: #9ec287;
+    --term-ok: #9ec287;
+    --warn-bg: #251e0f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font: 17px/1.65 "Segoe UI", system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 0 1.25rem 5rem;
+  }
+  .mono, h1, h2, h3, .step-n, .chip, th, .copy-btn {
+    font-family: "Cascadia Code", ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  header { padding: 3.5rem 0 1rem; }
+  .eyebrow {
+    font-family: "Cascadia Code", ui-monospace, Consolas, monospace;
+    font-size: .72rem; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent-ink);
+  }
+  h1 {
+    font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15;
+    letter-spacing: -.02em; margin: .4rem 0 .8rem; text-wrap: balance;
+  }
+  .lede { font-size: 1.08rem; color: var(--muted); max-width: 62ch; margin: 0 0 .4rem; }
+  .lede strong { color: var(--ink); }
+  h2 {
+    font-size: 1.25rem; letter-spacing: -.01em; margin: 3rem 0 .8rem;
+    padding-top: 1.6rem; border-top: 1px solid var(--line); text-wrap: balance;
+  }
+  h3 { font-size: 1rem; margin: 1.8rem 0 .5rem; }
+  p { max-width: 65ch; margin: .7rem 0; }
+  a { color: var(--accent-ink); text-underline-offset: 3px; }
+  code {
+    font-family: "Cascadia Code", ui-monospace, Consolas, monospace;
+    font-size: .86em; background: var(--card); border: 1px solid var(--line);
+    border-radius: 4px; padding: .08em .35em;
+  }
+  /* ── diagram ── */
+  .diagram {
+    display: flex; align-items: stretch; gap: 0; margin: 2rem 0 0;
+    overflow-x: auto; padding-bottom: .5rem;
+  }
+  .node {
+    flex: 1 1 0; min-width: 9.5rem; background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem;
+  }
+  .node .hex { color: var(--accent); font-size: .95rem; }
+  .node b { display: block; font-size: .95rem; margin: .15rem 0 .2rem; }
+  .node span { font-size: .82rem; color: var(--muted); line-height: 1.45; display: block; }
+  .link-arrow {
+    align-self: center; padding: 0 .5rem; color: var(--accent-ink);
+    font-family: ui-monospace, Consolas, monospace; font-size: .78rem;
+    white-space: nowrap; flex: 0 0 auto; text-align: center;
+  }
+  .flow-note { font-size: .85rem; color: var(--muted); margin-top: .6rem; max-width: 65ch; }
+  /* ── steps ── */
+  .step { display: grid; grid-template-columns: 2.6rem 1fr; gap: 0 1rem; margin: 2.2rem 0; }
+  .step-n {
+    color: var(--accent); font-size: 1.15rem; font-weight: 600; text-align: right;
+    line-height: 1.5; padding-top: .05rem;
+  }
+  .step h3 { margin: 0 0 .4rem; font-size: 1.08rem; }
+  .step .body { min-width: 0; }
+  /* ── terminal cards ── */
+  .term {
+    background: var(--term-bg); color: var(--term-ink); border-radius: 8px;
+    border: 1px solid var(--term-line); margin: .8rem 0; position: relative;
+  }
+  .term pre {
+    margin: 0; padding: .8rem 3rem .8rem 1rem; overflow-x: auto;
+    font: .84rem/1.6 "Cascadia Code", ui-monospace, Consolas, monospace;
+  }
+  .term .out { color: var(--term-ok); }
+  .term .dim { color: #8d8163; }
+  .term-label {
+    position: absolute; top: .45rem; right: 2.7rem;
+    font: .62rem/1 ui-monospace, Consolas, monospace; letter-spacing: .12em;
+    text-transform: uppercase; color: #8d8163;
+  }
+  .copy-btn {
+    position: absolute; top: .35rem; right: .4rem; border: 1px solid var(--term-line);
+    background: transparent; color: #b0a37f; font-size: .68rem; border-radius: 5px;
+    padding: .25rem .5rem; cursor: pointer;
+  }
+  .copy-btn:hover, .copy-btn:focus-visible { color: var(--term-ink); border-color: #6b5c33; outline: none; }
+  .url-card {
+    display: block; background: var(--card); border: 1px dashed var(--accent);
+    border-radius: 8px; padding: .7rem 1rem; margin: .8rem 0;
+    font-family: "Cascadia Code", ui-monospace, Consolas, monospace; font-size: .92rem;
+    color: var(--accent-ink); overflow-x: auto; white-space: nowrap;
+  }
+  /* ── callouts / rules ── */
+  .rules { background: var(--warn-bg); border-radius: 8px; padding: .9rem 1.1rem; margin: 1rem 0; }
+  .rules ul { margin: .3rem 0 0; padding-left: 1.1rem; }
+  .rules li { margin: .35rem 0; font-size: .93rem; }
+  .rules b { font-weight: 600; }
+  .chip {
+    display: inline-block; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase;
+    border: 1px solid var(--line); border-radius: 999px; padding: .15rem .6rem;
+    color: var(--muted); margin-right: .4rem;
+  }
+  /* ── table ── */
+  .tablewrap { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; min-width: 34rem; }
+  th {
+    text-align: left; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; padding: .5rem .8rem .4rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  td { padding: .55rem .8rem .55rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { font-family: "Cascadia Code", ui-monospace, Consolas, monospace; font-size: .8rem; }
+  .not-list { padding-left: 1.1rem; }
+  .not-list li { margin: .5rem 0; max-width: 62ch; }
+  footer { margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
+    font-size: .85rem; color: var(--muted); }
+  @media (max-width: 620px) {
+    .step { grid-template-columns: 1fr; }
+    .step-n { text-align: left; }
+    .diagram { flex-direction: column; }
+    .link-arrow { padding: .35rem 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .copy-btn { transition: color .15s, border-color .15s; }
+  }
+</style>
+<style>
+  .tourlinks { margin: .4rem 0 0; font-size: .8rem; }
+  .tourlinks a { color: var(--accent-ink); }
+</style>
+</head>
+<body>
+
+
+<main>
+<header>
+  <div class="eyebrow">⬡ Hypercomb · point-and-click setup</div>
+  <nav class="tourlinks"><a href="/">◂ watch the tour</a> · <a href="https://hypercomb.io" rel="noopener">open hypercomb.io ↗</a></nav>
+  <h1>Your Claude Code subscription is the hive's AI</h1>
+  <p class="lede">Connect Claude Code to a live hive. Ask from inside Hypercomb — the chat
+  window or <code>/opus …</code> — and your own session, on the plan you already pay for,
+  reads the hive and writes the answer back onto your tiles. <strong>No API key needed.</strong></p>
+</header>
+
+<div class="diagram" role="img" aria-label="Hypercomb tab connects over WebSocket to a broker on localhost 2401, which connects to your Claude Code session">
+  <div class="node">
+    <span class="hex">⬡</span>
+    <b>Hypercomb tab</b>
+    <span>the renderer — your hive, opened with <code>?claudeBridge=1</code>. Executes every operation against its own local storage.</span>
+  </div>
+  <div class="link-arrow">◄── ws ──►</div>
+  <div class="node">
+    <span class="hex">⬡</span>
+    <b>Broker</b>
+    <span><code>localhost:2401</code> — a tiny relay. Interprets nothing, forwards everything, loopback-only by default.</span>
+  </div>
+  <div class="link-arrow">◄── ws ──►</div>
+  <div class="node">
+    <span class="hex">⬡</span>
+    <b>Claude Code</b>
+    <span>the responder — a parked session (or a scheduled drain) that watches for questions, answers, and retires them.</span>
+  </div>
+</div>
+<p class="flow-note">A question typed in the hive becomes a durable <b>ask record</b> in your
+hive's own storage. Close the laptop mid-question — the ask survives and is answered when a
+responder next connects. Nothing leaves your machine.</p>
+
+<h2>Path A — the subscription loop</h2>
+<p><b>The hive walks you through this.</b> The chat window's setup state is a guided
+checklist of these same steps — each checks itself off as it verifies (tab enabled,
+broker answering, first real answer landed). Open the chat and follow along; this
+page is the same path in full detail.</p>
+
+<div class="step">
+  <div class="step-n">0</div>
+  <div class="body">
+    <h3>Prerequisites</h3>
+    <p>Node.js ≥ 20.19 (<a href="https://nodejs.org">nodejs.org</a>), Claude Code with an
+    active subscription, and the Hypercomb repository:</p>
+    <div class="term"><button class="copy-btn">copy</button><pre>npm install -g @anthropic-ai/claude-code</pre></div>
+    <div class="term"><button class="copy-btn">copy</button><pre>git clone https://github.com/hypercomb/social.git hypercomb-social</pre></div>
+    <div class="term"><button class="copy-btn">copy</button><pre>cd hypercomb-social/src
+npm install
+npm run build:packages</pre></div>
+    <p>Every command from here on runs from the repo's <code>src/</code> directory.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-n">1</div>
+  <div class="body">
+    <h3>Start the hive <span class="chip">terminal A</span></h3>
+    <div class="term"><button class="copy-btn">copy</button><pre>npm run start:dev</pre></div>
+    <p>Wait for the compile; the hive serves at <code>http://localhost:4250</code>.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-n">2</div>
+  <div class="body">
+    <h3>Start the broker <span class="chip">terminal B</span></h3>
+    <div class="term"><button class="copy-btn">copy</button><pre>npm run bridge
+<span class="out">[bridge] listening on ws://127.0.0.1:2401</span></pre></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-n">3</div>
+  <div class="body">
+    <h3>Open the hive tab — with the bridge flag</h3>
+    <p>Open <b>exactly one</b> tab at:</p>
+    <span class="url-card">http://localhost:4250/?claudeBridge=1</span>
+    <p>The broker's terminal prints <code class="mono">[bridge] renderer connected</code>.</p>
+    <div class="rules">
+      <b>Three rules that save an hour:</b>
+      <ul>
+        <li><b>One tab only.</b> The broker holds a single renderer slot, last-wins — a second bridge tab silently steals it.</li>
+        <li><b>Order matters once.</b> Tab opened before the broker? Reload it — a tab that never connected doesn't retry.</li>
+        <li><b>Loopback only.</b> The flag does nothing on a non-localhost origin, by design.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-n">4</div>
+  <div class="body">
+    <h3>Verify the loop <span class="chip">terminal C</span></h3>
+    <div class="term"><button class="copy-btn">copy</button><pre>npm run bridge:check</pre></div>
+    <p>A tile listing means the whole loop works. <code>no renderer connected</code> means the
+    broker is fine and the tab is the problem — wrong URL, stolen slot, or it needs a reload.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-n">5</div>
+  <div class="body">
+    <h3>Park a listening session</h3>
+    <p>In a Claude Code session opened at the repo root, say:</p>
+    <div class="term"><button class="copy-btn">copy</button><pre>listen for hive asks</pre></div>
+    <p>The session arms the watcher and answers asks the moment they land. Or park the raw
+    watcher in a terminal (one JSON line per ask):</p>
+    <div class="term"><button class="copy-btn">copy</button><pre>npm run bridge:watch</pre></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-n">6</div>
+  <div class="body">
+    <h3>Ask from inside Hypercomb</h3>
+    <p>In the hive command line:</p>
+    <div class="term"><button class="copy-btn">copy</button><pre>/opus what is on this page?</pre></div>
+    <p><code>/opus</code> <code>/sonnet</code> <code>/haiku</code> <code>/fable</code> open the
+    chat window on that model — type there like any chat. Select tiles first and the answer
+    lands as a <b>note on those tiles</b>. <code>/atomize</code> asks for structure,
+    <code>/expand</code> for new siblings, <code>/organize</code> for a grouping plan. Your
+    parked session wakes, reads the tiles for context, and answers — live, no refresh.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-n">7</div>
+  <div class="body">
+    <h3>Drive the hive from the terminal</h3>
+    <p>The other direction — any terminal, including inside a Claude Code conversation,
+    can operate the hive directly:</p>
+    <div class="term"><button class="copy-btn">copy</button><pre>node scripts/bridge/bridge-cli.cjs list</pre></div>
+    <div class="term"><button class="copy-btn">copy</button><pre>node scripts/bridge/_bop.cjs '{"op":"note-add","segments":["my-tile"],"cell":"ideas","text":"hello from the terminal"}'</pre></div>
+    <p>36 operations — read layers, add notes, write resources, add decorations — and
+    <code>{"op":"submit","text":"/website"}</code> types into the hive command line itself,
+    so anything you can do by hand, a script can do.</p>
+  </div>
+</div>
+
+<h2>Optional modes</h2>
+
+<h3>Unattended answering — no parked session</h3>
+<p>Schedule this every few minutes (Task Scheduler / cron). Zero pending asks costs nothing;
+pending asks spawn <code>claude&nbsp;-p</code> per model group, answer, and retire:</p>
+<div class="term"><button class="copy-btn">copy</button><pre>npm run bridge:drain</pre></div>
+
+<h3>Remote answering session</h3>
+<p>The renderer tab must stay on the broker's machine — only the answering session can be
+remote, and only with a shared token. Without the token, remote senders are refused outright.</p>
+<div class="term"><span class="term-label">hive machine</span><button class="copy-btn">copy</button><pre>BRIDGE_HOST=0.0.0.0 HYPERCOMB_BRIDGE_TOKEN=&lt;shared-secret&gt; npm run bridge</pre></div>
+<div class="term"><span class="term-label">remote machine</span><button class="copy-btn">copy</button><pre>BRIDGE_URL=ws://&lt;hive-machine&gt;:2401 HYPERCOMB_BRIDGE_TOKEN=&lt;shared-secret&gt; npm run bridge:watch</pre></div>
+
+<h2>Troubleshooting</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Symptom</th><th>Meaning</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td>no renderer connected</td><td>Broker up; tab not registered</td><td>Open/reload the <code>?claudeBridge=1</code> tab; close duplicates</td></tr>
+    <tr><td>connection refused :2401</td><td>No broker</td><td><code>npm run bridge</code></td></tr>
+    <tr><td>port already bound</td><td>Broker already running</td><td>Use it — never start a second</td></tr>
+    <tr><td>asks queue, nothing answers</td><td>No responder</td><td>Park a session (step 5) or schedule the drain</td></tr>
+    <tr><td>chat: "nothing is listening"</td><td>Live truth from the socket</td><td>Same — start a session</td></tr>
+    <tr><td>died after tab reload</td><td>Renderer retries only if it ever connected</td><td>Reload the tab after the broker is up</td></tr>
+    <tr><td>connect/timeout flapping</td><td>Two tabs fighting for one slot</td><td>Close one (<code>Get-NetTCPConnection -RemotePort 2401</code>)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Path B: API keys instead of a subscription</h2>
+<p>Without Claude Code, the hive still answers two ways: a <b>host relay</b> (your hive host
+fields the ask with its own key and streams the answer — nothing to install), or a personal
+API key stored locally in your browser. Multi-provider keys — OpenAI, Gemini, Grok, DeepSeek,
+Mistral, local models — arrive with the provider picker page: every vendor as a branded
+hexagon, and picking one walks you through its key on first touch.</p>
+
+<h2>What the bridge is not</h2>
+<ul class="not-list">
+  <li><b>Not a cloud service.</b> Every byte stays between your browser, a localhost relay, and a process you run.</li>
+  <li><b>Not Anthropic-specific as a protocol.</b> An ask carries a model hint; any process that speaks WebSocket + JSON can be a responder. Adapters for other agent CLIs are on the roadmap.</li>
+  <li><b>Not keyed.</b> Path A needs no API key — the subscription you already have is the whole engine.</li>
+</ul>
+
+<footer>Hypercomb · the bridge protocol lives in <code>scripts/bridge/</code> and
+<code>claude-bridge.worker.ts</code> · docs: <code>documentation/claude-bridge-setup.md</code></footer>
+</main>
+
+<script>
+  for (const btn of document.querySelectorAll('.copy-btn')) {
+    btn.addEventListener('click', () => {
+      const pre = btn.parentElement.querySelector('pre');
+      const cmd = [...pre.childNodes]
+        .filter(n => !(n.classList && (n.classList.contains('out') || n.classList.contains('dim'))))
+        .map(n => n.textContent).join('').trim();
+      navigator.clipboard.writeText(cmd).then(() => {
+        btn.textContent = 'copied';
+        setTimeout(() => { btn.textContent = 'copy'; }, 1400);
+      });
+    });
+  }
+</script>
+
+</body>
+</html>
