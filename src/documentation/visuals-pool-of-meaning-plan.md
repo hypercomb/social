@@ -10,6 +10,8 @@
 > All `__x__` folder names below are the retired pre-pools vocabulary — members
 > are root sig files via `putResource`, the private set is the
 > `sign('optimization')` pool, and lineage sigbags live at the OPFS root.
+> **Current design: `visuals-across-lineages.md`** (2026-08-14) — the
+> cross-lineage wipe diagnosis and the layer-sig-keyed resolution.
 
 ## Goal
 

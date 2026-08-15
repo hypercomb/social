@@ -748,7 +748,7 @@
       "id": "visuals-across-lineages-design",
       "title": "Visuals-across-lineages design doc — mirror as notes on the visuals/superimposition tiles",
       "run": null,
-      "note": "documentation/visuals-across-lineages.md written 2026-08-14: diagnosis (wipe lives in location-keyed indexes, never sig-keyed pools) + 4-move design (layer-sig-keyed props index, stack of heads per address, (label,lineage) caches, substrate picks as decorations) + imagePool shape. Owes notes on the superimposition/participant-stack cells under behaviors/swarm and a design tile if none fits. note-add is additive — manual.",
+      "note": "documentation/visuals-across-lineages.md written 2026-08-14: diagnosis (wipe lives in location-keyed indexes, never sig-keyed pools) + 4-move design (layer-sig-keyed props index, stack of heads per address, (label,lineage) caches, substrate picks as decorations) + imagePool shape. PHASE A BUILT 2026-08-15 (warmHeadSigFor, seedLayerKeyedTileProps, layer-first show-cell paint, adopt/format-painter seeds) — the mirror owes part tiles for those files too. Owes notes on the superimposition/participant-stack cells under behaviors/swarm and a design tile if none fits. note-add is additive — manual.",
       "unattended": false,
       "created": "2026-08-15",
       "status": "pending"

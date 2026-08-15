@@ -7,7 +7,7 @@ import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
+import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
@@ -667,6 +667,26 @@ export class ShowCellDrone extends Drone {
 
   private renderedCellsKey = ''
   private renderedCount = 0
+
+  // The atlas eviction generations the CURRENT geometry buffer was baked
+  // against. Held BESIDE the cells key, never inside it — that is the whole
+  // point of the pair.
+  //
+  // A generation bump means "baked UVs in the buffer may now point at a slot
+  // that was wiped or handed to another label", and the only cure is a
+  // geometry rebuild (applyGeometry re-bakes and re-points every cell). While
+  // the generations lived inside buildCellsKey, the in-place fast paths —
+  // #repaintReadinessInPlace and #tryInPlaceCellUpdate, which recompute the
+  // WHOLE key after touching one attribute — ADOPTED a bump they had not
+  // acted on. The pending pass then found its key unchanged, took the
+  // early-return below, and the wiped slots were never re-baked: those tiles
+  // kept their label BAND with no name inside it (the shader gates the band
+  // on the UV rect, which is still valid — only the pixels behind it are
+  // gone). Same swallow for a retitle's invalidateLabel and for a pivot flip.
+  //
+  // Only applyGeometry's success path may write these. -1 = nothing baked yet.
+  #bakedImageAtlasGen = -1
+  #bakedLabelAtlasGen = -1
 
   // Complete child membership, memoized by the PARENT layer's content sig:
   // names + the subset that are branches (have their own children). Only a
@@ -2602,11 +2622,11 @@ export class ShowCellDrone extends Drone {
 
       // 16×16 = 256 slots — MUST be >= the imageAtlas slot count (and >= the
       // realistic on-screen tile count) so hives larger than 64 tiles do NOT
-      // wrap the label atlas. Wrapping bumps evictionGeneration, which is folded
-      // into buildCellsKey, so every wrap invalidates the cells-key → applyGeometry's
-      // early-return (cells-key unchanged) NEVER holds → the whole grid re-bakes
-      // its labels on EVERY render pass (O(tiles) thrash). At 64 slots a 79-tile
-      // hive thrashed continuously; at 256 it builds once and the cache holds.
+      // wrap the label atlas. Wrapping bumps evictionGeneration, which
+      // applyGeometry checks against #bakedLabelAtlasGen, so every wrap defeats
+      // its early-return → the whole grid re-bakes its labels on EVERY render
+      // pass (O(tiles) thrash). At 64 slots a 79-tile hive thrashed
+      // continuously; at 256 it builds once and the cache holds.
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 16, 16)
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
@@ -2619,11 +2639,11 @@ export class ShowCellDrone extends Drone {
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       // 16×16 = 256 slots — MUST be >= the imageAtlas slot count (and >= the
       // realistic on-screen tile count) so hives larger than 64 tiles do NOT
-      // wrap the label atlas. Wrapping bumps evictionGeneration, which is folded
-      // into buildCellsKey, so every wrap invalidates the cells-key → applyGeometry's
-      // early-return (cells-key unchanged) NEVER holds → the whole grid re-bakes
-      // its labels on EVERY render pass (O(tiles) thrash). At 64 slots a 79-tile
-      // hive thrashed continuously; at 256 it builds once and the cache holds.
+      // wrap the label atlas. Wrapping bumps evictionGeneration, which
+      // applyGeometry checks against #bakedLabelAtlasGen, so every wrap defeats
+      // its early-return → the whole grid re-bakes its labels on EVERY render
+      // pass (O(tiles) thrash). At 64 slots a 79-tile hive thrashed
+      // continuously; at 256 it builds once and the cache holds.
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 16, 16)
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
@@ -4379,7 +4399,21 @@ export class ShowCellDrone extends Drone {
     const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
 
     const nextCellsKey = this.buildCellsKey(cells)
-    if (nextCellsKey === this.renderedCellsKey && cells.length === this.renderedCount) {
+    // Read the generations HERE, alongside the key, and store this same pair
+    // on the success path — not the post-bake values. The bake loop below can
+    // itself evict (an oversized layer displaces its own earlier labels), and
+    // that leaves the cells baked before the eviction holding stale UVs; the
+    // entry-time pair is what makes the next pass rebuild instead of calling
+    // the buffer converged. See #bakedLabelAtlasGen for why they are not part
+    // of the key.
+    const nextImageAtlasGen = this.imageAtlas?.evictionGeneration ?? 0
+    const nextLabelAtlasGen = this.atlas?.evictionGeneration ?? 0
+    if (
+      nextCellsKey === this.renderedCellsKey
+      && cells.length === this.renderedCount
+      && nextImageAtlasGen === this.#bakedImageAtlasGen
+      && nextLabelAtlasGen === this.#bakedLabelAtlasGen
+    ) {
       return
     }
 
@@ -4574,6 +4608,10 @@ export class ShowCellDrone extends Drone {
 
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
+    // The ONE place these may be written: a fresh buffer whose UVs were just
+    // re-baked is the only thing that makes a generation "already applied".
+    this.#bakedImageAtlasGen = nextImageAtlasGen
+    this.#bakedLabelAtlasGen = nextLabelAtlasGen
     this.renderedCount = cells.length
     this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
 
@@ -6335,6 +6373,12 @@ export class ShowCellDrone extends Drone {
    * having to list each map individually.
    */
   #invalidateAllLabelDerivedState = (): void => {
+    // A REPLACED atlas restarts its eviction counter at 0, so a remembered
+    // generation of 0 would read as "already applied" against a brand-new,
+    // empty atlas and hold the early-return over an unbaked grid. -1 is never
+    // a live generation, so the next pass always rebuilds.
+    this.#bakedImageAtlasGen = -1
+    this.#bakedLabelAtlasGen = -1
     this.cellImageCache.clear()
     this.cellBorderColorCache.clear()
     this.cellTagsCache.clear()
@@ -6565,6 +6609,9 @@ export class ShowCellDrone extends Drone {
       this.geom = null
     }
     this.renderedCellsKey = ''
+    // No buffer left, so no generation has been applied to one.
+    this.#bakedImageAtlasGen = -1
+    this.#bakedLabelAtlasGen = -1
     this.renderedCount = 0
     this.renderedCells.clear()
     this.cachedCellNames = null
@@ -7684,11 +7731,39 @@ export class ShowCellDrone extends Drone {
         indexKeyByLabel.set(c.label, await cellLocationSig(renderSegments, c.label))
       }
     }
+
+    // Layer-first resolution (visuals-across-lineages.md, Phase A). The
+    // head layer's sig keys an entry that can neither collide nor go
+    // stale: new props = new head = miss; another lineage at this address
+    // = another head = its own entry — so adopt-sync, restore, or a
+    // rolled stack re-serves each lineage's OWN picture instead of the
+    // last writer's. Heads are warm here (the stream that produced
+    // `cells` resolved them); warmHeadSigFor is a map lookup, never an
+    // OPFS read or a marker mint. Fallback stays location → bare label;
+    // a fallback hit queues a re-mint so the NEXT pass hits layer-first.
+    const historyForHeads = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as
+      { warmHeadSigFor?: (l: string) => string | null } | undefined
+    const headSigByLabel = new Map<string, string>()
+    if (historyForHeads?.warmHeadSigFor) {
+      for (const [label, key] of indexKeyByLabel) {
+        const head = key ? historyForHeads.warmHeadSigFor(key) : null
+        if (head) headSigByLabel.set(label, head)
+      }
+    }
+    const remintLabels = new Set<string>()
+
     const propsSigForLabel = (label: string): string | undefined => {
       const override = this.#cursorPropsOverride?.get(label)
       if (override) return override
+      const headSig = headSigByLabel.get(label)
+      if (headSig) {
+        const byLayer = livePropsIndex[headSig]
+        if (byLayer) return byLayer
+      }
       const key = indexKeyByLabel.get(label) ?? ''
-      return (key ? livePropsIndex[key] : undefined) ?? livePropsIndex[label]
+      const sig = (key ? livePropsIndex[key] : undefined) ?? livePropsIndex[label]
+      if (sig && headSig) remintLabels.add(label)
+      return sig
     }
 
     // Peer-published image sigs for tiles the user hasn't adopted yet.
@@ -7971,6 +8046,35 @@ export class ShowCellDrone extends Drone {
     }
 
     await Promise.all(cells.map(loadOne))
+
+    // Re-mint absent layer-keyed entries from CANONICAL — never from the
+    // location fallback we just served: a stale location entry frozen
+    // under a head sig it doesn't belong to would outlive every later
+    // correction. Fill-if-empty, so a deliberate head-keyed override
+    // (format-painter's index-only paint) always wins over this. Heads
+    // are warm, so readTilePropsSigAt is map lookups — no resource
+    // fetches. Fire-and-forget: a lost re-mint is just a fallback read
+    // on the next pass.
+    if (remintLabels.size > 0 && !prepareOnly) {
+      void (async () => {
+        try {
+          const pairs: Array<[string, string]> = []
+          for (const label of remintLabels) {
+            const headSig = headSigByLabel.get(label)
+            if (!headSig) continue
+            const canonical = await readTilePropsSigAt(renderSegments, label)
+            if (canonical) pairs.push([headSig, canonical])
+          }
+          if (pairs.length === 0) return
+          const freshIndex = readTilePropsIndex()
+          let dirty = false
+          for (const [headSig, sig] of pairs) {
+            if (!freshIndex[headSig]) { freshIndex[headSig] = sig; dirty = true }
+          }
+          if (dirty) writeTilePropsIndex(freshIndex)
+        } catch { /* cache re-mint is best-effort */ }
+      })()
+    }
 
     // Children-readiness shade: once the visible cells' OWN images resolve,
     // drive each BRANCH tile's shade off whether the tiles INSIDE it (its
@@ -9177,6 +9281,11 @@ export class ShowCellDrone extends Drone {
     // (observed live: a 1-cell payload while a 12-child page was still
     // rendering). The narrow readiness event above updates only the gate and
     // cannot be confused with a completed level render.
+    //
+    // Safe to recompute the WHOLE key only because it describes cells and
+    // nothing else. It must never carry an atlas eviction generation again:
+    // this path re-baked nothing, so adopting one here would retire a pending
+    // rebake and strand the wiped slots (band, no name). See #bakedLabelAtlasGen.
     this.renderedCellsKey = this.buildCellsKey([...this.renderedCells.values()])
     if (DIAG) console.info(`[diag:readiness] brightened in place: ${flipped.join(',')}`)
     return true
@@ -9185,19 +9294,15 @@ export class ShowCellDrone extends Drone {
   private buildCellsKey = (cells: Cell[]): string => {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
-    // Fold the atlas's eviction generation into the key. Baked UVs
-    // in the geometry buffer become stale whenever an atlas slot is
-    // reused by a different sig — same imageSig on a cell does NOT
-    // imply the same UV if the atlas has evicted and re-loaded it.
-    // Including the generation forces a rebuild in exactly the cases
-    // where it's needed (and only those).
-    const atlasGen = this.imageAtlas?.evictionGeneration ?? 0
-    // Same rule for the LABEL atlas: when its 64 slots wrap and a slot is
-    // reused for a different label, a cell's baked label-UV goes stale.
-    // Folding its generation in forces the rebake that re-points cells at
-    // their fresh slots (the superimposed-labels-after-screensaver bug).
-    const labelGen = this.atlas?.evictionGeneration ?? 0
-    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}g${atlasGen}L${labelGen}|`
+    // NO ATLAS EVICTION GENERATIONS IN HERE. Baked UVs do go stale when an
+    // atlas slot is wiped or reused, and that still forces a rebuild — but the
+    // signal lives in #bakedImageAtlasGen / #bakedLabelAtlasGen, checked
+    // separately by applyGeometry. This key describes the CELLS, and it is
+    // recomputed by paths that only touched one attribute
+    // (#repaintReadinessInPlace, #tryInPlaceCellUpdate); a generation folded in
+    // here is a rebake those paths can mark as done without doing it, which is
+    // how tiles ended up with a label band and no name inside it. Keep them apart.
+    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
     // Fold in whether each cell's image is CURRENTLY resolvable in the
     // atlas. The sig alone is not enough: an image that arrives late (host
     // fill, back-nav refill, eviction reload) lands in a FRESH slot, which
@@ -9592,6 +9697,10 @@ export class ShowCellDrone extends Drone {
       rec.hasSubstrate = this.cellSubstrateCache.get(label) ?? false
       rec.hideText = ht
       const cellsSnapshot = [...this.renderedCells.values()]
+      // One cell's attributes were rewritten, so the cells key may legitimately
+      // be re-stated here. The atlas generations may NOT — every OTHER cell's
+      // label UV is untouched by this path, and claiming a generation it did
+      // not apply is what left tiles with a band and no name inside it.
       this.renderedCellsKey = this.buildCellsKey(cellsSnapshot)
       // Shade state may have flipped — refresh tile-overlay's mirrored
       // sets so click inertness matches what is on screen.

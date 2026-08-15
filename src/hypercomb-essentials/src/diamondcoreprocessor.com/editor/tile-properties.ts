@@ -477,6 +477,72 @@ export const readTilePropsSigAt = async (
   return (typeof propSig === 'string' && /^[0-9a-f]{64}$/.test(propSig)) ? propSig : undefined
 }
 
+// ── Layer-sig-keyed index entries (visuals-across-lineages.md, Phase A) ──
+//
+// The location-keyed slot is ONE slot per address: when another lineage
+// lands at the same address (adopt-sync, restore, a rolled stack), the
+// newcomer's entry displaces the previous lineage's image — the wipe. A
+// LAYER-sig-keyed entry cannot collide or go stale: the key is the head
+// layer's content sig, the value is that layer's `properties[0]`, and a
+// changed tile is a NEW head sig with no entry yet — derive-on-miss, the
+// optimize-phase key law. Two lineages at one address are two head sigs;
+// both entries coexist, and rolling between them re-serves each lineage's
+// own picture.
+//
+// The paint path (show-cell) reads layer-first and falls back to the
+// location/label entries, re-minting an absent layer-keyed entry from
+// CANONICAL after the pass. Entries are BEST-EFFORT: several writers still
+// rewrite the whole index map from a snapshot (read → mutate → write),
+// which can drop a freshly-seeded layer entry — harmless, because a lost
+// entry is a cache miss that re-mints on the next paint, never a wrong
+// serve. Growth is bounded by the cap below (sig-keyed entries only,
+// oldest first — pruned entries also just re-mint).
+
+const TILE_PROPS_INDEX_CAP = 4096
+const TILE_PROPS_INDEX_TRIM_TO = 3584
+
+/**
+ * Seed `index[<head layer sig>] = propSig` for the lineage at
+ * `locationSig`. Resolves the head through the WARM cache only
+ * (`HistoryService.warmHeadSigFor`) — a cold head is a silent no-op, and
+ * the paint path's canonical re-mint covers it later. Callers:
+ *
+ *   - `writeTilePropertiesAt` (below) — the central seed; every canonical
+ *     props commit refreshes the entry for the NEW head it just minted.
+ *   - swarm-adopt — post-importTree, one seed per folded node
+ *     (unconditional where the location seed is fill-if-empty: layer keys
+ *     cannot wipe another lineage's entry).
+ *   - format-painter — its paint is an index-only override (no canonical
+ *     commit), so the head-keyed entry must move WITH it or layer-first
+ *     paint would keep serving the pre-paint canonical.
+ */
+export const seedLayerKeyedTileProps = (locationSig: string, propSig: string): void => {
+  try {
+    if (!locationSig || !isSignature(propSig)) return
+    const history = iocGet<{ warmHeadSigFor?: (l: string) => string | null }>(HISTORY_KEY)
+    const headSig = history?.warmHeadSigFor?.(locationSig) ?? null
+    if (!headSig || !isSignature(headSig)) return
+    const index = readTilePropsIndex()
+    if (index[headSig] === propSig) return
+    index[headSig] = propSig
+    // Cap: layer-keyed entries accrue per EDIT (old heads' entries go
+    // inert, never consulted again), where location entries were bounded
+    // by tile count. Prune oldest sig-shaped keys first (JSON preserves
+    // insertion order); bare-label legacy entries are never pruned.
+    const keys = Object.keys(index)
+    if (keys.length > TILE_PROPS_INDEX_CAP) {
+      let excess = keys.length - TILE_PROPS_INDEX_TRIM_TO
+      for (const k of keys) {
+        if (excess <= 0) break
+        if (k === headSig || !isSignature(k)) continue
+        delete index[k]
+        excess--
+      }
+    }
+    writeTilePropsIndex(index)
+  } catch { /* best-effort cache — a lost seed re-mints on paint */ }
+}
+
 // ── Per-tile write serialization ─────────────────────────────────────
 //
 // `index`, `imageSig`, `tags`, `accent`, substrate images and the rest
@@ -613,6 +679,13 @@ export const writeTilePropertiesAt = async (
       cacheKey: lockKey,
       keys: Object.keys(updates),
     })
+
+    // Central layer-keyed seed: the commit above moved the head, and
+    // commitLayer keeps the warm head cache in sync, so this is a map
+    // lookup — never an OPFS read. Every writer that commits canonically
+    // (editor, substrate restamp, image-choice, link workers, …) gets its
+    // layer-keyed entry refreshed here without touching the index itself.
+    if (isSignature(lockKey)) seedLayerKeyedTileProps(lockKey, propSig)
   })
 }
 

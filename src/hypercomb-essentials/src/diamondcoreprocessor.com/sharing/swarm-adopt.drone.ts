@@ -41,6 +41,7 @@ import {
   cellLocationSig,
   readTilePropsIndex,
   writeTilePropsIndex,
+  seedLayerKeyedTileProps,
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
 import { recordWithheldAtRoot } from './behavior-enablement.js'
@@ -1505,6 +1506,7 @@ export class SwarmAdoptDrone extends Drone {
       // (peer/witnessed tiles excluded from substrate) stops stale random picks
       // at their source, so there is nothing legitimate to "heal" by replacing
       // — skip any occupied slot.
+      const layerSeeds: Array<[string, string]> = []
       try {
         const index = readTilePropsIndex()
         let seeded = false
@@ -1516,6 +1518,14 @@ export class SwarmAdoptDrone extends Drone {
           if (segs.length === 0) continue
           const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
           if (!key) continue
+          // Layer-sig-keyed twin (visuals-across-lineages.md, Phase A):
+          // seeded UNCONDITIONALLY after the commit below — keyed by the
+          // folded node's new head, it is a pure derivation of the adopted
+          // layer (its properties[0]) and can neither wipe another
+          // lineage's entry nor go stale. A same-named local tile keeps
+          // its own head sig, so both lineages' entries COEXIST and the
+          // paint path serves whichever head is current.
+          layerSeeds.push([key, propSig])
           // Fold fills empty slots only; sync overwrites so the publisher's
           // refreshed image wins (paired with the tile:saved cache-bust).
           if (index[key] && mode !== 'sync') continue
@@ -1534,6 +1544,13 @@ export class SwarmAdoptDrone extends Drone {
         { segments: at, layer: { ...(parent ?? {}), children: alreadyChild ? [...existing] : [...existing, name] } },
         ...treeUpdates,
       ])
+
+      // Post-commit so the warm head cache already points at the folded
+      // layers (commitLayer keeps it in sync); each seed is a map lookup
+      // plus one localStorage write, best-effort.
+      try {
+        for (const [locSig, propSig] of layerSeeds) seedLayerKeyedTileProps(locSig, propSig)
+      } catch { /* best-effort cache seed */ }
 
       // READ-BACK: resolve the fold target through the SAME path a cold boot
       // uses before reporting success. importTree resolves as void even when

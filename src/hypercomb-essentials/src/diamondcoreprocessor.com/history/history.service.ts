@@ -1779,6 +1779,17 @@ export class HistoryService {
   readonly #headSigFor = (lineageSig: string): string | undefined =>
     this.#latestSigByLineage.get(lineageSig) ?? this.#seededHeadByLineage.get(lineageSig)
 
+  /** The lineage's current head LAYER sig, WARM CACHE ONLY — no OPFS
+   *  reads, no marker materialization (`latestMarkerSigFor` is the commit
+   *  chain's materializing accessor; this one is safe from any read
+   *  path). Null when this session hasn't resolved the head yet.
+   *  Derived-cache KEY source (documentation/visuals-across-lineages.md):
+   *  layer-sig-keyed records key on this, and a null means the caller
+   *  falls back to its canonical path — never a wrong answer, only a
+   *  cache miss. */
+  public readonly warmHeadSigFor = (lineageSig: string): string | null =>
+    this.#headSigFor(lineageSig) ?? null
+
   readonly #seedVirtualHead = (lineageSig: string, sig: string): void => {
     this.#seededHeadByLineage.set(lineageSig, sig)
     this.#lineageBySig.set(sig, lineageSig)

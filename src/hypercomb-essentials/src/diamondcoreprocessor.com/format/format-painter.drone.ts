@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/format/format-painter.drone.ts
 import { EffectBus } from '@hypercomb/core'
 import type { FormatEntry, FormatProvider } from './format.provider.js'
-import { cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt } from '../editor/tile-properties.js'
+import { cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt, seedLayerKeyedTileProps } from '../editor/tile-properties.js'
 
 // ── built-in providers ──────────────────────────────────
 
@@ -179,6 +179,7 @@ export class FormatPainterDrone extends EventTarget {
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     const segments = lineage?.explorerSegments?.() ?? []
     const index = readTilePropsIndex()
+    const layerSeeds: Array<[string, string]> = []
 
     for (const cell of selection.selected) {
       // skip source tile
@@ -226,6 +227,7 @@ export class FormatPainterDrone extends EventTarget {
 
       // 4. update index
       index[cellKey || cell] = propsSig
+      if (cellKey) layerSeeds.push([cellKey, propsSig])
 
       // 5. notify renderer
       EffectBus.emit<{ cell: string }>('tile:saved', { cell })
@@ -233,6 +235,14 @@ export class FormatPainterDrone extends EventTarget {
 
     // persist updated index
     writeTilePropsIndex(index)
+
+    // Layer-keyed twin AFTER the map write above (each seed re-reads the
+    // index; seeding first would be clobbered by the snapshot write). The
+    // paint is an index-only override — no canonical commit — so the
+    // head-keyed entry must move WITH it, or layer-first paint
+    // (show-cell, visuals-across-lineages.md Phase A) would keep serving
+    // the pre-paint canonical.
+    for (const [locSig, sig] of layerSeeds) seedLayerKeyedTileProps(locSig, sig)
   }
 
   // ── emit state ──────────────────────────────────────────
