@@ -117,9 +117,12 @@ function visualHtml(s) {
   switch ((s.visual || 'none').split(':')[0]) {
     case 'film': {
       const clip = (s.visual.split(':')[1] || '').trim()
+      // drawn concept clips (concepts.cjs) are labelled as drawings, not captures
+      const DRAWN = { vocabulary: 'the flow of it', integrity: 'proof, not trust', time: 'the past, kept' }
       const tag = { navigate: 'localhost hive', zoom: 'one hive, many worlds',
-                    create: 'your first tile', children: 'creating structure' }[clip] || 'live capture'
-      return `\n  <div class="filmwrap"><span class="filmtag">live capture · ${esc(tag)}</span>` +
+                    create: 'your first tile', children: 'creating structure' }[clip] || DRAWN[clip] || 'live capture'
+      const cls = DRAWN[clip] ? 'filmtag drawn' : 'filmtag'
+      return `\n  <div class="filmwrap"><span class="${cls}">${DRAWN[clip] ? 'drawn' : 'live capture'} · ${esc(tag)}</span>` +
              `<video muted playsinline loop src="{{${clip}}}"></video></div>`
     }
     case 'hexes':
@@ -177,6 +180,9 @@ function assemble() {
     .replace('{{VID_ZOOM}}', vuri('hive-zoom.mp4'))
     .replace('{{VID_CREATE}}', vuri('hive-create.mp4'))
     .replace('{{VID_CHILDREN}}', vuri('hive-children.mp4'))
+    .replace('{{VID_VOCABULARY}}', vuri('concept-vocabulary.mp4'))
+    .replace('{{VID_INTEGRITY}}', vuri('concept-integrity.mp4'))
+    .replace('{{VID_TIME}}', vuri('concept-time.mp4'))
     .replace('{{AUDIO_JSON}}', JSON.stringify(scenes.map(auri)))
   const out = path.join(ROOT, 'dist', 'hypercomb-presentation.html')
   fs.writeFileSync(out, html)

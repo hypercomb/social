@@ -716,6 +716,24 @@
       "unattended": false,
       "created": "2026-08-14",
       "status": "pending"
+    },
+    {
+      "id": "postit-sticky-look",
+      "title": "Post-it sticky redesign — stacked pad + steel dome pin",
+      "run": null,
+      "note": "Note-add on the postit behavior's mirror tile: the sticky is now a small STACK (back sheet peeking out, written face with ruled lines) held by a narrow, tall STEEL DOME pin — no stem, the shadow ellipse underneath says it is pressed in (picked from a colorway strip; flat-cap push_pin and tilted variants tried and retired). Code: hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/postit-view.drone.ts (STICKY_CSS). Additive note — not safely re-runnable.",
+      "unattended": false,
+      "created": "2026-08-15",
+      "status": "pending"
+    },
+    {
+      "id": "presentation-concept-clips",
+      "title": "Presentation scenes 8/13/14 gained drawn concept clips — re-note the three scene tiles + the recipe",
+      "run": null,
+      "note": "Scenes 8 (the-language), 13 (verifiable-integrity), 14 (time-is-a-feature) changed visual to film:vocabulary / film:integrity / film:time — drawn concept clips rendered by scripts/presentation/concepts.cjs, beats timed to each narration's sentence boundaries. Push the updated instruction text onto the three scene tiles (presentation/what-is-hypercomb/the-language, presentation/why-hypercomb/verifiable-integrity, presentation/why-hypercomb/time-is-a-feature) and the updated production recipe onto the presentation tile (film:<clip> now includes the drawn trio). Targeted note-add per tile, NOT a full instructions.cjs --push (that would re-note all 24 scenes). note-add is additive - manual.",
+      "unattended": false,
+      "created": "2026-08-15",
+      "status": "pending"
     }
   ]
 }

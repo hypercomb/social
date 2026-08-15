@@ -61,6 +61,10 @@
     padding:5px 10px;border-radius:4px}
   .filmtag::before{content:"●";color:#e5484d;margin-right:8px;animation:blink 1.6s steps(1) infinite}
   @keyframes blink{50%{opacity:.25}}
+  /* drawn concept clips carry the comb, not the REC dot — and sit at the foot
+     of the pane, clear of the drawing's own beat labels in the top-left */
+  .filmtag.drawn{top:auto;bottom:10px}
+  .filmtag.drawn::before{content:"⬡";color:var(--honey);animation:none}
 
   /* drawn plates — a sheet laid on the stage, framed like the film */
   /* the scene is a flex column, so the plate is bounded by height and keeps its ratio — never cropped */
@@ -240,10 +244,13 @@
 <script>
 /* ============================ scenes ============================ */
 const V = {
-  navigate: "{{VID_NAVIGATE}}",
-  zoom:     "{{VID_ZOOM}}",
-  create:   "{{VID_CREATE}}",
-  children: "{{VID_CHILDREN}}",
+  navigate:   "{{VID_NAVIGATE}}",
+  zoom:       "{{VID_ZOOM}}",
+  create:     "{{VID_CREATE}}",
+  children:   "{{VID_CHILDREN}}",
+  vocabulary: "{{VID_VOCABULARY}}",
+  integrity:  "{{VID_INTEGRITY}}",
+  time:       "{{VID_TIME}}",
 };
 
 const SCENES = {{SCENES}};
@@ -263,7 +270,7 @@ const startIndex=(()=>{
 
 SCENES.forEach((s,i)=>{
   const d=document.createElement('div');d.className='scene';
-  d.innerHTML=`<div class="eyebrow">${s.eyebrow}</div>${s.html.replaceAll('{{navigate}}',V.navigate).replaceAll('{{zoom}}',V.zoom).replaceAll('{{create}}',V.create).replaceAll('{{children}}',V.children)}`;
+  d.innerHTML=`<div class="eyebrow">${s.eyebrow}</div>${Object.entries(V).reduce((h,[k,v])=>h.replaceAll('{{'+k+'}}',v),s.html)}`;
   stage.appendChild(d); s.el=d;
   const t=document.createElement('div');t.className='tick';t.title=`scene ${i+1}`;
   t.addEventListener('click',()=>goto(i,true)); ticks.appendChild(t); s.tick=t;

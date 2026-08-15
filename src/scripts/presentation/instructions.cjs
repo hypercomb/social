@@ -123,7 +123,10 @@ A scene instruction has these fields:
   sub         the calm sentence under it (optional)
   visual      one of:
                 none          just words
-                film:<clip>   a live screen capture (navigate, zoom, create, children)
+                film:<clip>   a clip in the pane — live capture (navigate, zoom,
+                              create, children) or a drawn concept clip timed to
+                              the narration (vocabulary, integrity, time —
+                              rendered by concepts.cjs)
                 hexes         a row of hexagon badges — one "- glyph label" line each
                 stack         stacked layer bars — one "- left | right" line each
                 road          a milestone list — one "- title — detail" line each

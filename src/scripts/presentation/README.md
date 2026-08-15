@@ -55,6 +55,21 @@ headless launch, then cut apart with ffmpeg `untile`; the launch, not the
 drawing, is the cost. Narration comes from the same `audio-cache` the full
 build fills, keyed by the same words.
 
+```bash
+node concepts.cjs          # media/concept-{vocabulary,integrity,time}.mp4
+node concepts.cjs time --probe   # stills at each beat, to eyeball a world
+```
+
+`concepts.cjs` draws the in-deck concept clips the same way — scenes 8, 13 and
+14 talk about things a capture cannot show (what the words mean, what
+verification is, what time feels like), so each gets one continuous drawn
+world with a camera travelling through it. The clips are **silent**: the deck
+plays the scene's narration and the pane plays the clip muted from t=0, so the
+beats are timed to the narration's own sentence boundaries — measured from the
+cached mp3 with silencedetect, matched by word-count expectation. Editing a
+scene's `say` re-times the clip on the next run; `film:vocabulary` /
+`film:integrity` / `film:time` in the scene instruction is what mounts them.
+
 ## Narrating it yourself
 
 Two ways, one destination. `record.cjs` takes scenes you read into a microphone;
