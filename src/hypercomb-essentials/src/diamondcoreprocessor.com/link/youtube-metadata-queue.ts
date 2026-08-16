@@ -1,12 +1,8 @@
 import { EffectBus } from '@hypercomb/core'
 import { storeImageResources } from '../editor/arm-resource.js'
 import {
-  cellLocationSig,
   readTilePropertiesAt,
-  readTilePropsIndex,
-  readTilePropsSigAt,
   writeTilePropertiesAt,
-  writeTilePropsIndex,
 } from '../editor/tile-properties.js'
 import {
   discoverYouTubeMetadata,
@@ -208,21 +204,14 @@ export class YouTubeMetadataQueue extends EventTarget {
           small: { image: resources.smallFlatSig },
         }
       }
+      // The props index follows via writeTilePropertiesAt's central
+      // layer-keyed seed — no location write needed (Phase C sweep,
+      // visuals-across-lineages.md).
       await writeTilePropertiesAt(entry.segments, entry.cell, updates)
-      await this.#syncTileIndex(entry)
       EffectBus.emit('tile:saved', { cell: entry.cell, segments: entry.segments })
     } finally {
       if (resources.previewUrl) URL.revokeObjectURL(resources.previewUrl)
     }
-  }
-
-  async #syncTileIndex(entry: YouTubeMetadataQueueEntry): Promise<void> {
-    const propsSig = await readTilePropsSigAt(entry.segments, entry.cell)
-    if (!propsSig) return
-    const location = await cellLocationSig(entry.segments, entry.cell)
-    const index = readTilePropsIndex()
-    index[location || entry.cell] = propsSig
-    writeTilePropsIndex(index)
   }
 
   async #run(id: string): Promise<void> {

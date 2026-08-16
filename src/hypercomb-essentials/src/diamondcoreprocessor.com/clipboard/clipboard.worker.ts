@@ -2,7 +2,7 @@
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
 import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
-import { readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
+import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
 
 interface ClipboardEntry {
   label: string
@@ -635,12 +635,11 @@ export class ClipboardWorker extends Worker {
       EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
     }
 
-    // Seed the participant-local render index (hc:tile-props-index) at the
-    // DESTINATION keys for the whole pasted subtree — a pure sig-walk over
-    // warm pool bytes, no commits. show-cell resolves a LOCAL tile's image
-    // ONLY through this index (keyed by cellLocationSig); overwrite, not
-    // fill-if-empty — paste refuses name collisions, so any existing entry
-    // at a destination key is stale.
+    // Seed the LAYER-keyed render index for the pasted subtree — a pure
+    // sig-walk over warm pool bytes, no commits, keys are the pasted
+    // layers' own sigs (valid before or after the delta commit below).
+    // Show-cell paints layer-first and derives from canonical on a miss,
+    // so this is a warm-up, not a requirement.
     const tSeed0 = performance.now()
     try {
       await this.#seedPropsIndex(history, appends, targetSegments)
@@ -670,42 +669,31 @@ export class ClipboardWorker extends Worker {
   }
 
   // Walk a placed collection (pool-warm, sig-addressed) and seed the
-  // participant-local render index at each node's DESTINATION location key.
+  // LAYER-keyed render index (Phase C sweep, visuals-across-lineages.md):
+  // the walk's `sig` IS each node's committed head, so `index[sig] =
+  // properties[0]` is a pure derivation — no location keys, no signing.
   // Read-only over layers; one localStorage write at the end.
   async #seedPropsIndex(
     history: HistoryServiceLike,
     rootSigs: readonly string[],
-    targetSegments: readonly string[],
+    _targetSegments: readonly string[],
   ): Promise<void> {
-    const index = readTilePropsIndex()
-    let seeded = false
+    const pairs: Array<[string, string]> = []
     const seen = new Set<string>()
-    const queue: { sig: string; parentSegs: string[] }[] =
-      rootSigs.map(sig => ({ sig, parentSegs: [...targetSegments] }))
+    const queue: string[] = [...rootSigs]
     while (queue.length > 0) {
-      const { sig, parentSegs } = queue.shift()!
+      const sig = queue.shift()!
+      if (seen.has(sig)) continue
+      seen.add(sig)
       const layer = await history.getLayerBySig(sig)
-      const name = typeof layer?.name === 'string' ? layer.name : ''
-      // Unsafe names (path separators / control chars) would address a
-      // different location — skip the node and its subtree, mirroring
-      // flattenLayerTree's guard.
-      if (!layer || !name || /[\\/\x00-\x1f]/.test(name)) continue
-      const dedupeKey = `${sig}|${parentSegs.join('/')}`
-      if (seen.has(dedupeKey)) continue
-      seen.add(dedupeKey)
+      if (!layer) continue
       const props = (layer as { properties?: unknown }).properties
       const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
-      if (propSig && /^[0-9a-f]{64}$/.test(propSig)) {
-        const key = await cellLocationSig(parentSegs, name)
-        if (key && index[key] !== propSig) {
-          index[key] = propSig
-          seeded = true
-        }
-      }
+      if (propSig && /^[0-9a-f]{64}$/.test(propSig)) pairs.push([sig, propSig])
       const children = Array.isArray(layer.children) ? layer.children : []
-      for (const c of children) queue.push({ sig: String(c), parentSegs: [...parentSegs, name] })
+      for (const c of children) queue.push(String(c))
     }
-    if (seeded) writeTilePropsIndex(index)
+    if (pairs.length > 0) seedLayerKeyedEntries(pairs)
   }
 
   // Re-mint a collection minus its excluded branches — the sig-native

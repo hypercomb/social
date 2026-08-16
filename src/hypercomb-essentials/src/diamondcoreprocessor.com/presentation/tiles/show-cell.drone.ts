@@ -3477,6 +3477,7 @@ export class ShowCellDrone extends Drone {
         // Only tiles they actually publish move; the rest of your layer
         // stays put, which is what makes the difference between the two
         // layers readable rather than a full-page swap.
+        const previousVariantLabels = this.#stackVariantLabels
         this.#stackVariantLabels = new Set<string>()
         const spotlit = this.#spotlightPubkey
         if (spotlit) {
@@ -3495,6 +3496,25 @@ export class ShowCellDrone extends Drone {
             // published index (the peerIndices path below); those have
             // no slot of yours to keep.
           }
+        }
+
+        // A label LEAVING the variant set is changing lineage source —
+        // theirs → yours on dismiss, theirs → nothing when the publisher
+        // departs or is filtered away (transitions with no spotlight
+        // event, which is why this diff lives HERE, at the one recompute
+        // every path funnels through). The image cache is a per-label
+        // derivation of whichever source last painted, and the local
+        // branch trusts it blindly — a surviving entry would serve the
+        // outgoing lineage's picture on the incoming lineage's tile
+        // (visuals-across-lineages.md, move 3: derivations follow their
+        // lineage, never the bare label). Drop the derivation AND its
+        // provenance record; this pass re-derives — external via the
+        // source-guarded peer path, local via layer-first props. Labels
+        // ENTERING or STAYING are already covered by that source guard.
+        for (const label of previousVariantLabels) {
+          if (this.#stackVariantLabels.has(label)) continue
+          this.cellImageCache.delete(label)
+          this.peerImageSourceByLabel.delete(label)
         }
 
         // Mismatch check — only mismatched peer names produce any

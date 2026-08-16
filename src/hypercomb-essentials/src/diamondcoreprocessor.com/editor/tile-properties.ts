@@ -532,19 +532,37 @@ export const seedLayerKeyedTileProps = (locationSig: string, propSig: string): v
     const history = iocGet<{ warmHeadSigFor?: (l: string) => string | null }>(HISTORY_KEY)
     const headSig = history?.warmHeadSigFor?.(locationSig) ?? null
     if (!headSig || !isSignature(headSig)) return
+    seedLayerKeyedEntries([[headSig, propSig]])
+  } catch { /* best-effort cache — a lost seed re-mints on paint */ }
+}
+
+/** Batch form for callers that hold LAYER sigs directly (subtree walkers:
+ *  paste, move, website import — the walk's `sig` IS the node's committed
+ *  head, so no location resolution is needed). One read-modify-write. */
+export const seedLayerKeyedEntries = (pairs: ReadonlyArray<readonly [string, string]>): void => {
+  try {
     const index = readTilePropsIndex()
-    if (index[headSig] === propSig) return
-    index[headSig] = propSig
+    let dirty = false
+    const fresh = new Set<string>()
+    for (const [layerSig, propSig] of pairs) {
+      if (!isSignature(layerSig) || !isSignature(propSig)) continue
+      fresh.add(layerSig)
+      if (index[layerSig] === propSig) continue
+      index[layerSig] = propSig
+      dirty = true
+    }
+    if (!dirty) return
     // Cap: layer-keyed entries accrue per EDIT (old heads' entries go
     // inert, never consulted again), where location entries were bounded
     // by tile count. Prune oldest sig-shaped keys first (JSON preserves
-    // insertion order); bare-label legacy entries are never pruned.
+    // insertion order); bare-label legacy entries are never pruned, and
+    // neither is anything seeded by this very call.
     const keys = Object.keys(index)
     if (keys.length > TILE_PROPS_INDEX_CAP) {
       let excess = keys.length - TILE_PROPS_INDEX_TRIM_TO
       for (const k of keys) {
         if (excess <= 0) break
-        if (k === headSig || !isSignature(k)) continue
+        if (fresh.has(k) || !isSignature(k)) continue
         delete index[k]
         excess--
       }

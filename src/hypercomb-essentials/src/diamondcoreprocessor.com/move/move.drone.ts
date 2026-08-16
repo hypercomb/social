@@ -3,7 +3,7 @@ import { Drone, EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@h
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { writeTilePropertiesAt, readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
+import { writeTilePropertiesAt, seedLayerKeyedEntries } from '../editor/tile-properties.js'
 import { childNamesOfStrict, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, flattenLayerTree } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
 
@@ -550,42 +550,36 @@ export class MoveDrone extends Drone {
   }
 
   /**
-   * Seed the participant-local render index (hc:tile-props-index) at each
-   * moved node's DESTINATION location key, walking the collections by sig
-   * over warm pool bytes. FILL-IF-EMPTY — a move never displaces an image
-   * an existing tile at the destination already owns.
+   * Seed the LAYER-keyed render index for each moved node (Phase C sweep,
+   * visuals-across-lineages.md): the walk's `sig` IS the node's committed
+   * head at the destination, so `index[sig] = properties[0]` is a pure
+   * derivation — unconditional and collision-free (fill-if-empty had
+   * nothing left to protect once location keys stopped being written).
    */
   async #seedPropsIndex(
     history: PlacementHistory,
     rootSigs: readonly string[],
-    destSegments: readonly string[],
+    _destSegments: readonly string[],
   ): Promise<void> {
     try {
-      const index = readTilePropsIndex()
-      let seeded = false
+      const pairs: Array<[string, string]> = []
       const seen = new Set<string>()
-      const queue: { sig: string; parentSegs: string[] }[] =
-        rootSigs.map(sig => ({ sig, parentSegs: [...destSegments] }))
+      const queue: string[] = [...rootSigs]
       while (queue.length > 0) {
-        const { sig, parentSegs } = queue.shift()!
+        const sig = queue.shift()!
+        if (seen.has(sig)) continue
+        seen.add(sig)
         const layer = await history.getLayerBySig(sig)
-        const name = typeof layer?.name === 'string' ? layer.name : ''
-        if (!layer || !name || /[\\/\x00-\x1f]/.test(name)) continue
-        const dedupeKey = `${sig}|${parentSegs.join('/')}`
-        if (seen.has(dedupeKey)) continue
-        seen.add(dedupeKey)
+        if (!layer) continue
         const props = (layer as { properties?: unknown }).properties
         const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
-        if (propSig && /^[0-9a-f]{64}$/.test(propSig)) {
-          const key = await cellLocationSig(parentSegs, name)
-          if (key && !index[key]) { index[key] = propSig; seeded = true }
-        }
+        if (propSig && /^[0-9a-f]{64}$/.test(propSig)) pairs.push([sig, propSig])
         const children = Array.isArray(layer.children) ? layer.children : []
-        for (const c of children) queue.push({ sig: String(c), parentSegs: [...parentSegs, name] })
+        for (const c of children) queue.push(String(c))
       }
-      if (seeded) writeTilePropsIndex(index)
+      if (pairs.length > 0) seedLayerKeyedEntries(pairs)
     } catch (err) {
-      console.warn('[move] props-index seed skipped', err)
+      console.warn('[move] props seed skipped', err)
     }
   }
 

@@ -7,7 +7,7 @@
 // the user ever opening the tile editor UI.
 
 import { EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
-import { writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from './tile-properties.js'
+import { writeTilePropertiesAt } from './tile-properties.js'
 
 type Store = {
   putResource: (blob: Blob) => Promise<string>
@@ -91,18 +91,6 @@ export class ResourceAttachDrone {
       // youtube/link arms with one and keeps it).
       ;(props as any).link = `${RESOURCE_URL_PREFIX}${payload.largeSig}`
     }
-
-    // persist as content-addressed resource + update cell → props-sig index
-    const json = JSON.stringify(props, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
-    const propsSig = await store.putResource(blob)
-
-    // Keyed by full lineage so a same-named tile at another hive location
-    // can never collide. segments bound at handler entry.
-    const indexCellKey = await cellLocationSig(segments, payload.cell)
-    const index = readTilePropsIndex()
-    index[indexCellKey || payload.cell] = propsSig
-    writeTilePropsIndex(index)
 
     // CANONICAL WRITE — a user-supplied image is creation-time CONTENT, so
     // it must land in the tile's canonical 0000 (the layer's properties

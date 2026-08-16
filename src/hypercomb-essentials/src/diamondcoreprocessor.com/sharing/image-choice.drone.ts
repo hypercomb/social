@@ -34,9 +34,7 @@ import {
   cellLocationSig,
   readTilePropertiesAt,
   readTilePropsIndex,
-  readTilePropsSigAt,
   writeTilePropertiesAt,
-  writeTilePropsIndex,
 } from '../editor/tile-properties.js'
 import { peerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 
@@ -482,15 +480,10 @@ export class ImageChoiceDrone extends Drone {
       const oldLarge = ((existing['large'] as { image?: string } | undefined)?.image) ?? ''
       if (oldLarge && existing['link'] === `${RESOURCE_URL_PREFIX}${oldLarge}`) updates['link'] = undefined
 
+      // The props index follows via the central layer-keyed seed inside
+      // writeTilePropertiesAt — no location write (Phase C sweep,
+      // visuals-across-lineages.md).
       await writeTilePropertiesAt(segments, label, updates)
-
-      const canonical = await readTilePropsSigAt(segments, label)
-      const key = await cellLocationSig(segments, label)
-      if (canonical && key) {
-        const index = readTilePropsIndex()
-        index[key] = canonical
-        writeTilePropsIndex(index)
-      }
 
       this.emitEffect('tile:saved', { cell: label, segments })
     } catch (err) {

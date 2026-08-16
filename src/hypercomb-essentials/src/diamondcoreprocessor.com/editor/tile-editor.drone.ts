@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
-import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
+import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -236,20 +236,7 @@ export class TileEditorDrone {
     // 3. preserve link + border.color from service
     // (already in props via service.properties — setLink/setBorderColor mutate in-place)
 
-    // 4. write tile properties as content-addressed resource
-    const json = JSON.stringify(props, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
-    const propsSig = await store.putResource(blob)
-
-    // persist cell → resource sig mapping, keyed by full lineage so a
-    // same-named tile at another hive location can never collide.
-    // segmentsForSave was bound at gesture start — never re-read here.
-    const indexCellKey = await cellLocationSig(segmentsForSave, service.cell)
-    const index = readTilePropsIndex()
-    index[indexCellKey || service.cell] = propsSig
-    writeTilePropsIndex(index)
-
-    // CANONICAL WRITE — the edited image/link is the user's content, so it
+    // 4. CANONICAL WRITE — the edited image/link is the user's content, so it
     // must land in the tile's canonical 0000 (the layer's properties slot),
     // not just this browser's label index. Merges over existing canonical
     // props, commits via the LayerCommitter cascade, and broadcasts

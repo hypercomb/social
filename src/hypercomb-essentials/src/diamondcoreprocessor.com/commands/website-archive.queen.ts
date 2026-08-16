@@ -43,7 +43,7 @@ import {
   type PlacementHistory,
   type PlacementLayer,
 } from '../history/layer-placement.js'
-import { cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from '../editor/tile-properties.js'
+import { cellLocationSig, seedLayerKeyedTileProps } from '../editor/tile-properties.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -444,13 +444,14 @@ export async function importArchive(): Promise<void> {
 
   const treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
 
-  // Seed the participant-local tile-props index from each node's `properties`
-  // slot BEFORE importTree. show-cell render + substrate blank-detection read
-  // ONLY this localStorage index; without the seed the imported tiles look
-  // blank and the substrate clobbers each image with a random one. Fill-if-empty.
+  // Layer-sig-keyed props seeds ONLY, POST-commit (Phase C sweep,
+  // visuals-across-lineages.md): each entry is a pure derivation of the
+  // imported node's layer, keyed by its new head — no fill-if-empty cases,
+  // no location writes. Show-cell derives-on-miss from canonical and the
+  // substrate's blank test reads canonical, so the seeds are a warm-up,
+  // not a requirement.
+  const layerSeeds: Array<[string, string]> = []
   try {
-    const index = readTilePropsIndex()
-    let seeded = false
     for (const u of treeUpdates) {
       const props = (u.layer as { properties?: unknown }).properties
       const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
@@ -458,17 +459,18 @@ export async function importArchive(): Promise<void> {
       const segs = u.segments
       if (segs.length === 0) continue
       const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
-      if (!key || index[key]) continue
-      index[key] = propSig
-      seeded = true
+      if (!key) continue
+      layerSeeds.push([key, propSig])
     }
-    if (seeded) writeTilePropsIndex(index)
-  } catch (err) { console.warn('[website-archive] props-index seed skipped', err) }
+  } catch (err) { console.warn('[website-archive] props seed prep skipped', err) }
 
   await committer.importTree([
     { segments: at, layer: { ...((parent ?? {}) as PlacementLayer), children: [...existing, name] } },
     ...treeUpdates,
   ])
+  try {
+    for (const [locSig, propSig] of layerSeeds) seedLayerKeyedTileProps(locSig, propSig)
+  } catch { /* best-effort cache seed */ }
   EffectBus.emit('fs:changed', { segments: at })
   await new hypercomb().act()
   toast('success', i18n()?.t('website-archive.imported.title') ?? 'Website imported', i18n()?.t('website-archive.imported.message', { name, count: toLand.length }) ?? `${name} — ${toLand.length} files, open it to view`)

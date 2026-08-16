@@ -223,6 +223,25 @@ per-lineage copies of anything.
 - **Phase C — stack heads at resolution** (move 2) + cache re-key (move 3).
   The superimposition payoff: several lineages coexist at an address, each
   with its own visuals, filter/roll/spotlight choosing what paints.
+  **Built 2026-08-16.** Move 2's substance already existed (the
+  participant stack + fold-vs-sync semantics: an arriving lineage stacks,
+  only the explicit sync gesture replaces your head); what Phase C added:
+  (a) the WRITER SWEEP — all eight remaining location writers (tile-editor,
+  resource-attach, image-choice, youtube queue, bridge stamp, clipboard
+  paste, move, website-archive) now ride the central seed or seed
+  layer-keyed directly (`seedLayerKeyedEntries` — subtree walkers hold the
+  head sigs in hand, so `index[sig] = properties[0]` needs no location
+  signing at all); NO code path writes a location-keyed entry anymore —
+  the legacy population is read-fallback only, drained by the reconciler
+  and the deletion sites. (b) Move 3 as PROVENANCE, not composite keys:
+  the render's per-label caches keep their label keys but every
+  lineage-source transition is guarded — the peer path was already
+  source-guarded (`peerImageSourceByLabel`), and the one unguarded
+  transition (a label LEAVING the variant set: spotlight dismissed,
+  publisher departed, filter changed) now drops its image derivation at
+  the single recompute all paths funnel through. Composite keys stay
+  available as the escalation if a future surface needs simultaneous
+  multi-lineage paint of one label.
 - **Phase D — candidate pools** (`imagePool`) when a feature wants it; the
   shape is reserved above so nothing in A–C has to move.
 
