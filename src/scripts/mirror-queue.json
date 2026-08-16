@@ -748,7 +748,7 @@
       "id": "visuals-across-lineages-design",
       "title": "Visuals-across-lineages design doc — mirror as notes on the visuals/superimposition tiles",
       "run": null,
-      "note": "documentation/visuals-across-lineages.md written 2026-08-14: diagnosis (wipe lives in location-keyed indexes, never sig-keyed pools) + 4-move design (layer-sig-keyed props index, stack of heads per address, (label,lineage) caches, substrate picks as decorations) + imagePool shape. PHASE A BUILT 2026-08-15 (warmHeadSigFor, seedLayerKeyedTileProps, layer-first show-cell paint, adopt/format-painter seeds); PHASE B BUILT 2026-08-16 (substrate picks = canonical commits via #commitDefault/#rollOne, clears strip the layer, show-cell full derive-on-miss + propsless-head memo, format-painter commits its diff canonically, adopt location seed-dance DELETED) — the mirror owes part tiles for those files too. Owes notes on the superimposition/participant-stack cells under behaviors/swarm and a design tile if none fits. note-add is additive — manual.",
+      "note": "documentation/visuals-across-lineages.md written 2026-08-14: diagnosis (wipe lives in location-keyed indexes, never sig-keyed pools) + 4-move design (layer-sig-keyed props index, stack of heads per address, (label,lineage) caches, substrate picks as decorations) + imagePool shape. PHASE A BUILT 2026-08-15 (warmHeadSigFor, seedLayerKeyedTileProps, layer-first show-cell paint, adopt/format-painter seeds); PHASE B BUILT 2026-08-16 (substrate picks = canonical commits via #commitDefault/#rollOne, clears strip the layer, show-cell full derive-on-miss + propsless-head memo, format-painter commits its diff canonically, adopt location seed-dance DELETED); PHASE C BUILT 2026-08-16 `5fc9c5306` (writer sweep — zero location-keyed writes remain, seedLayerKeyedEntries batch primitive, variant-set-exit cache-provenance drop in show-cell) — the mirror owes part tiles for those files too. Owes notes on the superimposition/participant-stack cells under behaviors/swarm and a design tile if none fits. note-add is additive — manual.",
       "unattended": false,
       "created": "2026-08-15",
       "status": "pending"
@@ -769,6 +769,15 @@
       "note": "Mirror the two settings the annotations window gained. Tiles under the behaviors mirror (one per part, marked `part`): scaled() in _notes-strip-shared.scss (the rem/px sweep that let --hc-panel-scale reach the strip's type at all), the sizeOwner/dock-width fix (the desk no longer publishes a screen-wide width or a ballooned auto size), defaultText on hcDockedPanel (a window declares the size it opens at; explicit Auto now survives a reload because writeTextScale WRITES 'auto' instead of erasing the key), ownSettings on hcDockedPanel (a window declares its own rows and the editor draws them, repaint wrapped), and the reading face itself (mono/sans/serif on the prose only, chrome stays mono). Collection gathering them + notes explaining the rule 'text scales, a glyph in a fixed box does not'. Mint the glyph card in the themed behaviors deck. --manual: note-add is additive.",
       "unattended": false,
       "created": "2026-08-15",
+      "status": "pending"
+    },
+    {
+      "id": "retire-miro-behaviors",
+      "title": "Retire the /miro-import and /miro-token cards from the behaviors mirror",
+      "run": null,
+      "note": "The miro.com module root was deleted from essentials (the Miro import problem it existed for is solved). Its two queen behaviours are gone from the code, so their glyph cards in the behaviors deck now describe behaviours that no longer exist. Find the cards for /miro-import and /miro-token under the behaviors root and retire them (and the miro.com grouping if it holds nothing else). Needs a live renderer on the bridge.",
+      "unattended": false,
+      "created": "2026-08-16",
       "status": "pending"
     }
   ]
