@@ -234,7 +234,9 @@
 </div>
 <p class="flow-note">A question typed in the hive becomes a durable <b>ask record</b> in your
 hive's own storage. Close the laptop mid-question — the ask survives and is answered when a
-responder next connects. Nothing leaves your machine.</p>
+responder next connects. The broker and your hive's storage stay on your machine; the
+question — and whatever hive content Claude reads to answer it — goes to Anthropic through
+your Claude Code session, the same as anything you type into Claude Code.</p>
 
 <h2>Path A — the subscription loop</h2>
 <p><b>The hive walks you through this.</b> The chat window's setup state is a guided

@@ -362,7 +362,7 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:remove', 'feature:apply', 'features:paint', 'features:roster-open']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:remove', 'features:bind', 'feature:apply', 'features:paint', 'features:roster-open']
   protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:paint-result', 'features:roster']
 
   constructor() {
@@ -434,6 +434,19 @@ export class ShowFeaturesDrone extends Drone {
       const cell = String(p?.cell ?? '').trim()
       if (!kind || (segments.length === 0 && !cell)) return
       void this.#removeAt(segments, kind, cell)
+    })
+
+    // The panel's BELONGS-HERE toggle on an applied row. One tap is the whole
+    // gesture: you are standing on the tile, the row is in front of you, and
+    // the tap says "this behaviour is this tile's". The panel cannot write the
+    // record itself — binding needs the LOCATION SIGNATURE, and only this side
+    // has the signer — so the shell states the intent and this drone resolves
+    // it, exactly as `features:enable` / `features:remove` already do.
+    this.onEffect<{ cell?: string; segments?: string[]; kind?: string; bound?: boolean }>('features:bind', (p) => {
+      const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      const kind = String(p?.kind ?? '')
+      if (!kind || segments.length === 0) return
+      void this.#bindAt(segments, kind, p?.bound !== false)
     })
 
     // `name@view` from the command line (`diagram@slides` / `~diagram@slides`).

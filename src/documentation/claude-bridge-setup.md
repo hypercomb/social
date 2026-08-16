@@ -27,7 +27,8 @@ at the end.
    interprets nothing; it forwards.
 2. **The renderer** — your hive browser tab. Opened with `?claudeBridge=1` it
    dials the broker and executes bridge operations against its own storage
-   (your data never leaves your machine).
+   (the storage itself stays local; what Claude reads to answer a question
+   goes to Anthropic through your Claude Code session).
 3. **The responder** — a Claude Code session (or a scheduled drain) that
    watches for questions and answers them.
 
