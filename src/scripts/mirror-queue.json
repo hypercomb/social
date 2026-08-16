@@ -779,6 +779,14 @@
       "unattended": false,
       "created": "2026-08-16",
       "status": "pending"
+    },
+    {
+      "id": "bridge-loopback-trust-model",
+      "title": "Mirror the bridge trust model: the broker port IS the security boundary",
+      "run": null,
+      "note": "The bridge broker relays ops that create tiles, write resources and commit layers on a LIVE hive, so the port is the security boundary. Hardened: hypercomb-cli/src/bridge/server.ts (the shipped 'hypercomb bridge') now binds loopback by default, refuses renderer registration from anywhere but loopback, and refuses non-loopback op senders unless HYPERCOMB_BRIDGE_TOKEN is set and presented. scripts/bridge/run-memory-relay.cjs and scripts/bridge/humanity-site/static-server.cjs now bind 127.0.0.1. scripts/run-bridge.cjs (a stale duplicate broker that bound 0.0.0.0 with no gates) was REMOVED outright rather than shimmed or blocklisted - one broker, one place to harden. New doctrine ratchet 'default-wide listener bind' in doctrine.spec.ts fails the suite on any listener without an explicit bind address; allowlist frozen at hypercomb-relay/relay.js (public by job) and scripts/local-relay.ts (dev swarm relay a phone must reach; serves only hash-verified bytes). DECIDED against publishing an untrusted/blocklist pheromone: enforcement stays local and hardcoded, since a remote-fetched list must never be able to loosen a local gate - and per pheromone-protocol.md marks are advisory, never moderation. Owed in the hive: a tile per hardened listener under the bridge/assistant area, a collection gathering them, pheromones marking each with its bind posture, and a note carrying the reason.",
+      "created": "2026-08-16",
+      "status": "pending"
     }
   ]
 }

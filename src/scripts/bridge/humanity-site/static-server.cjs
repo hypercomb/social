@@ -16,4 +16,5 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' })
     res.end(data)
   })
-}).listen(PORT, () => console.log(`Humanity Centres preview → http://localhost:${PORT}`))
+// Loopback bind: a local preview has no reason to be on the LAN.
+}).listen(PORT, '127.0.0.1', () => console.log(`Humanity Centres preview → http://127.0.0.1:${PORT}`))

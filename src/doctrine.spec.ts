@@ -464,4 +464,56 @@ describe('doctrine ratchets', () => {
     }
     assertRatchet(offenders.sort(), [], 'sibling window close')
   })
+
+  it('no listener binds every interface by default', () => {
+    // A listening socket with no `host` binds 0.0.0.0 — the whole LAN. For the
+    // claude bridge that is not a config nit: the broker relays ops that create
+    // tiles, write resources and commit layers on a LIVE hive, so a remote
+    // sender that reaches the port can ask the machine to do work on its
+    // owner's data. Every listener therefore names its bind address, and the
+    // default is loopback; going wide is an explicit env opt-in guarded by
+    // HYPERCOMB_BRIDGE_TOKEN.
+    //
+    // Scanned separately from SCAN_DIRS/isSource: servers live in `scripts/`
+    // as .cjs, which the main walk deliberately skips.
+    const SERVER_DIRS = ['scripts', 'hypercomb-cli/src', 'hypercomb-relay', 'hypercomb-essentials/scripts']
+    const isServerSource = (name: string): boolean =>
+      /\.(ts|cjs|mjs|js)$/.test(name) && !name.endsWith('.d.ts') && !name.endsWith('.spec.ts')
+    const walkAll = (dir: string, out: string[] = []): string[] => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+            // Dot-dirs here are vendored browser profiles (bundled third-party
+          // extension code), not our source.
+          if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walkAll(join(dir, entry.name), out)
+        } else if (isServerSource(entry.name)) out.push(join(dir, entry.name))
+      }
+      return out
+    }
+
+    // `port:` in a server options literal with no `host:` beside it, or a
+    // `.listen(port, …)` whose second argument is not a bind-address string.
+    const PORT_NO_HOST = /new\s+WebSocketServer\s*\(\s*\{(?![^}]*\bhost\s*:)[^}]*\bport\s*:/
+    const LISTEN_NO_HOST = /\.listen\s*\(\s*[^,)]+\s*(?:\)|,(?!\s*['"]))/
+
+    const offenders: string[] = []
+    for (const dir of SERVER_DIRS) {
+      let files: string[]
+      try { files = walkAll(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        if (PORT_NO_HOST.test(code) || LISTEN_NO_HOST.test(code)) {
+          offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
+        }
+      }
+    }
+    assertRatchet(offenders.sort(), [
+      // The deployed public nostr relay — being reachable IS its job.
+      'hypercomb-relay/relay.js',
+      // Dev swarm/content relay: a phone on the same wifi must reach it to
+      // test peer sync, so loopback would defeat the only thing it is for.
+      // It serves and accepts sig-addressed bytes (PUT verifies the hash) and
+      // relays nostr events — it can NOT drive the hive the way the bridge can.
+      'scripts/local-relay.ts',
+    ], 'default-wide listener bind')
+  })
 })

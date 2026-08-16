@@ -7,11 +7,15 @@
 //
 // Protocol: standard Nostr (NIP-01) — EVENT, REQ, CLOSE, EOSE, NOTICE.
 // Signatures are NOT verified (this is for local dev only; the wall is
-// `localhost` reachability + the channel-secret derivation).
+// `localhost` reachability + the channel-secret derivation) — so the socket
+// MUST actually be loopback-only for that wall to exist. It used to bind
+// 0.0.0.0, which handed anyone on the LAN an unauthenticated relay into the
+// paired channel.
 const { WebSocketServer, WebSocket } = require('ws')
 
 const PORT = 7777
-const wss = new WebSocketServer({ port: PORT })
+const HOST = '127.0.0.1'
+const wss = new WebSocketServer({ port: PORT, host: HOST })
 
 /** id → event */
 const events = new Map()
@@ -105,7 +109,7 @@ wss.on('connection', (ws) => {
   })
 })
 
-console.log(`[memory-relay] listening on ws://localhost:${PORT}`)
+console.log(`[memory-relay] listening on ws://${HOST}:${PORT} (loopback only — unauthenticated by design)`)
 
 process.on('SIGINT', () => { wss.close(); process.exit(0) })
 process.on('SIGTERM', () => { wss.close(); process.exit(0) })
