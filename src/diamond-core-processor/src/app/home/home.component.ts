@@ -229,6 +229,8 @@ export class HomeComponent implements OnDestroy {
   /** Package rootSigs whose code tree is open for inspection in the simple
    *  list. Verification is per row and never sticky across sessions. */
   readonly openCodeSigs = signal<Set<string>>(new Set())
+  /** Landing-expand ledger: domain → the row key we auto-opened for it. */
+  #behaviorsAutoOpened = new Map<string, string>()
 
   readonly receivedLayerSigs = signal<string[]>([])
   #fromHcChannel: BroadcastChannel | null = null
@@ -765,6 +767,31 @@ export class HomeComponent implements OnDestroy {
     effect(() => {
       const doms = this.domains()
       if (doms.length) this.#loadAllDomains(doms)
+    })
+
+    // The installer opens TO the behaviors: as each behavior row resolves,
+    // its code tree starts open, so landing here shows what the packages
+    // contain instead of a shelf of closed doors. Once per DOMAIN (a row's
+    // key carries its root sig, which churns while sections resolve) — after
+    // the landing expand, the toggles are the reader's.
+    effect(() => {
+      for (const row of this.behaviorRows()) {
+        if (this.#behaviorsAutoOpened.has(row.group.domainName)) {
+          const stale = this.#behaviorsAutoOpened.get(row.group.domainName)!
+          const key = this.rowKey(row)
+          if (stale !== key && this.openCodeSigs().has(stale)) {
+            const next = new Set(this.openCodeSigs())
+            next.delete(stale)
+            next.add(key)
+            this.openCodeSigs.set(next)
+            this.#behaviorsAutoOpened.set(row.group.domainName, key)
+          }
+          continue
+        }
+        const key = this.rowKey(row)
+        this.#behaviorsAutoOpened.set(row.group.domainName, key)
+        this.openCodeSigs.set(new Set(this.openCodeSigs()).add(key))
+      }
     })
 
     // When the inline rename input opens, focus it and select all text so the
