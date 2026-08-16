@@ -1467,6 +1467,42 @@ $path-fail: #e08a8a;     // failed terminal
   &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
 }
 
+// ── belongs-here — the binding tap ────────────────────────────────
+// Quiet until it means something: an unbound row shows a faint chain-link
+// that only warms on hover, so the control is discoverable without competing
+// with the row. Bound, it holds the same warm gold as the "belongs to" mark
+// beside it — one colour for one idea.
+.feat-bind {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: tw.$radius-control;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+
+  .mat-sym { font-size: 0.95rem; }
+
+  &:hover {
+    color: rgba(255, 214, 138, 0.95);
+    border-color: rgba(255, 214, 138, 0.34);
+    background: rgba(255, 214, 138, 0.08);
+  }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+
+  &.bound {
+    color: rgba(255, 214, 138, 0.92);
+    border-color: rgba(255, 214, 138, 0.4);
+    background: rgba(255, 214, 138, 0.12);
+  }
+}
+
 // ── add (+) — an addable Apply-picker row ─────────────────────────
 .feat-add {
   flex: 0 0 auto;

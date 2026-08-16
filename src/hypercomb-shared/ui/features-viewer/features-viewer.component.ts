@@ -1080,6 +1080,32 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#armRowLeash(key)
   }
 
+  /** BELONGS HERE — one tap. Bound rows free, unbound rows bind to the tile
+   *  the panel is describing. The panel never writes the record: binding is
+   *  keyed by the tile's LOCATION SIGNATURE and only the drone side has the
+   *  signer, so this states the intent and `features:bind` carries it — the
+   *  same shape remove and enable already use. */
+  bindHere(group: FeatureGroup, feat: FeatureRow): void {
+    if (group.segments.length === 0) return   // the hive root is not a tile
+    const key = this.rowKey(group, feat)
+    if (this.pending().has(key)) return
+    this.pending.update(set => new Set([...set, key]))
+    this.#clearNote(key)
+    EffectBus.emit('features:bind', {
+      cell: group.cell,
+      segments: [...group.segments],
+      kind: feat.kind,
+      bound: !feat.bound,
+    })
+    this.#armRowLeash(key)
+  }
+
+  /** Can this row be bound at all? Not at the hive root (not a tile), and not
+   *  for a row with no kind to key the record by. */
+  canBind(group: FeatureGroup, feat: FeatureRow): boolean {
+    return group.segments.length > 0 && !!feat.kind
+  }
+
   /** Resolve an i18n key at runtime (shell-side — the provider lives in ioc). */
   #t(key: string, fallback: string): string {
     const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc

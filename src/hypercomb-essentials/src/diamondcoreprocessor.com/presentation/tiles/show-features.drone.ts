@@ -64,7 +64,8 @@ import { kindsForLabel, countLabelsWithKind } from '../../commands/decoration-ki
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import {
   isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds,
-  bindingAt, bindingsFor, isWithdrawnByBinding, allBindings, type BehaviorBinding,
+  bindingAt, bindingsFor, isWithdrawnByBinding, allBindings,
+  behaviorPath, bindBehaviorTo, unbindBehavior, type BehaviorBinding,
 } from '../../sharing/behavior-enablement.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { writeDropbox } from '../../files/files-attachment.js'
@@ -727,6 +728,40 @@ export class ShowFeaturesDrone extends Drone {
       console.warn('[show-features] remove failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't remove "${kind}" from "${label}"`, icon: '○' })
       this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't remove "${kind}" from "${label}"` })
+    }
+  }
+
+  /** BIND (or free) `kind` at `segments` — the panel row's belongs-here tap.
+   *
+   *  The tile's LOCATION signature is the record's identity, and this side owns
+   *  the signer, so the resolution happens here rather than in the shell. The
+   *  free direction clears the WHOLE binding, not just this location: the tap
+   *  reads as "stop belonging to one tile", and leaving a behaviour bound to
+   *  some other tile the participant is not standing on would be an invisible
+   *  outcome for a visible gesture. */
+  async #bindAt(segments: readonly string[], kind: string, bound: boolean): Promise<void> {
+    const label = segments[segments.length - 1] ?? ''
+    try {
+      if (!bound) {
+        unbindBehavior(kind)
+        this.emitEffect('activity:log', { message: `"${label}" no longer owns this beehavior`, icon: 'link_off' })
+        this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
+        await this.#open(label, segments)
+        return
+      }
+      const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
+      if (!history?.sign) {
+        this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: 'history not ready — try again in a moment' })
+        return
+      }
+      const sig = await history.sign({ explorerSegments: () => [...segments] })
+      bindBehaviorTo(kind, { sig, path: behaviorPath(segments), name: label })
+      this.emitEffect('activity:log', { message: `this beehavior belongs to "${label}"`, icon: 'link' })
+      this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
+      await this.#open(label, segments)
+    } catch (err) {
+      console.warn('[show-features] bind failed', { kind, segments, bound, err })
+      this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't ${bound ? 'bind' : 'free'} "${kind}"` })
     }
   }
 

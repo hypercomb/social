@@ -456,6 +456,21 @@
                         [attr.aria-label]="'features.open' | t"
                       >▶ {{ 'features.open' | t }}</button>
                     }
+                    <!-- BELONGS HERE — the whole gesture is one tap. You are
+                         standing on the tile and the row is in front of you;
+                         the tap says "this is this tile's". Lit = bound, and
+                         tapping again gives it back to the hive. -->
+                    @if (canBind(group, feat)) {
+                      <button
+                        class="feat-bind"
+                        type="button"
+                        [class.bound]="feat.bound"
+                        [attr.aria-pressed]="!!feat.bound"
+                        (click)="bindHere(group, feat); $event.stopPropagation()"
+                        [attr.title]="(feat.bound ? 'features.bind.off.hint' : 'features.bind.on.hint') | t: { cell: group.cell }"
+                        [attr.aria-label]="(feat.bound ? 'features.bind.off' : 'features.bind.on') | t"
+                      ><span class="mat-sym" aria-hidden="true">{{ feat.bound ? 'link' : 'add_link' }}</span></button>
+                    }
                     <!-- Remove the decoration — the whole off for a direct
                          row. Its own control, never the row body. -->
                     @if (canRemove(group, feat)) {
