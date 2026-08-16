@@ -4,9 +4,18 @@
 // `diagram@slides` — matched by regex. A regex cannot carry an ARGUMENT,
 // which is why every behaviour whose payload is content (a post-it's message,
 // a page's text) needed its own slash command instead. This is that pairing
-// grown into a real call expression, parsed properly:
+// grown into a real call expression, parsed properly.
 //
-//     meetup@postit("Doors at 7 — bring the humidor")
+// THE DEFAULT SPELLING IS PAREN-LESS. A space ends the behaviour's name and
+// the rest of the line is the message, verbatim:
+//
+//     meetup@postit Don't forget to check this location out!
+//
+// Nothing in that text is grammar: no quotes to balance, no characters to
+// escape, no colon or comma that means something. Parentheses are the OPT-IN,
+// for when a behaviour needs more than one thing said to it:
+//
+//     meetup@postit("Doors at 7", title: "Meetup")
 //     deck@slide(3)
 //     ~diagram@slides                 (the `~` prefix still detaches)
 //
@@ -66,6 +75,9 @@ export interface BehaviourCall {
   /** True when the HUMAN fallback produced this parse — the strict grammar had
    *  no reading. Surfaced so a caller can explain itself. */
   readonly forgiving: boolean
+  /** True for the PAREN-LESS form — `meetup@postit Doors at 7`. The whole
+   *  remainder is one argument, taken verbatim. */
+  readonly parenless: boolean
 }
 
 export class BehaviourCallError extends Error {
@@ -134,6 +146,29 @@ class Scanner {
     if (c === '"' || c === "'" || c === '`') return this.readString()
     return this.readBareword()
   }
+}
+
+/** Strip ONE symmetric outer quote pair from a paren-less message, so a person
+ *  who quotes out of habit doesn't get the quotes stored in their note. Only
+ *  the outermost pair, and only when it matches — inner quotes are text. */
+function unwrapOuterQuotes(message: string): string {
+  const q = message[0]
+  if ((q === '"' || q === "'" || q === '`') && message.length >= 2 && message.endsWith(q)) {
+    return message.slice(1, -1)
+  }
+  return message
+}
+
+/** A paren-less message that is ENTIRELY one scalar token becomes that scalar
+ *  — `deck@slide 3` should mean the number 3, exactly as `deck@slide(3)` does.
+ *  Anything with more to it stays text, so `postit 3 things to bring` is a
+ *  sentence and not the number 3. */
+function coerceWholeLine(message: string): CallValue {
+  if (message === 'true') return true
+  if (message === 'false') return false
+  if (message === 'null') return null
+  if (/^-?\d+(\.\d+)?$/.test(message)) return Number(message)
+  return message
 }
 
 /** STRICT parse of the inside of the parentheses. Throws on any malformation
@@ -224,10 +259,37 @@ export function parseBehaviourCall(input: string): BehaviourCall | null {
   if (!after) return null
 
   const open = after.indexOf('(')
+  const firstSpace = after.search(/\s/)
+
+  // ── PAREN-LESS, the default spelling ────────────────────────────────
+  //
+  //     meetup@postit Doors at 7 — bring the humidor
+  //
+  // A space ends the behaviour's name and everything after it is the message,
+  // verbatim: no quotes to balance, no characters to escape, nothing in the
+  // text reinterpreted as grammar. This is the form a person reaches for, so
+  // it is the one that costs nothing to write; parentheses are the opt-in for
+  // when a behaviour needs more than one thing said to it.
+  //
+  // Checked BEFORE the parenthesised form so a `(` inside a message is just a
+  // bracket — `meetup@postit call Ana (she has the keys)` is one sentence, not
+  // a malformed call.
+  if (firstSpace !== -1 && (open === -1 || firstSpace < open)) {
+    const view = after.slice(0, firstSpace).toLowerCase()
+    if (!IDENT_RE.test(view)) return null
+    const message = after.slice(firstSpace + 1).trim()
+    if (!message) return { target, view, remove, args: [], named: {}, called: false, forgiving: false, parenless: false }
+    return {
+      target, view, remove,
+      args: [coerceWholeLine(unwrapOuterQuotes(message))],
+      named: {}, called: true, forgiving: false, parenless: true,
+    }
+  }
+
   if (open === -1) {
     const view = after.toLowerCase()
     if (!IDENT_RE.test(view)) return null
-    return { target, view, remove, args: [], named: {}, called: false, forgiving: false }
+    return { target, view, remove, args: [], named: {}, called: false, forgiving: false, parenless: false }
   }
 
   const view = after.slice(0, open).trim().toLowerCase()
@@ -252,7 +314,7 @@ export function parseBehaviourCall(input: string): BehaviourCall | null {
     forgiving = true
   }
 
-  return { target, view, remove, args, named, called: true, forgiving }
+  return { target, view, remove, args, named, called: true, forgiving, parenless: false }
 }
 
 /** The first positional argument as text, or ''. What a single-message

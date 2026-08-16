@@ -23,6 +23,55 @@ describe('behaviour call — the bare pairing still works', () => {
   })
 })
 
+describe('behaviour call — PAREN-LESS, the default spelling', () => {
+  it('takes the rest of the line as the message, verbatim', () => {
+    const c = call(`meetup@postit Don't forget to check this location out!`)
+    expect(c.args).toEqual([`Don't forget to check this location out!`])
+    expect(c.parenless).toBe(true)
+    expect(c.called).toBe(true)
+  })
+
+  it('reinterprets nothing in the message', () => {
+    expect(call('t@postit Bring: wine, cigars (and matches) — 100% sure').args)
+      .toEqual(['Bring: wine, cigars (and matches) — 100% sure'])
+  })
+
+  it('a bracket in the message is a bracket, not a call', () => {
+    expect(call('t@postit call Ana (she has the keys)').args)
+      .toEqual(['call Ana (she has the keys)'])
+  })
+
+  it('strips one symmetric outer quote pair, for people who quote by habit', () => {
+    expect(call('t@postit "Doors at 7"').args).toEqual(['Doors at 7'])
+    expect(call(`t@postit 'Doors at 7'`).args).toEqual(['Doors at 7'])
+    expect(call('t@postit "say "hi" back"').args).toEqual(['say "hi" back'])
+  })
+
+  it('leaves an unmatched quote alone — it is text', () => {
+    expect(call('t@postit "Doors at 7').args).toEqual(['"Doors at 7'])
+    expect(call(`t@postit it's 5 o'clock`).args).toEqual([`it's 5 o'clock`])
+  })
+
+  it('a whole-line scalar becomes that scalar, like the parenthesised form', () => {
+    expect(call('deck@slide 3').args).toEqual([3])
+    expect(call('t@x true').args).toEqual([true])
+    expect(call('t@x -2.5').args).toEqual([-2.5])
+  })
+
+  it('but a sentence that merely starts with a number stays text', () => {
+    expect(call('t@postit 3 things to bring').args).toEqual(['3 things to bring'])
+  })
+
+  it('trailing space alone is not a call', () => {
+    expect(call('diagram@slides   ').called).toBe(false)
+  })
+
+  it('the parenthesised form is untouched by all this', () => {
+    expect(call('t@x("a", "b")').parenless).toBe(false)
+    expect(call('t@x("a", "b")').args).toEqual(['a', 'b'])
+  })
+})
+
 describe('behaviour call — not a call at all (never hijack other input)', () => {
   for (const input of ['', 'hello', '@slides', 'a@', 'a@b@c', 'a:b@slides', '[a,b]:tag', '/postit here x', 'me@example.com']) {
     it(`returns null for ${JSON.stringify(input)}`, () => {

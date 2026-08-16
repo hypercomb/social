@@ -1036,10 +1036,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const featRemoveCtx = v.match(FEATURE_REMOVE_RE)
     const featAddCtx = featRemoveCtx ? null : v.match(FEATURE_RE)
     const featCtx = featRemoveCtx ?? featAddCtx
-    // Once an argument list is open the participant is writing a MESSAGE, not
-    // choosing a behaviour — completing against the registry there would
-    // suggest views for the text they are typing.
-    if (featCtx && !featCtx[2].includes('(')) {
+    // Once the message has started — a space after the behaviour's name, or an
+    // open parenthesis — the participant is writing CONTENT, not choosing a
+    // behaviour. Completing against the registry there would suggest views for
+    // the sentence they are typing.
+    if (featCtx && !/[\s(]/.test(featCtx[2])) {
       const frag = featCtx[2]
       return {
         active: true,
@@ -2447,10 +2448,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // A BEHAVIOUR CALL is not tag syntax. `meetup@postit("Doors at 7", title:
-    // "Meetup")` carries a colon inside its argument list, and the tag
-    // extractor — which runs before all routing — would strip `title:` out as
-    // a keyword and hand the parser a line that no longer says what was typed.
+    // A BEHAVIOUR CALL is not tag syntax. `meetup@postit Bring: wine` and
+    // `meetup@postit("Doors at 7", title: "Meetup")` both carry a colon inside
+    // their message, and the tag extractor — which runs before all routing —
+    // would strip it out as a keyword and hand the parser a line that no
+    // longer says what was typed.
     // The message is content, not grammar: nothing inside the parentheses may
     // be reinterpreted. Narrow on purpose — only a line that already parses as
     // a CALLED behaviour on a registered view skips extraction.

@@ -70,6 +70,7 @@ export class PostitQueenBee extends QueenBee {
   override description = 'Post-it — a small sticky on the tile that opens into a full page'
   override options = ['here <text>', 'tile', 'sticky', 'remove', 'on', 'off']
   override examples = [
+    { input: 'meetup@postit Call the venue before Saturday', result: 'Sticks that note on the "meetup" tile — from anywhere, no need to go there' },
     { input: '/postit here Call the venue before Saturday', result: 'Sticks that text on the current cell' },
     { input: '/postit', result: 'Opens or closes the post-it view' },
     { input: '/postit tile', result: 'The tile renders again here — the note is kept, just dormant' },
