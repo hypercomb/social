@@ -113,27 +113,63 @@ export class PostitQueenBee extends QueenBee {
     return [...(get<LineageShape>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])]
   }
 
+  /**
+   * Receive a CALL — `meetup@postit("Doors at 7 — bring the humidor")`.
+   *
+   * The `@` grammar names a TARGET, so unlike `/postit here` this authors the
+   * note on another tile without going there or selecting it. The message is
+   * the first argument; `title:` may name the sticky's heading. Everything
+   * else (pin, size, an htmlSig page) stays with the note's own editing —
+   * a call says what the note SAYS, not how it sits.
+   *
+   * Implementing this method IS how a behaviour declares it takes a message:
+   * ShowFeaturesDrone resolves it through the registry's `queenKey`.
+   */
+  public async applyCall(call: {
+    segments: readonly string[]
+    args: readonly unknown[]
+    named: Readonly<Record<string, unknown>>
+  }): Promise<void> {
+    const segments = call.segments.map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0) return
+    const text = call.args[0] === undefined || call.args[0] === null ? '' : String(call.args[0])
+    const title = call.named['title'] === undefined ? undefined : String(call.named['title'])
+    await this.#attachAt(segments, text, title)
+  }
+
   /** Attach or update — one live record per cell (`replaceDecoration`), so
    *  re-sticking never piles superseded notes onto the manifest. A pin the
    *  participant dragged into place is POSITION, not content — re-sticking
    *  the text must not snap the note back to the dock, so it carries over. */
   async #attach(text: string): Promise<void> {
-    const segments = this.#segments()
-    const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments }))
+    await this.#attachAt(this.#segments(), text)
+  }
+
+  /** The one write both `/postit here` and `tile@postit("…")` go through, so
+   *  the two spellings can never drift apart. `segments` is explicit because
+   *  the call form names a target rather than acting where you stand. */
+  async #attachAt(segments: readonly string[], text: string, title?: string): Promise<void> {
+    const segs = [...segments]
+    const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments: segs }))
       .at(-1)?.record.payload
     const payload: PostitPayload = {
       version: 1,
       ...(text ? { text } : {}),
+      ...(title ? { title } : prior?.title ? { title: prior.title } : {}),
       ...(prior?.pin ? { pin: prior.pin } : {}),
+      ...(prior?.size ? { size: prior.size } : {}),
     }
     await replaceDecoration({
       kind: POSTIT_KIND,
-      appliesTo: segments,
-      segments,
+      appliesTo: segs,
+      segments: segs,
       payload,
       mark: 'persistent',
     })
-    EffectBus.emit('activity:log', { message: 'Post-it stuck on this cell', icon: 'sticky_note_2' })
+    EffectBus.emit('activity:log', {
+      message: `Post-it stuck on "${segs[segs.length - 1] ?? 'this cell'}"`,
+      icon: 'sticky_note_2',
+    })
   }
 
   async #remove(): Promise<void> {

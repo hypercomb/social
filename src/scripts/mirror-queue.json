@@ -787,6 +787,15 @@
       "note": "The bridge broker relays ops that create tiles, write resources and commit layers on a LIVE hive, so the port is the security boundary. Hardened: hypercomb-cli/src/bridge/server.ts (the shipped 'hypercomb bridge') now binds loopback by default, refuses renderer registration from anywhere but loopback, and refuses non-loopback op senders unless HYPERCOMB_BRIDGE_TOKEN is set and presented. scripts/bridge/run-memory-relay.cjs and scripts/bridge/humanity-site/static-server.cjs now bind 127.0.0.1. scripts/run-bridge.cjs (a stale duplicate broker that bound 0.0.0.0 with no gates) was REMOVED outright rather than shimmed or blocklisted - one broker, one place to harden. New doctrine ratchet 'default-wide listener bind' in doctrine.spec.ts fails the suite on any listener without an explicit bind address; allowlist frozen at hypercomb-relay/relay.js (public by job) and scripts/local-relay.ts (dev swarm relay a phone must reach; serves only hash-verified bytes). DECIDED against publishing an untrusted/blocklist pheromone: enforcement stays local and hardcoded, since a remote-fetched list must never be able to loosen a local gate - and per pheromone-protocol.md marks are advisory, never moderation. Owed in the hive: a tile per hardened listener under the bridge/assistant area, a collection gathering them, pheromones marking each with its bind posture, and a note carrying the reason.",
       "created": "2026-08-16",
       "status": "pending"
+    },
+    {
+      "id": "behaviour-call-syntax",
+      "title": "tile@behaviour(args) — the @ pairing became a call expression",
+      "run": null,
+      "note": "New primitive: hypercomb-core/src/core/behaviour-call.ts parses target@view(args). Quoting rule = STRICT FIRST, HUMAN FALLBACK — the conventional grammar (both quote styles, backslash escapes, several args, named args) is tried first; only when it has NO valid reading does a body that opens and closes on the same quote become ONE string taken to the LAST quote, so tile@postit('Don't forget!') works without escaping. A behaviour declares it takes a message by implementing applyCall() on its queen; ShowFeaturesDrone resolves it via the registry queenKey. Post-it is the first, and /postit here now shares one write with it. Mirror owed: (1) glyph card for the @ call syntax under behaviors with a note carrying the two-mode quoting rule and WHY (human text is full of apostrophes; a regex cannot tell one from a terminator); (2) note-add on the postit tile: it now takes a message by name from anywhere, no navigation; (3) note on the command-line tile: tag extraction is SKIPPED inside a behaviour call, and the call parse runs ahead of [a,b]:tag. note-add is additive - manual.",
+      "unattended": false,
+      "created": "2026-08-16",
+      "status": "pending"
     }
   ]
 }

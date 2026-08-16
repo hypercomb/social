@@ -16,6 +16,7 @@ type TagOp = { label: string; tag: string; color?: string; remove: boolean }
 import {
   EffectBus, hypercomb, type I18nProvider,
   commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
+  parseBehaviourCall, BehaviourCallError, type BehaviourCall, type CallValue,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -1035,7 +1036,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const featRemoveCtx = v.match(FEATURE_REMOVE_RE)
     const featAddCtx = featRemoveCtx ? null : v.match(FEATURE_RE)
     const featCtx = featRemoveCtx ?? featAddCtx
-    if (featCtx) {
+    // Once an argument list is open the participant is writing a MESSAGE, not
+    // choosing a behaviour — completing against the registry there would
+    // suggest views for the text they are typing.
+    if (featCtx && !featCtx[2].includes('(')) {
       const frag = featCtx[2]
       return {
         active: true,
@@ -2443,7 +2447,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    const cleaned = await this.#extractAndPersistTags(original)
+    // A BEHAVIOUR CALL is not tag syntax. `meetup@postit("Doors at 7", title:
+    // "Meetup")` carries a colon inside its argument list, and the tag
+    // extractor — which runs before all routing — would strip `title:` out as
+    // a keyword and hand the parser a line that no longer says what was typed.
+    // The message is content, not grammar: nothing inside the parentheses may
+    // be reinterpreted. Narrow on purpose — only a line that already parses as
+    // a CALLED behaviour on a registered view skips extraction.
+    const cleaned = this.#isBehaviourCallLine(original)
+      ? original
+      : await this.#extractAndPersistTags(original)
 
     // Update the shell value with cleaned value (tags stripped)
     if (cleaned !== original) {
@@ -2489,9 +2502,24 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // '@' feature attach/detach — `abc@gallery` / `~abc@gallery`. Only consumed
-    // when the fragment resolves to a registered behavior; an unknown `@name`
-    // falls through to normal handling (so a stray `@` never eats input).
+    // '@' feature attach/detach — `abc@gallery`, `abc@postit("…")`, `~abc@x`.
+    // Only consumed when the fragment resolves to a registered behavior; an
+    // unknown `@name` falls through to normal handling (so a stray `@` never
+    // eats input).
+    //
+    // FIRST, ahead of targeted keywords: a NAMED argument carries a colon
+    // (`title: "Meetup"`), and the `[a,b]:tag` grammar would otherwise claim
+    // the line and drop the call on the floor. This is safe in the other
+    // direction because a behaviour call is strictly the narrower shape — it
+    // needs `@` followed by a view the registry actually knows, and its target
+    // may not contain `[`, `:` or `/`, so no tag input can parse as one.
+    const feat = this.#parseFeatureInput(v)
+    if (feat) {
+      await this.#applyFeatureOps(feat)
+      this.clear()
+      return
+    }
+
     const targetedKeywords = parseTargetedKeywordsInput(v)
     if (targetedKeywords) {
       const target = this.completions.normalize(targetedKeywords.target)
@@ -2510,13 +2538,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.clear()
         return
       }
-    }
-
-    const feat = this.#parseFeatureInput(v)
-    if (feat) {
-      await this.#applyFeatureOps(feat)
-      this.clear()
-      return
     }
 
     // check pluggable behaviors before default handling
@@ -3206,19 +3227,43 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * registered in the VisualBeeRegistry — so a stray `@` never hijacks a
    * create, paste, or any other input.
    */
-  #parseFeatureInput(v: string): { target: string; view: string; remove: boolean } | null {
-    const trimmed = v.trim()
-    const rm = trimmed.match(FEATURE_REMOVE_RE)
-    const ad = rm ? null : trimmed.match(FEATURE_RE)
-    const m = rm ?? ad
-    if (!m) return null
-    const target = this.completions.normalize(m[1])
-    const view = m[2].trim().toLowerCase()
-    if (!target || !view) return null
+  /** Is this line a behaviour call WITH an argument list, on a view the
+   *  registry knows? The guard that keeps the tag extractor out of a message.
+   *  Deliberately silent about malformed calls — this only decides whether to
+   *  leave the line alone; `#parseFeatureInput` is where errors are reported. */
+  #isBehaviourCallLine(v: string): boolean {
+    let call: BehaviourCall | null = null
+    try { call = parseBehaviourCall(v) } catch { return true }  // malformed call: still not tag syntax
+    if (!call?.called) return false
     const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
       { get(view: string): unknown } | undefined
-    if (!registry?.get(view)) return null
-    return { target, view, remove: !!rm }
+    return !!registry?.get(call.view)
+  }
+
+  #parseFeatureInput(v: string): {
+    target: string; view: string; remove: boolean
+    args: readonly CallValue[]; named: Readonly<Record<string, CallValue>>; called: boolean
+  } | null {
+    let call: BehaviourCall | null
+    try {
+      call = parseBehaviourCall(v)
+    } catch (err) {
+      // It IS a call, and a malformed one — say where, rather than letting the
+      // line fall through and silently become a tile named `t@postit("hi`.
+      const message = err instanceof BehaviourCallError ? err.message : 'this call could not be read'
+      EffectBus.emit('activity:log', { message, icon: 'error' })
+      return null
+    }
+    if (!call) return null
+    const target = this.completions.normalize(call.target)
+    if (!target) return null
+    const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
+      { get(view: string): unknown } | undefined
+    if (!registry?.get(call.view)) return null
+    return {
+      target, view: call.view, remove: call.remove,
+      args: call.args, named: call.named, called: call.called,
+    }
   }
 
   /**
@@ -3229,7 +3274,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * decoration here, exactly as `[a,b]:tag` routes through the keyword queen.
    * A `feature:apply` intent is also emitted as the decoupled extension seam.
    */
-  async #applyFeatureOps(op: { target: string; view: string; remove: boolean }): Promise<void> {
+  async #applyFeatureOps(op: {
+    target: string; view: string; remove: boolean
+    args?: readonly CallValue[]; named?: Readonly<Record<string, CallValue>>; called?: boolean
+  }): Promise<void> {
     const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
       { get(view: string): { view: string; slashCommand?: string; attachable?: boolean } | undefined } | undefined
     const bee = registry?.get(op.view)
@@ -3250,9 +3298,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#syncDirection = 'idle'
     }
 
-    EffectBus.emit('feature:apply', { view: op.view, segments, remove: op.remove })
+    EffectBus.emit('feature:apply', {
+      view: op.view, segments, remove: op.remove,
+      // The CALL rides along: a behaviour that declares a payload reads its
+      // message from here instead of needing its own authoring command.
+      ...(op.called ? { args: [...(op.args ?? [])], named: { ...(op.named ?? {}) }, called: true } : {}),
+    })
 
     if (op.remove) return
+
+    // A CALLED behaviour has been handed its content by `feature:apply` above.
+    // Falling through to its bare slash command would toggle a view rather
+    // than author anything — the same trap `attachable` already dodges.
+    if (op.called) return
 
     // An ATTACHABLE behaviour is fully installed by the `feature:apply` above
     // (its decoration written at the target). Running its slash command here

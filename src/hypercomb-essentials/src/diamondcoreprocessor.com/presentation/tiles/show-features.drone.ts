@@ -456,10 +456,20 @@ export class ShowFeaturesDrone extends Drone {
     // command, which for a view bee TOGGLES the view (flipping the cell you're
     // standing on into slides) instead of making the TARGET a deck. Attach it
     // properly here, at the target's own segments.
-    this.onEffect<{ view?: string; segments?: string[]; remove?: boolean }>('feature:apply', (p) => {
+    this.onEffect<{
+      view?: string; segments?: string[]; remove?: boolean
+      args?: unknown[]; named?: Record<string, unknown>; called?: boolean
+    }>('feature:apply', (p) => {
       const view = String(p?.view ?? '')
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       if (!view || segments.length === 0) return
+      // A CALLED attach carries its own content (`meetup@postit("Doors at 7")`)
+      // and is authored by the behaviour itself; a bare attach stays the
+      // payload-free decoration write it always was.
+      if (p?.called === true && p?.remove !== true) {
+        void this.#applyCalledFeature(view, segments, p.args ?? [], p.named ?? {})
+        return
+      }
       void this.#applyFeature(view, segments, p?.remove === true)
     })
 
@@ -728,6 +738,51 @@ export class ShowFeaturesDrone extends Drone {
       console.warn('[show-features] remove failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't remove "${kind}" from "${label}"`, icon: '○' })
       this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't remove "${kind}" from "${label}"` })
+    }
+  }
+
+  /** A CALLED attach — `meetup@postit("Doors at 7")`.
+   *
+   *  The content belongs to the behaviour, not to this drone: only the post-it
+   *  knows a message becomes a `text` payload, only the slide knows a number
+   *  is an index. So a behaviour opts into receiving a call by implementing
+   *  `applyCall` on its queen, and this resolves it through the registry's
+   *  `queenKey`. Presence of the method IS the declaration — no parallel
+   *  capability table to drift out of step with the code.
+   *
+   *  A behaviour with no `applyCall` is not silently given a bare attach and
+   *  a shrug: the participant wrote a message and deserves to hear that this
+   *  behaviour has nowhere to put it. */
+  async #applyCalledFeature(
+    view: string,
+    segments: readonly string[],
+    args: readonly unknown[],
+    named: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    const label = segments[segments.length - 1] ?? ''
+    const registry = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
+    const bee = registry?.get?.(view)
+    const queenKey = (bee as { queenKey?: string } | undefined)?.queenKey
+    const queen = queenKey
+      ? this.#ioc()?.get<{ applyCall?: (call: { segments: readonly string[]; args: readonly unknown[]; named: Readonly<Record<string, unknown>> }) => Promise<void> | void }>(queenKey)
+      : undefined
+
+    if (!queen?.applyCall) {
+      this.emitEffect('activity:log', {
+        message: `"${view}" doesn't take a message — attach it plainly, then author it`,
+        icon: 'help',
+      })
+      this.emitEffect('features:outcome', { cell: label, kind: bee?.decorationKind ?? '', ok: false, message: `"${view}" takes no message` })
+      return
+    }
+
+    try {
+      await queen.applyCall({ segments: [...segments], args: [...args], named: { ...named } })
+      this.emitEffect('features:outcome', { cell: label, kind: bee?.decorationKind ?? '', ok: true, message: '' })
+      await this.#open(label, segments)
+    } catch (err) {
+      console.warn('[show-features] called attach failed', { view, segments, err })
+      this.emitEffect('features:outcome', { cell: label, kind: bee?.decorationKind ?? '', ok: false, message: `couldn't apply "${view}" to "${label}"` })
     }
   }
 
