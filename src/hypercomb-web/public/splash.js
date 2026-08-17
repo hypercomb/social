@@ -1,11 +1,11 @@
-/* Hypercomb loading page — genesis animation (pure canvas, zero dependencies).
+/* Hypercomb loading page — "Point to Sphere" (pure canvas, zero dependencies).
  *
  * Paints instantly from inside <app-root>, then RE-PARENTS itself to <body> so it
  * survives Angular's bootstrap, and stays up until the hive is ready to show — the
  * first tiles on screen (EffectBus 'render:cell-count' with count>0), OR a genuinely
  * empty layer (count===0 with settled:true — pixi + data were up, the location just
  * has no tiles), OR the install-needed welcome card (boot:status) whose "Start" button
- * the splash must not cover. Then it finishes the animation down to the white dot,
+ * the splash must not cover. Then it finishes the animation down to the honey dot,
  * holds ~1s, and fades to reveal the hive. It never blocks on an event that may not
  * fire: an empty page reveals via settled, and after MAXLOOPS (3) plays with no signal
  * it rests on the dot and offers "click to enter" — the user always has a way in.
@@ -24,10 +24,25 @@
  * Keep in sync with hypercomb-dev/public/splash.js. The #hc-splash styles live in
  * <head> (index.html) so they persist after we move out of <app-root>.
  *
- * Model: N points repel on a sphere; the equilibrium for N IS the maximally-spread
- * shape (3→triangle, 4→tetrahedron, 6→octahedron … → sphere). Forward only: dot →
- * line → apex-up triangle → 3D → accelerating fill → dense sphere → collapse straight
- * down to a solid white dot (never fades).
+ * MODEL — ported from the authored design piece ("Point to Sphere", 3 scenes /
+ * 5s authored: Inflate 2.2 · Fill 1.95 · Return 0.85). ONE cosine wave over the
+ * loop governs every metric — zoom, arrival rate, and the red seam — which is why
+ * it reads as a single continuous breath and loops with zero slope at both ends:
+ *
+ *   • a Fibonacci lattice of N points, ordered by FARTHEST-POINT INSERTION, so
+ *     every arriving point lands at the position most distant from all the points
+ *     already there — the set is maximally balanced at every single iteration.
+ *   • arrivals follow the wave itself (slow open, fastest mid-loop, tapering out),
+ *     drawn from its inverse-CDF, while the sphere grows from a point to full size.
+ *   • the Return scene zooms back down so the sphere reads solid at exactly the
+ *     starting size and position, then fades into a honey dot — which IS the point
+ *     the next loop opens from. The seam is red/honey on both sides and cools to
+ *     blue as it inflates, so the loop has no visible cut.
+ *
+ * The whole thing is closed-form in T: there is no simulation, no relaxation pass,
+ * no per-frame state. The lattice and its arrival schedule are computed ONCE at
+ * construction; every frame is a pure function of the clock. (The previous genesis
+ * core ran an O(n²) repulsion solve per frame — this one is strictly cheaper.)
  */
 (function () {
   "use strict";
@@ -54,171 +69,204 @@
   function GenesisCore(canvas, opts, post) {
     var ctx = canvas.getContext('2d');
     var reduce = !!opts.reduce;
-    var NMAX = 280, PHI = Math.PI * (3 - Math.sqrt(5)), S3 = Math.sqrt(3) / 2;
-    var PIN = { 1: [[0, 0.2571, 0.9664]], 2: [[0, 1, 0], [0, -1, 0]], 3: [[0, 1, 0], [-S3, -0.5, 0], [S3, -0.5, 0]] };
-    var BIRTH = { 2: [0, 0.2571, 0.9664], 3: [0, -1, 0] };
-    var pts = [], fx = new Float64Array(NMAX), fy = new Float64Array(NMAX), fz = new Float64Array(NMAX);
-    var GAIN = 0.02, MAXSTEP = 0.07, ITERS = 10;
-    var candX = new Float64Array(128), candY = new Float64Array(128), candZ = new Float64Array(128), minD = new Float64Array(128);
 
-    // Grow to n. Points spawn at the emptiest spot on a 128-slot Fibonacci probe.
-    // The whole batch for a frame scores the slots against existing points ONCE
-    // (O(128·n)); each birth then refreshes the scores against itself only (O(128)).
-    // The old per-point rescan was O(128·n) PER BIRTH and spiked in late fill —
-    // ~18 births/frame at n≈280 — exactly while boot has the CPU busiest.
-    function setCount(n) {
-      if (pts.length > n) { pts.length = n; return; }
-      while (pts.length < n && n <= 3) pts.push({ p: (BIRTH[n] || PIN[n][pts.length]).slice(), s: (n === 1 ? 1 : 0) });
-      if (pts.length >= n) return;
-      var m = pts.length, c, i;
-      for (c = 0; c < 128; c++) {
-        var y = 1 - (c + 0.5) / 128 * 2, r = Math.sqrt(Math.max(0, 1 - y * y)), t = PHI * c;
-        candX[c] = Math.cos(t) * r; candY[c] = Math.sin(t) * r; candZ[c] = y;
-        var mn = Infinity;
-        for (i = 0; i < m; i++) { var b = pts[i].p, dx = candX[c] - b[0], dy = candY[c] - b[1], dz = candZ[c] - b[2], d = dx * dx + dy * dy + dz * dz; if (d < mn) mn = d; }
-        minD[c] = mn;
+    // ---- authored composition -------------------------------------------------
+    // Authored space is the piece's 1920x1080 frame; R/FOV/START_R are in those
+    // units and everything scales to the viewport by S (see resize()). Keeping the
+    // authored numbers verbatim is what makes this a faithful port rather than a
+    // lookalike — the proportions between dot size, sphere radius and perspective
+    // are all tuned against R=120.
+    var R = 120, FOV = 1600, START_R = 8, DEG = Math.PI / 180;
+    var TOTAL = 5.0;                                  // authoredTotal — Inflate 2.2 + Fill 1.95 + Return 0.85
+    var CUE_RETURN = 4.15;                            // start of the Return scene (the zoom back down)
+    var K = TOTAL / 15;                               // scales the piece's fixed micro-durations with total length
+    var BUILD_END = TOTAL - 0.35 * K;                 // last arrival lands; the end fade begins
+    var BUILD_SPAN = BUILD_END;                       // CUES.Inflate is 0, so the build spans the whole run
+    var FADE = 0.3 * K;                               // dots → honey dot
+    var ARRIVE = 0.5 * K;                             // how long one point takes to pop in
+    var SEED_GROW = 0.6 * K;                          // the opening point growing out to the sphere
+    var SEAM = BUILD_END * 0.18;                      // how long the honey seam takes to cool to blue
+    var SPIN = reduce ? 0.12 : 0.35, PITCH = 18 * DEG;
+    var N = 260;
+    var SPEED = 1.4;                                  // 5s authored → ~3.6s per play, matching the old core's cadence
+    var MAXLOOPS = 3;                                 // play at most this many times before offering click-to-enter
+    var FIT = 0.225;                                  // sphere's widest radius as a fraction of min(W,H) — clears the title at top:66%
+    var TONES = [[116, 157, 196], [148, 188, 227], [89, 128, 166], [181, 217, 253], [242, 242, 243]];
+    var GLOW_C = [232, 166, 61];                      // honey-sun the collapse converges to, and the next loop opens from
+
+    function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+    function easeOutCubic(t) { t -= 1; return t * t * t + 1; }
+    function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1; }
+    function easeInOutSine(t) { return -(Math.cos(Math.PI * t) - 1) / 2; }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    // the one wave: zero slope at both ends → seamless loop, creamy zoom
+    function wave(t) { return Math.pow(0.5 - 0.5 * Math.cos(2 * Math.PI * t), 0.7); }
+    function rnd(i) { var s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
+
+    // ---- lattice + arrival schedule (computed ONCE) ---------------------------
+    // Fibonacci lattice for the positions; farthest-point insertion for the ORDER
+    // they arrive in. Cost is O(N²) ≈ 135k ops once at construction, not per frame.
+    var UX = new Float64Array(N), UY = new Float64Array(N), UZ = new Float64Array(N);
+    var AT = new Float64Array(N), SZ = new Float64Array(N);
+    var TONE_R = new Float64Array(N), TONE_G = new Float64Array(N), TONE_B = new Float64Array(N);
+    (function buildLattice() {
+      var GA = Math.PI * (3 - Math.sqrt(5)), EPS = 0.36, i, c;
+      for (i = 0; i < N; i++) {
+        var y = 1 - 2 * (i + EPS) / (N - 1 + 2 * EPS);
+        var rr = Math.sqrt(Math.max(0, 1 - y * y)), th = i * GA;
+        UX[i] = rr * Math.cos(th); UY[i] = y; UZ[i] = rr * Math.sin(th);
       }
-      while (pts.length < n) {
-        var best = -Infinity, bi = 0;
-        for (c = 0; c < 128; c++) if (minD[c] > best) { best = minD[c]; bi = c; }
-        var px = candX[bi], py = candY[bi], pz = candZ[bi];
-        pts.push({ p: [px, py, pz], s: 0 });
-        for (c = 0; c < 128; c++) { var ddx = candX[c] - px, ddy = candY[c] - py, ddz = candZ[c] - pz, dd = ddx * ddx + ddy * ddy + ddz * ddz; if (dd < minD[c]) minD[c] = dd; }
-      }
-    }
-    function relax(iters) {
-      var n = pts.length; if (n < 2) return;
-      for (var it = 0; it < iters; it++) {
-        for (var i = 0; i < n; i++) { fx[i] = 0; fy[i] = 0; fz[i] = 0; }
-        for (i = 0; i < n; i++) {
-          var a = pts[i].p;
-          for (var j = i + 1; j < n; j++) {
-            var b = pts[j].p, dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2], d2 = dx * dx + dy * dy + dz * dz; if (d2 < 1e-6) d2 = 1e-6;
-            var inv = 1 / (d2 * Math.sqrt(d2)); dx *= inv; dy *= inv; dz *= inv;
-            fx[i] += dx; fy[i] += dy; fz[i] += dz; fx[j] -= dx; fy[j] -= dy; fz[j] -= dz;
-          }
+      var minD = new Float64Array(N), rank = new Float64Array(N), used = new Uint8Array(N);
+      used[0] = 1; rank[0] = 0;
+      for (i = 0; i < N; i++) { var dx = UX[i] - UX[0], dy = UY[i] - UY[0], dz = UZ[i] - UZ[0]; minD[i] = dx * dx + dy * dy + dz * dz; }
+      for (var step = 1; step < N; step++) {
+        var best = -1, bd = -1;
+        for (i = 0; i < N; i++) if (!used[i] && minD[i] > bd) { bd = minD[i]; best = i; }
+        used[best] = 1; rank[best] = step;
+        for (i = 0; i < N; i++) if (!used[i]) {
+          var ex = UX[i] - UX[best], ey = UY[i] - UY[best], ez = UZ[i] - UZ[best], d = ex * ex + ey * ey + ez * ez;
+          if (d < minD[i]) minD[i] = d;
         }
-        for (i = 0; i < n; i++) {
-          var p = pts[i].p, gx = fx[i], gy = fy[i], gz = fz[i], dot = gx * p[0] + gy * p[1] + gz * p[2];
-          gx -= dot * p[0]; gy -= dot * p[1]; gz -= dot * p[2];
-          var mL = Math.sqrt(gx * gx + gy * gy + gz * gz);
-          if (mL > 1e-9) {
-            var k = Math.min(MAXSTEP, mL * GAIN) / mL, nx = p[0] + gx * k, ny = p[1] + gy * k, nz = p[2] + gz * k, L = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
-            p[0] = nx / L; p[1] = ny / L; p[2] = nz / L;
-          }
-        }
       }
-    }
+      // arrivals follow the SAME wave: sample its inverse CDF so the rate IS the
+      // zoom curve — slow open, fastest mid-loop, tapering out.
+      var M = 512, cum = new Float64Array(M + 1);
+      for (c = 1; c <= M; c++) cum[c] = cum[c - 1] + wave((c - 0.5) / M);
+      for (c = 1; c <= M; c++) cum[c] /= cum[M];
+      for (i = 0; i < N; i++) {
+        var f = rank[i] / N, lo = 0, hi = M;
+        while (lo < hi) { var mid = (lo + hi) >> 1; if (cum[mid] < f) lo = mid + 1; else hi = mid; }
+        AT[i] = (lo / M) * 0.97;
+        // normal size shrinks as the sphere fills; each point a random size below it
+        SZ[i] = lerp(6, 2.6, AT[i]) * (0.45 + 0.55 * rnd(i));
+        var tn = TONES[Math.floor(rnd(i + 7) * TONES.length)];
+        TONE_R[i] = tn[0]; TONE_G[i] = tn[1]; TONE_B[i] = tn[2];
+      }
+    })();
 
-    // timeline — forward: fill, then collapse straight DOWN to an opaque white dot. Played at 1.25x.
-    var HOLD0 = 0.3, STEP_DT = 0.2, STEP_END = HOLD0 + 5 * STEP_DT;
-    var BALL_T = 1.5, BALL_END = STEP_END + BALL_T;                 // sphere fully formed
-    var COLLAPSE = 0.7, COLLAPSE_END = BALL_END + COLLAPSE;         // shrink down to the white dot
-    var DOT_FILL = 0.45, TOTAL = COLLAPSE_END;                      // fill during the end of collapse, then loop directly to the first dot
-    var SPIN = 0.45, TILT = 0.26, ZOOM0 = 0.75, ZOOM_STEP = 0.62, ZOOM_MIN = 0.30, ZOOM_DOT = 0.045, SPEED = 1.25;
-    function ease(x) { return x * x * (3 - 2 * x); }
-    function smooth(a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
-    var lastN = -1, nowSec = 0, zoom = 1, backCull = 0, solidify = 0;   // solidify: 0 everywhere except the end dot, where the small circle fills solid
-    var finishing = false, awaitEnter = false, loops = 0, dotReal = 0, restSent = false, doneSent = false;
-    var MAXLOOPS = 3;                                               // play the genesis animation at most this many times
+    // per-frame scratch, preallocated — the frame path allocates nothing
+    var PX = new Float64Array(N), PY = new Float64Array(N), PR = new Float64Array(N), PZ = new Float64Array(N);
+    var PC = new Array(N), ORDER = new Array(N);
+    for (var _i = 0; _i < N; _i++) { PC[_i] = ''; ORDER[_i] = _i; }
+    function byDepth(a, b) { return PZ[b] - PZ[a]; }   // far side first — painter's order
 
-    function computeState() {
-      var t = nowSec, N;
-      if (t < HOLD0) { N = 1; zoom = ZOOM0 - (ZOOM0 - ZOOM_STEP) * ease(t / STEP_END); }
-      else if (t < STEP_END) { N = Math.min(6, 2 + Math.floor((t - HOLD0) / STEP_DT)); zoom = ZOOM0 - (ZOOM0 - ZOOM_STEP) * ease(t / STEP_END); }
-      else if (t < BALL_END) { var tau = (t - STEP_END) / BALL_T; N = Math.min(NMAX, Math.round(6 * Math.pow(NMAX / 6, tau))); zoom = ZOOM_STEP - (ZOOM_STEP - ZOOM_MIN) * ease(tau); }
-      else if (t < COLLAPSE_END) { var r = (t - BALL_END) / COLLAPSE; N = NMAX; zoom = ZOOM_MIN - (ZOOM_MIN - ZOOM_DOT) * ease(r); }
-      else { N = NMAX; zoom = ZOOM_DOT; }
-      backCull = smooth(8, 34, pts.length);
-      if (N !== lastN) { setCount(N); lastN = N; }
-    }
+    // ---- timeline -------------------------------------------------------------
+    var nowSec = 0, loops = 0, finishing = false, awaitEnter = false;
+    var dotReal = 0, restSent = false, doneSent = false;
+
     function timeline(dt, realDt) {
       nowSec += dt;
-      if (finishing && nowSec >= COLLAPSE_END) {          // the finishing run has reached the white dot
-        nowSec = COLLAPSE_END;                            // pin on the dot
+      if (finishing && nowSec >= TOTAL) {                 // the finishing run has reached the honey dot
+        nowSec = TOTAL;                                   // pin on the dot
         if (awaitEnter) { if (!restSent) { restSent = true; post({ t: 'resting' }); } }   // cap hit with no ready signal → rest here, wait for a click
         else { dotReal += realDt; if (dotReal >= 1.0 && !doneSent) { doneSent = true; post({ t: 'done' }); } }   // real signal → hold ~1s, then hand off to the hive
       } else if (nowSec >= TOTAL) {
-        if (++loops >= MAXLOOPS && !finishing) {          // played the animation MAXLOOPS times, still no ready signal:
-          finishing = true; awaitEnter = true;            //   finish this run down to the dot and offer click-to-enter
-        } else {
-          nowSec -= TOTAL; pts = []; lastN = -1; solidify = 0;   // keep looping; start the next run sparse again
-        }
+        if (++loops >= MAXLOOPS) { finishing = true; awaitEnter = true; nowSec = TOTAL; }   // played MAXLOOPS times, still no ready signal → rest on the dot
+        else nowSec -= TOTAL;                             // the loop is seamless: dot out, dot in
       }
-      computeState();
-      solidify = smooth(COLLAPSE_END - DOT_FILL, COLLAPSE_END, nowSec);   // fill into the solid white dot before the loop resets
-    }
-    function integrate(dt) {
-      var n = pts.length; if (!n) return;
-      var kPos = 1 - Math.pow(0.004, dt), kS = 1 - Math.pow(0.0016, dt);
-      if (n <= 3 && PIN[n]) {
-        var H = PIN[n];
-        for (var i = 0; i < n; i++) {
-          var p = pts[i].p, h = H[i];
-          p[0] += (h[0] - p[0]) * kPos; p[1] += (h[1] - p[1]) * kPos; p[2] += (h[2] - p[2]) * kPos;
-          var L = Math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) || 1; p[0] /= L; p[1] /= L; p[2] /= L;
-        }
-        // Dense sphere needs few sweeps per frame — the equilibrium spread is identical,
-        // it just settles over a couple more frames. Full ITERS at n=280 burned ~10× the
-        // CPU of the whole render for no visible difference.
-      } else relax(n > 64 ? Math.max(3, Math.round(640 / n)) : ITERS);
-      for (var j = 0; j < pts.length; j++) pts[j].s += (1 - pts[j].s) * kS;
     }
 
-    // render — solid white discs, far side culled once it reads as a solid
-    var W = 0, H = 0;
-    var proj = []; for (var _i = 0; _i < NMAX; _i++) proj.push({ sx: 0, sy: 0, z: 0, persp: 1, s: 0, front: 1 });
+    // ---- render ---------------------------------------------------------------
+    var W = 0, H = 0, S = 1, cx = 0, cy = 0;
+    function resize() {
+      cx = W / 2;
+      cy = H * 0.46 - 10;                                  // sphere a touch above centre; the title (index.html #hc-splash .m, top:66%) hugs beneath it — the pair balanced as one vertically-centred group
+      S = Math.min(W, H) * FIT / (R * 1.08 * 1.08);        // 1.08 zoom peak × 1.08 perspective peak = the widest the sphere ever gets
+    }
 
     function render() {
       ctx.clearRect(0, 0, W, H);
-      var cx = W / 2, cy = H * 0.46 - 10, R = Math.min(W, H) * 0.30 * zoom;   // up 10px; title (index.html .m) down 10px → +20px gap, group stays centred   // sphere a touch above centre; the title (index.html #hc-splash .m, top:66%) hugs beneath it — the pair balanced as one vertically-centred group
-      var yaw = Math.max(0, nowSec - HOLD0) * (reduce ? 0.15 : SPIN);
-      var cyw = Math.cos(yaw), syw = Math.sin(yaw), ctl = Math.cos(TILT), stl = Math.sin(TILT), n = pts.length, i;
-      for (i = 0; i < n; i++) {
-        var p = pts[i].p, q = proj[i];
-        var x1 = p[0] * cyw + p[2] * syw, z1 = -p[0] * syw + p[2] * cyw;
-        var y2 = p[1] * ctl - z1 * stl, z2 = p[1] * stl + z1 * ctl, persp = 3.2 / (3.2 - z2);
-        q.sx = cx + x1 * R * persp; q.sy = cy - y2 * R * persp; q.z = z2; q.persp = persp; q.s = pts[i].s;
-        q.front = 1 - backCull + backCull * smooth(-0.05, 0.28, z2);
+      var T = nowSec;
+      var fallP = easeInOutSine(clamp01((T - CUE_RETURN) / (BUILD_END - CUE_RETURN)));
+      var endFade = clamp01((T - BUILD_END) / FADE);
+      // red at the seam on both sides: ends red, opens red, cools as it inflates
+      var redP = Math.max(fallP, 1 - easeInOutSine(clamp01(T / SEAM)));
+      var zoom = START_R / R + (1.08 - START_R / R) * wave(clamp01(T / TOTAL));
+      var yaw = SPIN * T;
+      var cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(PITCH), sp = Math.sin(PITCH);
+      var seedGrow = easeInOutCubic(clamp01(T / SEED_GROW));
+      var shrink = 1 - 0.2 * fallP, i, vn = 0;
+
+      for (i = 0; i < N; i++) {
+        var at = AT[i];
+        var ap = clamp01((T - at * BUILD_SPAN) / ARRIVE);
+        if (ap <= 0 && at > 0) continue;                   // not born yet
+        var grow = at === 0 ? seedGrow : easeOutCubic(ap);
+        var vx = UX[i] * R * grow, vy = UY[i] * R * grow, vz = UZ[i] * R * grow;
+        var x1 = vx * cyw + vz * syw, z1 = -vx * syw + vz * cyw;
+        var y2 = vy * cp - z1 * sp, z2 = vy * sp + z1 * cp;
+        var sc = FOV / (FOV + z2);
+        // the opening point starts at START_R and settles to its own size
+        var r0 = at === 0 ? lerp(START_R, SZ[i], clamp01(T / SEED_GROW)) : SZ[i];
+        var k = vn++;
+        PX[k] = cx + x1 * sc * zoom * S;
+        PY[k] = cy + y2 * sc * zoom * S;
+        PR[k] = Math.max(0.05, r0 * sc * shrink * S);
+        PZ[k] = z2;
+        PC[k] = redP > 0.001
+          ? 'rgb(' + Math.round(lerp(TONE_R[i], GLOW_C[0], redP)) + ',' + Math.round(lerp(TONE_G[i], GLOW_C[1], redP)) + ',' + Math.round(lerp(TONE_B[i], GLOW_C[2], redP)) + ')'
+          : 'rgb(' + TONE_R[i] + ',' + TONE_G[i] + ',' + TONE_B[i] + ')';
       }
-      // Original sparse render EVERYWHERE; only at the end dot does 'solidify' (see timeline) grow the dots a
-      // little — just enough to merge and close the gaps — CLIPPED to the circle so white can never flood past
-      // the outline. FILLK = how much the dots grow (bigger = fills sooner, but risks looking flooded).
-      var FILLK = 0.07;
-      var order = proj.slice(0, n).sort(function (u, v) { return u.z - v.z; });
-      var clipped = solidify > 0.01;
-      if (clipped) { ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.clip(); }
-      for (var k = 0; k < order.length; k++) {
-        var o = order[k], vis = o.s * o.front; if (vis <= 0.006) continue;
-        var sparse = (n <= 6 ? 7.5 : 3.2) * o.persp * zoom;                     // untouched — how it was before
-        var radPx = Math.max(0.8, (sparse + (R * FILLK - sparse) * solidify) * (0.5 + 0.5 * o.s));
-        var shade = Math.min(1, Math.max(0, (o.z + 1) * 0.5));
-        var a = Math.min(1, ((0.5 + 0.5 * shade) + 0.35 * solidify) * vis);
-        ctx.beginPath(); ctx.arc(o.sx, o.sy, radPx, 0, 6.2832); ctx.fillStyle = 'rgba(245,249,252,' + a + ')'; ctx.fill();
+
+      if (ORDER.length !== vn) ORDER.length = vn;
+      for (i = 0; i < vn; i++) ORDER[i] = i;
+      ORDER.sort(byDepth);
+
+      ctx.globalAlpha = 1 - endFade;
+      // The piece's redglow filter is feGaussianBlur merged twice under the source.
+      // A shadowBlur per circle would cost 260 blurred fills a frame; an additive
+      // oversized pass underneath reads the same and is a plain fill.
+      if (redP > 0.02) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = (1 - endFade) * 0.11 * redP;
+        var spread = 1 + 2.4 * redP;
+        for (i = 0; i < vn; i++) {
+          var g = ORDER[i];
+          ctx.beginPath(); ctx.arc(PX[g], PY[g], PR[g] * spread, 0, 6.2832);
+          ctx.fillStyle = PC[g]; ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1 - endFade;
       }
-      if (clipped) ctx.restore();
+      for (i = 0; i < vn; i++) {
+        var d = ORDER[i];
+        ctx.beginPath(); ctx.arc(PX[d], PY[d], PR[d], 0, 6.2832);
+        ctx.fillStyle = PC[d]; ctx.fill();
+      }
+
+      // the honey dot the run converges to — and the point the next loop opens from
+      if (endFade > 0) {
+        var dr = START_R * S;
+        ctx.globalAlpha = endFade;
+        var gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, dr * 4);
+        gr.addColorStop(0, 'rgba(232,166,61,0.55)');
+        gr.addColorStop(1, 'rgba(232,166,61,0)');
+        ctx.beginPath(); ctx.arc(cx, cy, dr * 4, 0, 6.2832); ctx.fillStyle = gr; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, dr, 0, 6.2832); ctx.fillStyle = 'rgb(232,166,61)'; ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     }
 
     // Wall-clock choreography: the clamp only guards against a monster lurch after a
     // long stall, and is generous (0.25s) so dropped frames DON'T stretch the run into
-    // slow motion — the old 0.05s cap made 10fps play at ~half speed, which read as
-    // "the animation slowed down" whenever boot work contended for the thread.
+    // slow motion — a 0.05s cap would make 10fps play at ~half speed, which reads as
+    // "the animation slowed down" whenever boot work contends for the thread.
     var raf = 0, stopped = false, last = 0;
     var rafFn = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : function (cb) { return setTimeout(function () { cb(performance.now()); }, 16); };
     var cancelFn = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout;
     function frame(now) {
       if (stopped || (opts.alive && !opts.alive())) return;
       var realDt = Math.min(0.25, (now - last) / 1000); last = now;
-      timeline(realDt * SPEED, realDt); integrate(realDt * SPEED); render();
+      timeline(realDt * SPEED, realDt); render();
       raf = rafFn(frame);
     }
     function handle(m) {
       if (!m) return;
-      if (m.t === 'size') { W = m.w; H = m.h; canvas.width = Math.round(W * m.dpr); canvas.height = Math.round(H * m.dpr); ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0); }
+      if (m.t === 'size') { W = m.w; H = m.h; canvas.width = Math.round(W * m.dpr); canvas.height = Math.round(H * m.dpr); ctx.setTransform(m.dpr, 0, 0, m.dpr, 0, 0); resize(); }
       else if (m.t === 'exit') { finishing = true; awaitEnter = false; }
       else if (m.t === 'rest') { finishing = true; awaitEnter = true; }
     }
-    function start() { setCount(1); last = performance.now(); raf = rafFn(frame); }
+    function start() { last = performance.now(); raf = rafFn(frame); }
     function stop() { stopped = true; cancelFn(raf); }
     return { start: start, stop: stop, handle: handle };
   }
