@@ -599,6 +599,8 @@
   "features.roster.hint": "{on} de {total} activas · desactivada = latente en todas partes y nunca compartida · las excepciones despiertas se mantienen",
   "features.roster.bound": "· {count} vinculados a un mosaico",
   "slash.behavior": "Comportamiento — vincula uno al mosaico al que pertenece",
+  "postit.param.message": "Lo que dice la nota",
+  "postit.param.title": "Título de la nota (por defecto, el del mosaico)",
   "features.roster.on.hint": "Activar en todas partes — la despierta allí donde viva.",
   "features.roster.off.hint": "Desactivar en todas partes — queda latente en cada mosaico y se retiene de todo enjambre. Sus mosaicos la conservan; no se elimina nada.",
   "features.bound.here": "pertenece a {cell}",

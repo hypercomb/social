@@ -599,6 +599,8 @@
   "features.roster.hint": "{on} von {total} an · aus = überall ruhend und nie geteilt · Weck-Ausnahmen bleiben bestehen",
   "features.roster.bound": "· {count} an eine Kachel gebunden",
   "slash.behavior": "Verhalten — an die Kachel binden, zu der es gehört",
+  "postit.param.message": "Was auf der Notiz steht",
+  "postit.param.title": "Überschrift des Zettels (standardmäßig die der Kachel)",
   "features.roster.on.hint": "Überall einschalten — weckt es, wo immer es lebt.",
   "features.roster.off.hint": "Überall ausschalten — es ruht dann auf jeder Kachel und wird keinem Schwarm gegeben. Seine Kacheln behalten es; nichts wird gelöscht.",
   "features.bound.here": "gehört zu {cell}",

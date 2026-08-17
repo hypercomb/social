@@ -599,6 +599,8 @@
   "features.roster.hint": "{on} sur {total} actives · désactivée = dormante partout et jamais partagée · les exceptions de réveil restent en place",
   "features.roster.bound": "· {count} liés à une tuile",
   "slash.behavior": "Comportement — liez-en un à la tuile à laquelle il appartient",
+  "postit.param.message": "Ce que dit la note",
+  "postit.param.title": "Titre du pense-bête (par défaut celui de la tuile)",
   "features.roster.on.hint": "Activer partout — la réveille où qu'elle vive.",
   "features.roster.off.hint": "Désactiver partout — elle devient dormante sur chaque tuile et est retenue hors de tout essaim. Ses tuiles la gardent ; rien n'est supprimé.",
   "features.bound.here": "appartient à {cell}",

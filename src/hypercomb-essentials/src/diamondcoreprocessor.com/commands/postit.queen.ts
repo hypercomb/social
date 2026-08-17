@@ -233,6 +233,21 @@ window.ioc.register('@diamondcoreprocessor.com/PostitQueenBee', _postit)
     // A post-it cell IS its sticky: the tile is the asset, the view is the
     // presence. The hexagon never renders while the mark is on.
     replacesTileRender: true,
+    // What `meetup@postit …` can be told. The message is the primary, so the
+    // paren-less form fills it; `title:` needs naming because a note that is
+    // all heading and no body is not the common case.
+    parameters: [
+      {
+        name: 'message', type: 'text', primary: true,
+        descriptionKey: 'postit.param.message',
+        fallbackDescription: 'What the note says',
+      },
+      {
+        name: 'title', type: 'text',
+        descriptionKey: 'postit.param.title',
+        fallbackDescription: 'Heading on the sticky (defaults to the tile’s title)',
+      },
+    ],
     pheromones: ['platform:mobile', 'platform:desktop'],
   }),
 )

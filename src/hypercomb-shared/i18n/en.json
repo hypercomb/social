@@ -715,6 +715,8 @@
   "features.roster.hint": "{on} of {total} on · off = dormant everywhere and never shared · wake exceptions stay put",
   "features.roster.bound": "· {count} bound to a tile",
   "slash.behavior": "Behaviour — bind one to the tile it belongs to",
+  "postit.param.message": "What the note says",
+  "postit.param.title": "Heading on the sticky (defaults to the tile’s title)",
   "features.roster.on.hint": "Turn on everywhere — wakes it wherever it lives.",
   "features.roster.off.hint": "Turn off everywhere — it goes dormant on every tile and is withheld from every swarm. Its tiles keep it; nothing is deleted.",
   "features.bound.here": "belongs to {cell}",

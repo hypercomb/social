@@ -73,6 +73,26 @@ import {
 } from '../preferences/mobile-pheromones.js'
 import type { AgentAvatarSpec } from '../presentation/avatars/agent-avatar.js'
 
+/**
+ * One thing a behaviour can be told in a call. Descriptive only — see
+ * `VisualBeeDescriptor.parameters`.
+ */
+export type BehaviourParameter = {
+  /** How it is written as a named argument: `title: "Meetup"`. Also the label
+   *  in the signature hint. */
+  readonly name: string
+  /** What shape of value it wants. Shown in the hint as `<message>` /
+   *  `<number>`; nothing coerces on its account. */
+  readonly type?: 'text' | 'number' | 'boolean'
+  /** The parameter the PAREN-LESS form fills — the rest of the line goes here.
+   *  At most one per behaviour; it is the one the signature leads with. */
+  readonly primary?: boolean
+  /** i18n key for the one-line explanation shown beside the name. */
+  readonly descriptionKey?: string
+  /** Shown when no catalog has the key — never "no description". */
+  readonly fallbackDescription?: string
+}
+
 export type VisualBeeDescriptor = {
   /**
    * Unique identity. e.g. `'website'`, `'audio'`, `'story'`. Used as the
@@ -282,6 +302,23 @@ export type VisualBeeDescriptor = {
    * be authored first (a website page, a tutor deck).
    */
   readonly attachable?: boolean
+
+  /**
+   * What this behaviour can be TOLD, when written as a call —
+   * `meetup@postit Doors at 7` or `meetup@postit("Doors at 7", title: "Meetup")`.
+   *
+   * Declaring it does two things and only two: the command line shows the
+   * behaviour's SIGNATURE while you are choosing it (so `postit <message>`
+   * tells you it takes one at all), and it completes NAMED parameters once
+   * you open a parenthesis (so `title:` is recalled rather than remembered).
+   *
+   * It is documentation, never enforcement. The behaviour's own `applyCall`
+   * remains the single authority on what it accepts — a declaration that
+   * drifted from the code would be worse than none, so nothing validates
+   * against this list. Omit it for behaviours that take no message; the
+   * absence is what the command line reports when someone tries.
+   */
+  readonly parameters?: readonly BehaviourParameter[]
 
   /**
    * Whether this behavior's on-tile ICON opens the view in place rather than

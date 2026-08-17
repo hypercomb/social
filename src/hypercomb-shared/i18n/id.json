@@ -599,6 +599,8 @@
   "features.roster.hint": "{on} dari {total} hidup · mati = tidur di mana-mana dan tidak pernah dibagikan · pengecualian bangun tetap berlaku",
   "features.roster.bound": "· {count} terikat pada ubin",
   "slash.behavior": "Perilaku — ikat ke ubin tempatnya berada",
+  "postit.param.message": "Isi catatan",
+  "postit.param.title": "Judul catatan (bawaan: judul ubin)",
   "features.roster.on.hint": "Hidupkan di mana-mana — membangunkannya di mana pun ia berada.",
   "features.roster.off.hint": "Matikan di mana-mana — ia tidur di setiap ubin dan ditahan dari setiap kawanan. Ubinnya tetap menyimpannya; tidak ada yang dihapus.",
   "features.bound.here": "milik {cell}",

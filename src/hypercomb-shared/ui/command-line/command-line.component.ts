@@ -16,7 +16,8 @@ type TagOp = { label: string; tag: string; color?: string; remove: boolean }
 import {
   EffectBus, hypercomb, type I18nProvider,
   commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
-  parseBehaviourCall, BehaviourCallError, type BehaviourCall, type CallValue,
+  parseBehaviourCall, behaviourCallCursor, BehaviourCallError,
+  type BehaviourCall, type CallValue,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -61,6 +62,31 @@ const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
  * / email pastes don't get hijacked — and commit only consumes the input
  * when the fragment resolves to a registered behavior.
  */
+/** The shape of a declared behaviour parameter, as the registry hands it over.
+ *  Structural on purpose — shared may not import essentials, and this is the
+ *  IoC seam, so the two agree on the shape and nothing else. */
+type BehaviourParameterLike = {
+  name: string
+  type?: 'text' | 'number' | 'boolean'
+  primary?: boolean
+  descriptionKey?: string
+  fallbackDescription?: string
+}
+
+/** A behaviour's call signature as one short line — `postit <message>`, or
+ *  `postit <message>, title:` when it takes more. '' when it declares nothing,
+ *  which is how "this takes no message" is said: by saying nothing. */
+function signatureOf(bee: { view: string; parameters?: readonly BehaviourParameterLike[] }): string {
+  const params = bee.parameters ?? []
+  if (params.length === 0) return ''
+  const primary = params.find(p => p.primary)
+  const named = params.filter(p => p !== primary)
+  const parts: string[] = []
+  if (primary) parts.push(`<${primary.name}>`)
+  for (const p of named) parts.push(`${p.name}:`)
+  return `${bee.view} ${parts.join(', ')}`
+}
+
 const FEATURE_RE = /^([^@:\[\/!#~\s]+)@([^@]*)$/
 const FEATURE_REMOVE_RE = /^~([^@:\[\/!#~\s]+)@([^@]*)$/
 
@@ -245,7 +271,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active || ctx.mode !== 'feature') return []
     const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as {
-      all(): readonly { view: string; toggleIcon?: string; slashCommand?: string; descriptionKey?: string; labelKey?: string; decorationKind?: string }[]
+      all(): readonly {
+        view: string; toggleIcon?: string; slashCommand?: string; descriptionKey?: string
+        labelKey?: string; decorationKind?: string; parameters?: readonly BehaviourParameterLike[]
+      }[]
     } | undefined
     const bees = registry?.all() ?? []
     const metrics = get('@diamondcoreprocessor.com/OverlapMetrics') as { kindCount(kind: string): number } | undefined
@@ -255,10 +284,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       view: b.view,
       icon: b.toggleIcon ?? '',
       slashCommand: b.slashCommand ?? '',
-      description:
+      // The SIGNATURE leads the description when a behaviour declares one, so
+      // choosing it also tells you it takes a message — `postit <message>`.
+      // The one fact you need at that moment is the one you can't discover by
+      // pressing Enter, because pressing Enter attaches it with nothing.
+      description: [
+        signatureOf(b),
         (b.descriptionKey ? i18n?.t(b.descriptionKey) : undefined) ??
         (b.labelKey ? i18n?.t(b.labelKey) : undefined) ??
         b.view,
+      ].filter(Boolean).join(' — '),
       // Overlap count = how many tiles share this feature (the popularity metric).
       count: metrics?.kindCount(b.decorationKind ?? '') ?? 0,
     }))
@@ -274,6 +309,40 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const filtered = q ? mapped.filter(m => m.view.toLowerCase().startsWith(q)) : mapped
     // Most-shared first; alpha breaks ties so order is stable.
     return [...filtered].sort((a, b) => b.count - a.count || a.view.localeCompare(b.view))
+  })
+
+  /** The parameters a behaviour declares, or [] — resolved through IoC, so a
+   *  behaviour that declares none simply completes nothing. */
+  #behaviourParamsFor(view: string): readonly BehaviourParameterLike[] {
+    if (!view) return []
+    const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
+      { get(view: string): { parameters?: readonly BehaviourParameterLike[] } | undefined } | undefined
+    return registry?.get(view)?.parameters ?? []
+  }
+
+  /**
+   * NAMED parameters offered inside an open argument list, each written the way
+   * it is used — `title:` — so accepting one leaves the cursor where the value
+   * goes. The PRIMARY parameter is excluded: it is filled positionally (and by
+   * the whole paren-less form), so offering `message:` would teach the long way
+   * round the short one.
+   */
+  readonly #behaviourParamMatches = computed<readonly { name: string; description: string }[]>(() => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'behaviour-args') return []
+    const cursor = behaviourCallCursor(this.value())
+    if (!cursor) return []
+    const i18n = this.#i18n
+    const q = ctx.normalized
+    return this.#behaviourParamsFor(cursor.view)
+      .filter(p => !p.primary)
+      .filter(p => !q || p.name.toLowerCase().startsWith(q))
+      .map(p => ({
+        name: `${p.name}:`,
+        description:
+          (p.descriptionKey ? i18n?.t(p.descriptionKey) : undefined) ??
+          p.fallbackDescription ?? p.name,
+      }))
   })
 
   /**
@@ -294,6 +363,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (map.size) return map
     }
     if (ctx.active && ctx.mode === 'slash') return this.slashDescriptionMap()
+    if (ctx.active && ctx.mode === 'behaviour-args') {
+      const map = new Map<string, string>()
+      for (const p of this.#behaviourParamMatches()) map.set(p.name, p.description)
+      return map
+    }
     if (ctx.active && ctx.mode === 'feature') {
       const map = new Map<string, string>()
       for (const f of this.#featureMatches()) map.set(f.view, f.description)
@@ -340,6 +414,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         icon: member?.icon ?? (member?.leaf ? 'tune' : 'category'),
         options: inside.length ? inside : undefined,
       }
+    }
+
+    // A behaviour's named parameter — it tunes the call, so it borrows the
+    // same 'tune' glyph a leaf member carries.
+    if (ctx.mode === 'behaviour-args') {
+      const p = this.#behaviourParamMatches().find(m => m.name === name)
+      return { name, kind: 'member', description: p?.description, icon: 'tune' }
     }
 
     // '@' feature — name + localized description + behavior icon + overlap count.
@@ -1036,6 +1117,31 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const featRemoveCtx = v.match(FEATURE_REMOVE_RE)
     const featAddCtx = featRemoveCtx ? null : v.match(FEATURE_RE)
     const featCtx = featRemoveCtx ?? featAddCtx
+    // Inside an OPEN argument list, the vocabulary is the behaviour's declared
+    // parameters, not the behaviour catalogue — `title:` is the thing you'd
+    // otherwise have to remember. Only where a name could actually start: the
+    // cursor reader returns '' inside a string, past a colon, or anywhere a
+    // quote has appeared in the current argument.
+    const argCursor = behaviourCallCursor(v)
+    if (argCursor?.inArgs) {
+      if (argCursor.canName && this.#behaviourParamsFor(argCursor.view).length > 0) {
+        const frag = argCursor.partialName
+        return {
+          active: true,
+          mode: 'behaviour-args',
+          head: frag ? v.slice(0, v.length - frag.length) : v,
+          raw: frag,
+          normalized: frag.toLowerCase().trim(),
+          style: 'space',
+        }
+      }
+      // Inside an argument list but nowhere a name can go — mid-string, past a
+      // colon. NO other vocabulary applies here: falling through would reach
+      // the tag branch (the colon looks like `name:tag`) and start offering
+      // tag names over the value someone is typing. Silence is the answer.
+      return { active: false, mode: 'action', head: v, raw: '', normalized: '', style: 'space' }
+    }
+
     // Once the message has started — a space after the behaviour's name, or an
     // open parenthesis — the participant is writing CONTENT, not choosing a
     // behaviour. Completing against the registry there would suggest views for
@@ -1153,6 +1259,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // '@' feature mode: list registered behaviors (filtered by fragment).
     if (ctx.mode === 'feature') {
       return this.#featureMatches().map(m => m.view)
+    }
+
+    // Inside a call's argument list: the behaviour's own named parameters.
+    if (ctx.mode === 'behaviour-args') {
+      return this.#behaviourParamMatches().map(p => p.name)
     }
 
     // plain colon tag mode: the `tags` object's members — the tag pool's own

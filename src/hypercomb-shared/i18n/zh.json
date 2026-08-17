@@ -599,6 +599,8 @@
   "features.roster.hint": "{total} 项中已开启 {on} 项 · 关闭 = 处处休眠且从不共享 · 唤醒例外保持不变",
   "features.roster.bound": "· {count} 个已绑定到磁贴",
   "slash.behavior": "行为 — 将其绑定到所属的磁贴",
+  "postit.param.message": "便筺上写什么",
+  "postit.param.title": "便筺标题（默认为磁贴标题）",
   "features.roster.on.hint": "在所有地方开启 — 它在哪里就在哪里唤醒。",
   "features.roster.off.hint": "在所有地方关闭 — 它会在每个磁贴上休眠，并且不会提供给任何群组。它的磁贴仍然保留它；不会删除任何内容。",
   "features.bound.here": "属于 {cell}",

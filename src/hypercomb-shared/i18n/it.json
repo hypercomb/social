@@ -599,6 +599,8 @@
   "features.roster.hint": "{on} di {total} attive · disattivata = dormiente ovunque e mai condivisa · le eccezioni di risveglio restano",
   "features.roster.bound": "· {count} legati a un tassello",
   "slash.behavior": "Comportamento — legane uno al tassello a cui appartiene",
+  "postit.param.message": "Cosa dice la nota",
+  "postit.param.title": "Titolo del foglietto (per impostazione predefinita quello del tassello)",
   "features.roster.on.hint": "Attiva ovunque — la sveglia ovunque si trovi.",
   "features.roster.off.hint": "Disattiva ovunque — diventa dormiente su ogni tessera ed è esclusa da ogni sciame. Le sue tessere la conservano; nulla viene eliminato.",
   "features.bound.here": "appartiene a {cell}",

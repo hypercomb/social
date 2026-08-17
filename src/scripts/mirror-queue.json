@@ -798,10 +798,36 @@
       "status": "pending"
     },
     {
+      "id": "behavior-mark-on-grid",
+      "title": "Mirror the on-grid behaviour-binding mark: a tile under behaviors/binding for behavior-mark.drone.ts (the corner glyph a bound child shows on the parent's layer), joined to the binding collection, marked part, with a note explaining exact-path matching and why the parent's panel does NOT hoist the child's behaviour.",
+      "run": null,
+      "note": "Needs a live renderer on the bridge. Code landed in hypercomb-essentials presentation/tiles/behavior-mark.drone.ts.",
+      "created": "2026-08-16",
+      "status": "pending"
+    },
+    {
       "id": "splash-point-to-sphere",
       "title": "Loading page replaced with the authored 'Point to Sphere' animation",
       "run": null,
       "note": "splash.js (web + dev, byte-identical) now runs the ported design piece: Fibonacci lattice + farthest-point insertion order, one cosine wave driving zoom/arrival-rate/honey seam, closed-form in T with no per-frame simulation. Mirror owes: a tile under the loading-page/boot part of the behaviors mirror carrying a note on the model (one wave governs every metric; the loop is seamless because the end dot IS the point the next loop opens from), and the boot-contract note (ready signal -> finish to the dot -> hold 1s -> reveal; 3-play cap -> click-to-enter; 20s wall-clock backstop). note-add is additive, so this is --manual.",
+      "unattended": false,
+      "created": "2026-08-17",
+      "status": "pending"
+    },
+    {
+      "id": "controls-rail-reorder",
+      "title": "Mirror the rail-reorder verb: drag an icon in edit mode to move it",
+      "run": null,
+      "note": "controls-bar edit mode gained a second verb — click toggles a control, DRAG reorders it (hc:controls-order, a full permutation; new controls insert beside their registry neighbour; right-click the edit chevron resets). Owes: a tile under behaviors for the reorder verb + a note on the controls-bar tile saying edit mode now carries two verbs. note-add is additive, so run it once.",
+      "unattended": false,
+      "created": "2026-08-17",
+      "status": "pending"
+    },
+    {
+      "id": "behaviour-parameter-intellisense",
+      "title": "Behaviours declare their parameters — signature hint + named-argument completion",
+      "run": null,
+      "note": "VisualBeeDescriptor gained parameters?: BehaviourParameter[] ({name, type, primary, descriptionKey, fallbackDescription}) — DESCRIPTIVE ONLY, applyCall() stays the sole authority, nothing validates against it. Two surfaces: the behaviour-choosing dropdown now leads its description with the SIGNATURE ('postit <message>, title:'), and a new 'behaviour-args' completion mode offers NAMED parameters inside an open argument list (primary excluded — it is filled positionally and by the paren-less form). behaviourCallCursor() in core reads a HALF-TYPED line; canName separates 'nothing typed yet' from 'a name is impossible here'. Mirror owed: (1) note on the @ call-syntax glyph card that behaviours now declare parameters and what the two surfaces are; (2) note on the postit tile listing its declared parameters (message primary, title named). note-add is additive - manual.",
       "unattended": false,
       "created": "2026-08-17",
       "status": "pending"

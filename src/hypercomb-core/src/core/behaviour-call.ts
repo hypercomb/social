@@ -317,6 +317,100 @@ export function parseBehaviourCall(input: string): BehaviourCall | null {
   return { target, view, remove, args, named, called: true, forgiving, parenless: false }
 }
 
+/** Where a HALF-TYPED call has got to. `parseBehaviourCall` deliberately
+ *  refuses unfinished input — it answers "what did they mean", and an
+ *  unfinished line means nothing yet. Intellisense asks the other question:
+ *  "what are they in the middle of", which is a different parse and must never
+ *  throw. */
+export interface BehaviourCallCursor {
+  readonly target: string
+  /** The behaviour name typed so far — possibly a fragment. */
+  readonly view: string
+  /** True once the behaviour is named and the message has begun (a space or an
+   *  open paren), so the participant is writing content, not choosing. */
+  readonly inMessage: boolean
+  /** True inside an unclosed argument list. */
+  readonly inArgs: boolean
+  /** Inside an argument list, the bare word being typed where a NAMED argument
+   *  could go (`tit` in `postit("x", tit`). '' when nothing has been typed at
+   *  a fresh argument position — which is NOT the same as a name being
+   *  impossible; see `canName`. */
+  readonly partialName: string
+  /** True when a named argument could START at the cursor: inside an open list,
+   *  at a fresh argument, not inside a string, not past a colon, and no quote
+   *  yet in the current argument. `partialName` is '' both here (nothing typed)
+   *  and where a name is impossible — only this flag separates the two, and
+   *  offering a parameter over someone's half-typed sentence is exactly the
+   *  mistake that conflation causes. */
+  readonly canName: boolean
+}
+
+/** Read a half-typed line. Never throws, never validates — the caller decides
+ *  whether the view is real. */
+export function behaviourCallCursor(input: string): BehaviourCallCursor | null {
+  const raw = String(input ?? '')
+  const rest = raw.startsWith('~') ? raw.slice(1) : raw
+  const at = rest.indexOf('@')
+  if (at <= 0) return null
+  const target = rest.slice(0, at).trim()
+  if (!target || /[@:[\]/!#~]/.test(target)) return null
+
+  const after = rest.slice(at + 1)
+  const open = after.indexOf('(')
+  const firstSpace = after.search(/\s/)
+
+  if (open === -1 && firstSpace === -1) {
+    return { target, view: after.toLowerCase(), inMessage: false, inArgs: false, partialName: '', canName: false }
+  }
+  // A space before any paren is the paren-less message: content, not a name.
+  if (firstSpace !== -1 && (open === -1 || firstSpace < open)) {
+    return {
+      target, view: after.slice(0, firstSpace).toLowerCase(),
+      inMessage: true, inArgs: false, partialName: '', canName: false,
+    }
+  }
+
+  const view = after.slice(0, open).toLowerCase()
+  const body = after.slice(open + 1)
+  if (body.includes(')')) {
+    // The list is closed — the line is a finished call, nothing to complete.
+    return { target, view, inMessage: true, inArgs: false, partialName: '', canName: false }
+  }
+
+  // Walk the open list so we know whether the cursor sits where a NAME could
+  // start: not inside a string, and not past a colon on the current argument.
+  // A named argument never STARTS with a quote, so the moment a quote appears
+  // in the current argument there is no name to complete there — whatever
+  // follows is content. That rule is also what keeps the apostrophe honest:
+  // typing `('don't ` looks to any walker like a closed string followed by
+  // `t `, and suggesting a parameter called "t" over someone's sentence is
+  // worse than suggesting nothing. Suppression is the safe failure here.
+  let quote = ''
+  let quotedSinceSeparator = false
+  let sinceSeparator = ''
+  let afterColon = false
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]
+    if (quote) {
+      if (c === '\\') { i++; continue }
+      if (c === quote) quote = ''
+      continue
+    }
+    if (c === '"' || c === "'" || c === '`') { quote = c; quotedSinceSeparator = true; sinceSeparator = ''; continue }
+    if (c === ',') { sinceSeparator = ''; afterColon = false; quotedSinceSeparator = false; continue }
+    if (c === ':') { afterColon = true; continue }
+    sinceSeparator += c
+  }
+  const blocked = !!quote || afterColon || quotedSinceSeparator
+  const partial = blocked ? '' : sinceSeparator.trim()
+  const named = /^[A-Za-z_][A-Za-z0-9_-]*$/.test(partial) || partial === ''
+  return {
+    target, view, inMessage: true, inArgs: true,
+    partialName: named ? partial : '',
+    canName: !blocked && named,
+  }
+}
+
 /** The first positional argument as text, or ''. What a single-message
  *  behaviour (a post-it) wants, without every caller re-deriving it. */
 export function primaryText(call: BehaviourCall): string {

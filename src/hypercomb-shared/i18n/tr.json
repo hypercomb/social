@@ -599,6 +599,8 @@
   "features.roster.hint": "{total} özelliğin {on} tanesi açık · kapalı = her yerde uykuda ve hiç paylaşılmaz · uyandırma istisnaları yerinde kalır",
   "features.roster.bound": "· {count} tanesi bir karoya bağlı",
   "slash.behavior": "Davranış — ait olduğu karoya bağla",
+  "postit.param.message": "Notta ne yazıyor",
+  "postit.param.title": "Not başlığı (varsayılan: karonun başlığı)",
   "features.roster.on.hint": "Her yerde aç — yaşadığı her yerde uyandırır.",
   "features.roster.off.hint": "Her yerde kapat — her döşemede uykuya geçer ve hiçbir sürüye verilmez. Döşemeleri onu tutmaya devam eder; hiçbir şey silinmez.",
   "features.bound.here": "{cell} öğesine ait",

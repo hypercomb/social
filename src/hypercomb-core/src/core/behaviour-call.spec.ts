@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseBehaviourCall, primaryText, BehaviourCallError } from './behaviour-call.js'
+import { parseBehaviourCall, primaryText, behaviourCallCursor, BehaviourCallError } from './behaviour-call.js'
 
 const call = (s: string) => parseBehaviourCall(s)!
 
@@ -163,6 +163,64 @@ describe('behaviour call — malformed calls speak up', () => {
   it('carries the position of the problem', () => {
     try { parseBehaviourCall('t@x(a: 1, a: 2)'); expect.fail('should have thrown') }
     catch (e) { expect((e as BehaviourCallError).index).toBeGreaterThan(0) }
+  })
+})
+
+describe('behaviourCallCursor — where a half-typed line has got to', () => {
+  const cur = (s: string) => behaviourCallCursor(s)!
+
+  it('reports the behaviour fragment while it is being chosen', () => {
+    expect(cur('meetup@post')).toMatchObject({ target: 'meetup', view: 'post', inMessage: false, inArgs: false })
+  })
+
+  it('knows the message has begun at the first space', () => {
+    expect(cur('meetup@postit ')).toMatchObject({ view: 'postit', inMessage: true, inArgs: false })
+    expect(cur('meetup@postit Doors at 7')).toMatchObject({ inMessage: true, inArgs: false })
+  })
+
+  it('knows it is inside an open argument list', () => {
+    expect(cur('meetup@postit(')).toMatchObject({ view: 'postit', inArgs: true, partialName: '' })
+  })
+
+  it('offers the bare word being typed where a name could go', () => {
+    expect(cur('meetup@postit("x", tit').partialName).toBe('tit')
+    expect(cur('meetup@postit("x", ').partialName).toBe('')
+  })
+
+  it('a fresh argument position CAN take a name, with nothing typed yet', () => {
+    expect(cur('meetup@postit(')).toMatchObject({ partialName: '', canName: true })
+    expect(cur('meetup@postit("x", ')).toMatchObject({ partialName: '', canName: true })
+  })
+
+  it('offers nothing inside a string', () => {
+    expect(cur('meetup@postit("Doors at 7')).toMatchObject({ partialName: '', canName: false })
+    expect(cur(`meetup@postit('don't `)).toMatchObject({ partialName: '', canName: false })
+  })
+
+  it('offers nothing once the name is settled by a colon', () => {
+    expect(cur('meetup@postit(title: ')).toMatchObject({ partialName: '', canName: false })
+    expect(cur('meetup@postit(title: "Mee')).toMatchObject({ partialName: '', canName: false })
+  })
+
+  it('a name is impossible outside an open list', () => {
+    expect(cur('meetup@postit Doors at 7').canName).toBe(false)
+    expect(cur('meetup@postit("x")').canName).toBe(false)
+    expect(cur('meetup@post').canName).toBe(false)
+  })
+
+  it('a closed list is finished — nothing to complete', () => {
+    expect(cur('meetup@postit("x")')).toMatchObject({ inArgs: false })
+  })
+
+  it('never throws on nonsense', () => {
+    for (const s of ['', '@', 'a@', 'a@b("', 'a@b(\\', '~x@y(']) {
+      expect(() => behaviourCallCursor(s)).not.toThrow()
+    }
+  })
+
+  it('is null when the line is not a call at all', () => {
+    expect(behaviourCallCursor('hello world')).toBeNull()
+    expect(behaviourCallCursor('[a,b]:tag')).toBeNull()
   })
 })
 

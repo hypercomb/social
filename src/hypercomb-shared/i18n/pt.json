@@ -599,6 +599,8 @@
   "features.roster.hint": "{on} de {total} ligadas · desligada = dormente em todo lugar e nunca compartilhada · as exceções acordadas permanecem",
   "features.roster.bound": "· {count} ligados a um ladrilho",
   "slash.behavior": "Comportamento — ligue um ao ladrilho a que pertence",
+  "postit.param.message": "O que a nota diz",
+  "postit.param.title": "Título do lembrete (por omissão, o do ladrilho)",
   "features.roster.on.hint": "Ligar em todo lugar — acorda onde quer que ela viva.",
   "features.roster.off.hint": "Desligar em todo lugar — ela fica dormente em todos os blocos e é retida de todo enxame. Os blocos a mantêm; nada é excluído.",
   "features.bound.here": "pertence a {cell}",

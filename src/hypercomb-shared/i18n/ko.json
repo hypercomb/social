@@ -599,6 +599,8 @@
   "features.roster.hint": "{total}개 중 {on}개 켜짐 · 끄면 어디서나 잠들고 공유되지 않음 · 개별 깨우기는 그대로 유지",
   "features.roster.bound": "· {count}개가 타일에 묶임",
   "slash.behavior": "비헤이비어 — 속한 타일에 묶습니다",
+  "postit.param.message": "메모 내용",
+  "postit.param.title": "메모의 제목 (기본값은 타일 제목)",
   "features.roster.on.hint": "어디서나 켜기 — 있는 곳마다 깨웁니다.",
   "features.roster.off.hint": "어디서나 끄기 — 모든 타일에서 잠들고 모든 스웜에서 제외됩니다. 타일은 그대로 가지고 있으며 삭제되는 것은 없습니다.",
   "features.bound.here": "{cell}에 속함",
