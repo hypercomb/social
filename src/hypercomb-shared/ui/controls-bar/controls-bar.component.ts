@@ -34,6 +34,13 @@ import { secretTag } from '@hypercomb/core'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
+/** The participant's own order for the rail — a full permutation of control
+ *  ids, written the first time one is dragged into a new position. Absent (or
+ *  empty) means the registry order below stands. Ids the stored order never saw
+ *  (controls added after it was written) are placed beside the registry
+ *  neighbour they were authored next to — see #orderedRegistry — so a new
+ *  control still lands where its author put it instead of at the far end. */
+const ORDER_KEY = 'hc:controls-order'
 /** Bumped when a default flip has to reclaim ids a legacy FULL map froze.
  *  Rev 1: the magnifiers came off the rail (bab6045d), but every map written
  *  before that carried `zoom-in`/`zoom-out: true`, so the flip never reached
@@ -516,11 +523,56 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // flips an item's enabled state instead of running its action.
   #enabledMap = signal<Record<string, boolean>>(this.#restoreEnabledMap())
   #editMode = signal(false)
+  /** The participant's order, or [] while the registry order stands. */
+  #order = signal<string[]>(this.#restoreOrder())
 
-  /** Flat list of every visible control, in registry order. */
+  /** CONTROL_REGISTRY laid out in the participant's order. Controls the stored
+   *  order never saw are inserted after their nearest preceding registry
+   *  sibling, so an order written today does not exile every control added
+   *  tomorrow to the end of the rail. */
+  readonly #orderedRegistry = computed((): ControlItem[] => {
+    const order = this.#order()
+    if (!order.length) return [...CONTROL_REGISTRY]
+    const byId = new Map(CONTROL_REGISTRY.map(ctrl => [ctrl.id, ctrl] as const))
+    const out: ControlItem[] = []
+    const placed = new Set<string>()
+    for (const id of order) {
+      const ctrl = byId.get(id)
+      if (ctrl && !placed.has(id)) { out.push(ctrl); placed.add(id) }
+    }
+    for (let i = 0; i < CONTROL_REGISTRY.length; i++) {
+      const ctrl = CONTROL_REGISTRY[i]
+      if (placed.has(ctrl.id)) continue
+      let at = out.length
+      for (let j = i - 1; j >= 0; j--) {
+        const idx = out.findIndex(o => o.id === CONTROL_REGISTRY[j].id)
+        if (idx >= 0) { at = idx + 1; break }
+      }
+      out.splice(at, 0, ctrl)
+      placed.add(ctrl.id)
+    }
+    return out
+  })
+
+  /** Flat list of every visible control, in the participant's order. */
   readonly visibleControls = computed((): ControlItem[] =>
-    CONTROL_REGISTRY.filter(ctrl => this.#isControlVisible(ctrl))
+    this.#orderedRegistry().filter(ctrl => this.#isControlVisible(ctrl))
   )
+
+  #restoreOrder(): string[] {
+    try {
+      const raw = localStorage.getItem(ORDER_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed.filter(id => typeof id === 'string') : []
+    } catch { return [] }
+  }
+
+  #persistOrder(): void {
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(this.#orderedRegistry().map(c => c.id)))
+    } catch { /* ignore */ }
+  }
 
   /** The scrollable icon set: every visible control EXCEPT back. Back is a
    *  structural footer action (rendered separately, pinned to the bottom of
@@ -540,6 +592,99 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly toggleEditMode = (): void => {
     this.#editMode.update(v => !v)
+  }
+
+  // ── reorder (edit mode) ──────────────────────────────────
+  //
+  // Managing the rail is two verbs, not one: a click flips a control on or
+  // off, a DRAG moves it. The drag only exists while edit mode is on — the
+  // same gate the toggle already lives behind — so an ordinary press on a
+  // live rail is untouched. The list reorders live under the pointer (the
+  // dragged icon takes the slot it is over), and the trailing click is
+  // swallowed so a move never also toggles what it moved.
+
+  /** Id of the control currently being dragged, or null. */
+  readonly reorderId = signal<string | null>(null)
+  #reorderPointerId: number | null = null
+  #reorderStartX = 0
+  #reorderStartY = 0
+  #reorderPassedSlop = false
+
+  /** Pointerdown on a rail icon. In edit mode it arms a reorder drag; the rest
+   *  of the time it is the icon-protocol long-press it always was. */
+  readonly onCtrlPointerDown = (ctrl: ControlItem, event: PointerEvent): void => {
+    if (!this.#editMode()) { this.onIconPressDown(); return }
+    if (event.button !== 0 && event.pointerType === 'mouse') return
+    this.#reorderPointerId = event.pointerId
+    this.#reorderStartX = event.clientX
+    this.#reorderStartY = event.clientY
+    this.#reorderPassedSlop = false
+    this.reorderId.set(null)
+    this.#pendingReorderId = ctrl.id
+    window.addEventListener('pointermove', this.#onReorderMove)
+    window.addEventListener('pointerup', this.#onReorderEnd)
+    window.addEventListener('pointercancel', this.#onReorderEnd)
+  }
+
+  #pendingReorderId: string | null = null
+
+  #onReorderMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#reorderPointerId || !this.#pendingReorderId) return
+    if (!this.#reorderPassedSlop) {
+      const dx = event.clientX - this.#reorderStartX
+      const dy = event.clientY - this.#reorderStartY
+      if (Math.hypot(dx, dy) < DRAG_SLOP_PX) return
+      this.#reorderPassedSlop = true
+      this.reorderId.set(this.#pendingReorderId)
+    }
+    event.preventDefault()
+    const over = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+    const targetId = over?.closest?.('[data-ctrl-id]')?.getAttribute('data-ctrl-id')
+    if (!targetId || targetId === this.#pendingReorderId) return
+    // Only the scrollable rail participates — the footer's back button and the
+    // left rail's fixed pin/home/tour are structural, not part of the set.
+    if (!this.railControls().some(c => c.id === targetId)) return
+    this.#moveControl(this.#pendingReorderId, targetId)
+  }
+
+  /** Lift `dragId` out of the order and drop it into `targetId`'s slot. */
+  #moveControl(dragId: string, targetId: string): void {
+    const ids = this.#orderedRegistry().map(c => c.id)
+    const from = ids.indexOf(dragId)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0 || from === to) return
+    ids.splice(to, 0, ids.splice(from, 1)[0])
+    this.#order.set(ids)
+  }
+
+  #onReorderEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#reorderPointerId) return
+    window.removeEventListener('pointermove', this.#onReorderMove)
+    window.removeEventListener('pointerup', this.#onReorderEnd)
+    window.removeEventListener('pointercancel', this.#onReorderEnd)
+    this.#reorderPointerId = null
+    this.#pendingReorderId = null
+    this.reorderId.set(null)
+    if (!this.#reorderPassedSlop) return
+    this.#reorderPassedSlop = false
+    this.#persistOrder()
+    // The click this release produces belongs to the move, not to the toggle.
+    this.#swallowNextClick = true
+    setTimeout(() => { this.#swallowNextClick = false }, 0)
+  }
+
+  /** Put the rail back in registry order. Reachable from the edit-mode
+   *  chevron's context menu — a permutation you can't undo is a trap. */
+  readonly resetOrder = (): void => {
+    this.#order.set([])
+    try { localStorage.removeItem(ORDER_KEY) } catch { /* ignore */ }
+  }
+
+  /** Right-click the edit chevron while editing → back to registry order. */
+  readonly onEditToggleContext = (event: Event): void => {
+    if (!this.#editMode()) return
+    event.preventDefault()
+    this.resetOrder()
   }
 
   // ── universal icon protocol ──────────────────────────────
@@ -2736,6 +2881,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly onListDragStart = (event: PointerEvent): void => {
     if (event.pointerType === 'touch' || event.button !== 0) return
+    // While editing, a drag on the list belongs to the icon being reordered —
+    // scrolling it out from under the pointer at the same time would fight the
+    // move. The wheel still scrolls the rail.
+    if (this.#editMode()) return
     const list = event.currentTarget as HTMLElement | null
     if (!list || list.scrollHeight <= list.clientHeight) return
     this.#swallowNextClick = false

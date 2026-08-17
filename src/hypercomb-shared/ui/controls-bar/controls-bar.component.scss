@@ -892,15 +892,32 @@ $actions-corner: 12rem;
 }
 
 // In edit mode, every button gets a subtle hover hint so the user
-// knows clicking will toggle rather than run.
+// knows clicking will toggle rather than run. It is also the only mode in
+// which an icon can be DRAGGED to a new position, hence the grab cursor —
+// click toggles, drag moves.
 .ctl-btn.editing {
-  cursor: cell;
+  cursor: grab;
   &:hover {
     opacity: 0.85;
   }
   &.muted:hover {
     opacity: 0.65;
   }
+}
+
+// The icon being carried. Lifted and dimmed so the slot it currently occupies
+// reads as provisional; the rest of the list closes around it live.
+.ctl-btn.editing.reordering {
+  cursor: grabbing;
+  opacity: 0.55;
+  transform: scale(1.12);
+  transition: transform 90ms ease-out;
+}
+
+// While editing, touch must not scroll the rail out from under a drag — the
+// gesture belongs to the icon. (The mouse path is gated in onListDragStart.)
+.controls-rows.editing .controls-row {
+  touch-action: none;
 }
 
 // expand/collapse toggle

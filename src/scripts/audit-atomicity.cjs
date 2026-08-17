@@ -70,7 +70,7 @@ const KNOWN_DEBT = new Set([
  *  Extend when a new multi-page root ships. */
 const SITE_ROOTS = [
   ['dolphin'], ['dashboard'], ['humanity-centres'], ['susan'], ['howard'],
-  ['ai-inside'], ['revolucion'], ['diagrams'],
+  ['ai-inside'], ['revolucion'], ['diagrams'], ['google-docs'],
 ]
 
 // ── static sweep ────────────────────────────────────────────────────────
