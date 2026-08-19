@@ -831,6 +831,16 @@
       "unattended": false,
       "created": "2026-08-17",
       "status": "pending"
+    },
+    {
+      "id": "tile-view-app-deck",
+      "title": "mirror the phone's app deck (tile close-up)",
+      "run": null,
+      "note": "behaviors/presentation/tile-view: a collection for the deck with one tile per part - app-deck (the paged grid), app-page (two centred rows), app-cell (plate + name + tone), the page indicator (count + dots + end arrows), the dock (previous/back/next), and the three plate tones. Mark each 'part'; mark the collection 'behavior'. Notes: the pages ARE the tile's own groups; rust is keyed to the action NAME not dangerRow; the dock never pages. Needs a live renderer on the bridge; note-add is additive so do not let an idle drain re-run it.",
+      "commit": "afbd82712",
+      "unattended": false,
+      "created": "2026-08-19",
+      "status": "pending"
     }
   ]
 }
