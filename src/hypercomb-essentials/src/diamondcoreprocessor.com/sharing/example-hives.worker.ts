@@ -72,6 +72,7 @@ interface AdoptLike {
   ) => Promise<string>
 }
 interface AdoptRequestPayload { name?: string }
+interface CellCountPayload { count?: number }
 
 export class ExampleHivesWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -101,6 +102,15 @@ export class ExampleHivesWorker extends Worker {
     })
     this.onEffect('examples:dismiss', () => this.#dismiss())
 
+    // The offer is spent the moment the participant HAS content. Without
+    // this it returns as soon as they navigate into the tile they just
+    // made (that page is legitimately empty, and the card's gate is the
+    // rendered page's count) — only a reload cleared it, because the boot
+    // probe reads the ROOT. Any non-zero render retires it for good.
+    this.onEffect<CellCountPayload>('render:cell-count', (p) => {
+      if ((p?.count ?? 0) > 0) this.#retire()
+    })
+
     if (this.#dismissed()) return
     setTimeout(() => { void this.#maybeOffer(PROBE_RETRIES) }, PROBE_DELAY_MS)
   }
@@ -108,6 +118,9 @@ export class ExampleHivesWorker extends Worker {
   // ── the offer ──────────────────────────────────────────────────────
 
   #maybeOffer = async (retriesLeft: number): Promise<void> => {
+    // Re-checked per attempt: the probe is delayed and retried, and the
+    // participant may have added a tile (or dismissed) in the meantime.
+    if (this.#dismissed()) return
     try {
       const empty = await this.#rootIsEmpty()
       if (empty === 'cold') {
@@ -209,6 +222,12 @@ export class ExampleHivesWorker extends Worker {
     } finally {
       this.#busy.delete(name)
     }
+  }
+
+  /** Same persistence as a dismissal — this hive is no longer fresh. */
+  #retire = (): void => {
+    if (this.#dismissed()) return
+    this.#dismiss()
   }
 
   #dismiss = (): void => {

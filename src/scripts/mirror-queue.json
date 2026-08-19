@@ -850,6 +850,15 @@
       "unattended": false,
       "created": "2026-08-19",
       "status": "pending"
+    },
+    {
+      "id": "example-hives-retire-on-content",
+      "title": "Note the example-hives offer's retirement rule on its mirror tiles",
+      "run": null,
+      "note": "The first-boot offer now retires permanently the moment any page renders a tile (render:cell-count > 0), persisted under hc:example-hives:dismissed — it used to return when the participant navigated into the empty tile they had just made, and only a reload cleared it. Add the note to the example-hives collection tiles minted by scripts/mirror-example-hives.ts.",
+      "unattended": false,
+      "created": "2026-08-19",
+      "status": "pending"
     }
   ]
 }
