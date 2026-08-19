@@ -22,9 +22,10 @@
 // closing and reopening.
 //
 // It opens full-screen with the tile's picture, its name, its notes, and its
-// actions as rows of thumb-sized icons — five to a row, growing downward with
-// no cap, because a screen (unlike the hexagon the band has to fit inside) has
-// room for however many a tile turns out to carry.
+// actions. HOW those actions are drawn depends on the device: a pointer gets
+// the RAIL (bare glyph, caption under it, wrapping down the column), a phone
+// gets the DECK — app-icon plates, four across, TWO ROWS, and the rest a page
+// away. Same chips, same `run()`, one grammar; see `#appDeck`.
 //
 // LAST IN THE TAKEOVER ORDER. tile-overlay consults `#viewTakeoverFor(label)`
 // first, so a tile carrying a deck (`slides`) or a gallery (`lightbox`)
@@ -92,6 +93,7 @@ import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
+import { MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
 
 const SIG = /^[0-9a-f]{64}$/
 /** ABOVE THE CANVAS FLOOR, deliberately — unlike the other takeovers' 59988.
@@ -152,6 +154,13 @@ const VIEW_CSS = `
 #hc-tile-view-host [data-hc-tv-chip]:active { background: rgba(126,182,214,0.16); }
 #hc-tile-view-host [data-hc-tv-face] { transition: color 0.12s ease, opacity 0.12s ease; -webkit-tap-highlight-color: transparent; }
 #hc-tile-view-host [data-hc-tv-face][data-hot] { color: rgba(126,182,214,1); opacity: 1; }
+#hc-tile-view-host [data-hc-tv-app] { transition: transform 0.13s ease, opacity 0.13s ease; -webkit-tap-highlight-color: transparent; }
+#hc-tile-view-host [data-hc-tv-app]:active { transform: scale(0.9); }
+#hc-tile-view-host [data-hc-tv-app] [data-role="app-name"] { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#hc-tile-view-host [data-hc-tv-deck] { scrollbar-width: none; }
+#hc-tile-view-host [data-hc-tv-deck]::-webkit-scrollbar { width: 0; height: 0; display: none; }
+#hc-tile-view-host [data-hc-tv-dot] { transition: background 0.16s ease; -webkit-tap-highlight-color: transparent; }
+#hc-tile-view-host [data-hc-tv-page-arrow] { transition: opacity 0.16s ease; -webkit-tap-highlight-color: transparent; }
 `
 let viewCssInstalled = false
 const installViewCss = (): void => {
@@ -182,6 +191,18 @@ const COLUMN = 'min(100%, 23rem)'
 /** The hexagon inside that column — inset, so the column's edge is a margin
  *  around the tile rather than a line the tile touches. */
 const HEX_PORTRAIT = 'min(68vw, 17rem)'
+/** THE SAME HEXAGON, MADE ROOM FOR. With the deck under it the column is no
+ *  longer a list that scrolls — it is a fixed block that has to LAND on the
+ *  screen, and at 375×812 the full-size hexagon leaves it exactly nothing.
+ *  Measured: hexagon, name, a readable note and two rows of icons plus their
+ *  dots and dock fit at this size and overflow at the other. */
+const HEX_PORTRAIT_DECK = 'min(58vw, 14.5rem)'
+/** How much of the tile's note the deck layout shows before the note scrolls
+ *  inside itself: about three lines. The whole note is one tap away in the
+ *  note editor; what belongs on this screen is enough to recognise the tile
+ *  by. Without a cap the note either eats the menu or — worse, and what it
+ *  actually did — gets squeezed by it to a clipped sliver of one line. */
+const NOTE_PEEK = '4.4rem'
 /** THE VERTICAL RHYTHM, and the only source of it. Vertical space used to come
  *  from a flex `gap` AND per-block `margin-top`s, which compounded at some
  *  joins and not others and left the column visibly ragged. Blocks now carry
@@ -192,6 +213,69 @@ const TIGHT_GAP = '0.5rem'
 /** Corner rounding. Cold and nearly square — the hive's shape is the hexagon,
  *  and a pill-shaped control beside one reads as borrowed from another app. */
 const RADIUS = '0.35rem'
+/** ── THE PHONE'S DECK ────────────────────────────────────────────────────
+ *
+ *  A phone draws this menu as APP ICONS, not as a rail of glyphs. The rail is
+ *  right for a pointer — a cursor hits a 34px mark, and a whole column of them
+ *  is read at a glance. On a phone the same rail is twenty small marks that
+ *  all look alike at arm's length, and the one you wanted is somewhere in row
+ *  four.
+ *
+ *  So on mobile: plates you can SEE, four across, TWO ROWS under the hexagon,
+ *  and everything beyond that one page away — the layout every phone already
+ *  taught its owner. What keeps it honest is that the pages are the tile's own
+ *  groups (what it opens as · what can be made on it · what can be done to
+ *  it), so paging sideways reads down a menu instead of shuffling a bag. */
+const APP_COLS = 4
+const APP_ROWS = 2
+/** Plate edge — near enough the 60pt icon a home screen uses that the hand
+ *  already knows the target. */
+const APP_PLATE = '3.4rem'
+/** The dock's plates, one step down, the way a dock's are. */
+const APP_DOCK_PLATE = '2.9rem'
+/** ~23% of the plate: the squircle proportion. Not a circle (that is a
+ *  button) and not a box (that is a form field) — this is the one place the
+ *  cold near-square RADIUS above does not apply, because a home-screen icon
+ *  that is not squircular reads as a broken one. */
+const APP_PLATE_RADIUS = '0.8rem'
+/** Glyph inside the plate — just over half of it, as a phone icon's is. */
+const APP_GLYPH = '1.75rem'
+const APP_DOCK_GLYPH = '1.5rem'
+/** One cell: plate, its gap, and two lines of name. FIXED, so every row of
+ *  every page lands on the same baseline and the pager never changes height
+ *  under a finger that is swiping it. */
+const APP_CELL_H = '5.5rem'
+/** Between the two rows. */
+const APP_ROW_GAP = '0.35rem'
+/** Between the columns. */
+const APP_COL_GAP = '0.2rem'
+/** The three plate tones, and the only thing that carries meaning here. Cold
+ *  steel throughout — an ACCENT is the same steel turned up, never a second
+ *  hue — with one exception: destructive verbs wear a desaturated rust,
+ *  because `remove` must not look like `note`. */
+const APP_TONES = {
+  plain: {
+    fill: 'linear-gradient(180deg, rgba(126,182,214,0.155), rgba(126,182,214,0.055))',
+    edge: 'rgba(126,182,214,0.22)',
+    glyph: 'rgba(233,240,246,0.92)',
+  },
+  accent: {
+    fill: 'linear-gradient(180deg, rgba(126,182,214,0.46), rgba(126,182,214,0.20))',
+    edge: 'rgba(126,182,214,0.58)',
+    glyph: 'rgba(248,252,255,0.98)',
+  },
+  danger: {
+    fill: 'linear-gradient(180deg, rgba(214,126,126,0.30), rgba(214,126,126,0.11))',
+    edge: 'rgba(214,126,126,0.36)',
+    glyph: 'rgba(247,228,228,0.94)',
+  },
+} as const
+/** Idle dot in the page row. */
+const DOT_IDLE = 'rgba(207,226,238,0.30)'
+/** WHAT THE RUST TONE IS FOR. Not the band's `dangerRow`, which means "rides
+ *  the hidden row behind the ⋮" — sharing a link carries that flag and is not
+ *  destructive. These are the verbs that take something away. */
+const DESTRUCTIVE = new Set(['remove', 'block'])
 /** How often the suspended view asks whether it is back on top. Cheap (one
  *  hit-test), and it runs ONLY while suspended. */
 const WATCH_MS = 350
@@ -232,6 +316,10 @@ type Chip = {
   backingKey?: string
   when?: () => boolean
   accent?: boolean
+  /** Destructive — remove, block. The band already ranks these into its own
+   *  row; the phone's deck tints their plate, so the one cell you must not
+   *  hit by accident does not look like the fifteen you may. */
+  danger?: boolean
   /** Icons that aren't a plain `tile:action` — going inside, picking the tile
    *  — carry what they do here instead. Default: emit `tile:action` and close. */
   run?: () => void
@@ -649,9 +737,15 @@ export class TileViewDrone extends Drone {
     // two directions; `#applyLayout` is the only thing that differs.
     const stage = document.createElement('div')
     stage.dataset['role'] = 'stage'
+    // A DEFINITE HEIGHT, or the column cannot be clamped. `max-height:100%`
+    // alone leaves the stage's own height `auto`, and a percentage max-height
+    // resolves to `none` against an auto-height parent — so the panel's
+    // `max-height:100%` did nothing and a column taller than the screen
+    // overflowed it at BOTH ends (the tile's name clipped off the top, the
+    // dock off the bottom) instead of scrolling inside it.
     stage.style.cssText =
       `display:flex;align-items:center;justify-content:center;gap:${STACK_GAP};` +
-      'width:100%;max-width:56rem;max-height:100%;min-height:0;'
+      'width:100%;max-width:56rem;height:100%;max-height:100%;min-height:0;'
     host.appendChild(stage)
 
     // THE TILE, AS A TILE. A hexagon — the same point-top shape it has on the
@@ -734,9 +828,14 @@ export class TileViewDrone extends Drone {
       // A hairline over the notes rather than a box around them: it marks
       // where the tile's own words start without adding a second rounded
       // rectangle to a screen that is already a hexagon and a grid of cells.
+      // UNDER THE DECK IT MUST NOT SHRINK. The deck is a fixed-height block,
+      // so in a full column the note is the only thing flex can take from —
+      // and it took all of it, leaving a clipped half-line under the name.
+      // Fixed basis, capped, scrolling inside itself.
+      const deck = this.#mobile()
       noteEl.style.cssText =
-        `flex:0 1 auto;width:100%;font-size:0.95rem;line-height:1.5;color:${DIM};` +
-        'overflow-y:auto;max-height:24vh;white-space:pre-wrap;' +
+        `flex:${deck ? '0 0 auto' : '0 1 auto'};width:100%;font-size:0.95rem;line-height:1.5;` +
+        `color:${DIM};overflow-y:auto;max-height:${deck ? NOTE_PEEK : '24vh'};white-space:pre-wrap;` +
         'border-top:1px solid rgba(255,255,255,0.08);padding-top:0.75rem;' +
         'touch-action:pan-y;overscroll-behavior:contain;'
       panel.appendChild(noteEl)
@@ -748,11 +847,19 @@ export class TileViewDrone extends Drone {
     // should happen is choosing another one. Buried among edit/note/share it
     // was a needle; at the top of the column it is the answer to the question
     // the arrival asked.
-    const viewers = this.#viewerRow(label)
-    if (viewers) panel.appendChild(viewers)
-    const creations = this.#creationRow(label)
-    if (creations) panel.appendChild(creations)
-    panel.appendChild(this.#actionRow(label))
+    // ON A PHONE, ONE DECK. The three sections become the three page-groups
+    // of a paged app grid — same chips, same order, same `run()` — because a
+    // column of twenty small glyphs is not a menu a thumb can read. A pointer
+    // device keeps the rail below exactly as it was.
+    if (this.#mobile()) {
+      panel.appendChild(this.#appDeck(label))
+    } else {
+      const viewers = this.#viewerRow(label)
+      if (viewers) panel.appendChild(viewers)
+      const creations = this.#creationRow(label)
+      if (creations) panel.appendChild(creations)
+      panel.appendChild(this.#actionRow(label))
+    }
 
     this.#applyLayout()
     // A phone in a full-screen view is a phone that will be rotated. Re-lay it
@@ -807,18 +914,7 @@ export class TileViewDrone extends Drone {
    *  putting them here gives the choice an explicit target and keeps global
    *  chrome for page-wide tools. */
   #creationRow(label: string): HTMLElement | null {
-    const registry = window.ioc?.get?.<VisualBeeRegistry>(
-      '@diamondcoreprocessor.com/VisualBeeRegistry',
-    )
-    const bees = (registry?.forPlatform?.('mobile') ?? [])
-      .filter(bee =>
-        bee.adoptable !== false &&
-        bee.behavior !== 'navigation' &&
-        !hasDecorationKind(label, bee.decorationKind) &&
-        // Globally-off behaviors (the roster lens) aren't offered as
-        // creations — dormant means gone, not "available to add".
-        !isKindGloballyOff(bee.decorationKind),
-      )
+    const bees = this.#creationBees(label)
     if (bees.length === 0) return null
 
     const section = document.createElement('section')
@@ -856,14 +952,35 @@ export class TileViewDrone extends Drone {
     return row
   }
 
-  #creationChip(bee: VisualBeeDescriptor, label: string): HTMLElement {
-    return this.#chip({
+  /** The creation behaviours this tile could take on. Asked for by both the
+   *  rail and the deck, so the two can never offer different sets. */
+  #creationBees(label: string): VisualBeeDescriptor[] {
+    const registry = window.ioc?.get?.<VisualBeeRegistry>(
+      '@diamondcoreprocessor.com/VisualBeeRegistry',
+    )
+    return (registry?.forPlatform?.('mobile') ?? [])
+      .filter(bee =>
+        bee.adoptable !== false &&
+        bee.behavior !== 'navigation' &&
+        !hasDecorationKind(label, bee.decorationKind) &&
+        // Globally-off behaviors (the roster lens) aren't offered as
+        // creations — dormant means gone, not "available to add".
+        !isKindGloballyOff(bee.decorationKind),
+      )
+  }
+
+  #creationChipSpec(bee: VisualBeeDescriptor): Chip {
+    return {
       action: `view:${bee.view}`,
       glyph: bee.toggleIcon || 'add_box',
       labelKey: bee.labelKey || '',
       fallback: bee.view,
       backingKey: bee.queenKey,
-    }, label)
+    }
+  }
+
+  #creationChip(bee: VisualBeeDescriptor, label: string): HTMLElement {
+    return this.#chip(this.#creationChipSpec(bee), label)
   }
 
   #onOrientation = (): void => { this.#applyLayout() }
@@ -928,8 +1045,10 @@ export class TileViewDrone extends Drone {
       panel.style.gridColumn = ''
       stage.style.flexDirection = 'column'
       // Narrower than the column it sits in, so the tile is inset in its own
-      // screen instead of touching the same edge the icon rows do.
-      frame.style.width = HEX_PORTRAIT
+      // screen instead of touching the same edge the icon rows do — and
+      // narrower still when the deck is under it, which is a block that has to
+      // fit rather than a list that can scroll.
+      frame.style.width = this.#mobile() ? HEX_PORTRAIT_DECK : HEX_PORTRAIT
       frame.style.height = 'auto'
       panel.style.flex = '0 1 auto'
       panel.style.alignItems = 'center'
@@ -937,6 +1056,15 @@ export class TileViewDrone extends Drone {
       panel.style.justifyContent = 'flex-start'
       panel.style.maxHeight = ''
       if (row) row.style.justifyContent = 'center'
+    }
+
+    // THE PAGE IS A SCROLL OFFSET IN A BOX WHOSE WIDTH JUST CHANGED. Put it
+    // back where it was, or a rotation silently strands the deck halfway
+    // between two pages — with a heading that belongs to neither.
+    const pager = host.querySelector('[data-role="deck-pager"]') as HTMLElement | null
+    if (pager) {
+      const page = Number(pager.dataset['page'] ?? '0')
+      requestAnimationFrame(() => { pager.scrollLeft = page * pager.clientWidth })
     }
   }
 
@@ -965,45 +1093,53 @@ export class TileViewDrone extends Drone {
     row.style.flex = '0 0 auto'
     row.style.alignContent = 'flex-start'
 
-    const chips: Chip[] = [
-      // GO INSIDE leads: a branch's whole point is what is under it, and the
-      // close-up is reached by holding one.
-      this.#enterChip(label),
-      // EVERYTHING THE BAND CARRIES — edit, note, share, features, adopt,
-      // hide, block, files, invite, remove, the lot — resolved for THIS tile
-      // by the surface that owns them. These used to be a hand-written subset
-      // here, which meant a phone saw five of the twenty-odd affordances a
-      // tile can have and no bee could add to them. Minus the viewers, which
-      // `#viewerRow` has already put at the top of the column as their own
-      // question.
-      ...this.#overlayChips(label).filter(c => !c.action.startsWith(VIEW_ENTER_PREFIX)),
-      // PICK IT. The close-up is one tile; the picked set is how you act on
-      // several, and every set verb (marking, removing, the clipboard, the
-      // options ring) reads that one selection. Arming the picker on the way
-      // out means the tile you were just looking at is the first one in.
-      this.#selectChip(label),
-    ]
-
-    for (const chip of chips) {
-      if (chip.when && !chip.when()) continue
-      row.appendChild(this.#chip(chip, label))
-    }
+    for (const chip of this.#actionChips(label)) row.appendChild(this.#chip(chip, label))
     // THE ROW YOU CAME FROM, reachable without leaving. The swipe does the
     // same thing and does it faster, but a swipe is invisible — these are how
     // anyone finds out it is there. Hidden outright when there is nowhere to
     // step, so a single-tile layer never offers a dead control.
+    for (const chip of this.#walkChips()) row.appendChild(this.#chip(chip, label))
+    row.appendChild(this.#exitChip())
+    return row
+  }
+
+  /**
+   * WHAT CAN BE DONE TO THIS TILE, as chips — already filtered by `when`, so
+   * the rail and the deck can only ever render the same set.
+   *
+   * GO INSIDE leads: a branch's whole point is what is under it, and the
+   * close-up is reached by holding one. Then EVERYTHING THE BAND CARRIES —
+   * edit, note, share, features, adopt, hide, block, files, invite, remove,
+   * the lot — resolved for THIS tile by the surface that owns them (these
+   * used to be a hand-written subset, which meant a phone saw five of the
+   * twenty-odd affordances a tile can have and no bee could add to them),
+   * minus the viewers, which are their own question. Last, PICK IT: the
+   * close-up is one tile, the picked set is how you act on several, and
+   * arming the picker on the way out means the tile you were just looking at
+   * is the first one in.
+   */
+  #actionChips(label: string): Chip[] {
+    return [
+      this.#enterChip(label),
+      ...this.#overlayChips(label).filter(c => !c.action.startsWith(VIEW_ENTER_PREFIX)),
+      this.#selectChip(label),
+    ].filter(chip => !chip.when || chip.when())
+  }
+
+  /** The two steps along the row, when there is a row to step along. */
+  #walkChips(): Chip[] {
+    const chips: Chip[] = []
     for (const delta of [-1, 1] as const) {
       if (!this.#sibling(delta)) continue
-      row.appendChild(this.#chip({
+      chips.push({
         action: delta < 0 ? 'previous-tile' : 'next-tile',
         glyph: delta < 0 ? 'chevron_left' : 'chevron_right',
         labelKey: delta < 0 ? 'tile-view.previous' : 'tile-view.next',
         fallback: delta < 0 ? 'previous' : 'next',
         run: () => this.#step(delta),
-      }, label))
+      })
     }
-    row.appendChild(this.#exitChip())
-    return row
+    return chips
   }
 
   /** GO INSIDE, as a chip. Emitted as a request rather than driven from here —
@@ -1219,6 +1355,7 @@ export class TileViewDrone extends Drone {
       labelKey: action.labelKey ?? '',
       fallback: action.name.replace(/-/g, ' '),
       backingKey: action.backingKey,
+      danger: DESTRUCTIVE.has(action.name),
       // Through the overlay, not a bare emit: it owns the `tile:action`
       // payload shape (q/r/index) and the one action that is not an emit at
       // all (break-apart plays its shatter first).
@@ -1325,25 +1462,33 @@ export class TileViewDrone extends Drone {
       'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.78;text-transform:lowercase;'
     btn.appendChild(caption)
 
-    btn.addEventListener('click', () => {
-      if (chip.run) { chip.run(); return }
-      // The exact rendered name: swarm-adopt string-matches the peer entry's
-      // `name` and does NOT normalize, so a normalized label would silently
-      // match nothing.
-      this.emitEffect('tile:action', { action: chip.action, label })
-      // Whatever this opened comes up over the close-up, which waits under it
-      // — see `#suspend`. Adopt is the exception in the other direction: its
-      // own `adopt:done` listener closes the view outright, because both
-      // shells snap back to hexagons on a non-silent adopt.
-      if (chip.action !== 'adopt') this.#suspend()
-    })
+    btn.addEventListener('click', () => { this.#activate(chip, label) })
     return btn
+  }
+
+  /** RUN A CHIP. One definition, shared by the rail and the deck, so the two
+   *  presentations of one menu can never turn out to do different things. */
+  #activate(chip: Chip, label: string): void {
+    if (chip.run) { chip.run(); return }
+    // The exact rendered name: swarm-adopt string-matches the peer entry's
+    // `name` and does NOT normalize, so a normalized label would silently
+    // match nothing.
+    this.emitEffect('tile:action', { action: chip.action, label })
+    // Whatever this opened comes up over the close-up, which waits under it
+    // — see `#suspend`. Adopt is the exception in the other direction: its
+    // own `adopt:done` listener closes the view outright, because both
+    // shells snap back to hexagons on a non-silent adopt.
+    if (chip.action !== 'adopt') this.#suspend()
   }
 
   /** The way out, as an ordinary cell — it belongs in the grid with everything
    *  else rather than floating beside it at a different shape. */
   #exitChip(): HTMLElement {
-    return this.#chip({
+    return this.#chip(this.#exitChipSpec(), '')
+  }
+
+  #exitChipSpec(): Chip {
+    return {
       action: 'exit',
       glyph: 'grid_view',
       // Its OWN key, not slides' — "Back to the hive" is the right thing for a
@@ -1351,7 +1496,340 @@ export class TileViewDrone extends Drone {
       labelKey: 'tile-view.exit',
       fallback: 'back',
       run: () => this.close(),
-    }, '')
+    }
+  }
+
+  // ── the phone's deck ────────────────────────────────
+
+  /** Mobile mode per the single source of truth — the same service the quick
+   *  menu and the overlay read, so a touch laptop keeps the rail and a phone
+   *  gets the deck, and no surface has its own idea of what a phone is. */
+  #mobile(): boolean {
+    try {
+      return window.ioc?.get?.<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true
+    } catch { return false }
+  }
+
+  /**
+   * TWO ROWS OF APP ICONS UNDER THE HEXAGON, AND A PAGE FOR THE REST.
+   *
+   * The same chips the rail draws — resolved from the same overlay registry,
+   * run through the same `#activate` — presented the way a phone presents a
+   * menu: plates big enough to recognise without reading them, four across,
+   * two rows deep, everything past that one swipe away.
+   *
+   * THE PAGES ARE THE TILE'S OWN GROUPS. A group starts a page and flows onto
+   * as many as it needs, so the heading over the grid is true of every icon
+   * under it. Sideways is therefore "the next question about this tile", not
+   * "eight more of whatever was left over".
+   *
+   * HOW YOU FIND OUT THERE IS MORE — the one thing a phone cannot infer, and
+   * the reason a paged menu is usually a menu with half its verbs missing:
+   * a live count beside the heading, a row of page dots that are also the way
+   * to jump, and an arrow at each end that fades out when there is nothing
+   * that way. Three signals for one fact, deliberately.
+   *
+   * THE DOCK never pages. Stepping back along the row, out to the hive, and
+   * on along the row are about the ROW, not about this tile — they cannot be
+   * allowed to land on page three.
+   */
+  #appDeck(label: string): HTMLElement {
+    const section = document.createElement('section')
+    section.dataset['role'] = 'app-deck'
+    section.style.cssText =
+      `display:flex;flex-direction:column;align-items:stretch;gap:${TIGHT_GAP};width:100%;`
+    // A drag that starts in here is a page turn or a scroll — never the host's
+    // step to the next tile. Same claim the hex zone makes for its faces.
+    section.addEventListener('pointerdown', e => { e.stopPropagation() })
+
+    const groups: Array<{ title: string; chips: Chip[] }> = []
+    const viewers = this.#overlayChips(label)
+      .filter(c => c.action.startsWith(VIEW_ENTER_PREFIX))
+      .map(c => ({ ...c, accent: true }))
+    if (viewers.length) {
+      groups.push({ title: this.#t('tile-view.open-as', 'open as'), chips: viewers })
+    }
+    const creations = this.#creationBees(label).map(bee => this.#creationChipSpec(bee))
+    if (creations.length) {
+      groups.push({ title: this.#t('tile-view.creations', 'available creations'), chips: creations })
+    }
+    const actions = this.#actionChips(label)
+    if (actions.length) {
+      groups.push({ title: this.#t('tile-view.actions', 'actions'), chips: actions })
+    }
+
+    // BALANCED, NOT GREEDY. Filling each page to eight leaves a group of nine
+    // as a full page and then a single lonely icon, which reads as a mistake.
+    // Spreading the group over the same number of pages costs nothing and
+    // gives 5 + 4.
+    const per = APP_COLS * APP_ROWS
+    const pages: Array<{ title: string; chips: Chip[] }> = []
+    for (const group of groups) {
+      const sheets = Math.max(1, Math.ceil(group.chips.length / per))
+      const size = Math.ceil(group.chips.length / sheets)
+      for (let i = 0; i < group.chips.length; i += size) {
+        pages.push({ title: group.title, chips: group.chips.slice(i, i + size) })
+      }
+    }
+
+    if (pages.length > 0) {
+      const head = document.createElement('div')
+      head.style.cssText =
+        'display:flex;align-items:baseline;justify-content:space-between;gap:0.6rem;width:100%;'
+      const title = document.createElement('div')
+      title.dataset['role'] = 'deck-title'
+      title.style.cssText =
+        'font-size:0.74rem;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;' +
+        `color:${DIM};opacity:0.75;min-width:0;overflow:hidden;text-overflow:ellipsis;` +
+        'white-space:nowrap;text-align:left;'
+      head.appendChild(title)
+      // The count is the plainest of the three "there is more" signals, and
+      // the only one that says HOW MUCH more. Hidden (not removed) on a
+      // single-page deck, so the heading never shifts sideways between tiles.
+      const count = document.createElement('div')
+      count.dataset['role'] = 'deck-count'
+      count.style.cssText =
+        `font-size:0.7rem;font-weight:600;letter-spacing:0.08em;color:${DIM};opacity:0.6;` +
+        `flex:0 0 auto;visibility:${pages.length > 1 ? 'visible' : 'hidden'};`
+      head.appendChild(count)
+      section.appendChild(head)
+
+      const pager = document.createElement('div')
+      pager.dataset['role'] = 'deck-pager'
+      pager.setAttribute('data-hc-tv-deck', '')
+      pager.dataset['page'] = '0'
+      pager.style.cssText =
+        'display:flex;width:100%;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;' +
+        // BOTH AXES. The pager is a scroll container, which is where the
+        // host's blanket `touch-action:none` gets re-granted (the same trick
+        // the panel plays): sideways for the pages, downward so a drag that
+        // lands on an icon still scrolls the column instead of dying.
+        'touch-action:pan-x pan-y;overscroll-behavior-x:contain;' +
+        // FIXED HEIGHT, always two rows' worth. A page holding three icons
+        // must be exactly as tall as one holding eight, or the dots and the
+        // dock jump under the finger that is swiping between them.
+        `height:calc(${APP_ROWS} * ${APP_CELL_H} + ${APP_ROW_GAP});`
+      for (const page of pages) {
+        pager.appendChild(this.#appPage(page.chips, label))
+      }
+      section.appendChild(pager)
+
+      const to = (index: number): void => {
+        const at = Math.max(0, Math.min(pages.length - 1, index))
+        pager.scrollTo({ left: at * pager.clientWidth, behavior: 'smooth' })
+      }
+      const nav = document.createElement('div')
+      nav.style.cssText =
+        'display:flex;align-items:center;justify-content:center;gap:0.4rem;width:100%;' +
+        `height:1.1rem;visibility:${pages.length > 1 ? 'visible' : 'hidden'};`
+      const arrow = (delta: -1 | 1): HTMLElement => {
+        const btn = document.createElement('button')
+        btn.type = 'button'
+        btn.setAttribute('data-hc-tv-page-arrow', delta < 0 ? 'prev' : 'next')
+        btn.setAttribute('aria-label', this.#t(
+          delta < 0 ? 'tile-view.page-previous' : 'tile-view.page-next',
+          delta < 0 ? 'previous page' : 'more',
+        ))
+        btn.textContent = delta < 0 ? 'chevron_left' : 'chevron_right'
+        btn.style.cssText =
+          `font-family:'Material Symbols Outlined';font-size:1.05rem;line-height:1;color:${STEEL};` +
+          'background:none;border:none;padding:0 0.1rem;cursor:pointer;opacity:0.55;'
+        btn.addEventListener('click', () => { to(Number(pager.dataset['page'] ?? '0') + delta) })
+        return btn
+      }
+      const prev = arrow(-1)
+      nav.appendChild(prev)
+      const dots: HTMLElement[] = []
+      pages.forEach((page, index) => {
+        const dot = document.createElement('button')
+        dot.type = 'button'
+        dot.setAttribute('data-hc-tv-dot', '')
+        dot.setAttribute('aria-label', page.title)
+        dot.style.cssText =
+          'width:0.42rem;height:0.42rem;flex:0 0 auto;border-radius:50%;border:none;padding:0;' +
+          `cursor:pointer;background:${DOT_IDLE};`
+        dot.addEventListener('click', () => { to(index) })
+        nav.appendChild(dot)
+        dots.push(dot)
+      })
+      const next = arrow(1)
+      nav.appendChild(next)
+      section.appendChild(nav)
+
+      /** Everything that says WHERE YOU ARE, from one number. */
+      const sync = (): void => {
+        const width = pager.clientWidth || 1
+        const index = Math.max(0, Math.min(pages.length - 1, Math.round(pager.scrollLeft / width)))
+        pager.dataset['page'] = String(index)
+        title.textContent = pages[index]?.title ?? ''
+        count.textContent = `${index + 1}/${pages.length}`
+        dots.forEach((dot, i) => { dot.style.background = i === index ? STEEL : DOT_IDLE })
+        prev.style.opacity = index === 0 ? '0' : '0.55'
+        prev.style.pointerEvents = index === 0 ? 'none' : 'auto'
+        next.style.opacity = index === pages.length - 1 ? '0' : '0.55'
+        next.style.pointerEvents = index === pages.length - 1 ? 'none' : 'auto'
+      }
+      sync()
+      let queued = false
+      pager.addEventListener('scroll', () => {
+        if (queued) return
+        queued = true
+        requestAnimationFrame(() => { queued = false; sync() })
+      }, { passive: true })
+      // A page turn is a scroll, and the click it leaves behind would fire
+      // whichever icon the finger happened to come up over. Capture phase,
+      // same reason the host swallows its row-walk's trailing click.
+      let from = 0
+      pager.addEventListener('pointerdown', () => { from = pager.scrollLeft })
+      pager.addEventListener('click', e => {
+        if (Math.abs(pager.scrollLeft - from) < 4) return
+        e.preventDefault()
+        e.stopPropagation()
+      }, true)
+    }
+
+    // THE DOCK — the three that are about the row rather than the tile, so
+    // they stay put whatever page you are on. Unnamed: a dock is icons you
+    // already know, and captions under three plates would double its height
+    // for nothing.
+    const dock = document.createElement('div')
+    dock.dataset['role'] = 'deck-dock'
+    dock.style.cssText =
+      'display:flex;align-items:center;justify-content:center;gap:1.15rem;width:100%;' +
+      'border-top:1px solid rgba(255,255,255,0.07);padding-top:0.7rem;'
+    const walk = this.#walkChips()
+    const docked: Chip[] = [
+      ...walk.filter(c => c.action === 'previous-tile'),
+      this.#exitChipSpec(),
+      ...walk.filter(c => c.action === 'next-tile'),
+    ]
+    for (const chip of docked) {
+      dock.appendChild(this.#appCell(chip, label, {
+        size: APP_DOCK_PLATE,
+        glyph: APP_DOCK_GLYPH,
+        named: false,
+      }))
+    }
+    section.appendChild(dock)
+    return section
+  }
+
+  /**
+   * ONE PAGE OF THE DECK — two CENTRED rows, not a grid.
+   *
+   * A four-column grid fills left to right and leaves five icons as four and
+   * then a lone one hanging off the left edge. That is what a home screen
+   * does with twenty-four icons and it is wrong with five: on a centred column
+   * the orphan reads as a mistake rather than as the end of a list. So a page
+   * splits its icons EVENLY over its two rows (5 → 3+2, 7 → 4+3) and centres
+   * each row, while every cell keeps the four-column width — so icons still
+   * line up down the deck from page to page.
+   */
+  #appPage(chips: Chip[], label: string): HTMLElement {
+    const page = document.createElement('div')
+    page.dataset['role'] = 'deck-page'
+    page.style.cssText =
+      'flex:0 0 100%;scroll-snap-align:start;display:flex;flex-direction:column;' +
+      `justify-content:flex-start;gap:${APP_ROW_GAP};`
+    const split = chips.length <= APP_COLS
+      ? [chips]
+      : [chips.slice(0, Math.ceil(chips.length / 2)), chips.slice(Math.ceil(chips.length / 2))]
+    for (const rowChips of split) {
+      const row = document.createElement('div')
+      row.style.cssText =
+        `display:flex;justify-content:center;gap:${APP_COL_GAP};height:${APP_CELL_H};width:100%;`
+      for (const chip of rowChips) {
+        const cell = this.#appCell(chip, label)
+        // The four-column width, whatever this row happens to hold.
+        cell.style.flex = `0 0 calc((100% - ${APP_COLS - 1} * ${APP_COL_GAP}) / ${APP_COLS})`
+        row.appendChild(cell)
+      }
+      page.appendChild(row)
+    }
+    return page
+  }
+
+  /**
+   * ONE APP ICON: a plate you can see, and its name under it.
+   *
+   * The PLATE is the whole change from the rail. A bare glyph is a mark on
+   * black — at arm's length twenty of them are one texture, and picking one
+   * out means reading every caption. A filled plate has an outline, a size
+   * and a tone, which is what turns "the bright one, top left" into something
+   * a hand learns once and then never re-reads.
+   *
+   * Tone carries meaning and nothing else does: steel-FILLED = what this tile
+   * can be OPENED AS, plain = what it can do, rust = the verbs that destroy
+   * something. An icon whose bee has not registered yet is shaded and inert,
+   * the same readiness rule the rail applies.
+   */
+  #appCell(
+    chip: Chip,
+    label: string,
+    opts: { size?: string; glyph?: string; named?: boolean } = {},
+  ): HTMLElement {
+    const inert = !!chip.backingKey && !window.ioc?.has?.(chip.backingKey)
+    const text = this.#t(chip.labelKey, chip.fallback)
+    const size = opts.size ?? APP_PLATE
+    const glyphSize = opts.glyph ?? APP_GLYPH
+    const tone = chip.danger ? APP_TONES.danger : chip.accent ? APP_TONES.accent : APP_TONES.plain
+
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.setAttribute('aria-label', text)
+    btn.setAttribute('data-hc-tv-app', '')
+    btn.style.cssText =
+      'display:flex;flex-direction:column;align-items:center;justify-content:flex-start;' +
+      'gap:0.34rem;min-width:0;padding:0;background:none;border:none;cursor:pointer;' +
+      `color:${tone.glyph};opacity:${inert ? 0.32 : 1};` +
+      `pointer-events:${inert ? 'none' : 'auto'};`
+
+    const plate = document.createElement('span')
+    plate.style.cssText =
+      `flex:0 0 auto;width:${size};height:${size};border-radius:${APP_PLATE_RADIUS};` +
+      'box-sizing:border-box;display:flex;align-items:center;justify-content:center;' +
+      `background:${tone.fill};border:1px solid ${tone.edge};` +
+      // One hairline of light along the top edge is the entire relief. More
+      // than that and it stops being a plate and starts being a button from
+      // somebody else's application.
+      'box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);'
+
+    const icon = document.createElement('span')
+    icon.style.cssText =
+      `display:flex;align-items:center;justify-content:center;width:${glyphSize};height:${glyphSize};`
+    if (chip.svg) {
+      // Provider markup: 24×24, `fill="white"`. Sized to the plate's glyph box
+      // and recoloured through `currentColor`, so the tone tints it.
+      icon.innerHTML = chip.svg
+      const svg = icon.firstElementChild as SVGElement | null
+      if (svg) {
+        svg.setAttribute('width', '100%')
+        svg.setAttribute('height', '100%')
+        svg.setAttribute('fill', 'currentColor')
+      }
+    } else {
+      icon.textContent = chip.glyph ?? ''
+      icon.style.cssText += `font-family:'Material Symbols Outlined';font-size:${glyphSize};line-height:1;`
+    }
+    plate.appendChild(icon)
+    btn.appendChild(plate)
+
+    if (opts.named !== false) {
+      const name = document.createElement('span')
+      name.dataset['role'] = 'app-name'
+      name.textContent = text
+      // TWO lines, clipped after (the clamp lives in VIEW_CSS). "break apart"
+      // and "make it public" are two words each and both have to survive; the
+      // fixed cell height means a second line costs the row below nothing.
+      name.style.cssText =
+        'font-size:0.7rem;font-weight:600;line-height:1.18;letter-spacing:0.01em;' +
+        'width:100%;text-align:center;word-break:break-word;text-transform:lowercase;' +
+        'color:rgba(233,240,246,0.74);'
+      btn.appendChild(name)
+    }
+
+    btn.addEventListener('click', () => { this.#activate(chip, label) })
+    return btn
   }
 
   // ── content ────────────────────────────────────────────────
@@ -1448,10 +1926,16 @@ export class TileViewDrone extends Drone {
     } catch { return '' }
   }
 
+  /** A caption, or the plain-English stand-in. `t()` ECHOES THE KEY BACK when
+   *  it cannot resolve one, and a provider that registered no `labelKey` at
+   *  all asks it for the empty string — both of which used to reach the screen
+   *  verbatim, which on the deck is an icon with no name under it. */
   #t(key: string, fallback: string): string {
+    if (!key) return fallback
     try {
       const i18n = window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
-      return i18n?.t(key) ?? fallback
+      const text = i18n?.t(key)
+      return text && text !== key ? text : fallback
     } catch { return fallback }
   }
 
