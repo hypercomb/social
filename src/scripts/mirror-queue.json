@@ -841,6 +841,15 @@
       "unattended": false,
       "created": "2026-08-19",
       "status": "pending"
+    },
+    {
+      "id": "lanes-device-axis",
+      "title": "Lanes: the axis lock follows the device, not the last re-pack",
+      "run": null,
+      "note": "Note the invariant on the /lanes behaviour tile in the behaviors mirror: lane mode is one switch (on/off) and the scroll axis is DERIVED from the viewport on every read (laneStripHorizontal) — the strip always runs the screen's long way, so a rotation whose re-pack is late or swallowed can no longer leave the phone travelling ACROSS the strip. Rotation re-pack is debounced + re-armed (8 tries) and also listens on screen.orientation. Fixed after Jaime reported landscape still scrolling up/down.",
+      "unattended": false,
+      "created": "2026-08-19",
+      "status": "pending"
     }
   ]
 }

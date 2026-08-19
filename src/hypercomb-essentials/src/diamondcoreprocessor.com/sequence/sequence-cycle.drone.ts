@@ -50,12 +50,13 @@ import {
   removeSequenceTarget,
 } from './sequence-target.js'
 import {
-  setLaneScrollAxis,
+  setLaneViewport,
+  getLaneScrollAxis,
+  laneStripHorizontal,
   getLaneCount,
   setLaneCount,
   stepLaneCount,
   laneCountAtEdge,
-  type LaneScrollAxis,
 } from './lane-viewport-mode.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[] }
@@ -107,7 +108,6 @@ export class SequenceCycleDrone extends Drone {
   #fitTimer: ReturnType<typeof setTimeout> | null = null
   #commitTail: Promise<void> = Promise.resolve()
   readonly #commitRevision = new Map<string, number>()
-  #threeLaneAxis: LaneScrollAxis | null = null
   // Runtime-only owner of the lane viewport. This is intentionally not read
   // from hc:arrange-active and not restored on navigation/reload: /lanes is a
   // global action, never a property of the tile/location being visited.
@@ -118,7 +118,11 @@ export class SequenceCycleDrone extends Drone {
   // Set when WE emit render:set-orientation, so the handler ignores its own
   // echo instead of re-entering the cycle it was already inside.
   #orientationEcho = false
+  // Which way the strip was last PACKED. Written only once a re-pack actually
+  // ran, so a pass that bailed is retried rather than remembered as done.
   #laneHorizontalApplied: boolean | null = null
+  #laneReflowTimer: ReturnType<typeof setTimeout> | null = null
+  #laneReflowTries = 0
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -138,12 +142,18 @@ export class SequenceCycleDrone extends Drone {
         return
       }
       if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) return
-      this.#threeLaneAxis = this.#laneAxis()
-      setLaneScrollAxis(this.#threeLaneAxis)
+      setLaneViewport(true)
       void this.#cycle(+1, 'three-lanes')
     })
+    // Window resize covers most rotations. `orientationchange` and
+    // `screen.orientation` cover the ones where it fires late, inconsistently,
+    // or (iOS) with the pre-rotation metrics still reported — the same three
+    // signals the pixi host recenters on, for the same reason.
     window.addEventListener('resize', this.#onViewportResize)
     window.addEventListener('orientationchange', this.#onViewportResize)
+    if (screen.orientation && typeof screen.orientation.addEventListener === 'function') {
+      screen.orientation.addEventListener('change', this.#onViewportResize)
+    }
     this.onEffect<{ active?: boolean }>('mobile:mode', ({ active }) => {
       if (active) return
       this.#clearLaneMode()
@@ -255,8 +265,7 @@ export class SequenceCycleDrone extends Drone {
         this.#laneLocation = locationKey
         this.#alignOrientation()
         this.#laneHorizontalApplied = this.#laneHorizontal()
-        this.#threeLaneAxis = this.#laneAxis()
-        setLaneScrollAxis(this.#threeLaneAxis)
+        setLaneViewport(true)
         this.#publishLanes(true)
       } else {
         this.#clearLaneMode()
@@ -319,9 +328,12 @@ export class SequenceCycleDrone extends Drone {
           fitAxis?: 'both' | 'x' | 'y',
         ) => void
       }>('@diamondcoreprocessor.com/ZoomDrone')
-      const fitAxis = this.#threeLaneAxis === 'y'
+      // Fit ACROSS the strip, leaving its length free to scroll. Read live —
+      // by the time this deferred fit runs the device may have turned again.
+      const laneAxis = getLaneScrollAxis()
+      const fitAxis = laneAxis === 'y'
         ? 'x'
-        : this.#threeLaneAxis === 'x' ? 'y' : 'both'
+        : laneAxis === 'x' ? 'y' : 'both'
       zoom?.zoomToFit?.(false, 'user', fitAxis)
     }, 80)
   }
@@ -333,12 +345,11 @@ export class SequenceCycleDrone extends Drone {
   // rotated: flat-top columns packed into a left↔right strip, scroll x.
   // Keeping the portrait packing in landscape gave very wide tiles that
   // still only moved up and down — the strip pointing the wrong way.
-  #landscape = (): boolean =>
-    typeof window !== 'undefined' && window.innerWidth > window.innerHeight
-
-  #laneHorizontal = (): boolean => this.#landscape()
-
-  #laneAxis = (): LaneScrollAxis => this.#laneHorizontal() ? 'x' : 'y'
+  //
+  // The direction comes from lane-viewport-mode, which is also what the pan
+  // and zoom lock reads. One definition: the packing and the lock cannot drift
+  // apart, whatever order the rotation's events arrive in.
+  #laneHorizontal = (): boolean => laneStripHorizontal()
 
   /** Lanes owns the hex orientation while it owns the viewport: a horizontal
    *  strip is only straight with flat-top hexes, a vertical one only with
@@ -374,13 +385,37 @@ export class SequenceCycleDrone extends Drone {
 
   /** Device rotation re-lays the strip. The viewport flip is the signal —
    *  MediaQueryList change events are not delivered under an emulated
-   *  resize, and a resize is exactly what a rotation is. */
+   *  resize, and a resize is exactly what a rotation is.
+   *
+   *  A rotation is a BURST, not an event: the bar collapses, the renderer
+   *  re-lays out, and the first notification can still carry the old metrics.
+   *  So the check is DEFERRED to the settled size and RE-ARMED until the strip
+   *  is actually packed the way the device is held — reading once, on the
+   *  earliest signal, is how landscape ended up wearing the portrait packing.
+   *  The axis lock never waits for any of this (it is derived per read); this
+   *  is only about the hexes catching up. */
   #onViewportResize = (): void => {
+    this.#laneReflowTries = 0
+    this.#scheduleLaneReflow(160)
+  }
+
+  #scheduleLaneReflow = (delay: number): void => {
+    if (this.#laneReflowTimer !== null) clearTimeout(this.#laneReflowTimer)
+    this.#laneReflowTimer = setTimeout(this.#reflowLanes, delay)
+  }
+
+  #reflowLanes = (): void => {
+    this.#laneReflowTimer = null
     if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) return
-    const horizontal = this.#laneHorizontal()
-    if (horizontal === this.#laneHorizontalApplied) return
-    this.#laneHorizontalApplied = horizontal
+    if (this.#laneHorizontal() === this.#laneHorizontalApplied) return
     void this.#cycle(+1, 'three-lanes')
+    // `#cycle` records the direction only when it really re-packed. If it bailed
+    // — no tiles in the render snapshot yet, mid re-render — come back for it,
+    // a bounded number of times, so a page that simply has nothing to arrange
+    // stops asking.
+    if (this.#laneHorizontal() !== this.#laneHorizontalApplied && ++this.#laneReflowTries < 8) {
+      this.#scheduleLaneReflow(400)
+    }
   }
 
   #locationKey = (): string => {
@@ -397,9 +432,12 @@ export class SequenceCycleDrone extends Drone {
   #clearLaneMode = (): void => {
     const wasActive = this.#laneLocation !== null
     this.#laneLocation = null
-    this.#threeLaneAxis = null
     this.#laneHorizontalApplied = null
-    setLaneScrollAxis(null)
+    if (this.#laneReflowTimer !== null) {
+      clearTimeout(this.#laneReflowTimer)
+      this.#laneReflowTimer = null
+    }
+    setLaneViewport(false)
     if (wasActive) {
       this.#restoreOrientation()
       this.#publishLanes(false)
