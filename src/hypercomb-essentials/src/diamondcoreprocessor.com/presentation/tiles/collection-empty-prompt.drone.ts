@@ -11,6 +11,15 @@
 //    instead of facing a blank hex field.
 //
 // Named for the first case it served; it owns the empty-layer message now.
+//
+// AN EMPTY LAYER ALSO OPENS THE BEEHAVIORS PANEL. Nothing here is the one
+// moment you are most likely to want to give this layer a BEHAVIOUR rather
+// than a tile — a website page, a game, a view — and with the puzzle-piece
+// icon gone from tiles (tile-actions.drone.ts) the panel needs a door where
+// the question is actually asked. `features:context-open` is the same signal
+// the top rail's Beehaviors switch sends: no tile in hand, so the subject is
+// the LOADED LAYER. Offered ONCE per arrival — closing it stands, and a
+// `synchronize` over the same empty layer never raises it again.
 
 import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
@@ -50,6 +59,13 @@ class CollectionEmptyPromptDrone {
   #viewModeBound = false
   #lastSettledEmpty = false
   #checkSeq = 0
+  /** Path we have already offered the beehaviors panel for, so a repeat
+   *  reconcile over the same empty layer cannot re-open what was closed.
+   *  Cleared on navigation — arriving somewhere new asks again. */
+  #behaviorsOfferedFor: string | null = null
+  /** Whether the panel is up. Already open means already answered; raising
+   *  it again would only yank it out of the store mid-flip. */
+  #behaviorsPanelOpen = false
   /** True while the first-boot EXAMPLE HIVES offer owns the screen. It fires on
    *  exactly our `root` condition (empty hive root, first boot), so the two
    *  cards used to stack. The offer is the single view now: it carries our
@@ -83,6 +99,9 @@ class CollectionEmptyPromptDrone {
       this.#lastSettledEmpty = false
     })
     EffectBus.on('cell:removed', () => { void this.#reconcile() })
+    EffectBus.on<{ open?: boolean }>('features:viewer-state', payload => {
+      this.#behaviorsPanelOpen = payload?.open === true
+    })
     window.addEventListener('synchronize', () => { void this.#reconcile() })
     this.#ensureLineage()
     this.#ensureViewMode()
@@ -96,6 +115,7 @@ class CollectionEmptyPromptDrone {
     this.#lineage = lineage
     lineage.addEventListener('change', () => {
       this.#lastSettledEmpty = false
+      this.#behaviorsOfferedFor = null
       this.#hide()
       void this.#reconcile()
     })
@@ -156,6 +176,20 @@ class CollectionEmptyPromptDrone {
     const isCollection = segments.length === 1 && await this.#isCollectionRoot(name)
     if (seq !== this.#checkSeq) return
     this.#show(name, isCollection ? 'collection' : 'layer')
+    this.#offerBehaviors(segments)
+  }
+
+  /** Raise the beehaviors panel on THIS layer, once per arrival. The hive
+   *  root is deliberately excluded: its empty state is the onboarding path
+   *  (the examples offer / welcome notice), and a docked panel over a first
+   *  boot is noise, not help. */
+  #offerBehaviors(segments: readonly string[]): void {
+    if (segments.length === 0) return
+    const key = segments.join('/')
+    if (this.#behaviorsOfferedFor === key) return
+    this.#behaviorsOfferedFor = key
+    if (this.#behaviorsPanelOpen) return
+    EffectBus.emit('features:context-open', {})
   }
 
   async #isCollectionRoot(name: string): Promise<boolean> {

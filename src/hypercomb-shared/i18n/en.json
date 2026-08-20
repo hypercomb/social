@@ -950,7 +950,7 @@
   "sync.adopted.files.one": "adopted · 1 file",
   "sync.adopted.files.other": "adopted · {count} files",
   "swarm.kept": "\"{cell}\" is yours now — kept from the swarm",
-  "swarm.wand-hint": "hold Ctrl (⌘) and press a tile to keep it — walking only looks",
+  "swarm.wand-hint": "the shaded tiles are not yours yet — click one to add it and step inside",
   "features.visit-first": "step into \"{cell}\" first — visiting a tile makes it yours, then its behaviors are yours to switch on",
   "features.download.active.one": "downloading… · 1 file fetched",
   "features.download.active.other": "downloading… · {count} files fetched",

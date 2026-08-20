@@ -1,12 +1,23 @@
 // diamondcoreprocessor.com/presentation/tiles/show-features.drone.ts
 //
-// "Show features" — the puzzle-piece overlay icon. Click it and this drone
-// gathers the META details (NO code) of the bee features the clicked tile
-// is using, and emits `features:open` so the shell-side right-docked
-// Beehaviors panel can list them. Beehaviors are managed ONE tile at a time:
-// clicking another tile's icon REPLACES the panel's subject (its name rides
-// in the panel header) — no accumulation, so you're never acting on several
-// tiles at once. The panel also FOLLOWS NAVIGATION: while it is open, moving
+// "Show features" — the drone behind the Beehaviors panel. Given a LOCATION
+// it gathers the META details (NO code) of the bee features there and emits
+// `features:open` so the shell-side right-docked panel can list them.
+//
+// BEHAVIOURS BELONG TO WHERE YOU STAND, so there is no always-on icon on a
+// tile: the doors are the top rail's Beehaviors switch, an empty layer
+// raising the panel by itself (collection-empty-prompt.drone.ts), the
+// selection menu's features button, and the `?features=` URL intent. The one
+// PER-TILE door is earned, not standing — the puzzle piece appears on a tile
+// that carries a behaviour explicitly created for IT (a view applied here, or
+// a kind bound to this location; tile-actions' tileCarriesOwnBehavior), which
+// is how a tile added from a swarm shows what it arrived carrying. Every one
+// of these arrives here as the same `tile:action` payload.
+//
+// Beehaviors are managed ONE subject at a time: a new subject REPLACES the
+// panel's (its name rides in the panel header) — no accumulation, so you're
+// never acting on several tiles at once. The panel also FOLLOWS NAVIGATION:
+// while it is open, moving
 // through the hive re-targets it to the current location, so behaviors are
 // discovered and managed where they apply — go to the place, toggle the
 // behavior. Beehaviors are TOGGLES ONLY: tiles are never added, removed, or
@@ -418,7 +429,7 @@ export class ShowFeaturesDrone extends Drone {
       void this.#open(label, root ? [] : (segments && segments.length ? segments : undefined))
     })
 
-    // The selection context menu mirrors the per-tile puzzle-piece: when the
+    // The selection context menu is the one PER-TILE door left: when the
     // selection includes a tile that carries a feature, its "features" button
     // appears. Publish that gate on every selection change — last-value replay
     // keeps a late-mounting menu correct. Same shape FileDropDrone uses for
@@ -883,10 +894,10 @@ export class ShowFeaturesDrone extends Drone {
 
   #ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
 
-  /** True when this label carries a registered visual-bee feature — the same
-   *  honest "has features" signal the per-tile puzzle-piece uses (tile-actions'
-   *  tileHasVisualBeeFeature). Synchronous: kindsForLabel is the hot decoration
-   *  index and byDecorationKind is a Map walk. */
+  /** True when this label carries a registered visual-bee feature — the
+   *  honest "has features" signal the selection menu's button gates on.
+   *  Synchronous: kindsForLabel is the hot decoration index and
+   *  byDecorationKind is a Map walk. */
   #labelHasFeature(label: string): boolean {
     const registry = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
     if (!registry?.byDecorationKind) return false

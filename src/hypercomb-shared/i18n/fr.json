@@ -825,7 +825,7 @@
   "sync.adopted.files.one": "adopté · 1 fichier",
   "sync.adopted.files.other": "adopté · {count} fichiers",
   "swarm.kept": "\"{cell}\" est à vous désormais — gardée depuis l’essaim",
-  "swarm.wand-hint": "maintenez Ctrl (⌘) et appuyez sur une tuile pour la garder — se promener ne fait que regarder",
+  "swarm.wand-hint": "les tuiles estompées ne sont pas encore à vous — cliquez sur l'une d'elles pour l'ajouter et y entrer",
   "features.visit-first": "entrez d'abord dans \"{cell}\" — visiter une tuile la rend vôtre, vous pourrez alors activer ses fonctionnalités",
   "features.download.active.one": "téléchargement… · 1 fichier récupéré",
   "features.download.active.other": "téléchargement… · {count} fichiers récupérés",

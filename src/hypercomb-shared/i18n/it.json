@@ -825,7 +825,7 @@
   "sync.adopted.files.one": "adottato · 1 file",
   "sync.adopted.files.other": "adottato · {count} file",
   "swarm.kept": "\"{cell}\" ora è tua — tenuta dallo sciame",
-  "swarm.wand-hint": "tieni premuto Ctrl (⌘) e premi una tessera per tenerla — passeggiare guarda soltanto",
+  "swarm.wand-hint": "le tessere in ombra non sono ancora tue — fai clic su una per aggiungerla ed entrarci",
   "features.visit-first": "entra prima in \"{cell}\" — visitare una tessera la rende tua, poi potrai attivare le sue funzionalità",
   "features.download.active.one": "scaricamento… · 1 file recuperato",
   "features.download.active.other": "scaricamento… · {count} file recuperati",

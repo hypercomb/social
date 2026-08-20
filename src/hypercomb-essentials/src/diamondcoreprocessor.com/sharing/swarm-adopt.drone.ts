@@ -288,35 +288,42 @@ export class SwarmAdoptDrone extends Drone {
       dropVisitsWithin(target)
     })
 
-    // ── THE WALK IS A LOOK, NOT A KEEP ─────────────────────────────────
-    // (Jaime's ruling, 2026-08-20 — this REPLACES visit-driven
-    // acquisition.) Walking into a peer's tile writes NOTHING. You are
-    // browsing somebody else's hive: every tile you pass renders as a
-    // witness (WITNESSED_BORDER), the drill keeps serving one page per
-    // level entered, and your own hive is exactly as it was when you set
-    // out. Nothing is permanent until you say so with the wand.
+    // ── THE SIGNAL, NOT THE ACQUISITION ────────────────────────────────
+    // The visit itself still writes nothing. Taking is a GESTURE (the
+    // click below, or the ctrl sweep) — it is never a side effect of
+    // where the URL happens to point, so a deep link, a back button or a
+    // restored session browses without collecting.
     //
     // The signal is still worth hearing: it names the entered tile in the
     // debug ladder, and when the tile is one you ALREADY hold it refreshes
     // that path's provenance stamp. It never MINTS a genome record — the
-    // genome means "I took this", and a walk takes nothing.
+    // genome means "I took this", and the record is minted by the fold.
     this.onEffect<VisitPayload>('swarm:tile-visited', (p) => { void this.#onTileVisited(p) })
 
-    // ── THE WAND — ctrl + press over a witnessed tile takes it ─────────
-    // Hold ctrl (⌘ on a Mac) and press a tile: that ONE tile is yours.
-    // Drag on if you like and every witnessed tile the pointer crosses is
-    // taken too — the gesture is a wand, not a marquee. It takes the ITEM
-    // and never its children: what is inside a taken tile stays somebody
-    // else's until you walk in and wand it as well.
+    // ── EACH LAYER IS ADOPTED ON CLICK ─────────────────────────────────
+    // (Jaime's ruling, 2026-08-20.) In a swarm the tiles you don't own
+    // render SHADED — a standing state the moment you arrive, not a
+    // modifier preview. CLICK ONE AND IT IS ADDED: that tile is yours,
+    // permanently, painted at full strength, and you walk into it in the
+    // same gesture. Its children arrive shaded in their turn, and each one
+    // is added by the click that enters it. Walking a peer's hive is
+    // COLLECTING it, one layer at a time.
     //
-    // SELECT IS SUPPRESSED FOR THE WHOLE GESTURE (SelectionInputDrone):
-    // in a swarm, ctrl+press already MEANS take-this, so the ordinary
-    // add-to-selection must not also fire and get in the way.
+    // Two gestures reach this handler, both taking exactly ONE ITEM and
+    // never its children (what is inside becomes yours by clicking in
+    // there too):
+    //   • TileOverlayDrone's entry choke point — the click, the
+    //     hold-to-enter, the tap. The only take a finger can perform.
+    //   • SelectionInputDrone's ctrl (⌘) sweep — press, or drag across
+    //     several, to take without going in. SELECT IS SUPPRESSED FOR THE
+    //     WHOLE GESTURE there: in a swarm ctrl+press already MEANS
+    //     take-this, so the ordinary add-to-selection must not fire too.
     //
-    // The wand is explicit, so — unlike a walk — it CLEARS a tombstone:
-    // it is the way back in after a delete. Native tiles are untouchable
-    // (SelectionInputDrone never wands a tile that isn't external, and
-    // wandEligible demands a live peer offer at this location).
+    // A take is explicit, so — unlike a bare visit — it CLEARS a
+    // tombstone: clicking a tile you gave back adds it again. Native tiles
+    // are untouchable (both callers only ever offer a label the renderer
+    // reported EXTERNAL, and wandEligible demands a live peer offer at
+    // this location).
     this.onEffect<{ label?: string }>('swarm:wand', (p) => {
       void this.#onWand(String(p?.label ?? '').trim())
     })
@@ -370,8 +377,8 @@ export class SwarmAdoptDrone extends Drone {
         return
       }
 
-      // NOTE: `features` no longer routes here. The puzzle-piece icon is now
-      // "show features" — ShowFeaturesDrone gathers the tile's bee metadata
+      // NOTE: `features` no longer routes here. It is "show features" now
+      // — ShowFeaturesDrone gathers the tile's bee metadata
       // and opens the right-docked panel (read-only, stays in the hive). The
       // installer hand-off survives only as the panel's BENIGN staging: a
       // wanted feature's branch sig is pre-ticked when the installer is opened
@@ -716,12 +723,13 @@ export class SwarmAdoptDrone extends Drone {
     return true
   }
 
-  /** Is `label` something the wand can take right here? Synchronous, so
-   *  SelectionInputDrone can decide ON POINTERDOWN whether this press is a
-   *  wand (and therefore whether to suppress the ordinary select). Two
-   *  conditions: we are in a zone, and a live peer offers this name at the
-   *  current location. HELD-ness is the caller's half of the test — the
-   *  selection drone only ever wands a tile the renderer reported EXTERNAL
+  /** Is `label` something a take can add right here? Synchronous, so both
+   *  callers can decide in the middle of a gesture — SelectionInputDrone on
+   *  POINTERDOWN (is this press a take, and must select stand down?) and
+   *  TileOverlayDrone at the entry choke point (does walking in also add
+   *  this tile?). Two conditions: we are in a zone, and a live peer offers
+   *  this name at the current location. HELD-ness is the caller's half of
+   *  the test — both only ever offer a label the renderer reported EXTERNAL
    *  — which keeps the whole check off the async layer reads. */
   public wandEligible = (label: string): boolean => {
     const name = String(label ?? '').trim()
@@ -732,11 +740,12 @@ export class SwarmAdoptDrone extends Drone {
     return this.#peerEntryFor(name) !== null
   }
 
-  /** THE WAND (see the constructor comment). One witnessed tile per touch,
+  /** THE TAKE (see the constructor comment). One witnessed tile per touch,
    *  the item only — never its children. Every guard the fold has applies;
-   *  the wand additionally CLEARS a tombstone, because it is an explicit
-   *  gesture and that is the way back in after a delete. Giving a tile back
-   *  stays what it always was: delete it (delete is the unsubscribe). */
+   *  a take additionally CLEARS a tombstone, because it is an explicit
+   *  gesture and that is the way back in after a delete — click a tile you
+   *  gave back and you add it again. Giving a tile back stays what it always
+   *  was: delete it (delete is the unsubscribe). */
   #onWand = async (label: string): Promise<void> => {
     if (!label) { this.#visitStage('wand-no-label'); return }
     if (!this.wandEligible(label)) { this.#visitStage('wand-ineligible', { name: label }); return }
@@ -751,10 +760,10 @@ export class SwarmAdoptDrone extends Drone {
     await this.#foldPageTile(at, label, entry)
   }
 
-  /** The wand has no chrome — nothing on screen says "hold ctrl". Say it
-   *  ONCE per session, the first time the participant is standing among
-   *  tiles they could take. (An activity line, not a tile: the hive gains
-   *  nothing from a hint.) */
+  /** The shade shows WHICH tiles are takeable; it can't say what a click
+   *  will do with one. Say that ONCE per session, the first time the
+   *  participant is standing among tiles they could add. (An activity line,
+   *  not a tile: the hive gains nothing from a hint.) */
   #wandHinted = false
   #hintWand = (): void => {
     if (this.#wandHinted) return
@@ -766,7 +775,7 @@ export class SwarmAdoptDrone extends Drone {
     this.#wandHinted = true
     const i18n = this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
     EffectBus.emit('activity:log', {
-      message: i18n?.t('swarm.wand-hint') ?? 'hold Ctrl (⌘) and press a tile to keep it — walking only looks',
+      message: i18n?.t('swarm.wand-hint') ?? 'the shaded tiles are not yours yet — click one to add it and step inside',
       icon: '✦',
     })
   }

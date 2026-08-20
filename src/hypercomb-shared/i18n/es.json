@@ -825,7 +825,7 @@
   "sync.adopted.files.one": "adoptado · 1 archivo",
   "sync.adopted.files.other": "adoptado · {count} archivos",
   "swarm.kept": "\"{cell}\" ya es tuyo — guardado del enjambre",
-  "swarm.wand-hint": "mantén Ctrl (⌘) y pulsa un mosaico para quedártelo — pasear solo mira",
+  "swarm.wand-hint": "los mosaicos atenuados aún no son tuyos: haz clic en uno para añadirlo y entrar",
   "features.visit-first": "entra primero en «{cell}» — visitar un mosaico lo hace tuyo, y luego podrás activar sus características",
   "features.download.active.one": "descargando… · 1 archivo obtenido",
   "features.download.active.other": "descargando… · {count} archivos obtenidos",

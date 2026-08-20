@@ -101,9 +101,9 @@ export class ShareLinkDrone extends Drone {
 
   #ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
 
-  /** Does this tile carry a registered visual-bee feature? Same signal as
-   *  the puzzle-piece icon — decides whether the link carries the
-   *  open-the-features-panel landing intent. */
+  /** Does this tile carry a registered visual-bee feature? Same signal the
+   *  selection menu's features button gates on — decides whether the link
+   *  carries the open-the-features-panel landing intent. */
   #hasFeature(label: string): boolean {
     const registry = this.#ioc()?.get<VisualBeeRegistryLike>(VISUAL_BEE_REGISTRY_KEY)
     if (!registry?.byDecorationKind) return false

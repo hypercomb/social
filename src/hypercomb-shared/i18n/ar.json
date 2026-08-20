@@ -825,7 +825,7 @@
   "sync.adopted.files.one": "تم التبنّي · ملف واحد",
   "sync.adopted.files.other": "تم التبنّي · {count} ملفات",
   "swarm.kept": "\"{cell}\" أصبحت لك الآن — احتفظت بها من السرب",
-  "swarm.wand-hint": "اضغط مع الاستمرار على Ctrl (⌘) ثم اضغط على بلاطة لتصبح لك — التجوّل مجرد نظر",
+  "swarm.wand-hint": "البلاطات المظلّلة ليست لك بعد — اضغط على إحداها لإضافتها والدخول إليها",
   "features.visit-first": "ادخل إلى \"{cell}\" أولاً — زيارة البلاطة تجعلها لك، ثم يمكنك تفعيل ميزاتها",
   "features.download.active.one": "جارٍ التنزيل… · تم جلب ملف واحد",
   "features.download.active.other": "جارٍ التنزيل… · تم جلب {count} ملفات",

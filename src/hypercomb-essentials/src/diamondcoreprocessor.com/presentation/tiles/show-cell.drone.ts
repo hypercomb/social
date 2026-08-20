@@ -618,7 +618,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'wand:armed', 'swarm:wand']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -658,12 +658,9 @@ export class ShowCellDrone extends Drone {
    *  Bright means "preloaded — a click lands instantly". */
   readonly #shadedLabels = new Set<string>()
 
-  /** Ctrl is down over a takeable page (`wand:armed`) — witnessed tiles
-   *  render shaded so the wand's reach is visible before any press. */
-  #wandShadeArmed = false
-  /** Tiles the current wand gesture has touched — lifted out of the armed
-   *  shade and stamped with WAND_TAKING_BORDER while their fold lands.
-   *  Cleared on disarm; a re-render paints landed folds native anyway. */
+  /** Tiles a take has touched — lifted out of the swarm's standing shade
+   *  and stamped with WAND_TAKING_BORDER while their fold lands. Held until
+   *  the geometry is rebuilt; by then the landed fold paints them native. */
   readonly #wandTakingLabels = new Set<string>()
 
   /** The hideText tile currently under the pointer, if any. A tile that
@@ -5680,21 +5677,14 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // ── THE WAND'S SHADE + TOUCH ─────────────────────────────────────
-    // wand:armed — ctrl is down over a page with takeable tiles
-    // (SelectionInputDrone announces only when the wand could act). Shade
-    // every witnessed tile; lift on release. Attribute writes only — a
-    // modifier press must never cost a render pass.
-    this.onEffect<{ active?: boolean }>('wand:armed', ({ active }) => {
-      const next = active === true
-      if (next === this.#wandShadeArmed) return
-      this.#wandShadeArmed = next
-      if (!next) this.#wandTakingLabels.clear()
-      this.#applyWandShadeToExternals(next)
-    })
-    // swarm:wand — the gesture crossed this tile (transient, one per tile
-    // per gesture). Lift it out of the shade NOW and stamp the taking rim;
-    // the fold lands behind it and the next render paints it native.
+    // ── THE TAKE'S TOUCH ─────────────────────────────────────────────
+    // The swarm's shade is a STANDING state now (#cellIsShaded), so there is
+    // nothing for a modifier to arm: what you don't own is dim the whole
+    // time you stand among it.
+    // swarm:wand — a take touched this tile (transient, one per tile per
+    // gesture: the click that walks in, or a ctrl sweep). Lift it out of the
+    // shade NOW and stamp the taking rim; the fold lands behind it and the
+    // next render paints it native — yours, permanently, at full strength.
     this.onEffect<{ label?: string }>('swarm:wand', ({ label }) => {
       const l = String(label ?? '').trim()
       if (l) this.#flashWandTake(l)
@@ -7783,13 +7773,17 @@ export class ShowCellDrone extends Drone {
     // Shade off and hover affect presentation only. Neither can weaken the
     // independent readiness predicate the payload publishes.
     if (!TILE_SHADE || this.#hoverOpaqueLabel === c.label) return false
-    // THE WAND'S SHADE: while ctrl is down over a takeable page, every tile
-    // you don't own recedes — the modifier itself shows what the wand can
-    // reach. A tile the gesture has touched lifts out (it is becoming
-    // yours); the hover clause above keeps the one under the pointer bright,
-    // which reads as "this is the one you'd take". Presentation only — the
-    // fold, the guards, and ownership never consult this.
-    if (this.#wandShadeArmed && c.external && !this.#wandTakingLabels.has(c.label)) return true
+    // THE SWARM'S SHADE — A STANDING STATE, NOT A MODIFIER PREVIEW (Jaime,
+    // 2026-08-20: "when you go into a swarm there should be tiles shaded").
+    // In a zone, every tile you don't own yet recedes, from the moment you
+    // arrive: the page itself says which tiles are somebody else's and which
+    // ones you have added. A tile a take has touched lifts out (it is
+    // becoming yours) and stays out — the fold that follows paints it
+    // native, permanently and at full brightness. The hover clause above
+    // keeps the one under the pointer bright, which reads as "this is the
+    // one you'd add". Presentation only — the fold, the guards, and
+    // ownership never consult this.
+    if (c.external && !this.#wandTakingLabels.has(c.label)) return true
     return this.#cellIsPreloading(c)
   }
 
@@ -9191,30 +9185,9 @@ export class ShowCellDrone extends Drone {
     this.#writeShadeFor(next)       // lifted under the pointer
   }
 
-  /** The wand's armed shade, applied (or lifted) for every EXTERNAL cell in
-   *  one batch — a single aShaded upload however many tiles the page shows.
-   *  Lifting begins the ordinary ease-out fade so release reads as release
-   *  rather than a snap. */
-  #applyWandShadeToExternals(arming: boolean): void {
-    const shadedBuf = this.#buf?.shaded
-    if (!shadedBuf || !this.geom) return
-    let wrote = false
-    for (const [label, cell] of this.renderedCells) {
-      if (!cell.external) continue
-      const i = this.#labelToIndex.get(label)
-      if (i === undefined) continue
-      const shaded = this.#cellIsShaded(cell)
-      if (shaded) this.#shadedLabels.add(label)
-      else if (this.#shadedLabels.delete(label) && !arming) this.#beginShadeFade(label)
-      this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
-      wrote = true
-    }
-    if (wrote) this.#pushBuffer('aShaded')
-  }
-
-  /** The wand crossed `label`: lift it out of the armed shade this frame and
+  /** A take touched `label`: lift it out of the swarm's shade this frame and
    *  stamp the bright taking rim — the prominent "this one is now being
-   *  taken" the gesture needs while its fold is still landing. Attribute
+   *  added" the gesture needs while its fold is still landing. Attribute
    *  writes only; the next full render paints the tile native. */
   #flashWandTake(label: string): void {
     this.#wandTakingLabels.add(label)

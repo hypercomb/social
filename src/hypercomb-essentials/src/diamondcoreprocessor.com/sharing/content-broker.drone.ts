@@ -391,6 +391,13 @@ export class ContentBrokerDrone extends Drone {
   // every subsequent miss against a known host.
   #hostPathShape = new Map<string, 'flat' | 'legacy'>()
 
+  // Hosts that have answered 404 on the flat shape AND 404 on the legacy
+  // typed shape in the same pass: they do not serve the legacy layout, so
+  // the second probe is dead weight on every subsequent miss. Distinct from
+  // #hostPathShape, which only ever latches on a SUCCESS and therefore never
+  // fires for a host we keep missing against.
+  #hostLegacyDead = new Set<string>()
+
   // Full-cascade miss window per sig (egg semantics — see fetchBySig).
   // Cleared by new knowledge (#noteDomains / noteDomain) or lapse.
   #fetchMissUntil = new Map<string, number>()
@@ -856,9 +863,18 @@ export class ContentBrokerDrone extends Drone {
       // tries flat-then-legacy.
       const shape = this.#hostPathShape.get(host)
       const flatPath = `/${sig}`
+      // A host that has already 404'd on BOTH shapes has proven it does not
+      // speak the legacy typed path. Every later miss against it probes flat
+      // ONLY — otherwise a host that simply doesn't hold the sig re-pays the
+      // second request forever (the shape memo below latches on a 200, and a
+      // miss never produces one). Halves the request cost of every repeat
+      // miss; on the Cloudflare content worker both shapes hit the identical
+      // serveBlob, so the second probe could never have succeeded anyway.
       const tryPaths = shape === 'flat' ? [flatPath]
         : shape === 'legacy' ? [path]
+        : this.#hostLegacyDead.has(host) ? [flatPath]
         : [flatPath, path]
+      let flatMissed = false
       for (const tryPath of tryPaths) {
         const url = `${scheme}://${host}${tryPath}`
         // Bounded probe: a dead/hung host must cost at most
@@ -867,8 +883,21 @@ export class ContentBrokerDrone extends Drone {
         const probeCtrl = new AbortController()
         const probeTimer = setTimeout(() => probeCtrl.abort(), HTTP_PROBE_TIMEOUT_MS)
         try {
-          const res = await fetch(url, { cache: 'no-store', signal: probeCtrl.signal })
+          // `/<sig>` is IMMUTABLE by construction — the URL is the content
+          // hash, so a cached response can only be the right bytes, and
+          // sha256 re-gates them below regardless. Let the browser's HTTP
+          // cache answer repeats (hosts serve `max-age=31536000, immutable`,
+          // so this is a zero-network hit with no revalidation): `no-store`
+          // was discarding a free cache tier and re-billing the origin for
+          // bytes we had already downloaded. The legacy typed shape keeps
+          // `no-store` — it is not guaranteed immutable on static layouts.
+          const res = await fetch(url, {
+            cache: tryPath === flatPath ? 'default' : 'no-store',
+            signal: probeCtrl.signal,
+          })
           if (!res.ok) {
+            if (tryPath === flatPath && res.status === 404) flatMissed = true
+            if (tryPath === path && flatMissed && res.status === 404) this.#hostLegacyDead.add(host)
             // 404 = the host answered but doesn't have it; anything else
             // (5xx, 403, …) = the host isn't usefully reachable for bytes.
             this.#mintOutcome(host, res.status === 404 ? 'not-found' : 'unreachable')

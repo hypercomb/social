@@ -5,10 +5,11 @@ import { resolveCurrentLayer } from '../../history/layer-placement.js'
 import type { PlacementHistory } from '../../history/layer-placement.js'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
-import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKind, kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
 import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
+import { allBindings, behaviorPath } from '../../sharing/behavior-enablement.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -215,12 +216,11 @@ const ICONS = {
   reroll: md('M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z'),
   // sticky_note_2 — Material Icons Filled
   note: md('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z'),
+  // extension (puzzle piece) — Material Icons Filled. "Features": opens the
+  // Beehaviors panel on a tile that carries a behaviour of its OWN.
+  extension: md('M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z'),
   // sync — Material Icons Filled
   sync: md('M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'),
-  // extension (puzzle piece) — Material Icons Filled. "Features": opens the
-  // installer for a synced tile's branch so its scripts/packages can be
-  // turned on, separate from the visuals `sync` already folds in.
-  extension: md('M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z'),
   // public/globe — Material Icons Filled (make THIS tile public: "the world")
   public: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'),
   // share — Material Icons Filled (make this tile + its whole BRANCH public)
@@ -277,6 +277,48 @@ const peerTileHasInvite = (label: string): boolean => {
 const tileHasInvite = (label: string): boolean =>
   hasDecorationKind(label, SWARM_INVITE_KIND) || peerTileHasInvite(label)
 
+// True when a behaviour was explicitly created FOR THIS TILE — not for the
+// hive, and not for an ancestor. Two ways a tile carries one of its own:
+//
+//   • a decoration kind ON the tile that a registered visual bee owns — a
+//     behaviour applied right here (a website page, a post-it, a tutor deck).
+//     Read from the live VisualBeeRegistry, so a new community view takes
+//     part automatically and a drone toggled off in DCP drops out; plain
+//     images and pure-data decorations (contact cards, file attachments) are
+//     NOT features and never light it.
+//   • a behaviour BOUND to this tile's LOCATION (`/behavior bind`, and every
+//     website root, which always binds). The binding record's canonical path
+//     is the synchronous match key — see sharing/behavior-enablement.ts.
+//
+// EXACT path match, never prefix: a binding covers its subtree for DORMANCY,
+// but this icon is a statement about the tile under the pointer, and lighting
+// up every descendant of a bound root would say nothing about any of them.
+//
+// This is the whole gate. There is no always-on puzzle piece any more —
+// behaviours belong to where you STAND, and the top rail's Beehaviors switch
+// is the door for the layer you are in. The icon comes back only for a tile
+// that genuinely has something of its own to show, which is exactly what a
+// tile ADDED FROM A SWARM needs: you click it in, it paints in full, and the
+// features it arrived carrying say so on its own hexagon.
+const tileCarriesOwnBehavior = (label: string): boolean => {
+  const registry = window.ioc.get<{ byDecorationKind?: (kind: string) => unknown }>(
+    '@diamondcoreprocessor.com/VisualBeeRegistry',
+  )
+  if (registry?.byDecorationKind) {
+    for (const kind of kindsForLabel(label)) {
+      if (registry.byDecorationKind(kind)) return true
+    }
+  }
+  const segments = (window.ioc.get<{ explorerSegments?: () => readonly string[] }>(
+    '@hypercomb.social/Lineage',
+  )?.explorerSegments?.() ?? []) as readonly string[]
+  const here = behaviorPath([...segments, label])
+  for (const bindings of Object.values(allBindings())) {
+    for (const b of bindings) if (b.path === here) return true
+  }
+  return false
+}
+
 // Login-style glyph (arrow stepping through a doorway) — "step into this
 // meeting place". Material "login" path, verbatim.
 const INVITE_ICON = md('M11 7l-1.41 1.41L12.17 11H3v2h9.17l-2.58 2.59L11 17l5-5zM20 19h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z')
@@ -285,9 +327,9 @@ const INVITE_ICON = md('M11 7l-1.41 1.41L12.17 11H3v2h9.17l-2.58 2.59L11 17l5-5z
 // is core chrome (in ICON_REGISTRY) but the bee that services its tile:action
 // isn't loaded until the post-paint background wave. Until that bee registers,
 // the overlay renders the affordance shaded + inert (see tile-overlay's
-// #updatePerTileVisibility) — the "shaded until preloaded" rule, applied to
-// features. Self-backed actions (serviced by THIS drone, or whose icon-provider
-// IS the handler, e.g. edit) are absent here and never gate.
+// #updatePerTileVisibility) — the "shaded until preloaded" rule. Self-backed
+// actions (serviced by THIS drone, or whose icon-provider IS the handler,
+// e.g. edit) are absent here and never gate.
 const BACKING_KEY_BY_ACTION: Record<string, string> = {
   'promote-to-parent': '@diamondcoreprocessor.com/MoveDrone',
   'features': '@diamondcoreprocessor.com/ShowFeaturesDrone',
@@ -348,35 +390,26 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'public-own', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   { name: 'promote-to-parent', svgMarkup: ICONS.arrowUpward, hoverTint: 0xc8d4ff, profile: 'public-own', visibleWhen: () => (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).length > 0, labelKey: 'action.promote-to-parent', descriptionKey: 'action.promote-to-parent.description' },
-  // NOTE: there is NO `sync` button and NO `adopt` button. THE WALK IS THE
-  // ADOPT: stepping into a peer-offered tile folds it (SwarmAdoptDrone's
-  // swarm:tile-visited handler), and a held tile a peer diverged on shows
-  // its new children as peer tiles the moment you step inside — entering
-  // them takes them, additively. The divergence scan stays detection-only;
-  // its answer now surfaces as the peer tiles themselves rather than an
-  // icon. `sync` stays programmatic and never becomes an icon.
-  // `features` (the puzzle-piece) is the BEEHAVIORS window: click it and
-  // ShowFeaturesDrone gathers the META details (no code) of this tile's
-  // beehaviors and opens the right-docked panel — you stay in the hive.
-  // Clicking another tile's icon ADDS its rows to the same list.
+  // NOTE: there is NO `sync` button and NO `adopt` button. THE CLICK IS THE
+  // ADOPT: in a swarm the tiles you don't own render shaded, and clicking one
+  // adds it while walking you in (tile-overlay's entry choke point →
+  // SwarmAdoptDrone's one-level fold). A held tile a peer diverged on shows
+  // its new children as shaded peer tiles the moment you step inside —
+  // clicking them adds them too, additively. The divergence scan stays
+  // detection-only; its answer surfaces as the peer tiles themselves rather
+  // than an icon. `sync` stays programmatic and never becomes an icon.
   //
-  // ALWAYS VISIBLE on every held tile — `private` (browsing your own hive)
-  // and `public-own` (your tile in public mode) — with NO feature-present /
-  // peer-broadcast gate. The panel is the STANDARD, discoverable way in (turn
-  // beehaviors on/off, adopt, review a peer's diff), so a participant never
-  // has to reach for a slash command just to FIND it; the slash commands stay
-  // as the power-user shortcut for when they're comfortable. On a tile with
-  // nothing yet the panel simply shows "no beehaviors" plus the available
-  // list; the peer diff + adopt rows still surface for a held tile a live peer
-  // also broadcasts. Click handled by ShowFeaturesDrone (action 'features').
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', labelKey: 'action.features', descriptionKey: 'action.features.description' },
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  // `features` (the puzzle piece) is NOT an always-on icon: beehaviours
+  // belong to where you STAND, so the panel's own doors are the top rail's
+  // Beehaviors switch and an empty layer raising it by itself
+  // (collection-empty-prompt.drone.ts). What DOES earn a per-tile icon is a
+  // behaviour explicitly created FOR THIS TILE — a view applied here, or a
+  // kind bound to this location (tileCarriesOwnBehavior). A tile added from
+  // a swarm is the case that matters: once it is yours it paints in full,
+  // and the features assigned to it show on it.
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, featureRow: true, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileCarriesOwnBehavior(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, featureRow: true, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileCarriesOwnBehavior(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // ── public-external profile ──
-  // `features` on a PEER tile lets a visitor read what behaviors a tile
-  // carries BEFORE walking into it — the behaviors opt-in surface needs a
-  // pre-acquisition door now that visiting acquires. ShowFeaturesDrone
-  // answers with the step-inside guidance until the tile is local.
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-external', labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);
   // re-registering for `public-external` lets the same handler apply
   // when the tile is a peer-only mesh entry. Same dispatch through
@@ -417,22 +450,18 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // `remove` is last: the overlay orders dangerRow icons to the end, so delete
   // sits at the tail of the bottom row rather than under the entering pointer.
-  'private': ['command', 'edit', 'features', 'break-apart', 'files', 'invite', 'remove'],
+  'private': ['command', 'edit', 'break-apart', 'features', 'files', 'invite', 'remove'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode. `remove` rides the same ordering rule
-  // as private. `features` (puzzle-piece) opens the SHOW FEATURES
-  // panel for any tile carrying a registered visual bee — it stays in the
-  // hive and has NO peer-broadcast requirement. (No `sync`, no `adopt`
-  // icon — taking is the wand.)
-  'public-own': ['features', 'break-apart', 'files', 'invite', 'remove'],
+  // as private. (No `sync`, no `adopt` icon — taking is the wand.)
+  'public-own': ['break-apart', 'features', 'files', 'invite', 'remove'],
   // Peer-only mesh tiles. There is still no adopt button, and walking in
   // takes NOTHING (2026-08-20): acquisition is the WAND — ctrl (⌘) +
   // press over the tile, which takes that one item (SwarmAdoptDrone's
-  // one-level fold). `features` reads the tile's behavior metadata
-  // before you step in; `hide` dismisses a peer tile from view without
+  // one-level fold). `hide` dismisses a peer tile from view without
   // taking ownership.
-  'public-external': ['features', 'hide', 'files', 'invite'],
+  'public-external': ['hide', 'files', 'invite'],
 }
 
 // ── Position computation ──────────────────────────────────────────

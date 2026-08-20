@@ -825,7 +825,7 @@
   "sync.adopted.files.one": "diadopsi · 1 file",
   "sync.adopted.files.other": "diadopsi · {count} file",
   "swarm.kept": "”{cell}” kini milik Anda — disimpan dari kawanan",
-  "swarm.wand-hint": "tahan Ctrl (⌘) lalu tekan ubin untuk menyimpannya — berjalan-jalan hanya melihat",
+  "swarm.wand-hint": "ubin yang meredup belum menjadi milikmu — klik satu untuk menambahkannya dan masuk ke dalamnya",
   "features.visit-first": "masuki ”{cell}” dulu — mengunjungi sebuah ubin menjadikannya milik Anda, lalu fitur-fiturnya bisa Anda nyalakan",
   "features.download.active.one": "mengunduh… · 1 file diambil",
   "features.download.active.other": "mengunduh… · {count} file diambil",

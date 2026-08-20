@@ -1072,6 +1072,15 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "beehaviors-door-off-tiles",
+      "title": "Mirror the beehaviors DOOR moving off tiles: on the behaviors mirror, retire the per-tile puzzle-piece as a way in and note the doors that remain — the top rail's Beehaviors switch, an EMPTY LAYER raising the panel by itself on arrival, the selection menu's features button, and the ?features= URL intent. Add a note on the empty-prompt part explaining WHY the empty layer is the right place to ask (nothing here = the moment you want to give the layer a behaviour, not a tile), and drop the close-up's west SETTINGS face from the six-faces mirror.",
+      "run": null,
+      "note": "Needs a live renderer on the bridge (none connected at the time). Code: hypercomb-essentials presentation/tiles/tile-actions.drone.ts (features entries + DEFAULT_ACTIVE), tile-view.drone.ts (west face), collection-empty-prompt.drone.ts (features:context-open on arrival). Verified by scripts/drive-empty-layer-behaviors.cjs, 8/8. --manual: note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

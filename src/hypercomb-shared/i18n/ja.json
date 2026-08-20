@@ -892,7 +892,7 @@
   "sync.adopted.files.one": "取り込み完了 · 1件",
   "sync.adopted.files.other": "取り込み完了 · {count}件",
   "swarm.kept": "「{cell}」があなたのものになりました — 群れから受け取りました",
-  "swarm.wand-hint": "Ctrl（⌘）を押しながらタイルを押すと受け取れます — 歩くだけでは見るだけです",
+  "swarm.wand-hint": "薄くなったタイルはまだあなたのものではありません — クリックすると受け取って中に入れます",
   "features.visit-first": "まず「{cell}」に入ってください — タイルは訪れると自分のものになり、そのビヘイビアを切り替えられるようになります",
   "features.download.active.one": "ダウンロード中… · 1件取得",
   "features.download.active.other": "ダウンロード中… · {count}件取得",

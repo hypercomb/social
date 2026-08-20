@@ -986,8 +986,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Flip the Beehaviors window. Opening from the rail carries NO tile, so
    *  the panel opens on the context — the layer that is loaded — and follows
-   *  navigation from there. A tile's puzzle-piece is the other door, and it
-   *  puts that tile in the subject instead. */
+   *  navigation from there. This is the MAIN door now that tiles carry no
+   *  beehaviors icon; an empty layer sends the same signal by itself. */
   onFeaturesToggle(): void {
     EffectBus.emit(this.#featuresPanelOpen() ? 'features:viewer-close' : 'features:context-open', {})
   }

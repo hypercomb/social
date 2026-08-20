@@ -1195,7 +1195,8 @@ export class TileViewDrone extends Drone {
   //
   //   upper-right · upper-left — what the tile can be OPENED AS (its viewers:
   //     photos, slides, a website …), the live question on arrival;
-  //   right — EDIT · left — SETTINGS (the features panel);
+  //   right — EDIT · left — nothing (beehaviors are managed where you
+  //     STAND, not from a tile you point at — see tile-actions.drone.ts);
   //   lower-right — GO INSIDE (branches; the thumb's easiest flick)
   //   lower-left — SELECT.
   //
@@ -1220,10 +1221,10 @@ export class TileViewDrone extends Drone {
     }
     const edit = named('edit')
     if (edit) faces.e = edit
-    // The features panel, wearing the name the face means: a face caption is
-    // an aim ("settings"), not the panel's own long title.
-    const settings = named('features')
-    if (settings) faces.w = { ...settings, labelKey: 'tile-view.settings', fallback: 'settings' }
+    // WEST IS EMPTY. It used to carry the features panel wearing the name
+    // "settings"; the beehaviors panel is not a per-tile door any more, and
+    // a face with no occupant renders nothing and swallows nothing — better
+    // than a chip that asks the behaviour question about the wrong tile.
     if (this.#branches.has(label)) faces.se = this.#enterChip(label)
     faces.sw = this.#selectChip(label)
     return faces

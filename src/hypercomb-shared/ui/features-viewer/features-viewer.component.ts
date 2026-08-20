@@ -251,12 +251,13 @@ export class FeaturesViewerComponent implements OnDestroy {
   //
   // The panel has TWO doors and they mean different things:
   //
-  //   • the top rail's switch — no tile in hand, so the subject is the
-  //     CONTEXT: the layer that is loaded. Walk deeper and the subject walks
-  //     with you; every arrival lands on self again.
-  //   • a tile's puzzle-piece — that TILE becomes the subject, a child of
-  //     self, and it stays there. Standing on the parent does not drag the
-  //     panel back up; you asked about the tile.
+  //   • the top rail's switch (and an empty layer, which sends the same
+  //     signal on arrival) — no tile in hand, so the subject is the CONTEXT:
+  //     the layer that is loaded. Walk deeper and the subject walks with
+  //     you; every arrival lands on self again.
+  //   • the selection menu's features button — that TILE becomes the
+  //     subject, a child of self, and it stays there. Standing on the parent
+  //     does not drag the panel back up; you asked about the tile.
   //
   // Either way the header says which subject you are looking at.
 

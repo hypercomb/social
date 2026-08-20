@@ -527,7 +527,7 @@ export class TileOverlayDrone extends Drone {
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'clipboard:take-items']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'clipboard:take-items', 'swarm:wand']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -3093,9 +3093,20 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    if (this.#branchLabels.has(entry.label) || referenceTargetForLabel(entry.label) !== null) {
+    if (
+      this.#branchLabels.has(entry.label)
+      || referenceTargetForLabel(entry.label) !== null
+      || this.#externalLabels.has(entry.label)
+    ) {
       // A branch (enter its children) OR a reference tile (portal to its
       // target). #navigateInto routes references to their pointer.
+      //
+      // A PEER TILE ALWAYS ENTERS, branch dot or not. Structure travels only
+      // by walking (MAX_PUBLISH_DEPTH=0), so what is inside somebody else's
+      // tile is not on the wire until you step in and the drill serves that
+      // level — "no children" here means "not asked yet", never "empty". The
+      // entry is also the take (#takeFromSwarm), so refusing it would be
+      // refusing the one gesture that adds the tile.
       this.#navigateInto(entry.label)
     } else {
       // ── LEAF TILE ───────────────────────────────────────────
@@ -3349,6 +3360,20 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
+    // ── EACH LAYER IS ADOPTED ON THE CLICK THAT ENTERS IT ───────────────
+    // (Jaime, 2026-08-20.) In a swarm the tiles you don't own render SHADED
+    // — a standing state, not a modifier preview. Click one and it is ADDED:
+    // yours from that moment, permanently, painted at full strength while
+    // you walk into it. Walking a peer's hive is COLLECTING it, one layer at
+    // a time, and the click is the only take a finger can perform (a phone
+    // has no modifier). The ctrl sweep survives beside it for taking several
+    // tiles without going in.
+    //
+    // Placed at the entry choke point, so every gesture that walks in (click,
+    // hold-to-enter, tap) takes — and BEFORE the lineage moves, because the
+    // fold resolves the parent from where we still stand.
+    this.#takeFromSwarm(label)
+
     this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-in', { label })
 
@@ -3382,6 +3407,24 @@ export class TileOverlayDrone extends Drone {
     // a segment (explorerEnter guards empty/'.'/'..'), so this is never a no-op
     // on the normal path — the check is belt-and-braces and simply won't fire.
     this.#releaseGuardIfNoMove(before)
+  }
+
+  /** Add a peer's tile to the hive as we walk into it (see the call site).
+   *  The take rides the wand's own effect: TRANSIENT (a gesture is a moment,
+   *  and a replayed last-value would re-take a tile given back), tombstone-
+   *  clearing, and one ITEM only — what is inside becomes yours by clicking
+   *  in there too. Eligibility is SwarmAdoptDrone's to answer: `wandEligible`
+   *  is the same synchronous oracle the ctrl sweep asks on pointerdown (in a
+   *  zone, and a live peer offers this name right here). A bundle without the
+   *  sharing drones resolves nothing and takes nothing; a tile already held
+   *  is a silent no-op inside the fold. */
+  #takeFromSwarm(label: string): void {
+    if (!this.#externalLabels.has(label)) return
+    const adopt = window.ioc?.get?.<{ wandEligible?: (l: string) => boolean }>(
+      '@diamondcoreprocessor.com/SwarmAdoptDrone',
+    )
+    if (!adopt?.wandEligible?.(label)) return
+    EffectBus.emitTransient('swarm:wand', { label })
   }
 
   /** Redirect the preloader at the tile we are entering. The destination is
