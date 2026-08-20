@@ -167,10 +167,11 @@ describe('the walk is the adopt', () => {
     expect(updates.some(u => u.segments.join('/') === 'garden' && u.layer.name === 'garden')).toBe(true)
     const rootUpdate = updates.find(u => u.segments.length === 0)
     expect(rootUpdate?.layer.children).toContain('garden')
-    expect(committer.commitSlotSet).toHaveBeenCalled()
-    const [segs, slot] = committer.commitSlotSet.mock.calls[0] as [string[], string, string[]]
-    expect(segs.join('/')).toBe('garden')
-    expect(slot).toBe('properties')
+    // Props ride the SAME commit — the child layer carries the properties
+    // slot, so there is never an imageless frame for theming to fill.
+    const child = updates.find(u => u.segments.join('/') === 'garden')
+    expect(child?.layer.properties).toEqual([PROPS_SIG])
+    expect(committer.commitSlotSet).not.toHaveBeenCalled()
 
     // Real props travelled: image + tags + hideText from the wire visual.
     const body = JSON.parse(putBodies[putBodies.length - 1]) as Record<string, unknown>
@@ -205,7 +206,7 @@ describe('the walk is the adopt', () => {
     await settle()
 
     expect(committer.importTree).not.toHaveBeenCalled()
-    expect(committer.commitSlotSet).not.toHaveBeenCalled()
+    expect(store.putResource).not.toHaveBeenCalled()
     expect(visitRecordAt(['garden'])).toBeNull()
     expect(isAdoptTombstoned(['garden'])).toBe(true)   // still stoned
   })
@@ -218,7 +219,6 @@ describe('the walk is the adopt', () => {
     await settle()
 
     expect(committer.importTree).not.toHaveBeenCalled()
-    expect(committer.commitSlotSet).not.toHaveBeenCalled()
     expect(store.putResource).not.toHaveBeenCalled()
   })
 
@@ -229,10 +229,8 @@ describe('the walk is the adopt', () => {
     visitGarden()
     await settle()
 
-    // Props are written only AFTER the read-back proves the tile landed —
-    // a refused materialization leaves no bytes, no slot write, no records.
-    expect(store.putResource).not.toHaveBeenCalled()
-    expect(committer.commitSlotSet).not.toHaveBeenCalled()
+    // The props blob is content-addressed and inert — a refused commit
+    // may leave the bytes, but never a record.
     expect(visitRecordAt(['garden'])).toBeNull()
     expect(localStorage.getItem('hc:synced-publisher-roots')).toBeNull()
     expect(localStorage.getItem('hc:adopted-roots')).toBeNull()
@@ -246,7 +244,6 @@ describe('the walk is the adopt', () => {
     await settle()
 
     expect(committer.importTree).not.toHaveBeenCalled()
-    expect(committer.commitSlotSet).not.toHaveBeenCalled()
     expect(store.putResource).not.toHaveBeenCalled()
     expect(visitRecordAt(['garden'])).toBeNull()
   })

@@ -84,6 +84,7 @@ const PENDING_FOLDS_KEY = 'hc:pending-folds'
 const SYNC_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 
 const SIG_RE = /^[a-f0-9]{64}$/
+const STORE_KEY_LOCAL = '@hypercomb.social/Store'
 // The durable work-list behind a multi-tile adopt (AdoptQueueService).
 const ADOPT_QUEUE_KEY = '@diamondcoreprocessor.com/AdoptQueueService'
 
@@ -576,15 +577,35 @@ export class SwarmAdoptDrone extends Drone {
       if (stillRewound) { this.#visitStage('rewound', { name }); this.#scheduleVisitRetry(retrySrc ?? { segments, parentSegments, name, entry }); return false }
     }
 
-    // ONE-LEVEL fold. MATERIALIZE first — the EGG shape (importTree links
-    // the name into the parent and mints the child layer), the same
-    // primitive every fold rides; a slot write alone cannot create a tile
-    // that does not exist yet (commitSlotSet edits slots on EXISTING
-    // layers — gating the whole fold on it was a silent no-op).
+    // ONE-LEVEL fold, ONE COMMIT. The tile materializes WITH its props —
+    // name, children:[], and the wire visual's 0000 in the same importTree
+    // update. A two-step (egg first, props after) opened an imageless
+    // window in which the new-tile theming stamped a substrate filler
+    // picture, whose small.image then beat the real imageSig the late
+    // props merge added — folded hives painted STOCK ART over people's
+    // real pictures. Single-commit closes the window: the tile is never,
+    // for any frame, an imageless local tile.
     const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
     const committer = ioc?.get?.(COMMITTER_KEY) as CommitterLike | undefined
     const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+    const store = ioc?.get?.(STORE_KEY_LOCAL) as { putResource?: (b: Blob) => Promise<string> } | undefined
     if (!history || !committer?.importTree) { this.#visitStage('no-services', { name }); return false }
+
+    // Props from the witnessed wire visual — canonical sorted-key bytes,
+    // the same shape writeTilePropertiesAt mints, so identical content
+    // dedups to identical sigs.
+    const props: Record<string, unknown> = {}
+    for (const key of VISIT_PROP_KEYS) {
+      if (entry[key] !== undefined) props[key] = entry[key]
+    }
+    let propSig = ''
+    if (Object.keys(props).length > 0 && store?.putResource) {
+      const canonical: Record<string, unknown> = {}
+      for (const k of Object.keys(props).sort()) canonical[k] = props[k]
+      try { propSig = await store.putResource(new Blob([JSON.stringify(canonical)], { type: 'application/json' })) }
+      catch { propSig = '' }
+    }
+
     try {
       const parent = await resolveLayerAt(history, lineage?.domain, parentSegments)
       const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
@@ -592,10 +613,16 @@ export class SwarmAdoptDrone extends Drone {
       // cold-sibling wipe guard every fold honours.
       if (coldMiss) { this.#visitStage('cold-parent', { name }); return false }
       if (!existing.includes(name)) {
+        const childLayer: Record<string, unknown> = { name, children: [] }
+        if (propSig) childLayer['properties'] = [propSig]
         await committer.importTree([
           { segments: parentSegments, layer: { ...(parent ?? {}), children: [...existing, name] } },
-          { segments: [...segments], layer: { name, children: [] } },
+          { segments: [...segments], layer: childLayer },
         ])
+      } else if (propSig) {
+        // Already linked (a racing create) — carry the wire props onto it
+        // through the canonical writer instead.
+        try { await writeTilePropertiesAt(parentSegments, name, props) } catch { /* best-effort */ }
       }
     } catch (err) { this.#visitStage('import-threw', { name, err: String(err).slice(0, 120) }); return false }
 
@@ -607,19 +634,6 @@ export class SwarmAdoptDrone extends Drone {
       this.#visitStage('not-landed', { name })
       this.#scheduleVisitRetry(retrySrc ?? { segments, parentSegments, name, entry })
       return false
-    }
-
-    // PROPS from the witnessed wire visual, through the canonical writer
-    // (per-tile lock, canonical bytes, participant mark, nurse cache
-    // events) — the tile lands with its real picture/tags/link, never a
-    // husk. Children stay []; deeper levels fold as they are walked.
-    const props: Record<string, unknown> = {}
-    for (const key of VISIT_PROP_KEYS) {
-      if (entry[key] !== undefined) props[key] = entry[key]
-    }
-    if (Object.keys(props).length > 0) {
-      try { await writeTilePropertiesAt(parentSegments, name, props) }
-      catch (err) { this.#visitStage('props-write-failed', { name, err: String(err).slice(0, 120) }) }
     }
     this.#visitStage('landed', { name, at: [...segments] })
 

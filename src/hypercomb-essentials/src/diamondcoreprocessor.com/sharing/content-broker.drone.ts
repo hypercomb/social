@@ -1005,24 +1005,22 @@ export class ContentBrokerDrone extends Drone {
     const fromHttp = await this.#fetchOverHttp(s, type)
     if (fromHttp) return fromHttp
 
-    // Layer-only mesh transport. Per the doctrine in
-    // project_public_navigation_lineage_filter.md:
-    //   "Mesh transports LAYER SIGS ONLY — layers are tiny directories;
-    //    resources / deps / bees / blobs travel via direct HTTPS fetches
-    //    to the domains the mesh told you about."
-    // Resources and dependencies have no mesh fallback. If they aren't
-    // available via HTTP-direct, the asker simply doesn't get them —
-    // they'll be re-tried after the miss window, by which point HTTP-
-    // direct may have learned new domains via subsequent layer fetches.
-    if (type !== 'layer') {
+    // Mesh fallback for LAYERS and RESOURCES (Jaime's ruling, 2026-08-20:
+    // "all resources must be resolvable at swarm joining time" — a live
+    // peer's pictures must paint for the people in the zone with them,
+    // host or no host). Layers are tiny ref directories; resources ride
+    // the same request/response channel, sha256-verified end to end and
+    // bounded by MAX_RESPONSE_BYTES on the serving side, so only what a
+    // receiver actually asks for ever moves — this is the REQUEST-driven
+    // ship path #publishResource's retirement note reserved, finally lit.
+    // The HTTPS hosts remain the durability tier: a live-peer byte dies
+    // with the peer's session; a hosted byte outlives it. DEPENDENCIES
+    // and bees stay HTTP-only — code keeps the stricter path.
+    if (type !== 'layer' && type !== 'resource') {
       this.#noteFetchMiss(s)
       return null
     }
 
-    // Mesh broker fallback for layers only. Used when HTTP-direct
-    // returns nothing (no known domains, or every candidate 404'd /
-    // failed verify). Layers are tiny — typically <2KB of refs — so
-    // the mesh round-trip is cheap.
     const bytes = await this.#fetchOverMesh(s, type, timeoutMs)
     if (!bytes) this.#noteFetchMiss(s)
     return bytes
@@ -1706,17 +1704,13 @@ export class ContentBrokerDrone extends Drone {
       return
     }
 
-    // Layer-only mesh transport. Per the doctrine in
-    // project_public_navigation_lineage_filter.md, the mesh carries
-    // layer sigs only — resources, dependencies, bees, and blobs
-    // travel via direct HTTPS fetches to the domains the mesh told
-    // you about. We silently ignore any inbound `t=resource` or
-    // `t=dependency` request — those are protocol violations now,
-    // and the asker should be using HTTP-direct against the domains
-    // they learned about. (Legacy peers that haven't been rebuilt
-    // yet may still send them; ignoring is the kindest forward-
-    // compatible response.)
-    if (typeTag !== 'layer') return
+    // LAYERS and RESOURCES are servable (resources re-opened 2026-08-20 —
+    // "all resources must be resolvable at swarm joining time": a live
+    // peer serves their own pictures to the zone on request, bounded by
+    // MAX_RESPONSE_BYTES below and sha256-gated by the asker; the HTTPS
+    // hosts stay the durability tier). `t=dependency` remains ignored —
+    // code bytes keep the stricter HTTP-only path.
+    if (typeTag !== 'layer' && typeTag !== 'resource') return
 
     // Early cancel-check: if some other peer has already satisfied this
     // sig (we saw their cancel signal), skip the readLocal+publish

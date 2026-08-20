@@ -19,6 +19,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { peerDivergesAt } from './peer-divergence.js'
 
+import { _resetAdoptedRootsCache } from './adopted-roots.js'
+
 const ADOPTED_ROOTS_KEY = 'hc:adopted-roots'
 const RECEIPTS_KEY = 'hc:synced-publisher-roots'
 const TOMBSTONE_KEY = 'hc:adopt-tombstones'
@@ -130,7 +132,7 @@ const adoptedAt = (label: string, sig: string) => {
 }
 
 beforeEach(() => {
-  localStorage.clear()
+  localStorage.clear(); _resetAdoptedRootsCache()
 })
 
 describe('peer divergence — detect, never apply', () => {

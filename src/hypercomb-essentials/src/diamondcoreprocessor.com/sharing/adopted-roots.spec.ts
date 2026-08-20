@@ -11,9 +11,10 @@ import {
   markAdoptTombstone,
   clearAdoptTombstone,
   isAdoptTombstoned,
+  _resetAdoptedRootsCache,
 } from './adopted-roots.js'
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => { localStorage.clear(); _resetAdoptedRootsCache() })
 
 describe('adopted roots', () => {
   it('marks a root and matches it and its descendants', () => {
