@@ -15,6 +15,19 @@
 
 $accent: #c8b8ff;
 
+// ── ONE GUTTER ────────────────────────────────────────────────────
+// Every horizontal edge inside the panel lands on the same line: the search
+// field, the row cards, the strips that slide in above them, the footer.
+// It had drifted to four different insets (17 / 13 / 1 / 16px on a 405px
+// panel), and that — not any one rule — is what made the panel read as
+// unfinished: cards inset, the selection bar bleeding past them, the field
+// that filters them sitting further in than they are.
+//
+// A strip may still paint FULL-BLEED (the selection bar's band is meant to
+// span the panel); its CONTENT starts on the gutter like everything else.
+$gutter: 1rem;
+$gutter-phone: 0.7rem;
+
 :host {
   position: fixed;
   inset: 0;
@@ -90,7 +103,7 @@ $accent: #c8b8ff;
   align-items: center;
   gap: 0.45em;
   width: 100%;
-  padding: 0.45em 0.75em;
+  padding: 0.45em $gutter;
   border: 0;
   border-bottom: 1px solid rgba($accent, 0.18);
   background: rgba($accent, 0.07);
@@ -256,7 +269,7 @@ $accent: #c8b8ff;
 
 .features-foot {
   flex: 0 0 auto;
-  padding: 0.6em 1em 0.8em;
+  padding: 0.6em $gutter 0.8em;
   border-top: 1px solid rgba($accent, 0.2);
   font-size: 0.72em;
   line-height: 1.4;
@@ -376,7 +389,7 @@ $accent: #c8b8ff;
   display: flex;
   align-items: center;
   gap: 0.5em;
-  padding: 0.5em 1em;
+  padding: 0.5em $gutter;
   border-bottom: 1px solid rgba($accent, 0.25);
   background: rgba($accent, 0.07);
 }
@@ -424,7 +437,7 @@ $path-ok: #6ec96e;       // complete
 $path-fail: #e08a8a;     // failed terminal
 
 .download-status {
-  padding: 0.55em 1em 0.5em;
+  padding: 0.55em $gutter 0.5em;
   border-bottom: 1px solid rgba($accent, 0.18);
   display: flex;
   flex-direction: column;
@@ -584,7 +597,7 @@ $path-fail: #e08a8a;     // failed terminal
   display: flex;
   flex-direction: column;
   gap: 0.6em;
-  padding: 0.85em 1em;
+  padding: 0.85em $gutter;
   border-bottom: 1px solid rgba($accent, 0.25);
   background: rgba(20, 18, 30, 0.6);
 }
@@ -983,7 +996,7 @@ $path-fail: #e08a8a;     // failed terminal
 }
 
 .features-scroll {
-  padding: 0 0.75rem 1rem;
+  padding: 0 $gutter 1rem;
   scrollbar-width: thin;
   scrollbar-color: rgba($accent, 0.2) transparent;
 }
@@ -1082,7 +1095,17 @@ $path-fail: #e08a8a;     // failed terminal
   color: rgba(250, 249, 255, 0.94);
 }
 
+// Two lines, then an ellipsis. Not a space saving — an EVEN RHYTHM: a
+// description free to run to three or four lines made every card a
+// different height, and a list of differently-sized cards reads as
+// unfinished however well each one is set. The full text is still the
+// row's tooltip.
 .feature-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   font-size: 0.67rem;
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.55);
@@ -1235,9 +1258,160 @@ $path-fail: #e08a8a;     // failed terminal
 // flips at its origin, so it doesn't invite the click.
 .features-row.inherited { cursor: default; }
 
+// ── VIEWS, MIXED IN ───────────────────────────────────────────────
+// A view is not a section, a tab or a window — it is a row like any
+// other. The ONLY difference is the ground it stands on: a cool blue
+// wash instead of the neutral one, so a glance sorts the list without
+// reading it. $view-ground matches the tile overlay's hover tint
+// (0xa8d8ff), so a view wears the same colour everywhere it appears.
+$view-ground: #a8d8ff;
+
+.features-row.view {
+  border-color: rgba($view-ground, 0.22);
+  background:
+    linear-gradient(120deg, rgba($view-ground, 0.115), rgba($view-ground, 0.03));
+
+  &:hover {
+    border-color: rgba($view-ground, 0.32);
+    background:
+      linear-gradient(120deg, rgba($view-ground, 0.13), rgba($accent, 0.05));
+  }
+}
+
+// Lit AND a view: the warm filament over the cool ground, both true.
+.features-row.view.lit {
+  border-color: rgba($view-ground, 0.3);
+  background:
+    linear-gradient(120deg, rgba($view-ground, 0.155), rgba(255, 205, 100, 0.06));
+}
+
+// ── THE ICON AS A CONTROL ─────────────────────────────────────────
+// On a lit view row the glyph is pressable: it says what the layer
+// OPENS AS. Unpressed it is the ordinary icon; pressed it wears the
+// accent — the same violet the tile's own behaviour glyph takes, so
+// the mark reads identically on the canvas and in the panel.
+.feature-icon.as-default {
+  padding: 0;
+  appearance: none;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+
+  &:hover {
+    border-color: rgba($accent, 0.45);
+    background: linear-gradient(145deg, rgba($accent, 0.3), rgba($accent, 0.1));
+  }
+
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+}
+
+// THE DEFAULT. Written last so it wins over `.features-row.off
+// .feature-icon` and the hover above — a default is a standing fact and
+// must not flicker with the pointer.
+.features-row .feature-icon.as-default.is-default {
+  color: #efe9ff;
+  border-color: rgba($accent, 0.7);
+  background: linear-gradient(145deg, rgba($accent, 0.42), rgba($accent, 0.16));
+  box-shadow:
+    0 0 16px rgba($accent, 0.3),
+    inset 0 1px rgba(255, 255, 255, 0.12);
+
+  .mat-sym { font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24; }
+}
+
+// One quiet line under the name, only on the row that carries the mark.
+.feature-default-note {
+  font-size: 0.55rem;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba($accent, 0.85);
+}
+
+// ── MANAGE ────────────────────────────────────────────────────────
+// Hover-only, beside Open, and grown ONLY by a row that has something
+// to decide. Today that is a view's reach; the affordance is generic
+// because any behaviour could earn one.
+.feat-manage {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: tw.$radius-control;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease, background 120ms ease, color 120ms ease;
+
+  .mat-sym { font-size: 0.95rem; }
+
+  .features-row:hover &,
+  .features-row:focus-within &,
+  &.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  &.open {
+    border-color: rgba($accent, 0.45);
+    background: rgba($accent, 0.16);
+    color: rgba(240, 236, 255, 0.95);
+  }
+
+  &:hover { background: rgba($accent, 0.18); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+}
+
+// The strip itself: two words, one choice, on its own line across the card.
+// `flex: 1 0 100%` plus the row's wrap is what gives it the full width — set
+// beside the controls it had to share the text column and the longer answer
+// broke onto two lines.
+.feature-manage {
+  flex: 1 0 100%;
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+
+  button {
+    flex: 1 1 0;
+    padding: 0.3rem 0.4rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: tw.$radius-control;
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 0.58rem;
+    font-weight: 620;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+
+    &:hover { background: rgba($accent, 0.14); }
+    &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+
+    &.on {
+      border-color: rgba($accent, 0.5);
+      background: rgba($accent, 0.2);
+      color: rgba(242, 238, 255, 0.96);
+    }
+  }
+}
+
+// A row being managed grows a second line rather than squeezing the first.
+.features-row.managing {
+  z-index: 2;
+  flex-wrap: wrap;
+}
+
 .features-foot {
-  margin: 0 0.75rem;
-  padding: 0.65rem 0.25rem 0.72rem;
+  margin: 0 $gutter;
+  padding: 0.65rem 0 0.72rem;
   border-top-color: rgba(255, 255, 255, 0.055);
   font-size: 0.58rem;
   line-height: 1.45;
@@ -1248,7 +1422,17 @@ $path-fail: #e08a8a;     // failed terminal
   .features-header { padding-top: env(safe-area-inset-top, 0px); }
   .features-searchbar { margin-top: 0.25rem; }
 
-  .features-scroll { padding-inline: 0.65rem; }
+  // Narrower, but still ONE line — the same set of edges moves together.
+  .features-scroll,
+  .features-selection,
+  .bulk-bar,
+  .download-status,
+  .feature-review { padding-inline: $gutter-phone; }
+
+  .features-searchbar,
+  .features-foot { margin-inline: $gutter-phone; }
+
+  .features-header { padding-inline: $gutter-phone 0.45rem; }
 
   .features-panel.reviewing {
     .features-searchbar { display: none; }

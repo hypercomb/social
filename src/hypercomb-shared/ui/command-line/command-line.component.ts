@@ -762,8 +762,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #notesPanelOpen = signal(false)
   readonly notesPanelOpen = this.#notesPanelOpen.asReadonly()
 
-  readonly #viewsPanelOpen = signal(false)
-  readonly viewsPanelOpen = this.#viewsPanelOpen.asReadonly()
 
   // Beehaviors window open/closed — lights the toggle right of views.
   // Mirrors `features:viewer-state`, which the panel announces on open,
@@ -862,9 +860,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // the header only reports state (see dock-lanes.ts).
       EffectBus.on<{ open?: boolean }>('notes:panel-state', ({ open }) => {
         this.#notesPanelOpen.set(!!open)
-      }),
-      EffectBus.on<{ open?: boolean }>('views:state', ({ open }) => {
-        this.#viewsPanelOpen.set(!!open)
       }),
       EffectBus.on<{ open?: boolean }>('features:viewer-state', ({ open }) => {
         this.#featuresPanelOpen.set(!!open)
@@ -987,10 +982,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  that the controls-bar Notes button is gone. */
   onNotesToggle(): void {
     EffectBus.emit('notes:panel', { visible: !this.#notesPanelOpen() })
-  }
-
-  onViewsToggle(): void {
-    EffectBus.emit(this.#viewsPanelOpen() ? 'views:close' : 'views:open', {})
   }
 
   /** Flip the Beehaviors window. Opening from the rail carries NO tile, so

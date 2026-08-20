@@ -222,8 +222,6 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Aria-label / tooltip for the notes toggle. */
   readonly notesLabel = input<string>('notes')
 
-  readonly viewsPanelOpen = input<boolean>(false)
-  readonly viewsLabel = input<string>('views')
 
   /** The chat window's open state — its toggle LEADS the standing-tools group
    *  (the chat window is the default companion view, so its switch comes
@@ -360,7 +358,6 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  via the `notes:panel` command channel — the shell stays presentational. */
   readonly notesToggle = output<void>()
 
-  readonly viewsToggle = output<void>()
 
   readonly chatToggle = output<void>()
 

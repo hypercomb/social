@@ -930,6 +930,14 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "behaviors-default-view",
+      "title": "Default view per layer + views folded into Beehaviors (Views toolwindow retired)",
+      "run": null,
+      "note": "MANUAL: note-add is additive and would land the same notes twice. Mirror the three-part row (bulb = on/off here, ICON = the layer's default view, tune = manage) and the view background as the only view/behaviour distinction; add a card for the view:default mark on the behaviors deck; retire the mirror tiles/notes for the hc-views-viewer window (deleted this pass) and repoint anything that names it at hc-features-viewer + the lens (all/views/behaviors/global). See documentation/behaviors-view-simplification.md section '2026-08-20 - the icon is the default, and views come home'.",
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

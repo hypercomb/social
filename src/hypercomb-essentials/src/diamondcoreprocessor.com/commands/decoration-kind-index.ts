@@ -524,6 +524,26 @@ export function titleForSegments(segments: readonly string[], locale: string): s
   return titleByKey.get(locationKey(segments))?.[locale] ?? ''
 }
 
+/** Decoration kind carrying THE LAYER'S DEFAULT VIEW: payload `{ view: 'postit' }`.
+ *
+ *  "When you come to this layer, this is the view that opens." One per layer —
+ *  the writer is `replaceDecoration`, so mutual exclusivity is structural
+ *  rather than reconciled. Owner: `view-default.ts`.
+ *
+ *  Indexed here because the readers are SYNCHRONOUS: the tile overlay tints a
+ *  behaviour's glyph for the default view while baking icons, and view.bee
+ *  decides the arrival surface inside a recompute that must not touch OPFS. */
+export const DEFAULT_VIEW_DECORATION_KIND = 'view:default'
+
+/** Map<locationKey, view token>. */
+const defaultViewByKey = new Map<string, string>()
+
+/** The view this location opens as, or '' when it has no default.
+ *  Synchronous and O(1) — see the kind's note above. */
+export function defaultViewForSegments(segments: readonly string[]): string {
+  return defaultViewByKey.get(locationKey(segments)) ?? ''
+}
+
 /** Map<locationKey, shapeId> — the owning group's silhouette for a launcher tile. */
 const launchShapeByKey = new Map<string, string>()
 
@@ -885,6 +905,11 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
     if (text) titleByKey.set(key, text)
     else titleByKey.delete(key)
   }
+  if (kind === DEFAULT_VIEW_DECORATION_KIND) {
+    const view = String((record.payload as { view?: unknown } | undefined)?.view ?? '').trim()
+    if (view) defaultViewByKey.set(key, view)
+    else defaultViewByKey.delete(key)
+  }
 }
 
 function addKind(key: string, kind: string): void {
@@ -931,6 +956,7 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     // Stringified: the map is rebuilt on every index, so a reference compare
     // would report a change on every pass and repaint the hive needlessly.
     const priorTitle = JSON.stringify(titleByKey.get(key) ?? null)
+    const priorDefaultView = defaultViewByKey.get(key)
     const record = await fetchDecorationRecord(sig)
     if (!record) return
     indexRecord(segments, sig, record)
@@ -959,6 +985,14 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     if (record.kind === TITLE_DECORATION_KIND
         && JSON.stringify(titleByKey.get(key) ?? null) !== priorTitle) {
       EffectBus.emit('title:indexed', { label })
+    }
+    // The layer's default view changed under us. The tile overlay tints the
+    // chosen behaviour's glyph from this map, and view.bee decides the arrival
+    // surface from it — both read synchronously, so neither would notice an
+    // append that landed after their pass. Nudge once, only on a real change.
+    if (record.kind === DEFAULT_VIEW_DECORATION_KIND
+        && defaultViewByKey.get(key) !== priorDefaultView) {
+      EffectBus.emit('default-view:indexed', { label })
     }
     // A takeover kind (visual-bee `replacesTileRender`) landing live: the
     // synchronize-driven repaint raced past the async record fetch above, so
@@ -1060,6 +1094,10 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       titleByKey.delete(key)
       EffectBus.emit('title:indexed', { label })
     }
+    if (kind === DEFAULT_VIEW_DECORATION_KIND) {
+      defaultViewByKey.delete(key)
+      EffectBus.emit('default-view:indexed', { label })
+    }
     // A tag's resource is content-addressed and shared across cells, so subtract
     // it from the cell named in THIS event, using the sig's constant tag name.
     // Never delete `nameBySig[sig]` — other cells still share it.
@@ -1118,6 +1156,7 @@ export function forgetDecorationLabel(label: string): void {
     contextTargetsByKey.delete(key)
     contextSigByKeyTarget.delete(key)
     titleByKey.delete(key)
+    defaultViewByKey.delete(key)
     segmentsByKey.delete(key)
   }
   checkedLabels.delete(label)
@@ -1176,6 +1215,9 @@ async function hydrateLabel(
     // Same post-paint race for a title found on this walk: the tile has already
     // painted under its raw label, so flush and repaint it under the title.
     if (nudge && titleByKey.has(pathKey)) EffectBus.emit('title:indexed', { label })
+    // Same for a default view found on this walk: the layer already painted as
+    // hexagons, so view.bee has to be told there is a surface to open.
+    if (nudge && defaultViewByKey.has(pathKey)) EffectBus.emit('default-view:indexed', { label })
     // A takeover kind discovered on this walk (visual-bee `replacesTileRender`):
     // the hex painted before the index knew the cell was claimed, and unlike
     // tags/launchers nothing else repaints — tile and sticky sat on screen

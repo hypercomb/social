@@ -45,7 +45,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
-import { hasDecorationKind } from './decoration-kind-index.js'
+import { hasDecorationKind, defaultViewForSegments } from './decoration-kind-index.js'
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
 import { resolveViewEntrance } from './view-entrance.js'
 import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
@@ -120,19 +120,19 @@ function dormantHere(ctx: unknown, kind: string): boolean {
   return isBehaviorDormant(kind, label ? [...here, label] : here)
 }
 
+/** Is this the view the tile's own layer opens as — its DEFAULT?
+ *
+ *  Read from the decoration index, not from a preference map: the default is
+ *  a fact about the layer (`view:default`), so the tint, the panel's lit icon
+ *  and view.bee's arrival surface are all the same fact. One source, three
+ *  readers. */
 function isPreferredView(ctx: unknown, view: string): boolean {
   const label = String((ctx as { label?: string })?.label ?? '').trim()
   if (!label) return false
   const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
   const here = (lineage?.explorerSegments?.() ?? [])
     .map(segment => String(segment ?? '').trim()).filter(Boolean)
-  const location = [...here, label].join('\u0000')
-  try {
-    const stored = JSON.parse(localStorage.getItem('hc:view-defaults') ?? '{}') as Record<string, unknown>
-    return String(stored?.[location] ?? '') === view
-  } catch {
-    return false
-  }
+  return defaultViewForSegments([...here, label]) === view
 }
 
 /** Sync the IconProviderRegistry to the current set of adoptable visual
@@ -204,9 +204,10 @@ function syncIcons(): void {
       // expander.
       featureRow: false,
       hoverTint: 0xa8d8ff,
-      // A default is only a preferred glyph now. Tile bodies always navigate;
-      // the accent makes the chosen icon easy to find without stealing that
-      // primary gesture.
+      // THE DEFAULT wears the accent. Tile bodies still always navigate —
+      // but walking in now lands on this view (view.bee's arrival surface),
+      // so the accent is a promise about what you are about to see, not just
+      // a bookmark.
       tintWhen: (ctx) => isPreferredView(ctx, bee.view) ? 0xc8b8ff : 0xd8e1e8,
       labelKey: bee.labelKey,
       descriptionKey: bee.descriptionKey,

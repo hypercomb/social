@@ -60,7 +60,9 @@
 
 import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
-import { kindsForLabel, countLabelsWithKind } from '../../commands/decoration-kind-index.js'
+import { kindsForLabel, countLabelsWithKind, DEFAULT_VIEW_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
+import { defaultViewAt, writeDefaultView, clearDefaultView } from '../../commands/view-default.js'
+import { viewSourceScopeAt } from '../../commands/view-source-scope.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import {
   isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds,
@@ -224,20 +226,23 @@ interface FeatureItem {
   /** True when opening it mounts the view IN PLACE over the current layer
    *  (no navigation) — so closing returns the participant where they were. */
   opensInPlace?: boolean
+  /** True when this behaviour has a REACH to choose — it can read the layer's
+   *  own children, or the whole hierarchy beneath. That is the one thing a row
+   *  has to MANAGE; every other row has nothing and shows no affordance. */
+  manageScopes?: boolean
+  /** Which reach it is reading right now. */
+  sourceScope?: 'layer' | 'hierarchy'
+  /** The bee to ask for a reach change. */
+  queenKey?: string
   label: string
   description: string
   branchSig?: string
   /** True when no module here declares this kind — the behaviour is named from
    *  its kind and stays inert until its module arrives. Never "unrecognized":
-   *  the row is fully nameable, toggleable and paintable meanwhile. */
+   *  the row is fully nameable and toggleable meanwhile. */
   foreign?: boolean
   /** The module segment a foreign behaviour is waiting on (`visual:<module>:x`). */
   module?: string
-  /** True when this behaviour rides a DECORATION we can read and re-write — so
-   *  the painter can put it on other tiles. False for slot-backed behaviours
-   *  (a tutor deck, a website page in its slot): their content must be
-   *  authored at the target, not copied by a brush. */
-  paintable?: boolean
   /** True when this feature, declared on a container, flows to its subtree. */
   cascades: boolean
   /** `direct` = on this tile; `cascade` = inherited from an ancestor. */
@@ -300,6 +305,11 @@ interface AvailableItem {
    *  are NOT addable here — their slash commands TOGGLE a view; "adding" one
    *  means authoring content (a page, a deck), which no switch can conjure. */
   addable?: boolean
+  /** True when this behaviour is a VIEW — a render surface you can be
+   *  standing in, as opposed to a capability that quietly applies. Only a
+   *  view can be a layer's DEFAULT, so the panel needs the fact on the
+   *  available side too (an applied row carries it as `openable`). */
+  isView?: boolean
   /** True when this kind is off on the GLOBAL roster, or bound to another
    *  tile — a dormant behavior is not offered for adding (dormant means gone,
    *  not "available"). */
@@ -320,6 +330,9 @@ interface FeaturesOpenPayload {
    *  The panel opens such a tile at DIRECT reach — you see the branch as it
    *  arrived, not with your own hive-wide behaviours cascaded over it. */
   adopted?: boolean
+  /** The view this layer OPENS AS — its default ('' when it has none). One
+   *  per layer; the panel lights that row's icon. */
+  defaultView?: string
 }
 
 interface TileActionPayload {
@@ -362,6 +375,12 @@ interface RecognizedFeature {
   /** True for a registered visual bee (an enterable view); false for a
    *  cascading capability (dropbox) — which has no view to open. */
   isVisualBee: boolean
+  /** The reaches this view can read its content from. Declaring both is what
+   *  gives the row something to MANAGE. */
+  sourceScopes?: readonly ('layer' | 'hierarchy')[]
+  /** The bee that owns the view's commands — how the panel asks for a reach
+   *  change (`scope layer` / `scope hierarchy`). */
+  queenKey?: string
   /** True when the view opens IN PLACE over the current layer (no navigation),
    *  the same takeover a click on the tile performs. */
   opensInPlace: boolean
@@ -375,8 +394,8 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:remove', 'features:bind', 'feature:apply', 'features:paint', 'features:roster-open']
-  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:paint-result', 'features:roster']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:remove', 'features:bind', 'features:default', 'feature:apply', 'features:roster-open']
+  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:roster']
 
   constructor() {
     super()
@@ -462,6 +481,18 @@ export class ShowFeaturesDrone extends Drone {
       void this.#bindAt(segments, kind, p?.bound !== false)
     })
 
+    // The panel's DEFAULT toggle — clicking a view row's ICON. The layer gets
+    // one mark saying which view it opens as; clicking the lit one clears it.
+    // Same division of labour as the three above: the shell states the
+    // intent, this side owns the write.
+    this.onEffect<{ cell?: string; segments?: string[]; view?: string; clear?: boolean }>('features:default', (p) => {
+      const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      const view = String(p?.view ?? '').trim()
+      const cell = String(p?.cell ?? '').trim()
+      if (segments.length === 0 && !cell) return
+      void this.#defaultViewAt(segments, view, p?.clear === true, cell)
+    })
+
     // `name@view` from the command line (`diagram@slides` / `~diagram@slides`).
     // The command line emits this intent and, until now, NOTHING listened — so
     // the attach silently did nothing and the fallback ran the bee's bare slash
@@ -483,19 +514,6 @@ export class ShowFeaturesDrone extends Drone {
         return
       }
       void this.#applyFeature(view, segments, p?.remove === true)
-    })
-
-    // The PAINTER: put the behaviours picked in the panel onto other tiles.
-    // The brush carries decoration-backed behaviours only — painting one is
-    // copying its record (kind + payload) to each target, which is why it works
-    // for a FOREIGN behaviour too: no module is needed to carry a decoration,
-    // and the painted tiles are correct the day its module lands.
-    this.onEffect<{ source?: string[]; kinds?: string[]; targets?: string[] }>('features:paint', (p) => {
-      const source = Array.isArray(p?.source) ? p!.source!.map(s => String(s ?? '').trim()).filter(Boolean) : []
-      const kinds = Array.isArray(p?.kinds) ? p!.kinds!.map(k => String(k ?? '').trim()).filter(Boolean) : []
-      const targets = Array.isArray(p?.targets) ? p!.targets!.map(t => String(t ?? '').trim()).filter(Boolean) : []
-      if (source.length === 0 || kinds.length === 0 || targets.length === 0) return
-      void this.#paint(source, kinds, targets)
     })
 
     // The GLOBAL ROSTER — the pool of behaviors. No tile subject, no
@@ -614,66 +632,6 @@ export class ShowFeaturesDrone extends Drone {
       })
     }
     this.emitEffect('features:roster', { rows })
-  }
-
-  /** Copy every picked behaviour from `source` onto each target tile. Targets
-   *  are TILE NAMES on the layer the participant is standing on (the canvas
-   *  selection), resolved against the live lineage — the same resolution the
-   *  pheromone drop uses, so painting always lands where you can see it.
-   *
-   *  A behaviour whose content is a first-class SLOT (a tutor deck, a website
-   *  page in its slot) has no record to copy: it is reported as skipped rather
-   *  than half-applied — authoring belongs to its own bee. */
-  async #paint(source: readonly string[], kinds: readonly string[], targets: readonly string[]): Promise<void> {
-    const lineage = this.#ioc()?.get<LineageLike>(LINEAGE_KEY)
-    const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-    const sourceKey = source.join('/')
-
-    const skipped: string[] = []
-    const touched = new Set<string>()
-    const paintedKinds = new Set<string>()
-
-    for (const kind of kinds) {
-      let records: Array<{ record: { payload: unknown; mark?: 'persistent' } }> = []
-      try {
-        records = await listDecorations<unknown>({ kind, segments: source })
-      } catch {
-        records = []
-      }
-      if (records.length === 0) { skipped.push(kind); continue }
-      for (const label of targets) {
-        const targetSegments = [...here, label]
-        if (targetSegments.join('/') === sourceKey) continue   // painting a tile onto itself
-        try {
-          for (const { record } of records) {
-            await writeDecoration({
-              kind,
-              appliesTo: targetSegments,
-              segments: targetSegments,
-              payload: record.payload,
-              ...(record.mark ? { mark: record.mark } : {}),
-            })
-          }
-          paintedKinds.add(kind)
-          touched.add(label)
-        } catch (err) {
-          console.warn('[show-features] paint failed', { kind, label, err })
-          skipped.push(`${kind} → ${label}`)
-        }
-      }
-    }
-
-    const tiles = touched.size
-    const painted = paintedKinds.size
-    this.emitEffect('activity:log', {
-      message: painted > 0
-        ? `${painted} beehavior${painted === 1 ? '' : 's'} onto ${tiles} tile${tiles === 1 ? '' : 's'}`
-        : 'nothing to paint — those beehaviors carry no record to copy',
-      icon: painted > 0 ? '●' : '○',
-    })
-    this.emitEffect('features:paint-result', {
-      painted, tiles, skipped, targets: [...touched],
-    })
   }
 
   /** Attach (or detach) an ATTACHABLE view behaviour at `segments` by writing
@@ -870,6 +828,46 @@ export class ShowFeaturesDrone extends Drone {
     }
   }
 
+  /** THE LAYER'S DEFAULT VIEW — "when you come here, open as this."
+   *
+   *  Mutual exclusivity is the writer's, not ours: `writeDefaultView` uses
+   *  `replaceDecoration`, so a layer holds one mark or none and choosing a
+   *  second view is the same gesture as choosing the first. */
+  async #defaultViewAt(
+    segments: readonly string[],
+    view: string,
+    clear: boolean,
+    cellLabel = '',
+  ): Promise<void> {
+    const label = segments[segments.length - 1] ?? cellLabel
+    try {
+      if (clear) {
+        await clearDefaultView(segments)
+        this.emitEffect('activity:log', { message: `"${label}" opens as hexagons again`, icon: '○' })
+      } else {
+        // Only a REGISTERED RENDER view can be a surface to arrive on. A
+        // navigation behaviour opens a lineage rather than a surface, so it
+        // has nothing to be the default of.
+        const bee = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)?.get?.(view)
+        if (!bee || bee.behavior === 'navigation') {
+          this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: false, message: `"${view}" isn't a view this layer can open as` })
+          return
+        }
+        await writeDefaultView(segments, view)
+        // The append is QUEUED, not committed. Without the wait the refresh
+        // below reads the pre-commit layer, answers "no default here", and
+        // the icon the participant just lit goes dark again.
+        await this.#settleKind(segments, DEFAULT_VIEW_DECORATION_KIND)
+        this.emitEffect('activity:log', { message: `"${label}" opens as ${view}`, icon: '▶' })
+      }
+      this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: true, message: '' })
+      if (label) await this.#open(label, segments.length ? undefined : [])
+    } catch (err) {
+      console.warn('[show-features] default view failed', { view, segments, clear, err })
+      this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: false, message: `couldn't set how "${label}" opens` })
+    }
+  }
+
   /** Wait until `kind` is readable on the layer at `segments` — the commit
    *  cascade landing — so a refresh reads the tile as it now IS. Bounded: on
    *  timeout we refresh anyway (the write is queued; the next open is correct)
@@ -930,11 +928,16 @@ export class ShowFeaturesDrone extends Drone {
     }
     const i18n = ioc?.get<I18nProvider>(I18N_KEY)
 
-    // Behaviors belong to ADOPTED tiles. A peer-only offer has nothing local
-    // to toggle — the honest answer is "adopt it first", not a projection of
-    // the peer's rows (the old adopt-time decision surface).
+    // Behaviors belong to tiles you HOLD. A peer-only offer has nothing local
+    // to toggle — and with the adopt button retired, the way to hold it is to
+    // WALK IN: visiting a peer tile folds it into your hive (SwarmAdoptDrone's
+    // visit handler), after which this panel toggles its behaviors normally.
     if (branchSig && !(await this.#isLocalCell(segments))) {
-      this.emitEffect('activity:log', { message: `adopt "${label}" first — behaviors belong to adopted tiles`, icon: '○' })
+      this.emitEffect('activity:log', {
+        message: i18n?.t('features.visit-first', { cell: label })
+          ?? `step into "${label}" first — visiting a tile makes it yours, then its behaviors are yours to switch on`,
+        icon: '○',
+      })
       return
     }
 
@@ -963,9 +966,7 @@ export class ShowFeaturesDrone extends Drone {
       if (feature) {
         if (appliedViews.has(feature.view)) continue
         appliedViews.add(feature.view)
-        // Decoration-backed (both sources here ARE decoration kinds) — the
-        // painter can copy this row's record onto other tiles.
-        applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments, true))
+        applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
         continue
       }
       // FOREIGN feature kind — a community module's decoration whose bee isn't
@@ -975,7 +976,7 @@ export class ShowFeaturesDrone extends Drone {
       // ever listed as "unrecognized" — a row you can't name is a row you can't
       // decide about. Surfaced for visual:* kinds only (tags, images and
       // attachments are decorations, not features); inert until its module
-      // arrives, and toggleable/paintable meanwhile.
+      // arrives, and toggleable meanwhile.
       if (kind.startsWith('visual:') && !appliedViews.has(kind)) {
         appliedViews.add(kind)
         const moduleName = moduleFromKind(kind)
@@ -991,10 +992,6 @@ export class ShowFeaturesDrone extends Drone {
           cascades: false,
           origin: 'direct',
           originSegments: [...segments],
-          // Decoration-backed: a foreign behaviour can still be PAINTED onto
-          // other tiles — copying its record needs no module here, and the
-          // tiles are correct the day the module lands.
-          paintable: true,
           ...(branchSig ? { branchSig } : {}),
         })
       }
@@ -1030,7 +1027,7 @@ export class ShowFeaturesDrone extends Drone {
         const feature = this.#recognize(kind, registry)
         if (!feature || !feature.cascades || appliedViews.has(feature.view)) continue
         appliedViews.add(feature.view)
-        applied.push(this.#describe(feature, kind, i18n, 'cascade', from, undefined, ancestor, true))
+        applied.push(this.#describe(feature, kind, i18n, 'cascade', from, undefined, ancestor))
       }
     }
 
@@ -1103,6 +1100,12 @@ export class ShowFeaturesDrone extends Drone {
       if (isBehaviorDormant(row.kind, segments)) row.dormant = true
       const binding = bindingAt(row.kind, segments)
       if (binding) row.bound = binding
+      // The row's CURRENT reach, for the rows that have one to manage. Read
+      // where the record actually sits — a cascade row's declaration lives at
+      // its origin, not here.
+      if (row.manageScopes) {
+        row.sourceScope = await viewSourceScopeAt(row.kind, row.originSegments ?? segments)
+      }
     }
     for (const row of available) {
       if (!row.kind) continue
@@ -1116,6 +1119,7 @@ export class ShowFeaturesDrone extends Drone {
     this.emitEffect<FeaturesOpenPayload>('features:open', {
       cell, segments, applied, available,
       adopted: isWithinAdoptedRoot(segments),
+      defaultView: await defaultViewAt(segments),
     })
   }
 
@@ -1206,6 +1210,9 @@ export class ShowFeaturesDrone extends Drone {
         label: this.#t(i18n, bee.labelKey, bee.view),
         description: this.#t(i18n, bee.descriptionKey, ''),
         cascades: bee.cascades === true,
+        // A registered visual bee IS a view — the same fact an applied row
+        // carries as `openable`.
+        isView: bee.behavior !== 'navigation',
         // Every bee can be turned on here — the on is a DEPOSIT (its own
         // kind payload-free, or its pending marker when the content is
         // authored later), waiting on what's beneath to give it meaning.
@@ -1259,6 +1266,8 @@ export class ShowFeaturesDrone extends Drone {
         cascades: bee.cascades === true,
         isVisualBee: true,
         opensInPlace: bee.opensOnTileClick === true,
+        sourceScopes: bee.sourceScopes,
+        queenKey: bee.queenKey,
       }
     }
     const cap = CAPABILITIES[kind]
@@ -1288,7 +1297,6 @@ export class ShowFeaturesDrone extends Drone {
     originCell: string | undefined,
     branchSig: string | undefined,
     originSegments: readonly string[] | undefined,
-    paintable = false,
   ): FeatureItem {
     return {
       view: feature.view,
@@ -1298,7 +1306,9 @@ export class ShowFeaturesDrone extends Drone {
       behavior: feature.behavior,
       openable: feature.isVisualBee,
       opensInPlace: feature.opensInPlace,
-      paintable,
+      ...(feature.sourceScopes?.includes('layer') && feature.sourceScopes.includes('hierarchy')
+        ? { manageScopes: true } : {}),
+      ...(feature.queenKey ? { queenKey: feature.queenKey } : {}),
       label: this.#t(i18n, feature.labelKey, feature.fallbackLabel),
       description: this.#t(i18n, feature.descriptionKey, ''),
       cascades: feature.cascades,

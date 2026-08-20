@@ -201,20 +201,11 @@
         </button>
       }
 
-      <!-- notes toggle — always present; lights while the notes strip is
-           open. Post-it yellow (filled glyph) carries its identity; the
-           box stays on the rail's size like every other icon. -->
-      <button
-        class="rail-btn views-toggle-btn"
-        [class.on]="viewsPanelOpen()"
-        type="button"
-        (mousedown)="$event.preventDefault(); viewsToggle.emit()"
-        [attr.aria-label]="viewsLabel()"
-        [attr.aria-pressed]="viewsPanelOpen()"
-        [title]="viewsLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">view_quilt</span>
-      </button>
+      <!-- The VIEWS button stood here. Views are not a separate window
+           any more: they are rows in Beehaviors, told apart by their
+           background, and its lens narrows to just them. One rail slot back —
+           which is what puts the portrait phone rail inside its five-slot
+           budget again. -->
 
       <!-- Beehaviors — RIGHT OF VIEWS, its neighbour by meaning: views are
            the ways a layer can be shown, beehaviors are what it can do.

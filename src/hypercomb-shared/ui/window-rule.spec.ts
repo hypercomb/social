@@ -71,7 +71,7 @@ describe('one window at a time', () => {
     const third = new FakeWindow()
     await opened(['history-viewer', left])
     await opened(['sequence-viewer', right])
-    await opened(['views-viewer', third])
+    await opened(['files-viewer', third])
     const notes = new FakeWindow()
     await opened(['notes-strip', notes])
     expect([left.parked, right.parked, third.parked]).toEqual([1, 1, 1])

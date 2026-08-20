@@ -53,6 +53,14 @@ interface FeatureRow {
   openable?: boolean
   /** True when the view opens IN PLACE over the current layer (no navigation). */
   opensInPlace?: boolean
+  /** True when this behaviour has a REACH to choose — its content can be read
+   *  from the layer's own children or from the whole hierarchy beneath. That
+   *  is the one thing a row has to MANAGE. */
+  manageScopes?: boolean
+  /** Which reach it is reading right now. */
+  sourceScope?: 'layer' | 'hierarchy'
+  /** The bee to ask for a reach change (`scope layer` / `scope hierarchy`). */
+  queenKey?: string
   branchSig?: string
   /** True when this feature, declared on a container, flows to its subtree. */
   cascades?: boolean
@@ -123,6 +131,9 @@ interface AvailableRow {
   /** True when the panel can ADD this feature mechanically. View bees whose
    *  content must be authored carry the slash-command chip instead. */
   addable?: boolean
+  /** True when this behaviour is a VIEW — a surface you can be standing in.
+   *  An applied row carries the same fact as `openable`. */
+  isView?: boolean
   /** True when this kind's light is off, or it belongs to another tile — the
    *  row is not offered at all. */
   globalOff?: boolean
@@ -147,6 +158,14 @@ interface LayerRow {
   inherited: boolean
   /** A lit view behaviour can be ENTERED — the hover-only Open affordance. */
   openable: boolean
+  /** This behaviour is a VIEW. Views live in the same list as everything
+   *  else — the only difference is the row's background, and that only a
+   *  view can be the layer's DEFAULT. */
+  isView: boolean
+  /** This row has a reach to choose — it grows the manage affordance. */
+  manageScopes: boolean
+  sourceScope?: 'layer' | 'hierarchy'
+  queenKey?: string
   originCell?: string
   foreign?: boolean
   module?: string
@@ -194,6 +213,8 @@ interface FeaturesOpenPayload {
   applied: FeatureRow[]
   available: AvailableRow[]
   adopted?: boolean
+  /** The view this layer OPENS AS — '' when it has none. */
+  defaultView?: string
 }
 
 /** Shell-safe slice of the essentials picker, resolved through IoC. */
@@ -239,6 +260,17 @@ export class FeaturesViewerComponent implements OnDestroy {
   //
   // Either way the header says which subject you are looking at.
 
+  /** The subject's name for the header title — `Beehaviors / <name>`. Empty at
+   *  the HIVE ROOT (no segments, or a bare `/` label): there is no name below
+   *  the app there, and a separator with nothing after it read as `Beehaviors
+   *  //`. The pool suppresses it too — it has no subject at all. */
+  readonly subjectName = computed(() => {
+    const g = this.group()
+    if (!g || g.segments.length === 0) return ''
+    const cell = String(g.cell ?? '').trim()
+    return cell === '/' ? '' : cell
+  })
+
   /** A foreign feature the participant has been asked to REVIEW before
    *  enabling — set from `feature:review:open` (the website gate). */
   readonly reviewTarget = signal<{
@@ -279,6 +311,51 @@ export class FeaturesViewerComponent implements OnDestroy {
   // STORE — no tile subject: every behavior, one light each.
 
   readonly mode = signal<'tile' | 'store'>('tile')
+
+  /** THE LENS - the header's ONE filter, cycled by its ONE icon.
+   *
+   *  `all` is the resting state: views and behaviours in the same list, told
+   *  apart only by the row's background. The two narrow positions are for
+   *  when the list is long; `global` is the pool, which used to have a
+   *  storefront button of its own. Four positions, one icon, no clutter - and
+   *  the Views toolwindow that used to be a rail button of its own no longer
+   *  has to exist. */
+  readonly lens = signal<'all' | 'views' | 'behaviors' | 'global'>('all')
+
+  /** The lens glyph names WHERE YOU ARE, not where the next click goes.
+   *  `view_quilt` is the retired Views window's glyph, kept so the gesture it
+   *  replaced stays recognisable. */
+  readonly lensIcon = computed(() => {
+    switch (this.lens()) {
+      case 'views': return 'view_quilt'
+      case 'behaviors': return 'extension'
+      case 'global': return 'storefront'
+      default: return 'filter_list'
+    }
+  })
+
+  readonly lensKey = computed(() => 'features.lens.' + this.lens())
+
+  /** One tap moves to the next position: all -> views -> behaviors -> pool. */
+  readonly cycleLens = (): void => {
+    const next = this.lens() === 'all' ? 'views'
+      : this.lens() === 'views' ? 'behaviors'
+        : this.lens() === 'behaviors' ? 'global'
+          : 'all'
+    this.lens.set(next)
+    if (next === 'global') this.openStore()
+    else if (this.mode() === 'store') this.closeStore()
+  }
+
+  /** The view this LAYER opens as - '' when it opens as hexagons. One per
+   *  layer: choosing a second view is the same gesture as choosing the first,
+   *  because the writer replaces rather than appends. */
+  readonly defaultView = signal('')
+
+  /** The row whose MANAGE strip is open (by kind), '' when none is. Manage is
+   *  not a mode and not a window - it is the row telling you the one thing it
+   *  has to decide, and only while you ask. */
+  readonly managing = signal('')
 
   /** The store rows, as last delivered by `features:roster`. */
   readonly storeRows = signal<StoreRow[]>([])
@@ -348,6 +425,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   readonly closeStore = (): void => {
     if (this.mode() !== 'store') return
     this.mode.set('tile')
+    if (this.lens() === 'global') this.lens.set('all')
     this.#refreshGroup()
   }
 
@@ -486,6 +564,10 @@ export class FeaturesViewerComponent implements OnDestroy {
         available: Array.isArray(p.available) ? p.available : [],
         adopted: p.adopted === true,
       }
+      // The layer says how it opens. Read from the payload rather than
+      // derived from the rows: a layer can name a default whose row is
+      // currently dim, and that is still the truth about the layer.
+      this.defaultView.set(String(p.defaultView ?? '').trim())
       // One tile at a time: re-clicking the SAME tile refreshes in place;
       // a DIFFERENT tile replaces the subject.
       const prev = this.group()
@@ -493,6 +575,10 @@ export class FeaturesViewerComponent implements OnDestroy {
         this.selectedKeys.set(new Set())
         this.rowNotes.set(new Map())
         this.query.set('')
+        // A new subject has nothing being managed. An in-place REFRESH does —
+        // choosing a reach re-opens the group, and closing the strip under the
+        // participant would hide the answer they just gave.
+        this.managing.set('')
       }
       this.group.set(group)
       if (!this.visible()) {
@@ -514,6 +600,7 @@ export class FeaturesViewerComponent implements OnDestroy {
       this.query.set('')
       this.selectedKeys.set(new Set())
       this.mode.set('store')
+      this.lens.set('global')
       if (!this.visible()) {
         this.visible.set(true)
         EffectBus.emit('features:viewer-state', { open: true })
@@ -526,6 +613,20 @@ export class FeaturesViewerComponent implements OnDestroy {
     // Everything after that is the ordinary pipeline: the drone answers with
     // `features:open`, and that is what raises the panel.
     this.#cleanups.push(EffectBus.on('features:context-open', () => {
+      this.#openAt(this.#currentSegments())
+    }))
+
+    // ── /views (and anything else that wants a particular lens) ───────
+    //
+    // Views used to be a window of their own. They are rows here now, so the
+    // command raises this panel on the loaded layer and narrows the lens to
+    // them — the same list, in the one place behaviours live.
+    this.#cleanups.push(EffectBus.on<{ lens?: string }>('features:lens', (p) => {
+      const want = String(p?.lens ?? '').trim()
+      if (want !== 'all' && want !== 'views' && want !== 'behaviors' && want !== 'global') return
+      this.lens.set(want)
+      if (want === 'global') { this.openStore(); return }
+      if (this.mode() === 'store') this.mode.set('tile')
       this.#openAt(this.#currentSegments())
     }))
 
@@ -860,6 +961,12 @@ export class FeaturesViewerComponent implements OnDestroy {
         on: this.isOn(group, f), applied: true,
         inherited: f.origin === 'cascade',
         openable: f.openable === true && this.isOn(group, f),
+        // Deliberately NOT ANDed with on-ness the way `openable` is: a view
+        // merely offered here is still a view, and the background is how the
+        // list says so.
+        isView: f.openable === true,
+        manageScopes: f.manageScopes === true,
+        sourceScope: f.sourceScope, queenKey: f.queenKey,
         originCell: f.originCell, foreign: f.foreign, module: f.module,
         bound: f.bound, feat: f,
       })
@@ -869,10 +976,73 @@ export class FeaturesViewerComponent implements OnDestroy {
         kind: f.kind, view: f.view, icon: f.icon, label: f.label,
         description: f.description, slashCommand: f.slashCommand,
         on: false, applied: false, inherited: false, openable: false,
+        isView: f.isView === true, manageScopes: false,
         bound: f.bound, feat: f,
       })
     }
+    const lens = this.lens()
+    if (lens === 'views') return rows.filter(r => r.isView)
+    if (lens === 'behaviors') return rows.filter(r => !r.isView)
     return rows
+  }
+
+  /** THE DEFAULT - clicking a VIEW row's own icon.
+   *
+   *  "When you come to this layer, open as this." Mutually exclusive by
+   *  construction: the record is REPLACED, never appended, so choosing a
+   *  second view is the same gesture as choosing the first, and clicking the
+   *  lit one clears it.
+   *
+   *  Only a view can be a default (a behaviour that is not a surface has
+   *  nothing to open as), and only a row that is ON here (a default has to be
+   *  something this layer can actually mount). An inherited row is managed
+   *  where it flows from, defaults included. */
+  setDefaultView(group: FeatureGroup, row: LayerRow, event?: Event): void {
+    event?.stopPropagation()
+    if (!this.canDefault(row)) return
+    const clear = this.defaultView() === row.view
+    this.defaultView.set(clear ? '' : row.view)
+    EffectBus.emit('features:default', {
+      cell: group.cell,
+      segments: [...group.segments],
+      view: row.view,
+      clear,
+    })
+  }
+
+  readonly isDefaultView = (row: LayerRow): boolean =>
+    row.isView && !!row.view && this.defaultView() === row.view
+
+  /** Can this row's icon be pressed to make it the layer's default? */
+  readonly canDefault = (row: LayerRow): boolean =>
+    row.isView && !!row.view && row.on && !row.inherited
+
+  /** Open (or put away) the row's manage strip. */
+  toggleManage(row: LayerRow, event?: Event): void {
+    event?.stopPropagation()
+    if (!row.manageScopes) return
+    this.managing.set(this.managing() === row.kind ? '' : row.kind)
+  }
+
+  readonly isManaging = (row: LayerRow): boolean =>
+    row.manageScopes && this.managing() === row.kind
+
+  /** THE ONE THING A ROW MANAGES - where the behaviour reads from: this
+   *  layer's own children, or the whole hierarchy beneath it. The bee owns
+   *  the write; the panel only asks, the way it asks for everything else it
+   *  cannot write itself. */
+  async setSourceScope(group: FeatureGroup, row: LayerRow, scope: 'layer' | 'hierarchy'): Promise<void> {
+    if (!row.manageScopes || !row.queenKey || row.sourceScope === scope) return
+    const queen = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ invoke?: (args: string) => Promise<void> | void }>(row.queenKey)
+    if (!queen?.invoke) return
+    // Onto the SOURCE row, not the LayerRow: layerRows() rebuilds its objects
+    // on every change-detection pass, so a choice written on the row itself is
+    // gone by the next tick. The re-open below confirms it for real.
+    ;(row.feat as FeatureRow).sourceScope = scope
+    row.sourceScope = scope
+    await queen.invoke('scope ' + scope)
+    this.#openAt(group.segments, group.cell)
   }
 
   /** ENTER a lit view behaviour — the hover-only Open. Navigates to the
@@ -1091,13 +1261,16 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#armRowLeash(key)
   }
 
-  /** One level back per press: a review, then the search, then the store.
+  /** One level back per press: a review, a manage strip, the search, then the
+   *  lens back to its resting position (the pool first, then a narrowing).
    *  False = nothing of ours was open, and the shell cascade carries on.
    *  Reached from the session; there is no listener here. */
   dismiss(): boolean {
     if (this.reviewTarget()) { this.cancelReview(); return true }
+    if (this.managing()) { this.managing.set(''); return true }
     if (this.query()) { this.query.set(''); return true }
     if (this.mode() === 'store') { this.closeStore(); return true }
+    if (this.lens() !== 'all') { this.lens.set('all'); return true }
     return false
   }
 }

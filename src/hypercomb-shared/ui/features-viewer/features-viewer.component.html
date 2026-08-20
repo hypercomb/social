@@ -20,25 +20,30 @@
         <span class="features-brand-mark" aria-hidden="true">
           <span class="mat-sym">extension</span>
         </span>
-        <!-- The title says WHAT and, for a layer subject, WHICH — the pool
-             keeps the bare app title, a tile subject hangs off it. -->
+        <!-- The title says WHAT and, when there is one to name, WHICH — the
+             pool and the hive root keep the bare app title, a named subject
+             hangs off it. -->
         <span class="features-title">
           <span class="features-title-app">{{ 'features.viewer.title' | t }}</span>
-          @if (!isStore() && group(); as g) {
+          @if (!isStore() && subjectName(); as name) {
             <span class="features-title-sep" aria-hidden="true">/</span>
-            <span class="features-title-cell" [title]="g.cell">{{ g.cell }}</span>
+            <span class="features-title-cell" [title]="name">{{ name }}</span>
           }
         </span>
       </div>
-      <!-- THE STORE: every behavior the app knows, one light each. -->
+      <!-- THE LENS — the panel's one filter, and its one header control.
+           Four positions on one icon: everything on this layer, just its
+           views, just its other behaviours, then the pool (every behavior
+           the app knows, one global light each). The glyph shows where you
+           are; the tooltip names it. -->
       <button
         class="features-mode"
         type="button"
-        [class.active]="isStore()"
-        (click)="isStore() ? closeStore() : openStore()"
-        [attr.title]="'features.mode.roster.hint' | t"
-        [attr.aria-pressed]="isStore()"
-      ><span class="mat-sym" aria-hidden="true">storefront</span></button>
+        [class.active]="lens() !== 'all'"
+        (click)="cycleLens()"
+        [attr.title]="lensKey() | t"
+        [attr.aria-label]="lensKey() | t"
+      ><span class="mat-sym" aria-hidden="true">{{ lensIcon() }}</span></button>
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">
         <span class="mat-sym" aria-hidden="true">close</span>
       </button>
@@ -287,6 +292,9 @@
                     [class.lit]="row.on"
                     [class.off]="!row.on"
                     [class.inherited]="row.inherited"
+                    [class.view]="row.isView"
+                    [class.default-view]="isDefaultView(row)"
+                    [class.managing]="isManaging(row)"
                     [class.selected]="isSelected(group, row.feat)"
                     [class.busy]="isPending(group, row.feat)"
                     (click)="toggleRow(group, row, $event)"
@@ -296,9 +304,28 @@
                       ? (row.originCell ? 'features.origin.cascade' : 'features.origin.cascade.root')
                       : row.on ? 'features.remove.hint' : 'features.enable.hint') | t: { cell: row.originCell ?? '' }"
                   >
-                    <span class="feature-icon" aria-hidden="true">
-                      <span class="mat-sym">{{ row.icon }}</span>
-                    </span>
+                    <!-- THE ICON IS THE DEFAULT. On a lit view row it is the
+                         second control: press it and this is what the layer
+                         opens as. Lit accent = it already is. One per layer —
+                         pressing another moves it, pressing this one clears
+                         it. Every other row's icon is just an icon. -->
+                    @if (canDefault(row)) {
+                      <button
+                        class="feature-icon as-default"
+                        type="button"
+                        [class.is-default]="isDefaultView(row)"
+                        [attr.aria-pressed]="isDefaultView(row)"
+                        [attr.title]="(isDefaultView(row) ? 'features.default.clear' : 'features.default.set') | t"
+                        [attr.aria-label]="(isDefaultView(row) ? 'features.default.clear' : 'features.default.set') | t"
+                        (click)="setDefaultView(group, row, $event)"
+                        (keydown.enter)="$event.stopPropagation()"
+                        (keydown.space)="$event.stopPropagation()"
+                      ><span class="mat-sym" aria-hidden="true">{{ row.icon }}</span></button>
+                    } @else {
+                      <span class="feature-icon" aria-hidden="true">
+                        <span class="mat-sym">{{ row.icon }}</span>
+                      </span>
+                    }
                     <div class="feature-meta">
                       <span class="feature-name">
                         {{ row.label }}
@@ -320,6 +347,9 @@
                           }
                         </span>
                       }
+                      @if (isDefaultView(row)) {
+                        <span class="feature-default-note">{{ 'features.default.on' | t }}</span>
+                      }
                     </div>
                     <!-- Hover-only WHENCE — the row itself never specifies.
                          Bound: this beehavior is for this tile only.
@@ -336,12 +366,29 @@
                         }
                       </span>
                     }
+                    <!-- Hover-only MANAGE — shown only by a row that has
+                         something to decide. Nothing else grows a button. -->
+                    @if (row.manageScopes) {
+                      <button
+                        class="feat-manage"
+                        type="button"
+                        [class.open]="isManaging(row)"
+                        (click)="toggleManage(row, $event)"
+                        (keydown.enter)="$event.stopPropagation()"
+                        (keydown.space)="$event.stopPropagation()"
+                        [attr.title]="'features.manage.hint' | t"
+                        [attr.aria-label]="'features.manage' | t"
+                        [attr.aria-expanded]="isManaging(row)"
+                      ><span class="mat-sym" aria-hidden="true">tune</span></button>
+                    }
                     <!-- Hover-only: a lit view behaviour can be entered. -->
                     @if (row.openable) {
                       <button
                         class="feat-open"
                         type="button"
                         (click)="openBehavior(group, row); $event.stopPropagation()"
+                        (keydown.enter)="$event.stopPropagation()"
+                        (keydown.space)="$event.stopPropagation()"
                         [attr.title]="'features.open.hint' | t"
                         [attr.aria-label]="'features.open' | t"
                       >▶ {{ 'features.open' | t }}</button>
@@ -349,6 +396,24 @@
                     <span class="feat-bulb" [class.on]="row.on" aria-hidden="true">
                       <span class="mat-sym">lightbulb</span>
                     </span>
+                    <!-- MANAGE — only while asked, and only the one thing this
+                         row has to decide: where it reads from. Its own line
+                         across the whole card, so the two answers can be read
+                         as answers rather than squeezed beside the controls. -->
+                    @if (isManaging(row)) {
+                      <div class="feature-manage" (click)="$event.stopPropagation()">
+                        <button
+                          type="button"
+                          [class.on]="row.sourceScope !== 'hierarchy'"
+                          (click)="setSourceScope(group, row, 'layer')"
+                        >{{ 'features.scope.layer' | t }}</button>
+                        <button
+                          type="button"
+                          [class.on]="row.sourceScope === 'hierarchy'"
+                          (click)="setSourceScope(group, row, 'hierarchy')"
+                        >{{ 'features.scope.hierarchy' | t }}</button>
+                      </div>
+                    }
                   </li>
                 }
               </ul>

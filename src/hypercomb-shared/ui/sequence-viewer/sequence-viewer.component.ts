@@ -45,7 +45,7 @@ export class SequenceViewerComponent implements OnDestroy {
     this.#service?.removeEventListener('change', this.#changed)
   }
   // Escape's window-CAPTURE listener is gone from here — see the note in
-  // views-viewer. Closing now hangs off the session and runs only when the
+  // features-viewer. Closing now hangs off the session and runs only when the
   // focus is inside this window.
   #bind(): void {
     this.#service?.removeEventListener('change', this.#changed)

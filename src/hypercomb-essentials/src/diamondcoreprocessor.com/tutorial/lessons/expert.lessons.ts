@@ -432,22 +432,22 @@ tutorialLessons.register({
   },
 })
 
-// ── 140 · the views window ─────────────────────────────────────────────
+// ── 140 · the views lens ───────────────────────────────────────────────
 
 tutorialLessons.register({
   id: 'window-views',
   level: L,
   order: 140,
-  title: 'The views window',
+  title: 'The ways of seeing',
   pheromones: ['tutorial', 'lesson', 'expert', 'view', 'appearance'],
   teaches: ['views', 'tree', 'website', 'present', 'tutor'],
-  requires: () => hasBehaviour('views') && hasWindow('hc-views-viewer'),
+  requires: () => hasBehaviour('views') && hasWindow('hc-features-viewer'),
   async run(stage) {
     await subjects(stage, 3, names(stage), 29)
 
     await stage.flyToRect(stage.commandInput())
     await stage.say('views-window', 'Another way of seeing',
-      'The same tiles can be drawn as something else entirely. This window is the library of those ways — attach one, preview it, take it off again.')
+      'The same tiles can be drawn as something else entirely. A view is just a beehaviour — it sits in the same list as the rest, on its own coloured ground, and the lens narrows to show only those.')
     stage.highlight(null)
 
     await stage.typeAndSubmit('/views', false)
@@ -460,7 +460,7 @@ tutorialLessons.register({
     await stage.say('views-window-done', 'Attach, never convert',
       'Nothing changed — only how it is drawn. A view is a behaviour you ATTACH, so a branch can carry several at once and you switch between them. Your work is never converted into anything.')
     await stage.typeAndSubmit('/tree off', false)
-    stage.emit('views:close', {})
+    stage.emit('features:viewer-close', {})
     await stage.wait(700)
   },
 })

@@ -40,12 +40,17 @@ import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-regist
 import { WEBSITE_SLOT } from './website-slot.js'
 import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
+import { DEFAULT_VIEW_DECORATION_KIND } from './decoration-kind-index.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
 const FALLBACK_TOGGLE_ICON = 'visibility'
 /** The render surface websites toggle against. */
 const DEFAULT_SURFACE = 'hexagons'
+
+/** Joins a path into one latch key. A separator no tile name can contain, so
+ *  `['a','b']` and `['a/b']` are never the same address. */
+const SEGMENT_SEPARATOR = String.fromCharCode(0)
 
 type LineageLike = EventTarget & {
   domain?: () => string
@@ -103,6 +108,14 @@ export class ViewBee extends Worker {
    *  them into one async recompute per tick. */
   #pending = false
 
+  /** True once the hive has painted at least once this session. */
+  #painted = false
+
+  /** The location whose ARRIVAL SURFACE has already been decided, so a
+   *  recompute at the same address never re-opens a view the participant
+   *  escaped out of. Null = armed. */
+  #autoOpenedKey: string | null = null
+
   protected override act = async (): Promise<void> => {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     lineage?.addEventListener?.('change', () => this.#schedule())
@@ -117,8 +130,28 @@ export class ViewBee extends Worker {
     // views are available — recompute on both. (When the build skill writes
     // pages, `decorations:changed` populates the kind index, and this makes
     // the toggle appear without a navigation.)
-    EffectBus.on('render:cell-count', () => this.#schedule())
+    EffectBus.on('render:cell-count', () => {
+      // First real paint. The arrival surface waits for it — mounting a
+      // canvas-hiding view during boot is the white-screen strand
+      // TRANSIENT_MODES exists to prevent.
+      this.#painted = true
+      this.#schedule()
+    })
     EffectBus.on('decorations:changed', () => this.#schedule())
+
+    // The layer's DEFAULT VIEW mark landed (or was cleared) — re-arm the
+    // arrival latch so setting one from the Beehaviors panel shows you what
+    // you just chose. Only for THIS layer's mark: a child's default being
+    // indexed by the hydration walk must never re-open a view the
+    // participant has just escaped out of.
+    EffectBus.on<{ label?: string }>('default-view:indexed', (payload) => {
+      const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+      const here = (lineage?.explorerSegments?.() ?? [])
+        .map(s => String(s ?? '').trim()).filter(Boolean)
+      if (String(payload?.label ?? '') !== (here[here.length - 1] ?? '')) return
+      this.#autoOpenedKey = null
+      this.#schedule()
+    })
 
     // The cursor rebinding to a new location (or the user rewinding) changes
     // which layer "here" resolves to. Without this, a navigation whose
@@ -350,6 +383,45 @@ export class ViewBee extends Worker {
       })
     }
     this.#emit(toggles)
+    this.#openDefaultView(segments, toggles, layer, records, vm)
+  }
+
+  /** THE ARRIVAL SURFACE — a layer can declare which view it opens as, and
+   *  walking in lands on it instead of on hexagons. The mark is
+   *  `view:default` on the layer, written by clicking a view row's icon in
+   *  the Beehaviors panel; one per layer, so there is nothing to arbitrate.
+   *
+   *  Every gate above is inherited for free by asking one question — is this
+   *  view in the toggle strip we just built? Dormant, hidden, not present
+   *  here, outside its branch scope, a navigation behaviour with no
+   *  controller: all of them already removed it, and none of them has to be
+   *  re-checked (or re-forgotten) here. */
+  #openDefaultView(
+    segments: readonly string[],
+    toggles: readonly ViewToggle[],
+    layer: LayerLike | null,
+    records: readonly DecorationRecord[],
+    vm: ViewModeLike,
+  ): void {
+    // A cold layer read is indistinguishable from "no default" — don't latch
+    // on it, let the next trigger answer properly.
+    if (layer === null) return
+    if (!this.#painted) return
+    const key = segments.join(SEGMENT_SEPARATOR)
+    if (this.#autoOpenedKey === key) return
+    // Latch BEFORE deciding, and latch even when the answer is "nothing to
+    // open": #recompute re-runs many times at one address (cell-count,
+    // decorations, ViewMode change, enablement flips), and a second pass must
+    // not undo an Escape back to the hexagons.
+    this.#autoOpenedKey = key
+    const mark = records.find(r => r.kind === DEFAULT_VIEW_DECORATION_KIND)
+    const want = String(mark?.payload?.['view'] ?? '').trim()
+    if (!want) return
+    if (!toggles.some(t => t.view === want)) return
+    // Something is already up — never yank the participant out of the view
+    // they chose into the one the layer suggests.
+    if (vm.mode !== DEFAULT_SURFACE) return
+    vm.setMode(want)
   }
 
   /** The toggle's human label — its tooltip and aria-label. The view's
