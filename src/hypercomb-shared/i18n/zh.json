@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "收到回复",
   "feedback.reply.received.message": "{who} 回复了你的反馈 — 请打开反馈窗口。",
   "viewer.close": "关闭视频",
+  "viewer.watchOnYouTube": "在 YouTube 上观看",
   "controls.save": "保存",
   "controls.undo": "撤销",
   "controls.redo": "重做",

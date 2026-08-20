@@ -13,6 +13,7 @@ import { Component, HostListener, signal } from '@angular/core'
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { parseYouTubeVideoId } from '@hypercomb/essentials/diamondcoreprocessor.com/link/youtube'
+import { openExternalLink } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/document-view-links'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
 
@@ -55,6 +56,10 @@ function ensureViewerStyle(): void {
 })
 export class YoutubeViewerComponent {
   readonly embedUrl = signal<SafeResourceUrl | null>(null)
+  // Canonical watch URL for the escape hatch below. Armed alongside embedUrl,
+  // BEFORE the player has had any chance to refuse — we can never detect the
+  // refusal (see watchOnYouTube), so the way out cannot be conditional on it.
+  readonly watchUrl = signal<string | null>(null)
   readonly chromeVisible = signal(true)
 
   #unsub: (() => void) | null = null
@@ -73,9 +78,17 @@ export class YoutubeViewerComponent {
       const videoId = parseYouTubeVideoId(payload.url)
       if (!videoId) return
 
+      // `origin` is YouTube's documented requirement for an iframe embed: the
+      // player validates the embedding page before configuring itself, and
+      // without it some shells and privacy modes answer with "error 153 —
+      // video player configuration error" instead of a video. It must be the
+      // EMBEDDING page's origin, whatever that is (https://hypercomb.social on
+      // the web, http://tauri.localhost inside the native client).
       const url = this.sanitizer.bypassSecurityTrustResourceUrl(
-        `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`
+        `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0` +
+        `&origin=${encodeURIComponent(location.origin)}`
       )
+      this.watchUrl.set(`https://www.youtube.com/watch?v=${videoId}`)
       this.embedUrl.set(url)
       this.#enterViewerMode()
     })
@@ -83,7 +96,23 @@ export class YoutubeViewerComponent {
 
   close(): void {
     this.embedUrl.set(null)
+    this.watchUrl.set(null)
     this.#exitViewerMode()
+  }
+
+  // The escape hatch. An embed can refuse to play for reasons the hive can
+  // neither see nor fix — the owner disallowed embedding, the shell's origin
+  // isn't one YouTube accepts, tracking prevention starved the player of the
+  // storage it configures from — and the refusal renders INSIDE a cross-origin
+  // iframe, so it is unreadable from here by construction. Rather than try to
+  // detect the failure, the way out is simply always present: one tap hands
+  // the video to the OS browser (a new tab on the web) and drops the dead
+  // overlay, so a refused embed is never a dead end.
+  watchOnYouTube(): void {
+    const url = this.watchUrl()
+    if (!url) return
+    openExternalLink(url)
+    this.close()
   }
 
   onBackdropClick(): void {

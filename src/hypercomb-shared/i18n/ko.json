@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "답장이 도착했습니다",
   "feedback.reply.received.message": "{who} 님이 회원님의 피드백에 답장했습니다 — 피드백 창을 여세요.",
   "viewer.close": "동영상 닫기",
+  "viewer.watchOnYouTube": "YouTube에서 보기",
   "controls.save": "저장",
   "controls.undo": "실행 취소",
   "controls.redo": "다시 실행",

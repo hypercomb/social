@@ -52,7 +52,16 @@ export function mediaKindForUrl(link: string): MediaKind | null {
  */
 export function embedUrlFor(link: string): string | null {
   const youTubeId = parseYouTubeVideoId(link)
-  if (youTubeId) return `https://www.youtube-nocookie.com/embed/${youTubeId}`
+  // `origin` is required for the player to configure itself; without it the
+  // embed can answer "error 153 — video player configuration error" instead of
+  // a video. Same term, same reason as youtube-viewer.component.ts.
+  if (youTubeId) {
+    // Guarded: this module is pure and gets imported outside a document too,
+    // where there is no location to name as the embedding origin.
+    const origin = globalThis.location?.origin
+    const base = `https://www.youtube-nocookie.com/embed/${youTubeId}`
+    return origin ? `${base}?origin=${encodeURIComponent(origin)}` : base
+  }
   return null
 }
 

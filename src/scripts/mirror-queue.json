@@ -947,6 +947,15 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "youtube-embed-escape-hatch",
+      "title": "Mirror the video viewer's escape hatch: tile for the watch-out fallback + the origin term, marked as parts of the youtube viewer, note explaining error 153",
+      "run": "note-add on the youtube-viewer tile + a 'watch on youtube' part tile under it",
+      "note": "Fix: origin= param on both embed builders, always-present 'Watch on YouTube' pill, youtube added to native frame-src. note-add is additive so this is manual.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

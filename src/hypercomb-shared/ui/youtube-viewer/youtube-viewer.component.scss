@@ -80,6 +80,47 @@
   }
 }
 
+// The escape hatch, mirrored opposite the exit so the two guaranteed actions
+// bracket the video rather than crowd one corner. Subdued on purpose: closing
+// is the primary way out, this is the one for when the player refused to play.
+.watch-fab {
+  position: fixed;
+  left: calc(1.4rem + var(--hc-inset-left, 0px));
+  bottom: calc(1.4rem + env(safe-area-inset-bottom, 0px));
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 3rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 1.5rem;
+  padding: 0 1.1rem 0 0.75rem;
+  background: rgba(18, 24, 32, 0.82);
+  color: #dfe8f0;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: filter 0.16s ease, opacity 0.5s ease, gap 0.5s ease, padding 0.5s ease;
+
+  &:hover {
+    filter: brightness(1.25);
+    opacity: 1;
+  }
+
+  .chrome-hidden & {
+    opacity: 0.45;
+    gap: 0;
+    padding: 0 0.75rem;
+    cursor: pointer; // same exemption as the exit — it stays usable while dimmed
+  }
+}
+
+.watch-glyph {
+  font-family: 'Material Symbols Outlined';
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.watch-label,
 .exit-label {
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 0.95rem;

@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "Risposta ricevuta",
   "feedback.reply.received.message": "{who} ha risposto al tuo feedback — apri la finestra feedback.",
   "viewer.close": "Chiudi video",
+  "viewer.watchOnYouTube": "Guarda su YouTube",
   "controls.save": "salva",
   "controls.undo": "annulla",
   "controls.redo": "ripeti",

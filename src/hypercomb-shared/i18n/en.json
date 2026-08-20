@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "Reply received",
   "feedback.reply.received.message": "{who} replied to your feedback — open the feedback window.",
   "viewer.close": "Close video",
+  "viewer.watchOnYouTube": "Watch on YouTube",
   "controls.save": "save",
   "controls.undo": "undo",
   "controls.redo": "redo",

@@ -9,6 +9,11 @@
         allowfullscreen>
       </iframe>
     </div>
+    <button class="watch-fab" (click)="$event.stopPropagation(); watchOnYouTube()"
+            [title]="'viewer.watchOnYouTube' | t" [attr.aria-label]="'viewer.watchOnYouTube' | t">
+      <span class="watch-glyph">open_in_new</span>
+      <span class="watch-label">{{ 'viewer.watchOnYouTube' | t }}</span>
+    </button>
     <button class="exit-fab" (click)="$event.stopPropagation(); close()"
             [title]="'viewer.close' | t" [attr.aria-label]="'viewer.close' | t">
       <span class="exit-label">{{ 'viewer.close' | t }}</span>

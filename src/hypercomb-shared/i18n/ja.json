@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "返信が届きました",
   "feedback.reply.received.message": "{who} さんがあなたのフィードバックに返信しました — フィードバックウィンドウを開いてください。",
   "viewer.close": "動画を閉じる",
+  "viewer.watchOnYouTube": "YouTube で見る",
   "controls.save": "保存",
   "controls.undo": "元に戻す",
   "controls.redo": "やり直す",

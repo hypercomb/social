@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "Yanıt alındı",
   "feedback.reply.received.message": "{who} geri bildiriminize yanıt verdi — geri bildirim penceresini açın.",
   "viewer.close": "Videoyu kapat",
+  "viewer.watchOnYouTube": "YouTube'da izle",
   "controls.save": "kaydet",
   "controls.undo": "geri al",
   "controls.redo": "yinele",

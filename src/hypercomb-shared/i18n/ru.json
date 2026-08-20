@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "Получен ответ",
   "feedback.reply.received.message": "{who} ответил(а) на ваш отзыв — откройте окно обратной связи.",
   "viewer.close": "Закрыть видео",
+  "viewer.watchOnYouTube": "Смотреть на YouTube",
   "controls.save": "сохранить",
   "controls.undo": "отменить",
   "controls.redo": "повторить",

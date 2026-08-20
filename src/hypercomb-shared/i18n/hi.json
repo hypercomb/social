@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "जवाब मिला",
   "feedback.reply.received.message": "{who} ने आपके फीडबैक का जवाब दिया — फीडबैक विंडो खोलें।",
   "viewer.close": "वीडियो बंद करें",
+  "viewer.watchOnYouTube": "YouTube पर देखें",
   "controls.save": "सहेजें",
   "controls.undo": "पूर्ववत करें",
   "controls.redo": "पुनः करें",

@@ -67,6 +67,7 @@
   "feedback.reply.received.title": "Réponse reçue",
   "feedback.reply.received.message": "{who} a répondu à votre retour — ouvrez la fenêtre de retours.",
   "viewer.close": "Fermer la vidéo",
+  "viewer.watchOnYouTube": "Regarder sur YouTube",
   "controls.save": "enregistrer",
   "controls.undo": "annuler",
   "controls.redo": "rétablir",
