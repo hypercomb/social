@@ -1,15 +1,13 @@
 @if (visible()) {
-  <!-- Focus mode dims the hive behind the widened panel — dimmed, never
-       hidden. Clicking the dim steps back out of focus. -->
-  @if (focused()) {
-    <div class="chat-dim" (click)="focused.set(false)" aria-hidden="true"></div>
-  }
+  <!-- Full screen covers everything, so there is no dim and no click-out —
+       Escape and the collapse button are the ways back. -->
   <aside
     class="chat-panel"
     [class.focus]="focused()"
     hcDockInset="right"
     [hcDockInsetActive]="!focused()"
     hcDockedPanel="chat-window"
+    [hasReadingSurface]="true"
     [hcSession]="session"
     (hcDockedPanelClose)="close()"
     dockSide="right"
@@ -22,6 +20,13 @@
     role="dialog"
     [attr.aria-label]="'chat.title' | t"
   >
+    <!-- FULL SCREEN'S LEFT SIDEBAR — the tiles rail, for choosing what the
+         conversation is about. Built by essentials (agent-tiles-rail.ts) and
+         mounted through IoC; absolutely positioned, so the column flow of the
+         window is untouched. -->
+    @if (focused()) {
+      <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
+    }
     <header class="chat-header">
       <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
       <span class="chat-title">{{ 'chat.title' | t }}</span>
@@ -289,8 +294,8 @@
           }
         </select>
         <span class="chat-where" [title]="path()">{{ path() }}</span>
-        @if (targets().length) {
-          <span class="chat-targets">{{ 'chat.selected' | t: { count: targets().length } }}</span>
+        @if (chosen()) {
+          <span class="chat-targets">{{ 'chat.selected' | t: { count: chosen() } }}</span>
         }
         <!-- Attached context (portal-drop branches) rides with every question —
              a rider the participant can't see is a surprise, so it is counted

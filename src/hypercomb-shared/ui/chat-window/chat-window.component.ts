@@ -139,6 +139,20 @@ type QueenLike = {
 
 type LineageLike = { explorerSegments?(): readonly string[] }
 type SelectionLike = { selected: ReadonlySet<string> }
+
+/** The tiles rail — the full-screen view's left sidebar for choosing tiles.
+ *  It lives in essentials (assistant/agent-tiles-rail.ts) and shared must
+ *  never import essentials, so it arrives structurally through the factory
+ *  it registers in IoC. */
+type RailPickLike = { readonly key: string; readonly path: readonly string[]; readonly name: string }
+type TilesRailLike = {
+  onPicksChanged: () => void
+  readonly picks: RailPickLike[]
+  mount(host: HTMLElement): void
+  clearPicks(): void
+  dispose(): void
+}
+type TilesRailFactoryLike = { create?: () => TilesRailLike }
 type BridgeLike = { connected?: boolean }
 type NavigationLike = { goRaw?(segments: readonly string[]): void }
 
@@ -345,6 +359,16 @@ export class ChatWindowComponent implements OnDestroy {
   readonly here = signal<readonly string[]>([])
   readonly targets = signal<readonly string[]>([])
 
+  /** Tiles chosen in the full-screen view's left sidebar. They ride the next
+   *  question alongside the canvas selection, and they are STICKY across
+   *  turns — the sidebar shows them lit, so nothing rides invisibly. */
+  readonly railPicks = signal<readonly RailPickLike[]>([])
+
+  /** What the next question is about, counted for the status row — the SAME
+   *  deduped union `send()` will carry, so a tile both canvas-selected and
+   *  sidebar-picked counts once. */
+  readonly chosen = computed(() => this.#chosenTargets().length)
+
   /** How many context branches are ATTACHED to this tile (the portal-drop
    *  records) — they ride with every question, and a rider the participant
    *  cannot see is a surprise, so the count is shown beside the path. */
@@ -417,6 +441,12 @@ export class ChatWindowComponent implements OnDestroy {
 
   readonly input = viewChild<ElementRef<HTMLTextAreaElement>>('input')
   readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller')
+  readonly chatRail = viewChild<ElementRef<HTMLDivElement>>('chatRail')
+
+  /** ONE rail per window lifetime, mounted whenever full screen puts its host
+   *  in the DOM — so the trail you drilled and the tiles you chose survive
+   *  leaving and re-entering full screen. */
+  #rail: TilesRailLike | null = null
 
   /** The active thread's name — its first message. Read from the list when it
    *  is there, else from the turns in hand, so a brand-new conversation is
@@ -529,6 +559,33 @@ export class ChatWindowComponent implements OnDestroy {
       setTimeout(() => void highlightBlocks(this.scroller()?.nativeElement), 0)
     })
 
+    // The full-screen sidebar. Its host `<div>` exists only while focused, so
+    // this effect re-fires as full screen comes and goes; the rail itself is
+    // created once and re-mounted, keeping its trail and picks. Essentials
+    // may register the factory AFTER this window is up (web loads its bees
+    // from OPFS), so a miss WAITS on the key instead of leaving the sidebar
+    // empty until the next refocus. Without any factory ever arriving the
+    // sidebar stays empty — the chat loses nothing it had before.
+    effect(() => {
+      const host = this.chatRail()?.nativeElement
+      if (!host) return
+      if (this.#rail) { this.#rail.mount(host); return }
+      const registry = ioc() as { get?(k: string): unknown; whenReady?(k: string, cb: (v: unknown) => void): void } | undefined
+      const key = '@diamondcoreprocessor.com/AgentTilesRailFactory'
+      const bring = (factory: TilesRailFactoryLike | undefined): void => {
+        if (this.#rail || !factory?.create) return
+        this.#rail = factory.create()
+        this.#rail.onPicksChanged = () => { this.railPicks.set([...(this.#rail?.picks ?? [])]) }
+        // The host captured here may have been replaced by the time a late
+        // factory lands — mount into whatever full screen is showing NOW.
+        const live = this.chatRail()?.nativeElement
+        if (live) this.#rail.mount(live)
+      }
+      const now = registry?.get?.(key) as TilesRailFactoryLike | undefined
+      if (now) bring(now)
+      else registry?.whenReady?.(key, value => bring(value as TilesRailFactoryLike))
+    })
+
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
 
@@ -612,6 +669,8 @@ export class ChatWindowComponent implements OnDestroy {
     if (this.#retryTimer) clearInterval(this.#retryTimer)
     this.#stopClock()
     this.#abort?.abort()
+    this.#rail?.dispose()
+    this.#rail = null
   }
 
   #retryTimer: ReturnType<typeof setInterval> | null = null
@@ -851,6 +910,11 @@ export class ChatWindowComponent implements OnDestroy {
     this.focused.set(false)
     this.listOpen.set(false)
     this.armed.set('')
+    // Closing the window is a real close: the sidebar's trail and picks go
+    // down with it (a swap of focus mode alone keeps them — see the effect).
+    this.#rail?.dispose()
+    this.#rail = null
+    this.railPicks.set([])
     EffectBus.emit('chat:window-state', { open: false })
   }
 
@@ -862,8 +926,10 @@ export class ChatWindowComponent implements OnDestroy {
   onKey(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return
     event.preventDefault()
-    // Focus mode peels back before the window goes — two Escapes to fully
-    // dismiss a focused chat, matching the escape-cascade's outermost-first rule.
+    // The cascade unwinds the smallest commitment first: chosen tiles, then
+    // full screen, then the window — matching the escape-cascade's
+    // outermost-first rule.
+    if (this.focused() && this.railPicks().length) { this.#rail?.clearPicks(); return }
     if (this.focused()) { this.focused.set(false); return }
     this.close()
   }
@@ -1016,6 +1082,18 @@ export class ChatWindowComponent implements OnDestroy {
     } catch { this.contextCount.set(0) }
   }
 
+  /** What the question is about: the canvas selection, plus the tiles chosen
+   *  in the full-screen sidebar. A sidebar pick on the CURRENT page rides as
+   *  a bare name — exactly the shape a selection target has always had — and
+   *  a pick from a drilled level rides as its full `/path/name`, which is
+   *  self-describing to the responder without any protocol change. */
+  #chosenTargets(): string[] {
+    const hereJson = JSON.stringify(this.here())
+    const picked = this.railPicks().map(pick =>
+      JSON.stringify(pick.path) === hereJson ? pick.name : '/' + [...pick.path, pick.name].join('/'))
+    return [...new Set([...this.targets(), ...picked])]
+  }
+
   /** The tile's attached context, resolved to content sigs for the SHALLOW
    *  tier (the host caps them server-side). Best-effort: context is a grade
    *  of service, never a reason a question fails to leave. */
@@ -1110,7 +1188,7 @@ export class ChatWindowComponent implements OnDestroy {
       .map(t => ({ role: t.role, text: t.text }))
 
     queen.activeModel = this.model()
-    const queued = await queen.submitChat(convoId, message, [...this.targets()], transcript)
+    const queued = await queen.submitChat(convoId, message, this.#chosenTargets(), transcript)
     if (!queued) {
       this.#endWait()
       EffectBus.emit('toast:show', { type: 'warning', message: 'Could not send — try again.' })
@@ -1151,6 +1229,12 @@ export class ChatWindowComponent implements OnDestroy {
     // heap — the parameter host-ai always accepted and nothing ever passed.
     const contextSigs = await this.#contextSigs()
 
+    // The shallow tier cannot read the hive, so chosen tiles reach it the
+    // only way they can: named in the question itself. Wire-only — the
+    // stored turn stays the participant's own words.
+    const about = this.#chosenTargets()
+    const question = about.length ? `${message}\n\n(About: ${about.join(', ')})` : message
+
     const controller = new AbortController()
     this.#abort = controller
     this.hostStreaming.set(true)
@@ -1159,7 +1243,7 @@ export class ChatWindowComponent implements OnDestroy {
     let aborted = false
     try {
       const options = { signal: controller.signal, ...(contextSigs.length ? { contextSigs } : {}) }
-      for await (const chunk of host.ask(message, options)) {
+      for await (const chunk of host.ask(question, options)) {
         full += chunk
         if (this.activeId() !== convoId) continue
         this.streaming.set(full)
@@ -1242,7 +1326,11 @@ export class ChatWindowComponent implements OnDestroy {
       void this.send()
       return
     }
-    if (event.key === 'Escape') { event.preventDefault(); this.close() }
+    // Through the SAME cascade the window itself runs — the caret lives in
+    // this box (every focus() lands here), so an Escape that closed the whole
+    // window directly would throw away picked tiles and the drilled trail
+    // from the one place Escape is most likely to be pressed.
+    if (event.key === 'Escape') this.onKey(event)
   }
 
   /** Grow with the message, to a ceiling — past that the box scrolls, so the

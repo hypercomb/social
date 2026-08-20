@@ -109,4 +109,12 @@ $code-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
   // not write, a `!==` redrawn as one glyph is a place to guess. Tool windows
   // override this on their own host (hc-docked-panel.directive.ts).
   --hc-code-ligatures: none;
+
+  // --hc-read is the reading face for PROSE inside tool windows — the other
+  // half of a window's typography. The toolwindow shell sets everything in
+  // --hc-mono, which is right for chrome and wrong for sentences; a reading
+  // surface (the chat's answers, a note body) renders in this instead, and
+  // the docked-panel gear offers a per-window/per-group choice over it
+  // (READ_FONTS in panel-groups.ts). Defaults to the app's own text face.
+  --hc-read: var(--hc-font);
 }

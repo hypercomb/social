@@ -23,16 +23,6 @@ $accent: #7eb6d6;
   pointer-events: none;
 }
 
-// Focus mode's veil over the hive: dimmed, never hidden. No backdrop blur —
-// it would tax the live canvas underneath every frame for pure decoration.
-.chat-dim {
-  position: absolute;
-  inset: 0;
-  pointer-events: auto;
-  background: rgba(4, 8, 14, 0.55);
-  cursor: pointer;
-}
-
 .chat-panel {
   pointer-events: auto;
   position: absolute;
@@ -58,13 +48,44 @@ $accent: #7eb6d6;
   border-right: 1px solid rgba($accent, 0.38);
   border-radius: tw.$radius-floating;
 
-  // FOCUS: wide over the dim. `!important` because hcDockedPanel writes the
-  // docked width inline; the drag-set width is untouched underneath and comes
-  // straight back when focus lifts.
+  // FOCUS: the ENTIRE screen, with the tiles rail down the left. `!important`
+  // against hcDockedPanel's inline width and lane offset; the drag-set width
+  // is untouched underneath and comes straight back when focus lifts. The
+  // rail is absolutely positioned, so the window's column flow just moves
+  // right by the rail's width.
   &.focus {
-    width: min(62vw, 60rem) !important;
+    inset: 0;
+    right: 0 !important;
+    width: auto !important;
+    max-width: none;
+    margin: 0;
+    border-radius: 0;
+    border-right: none;
+    padding-left: var(--chat-rail-width, clamp(15rem, 22vw, 20rem));
     box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
   }
+}
+
+// The full-screen view's left sidebar — the tiles rail (essentials builds its
+// rows; this owns only where it sits). ::ng-deep-free: the host div is
+// template-owned, and everything inside carries the rail's own stylesheet.
+.chat-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--chat-rail-width, clamp(15rem, 22vw, 20rem));
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba($accent, 0.18);
+  background: rgba(3, 5, 9, 0.55);
+}
+
+// A phone has no room for a sidebar beside a conversation — full screen there
+// is the conversation alone, and tiles are chosen by selecting on the canvas.
+@media (max-width: 700px) {
+  .chat-panel.focus { padding-left: 0; }
+  .chat-rail { display: none; }
 }
 
 .chat-header {
@@ -130,6 +151,9 @@ $accent: #7eb6d6;
   padding: 1.5em 1.5em 2em;
   text-align: center;
   color: rgba(238, 244, 250, 0.88);
+  // Setup is paragraphs with commands inside — prose face here, and each
+  // .chat-cmd code pins itself back to --hc-code.
+  font-family: var(--hc-read, inherit);
   scrollbar-width: thin;
   scrollbar-color: rgba($accent, 0.35) transparent;
 
@@ -537,6 +561,11 @@ $accent: #7eb6d6;
   flex-direction: column;
   gap: 0.5em;
   padding: 0.85em 0.85em;
+  // The transcript is a READING surface: prose renders in the reading face,
+  // and everything that is code inside it (blocks, inline spans, paths, the
+  // wait clock) already pins itself back to --hc-code. This is the line that
+  // stops sentences rendering as terminal output.
+  font-family: var(--hc-read, inherit);
   scrollbar-width: thin;
   scrollbar-color: rgba($accent, 0.35) transparent;
 
@@ -691,6 +720,8 @@ $accent: #7eb6d6;
   max-height: 160px;
   padding: 0.5em 0.6em;
   font: inherit;
+  // You WRITE prose here — same reading face the transcript answers in.
+  font-family: var(--hc-read, inherit);
   // 16px floor: anything smaller and iOS Safari zooms the page on focus.
   font-size: max(0.8em, 16px);
   line-height: 1.45;

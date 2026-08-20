@@ -61,9 +61,11 @@ import { EffectBus } from '@hypercomb/core'
 import {
   type GroupAttrs, type GroupMember, STEEL, TEXT_SIZES,
   CODE_FONTS, DEFAULT_CODE_FONT, codeFont,
+  READ_FONTS, DEFAULT_READ_FONT, readFont,
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
   readPairing, writePairing, readTextScale, writeTextScale,
   readCodeFont, writeCodeFont, readLigatures, writeLigatures,
+  readReadFont, writeReadFont,
 } from './panel-groups'
 
 // The EDITOR — how a settings popover is drawn from declared rows, and the one
@@ -96,7 +98,10 @@ import { holdToolWindow } from '../window-rule'
 const t = (key: string, fallback: string, params?: Record<string, unknown>): string => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
     { t(k: string, p?: Record<string, unknown>): string } | undefined
-  return i18n?.t(key, params) ?? fallback
+  const value = i18n?.t(key, params)
+  // The service answers a MISSING key with the key itself — which is not a
+  // translation, it is a leak. The declared fallback is the real answer.
+  return value && value !== key ? value : fallback
 }
 
 /** Every mounted docked panel — the chrome-side view of `members`, used to
@@ -230,6 +235,11 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   /** Human name for the paired window in the settings switch. Falls back to the
    *  id, the way a group's membership line already labels its mates. */
   @Input() pairLabel = ''
+  /** Does this window have a PROSE surface that renders in var(--hc-read)?
+   *  The Reading-font picker is offered only where it can change what you are
+   *  looking at — the same rule the ligature switch already follows. Most
+   *  tool windows are chrome (lists, chips, sigs) and stay mono by design. */
+  @Input() hasReadingSurface = false
   /** How this window is PUT AWAY and BROUGHT BACK when the hive is covered —
    *  entering the installer parks every showing window, leaving unparks them.
    *  Supplied by the window itself because only the window knows what "stop
@@ -267,6 +277,10 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
    *  today's value of it. */
   #font: string | undefined = undefined
 
+  /** The READ_FONTS key this window reads PROSE in — same "never chose
+   *  inherits :root's --hc-read" contract as the code face. */
+  #readFace: string | undefined = undefined
+
   /** Ligatures on the chosen face. Off unless asked for; see readLigatures. */
   #ligatures = false
   #width = 0
@@ -296,10 +310,20 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     // clear a size the group was holding, and the key being present is how a
     // mate tells "the group says auto" from "the group has no opinion".
     const text = this.#text ?? undefined
-    const font = this.#font
-    const ligatures = this.#ligatures
-    if (this.ownsSize) return { width: this.#width, text, font, ligatures }
-    return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth, text, font, ligatures }
+    // FACES ONLY WHEN CHOSEN. `undefined` here means "never chose", and a
+    // publish is a live object — `'font' in attrs` is TRUE for an undefined-
+    // valued key, so carrying it would make any mate's width drag ERASE the
+    // faces of every window that did choose (the stored blob never had this
+    // hole: JSON.stringify drops undefined values). There is no "unset"
+    // gesture to represent — the pickers only ever set a concrete key — so
+    // omitting the undecided is lossless.
+    const faces = {
+      ...(this.#font !== undefined ? { font: this.#font } : {}),
+      ...(this.#readFace !== undefined ? { read: this.#readFace } : {}),
+      ligatures: this.#ligatures,
+    }
+    if (this.ownsSize) return { width: this.#width, text, ...faces }
+    return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth, text, ...faces }
   }
 
   // ── LaneMember ─────────────────────────────────────────────────────
@@ -386,10 +410,11 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
       ? (groupAttrs.text ?? null)
       : (ownText === undefined ? this.defaultText : ownText)
 
-    // The face reads the same way — the group's word if the group has one, the
+    // The faces read the same way — the group's word if the group has one, the
     // window's own record otherwise, and "no record anywhere" left as
     // undefined so :root's default reaches it untouched.
     this.#font = ('font' in groupAttrs) ? groupAttrs.font : readCodeFont(this.id)
+    this.#readFace = ('read' in groupAttrs) ? groupAttrs.read : readReadFont(this.id)
     this.#ligatures = ('ligatures' in groupAttrs)
       ? groupAttrs.ligatures === true
       : readLigatures(this.id)
@@ -602,10 +627,10 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#el.style.setProperty('--hc-panel-scale', String(scale))
   }
 
-  /** Put the chosen face on the host, where everything the window renders
-   *  inherits it. A window that never chose sets NOTHING — the property is
+  /** Put the chosen faces on the host, where everything the window renders
+   *  inherits them. A window that never chose sets NOTHING — the property is
    *  removed rather than written with the default, so :root stays the one
-   *  place the app's default face is decided.
+   *  place the app's default faces are decided.
    *
    *  Ligatures are a separate property because they are a separate question:
    *  the same face can be read either way, and the code that sizes off
@@ -614,6 +639,9 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     const face = codeFont(this.#font)
     if (face) this.#el.style.setProperty('--hc-code', face.stack)
     else this.#el.style.removeProperty('--hc-code')
+    const reading = readFont(this.#readFace)
+    if (reading) this.#el.style.setProperty('--hc-read', reading.stack)
+    else this.#el.style.removeProperty('--hc-read')
     if (this.#ligatures) this.#el.style.setProperty('--hc-code-ligatures', 'normal')
     else this.#el.style.removeProperty('--hc-code-ligatures')
   }
@@ -821,9 +849,19 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     pop.setAttribute('data-hc-panel-settings-pop', '')
     pop.setAttribute('role', 'dialog')
     pop.setAttribute('aria-label', this.#t('panel.settings', 'Window settings'))
-    const inner = this.dockSide === 'right' ? 'left' : 'right'
+    // UNDER THE GEAR, measured — not a fixed corner. The old inner-edge
+    // anchor assumed a panel a few hundred pixels wide, where every corner is
+    // near the gear; the chat's full screen made the panel the whole viewport
+    // and put the popover over the far-away tiles rail instead. Anchoring on
+    // the gear's own measured offset is right at every panel width. The inner
+    // edge stays the fallback for a popover opened before the gear exists.
+    const panelRect = this.#el.getBoundingClientRect()
+    const gearRect = this.#gearBtn?.getBoundingClientRect()
+    const anchor: Partial<CSSStyleDeclaration> = gearRect
+      ? { right: `${Math.max(10, Math.round(panelRect.right - gearRect.right))}px` }
+      : { [this.dockSide === 'right' ? 'left' : 'right']: '10px' } as Partial<CSSStyleDeclaration>
     Object.assign(pop.style, {
-      position: 'absolute', top: '2.6rem', [inner]: '10px', zIndex: '9',
+      position: 'absolute', top: '2.6rem', zIndex: '9', ...anchor,
     } as Partial<CSSStyleDeclaration>)
     pop.addEventListener('pointerdown', (e) => { e.stopPropagation() })
     // The editor is a place to TYPE — keys must not fall through to the hive's
@@ -935,6 +973,35 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
         : this.#t('panel.text.hint.pinned', 'Held at this size, whatever the window\'s width.'),
       pick: (value) => { this.#setText(value === 'auto' ? null : parseFloat(value)) },
     }]
+
+    // The face PROSE is read in — the window's normal text: answers, notes,
+    // setup paragraphs. First of the two faces because it is most of what a
+    // reading window shows; the code face below covers the blocks inside it.
+    // Managing both is what lets a window's typography actually look right —
+    // one face for sentences, one for code, never one pretending to be both.
+    // Offered only by a window that declares a reading surface: elsewhere the
+    // control could not change what you are looking at, and a dead control is
+    // worse than none (the ligature switch's own rule).
+    if (this.hasReadingSurface) {
+      const prose = this.#readFace ?? DEFAULT_READ_FONT
+      shared.push({
+        kind: 'specimen', key: 'read-font',
+        label: this.#t('panel.read-font.label', 'Reading font'),
+        value: prose,
+        options: READ_FONTS.map(font => ({
+          value: font.key,
+          // Face names are themselves in every language; the two that are
+          // WORDS (system, match-code) localize.
+          label: font.key === 'system'
+            ? this.#t('panel.read-font.system', font.label)
+            : font.key === 'mono' ? this.#t('panel.read-font.mono', font.label) : font.label,
+          family: font.stack,
+          specimen: font.specimen,
+        })),
+        hint: this.#t('panel.read-font.hint', 'Normal text — answers and notes — reads in this face.'),
+        pick: (value) => { this.#setRead(value) },
+      })
+    }
 
     // The face code is READ in. Offered here rather than in the chat window's
     // own settings because it is not the chat window's question: any tool
@@ -1075,6 +1142,17 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#refreshPopover()
   }
 
+  /** Pick the face prose reads in — the same shape as `#setFont`, because it
+   *  is the same setting asked about the window's other surface. */
+  #setRead(next: string): void {
+    if (next === this.#readFace) return
+    this.#readFace = next
+    writeReadFont(this.id, next)
+    this.#applyFont()
+    if (this.#group) publishAttrs(this)
+    this.#refreshPopover()
+  }
+
   #setLigatures(on: boolean): void {
     if (on === this.#ligatures) return
     this.#ligatures = on
@@ -1142,16 +1220,19 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
         this.#refreshPopover()
       }
     }
-    // The face travels with the size — a group is a settings SET, and a mate
-    // that took the group's text size but kept its own typeface would make
+    // The faces travel with the size — a group is a settings SET, and a mate
+    // that took the group's text size but kept its own typefaces would make
     // that a half-truth.
-    if ('font' in attrs || 'ligatures' in attrs) {
+    if ('font' in attrs || 'ligatures' in attrs || 'read' in attrs) {
       const font = ('font' in attrs) ? attrs.font : this.#font
+      const read = ('read' in attrs) ? attrs.read : this.#readFace
       const ligatures = ('ligatures' in attrs) ? attrs.ligatures === true : this.#ligatures
-      if (font !== this.#font || ligatures !== this.#ligatures) {
+      if (font !== this.#font || read !== this.#readFace || ligatures !== this.#ligatures) {
         this.#font = font
+        this.#readFace = read
         this.#ligatures = ligatures
         writeCodeFont(this.id, font)
+        writeReadFont(this.id, read)
         writeLigatures(this.id, ligatures)
         this.#applyFont()
         this.#refreshPopover()

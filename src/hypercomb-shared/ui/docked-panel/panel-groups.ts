@@ -32,8 +32,12 @@
  *  being dropped. ABSENT means the window has no opinion and inherits the
  *  --hc-code default from :root — which is why it, too, is read by key
  *  presence. `ligatures` rides with it, because it is a property of the face
- *  that was chosen rather than a separate taste. */
-export type GroupAttrs = { width?: number; text?: number; font?: string; ligatures?: boolean }
+ *  that was chosen rather than a separate taste.
+ *
+ *  `read` is a READ_FONTS key — the face PROSE renders in, the second half of
+ *  a window's typography. Same rules as `font`: key not stack, absent means
+ *  inherit :root's --hc-read. */
+export type GroupAttrs = { width?: number; text?: number; font?: string; ligatures?: boolean; read?: string }
 
 /** The text sizes a window (or a group) can be set to. AUTO — `null` — is the
  *  old behaviour: the content scales with the window's width. The rest hold it
@@ -98,8 +102,62 @@ export const DEFAULT_CODE_FONT = 'plex'
 export const codeFont = (key: string | undefined): CodeFont | undefined =>
   CODE_FONTS.find(f => f.key === key)
 
+// ── the reading font ─────────────────────────────────────────────────
+//
+// Which face a window reads PROSE in — the other half of its typography.
+// The tool-window shell sets everything in --hc-mono, which is right for
+// chrome and wrong for sentences: an answer, a note, a paragraph of setup
+// text should read as text. A window that has a reading surface renders it
+// in `var(--hc-read)` and this ladder decides what that resolves to.
+//
+// No ligature switch here — that is a property of code faces; prose faces
+// keep their designer's defaults.
+
+/** One offered reading face. `stack` always ends in a var() so a face that is
+ *  not present degrades down a declared chain, never to the UA default. */
+export interface ReadFont {
+  key: string
+  label: string
+  stack: string
+  /** Shown under the name, drawn in the face itself — a sentence, because a
+   *  reading face is judged on sentences. */
+  specimen: string
+}
+
+const READ_SPECIMEN = 'The answer lands as a quiet note on the tile.'
+
+export const READ_FONTS: readonly ReadFont[] = [
+  { key: 'hive', label: 'Source Sans', stack: 'var(--hc-font)', specimen: READ_SPECIMEN },
+  { key: 'system', label: 'System', stack: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", specimen: READ_SPECIMEN },
+  { key: 'serif', label: 'Georgia', stack: "Georgia, 'Iowan Old Style', 'Times New Roman', serif", specimen: READ_SPECIMEN },
+  { key: 'mono', label: 'Match code', stack: 'var(--hc-code)', specimen: READ_SPECIMEN },
+]
+
+/** What :root's --hc-read resolves to — same contract as DEFAULT_CODE_FONT:
+ *  a window that never chose inherits it live rather than pinning a copy. */
+export const DEFAULT_READ_FONT = 'hive'
+
+export const readFont = (key: string | undefined): ReadFont | undefined =>
+  READ_FONTS.find(f => f.key === key)
+
 export const fontKey = (window: string): string => `hc:panel-font:${window}`
 export const ligaturesKey = (window: string): string => `hc:panel-ligatures:${window}`
+export const readFontKey = (window: string): string => `hc:panel-read:${window}`
+
+/** This window's chosen reading face, or `undefined` for "never chose". */
+export const readReadFont = (window: string): string | undefined => {
+  try {
+    const raw = localStorage.getItem(readFontKey(window))
+    return raw && readFont(raw) ? raw : undefined
+  } catch { return undefined }
+}
+
+export const writeReadFont = (window: string, key: string | undefined): void => {
+  try {
+    if (key) localStorage.setItem(readFontKey(window), key)
+    else localStorage.removeItem(readFontKey(window))
+  } catch { /* ignore */ }
+}
 
 /** This window's chosen face, or `undefined` for "never chose" — the state that
  *  inherits the app default rather than pinning today's value of it. */

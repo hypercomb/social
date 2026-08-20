@@ -954,57 +954,14 @@ export class AgentPanelView extends EventTarget {
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(30rem,70vh);box-sizing:border-box;
   background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:10px;}
-.hc-agent.fullscreen{inset:0.75rem;width:auto!important;max-width:none;height:auto;max-height:none;}
+.hc-agent.fullscreen{inset:0;width:auto!important;max-width:none;height:auto;max-height:none;
+  border-radius:0;border:none;}
 .hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:0.55rem;
   padding:0.75rem 0.85rem;box-sizing:border-box;}
 .hc-agent-rail{display:none;}
 .hc-agent.fullscreen .hc-agent-rail{display:flex;flex-direction:column;min-height:0;
   flex:0 0 clamp(15rem,24vw,19rem);border-right:1px solid rgba(${STEEL},0.16);
-  background:rgba(3,5,9,0.55);border-radius:10px 0 0 10px;}
-.hc-rail-head{display:flex;align-items:center;gap:0.35rem;flex:0 0 auto;
-  padding:0.8rem 0.85rem 0.5rem;}
-.hc-rail-back{width:1.7rem;height:1.9rem;flex:0 0 auto;border:none;background:none;
-  color:rgba(${STEEL},0.75);font-size:1.4rem;line-height:1;cursor:pointer;border-radius:6px;}
-.hc-rail-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
-.hc-rail-back[hidden]{display:none;}
-.hc-rail-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-family:var(--hc-mono,monospace);font-size:0.72rem;font-weight:600;letter-spacing:0.12em;
-  text-transform:uppercase;color:rgba(${STEEL},0.85);}
-.hc-rail-list{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;
-  gap:2px;padding:0.15rem 0.5rem 0.7rem;}
-@keyframes hcRailIn{from{opacity:0;transform:translateX(0.6rem);}to{opacity:1;transform:none;}}
-@keyframes hcRailOut{from{opacity:0;transform:translateX(-0.6rem);}to{opacity:1;transform:none;}}
-.hc-rail-row{display:flex;align-items:center;border-radius:9px;}
-.hc-rail-row:hover{background:rgba(255,255,255,0.05);}
-.hc-rail-row.picked{background:rgba(${STEEL},0.1);box-shadow:inset 0 0 0 1px rgba(${STEEL},0.4);}
-.hc-rail-main{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:0.6rem;
-  padding:0.35rem 0.2rem 0.35rem 0.45rem;border:0;background:none;text-align:left;font:inherit;
-  cursor:pointer;border-radius:9px;color:inherit;}
-.hc-rail-main:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
-.hc-rail-icon{width:2.15rem;height:2.15rem;flex:0 0 auto;border-radius:8px;overflow:hidden;
-  display:grid;place-items:center;background:rgba(${STEEL},0.08);
-  border:1px solid rgba(${STEEL},0.14);color:rgba(${STEEL},0.55);
-  font-size:0.95rem;font-weight:600;}
-.hc-rail-icon img{width:100%;height:100%;object-fit:cover;display:block;}
-.hc-rail-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-size:0.86rem;color:rgba(238,244,250,0.92);}
-.hc-rail-bees{flex:0 0 auto;min-width:1.15rem;text-align:center;padding:0.06rem 0.3rem;
-  border-radius:999px;border:1px solid rgba(226,196,140,0.5);color:rgba(226,196,140,0.95);
-  font-size:0.66rem;line-height:1.2;}
-.hc-rail-bees[hidden]{display:none;}
-.hc-rail-chev{flex:0 0 auto;color:rgba(216,230,238,0.35);font-size:1.05rem;line-height:1;
-  padding-right:0.1rem;}
-.hc-rail-chev[hidden]{display:none;}
-.hc-rail-pick{flex:0 0 auto;width:1.05rem;height:1.05rem;margin:0 0.55rem 0 0.15rem;
-  border-radius:999px;border:1px solid rgba(${STEEL},0.45);background:none;cursor:pointer;
-  opacity:0.35;transition:opacity 0.12s ease,background 0.12s ease;}
-.hc-rail-row:hover .hc-rail-pick,.hc-rail-pick:focus-visible{opacity:1;outline:none;}
-.hc-rail-row.picked .hc-rail-pick{opacity:1;background:rgba(${STEEL},0.9);
-  box-shadow:inset 0 0 0 2px #0c1118;}
-.hc-rail-skel{height:2.5rem;border-radius:9px;background:rgba(255,255,255,0.045);
-  animation:hcRailPulse 1.1s ease-in-out infinite;}
-@keyframes hcRailPulse{0%,100%{opacity:0.5;}50%{opacity:1;}}
-.hc-rail-empty{padding:0.9rem 0.45rem;font-size:0.78rem;color:rgba(216,230,238,0.45);}
+  background:rgba(3,5,9,0.55);}
 .hc-agent-chips{display:flex;flex-wrap:wrap;gap:0.3rem;flex:0 0 auto;}
 .hc-agent-chips[hidden]{display:none;}
 .hc-agent-chip{display:inline-flex;align-items:center;gap:0.25rem;max-width:12rem;

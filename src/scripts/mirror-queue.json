@@ -1018,6 +1018,15 @@
       "note": "Built this pass, NO mirror run (bridge probe timed out — broker up on 2401, no renderer attached). Owed under behaviors: extend the pheromones/tags creation with a part tile for the PREVIEW behaviour, marked 'part', plus a note saying what it is — pointing at a mark ANYWHERE in the chrome (panel row, bouquet head, painter chip, bottom crumb) emits tags:preview {marks,color}; show-cell resolves the carriers on the current page and writes divergence 3 STRAIGHT INTO the aDivergence buffer (an in-place attribute push, never a render pass), the hex-sdf fragment paints them with a rim band in the mark's OWN colour sized as a fraction of u_radiusPx and lifts them, and every other tile recedes; u_markPreview ramps the whole treatment 0..1 so nothing snaps, and 3 is the one divergence value nothing persists — no Cell record holds it, so clearing is a restore. Files: presentation/grid/hex-sdf.shader.ts, presentation/tiles/show-cell.drone.ts, hypercomb-shared/ui/tags-viewer/{ts,html,scss}, hypercomb-shared/ui/controls-bar/{ts,html}, scripts/drive-pheromone-preview.cjs (the proof harness). Also mint its card in the behaviors theme sweep.",
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "chat-fullscreen-reading-face",
+      "title": "Mirror the chat window's full screen + the reading-face system",
+      "run": null,
+      "note": "Chat window (hypercomb-shared/ui/chat-window): focus mode is now FULL SCREEN - the entire screen with the tiles rail (essentials assistant/agent-tiles-rail.ts) as the left sidebar, reached over IoC ('@diamondcoreprocessor.com/AgentTilesRailFactory'); picked tiles ride sends as targets (on-page = bare names, drilled = /path/name strings). Typography: every docked tool window can now manage TWO faces - the new Reading font picker (READ_FONTS in docked-panel/panel-groups.ts, --hc-read token, gated by hasReadingSurface) beside the existing Code font; the chat's transcript/composer/setup read in it. Mirror pass: notes on the chat-window and docked-panel part tiles + a part tile for panel-groups' reading-face registry if the shell parts are mirrored; note the group-attrs undefined-key erase trap that was fixed. note-add is additive - hands-on.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

@@ -1,6 +1,10 @@
 // diamondcoreprocessor.com/assistant/agent-tiles-rail.ts
 //
-// THE TILES RAIL — the left column of the full-screen agent panel.
+// THE TILES RAIL — the left sidebar of a full-screen surface: the agent
+// panel mounts it directly, and the chat window (shared shell, which must
+// never import essentials) reaches it through the IoC factory registered at
+// the bottom. It carries its own stylesheet so it looks the same wherever it
+// is mounted.
 //
 // One level of the hive at a time, as a vertical list: square picture icons,
 // names, a chevron where there is structure inside, and a quiet count of the
@@ -49,6 +53,66 @@ const MAX_ROWS = 500
 
 const pathKey = (segments: readonly string[]): string => segments.join('\u0000')
 
+const STYLE_ID = 'hc-tiles-rail-styles'
+const STEEL = '126, 182, 214'
+
+/** The rail's own stylesheet — installed on first mount so the rail reads
+ *  identically inside the agent panel and the chat window. Host geometry
+ *  (where the rail sits, how wide) stays with whichever surface mounts it. */
+const ensureRailStyles = (): void => {
+  if (document.getElementById(STYLE_ID)) return
+  const style = document.createElement('style')
+  style.id = STYLE_ID
+  style.textContent = `
+.hc-rail-head{display:flex;align-items:center;gap:0.35rem;flex:0 0 auto;
+  padding:0.8rem 0.85rem 0.5rem;}
+.hc-rail-back{width:1.7rem;height:1.9rem;flex:0 0 auto;border:none;background:none;
+  color:rgba(${STEEL},0.75);font-size:1.4rem;line-height:1;cursor:pointer;border-radius:6px;}
+.hc-rail-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
+.hc-rail-back[hidden]{display:none;}
+.hc-rail-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--hc-mono,monospace);font-size:0.72rem;font-weight:600;letter-spacing:0.12em;
+  text-transform:uppercase;color:rgba(${STEEL},0.85);}
+.hc-rail-list{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;
+  gap:2px;padding:0.15rem 0.5rem 0.7rem;scrollbar-width:thin;
+  scrollbar-color:rgba(${STEEL},0.3) transparent;}
+@keyframes hcRailIn{from{opacity:0;transform:translateX(0.6rem);}to{opacity:1;transform:none;}}
+@keyframes hcRailOut{from{opacity:0;transform:translateX(-0.6rem);}to{opacity:1;transform:none;}}
+.hc-rail-row{display:flex;align-items:center;border-radius:9px;}
+.hc-rail-row:hover{background:rgba(255,255,255,0.05);}
+.hc-rail-row.picked{background:rgba(${STEEL},0.1);box-shadow:inset 0 0 0 1px rgba(${STEEL},0.4);}
+.hc-rail-main{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:0.6rem;
+  padding:0.35rem 0.2rem 0.35rem 0.45rem;border:0;background:none;text-align:left;font:inherit;
+  cursor:pointer;border-radius:9px;color:inherit;}
+.hc-rail-main:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
+.hc-rail-icon{width:2.15rem;height:2.15rem;flex:0 0 auto;border-radius:8px;overflow:hidden;
+  display:grid;place-items:center;background:rgba(${STEEL},0.08);
+  border:1px solid rgba(${STEEL},0.14);color:rgba(${STEEL},0.55);
+  font-size:0.95rem;font-weight:600;}
+.hc-rail-icon img{width:100%;height:100%;object-fit:cover;display:block;}
+.hc-rail-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:0.86rem;color:rgba(238,244,250,0.92);}
+.hc-rail-bees{flex:0 0 auto;min-width:1.15rem;text-align:center;padding:0.06rem 0.3rem;
+  border-radius:999px;border:1px solid rgba(226,196,140,0.5);color:rgba(226,196,140,0.95);
+  font-size:0.66rem;line-height:1.2;}
+.hc-rail-bees[hidden]{display:none;}
+.hc-rail-chev{flex:0 0 auto;color:rgba(216,230,238,0.35);font-size:1.05rem;line-height:1;
+  padding-right:0.1rem;}
+.hc-rail-chev[hidden]{display:none;}
+.hc-rail-pick{flex:0 0 auto;width:1.05rem;height:1.05rem;margin:0 0.55rem 0 0.15rem;
+  border-radius:999px;border:1px solid rgba(${STEEL},0.45);background:none;cursor:pointer;
+  opacity:0.35;transition:opacity 0.12s ease,background 0.12s ease;}
+.hc-rail-row:hover .hc-rail-pick,.hc-rail-pick:focus-visible{opacity:1;outline:none;}
+.hc-rail-row.picked .hc-rail-pick{opacity:1;background:rgba(${STEEL},0.9);
+  box-shadow:inset 0 0 0 2px #0c1118;}
+.hc-rail-skel{height:2.5rem;border-radius:9px;background:rgba(255,255,255,0.045);
+  animation:hcRailPulse 1.1s ease-in-out infinite;}
+@keyframes hcRailPulse{0%,100%{opacity:0.5;}50%{opacity:1;}}
+.hc-rail-empty{padding:0.9rem 0.45rem;font-size:0.78rem;color:rgba(216,230,238,0.45);}
+`
+  document.head.appendChild(style)
+}
+
 export class AgentTilesRail {
   #host: HTMLElement | null = null
   #back: HTMLButtonElement | null = null
@@ -84,6 +148,7 @@ export class AgentTilesRail {
   }
 
   mount(host: HTMLElement): void {
+    ensureRailStyles()
     this.#host = host
     host.textContent = ''
 
@@ -241,7 +306,7 @@ export class AgentTilesRail {
       const key = pathKey(row.segments)
       const wrap = document.createElement('div')
       wrap.className = 'hc-rail-row'
-      wrap.dataset.key = key
+      wrap.dataset['key'] = key
       wrap.classList.toggle('picked', this.#picks.has(key))
 
       const main = document.createElement('button')
@@ -325,7 +390,7 @@ export class AgentTilesRail {
     for (const row of list.querySelectorAll<HTMLElement>('.hc-rail-row')) {
       const badge = row.querySelector<HTMLElement>('.hc-rail-bees')
       if (!badge) continue
-      const busy = counts.get(row.dataset.key ?? '') ?? 0
+      const busy = counts.get(row.dataset['key'] ?? '') ?? 0
       badge.textContent = String(busy)
       badge.hidden = busy === 0
     }
@@ -391,3 +456,13 @@ export class AgentTilesRail {
     }
   }
 }
+
+// ── the seam to the shell ──────────────────────────────────────────────
+//
+// The chat window lives in hypercomb-shared, and shared must never import
+// essentials — so the rail is offered structurally, the same loose-IoC seam
+// TileContext uses. A fresh rail per call: each surface keeps its own trail
+// and picks.
+window.ioc.register('@diamondcoreprocessor.com/AgentTilesRailFactory', {
+  create: (): AgentTilesRail => new AgentTilesRail(),
+})
