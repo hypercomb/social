@@ -423,6 +423,50 @@ describe('FolderSyncService', () => {
     expect(service.state()).toMatchObject({ status: 'incomplete', missingReferences: 1 })
   })
 
+  it('backs up the hive through the facade, never the pack file', async () => {
+    // In packed mode the hive is not records in the raw OPFS — it is one
+    // `hive.pack` file. A raw walk copies that whole file alongside the same
+    // content expanded (measured: 651 MB of pack in a 1,024 MB folder against
+    // 504 MB of storage), and because the pack is append-only its size and
+    // mtime change on any hive change, so it is re-copied IN FULL every pass.
+    const raw = new MemoryDir('opfs')
+    const facade = new MemoryDir('facade')
+    const chosen = new MemoryDir('Backups')
+
+    const record = 'a'.repeat(64)
+    const packPool = 'b'.repeat(64)
+    await put(facade, record, new TextEncoder().encode('a real record'))
+    // What the raw root holds and the facade deliberately hides.
+    await put(raw, `${packPool}/hive.pack`, new Uint8Array(4096))
+    await put(raw, '__layers__/legacy-record', new TextEncoder().encode('undrained'))
+
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => raw },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+    registrations.set('@hypercomb.social/Store', { opfsRoot: facade })
+
+    const service = new FolderSyncService()
+    await service.connect('local')
+
+    const opfs = await (await (await (await chosen.getDirectoryHandle('hypercomb-backup'))
+      .getDirectoryHandle('devices')).entriesMap.values().next().value as MemoryDir)
+      .getDirectoryHandle('opfs')
+
+    // The hive travelled.
+    expect(opfs.entriesMap.has(record)).toBe(true)
+    // The legacy dir the facade hides travelled too — it still holds records
+    // until the drain finishes, and a list of legacy names would have drifted.
+    expect(opfs.entriesMap.has('__layers__')).toBe(true)
+    // The pack did NOT. It is the storage engine's internal representation,
+    // and every record inside it is already here individually.
+    expect(opfs.entriesMap.has(packPool)).toBe(false)
+  })
+
   it('joins an in-flight full pass instead of queueing a repeat', async () => {
     const opfs = new MemoryDir('opfs')
     const chosen = new MemoryDir('Backups')

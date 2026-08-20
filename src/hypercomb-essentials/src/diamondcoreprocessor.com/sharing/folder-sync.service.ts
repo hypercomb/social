@@ -409,6 +409,41 @@ const directoryAt = async (
  * nobody was told about. A backup is allowed to be incomplete. It is not
  * allowed to be quietly incomplete.
  */
+/**
+ * Everything the backup must carry: the hive through the facade, plus whatever
+ * the facade hides.
+ *
+ * The facade surfaces only SIGNATURE-named entries — that is what makes it the
+ * interchange form, and it is why the pack file never appears. But the raw root
+ * also holds the legacy typed directories (`__hive__`, `__layers__`,
+ * `__visuals__`, …), which are read-fallback sources still holding real records
+ * until the store finishes draining them. Move the walk to the facade and they
+ * would silently stop being backed up.
+ *
+ * So the second pass takes every raw entry the facade did NOT cover, by
+ * ENUMERATING rather than by keeping a list of legacy names. A list drifts, and
+ * the failure mode of a stale one is a directory nobody remembered quietly
+ * dropping out of the backup.
+ */
+async function* walkHive(
+  source: FileSystemDirectoryHandle,
+  raw: FileSystemDirectoryHandle,
+  refused: string[],
+): AsyncGenerator<{ path: string; handle: FileSystemFileHandle }> {
+  yield* walkFiles(source, '', refused)
+  if (source === raw) return // not packed — the facade IS the raw root
+  for await (const [name, handle] of (raw as any).entries()) {
+    // Signature-named entries are the hive, and the facade already yielded
+    // them — including the undrained flat ones it unions in.
+    if (SIG_RE.test(name)) continue
+    if (handle.kind === 'directory') {
+      yield* walkFiles(handle as FileSystemDirectoryHandle, name, refused)
+    } else if (validSegment(name)) {
+      yield { path: name, handle: handle as FileSystemFileHandle }
+    }
+  }
+}
+
 async function* walkFiles(
   dir: FileSystemDirectoryHandle,
   prefix = '',
@@ -796,7 +831,25 @@ export class FolderSyncService {
     this.#pendingMirrors.clear()
 
     try {
-      const source = await navigator.storage.getDirectory()
+      // THE HIVE, not the storage it happens to sit in.
+      //
+      // `navigator.storage.getDirectory()` is the RAW OPFS, and in packed mode
+      // the hive does not live there as records — it lives inside one
+      // `hive.pack` file, which the raw walk then copies WHOLE. Measured on the
+      // real hive: a 651 MB pack copied alongside the same content expanded,
+      // making the folder 1,024 MB against 504 MB of storage. Worse, the pack
+      // is append-only, so its size and mtime change on any hive change and
+      // `cheapMatch` never matches — every pass re-copied 651 MB. That is the
+      // exact opposite of an incremental backup.
+      //
+      // `Store.opfsRoot` is the FACADE. Its `rootEntries` unions packed records
+      // with undrained flat ones and deliberately hides the pack pool ("the
+      // pack pool dir is internal representation and never surfaces in the
+      // virtual root"), so the walk sees the interchange form whatever the
+      // storage engine underneath is doing. On a hive that is not packed the
+      // facade IS the raw root, so nothing changes there.
+      const raw = await navigator.storage.getDirectory()
+      const source = (window as any).ioc?.get?.('@hypercomb.social/Store')?.opfsRoot ?? raw
 
       // The destination is opened BEFORE materialization, not after, because
       // materialization now writes THROUGH it. Nothing waits for the closure
@@ -854,7 +907,7 @@ export class FolderSyncService {
        *  hive does this; the next pass picks up whatever replaced them. */
       let vanished = 0
 
-      for await (const entry of walkFiles(source, '', unrepresentable)) {
+      for await (const entry of walkHive(source, raw, unrepresentable)) {
         // The source is a LIVE filesystem: the hive keeps writing while this
         // walk runs, so an entry can be enumerated and then be gone before it
         // is read. That is ordinary, and it threw `NotFoundError` straight out
