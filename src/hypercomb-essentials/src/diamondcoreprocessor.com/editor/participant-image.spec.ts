@@ -3,10 +3,11 @@
 // below is a shape that reached a real hive and was mistaken for a default.
 
 import { describe, expect, it } from 'vitest'
-import { hasTileImage, isParticipantImage, withoutSubstrateImage } from './tile-properties.js'
+import { hasTileImage, isParticipantImage, primaryTileImageSig, tilePictureCandidates, unframedTileImageSig, withoutSubstrateImage } from './tile-properties.js'
 
 const A = 'a'.repeat(64)
 const B = 'b'.repeat(64)
+const C = 'c'.repeat(64)
 
 describe('picture ownership', () => {
   it('a tile with no picture belongs to nobody', () => {
@@ -70,6 +71,45 @@ describe('picture ownership', () => {
     it('passes a tile with no picture straight through', () => {
       const bare = { index: 1, tags: [] }
       expect(withoutSubstrateImage(bare)).toBe(bare)
+    })
+  })
+
+  // A rectangle must never be handed a hex capture. The capture is cropped
+  // to the hexagon's aspect over the tile's background colour, and every
+  // tile saved through the editor before the frame stopped being baked
+  // carries the gold hex stroke IN ITS PIXELS — fine on a rim, a gold
+  // hexagon drawn across the middle of the picture anywhere else.
+  describe('the picture a rectangle should show', () => {
+    it('is the editor original when the tile has one', () => {
+      expect(unframedTileImageSig({ small: { image: A }, large: { image: B, x: 0, y: 0, scale: 1 } })).toBe(B)
+      // …and the hexagons still want the capture, framed for their shape.
+      expect(primaryTileImageSig({ small: { image: A }, large: { image: B, x: 0, y: 0, scale: 1 } })).toBe(A)
+    })
+
+    it('falls back to the smalls when there is no original', () => {
+      // A substrate default and an adopted peer picture are both smalls
+      // with no `large` — and both are frameless anyway.
+      expect(unframedTileImageSig({ small: { image: A }, substrate: true })).toBe(A)
+      expect(unframedTileImageSig({ flat: { small: { image: B } } })).toBe(B)
+      expect(unframedTileImageSig({ imageSig: A })).toBe(A)
+    })
+
+    it('offers the fallbacks in order, so a reader can take one it HOLDS', () => {
+      // Adoption carries the props blob, not the heavy original — the
+      // receiver names a `large` it does not have. A reader that took the
+      // name on faith would paint a broken image where a framed one was.
+      expect(tilePictureCandidates({
+        large: { image: A }, small: { image: B }, flat: { small: { image: C } },
+      })).toEqual([A, B, C])
+      expect(tilePictureCandidates({ small: { image: B }, large: { image: 'nope' } })).toEqual([B])
+      expect(tilePictureCandidates({ index: 1 })).toEqual([])
+    })
+
+    it('is nothing when the tile carries no picture', () => {
+      expect(unframedTileImageSig({ index: 2, tags: ['x'] })).toBeUndefined()
+      for (const junk of [{ large: { image: 'nope' } }, { large: { image: null } }, null, 'x', 42]) {
+        expect(unframedTileImageSig(junk)).toBeUndefined()
+      }
     })
   })
 

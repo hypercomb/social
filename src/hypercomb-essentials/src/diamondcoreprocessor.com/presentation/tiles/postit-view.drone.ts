@@ -24,6 +24,7 @@ import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-en
 import { listDecorations, replaceDecoration } from '../../commands/decoration-manifest.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
+import { tilePictureCandidates } from '../../editor/tile-properties.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY, type PostitPayload } from '../../commands/postit.queen.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
@@ -33,7 +34,10 @@ type HistoryShape = {
   currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
 }
 const SIG_RE = /^[0-9a-f]{64}$/
-type StoreShape = { getResource(sig: string): Promise<Blob | null> }
+type StoreShape = {
+  getResource(sig: string): Promise<Blob | null>
+  getResourceLocal?(sig: string): Promise<Blob | null>
+}
 
 const STICKY_LIMIT = 5
 
@@ -583,9 +587,18 @@ export class PostitViewDrone extends Drone {
       if (!SIG_RE.test(propsSig)) return null
       const blob = await store.getResource(propsSig)
       if (!blob) return null
-      const props = JSON.parse(await blob.text()) as { small?: { image?: string } }
-      const imageSig = String(props?.small?.image ?? '')
-      return SIG_RE.test(imageSig) ? imageSig : null
+      // A post-it shows the asset as a RECTANGLE, so it wants the picture
+      // itself — not the hexagon-shaped capture with the gold rim baked
+      // across it. First candidate whose bytes are actually here: a tile
+      // can name an original it does not hold (adoption carries the props
+      // blob, not the heavy original), and a broken image is worse than a
+      // framed one.
+      const candidates = tilePictureCandidates(JSON.parse(await blob.text()))
+      for (const sig of candidates) {
+        const bytes = await (store.getResourceLocal?.(sig) ?? store.getResource(sig))
+        if (bytes && bytes.size > 0) return sig
+      }
+      return candidates[0] ?? null
     } catch { return null }
   }
 

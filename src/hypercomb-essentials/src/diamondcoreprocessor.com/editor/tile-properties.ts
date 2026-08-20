@@ -155,6 +155,42 @@ export const primaryTileImageSig = (props: unknown): string | undefined => {
   return isSignature(sig) ? sig as string : undefined
 }
 
+/** The sig of the tile's picture AS A PICTURE — what a rectangle should
+ *  show. `large.image` first: that is the untouched original, the bytes
+ *  the person actually gave the tile.
+ *
+ *  The `small`s are not pictures, they are HEX CAPTURES — a crop taken at
+ *  the hexagon's aspect, painted over the tile's background colour, and
+ *  (for every tile saved through the editor before the frame stopped
+ *  being baked) carrying the gold hexagon stroke IN THE PIXELS. Inside a
+ *  hexagon that stroke lands on the rim and reads as the tile's edge;
+ *  inside a rectangle it is a gold hexagon drawn across the middle of
+ *  someone's picture, with the picture bleeding out past its corners.
+ *
+ *  So: hexagons (and hexagon-clipped chrome — the notes strip, the
+ *  clipboard panel, the rewind window, the close-up deck) want
+ *  `primaryTileImageSig`. Anything that shows the picture as a rectangle
+ *  wants THIS. The smalls stay as the fallback, because a tile can have
+ *  no original at all — a substrate default and an adopted peer picture
+ *  are both smalls with no `large`, and both are frameless anyway. */
+export const tilePictureCandidates = (props: unknown): string[] => {
+  const p = props as any
+  return [p?.large?.image, p?.small?.image, p?.flat?.small?.image, p?.imageSig]
+    .filter(v => isSignature(v)) as string[]
+}
+
+/** The first candidate, for callers that cannot check what they hold.
+ *
+ *  Prefer walking `tilePictureCandidates` and taking the first sig whose
+ *  BYTES are actually present: a tile can name an original it does not
+ *  have. Adoption travels the props blob — so `large.image` arrives as a
+ *  signature — while the heavy original stays behind with the publisher;
+ *  the receiver has only the smalls. A reader that trusts the name alone
+ *  renders a broken image where a framed one used to be, which is worse
+ *  than the frame. */
+export const unframedTileImageSig = (props: unknown): string | undefined =>
+  tilePictureCandidates(props)[0]
+
 /**
  * Is this tile's picture the PARTICIPANT'S — untouchable by any default,
  * theme or force? Three ways to be theirs, and any one is enough:

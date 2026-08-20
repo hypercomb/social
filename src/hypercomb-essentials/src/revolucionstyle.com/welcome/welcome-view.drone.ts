@@ -15,11 +15,12 @@
 // hive notes: the dark colonnade hid the layer, the dark 3D wall read as
 // heavy — the interface is light now, in both senses.
 
-import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
+import { Drone } from '@hypercomb/core'
 import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
 import { isKindGloballyOff } from '../../diamondcoreprocessor.com/sharing/behavior-enablement.js'
 import { listDecorations } from '../../diamondcoreprocessor.com/commands/decoration-manifest.js'
+import { tilePictureCandidates } from '../../diamondcoreprocessor.com/editor/tile-properties.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../diamondcoreprocessor.com/history/layer-placement.js'
 import { WELCOME_KIND, WELCOME_VIEW, type WelcomePayload } from './welcome.queen.js'
 import { ROOM_VIEW } from './room-view.drone.js'
@@ -31,10 +32,17 @@ type HistoryShape = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
 }
-type StoreShape = { getResource(sig: string): Promise<Blob | null> }
+type StoreShape = {
+  getResource(sig: string): Promise<Blob | null>
+  getResourceLocal?(sig: string): Promise<Blob | null>
+}
 const SIG_RE = /^[0-9a-f]{64}$/
 
 interface PanelData { label: string; title: string; imageUrl: string | null }
+
+const revokeAll = (urls: readonly string[]): void => {
+  for (const url of urls) URL.revokeObjectURL(url)
+}
 
 export class WelcomeViewDrone extends Drone {
   readonly namespace = 'revolucionstyle.com'
@@ -47,6 +55,8 @@ export class WelcomeViewDrone extends Drone {
   #bound = false
   #active = false
   #gen = 0
+  /** Object URLs handed to the plates — process-wide until revoked. */
+  #objectUrls: string[] = []
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -108,17 +118,23 @@ export class WelcomeViewDrone extends Drone {
     const title = payload?.title
       || (label ? titleForLabel(label, navigator.language) || label : 'Welcome')
 
-    const panels = await this.#panels(segments)
-    if (gen !== this.#gen || this.#vm()?.mode !== WELCOME_VIEW) return
+    // The plates' bytes are handed over as object URLs, so this pass's URLs
+    // are collected apart from the live set and only adopted AFTER the old
+    // host is torn down — teardown revokes what it owns, and revoking a URL
+    // the new plates are about to use would blank the page it just built.
+    const fresh: string[] = []
+    const panels = await this.#panels(segments, fresh)
+    if (gen !== this.#gen || this.#vm()?.mode !== WELCOME_VIEW) { revokeAll(fresh); return }
 
     this.#teardown()
+    this.#objectUrls = fresh
     this.#host = this.#build(title, payload?.tagline ?? '', segments, panels)
     document.body.appendChild(this.#host)
     this.#setActive(true)
   }
 
   /** The layer's children, in layer order — the elements of the page. */
-  async #panels(segments: readonly string[]): Promise<PanelData[]> {
+  async #panels(segments: readonly string[], sink: string[]): Promise<PanelData[]> {
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return []
     let labels: string[] = []
@@ -129,11 +145,11 @@ export class WelcomeViewDrone extends Drone {
     return Promise.all(labels.map(async child => ({
       label: child,
       title: titleForLabel(child, navigator.language) || child,
-      imageUrl: await this.#tileImageUrl([...segments, child]),
+      imageUrl: await this.#tileImageUrl([...segments, child], sink),
     })))
   }
 
-  async #tileImageUrl(segments: readonly string[]): Promise<string | null> {
+  async #tileImageUrl(segments: readonly string[], sink: string[]): Promise<string | null> {
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
     if (!history || !store) return null
@@ -145,9 +161,26 @@ export class WelcomeViewDrone extends Drone {
       if (!SIG_RE.test(propsSig)) return null
       const blob = await store.getResource(propsSig)
       if (!blob) return null
-      const props = JSON.parse(await blob.text()) as { small?: { image?: string } }
-      const imageSig = String(props?.small?.image ?? '')
-      return SIG_RE.test(imageSig) ? RESOURCE_URL_PREFIX + imageSig : null
+      // The PICTURE, not the hex capture: a plate is a rectangle, and the
+      // capture carries the hexagon's crop — and, on anything saved
+      // through the tile editor before the frame stopped being baked, the
+      // gold hex stroke straight across the middle of the image.
+      //
+      // The original has to be one we actually HOLD. A tile can name an
+      // original it does not have (adoption carries the props blob, not
+      // the heavy bytes), and a plate showing a broken image is worse
+      // than a plate showing a framed one — so take the first candidate
+      // whose bytes are here, and hand the browser those bytes rather
+      // than making it fetch them a second time through /@resource/.
+      // Local reads only: sixteen plates must not each wait on the host.
+      for (const sig of tilePictureCandidates(JSON.parse(await blob.text()))) {
+        const bytes = await (store.getResourceLocal?.(sig) ?? store.getResource(sig))
+        if (!bytes || bytes.size === 0) continue
+        const url = URL.createObjectURL(bytes)
+        sink.push(url)
+        return url
+      }
+      return null
     } catch { return null }
   }
 
@@ -243,6 +276,8 @@ export class WelcomeViewDrone extends Drone {
   #teardown(): void {
     this.#host?.remove()
     this.#host = null
+    revokeAll(this.#objectUrls)
+    this.#objectUrls = []
     this.#setActive(false)
   }
 

@@ -204,16 +204,32 @@ export class ImageEditorService extends EventTarget {
     this.#container.x = offsetX
     this.#container.y = offsetY
 
-    renderer.render({
-      container: this.#container,
-      target: renderTexture,
-      clear: true,
-      clearColor: this.#backgroundColor,
-    } as any)
+    // The hex frame is a GUIDE for the person editing — it shows where the
+    // hexagon's edge will fall across their picture. It must never reach the
+    // BYTES. The grid shader draws the rim itself from `aBorderColor`
+    // (hex-sdf.shader.ts mixes `vBorderColor` over image tiles exactly as it
+    // does over empty ones), so a baked frame is a second rim in the
+    // hexagons — and, in every rectangular surface that shows a tile's
+    // picture (the welcome plates, a post-it's asset), a gold hexagon
+    // painted across the middle of the image with the picture still
+    // bleeding out past its corners. Hide it for the capture only.
+    const frame = this.#hexFrame
+    const frameWasVisible = frame?.visible ?? false
+    if (frame) frame.visible = false
 
-    // restore
-    this.#container.x = 0
-    this.#container.y = 0
+    try {
+      renderer.render({
+        container: this.#container,
+        target: renderTexture,
+        clear: true,
+        clearColor: this.#backgroundColor,
+      } as any)
+    } finally {
+      if (frame) frame.visible = frameWasVisible
+      // restore
+      this.#container.x = 0
+      this.#container.y = 0
+    }
 
     const canvas = renderer.extract.canvas(renderTexture) as HTMLCanvasElement
     renderTexture.destroy(true)
