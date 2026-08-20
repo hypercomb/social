@@ -216,12 +216,22 @@ describe('FolderSyncService', () => {
     })
     const adopt = vi.fn(async (
       rootSig: string,
-      options?: { deepResources?: boolean; silent?: boolean; quiet?: boolean },
+      options?: {
+        deepResources?: boolean
+        silent?: boolean
+        quiet?: boolean
+        mirror?: { has?: unknown; read?: unknown; write?: unknown }
+      },
     ) => {
       expect(rootSig).toBe(layerSig)
       // A hard copy must descend through resources that name further content,
-      // not stop at the contracts.
-      expect(options).toEqual({ deepResources: true, silent: true, quiet: true })
+      // not stop at the contracts — and it must hand the walk the BACKUP as a
+      // write-through destination, so bytes are saved as they verify rather
+      // than after the whole closure resolves.
+      expect(options).toMatchObject({ deepResources: true, silent: true, quiet: true })
+      expect(typeof options?.mirror?.has).toBe('function')
+      expect(typeof options?.mirror?.read).toBe('function')
+      expect(typeof options?.mirror?.write).toBe('function')
       await put(opfs, layerSig, layer)
       await put(opfs, resourceSig, resource)
       EffectBus.emit('content:wrote', {
@@ -369,7 +379,17 @@ describe('FolderSyncService', () => {
     // in the layer walk would ever reach it.
     expect(adoptResources).toHaveBeenCalledWith(
       [messageSig],
-      { deepResources: true, quiet: true },
+      expect.objectContaining({
+        deepResources: true,
+        quiet: true,
+        // Pool-named content writes through to the backup too — it is the
+        // content no layer references, so nothing else would ever save it.
+        mirror: expect.objectContaining({
+          has: expect.any(Function),
+          read: expect.any(Function),
+          write: expect.any(Function),
+        }),
+      }),
     )
     expect(service.state()).toMatchObject({ status: 'backed-up', mode: 'hard-copy' })
   })

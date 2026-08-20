@@ -66,7 +66,7 @@ describe('resource closure', () => {
 
     expect(fetched).toContain(NESTED_RECORD)
     expect(fetched).toContain(IMAGE)
-    expect(stats).toEqual({ leaves: 3, failed: 0, truncated: 0 })
+    expect(stats).toEqual({ leaves: 3, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 })
   })
 
   it('treats non-JSON bytes as a leaf and never harvests hex out of them', async () => {
@@ -83,7 +83,7 @@ describe('resource closure', () => {
     const stats = await broker.adoptResources([MANIFEST], { quiet: true })
 
     expect(fetched).toEqual([MANIFEST])
-    expect(stats).toEqual({ leaves: 1, failed: 0, truncated: 0 })
+    expect(stats).toEqual({ leaves: 1, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 })
   })
 
   it('counts content it cannot resolve as failed rather than silently passing', async () => {
@@ -94,7 +94,7 @@ describe('resource closure', () => {
       quiet: true,
     })
 
-    expect(stats).toEqual({ leaves: 1, failed: 1, truncated: 0 })
+    expect(stats).toEqual({ leaves: 1, failed: 1, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 })
   })
 
   it('bounds a hostile fan-out and reports what it dropped', async () => {
@@ -140,7 +140,7 @@ describe('resource closure', () => {
       quiet: true,
     })
 
-    expect(stats).toEqual({ leaves: 2, failed: 0, truncated: 0 })
+    expect(stats).toEqual({ leaves: 2, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 })
     expect(fetched).toHaveLength(2)
   })
 })

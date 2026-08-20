@@ -144,6 +144,53 @@ const DEEP_DEPTH_LIMIT = 64
  *  full parse and a signature sweep over the result. */
 const DEEP_RECORD_MAX_BYTES = 8 * 1024 * 1024
 
+/**
+ * A destination that wants content as it lands, and already holds some of it.
+ *
+ * Passing one turns a walk from "fetch everything, then let the caller copy"
+ * into a write-through: each item is handed over the moment it verifies, so an
+ * interrupted walk leaves everything it reached already saved. Content is
+ * IMMUTABLE and named by its own hash, so `has` is a complete answer — a
+ * signature the destination holds never needs fetching again.
+ */
+export interface MirrorSink {
+  /** Byte size if the destination already holds this signature, else null. */
+  has: (sig: string) => Promise<number | null>
+  /** Read one back. Only ever called for something `has` reported small. */
+  read: (sig: string) => Promise<Uint8Array | null>
+  /** Take newly resolved bytes. Must be atomic per item. */
+  write: (sig: string, bytes: Uint8Array) => Promise<void>
+}
+
+/** Counters a mirrored walk reports back. */
+interface MirrorStats {
+  mirrored?: number
+  alreadyMirrored?: number
+  mirrorFailed?: number
+}
+
+/**
+ * Hand one verified item to the destination.
+ *
+ * A write that fails is COUNTED, never swallowed: a backup that cannot say
+ * which items it failed to save is the exact failure this whole path exists to
+ * prevent. It does not throw, because the bytes are safely in the local store
+ * either way and one bad file must not abort a walk of thousands.
+ */
+const mirrorOut = async (
+  sig: string,
+  bytes: Uint8Array,
+  mirror: MirrorSink,
+  stats: MirrorStats,
+): Promise<void> => {
+  try {
+    await mirror.write(sig, bytes)
+    stats.mirrored = (stats.mirrored ?? 0) + 1
+  } catch {
+    stats.mirrorFailed = (stats.mirrorFailed ?? 0) + 1
+  }
+}
+
 // Hard cap on a single HTTP-direct probe. DEFAULT_TIMEOUT_MS bounds only
 // the MESH wait; the HTTP cascade's fetches had no timeout at all, so one
 // hung/unreachable host wedged every awaiting caller for the browser's
@@ -1098,9 +1145,9 @@ export class ContentBrokerDrone extends Drone {
    * `quiet` keeps that interactive event lane untouched for background
    * materialization jobs that report their own aggregate progress.
    */
-  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; deepResources?: boolean; maxResources?: number; silent?: boolean; quiet?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number; truncated: number }> => {
+  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; deepResources?: boolean; maxResources?: number; silent?: boolean; quiet?: boolean; mirror?: MirrorSink } = {}): Promise<{ layers: number; leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number }> => {
     const root = String(rootSig ?? '').toLowerCase().trim()
-    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0 }
+    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 }
     if (!SIG_RE.test(root)) return stats
     const visited = new Set<string>()
 
@@ -1129,6 +1176,11 @@ export class ContentBrokerDrone extends Drone {
       const bytes = await this.fetchBySig(sig, 'layer') // fill + verify + store
       if (!bytes) { stats.failed++; return }
       stats.layers++
+      // Layers are never skipped on the destination's behalf: the walk has to
+      // READ one to learn its children, and they are a handful of tiny JSONs
+      // (the slim-mesh note below). Only the leaves are worth skipping, and
+      // they are where all the bytes are.
+      if (opts.mirror) await mirrorOut(sig, bytes, opts.mirror, stats)
       if (!opts.quiet) this.emitEffect('adopt:progress', { sig, ...stats })
 
       let parsed: Record<string, unknown>
@@ -1187,9 +1239,9 @@ export class ContentBrokerDrone extends Drone {
    */
   #walkResources = async (
     seeds: readonly string[],
-    stats: { layers: number; leaves: number; failed: number; truncated?: number },
+    stats: { layers: number; leaves: number; failed: number; truncated?: number } & MirrorStats,
     visited: Set<string>,
-    opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number },
+    opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number; mirror?: MirrorSink },
     skipChildren: ReadonlySet<string> = new Set(),
     skipBees: ReadonlySet<string> = new Set(),
   ): Promise<void> => {
@@ -1226,9 +1278,43 @@ export class ContentBrokerDrone extends Drone {
       const { sig, depth } = queue.shift()!
       if (skipChildren.has(sig) || skipBees.has(sig) || visited.has(sig)) continue
       visited.add(sig)
-      const got = await this.fetchBySig(sig, 'resource')
-      if (!got) { stats.failed++; continue }
-      stats.leaves++
+
+      // ── Already saved? Then never fetch it. ───────────────────────────
+      //
+      // Content is immutable and named by the hash of its own bytes, so the
+      // destination holding this name IS the complete answer — there is
+      // nothing a fetch could add. This is the whole difference between a
+      // backup that re-downloads the hive every pass and one that finishes
+      // instantly when it is current.
+      //
+      // The bytes are still needed if the walk has to descend THROUGH this
+      // item: a record names further content inside itself. But only a record
+      // can do that, and a record is small — so anything bigger than the
+      // record ceiling cannot descend and is skipped outright, unread. That
+      // matters: reading every already-saved image back off disk on every
+      // pass would make a current backup as expensive as a new one.
+      const sink = opts.mirror
+      let got: Uint8Array | null = null
+      if (sink) {
+        let size: number | null = null
+        try { size = await sink.has(sig) } catch { size = null }
+        if (size !== null) {
+          stats.leaves++
+          stats.alreadyMirrored = (stats.alreadyMirrored ?? 0) + 1
+          if (size > DEEP_RECORD_MAX_BYTES) continue
+          try { got = await sink.read(sig) } catch { got = null }
+          if (!got) continue
+        }
+      }
+
+      if (!got) {
+        got = await this.fetchBySig(sig, 'resource')
+        if (!got) { stats.failed++; continue }
+        stats.leaves++
+        // Write-through: saved the moment it verifies, not after the walk. An
+        // interrupted pass therefore keeps everything it reached.
+        if (sink) await mirrorOut(sig, got, sink, stats)
+      }
       // Per-resource progress, not just per-layer: a one-layer branch with
       // many images otherwise sits silent for the whole resource phase — the
       // UI cue must climb as resources resolve.
@@ -1275,13 +1361,22 @@ export class ContentBrokerDrone extends Drone {
    */
   public adoptResources = async (
     sigs: readonly string[],
-    opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number } = {},
-  ): Promise<{ leaves: number; failed: number; truncated: number }> => {
-    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0 }
+    opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number; mirror?: MirrorSink } = {},
+  ): Promise<{ leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number }> => {
+    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 }
     const seeds = sigs.map(s => String(s ?? '').toLowerCase().trim()).filter(s => SIG_RE.test(s))
-    if (seeds.length === 0) return { leaves: 0, failed: 0, truncated: 0 }
+    if (seeds.length === 0) {
+      return { leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 }
+    }
     await this.#walkResources(seeds, stats, new Set<string>(), opts)
-    return { leaves: stats.leaves, failed: stats.failed, truncated: stats.truncated ?? 0 }
+    return {
+      leaves: stats.leaves,
+      failed: stats.failed,
+      truncated: stats.truncated ?? 0,
+      mirrored: stats.mirrored ?? 0,
+      alreadyMirrored: stats.alreadyMirrored ?? 0,
+      mirrorFailed: stats.mirrorFailed ?? 0,
+    }
   }
 
   /** Recursively collect every 64-hex signature reachable inside a value

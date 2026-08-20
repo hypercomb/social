@@ -22,6 +22,9 @@
 
 import { EffectBus, SignatureService, poolMeanings } from '@hypercomb/core'
 import { extractLayerSigFromMarker } from '../history/history.service.js'
+// TYPE ONLY — erased at compile time, so this stays an IoC relationship at
+// runtime and no bundle edge is created between the two drones.
+import type { MirrorSink } from './content-broker.drone.js'
 
 export const FOLDER_SYNC_KEY = '@diamondcoreprocessor.com/FolderSyncService'
 
@@ -141,6 +144,12 @@ interface HardCopyResult {
   resources: number
   missing: number
   resolverAvailable: boolean
+  /** Items written straight into the backup as they verified. */
+  mirrored: number
+  /** Items the backup already held, and so were never fetched at all. */
+  alreadyMirrored: number
+  /** Items that resolved but could not be written to the backup. */
+  mirrorFailed: number
 }
 
 const emptyClosure = (): HardCopyResult => ({
@@ -153,6 +162,9 @@ const emptyClosure = (): HardCopyResult => ({
   resources: 0,
   missing: 0,
   resolverAvailable: true,
+  mirrored: 0,
+  alreadyMirrored: 0,
+  mirrorFailed: 0,
 })
 
 interface CompletionSeal {
@@ -190,12 +202,30 @@ interface ContentBrokerLike {
       deepResources?: boolean
       silent?: boolean
       quiet?: boolean
+      /** Write-through destination: saves each item as it verifies, and skips
+       *  anything the destination already holds without fetching it. */
+      mirror?: MirrorSink
     },
-  ) => Promise<{ layers: number; leaves: number; failed: number; truncated?: number }>
+  ) => Promise<{
+    layers: number
+    leaves: number
+    failed: number
+    truncated?: number
+    mirrored?: number
+    alreadyMirrored?: number
+    mirrorFailed?: number
+  }>
   adoptResources?: (
     sigs: readonly string[],
-    options?: { deepResources?: boolean; quiet?: boolean },
-  ) => Promise<{ leaves: number; failed: number; truncated?: number }>
+    options?: { deepResources?: boolean; quiet?: boolean; mirror?: MirrorSink },
+  ) => Promise<{
+    leaves: number
+    failed: number
+    truncated?: number
+    mirrored?: number
+    alreadyMirrored?: number
+    mirrorFailed?: number
+  }>
 }
 
 interface PermissionHandle extends FileSystemDirectoryHandle {
@@ -708,11 +738,21 @@ export class FolderSyncService {
 
     try {
       const source = await navigator.storage.getDirectory()
+
+      // The destination is opened BEFORE materialization, not after, because
+      // materialization now writes THROUGH it. Nothing waits for the closure
+      // to finish before bytes start landing: a pass interrupted at ninety
+      // percent leaves ninety percent saved, and a pass over a folder that is
+      // already current fetches nothing at all.
+      const backup = this.#backupHandle
+      const devicesEarly = await backup.getDirectoryHandle(DEVICES_DIR, { create: true })
+      const deviceEarly = await devicesEarly.getDirectoryHandle(this.#deviceId, { create: true })
+      const destination = await deviceEarly.getDirectoryHandle('opfs', { create: true })
+
       const hardCopy = mode === 'hard-copy'
-        ? await this.#materializeHardCopy(source, selected.name, mode, agentId)
+        ? await this.#materializeHardCopy(source, selected.name, mode, agentId, destination)
         : emptyClosure()
 
-      const backup = this.#backupHandle
       await this.#writeRootManifest(backup)
       if (mode === 'hard-copy') {
         const dcpSnapshot = await this.#exportDcpBackup(backup, agentId)
@@ -729,9 +769,7 @@ export class FolderSyncService {
           })
         }
       }
-      const devices = await backup.getDirectoryHandle(DEVICES_DIR, { create: true })
-      const device = await devices.getDirectoryHandle(this.#deviceId, { create: true })
-      const destination = await device.getDirectoryHandle('opfs', { create: true })
+      const device = deviceEarly
       const prior = await readJson<DeviceManifest>(device, DEVICE_MANIFEST)
       const manifest: DeviceManifest = prior?.kind === 'hypercomb-folder-backup-device'
         && prior.deviceId === this.#deviceId
@@ -1062,7 +1100,36 @@ export class FolderSyncService {
     folder: string,
     mode: FolderSyncMode,
     agentId: string,
+    destination: FileSystemDirectoryHandle,
   ): Promise<HardCopyResult> => {
+    // The backup folder, handed to the walk as a write-through destination.
+    //
+    // `has` is a COMPLETE answer, not a hint: content is immutable and named
+    // by the hash of its own bytes, so a signature this folder already holds
+    // can never need fetching again. That is what turns the second pass over
+    // an unchanged hive into a stat sweep — and what stops a new folder from
+    // being the only case that ever does real work.
+    const mirror: MirrorSink = {
+      has: async (sig) => {
+        try {
+          return (await (await destination.getFileHandle(sig, { create: false })).getFile()).size
+        } catch {
+          return null
+        }
+      },
+      read: async (sig) => {
+        try {
+          const file = await (await destination.getFileHandle(sig, { create: false })).getFile()
+          return new Uint8Array(await file.arrayBuffer())
+        } catch {
+          return null
+        }
+      },
+      // writeFile commits through createWritable().close(), so a partial write
+      // never lands under the real name. Presence is therefore trustworthy,
+      // which is the assumption `has` above is built on.
+      write: async (sig, bytes) => { await writeFile(destination, sig, bytes) },
+    }
     const roots = new Set<string>()
     // Content named by pool records — threads, clipboard, manifests — that no
     // layer references. Nothing else in the walk would ever pull it local, so
@@ -1140,7 +1207,11 @@ export class FolderSyncService {
           deepResources: true,
           silent: true,
           quiet: true,
+          mirror,
         })
+        result.mirrored += stats.mirrored ?? 0
+        result.alreadyMirrored += stats.alreadyMirrored ?? 0
+        result.mirrorFailed += stats.mirrorFailed ?? 0
         result.layers += stats.layers
         result.resources += stats.leaves
         // A walk that hit its safety bound left content unfetched. That is
@@ -1172,7 +1243,11 @@ export class FolderSyncService {
         const stats = await broker.adoptResources([...poolReferenced], {
           deepResources: true,
           quiet: true,
+          mirror,
         })
+        result.mirrored += stats.mirrored ?? 0
+        result.alreadyMirrored += stats.alreadyMirrored ?? 0
+        result.mirrorFailed += stats.mirrorFailed ?? 0
         result.poolReferences = poolReferenced.size
         result.resources += stats.leaves
         result.missing += stats.failed + (stats.truncated ?? 0)
@@ -1446,6 +1521,14 @@ export class FolderSyncService {
       `Referenced layers made local: ${hardCopy.layers}`,
       `Referenced resources made local: ${hardCopy.resources}`,
       `Missing referenced items: ${hardCopy.missing}`,
+      // The three numbers that answer "am I actually getting payloads". A pass
+      // over an unchanged hive is all `already here` and no fetching; a first
+      // pass into a new folder is the reverse. `could not be written` is never
+      // silent — a backup that cannot say what it failed to save is the thing
+      // this whole path exists to prevent.
+      `Payload items saved as they resolved: ${hardCopy.mirrored}`,
+      `Payload items already here (never re-fetched): ${hardCopy.alreadyMirrored}`,
+      `Payload items that could not be written: ${hardCopy.mirrorFailed}`,
       '',
       'CATEGORY BREAKDOWN',
       ...Object.entries(manifest.categories)
