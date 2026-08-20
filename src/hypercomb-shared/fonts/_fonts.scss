@@ -14,10 +14,62 @@
   font-style: normal;
 }
 
+// IBM Plex Mono — the READING mono, for surfaces where code is the content
+// rather than the label (see --hc-code below). Self-hosted, latin subset:
+// three cuts only, because that is all a code block asks for — regular,
+// italic (comments), semibold (the highlighter's `strong`). SIL OFL 1.1,
+// license alongside in IBMPlexMono-OFL.txt.
+//
+// The unicode-range is what keeps this honest: a CJK identifier or a box-
+// drawing glyph is NOT in the latin subset, so the browser never waits on
+// these files for it — it falls straight through to --hc-mono's system
+// stack, which has the coverage. Widening the subset means shipping more
+// bytes for characters code blocks rarely hold.
+$plex-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+  U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
+  U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./IBMPlexMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: $plex-latin;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./IBMPlexMono-Italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  unicode-range: $plex-latin;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./IBMPlexMono-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: $plex-latin;
+}
+
 // ── typography tokens ─────────────────────────────────────
 :root {
   --hc-font: 'Source Sans Pro Light', system-ui, -apple-system,
     BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  // --hc-mono is the UI mono: sig strings, chips, coordinates, panel labels —
+  // monospace as a SIGNAL, a few characters at a time, at chrome sizes.
   --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', 'Fira Code',
     Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+
+  // --hc-code is the reading mono: whole blocks you actually read, in a narrow
+  // docked panel. Two tokens, not one, because the jobs pull opposite ways —
+  // chrome wants the system font it already has, a code block wants a known
+  // face with a real italic and a measure that fits the panel. Falls through
+  // to --hc-mono, so the chain stays declared in ONE place.
+  --hc-code: 'IBM Plex Mono', var(--hc-mono);
 }

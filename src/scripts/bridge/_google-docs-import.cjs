@@ -174,6 +174,25 @@ async function writeTileLayer(segments, { bodySig, props }) {
            hadNotes: Array.isArray(layer.notes) && layer.notes.length > 0 }
 }
 
+
+/**
+ * Names of a branch's children, read from the LAYER.
+ *
+ * Not `list-at`: that op answers for the renderer's CURRENT location and
+ * returns [] (or "path not found") for a populated branch the renderer is not
+ * standing in. Reading it as "no children" would make every guarded `add`
+ * fire again and duplicate every tile.
+ */
+async function childNames(segments) {
+  let layer
+  try { layer = await bridge({ op: 'layer-at', segments }) } catch { return null }
+  const names = []
+  for (const sig of (layer.children || [])) {
+    try { names.push(JSON.parse((await bridge({ op: 'get-resource', sig })).text).name) } catch { /* unresolved */ }
+  }
+  return names
+}
+
 async function main() {
   const parentCell = normalizeCell(PARENT_LABEL)
   console.log(`[import] parent tile: "${PARENT_LABEL}" -> /${parentCell}`)
@@ -192,6 +211,15 @@ async function main() {
   if (debris.length) {
     docs = docs.filter(d => d.name !== TEST_DOC)
     console.log(`[import] skipping ${debris.length} bridge-test document(s) — testing debris, not content`)
+  }
+
+  // OWNED-BY-ME ONLY (participant's rule). Most documents visible to this
+  // account are SHARED WITH ME and owned by other people; mirroring those makes
+  // tiles for material the participant does not control and cannot push back to.
+  const foreign = docs.filter(d => d.owner && d.owner !== SELF)
+  if (foreign.length) {
+    docs = docs.filter(d => !d.owner || d.owner === SELF)
+    console.log(`[import] skipping ${foreign.length} document(s) owned by other people — mirroring only ${SELF}`)
   }
 
   // Collisions are real: normalizeCell truncates at 64 chars, so two long
@@ -225,15 +253,15 @@ async function main() {
   // there mints a SECOND child entry (this is exactly how /google-docs came to
   // be listed twice at root). So every add in this script is guarded by a
   // membership check first.
-  const rootNames = await bridge({ op: 'list-at', segments: [] }).catch(() => [])
-  if (!(Array.isArray(rootNames) ? rootNames : []).includes(parentCell)) {
+  const rootNames = await childNames([])
+  if (rootNames && !rootNames.includes(parentCell)) {
     await bridge({ op: 'add', cells: [PARENT_LABEL], segments: [] })
     console.log(`[import] parent created`)
   } else {
     console.log(`[import] parent already present`)
   }
 
-  const existing = new Set(await bridge({ op: 'list-at', segments: [parentCell] }).catch(() => []))
+  const existing = new Set(await childNames([parentCell]) || [])
   console.log(`[import] ${existing.size} tiles already under /${parentCell}`)
 
   let created = 0, skipped = 0, failed = 0

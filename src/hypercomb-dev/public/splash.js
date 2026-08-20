@@ -9,6 +9,8 @@
  * holds ~1s, and fades to reveal the hive. It never blocks on an event that may not
  * fire: an empty page reveals via settled, and after MAXLOOPS (3) plays with no signal
  * it rests on the dot and offers "click to enter" — the user always has a way in.
+ * Resting is never a dead stop: the dot dances a faint waggle — the bee's figure-
+ * eight — with a breathing glow (position pinned under prefers-reduced-motion).
  *
  * SMOOTHNESS: the animation runs in a dedicated Worker on an OffscreenCanvas when the
  * browser supports it, so main-thread boot work (module parse/exec, pixi warmup, OPFS
@@ -153,11 +155,13 @@
     // ---- timeline -------------------------------------------------------------
     var nowSec = 0, loops = 0, finishing = false, awaitEnter = false;
     var dotReal = 0, restSent = false, doneSent = false;
+    var waggleT = 0;                                      // real seconds resting on the dot — drives the waggle dance
 
     function timeline(dt, realDt) {
       nowSec += dt;
       if (finishing && nowSec >= TOTAL) {                 // the finishing run has reached the honey dot
-        nowSec = TOTAL;                                   // pin on the dot
+        nowSec = TOTAL;                                   // pin on the dot — but it rests DANCING, never dead (see the waggle in render())
+        waggleT += realDt;
         if (awaitEnter) { if (!restSent) { restSent = true; post({ t: 'resting' }); } }   // cap hit with no ready signal → rest here, wait for a click
         else { dotReal += realDt; if (dotReal >= 1.0 && !doneSent) { doneSent = true; post({ t: 'done' }); } }   // real signal → hold ~1s, then hand off to the hive
       } else if (nowSec >= TOTAL) {
@@ -234,15 +238,31 @@
         ctx.fillStyle = PC[d]; ctx.fill();
       }
 
-      // the honey dot the run converges to — and the point the next loop opens from
+      // the honey dot the run converges to — and the point the next loop opens from.
+      // WAGGLE DANCE: pinned at TOTAL the dot never turns into a stopped object — it
+      // dances the bee's figure-eight, ever so slightly, glow breathing. waggleT only
+      // accrues while finishing rests on the dot, so the mid-loop seams (where the dot
+      // also shows) stay perfectly still and the loop keeps its zero-slope seam.
       if (endFade > 0) {
         var dr = START_R * S;
+        var wx = cx, wy = cy, wg = 0;
+        if (waggleT > 0) {
+          var wIn = easeInOutSine(clamp01(waggleT / 1.6));            // settle into the dance — no jump off the convergence
+          var wt = waggleT * 1.7;                                     // dance tempo: one figure-eight ≈ 3.7s
+          wg = wIn * (0.5 - 0.5 * Math.cos(wt * 0.83));               // the glow breath, from 0 so nothing pops
+          if (!reduce) {                                              // reduced motion: the glow may breathe, the dot holds still
+            var amp = dr * 0.5 * wIn;
+            wx += (Math.sin(wt) + 0.14 * Math.sin(wt * 4.7)) * amp;   // the figure-eight run + the waggle tremor along it
+            wy += Math.sin(wt * 2) * amp * 0.45;                      // half-height lobes — an ∞ lying on its side
+          }
+        }
         ctx.globalAlpha = endFade;
-        var gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, dr * 4);
-        gr.addColorStop(0, 'rgba(232,166,61,0.55)');
+        var glowR = dr * (4 + 1.1 * wg);
+        var gr = ctx.createRadialGradient(wx, wy, 0, wx, wy, glowR);
+        gr.addColorStop(0, 'rgba(232,166,61,' + (0.55 + 0.13 * wg).toFixed(3) + ')');
         gr.addColorStop(1, 'rgba(232,166,61,0)');
-        ctx.beginPath(); ctx.arc(cx, cy, dr * 4, 0, 6.2832); ctx.fillStyle = gr; ctx.fill();
-        ctx.beginPath(); ctx.arc(cx, cy, dr, 0, 6.2832); ctx.fillStyle = 'rgb(232,166,61)'; ctx.fill();
+        ctx.beginPath(); ctx.arc(wx, wy, glowR, 0, 6.2832); ctx.fillStyle = gr; ctx.fill();
+        ctx.beginPath(); ctx.arc(wx, wy, dr * (1 + 0.05 * wg), 0, 6.2832); ctx.fillStyle = 'rgb(232,166,61)'; ctx.fill();
       }
       ctx.globalAlpha = 1;
     }

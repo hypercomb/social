@@ -938,6 +938,15 @@
       "note": "MANUAL: note-add is additive and would land the same notes twice. Mirror the three-part row (bulb = on/off here, ICON = the layer's default view, tune = manage) and the view background as the only view/behaviour distinction; add a card for the view:default mark on the behaviors deck; retire the mirror tiles/notes for the hc-views-viewer window (deleted this pass) and repoint anything that names it at hc-features-viewer + the lens (all/views/behaviors/global). See documentation/behaviors-view-simplification.md section '2026-08-20 - the icon is the default, and views come home'.",
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "chat-reading-font",
+      "title": "chat window's code font: the --hc-code token",
+      "run": null,
+      "note": "Note on behaviors/assistant/chat: code blocks now read in IBM Plex Mono via var(--hc-code), a second typography token beside --hc-mono. --hc-mono stays the UI mono (sigs, chips, labels — monospace as a signal); --hc-code is the READING mono for whole blocks, self-hosted latin subset, 3 cuts (400/400i/600), falling through to --hc-mono. Mark the tile so the distinction is readable from the hive, not only from _fonts.scss.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

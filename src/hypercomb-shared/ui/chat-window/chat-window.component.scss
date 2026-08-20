@@ -291,7 +291,7 @@ $accent: #7eb6d6;
     overflow-x: auto;
     white-space: nowrap;
     scrollbar-width: none;
-    font-family: ui-monospace, Consolas, monospace;
+    font-family: var(--hc-code);
     font-size: 0.72em;
     color: #d9e4ee;
   }
