@@ -809,7 +809,7 @@
       "id": "splash-point-to-sphere",
       "title": "Loading page replaced with the authored 'Point to Sphere' animation",
       "run": null,
-      "note": "splash.js (web + dev, byte-identical) now runs the ported design piece: Fibonacci lattice + farthest-point insertion order, one cosine wave driving zoom/arrival-rate/honey seam, closed-form in T with no per-frame simulation. Mirror owes: a tile under the loading-page/boot part of the behaviors mirror carrying a note on the model (one wave governs every metric; the loop is seamless because the end dot IS the point the next loop opens from), and the boot-contract note (ready signal -> finish to the dot -> hold 1s -> reveal; 3-play cap -> click-to-enter; 20s wall-clock backstop). note-add is additive, so this is --manual.",
+      "note": "splash.js (web + dev, byte-identical) now runs the ported design piece: Fibonacci lattice + farthest-point insertion order, one cosine wave driving zoom/arrival-rate/honey seam, closed-form in T with no per-frame simulation. Mirror owes: a tile under the loading-page/boot part of the behaviors mirror carrying a note on the model (one wave governs every metric; the loop is seamless because the end dot IS the point the next loop opens from), and the boot-contract note (ready signal -> finish to the dot -> hold 1s -> reveal; 3-play cap -> click-to-enter; 20s wall-clock backstop). ALSO (2026-08-19): resting on the dot is never a dead stop — the dot dances the bee's WAGGLE (a faint figure-eight, ~half a dot-radius, one pass ~3.7s, with a tremor along the run) and its glow breathes; the rest clock only accrues while the finishing run is pinned at TOTAL, so mid-loop seams stay perfectly still and the loop keeps its zero-slope seam; prefers-reduced-motion pins the position, glow still breathes. The mirror note should carry the waggle as part of the boot contract. note-add is additive, so this is --manual.",
       "unattended": false,
       "created": "2026-08-17",
       "status": "pending"
@@ -883,6 +883,16 @@
       "title": "Note the lane switch's bus-backed state on the lanes mirror tiles",
       "run": null,
       "note": "Bees are bundled standalone, so lane-viewport-mode.ts was inlined per bee and the /lanes switch only existed inside the sequence bee — pan/zoom read their own copy, permanently false, so the axis lock never engaged in the runtime (web/DCP/deployed) shell while working in dev. The switch now travels on EffectBus (LANE_VIEWPORT_EFFECT, globalThis singleton + last-value replay) and the rung reads localStorage. Add this to the lanes/mobile mirror tiles.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "window-rule-one-at-a-time",
+      "title": "Windows: one at a time, the pheromone palette beside it",
+      "run": null,
+      "note": "Note on the behaviors-mirror tiles for the tool windows (and the pheromones tile): opening a tool window PARKS every other one; the pheromone palette is the single exception because it is not a view, it is the paint (marks are applied by dragging from it onto the note/tile in the window that is open). The exception is spent on a phone, where a second panel is a second full-bleed slab. Declared per-window with companion:true on its session; the rule names no ids. Also: every docked window's top edge comes from the shared --hc-header-anchor, never its own offset.",
+      "commit": "0cf093446",
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
