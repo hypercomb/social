@@ -77,11 +77,42 @@ export function childSigsOf(layer: PlacementLayer): readonly string[] {
   return []
 }
 
+/** A parent's children, BY NAME, can never hold the same name twice.
+ *
+ *  The name IS the path segment: `[...segments, name]` addresses one
+ *  lineage bag, so two children of one parent called `x` are not two
+ *  tiles — they are two sigs pointing at the SAME location. A `children`
+ *  array can still carry the name more than once (a re-add that appended
+ *  instead of replacing, an adopt that landed beside its own earlier
+ *  copy, the sig-into-name-slot husks), and every such entry is
+ *  redundant by construction.
+ *
+ *  The renderer has always known this — `resolveChildNames` returns a
+ *  Set, which is why the hexagons show one tile while a list built from
+ *  these helpers showed three plates for the same cell. Collapsing here
+ *  makes the two agree, and because membership SETs are recomputed from
+ *  these same reads, the next edit at that parent PERSISTS the collapsed
+ *  list — the array heals itself without a migration.
+ *
+ *  First occurrence wins, order preserved: the parent's own ordering is
+ *  the layout order, and the first sig is the one it listed first. */
+const firstByName = <T>(rows: readonly T[], nameOf: (row: T) => string): T[] => {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const row of rows) {
+    const name = nameOf(row)
+    if (seen.has(name)) continue
+    seen.add(name)
+    out.push(row)
+  }
+  return out
+}
+
 /** Resolve a parent layer's `children` sigs to child display names.
  *  Names are the truth — each child layer's own `name` field — and the
  *  committer re-resolves them to head sigs at commit time. Mirrors the
  *  resolution show-cell uses so membership edits all agree on the same
- *  authoritative list. */
+ *  authoritative list — including its uniqueness (see {@link firstByName}). */
 export async function childNamesOf(
   history: PlacementHistory,
   parent: PlacementLayer | null,
@@ -94,7 +125,7 @@ export async function childNamesOf(
       names.push(child.name)
     }
   }
-  return names
+  return firstByName(names, n => n)
 }
 
 /** Like {@link childNamesOf}, but also reports whether any child sig failed to
@@ -134,7 +165,11 @@ export async function childNamesOfStrict(
   }
 
   return {
-    names: slots.filter((s): s is string => s !== null),
+    // Deduped BEFORE the caller writes it back: a membership SET recomputed
+    // from this list is what heals a parent whose array carries the same
+    // name twice. coldMiss is untouched — an unresolved sig is still a
+    // reason to refuse the write, whatever the names collapsed to.
+    names: firstByName(slots.filter((s): s is string => s !== null), n => n),
     coldMiss: slots.some(s => s === null),
   }
 }
@@ -175,7 +210,11 @@ export async function childEntriesOf(
       missing++
     }
   }
-  return { entries, missing }
+  // Name-keyed callers (paste collision, cut, move) must see one entry per
+  // name for the same reason the name lists do: a second entry names the
+  // same location, so acting on it would copy one cell twice or leave a
+  // stale sig behind after removing the other.
+  return { entries: firstByName(entries, e => e.name), missing }
 }
 
 /** Capture "the collection" at a source path as ONE signature — the

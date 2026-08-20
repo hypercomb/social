@@ -138,6 +138,54 @@ describe('childNamesOf (non-strict, read-only paths)', () => {
 // commits never re-list the slot.
 // -------------------------------------------------
 
+// -------------------------------------------------
+// ONE NAME, ONE CHILD. The name is the path segment, so two children of
+// one parent called `x` address the same lineage bag — the second entry
+// is redundant by construction. The renderer has always deduped
+// (resolveChildNames returns a Set); these helpers had not, so a list
+// built from them showed the same cell three times while the hexagons
+// showed it once. Real cause: a root whose `children` array carried
+// three sigs all named `pheromone-workflow`.
+// -------------------------------------------------
+
+describe('one name, one child', () => {
+  const dupHistory = (): PlacementHistory => historyWith({
+    [SIG_A]: { name: 'pheromone-workflow' },
+    [SIG_B]: { name: 'pheromone-workflow' },
+    [SIG_C]: { name: 'pheromone-workflow' },
+  })
+  const threeSigs = { name: 'root', children: [SIG_A, SIG_B, SIG_C] }
+
+  it('collapses repeated names to one, first sig wins', async () => {
+    expect(await childNamesOf(dupHistory(), threeSigs)).toEqual(['pheromone-workflow'])
+    expect(await childEntriesOf(dupHistory(), threeSigs)).toEqual({
+      entries: [{ sig: SIG_A, name: 'pheromone-workflow' }], missing: 0,
+    })
+  })
+
+  it('collapses before a membership SET writes the list back — the array self-heals', async () => {
+    const { names, coldMiss } = await childNamesOfStrict(dupHistory(), threeSigs)
+    expect(names).toEqual(['pheromone-workflow'])
+    expect(coldMiss).toBe(false)
+  })
+
+  it('a cold sibling still refuses the write, however the names collapsed', async () => {
+    const history = historyWith({
+      [SIG_A]: { name: 'dup' }, [SIG_B]: { name: 'dup' }, [SIG_C]: null,
+    })
+    const { names, coldMiss } = await childNamesOfStrict(history, threeSigs)
+    expect(names).toEqual(['dup'])
+    expect(coldMiss).toBe(true)
+  })
+
+  it('keeps the parent own order for the names that do differ', async () => {
+    const history = historyWith({
+      [SIG_A]: { name: 'beta' }, [SIG_B]: { name: 'alpha' }, [SIG_C]: { name: 'beta' },
+    })
+    expect(await childNamesOf(history, threeSigs)).toEqual(['beta', 'alpha'])
+  })
+})
+
 describe('childEntriesOf', () => {
   it('pairs every child sig with its name, manifest-first at zero byte reads', async () => {
     let byteReads = 0
