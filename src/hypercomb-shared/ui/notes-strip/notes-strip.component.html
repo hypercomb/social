@@ -45,9 +45,37 @@
     <div class="cv2-dragbar"
          (pointerdown)="onDragStart($event)"
          (dblclick)="resetPanelOffset($event)">
+      <!-- WHICH tile, and — on the lists tab — WHICH LIST, right of it.
+           A list's name belongs with the window's identity, not stacked on
+           top of its own lines: it reads here once, and the pane below is
+           nothing but the list. Click it to rename, the same in-place
+           gesture the lines use. -->
       <span class="cv2-dragbar-title">
         <span class="hex-mark" aria-hidden="true"></span>
         <span>{{ cell() || ('annotations.title' | t) }}</span>
+        @if (tab() === 'lists' && cell()) {
+          @if (listRoot(); as root) {
+            <span class="cv2-dragbar-sep" aria-hidden="true">/</span>
+            @if (editingItemId() === root.id) {
+              <input #lineInput class="cv2-dragbar-listname-input"
+                     [value]="itemDraft()"
+                     (pointerdown)="$event.stopPropagation()"
+                     (input)="onItemInput($event)"
+                     (keydown)="onItemKeydown($event)"
+                     (blur)="commitItemEdit()"
+                     [attr.aria-label]="'notes.lists.rename' | t" />
+            } @else {
+              <button type="button" class="cv2-dragbar-listname"
+                      (click)="startListRename($event)"
+                      [title]="'notes.lists.rename' | t">
+                @if (markOf(root); as icon) {
+                  <span class="mat-sym cv2-dragbar-listmark" aria-hidden="true">{{ icon }}</span>
+                }
+                <span class="cv2-dragbar-listtext">{{ noteDisplayText(root) }}</span>
+              </button>
+            }
+          }
+        }
       </span>
       <span class="cv2-dragbar-spacer"></span>
       <!-- Open the READER on this tile. The strip is for authoring — a dense
@@ -237,43 +265,12 @@
       </form>
     </ng-template>
 
-    <!-- ── NOTE TABS — the selector, up in the header ─────────────
-         One short tab per note of the active tile, in tree order, carrying
-         the note's hexagon mark and enough of its text to recognise it.
-         Click one and it fills the pane below. This is the whole selector:
-         there is no search (a tile's notes are a handful of things you can
-         see at once, and a search box for them cost more room than it ever
-         saved), and there is no second list anywhere.
-
-         Docked only. The desk keeps its tree column — the one place with
-         width for the whole hierarchy at once. -->
-    @if (!isFullscreen() && cell()) {
-      <div class="cv2-notetabs thin-scroll" role="tablist"
-           [attr.aria-label]="'notes.strip.aria' | t">
-        @for (row of readingRows(); track trackById($index, row.note)) {
-          <button type="button" class="cv2-notetab" role="tab"
-                  [attr.data-note-id]="row.note.id"
-                  [style.--depth]="row.depth"
-                  [class.is-active]="readingRow()?.note?.id === row.note.id"
-                  [class.is-mark-target]="markDropTargetId() === row.note.id"
-                  [class.cv2-note-q]="noteKind(row.note) === 'q'"
-                  [attr.aria-selected]="readingRow()?.note?.id === row.note.id"
-                  (click)="selectNote(row.note.id)"
-                  [title]="noteDisplayText(row.note)">
-            @if (markOf(row.note); as icon) {
-              <span class="mat-sym cv2-notetab-mark">{{ icon }}</span>
-            } @else {
-              <span class="cv2-notetab-slot" aria-hidden="true"></span>
-            }
-            <span class="cv2-notetab-text">{{ noteDisplayText(row.note) }}</span>
-          </button>
-        }
-        <button type="button" class="cv2-notetab is-add" (click)="paneAdd()"
-                [attr.aria-label]="'notes.add' | t" [title]="'notes.add' | t">
-          <span class="mat-sym" style="font-size:15px">add</span>
-        </button>
-      </div>
-    }
+    <!-- NO SELECTOR ROW. A strip of one tab per note used to sit here, and
+         it rendered under exactly the condition the PINNED CARD does
+         (docked, with a tile active) — the same notes, listed twice, one of
+         them stealing height from the pane. The card beside the window is
+         the selector on both tabs: every note and every line of every list,
+         clickable, with its own "+" for one more note. -->
 
     <!-- Editor column. `cv2-main` is `display: contents` in the docked strip
          (so the rows below stay direct flex children, exactly as before) and
@@ -371,7 +368,7 @@
            depth via [style.paddingLeft.px]; children render via
            ng-template self-recursion when not collapsed. -->
       <ng-template #rowTpl let-note="note" let-depth="depth" let-path="path">
-        <article class="cv2-note"
+        <article class="cv2-note" data-note-row
                  [attr.data-note-id]="note.id"
                  [style.--depth]="depth"
                  [class.is-open-list]="tab() === 'lists' && listRoot()?.id === note.id"
@@ -501,6 +498,7 @@
       <!-- Notes tree body. Roots render through the recursive template,
            filtered by the search above. -->
       <div class="cv2-list thin-scroll notes-strip-body"
+           data-note-drag-scope="tree"
            [class.has-root-drop]="noteDropMode() === 'root'">
         @for (root of visibleNotes(); track trackById($index, root)) {
           <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0, path: [$index] }"></ng-container>
@@ -562,90 +560,81 @@
       } @else {
         <!-- ── LISTS: its own interface ──────────────────────────
              A list is not prose and does not want the prose surface. It is
-             a title and a column of one-liners, GROWN ONE LINE AT A TIME:
-             the new-line input at the foot never closes — Enter commits the
-             line, clears the field and leaves the caret exactly where it
-             was, so the next line is just more typing. Existing lines are
-             corrected in place (click, type, Enter). Only the tab's pane
-             changes: the bottom selector below is the same tree on both
-             tabs, which is how you pick WHICH list. -->
-        @if (tab() === 'lists') {
-          <div class="cv2-listpane">
-            <div class="cv2-listpane-head">
-              @if (listTrail().length > 0) {
-                <button type="button" class="cv2-list-back" (click)="exitList()"
-                        [title]="'notes.lists.back' | t">
-                  <span class="mat-sym" aria-hidden="true">chevron_left</span>
-                  <span class="cv2-list-back-text">{{ listTrail()[listTrail().length - 1] }}</span>
-                </button>
-              }
-              @if (listRoot(); as root) {
-                @if (editingItemId() === root.id) {
-                  <input class="cv2-list-title-input"
-                         [value]="itemDraft()"
-                         (input)="onItemInput($event)"
-                         (keydown)="onItemKeydown($event)"
-                         (blur)="commitItemEdit()"
-                         [attr.aria-label]="'notes.lists.rename' | t" />
-                } @else {
-                  <button type="button" class="cv2-list-title" (click)="startListRename($event)"
-                          [title]="'notes.lists.rename' | t">
-                    @if (markOf(root); as icon) {
-                      <span class="mat-sym cv2-list-title-mark" aria-hidden="true">{{ icon }}</span>
-                    }
-                    <span>{{ noteDisplayText(root) }}</span>
-                  </button>
-                }
-                <span class="cv2-list-count">{{ 'notes.lists.count' | t: { count: listItems().length } }}</span>
-              }
-              <span class="cv2-toolbar-spacer"></span>
-              <button type="button" class="cv2-mini-btn" (click)="newList()"
-                      [attr.aria-label]="'notes.lists.new' | t" [title]="'notes.lists.new' | t">
-                <span class="mat-sym">playlist_add</span>
-              </button>
-            </div>
+             a column of one-liners, GROWN ONE LINE AT A TIME: the new-line
+             input at the foot never closes — Enter commits the line, clears
+             the field and leaves the caret exactly where it was, so the
+             next line is just more typing. Tab and Shift+Tab move that open
+             line in and out, and the line lands where the bullet sits, so a
+             HIERARCHY is typed at the same speed as a flat list. Existing
+             lines are corrected in place (click, type, Enter), moved with
+             the same two keys, or dragged by their grip.
 
+             The list's name is in the title bar, right of the tile. Which
+             list is open is chosen in the card beside the window (docked)
+             or the tree column (the desk). Neither is repeated here: the
+             pane is the list, whole, and nothing else. -->
+        @if (tab() === 'lists') {
+          <div class="cv2-listpane" data-note-drag-scope="list">
             @if (listRoot()) {
-              <div class="cv2-list-lines thin-scroll">
-                @for (item of listItems(); track trackById($index, item)) {
-                  <div class="cv2-line"
-                       [class.is-editing]="editingItemId() === item.id"
-                       [class.is-mark-target]="markDropTargetId() === item.id"
-                       [attr.data-pheromone-note]="item.id"
+              <div class="cv2-list-lines thin-scroll"
+                   [class.has-root-drop]="noteDropMode() === 'root'">
+                @for (row of listRows(); track trackById($index, row.note)) {
+                  <div class="cv2-line" data-note-row
+                       [attr.data-note-id]="row.note.id"
+                       [style.--depth]="row.depth"
+                       [class.is-editing]="editingItemId() === row.note.id"
+                       [class.is-mark-target]="markDropTargetId() === row.note.id"
+                       [class.is-dragging]="noteDragSourceId() === row.note.id"
+                       [class.is-drop-into]="noteDropTargetId() === row.note.id && noteDropMode() === 'into'"
+                       [class.is-drop-before]="noteDropTargetId() === row.note.id && noteDropMode() === 'before'"
+                       [class.is-drop-after]="noteDropTargetId() === row.note.id && noteDropMode() === 'after'"
+                       [attr.data-pheromone-note]="row.note.id"
                        [attr.data-pheromone-note-cell]="cell()">
-                    @if (markOf(item); as icon) {
+                    <!-- Grip is a CSS-drawn rail, as in the tree — no glyph. -->
+                    <div class="cv2-line-grip" [title]="'notes.dragToReorder' | t"
+                         (pointerdown)="onNoteGripPointerDown(cell()!, row.note.id, $event)"></div>
+                    @if (row.note.children.length > 0) {
+                      <button type="button" class="cv2-line-chevron"
+                              [class.is-collapsed]="isCollapsed(row.note.id)"
+                              (click)="toggleCollapse(row.note.id, $event)"
+                              [attr.aria-label]="(isCollapsed(row.note.id) ? 'notes.expand' : 'notes.collapse') | t">
+                        <span class="cv2-chevron-mark" aria-hidden="true"></span>
+                      </button>
+                    } @else {
+                      <span class="cv2-line-chevron-spacer" aria-hidden="true"></span>
+                    }
+                    @if (markOf(row.note); as icon) {
                       <span class="mat-sym cv2-line-mark" aria-hidden="true">{{ icon }}</span>
                     } @else {
                       <span class="cv2-line-bullet" aria-hidden="true"></span>
                     }
-                    @if (editingItemId() === item.id) {
-                      <input class="cv2-line-input"
+                    @if (editingItemId() === row.note.id) {
+                      <input #lineInput class="cv2-line-input"
                              [value]="itemDraft()"
                              (input)="onItemInput($event)"
                              (keydown)="onItemKeydown($event)"
                              (blur)="commitItemEdit()"
                              [attr.aria-label]="'notes.edit' | t" />
                     } @else {
-                      <button type="button" class="cv2-line-text" (click)="startItemEdit(item, $event)">
-                        {{ noteDisplayText(item) }}
+                      <button type="button" class="cv2-line-text" (click)="startItemEdit(row.note, $event)">
+                        {{ noteDisplayText(row.note) }}
                       </button>
-                      @if (item.children.length > 0) {
-                        <button type="button" class="cv2-line-btn" (click)="enterItem($index)"
-                                [title]="'notes.lists.open' | t">
-                          <span class="mat-sym" style="font-size:15px">chevron_right</span>
-                          <span class="cv2-line-sub">{{ item.children.length }}</span>
-                        </button>
+                      @if (isCollapsed(row.note.id)) {
+                        <span class="cv2-line-sub" aria-hidden="true">{{ row.note.children.length }}</span>
                       }
                       <button type="button" class="cv2-line-btn cv2-line-del"
-                              (click)="remove(item.id, $event)"
+                              (click)="remove(row.note.id, $event)"
                               [attr.aria-label]="'notes.delete' | t" [title]="'notes.delete' | t">
                         <span class="mat-sym" style="font-size:14px">close</span>
                       </button>
                     }
                   </div>
                 }
-                <!-- The line that is always open. This is the interface. -->
-                <div class="cv2-line is-new">
+                <!-- The line that is always open. This is the interface —
+                     and its indent is where the next line will land. -->
+                <div class="cv2-line is-new" [style.--depth]="newLineDepth()">
+                  <span class="cv2-line-grip-slot" aria-hidden="true"></span>
+                  <span class="cv2-line-chevron-spacer" aria-hidden="true"></span>
                   <span class="cv2-line-bullet is-new" aria-hidden="true"></span>
                   <input #newLineInput class="cv2-line-input"
                          [value]="newItemText()"
@@ -658,12 +647,31 @@
             } @else {
               <div class="cv2-list-blank">
                 <span>{{ 'annotations.lists.empty' | t }}</span>
-                <button type="button" class="cv2-reading-edit" (click)="newList()">
-                  <span class="mat-sym" aria-hidden="true">playlist_add</span>
-                  <span>{{ 'notes.lists.new' | t }}</span>
-                </button>
               </div>
             }
+
+            <!-- The two things you can do TO a list, rather than in it, kept
+                 quiet at the foot and out of the writing. Delete arms on the
+                 first click and acts on the second — no dialogue, and no
+                 one-click trap next to the line being typed. -->
+            <div class="cv2-listfoot">
+              <button type="button" class="cv2-listfoot-btn" (click)="newList()"
+                      [title]="'notes.lists.new' | t">
+                <span class="mat-sym" aria-hidden="true">playlist_add</span>
+                <span>{{ 'notes.lists.new' | t }}</span>
+              </button>
+              <span class="cv2-toolbar-spacer"></span>
+              @if (listRoot()) {
+                <button type="button" class="cv2-listfoot-btn is-danger"
+                        [class.is-armed]="listDeleteArmed()"
+                        (click)="deleteList($event)"
+                        (pointerleave)="disarmListDelete()"
+                        [title]="'notes.lists.delete' | t">
+                  <span class="mat-sym" aria-hidden="true">delete</span>
+                  <span>{{ (listDeleteArmed() ? 'notes.lists.deleteConfirm' : 'notes.lists.delete') | t }}</span>
+                </button>
+              }
+            </div>
           </div>
         } @else if (paneEditorOpen()) {
           <!-- Writing mode — the same embedded form, given the whole pane.
@@ -702,27 +710,32 @@
               }
             </div>
 
-            <!-- The glyph plate — the note's mark, room-readable. -->
-            <div class="cv2-reading-hex"
-                 [class.is-q]="noteKind(row.note) === 'q'"
-                 [class.is-a]="noteKind(row.note) === 'a'"
-                 aria-hidden="true">
-              @if (markOf(row.note); as icon) {
-                <span class="mat-sym cv2-reading-hex-icon">{{ icon }}</span>
-              } @else if (noteKind(row.note) === 'q') {
-                <span class="mat-sym filled cv2-reading-hex-icon">help</span>
-              } @else if (noteKind(row.note) === 'a') {
-                <span class="mat-sym filled cv2-reading-hex-icon">chat</span>
-              } @else {
-                <span class="hc-shape-glyph cv2-reading-hex-shape"
-                      [class.hc-shape-circle]="row.note.shape === 'circle'"
-                      [class.hc-shape-square]="row.note.shape === 'square'"
-                      [class.hc-shape-triangle]="row.note.shape === 'triangle'"
-                      [class.hc-shape-diamond]="row.note.shape === 'diamond'"
-                      [class.hc-shape-star]="row.note.shape === 'star'"
-                      [class.hc-shape-hexagon]="row.note.shape === 'hexagon'"></span>
-              }
-            </div>
+            <!-- The glyph plate — the note's mark, room-readable. Only when
+                 the note HAS a glyph to carry (mark, question/answer, shape):
+                 a bare note would render the plate empty, and a blank
+                 hexagon reads as broken. -->
+            @if (markOf(row.note) || noteKind(row.note) !== 'note' || row.note.shape) {
+              <div class="cv2-reading-hex"
+                   [class.is-q]="noteKind(row.note) === 'q'"
+                   [class.is-a]="noteKind(row.note) === 'a'"
+                   aria-hidden="true">
+                @if (markOf(row.note); as icon) {
+                  <span class="mat-sym cv2-reading-hex-icon">{{ icon }}</span>
+                } @else if (noteKind(row.note) === 'q') {
+                  <span class="mat-sym filled cv2-reading-hex-icon">help</span>
+                } @else if (noteKind(row.note) === 'a') {
+                  <span class="mat-sym filled cv2-reading-hex-icon">chat</span>
+                } @else {
+                  <span class="hc-shape-glyph cv2-reading-hex-shape"
+                        [class.hc-shape-circle]="row.note.shape === 'circle'"
+                        [class.hc-shape-square]="row.note.shape === 'square'"
+                        [class.hc-shape-triangle]="row.note.shape === 'triangle'"
+                        [class.hc-shape-diamond]="row.note.shape === 'diamond'"
+                        [class.hc-shape-star]="row.note.shape === 'star'"
+                        [class.hc-shape-hexagon]="row.note.shape === 'hexagon'"></span>
+                }
+              </div>
+            }
 
             <!-- Where it sits: ancestors, root → parent. Roots show none. -->
             @if (readingPath().length > 0) {
@@ -846,6 +859,15 @@
           </div>
         }
       </div>
+      <!-- The page's filter reaches in here: while one is on, this list is
+           the page's surviving tiles, not the whole layer. Say so, or the
+           missing tiles read as a bug. -->
+      @if (pageFiltered()) {
+        <div class="cv2-tilelist-scopehint">
+          <span class="mat-sym" style="font-size:13px" aria-hidden="true">filter_alt</span>
+          <span>{{ 'notes.pageFiltered' | t }}</span>
+        </div>
+      }
     </div>
 
     <!-- Invisible edge drag-handles. The left edge is the live resize
