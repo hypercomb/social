@@ -298,6 +298,11 @@ additions:
 - It asserts the **WebView2 runtime** is present before anything else. Without
   it the window comes up blank and every other check still passes.
 - It runs the durability test, which on an enforced machine can only run here.
+- The smoke test is a **hard gate**, not advisory. It earned that on its second
+  run, because its first went green while the log read `no Hypercomb.exe was
+  built` — cargo names the binary after the CRATE, and `productName` only
+  applies inside the bundle. A smoke test nobody is forced to read reports
+  nothing.
 - The bundle is **msi + nsis**, selected by `tauri.windows.conf.json`.
 
 ## Signing, notarization, distribution

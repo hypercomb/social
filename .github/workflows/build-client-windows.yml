@@ -287,12 +287,16 @@ jobs:
       # rendered — the whole chain, asserted from outside the window, which is
       # the only place a runner can look.
       #
-      # Non-blocking for now, matching its macOS twin: until one green run
-      # confirms the step is sound on a runner, a session quirk should not mask
-      # the artifacts. Flip to a hard gate once it has passed.
+      # A HARD GATE, as of run 32366098422 — which reached boot milestone #14,
+      # "bootstrapApplication done (Angular first paint)", proving the step
+      # itself is sound on a runner.
+      #
+      # It was non-blocking for exactly one run, and that run earned the gate:
+      # it went GREEN while the log read `no Hypercomb.exe was built`, because
+      # continue-on-error swallowed it. A smoke test nobody is forced to read
+      # is a smoke test that reports nothing.
       - name: Smoke test — launch and confirm first paint
         id: smoke
-        continue-on-error: true
         working-directory: src/hypercomb-client
         shell: pwsh
         run: |
