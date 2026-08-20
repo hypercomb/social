@@ -1470,15 +1470,12 @@ export class TileViewDrone extends Drone {
    *  presentations of one menu can never turn out to do different things. */
   #activate(chip: Chip, label: string): void {
     if (chip.run) { chip.run(); return }
-    // The exact rendered name: swarm-adopt string-matches the peer entry's
-    // `name` and does NOT normalize, so a normalized label would silently
-    // match nothing.
+    // Fallback for a chip built without run() — every chip the close-up
+    // composes today carries one, so this is belt-and-braces only. The
+    // exact rendered name matters: tile:action consumers string-match and
+    // do NOT normalize, so a normalized label would silently match nothing.
     this.emitEffect('tile:action', { action: chip.action, label })
-    // Whatever this opened comes up over the close-up, which waits under it
-    // — see `#suspend`. Adopt is the exception in the other direction: its
-    // own `adopt:done` listener closes the view outright, because both
-    // shells snap back to hexagons on a non-silent adopt.
-    if (chip.action !== 'adopt') this.#suspend()
+    this.#suspend()
   }
 
   /** The way out, as an ordinary cell — it belongs in the grid with everything

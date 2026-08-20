@@ -38,15 +38,6 @@
           </button>
         }
       }
-      @if (adoptCount() > 0) {
-        <button
-          class="adopt-chip"
-          type="button"
-          (click)="onAdoptSelected()"
-          [title]="'presence.adopt-selected' | t: { count: adoptCount() }">
-          {{ 'presence.adopt-selected' | t: { count: adoptCount() } }}
-        </button>
-      }
       @if (!alone()) {
         <button
           class="strip-caret"

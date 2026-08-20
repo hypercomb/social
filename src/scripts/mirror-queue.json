@@ -904,6 +904,32 @@
       "note": "Note on the behaviors-mirror tiles (panel + enablement): the Beehaviors panel is now TWO COPIES OF THE SAME LIST with one control — a light bulb per row. The pool lists every behavior flat A-Z; everything is OFF until lit there (opt-in: hc:behavior-global-on is the truth, seeded once from the census minus the old off-list so no existing hive went dark; new/foreign kinds arrive dark). The layer view (default; the header carries the layer name) lists every globally-lit behavior; clicking ON is a DEPOSIT — the record waits on the objects beneath and the behavior gives them meaning when they meet (context-behaviors availability doctrine); website/tutor deposit their PENDING marker for the next generation pass. Clicking OFF removes the record here (undoable). Website scope roots keep the /websites-menu meaning. Gone from rows: OPEN/x/check buttons, bind tap, add rows, section split, store categories, in-use badge (Open survives hover-only on lit view rows). Doc: documentation/behaviors-view-simplification.md section 2026-08-19.",
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "tile-picture-vs-hex-capture",
+      "title": "The picture is not the hex capture — /welcome plates + /postit asset",
+      "run": null,
+      "note": "Note on the /welcome and /postit behaviour tiles (behaviors deck): a tile carries TWO things — the picture the person gave it (props.large.image, untouched) and the HEX CAPTURE the editor bakes (props.small.image / flat.small.image: cropped to the hexagon's aspect over the tile's background colour, and — before this fix — with the gold hex stroke painted into the pixels). Hexagons and hexagon-clipped chrome want the capture; a rectangle wants the picture. New helper: unframedTileImageSig() in editor/tile-properties.ts. captureSmall() no longer bakes the frame — the grid shader already draws the rim from aBorderColor, so it was a second rim in the hexagons and a gold hexagon across the middle of the image everywhere else. Also worth a pheromone marking the two projections.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "beehaviors-paint-removed-title-path",
+      "title": "Beehaviors panel: paint gone, the subject reads in the title",
+      "run": null,
+      "note": "Note on the behaviors-mirror tiles for the Beehaviors panel: (1) PAINT MODE IS GONE end to end — the header format_paint toggle, the paint bar, the pick rows, the panel's brush state, the drone's features:paint listener and #paint copier, features:paint-result, and the paintable row flag. Copying a behaviour's record onto other tiles is no longer something this panel does; the header keeps ONE control, the pool switch. (2) The 'BEEHAVIORS OF' crumb row under the search field is DELETED — the subject was announced twice. It now reads in the header title alone as 'Beehaviors / <tile>' (bare app title in the pool); the top-rail switch is still the way back to the loaded layer. The search field is unchanged. i18n: 18 keys removed from all 15 catalogs (features.context.*, features.paint.*, features.mode.paint.hint, features.mode.manage.hint, features.section.paint). Doc: documentation/behaviors-view-simplification.md section '2026-08-19 — one control, and the subject in the title'. If the older 'beehaviors-one-bulb' entry has not been drained yet, fold this into the same note rather than adding a second.",
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "visit-driven-adoption",
+      "title": "Mirror visit-driven acquisition: the walk is the adopt",
+      "run": null,
+      "note": "The adopt button/panel/chip are retired: entering a peer-offered tile folds it one level (props from the wire) into the visitor's hive, records it in the visit genome (hc:visit-genome, sharing/visit-genome.ts), marks the drill's topmost tile as the adopted root, and drill requests on the lifecycle channel extend the publisher's broadcast frontier past MAX_PUBLISH_DEPTH. Mirror: tiles for visit-genome.ts + the SwarmAdoptDrone visit handler + the drill tunnel (swarm.drone #announceVisit/#publishDrillRequest/#onDrillRequest), pheromones marking them as sharing parts, notes carrying the doctrine (tombstones respected, code never auto-folds, behaviors stay the features-panel choice), and update the behaviors-mirror card for SwarmAdoptDrone. note-add is additive - needs a human.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

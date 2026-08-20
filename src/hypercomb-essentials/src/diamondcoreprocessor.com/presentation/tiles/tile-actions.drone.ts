@@ -9,7 +9,6 @@ import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
 import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
-import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -204,10 +203,10 @@ const ICONS = {
   // grid_view — Material Icons Filled
   breakApart: md('M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z'),
   arrowUpward: md('M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z'),
-  // cloud_download — Material Icons Filled. "Pull this peer's tile + its
-  // image into my hive" — a plain `add` (+) read as "create a blank tile"
-  // and gave no hint that the content/image comes FROM the peer.
-  adopt: md('M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z'),
+  // (The cloud_download `adopt` icon is retired: there is no adopt button.
+  // Visiting a peer tile IS the acquisition — see SwarmAdoptDrone's
+  // swarm:tile-visited handler. The `adopt` tile:action verb survives as a
+  // programmatic/spec entry point only.)
   // block — Material Icons Filled
   block: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z'),
   // delete — Material Icons Filled
@@ -290,7 +289,6 @@ const INVITE_ICON = md('M11 7l-1.41 1.41L12.17 11H3v2h9.17l-2.58 2.59L11 17l5-5z
 // features. Self-backed actions (serviced by THIS drone, or whose icon-provider
 // IS the handler, e.g. edit) are absent here and never gate.
 const BACKING_KEY_BY_ACTION: Record<string, string> = {
-  'adopt': '@diamondcoreprocessor.com/SwarmAdoptDrone',
   'promote-to-parent': '@diamondcoreprocessor.com/MoveDrone',
   'features': '@diamondcoreprocessor.com/ShowFeaturesDrone',
   'files': '@diamondcoreprocessor.com/FileDropDrone',
@@ -350,16 +348,13 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'public-own', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   { name: 'promote-to-parent', svgMarkup: ICONS.arrowUpward, hoverTint: 0xc8d4ff, profile: 'public-own', visibleWhen: () => (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).length > 0, labelKey: 'action.promote-to-parent', descriptionKey: 'action.promote-to-parent.description' },
-  // NOTE: there is still NO `sync` button — but ADOPT COMES BACK when a peer
-  // is offering something this held tile doesn't have. Nothing re-syncs on its
-  // own any more (the auto-sync pass is detection-only), so the merge has to
-  // be visible or it may as well not exist: `peerDivergesAt` is the sync-
-  // readable answer SwarmAdoptDrone's divergence scan publishes, and the
-  // affordance is the SAME adopt icon, not a second verb. Additive by
-  // construction — clicking it adds what they have and never removes or
-  // overwrites what you have. `sync` stays programmatic (SwarmAdoptDrone
-  // answers it for an explicit gesture) and never becomes an icon.
-  { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => peerDivergesAt(ctx.label), labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
+  // NOTE: there is NO `sync` button and NO `adopt` button. THE WALK IS THE
+  // ADOPT: stepping into a peer-offered tile folds it (SwarmAdoptDrone's
+  // swarm:tile-visited handler), and a held tile a peer diverged on shows
+  // its new children as peer tiles the moment you step inside — entering
+  // them takes them, additively. The divergence scan stays detection-only;
+  // its answer now surfaces as the peer tiles themselves rather than an
+  // icon. `sync` stays programmatic and never becomes an icon.
   // `features` (the puzzle-piece) is the BEEHAVIORS window: click it and
   // ShowFeaturesDrone gathers the META details (no code) of this tile's
   // beehaviors and opens the right-docked panel — you stay in the hive.
@@ -377,7 +372,11 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', labelKey: 'action.features', descriptionKey: 'action.features.description' },
   { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // ── public-external profile ──
-  { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
+  // `features` on a PEER tile lets a visitor read what behaviors a tile
+  // carries BEFORE walking into it — the behaviors opt-in surface needs a
+  // pre-acquisition door now that visiting acquires. ShowFeaturesDrone
+  // answers with the step-inside guidance until the tile is local.
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-external', labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);
   // re-registering for `public-external` lets the same handler apply
   // when the tile is a peer-only mesh entry. Same dispatch through
@@ -424,19 +423,15 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // Your own tile in public mode. `remove` rides the same ordering rule
   // as private. `features` (puzzle-piece) opens the SHOW FEATURES
   // panel for any tile carrying a registered visual bee — it stays in the
-  // hive and has NO peer-broadcast requirement. (Still no `sync` icon.)
-  // `adopt` leads because when it IS visible a peer is offering something
-  // this tile doesn't have — it is the only entry here gated on live swarm
-  // evidence, so it renders on nothing but a real merge.
-  'public-own': ['adopt', 'features', 'break-apart', 'files', 'invite', 'remove'],
-  // Peer-only mesh tiles. Single-click `adopt` is the explicit
-  // "I want to expand on this topic" action — writes the tile to
-  // your local layer AND pulls the resources it references (images
-  // etc.) via the content broker. Different mechanism from auto-
-  // adopt: auto-adopt follows a participant continuously, single-
-  // adopt is one tile + its resources, on demand. `hide` dismisses
-  // a peer tile from view without taking ownership.
-  'public-external': ['adopt', 'hide', 'files', 'invite'],
+  // hive and has NO peer-broadcast requirement. (No `sync`, no `adopt`
+  // icon — the walk is the adopt.)
+  'public-own': ['features', 'break-apart', 'files', 'invite', 'remove'],
+  // Peer-only mesh tiles. There is no adopt button: WALKING INTO the tile
+  // is the acquisition (SwarmAdoptDrone folds each visited tile, one
+  // level at a time). `features` reads the tile's behavior metadata
+  // before you step in; `hide` dismisses a peer tile from view without
+  // taking ownership.
+  'public-external': ['features', 'hide', 'files', 'invite'],
 }
 
 // ── Position computation ──────────────────────────────────────────
@@ -485,8 +480,8 @@ type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
 // 'adopt' is intentionally NOT in this set — SwarmAdoptDrone owns the
-// adopt path directly (its own tile:action listener at
-// swarm-adopt.drone.ts:63). The legacy paired-channel 'adopt' / 'import'
+// (now buttonless, programmatic/spec-only) adopt verb directly via its
+// own tile:action listener. The legacy paired-channel 'adopt' / 'import'
 // handlers were retired with the paired-channel subsystem.
 const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public'])
 

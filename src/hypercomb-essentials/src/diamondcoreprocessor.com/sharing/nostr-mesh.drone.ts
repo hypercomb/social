@@ -533,18 +533,22 @@ export class NostrMeshDrone extends Drone {
     this.fanoutToSig('local', s, evt)
     this.note('publish:local', undefined, s, undefined, k)
 
-    // best-effort: sign and send
+    // best-effort: sign and send. HONESTY: a failed signature means the
+    // event exists ONLY in local fanout — returning true here let callers
+    // stamp "published" memos while every peer saw nothing, silently, on
+    // every heartbeat. Local fanout already happened above, so the caller
+    // keeps its own view either way; `false` says "no relay will see this".
     const signed = await this.trySign(evt)
     if (!signed) {
       this.stats.sendSkippedNoSigner++
       this.note('publish:send-skipped-nosigner', undefined, s, undefined, k)
-      return true
+      return false
     }
 
-    this.sendEventToAll(signed)
+    const delivered = this.sendEventToAll(signed)
     this.note('publish:sent', undefined, s, undefined, k)
 
-    return true
+    return delivered
   }
 
   // note: publish a fully-formed event (signed elsewhere)
@@ -557,15 +561,15 @@ export class NostrMeshDrone extends Drone {
     const sig = this.readX(evt.tags)
     if (sig) this.fanoutToSig('local', sig, evt)
 
-    // note: if not signed, try to sign for network
+    // note: if not signed, try to sign for network. Same honesty contract
+    // as publish(): false = no relay will ever see this event.
     const signed = (evt.id && evt.pubkey && evt.sig) ? evt : await this.trySign(evt)
     if (!signed) {
       this.stats.sendSkippedNoSigner++
-      return true
+      return false
     }
 
-    this.sendEventToAll(signed)
-    return true
+    return this.sendEventToAll(signed)
   }
 
   // -----------------------------
@@ -655,7 +659,20 @@ export class NostrMeshDrone extends Drone {
     }
 
     let ws: WebSocket
-    try { ws = new WebSocket(relay) } catch { return }
+    try { ws = new WebSocket(relay) } catch {
+      // A synchronous constructor throw (malformed URL, mixed-content
+      // SecurityError) used to drop the relay from the loop for the whole
+      // session with no backoff entry and no retry. Record the failure and
+      // retry on the normal ladder instead — a transient throw self-heals,
+      // a permanent one backs off to the 15s cap and stays visible in
+      // getDebug()'s backoff map instead of vanishing.
+      this.stats.socketsErrors++
+      this.note('socket:create-threw', relay)
+      this.bumpBackoff(relay)
+      const st = this.backoff.get(relay)
+      if (st) this.scheduleEnsure(relay, Math.max(0, st.nextAtMs - Date.now()))
+      return
+    }
 
     this.sockets.set(relay, ws)
     this.note('socket:create', relay)
@@ -669,6 +686,10 @@ export class NostrMeshDrone extends Drone {
 
       // note: resubscribe everything on connect
       for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
+
+      // Deliver anything queued while no socket was open — the join's
+      // first publish burst rides here instead of dying in CONNECTING.
+      this.flushPendingOutbound()
     }
 
     ws.onmessage = (msg) => {
@@ -956,16 +977,55 @@ export class NostrMeshDrone extends Drone {
     try { ws.send(JSON.stringify(['CLOSE', subId])) } catch { /* ignore */ }
   }
 
-  private sendEventToAll = (evt: NostrEvent): void => {
+  // Outbound events raced by a connecting socket. Every join used to lose
+  // its first publish burst here: mesh:public-changed → connectAll puts the
+  // socket in CONNECTING, the swarm's publish walk finishes before onopen,
+  // and sendEventToAll skipped every socket — peers saw NOTHING for up to
+  // ~75s (the next heartbeat republish). Reads exactly like a dead swarm.
+  // Queue the frames instead and flush them the moment a socket opens.
+  // Relays dedupe by event id, so a flush to multiple relays is safe.
+  private pendingOutbound: { frame: string; queuedAtMs: number }[] = []
+  private static readonly PENDING_OUTBOUND_MAX = 64
+  private static readonly PENDING_OUTBOUND_TTL_MS = 60_000
+
+  private flushPendingOutbound = (): void => {
+    if (this.pendingOutbound.length === 0) return
+    const now = Date.now()
+    const live = this.pendingOutbound.filter(p => now - p.queuedAtMs <= NostrMeshDrone.PENDING_OUTBOUND_TTL_MS)
+    this.pendingOutbound = []
+    for (const p of live) {
+      let sent = false
+      for (const ws of this.sockets.values()) {
+        if (ws.readyState !== WebSocket.OPEN) continue
+        try { ws.send(p.frame); sent = true } catch { /* ignore */ }
+      }
+      if (sent) this.note('out:flush-pending')
+      else this.pendingOutbound.push(p)  // still nothing open — keep it
+    }
+  }
+
+  /** Send to every OPEN relay socket. Returns true when the frame reached
+   *  (or was queued for) at least one relay, or when zero relays are
+   *  configured (deliberate local-only mode). False = dropped. */
+  private sendEventToAll = (evt: NostrEvent): boolean => {
     const frame = JSON.stringify(['EVENT', evt])
 
     this.stats.eventSent++
 
+    let sent = false
     for (const ws of this.sockets.values()) {
-      if (!this.networkEnabled) return
+      if (!this.networkEnabled) return false
       if (ws.readyState !== WebSocket.OPEN) continue
-      try { ws.send(frame) } catch { /* ignore */ }
+      try { ws.send(frame); sent = true } catch { /* ignore */ }
     }
+    if (sent) return true
+    if (this.relays.length === 0) return true  // local-only by configuration
+    // Relays configured but nothing OPEN (connecting / backing off) —
+    // queue for the next socket open instead of dropping silently.
+    if (this.pendingOutbound.length >= NostrMeshDrone.PENDING_OUTBOUND_MAX) this.pendingOutbound.shift()
+    this.pendingOutbound.push({ frame, queuedAtMs: Date.now() })
+    this.note('out:queued-pending')
+    return true
   }
 
   /**
@@ -1233,6 +1293,21 @@ export class NostrMeshDrone extends Drone {
         .filter((u: string) => u.startsWith('ws://') || u.startsWith('wss://'))
 
       if (next.length === 0) return defaults.slice()
+
+      // Stale-dev-list guard. A loopback-only override left over from a
+      // dev session (hc:nostrmesh:relays=["ws://localhost:7777"]) WINS on
+      // a real host forever: the loopback passes canAttemptRelay (it is
+      // user-configured), the live seed is never dialed, and the client
+      // is silently deaf while every publish still "succeeds". When the
+      // whole override is loopback on a real host, dial the live seed
+      // ALONGSIDE it — unless the operator explicitly claimed loopback
+      // intent with hc:nostrmesh:allow-loopback='1' or opted out of the
+      // live relay with use-live-relay='0'.
+      const allLoopback = next.every(u => this.isLoopbackRelay(u))
+      if (allLoopback && !this.isLocalContext() && flag !== '0' && !this.allowLoopbackRelay()) {
+        this.note('relay:loopback-override-augmented', LIVE_RELAY)
+        return Array.from(new Set([...next, LIVE_RELAY]))
+      }
       return Array.from(new Set(next))
     } catch {
       return defaults.slice()

@@ -26,7 +26,7 @@
 // correct on mount, even if we subscribe after the initial emit).
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
-import { Component, signal, computed, effect, viewChild, type ElementRef, type OnDestroy, type OnInit } from '@angular/core'
+import { Component, ElementRef, inject, signal, computed, effect, viewChild, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
@@ -49,11 +49,6 @@ interface SwarmConsumerApi extends SwarmLabelApi {
   following: () => string
   subscribeTo: (pubkey: string | null) => Promise<void>
   follow: (pubkey: string | null) => Promise<void>
-  peerTilesGroupedAtCurrentSig?: () => readonly {
-    pubkey: string
-    label: string
-    tiles: readonly ({ name: string } & Record<string, unknown>)[]
-  }[]
 }
 
 /** The participant filter (essentials SwarmFilterService), consumed via
@@ -83,7 +78,6 @@ interface Badge {
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
-const SIG_RE = /^[a-f0-9]{64}$/
 
 @Component({
   selector: 'hc-presence-banner',
@@ -95,6 +89,10 @@ const SIG_RE = /^[a-f0-9]{64}$/
 export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   #unsubs: (() => void)[] = []
+
+  /** The strip's own element — the containment test for the
+   *  dismiss-on-outside-pointer handler. */
+  readonly #host = inject<ElementRef<HTMLElement>>(ElementRef)
 
   /** Whether the swarm has connected at any point this session.
    *  Gates rendering — until the first presence event lands, the
@@ -193,32 +191,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     return out
   })
 
-  /** Participant-grouped adopt picks for the current selection — every
-   *  branch the selected participants offer here (valid layer sig only).
-   *  Fed to the EXISTING `adopt-selected` verb; SwarmAdoptDrone folds
-   *  them sequentially with all its usual gates. */
-  readonly adoptSelections = computed<readonly { label: string; pubkey: string }[]>(() => {
-    this.#peers()          // recompute on peer churn
-    this.#labelVersion()
-    const selected = this.#selected()
-    if (selected.size === 0) return []
-    const groups = this.#swarm()?.peerTilesGroupedAtCurrentSig?.() ?? []
-    const out: { label: string; pubkey: string }[] = []
-    const seen = new Set<string>()
-    for (const g of groups) {
-      if (!selected.has(g.pubkey)) continue
-      for (const t of g.tiles) {
-        if (!SIG_RE.test(String(t['layerSig'] ?? ''))) continue
-        const key = `${g.pubkey}/${t.name}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        out.push({ label: t.name, pubkey: g.pubkey })
-      }
-    }
-    return out
-  })
-
-  readonly adoptCount = computed(() => this.adoptSelections().length)
+  // (The bulk adopt chip is retired with the adopt button — visiting a
+  // peer's tiles is the acquisition now. The participant filter itself
+  // stays: selecting peers still scopes the canvas to their tiles.)
 
   /** Per-row participant data for the expanded panel. Labels
    *  collide-safe: when two peers share a label, we suffix the
@@ -262,6 +237,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         this.#peers.set(peers)
         this.#alone.set(alone)
         this.#seen.set(true)
+        // Last peer left: the caret unmounts with them, so an expanded
+        // panel would have no way left to close. Collapse with them.
+        if (alone) this.expanded.set(false)
       }),
 
       // A peer's label arrived (or changed) — force badge/row recompute.
@@ -291,6 +269,28 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       }),
     )
 
+    // The panel is dismissible from anywhere: a pointer down outside
+    // the strip, or Escape, collapses it. The caret alone was the only
+    // way out — a small target that is easy to miss on a phone, which
+    // is why the panel read as stuck open once shown.
+    const onPointerDown = (ev: Event) => {
+      if (!this.expanded()) return
+      const root = this.#host.nativeElement as HTMLElement
+      if (root.contains(ev.target as Node)) return
+      this.expanded.set(false)
+    }
+    const onKeydown = (ev: KeyboardEvent) => {
+      if (!this.expanded() || ev.key !== 'Escape') return
+      ev.stopPropagation()
+      this.expanded.set(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeydown, true)
+    this.#unsubs.push(() => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeydown, true)
+    })
+
     // Seed from the live service — the replayed effect covers most
     // mounts, but a fresh mount before any toggle has no last value.
     const filter = this.#filter()
@@ -308,15 +308,6 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   onCaretClick(): void {
     if (this.#alone()) return
     this.expanded.set(!this.expanded())
-  }
-
-  /** One gesture: adopt every branch the selected participants offer
-   *  here, through the EXISTING adopt-selected verb — SwarmAdoptDrone
-   *  folds sequentially with all its gates (code consent included). */
-  onAdoptSelected(): void {
-    const selections = this.adoptSelections()
-    if (selections.length === 0) return
-    EffectBus.emit('tile:action', { action: 'adopt-selected', selections })
   }
 
   /** Click your own badge → open the inline name editor. */

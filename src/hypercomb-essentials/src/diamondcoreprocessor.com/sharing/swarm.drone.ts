@@ -321,7 +321,10 @@ interface SignatureStoreLike {
 // stubs, manual file-system poking, in-flight commits that didn't land)
 // and MUST NOT travel to peers.
 interface HistoryServiceLike {
-  sign: (l: LineageLike) => Promise<string>
+  // Structural minimum: sign() reads explorerSegments (+ optional domain),
+  // so ad-hoc path lineages (the drill response) can sign without carrying
+  // the full EventTarget surface a live Lineage has.
+  sign: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
   currentLayerAt: (locationSig: string) => Promise<{ children?: readonly string[]; name?: string } | null>
   getLayerBySig: (sig: string) => Promise<{ name?: string } | null>
   // Seal a subtree's LIVE location heads into a merkle-correct root sig for
@@ -544,8 +547,8 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete', 'swarm:tile-visited']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -631,6 +634,34 @@ export class SwarmDrone extends Drone {
   // parent see a presence glow on the tile we're exploring. Value =
   // expirationMs; deduped so we only republish past 2/3 TTL.
   #myParentPresenceExpMs = new Map<string, number>()
+
+  // ── Visit-driven acquisition state ────────────────────────────────
+  // Wall-clock of our last withheld-list send. The 30208 slot carries the
+  // same 90s NIP-40 expiration as every other event, so it must refresh on
+  // the beacon cadence or late joiners never learn the publisher's
+  // withheld behaviors (they'd render withheld kinds as enabled).
+  #lastWithheldSentMs = 0
+
+  // Path key of the location the last visit signal fired for — dedupes
+  // the heartbeat's re-sync (same location, no new visit) from a real
+  // navigation. Reset on zone teardown / going private.
+  #lastVisitKey = ''
+
+  // lineageKey()s of paths whose leaf we witnessed as a PEER offering —
+  // i.e. names the swarm itself taught us. Broadcasting such a segment
+  // back (presence, drill requests) discloses nothing new, unlike a
+  // locally-held private name. Bounded; oldest dropped first.
+  #foreignPathKeys = new Set<string>()
+
+  // Our own drill-request slots, keyed by path key → expirationMs, so an
+  // idle stay at a deep location re-requests the frontier only when the
+  // slot is past 2/3 TTL (same refresh shape as interest/presence).
+  #myDrillExpMs = new Map<string, number>()
+
+  // Publisher-side throttle for answered drill requests: pathKey → last
+  // response walk ms. A crowd drilling the same branch coalesces to one
+  // frontier walk per LAYER_REFRESH_MS per location.
+  #drillServedMs = new Map<string, number>()
 
   // Peer label cache. Each participant can stamp a human-readable
   // label on their published payload ("Alice", "Bob's bee-keep") so
@@ -752,7 +783,22 @@ export class SwarmDrone extends Drone {
     // single lineage would self-expire from the relay within
     // EVENT_TTL_SECS even though they're still present.
     this.#heartbeatTimer = setInterval(() => {
-      if (!this.#currentSig) return
+      if (!this.#currentSig) {
+        // No current sig despite the heartbeat running. Normally that
+        // means private mode / incomplete zone — but a transient failure
+        // inside #syncForCurrentLineage (signText hiccup during boot) can
+        // ALSO leave it empty with no retry path while the user idles:
+        // permanent deafness until navigation. When public with a
+        // complete zone, retry the sync; otherwise stay quiet.
+        try {
+          if (localStorage.getItem('hc:mesh-public') === 'true'
+            && this.#getRoomStore()?.value?.trim()
+            && this.#getSecretStore()?.value?.trim()) {
+            void this.#syncForCurrentLineage()
+          }
+        } catch { /* privacy-safe default: stay quiet */ }
+        return
+      }
       void this.#syncForCurrentLineage()
       // Re-assert our own hide list — the same heartbeat cadence as
       // layer events. Without this, a user who hides a tile and then
@@ -1030,6 +1076,18 @@ export class SwarmDrone extends Drone {
       this.#autoPublishInSwarm(payload)
       this.#schedulePropsRepublish()
     })
+    // A visit-fold landed (SwarmAdoptDrone): mark the visited tile public —
+    // acquired FROM the zone, it stays visible TO the zone, the same default
+    // a tile CREATED in a swarm gets — and republish so the frontier updates.
+    // The availability gate still decides when it actually re-announces.
+    this.onEffect<{ parentSegments?: string[]; name?: string }>('swarm:visit-folded', (p) => {
+      const name = String(p?.name ?? '').trim()
+      const parent = Array.isArray(p?.parentSegments)
+        ? p!.parentSegments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      if (!name) return
+      try { setCellPublic('/' + parent.join('/'), name, true) } catch { /* participant-local nicety */ }
+      this.#schedulePropsRepublish()
+    })
     // Public/private flip — full re-sync so BOTH the broadcast layer slot
     // (kind 30200) AND the personal subscribe channel re-publish with the new
     // public subset. (#schedulePropsRepublish alone only refreshes the layer
@@ -1117,6 +1175,11 @@ export class SwarmDrone extends Drone {
           try { sub.close() } catch { /* ignore */ }
         }
         this.#resourceSubs.clear()
+        // Visit/drill state falls with the rest of the swarm session.
+        this.#lastVisitKey = ''
+        this.#foreignPathKeys.clear()
+        this.#myDrillExpMs.clear()
+        this.#drillServedMs.clear()
         // Drop the zone key so hide reads/writes fall back to
         // device-scoped storage while in private mode.
         this.#updateZoneKey()
@@ -1145,6 +1208,7 @@ export class SwarmDrone extends Drone {
    *  callers already have to know about (sigs, pubkeys). */
   public debug = (): object => ({
     lastSyncInput: this.#lastSyncInput,
+    lastVisitSignal: this.#lastVisitSignal,
     currentSig: this.#currentSig.slice(0, 12),
     myPubkey: this.#myPubkey?.slice(0, 8) ?? null,
     room: this.#getRoomStore()?.value ?? null,
@@ -1620,6 +1684,26 @@ export class SwarmDrone extends Drone {
     // glow on the tile we're exploring. No-op at root. Fire-and-forget.
     void this.#publishPresenceToParent(segments)
 
+    // Drill request — tell the zone (lifecycle channel, which every
+    // member hears regardless of location) which path we are standing
+    // on, so a publisher who holds it can extend their broadcast
+    // frontier to us. This is what lets a visitor tunnel DEEPER than
+    // MAX_PUBLISH_DEPTH below the publisher's own position: each level
+    // entered re-requests, the publisher answers with that level's
+    // layer event, and the drill never goes dark. Fire-and-forget.
+    void this.#publishDrillRequest(segments)
+
+    // Visit signal — visit-driven acquisition's trigger. When the tile
+    // just entered is offered by a peer at the parent location, announce
+    // the visit; SwarmAdoptDrone folds it (one level, props from the
+    // wire) and records it in the visit genome. Fired once per actual
+    // location change — the heartbeat's re-sync of the same location is
+    // not a new visit.
+    if (pathKey !== this.#lastVisitKey) {
+      this.#lastVisitKey = pathKey
+      void this.#announceVisit(segments)
+    }
+
     // Initial presence emit — fires once per location after sync sets
     // up, even when nobody else is here. The UI presence banner needs
     // this to render the "first one here" state on cold arrival;
@@ -1667,6 +1751,13 @@ export class SwarmDrone extends Drone {
     this.#interestSeenBySig.clear()
     this.#myInterestBySig.clear()
     this.#myParentPresenceExpMs.clear()
+    // Visit/drill state is zone-scoped: names learned from zone A's peers
+    // must never make a path broadcastable in zone B, and the next zone's
+    // first location is a fresh visit.
+    this.#lastVisitKey = ''
+    this.#foreignPathKeys.clear()
+    this.#myDrillExpMs.clear()
+    this.#drillServedMs.clear()
     // Tear down resource subs and the published-resource memo too —
     // a zone change means a different audience for our resources, so
     // we want to re-assert them in the new zone (and stop fetching
@@ -2613,7 +2704,15 @@ const payload: SwarmLayerPayload = myLabel
       const selfDomain = this.#readSelfDomain()
       if (selfDomain) tags.push(['domain', selfDomain])
       this.#publishStats.wireEvents++
-      await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
+      const delivered = await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
+      // Publish honesty: `false` means signing failed — NOTHING reached
+      // (or was queued for) a relay. Un-stamp the memo so the next walk
+      // retries instead of believing the slot is live for 45s while
+      // peers see nothing.
+      if (delivered === false) {
+        this.#lastPublishedBySig.delete(sig)
+        this.#lastPublishTimeMsBySig.delete(sig)
+      }
     }
 
     if (depth >= MAX_PUBLISH_DEPTH) return
@@ -3183,6 +3282,9 @@ const payload: SwarmLayerPayload = myLabel
     const segs = (Array.isArray(segments) ? segments : [])
       .map(s => String(s ?? '').trim()).filter(s => s.length > 0)
     if (segs.length === 0) return  // at root — no parent to announce to
+    // PRIVACY: never announce a leaf name that is neither public nor
+    // swarm-taught — same rule as full-path presence above.
+    if (this.#broadcastablePrefix(segs).length < segs.length) return
     const leaf = segs[segs.length - 1]
     const parentSig = await this.composeSigForSegments(segs.slice(0, -1))
     if (!parentSig) return
@@ -3205,6 +3307,184 @@ const payload: SwarmLayerPayload = myLabel
     } catch {
       this.#myParentPresenceExpMs.delete(key)  // allow retry next heartbeat
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Visit-driven acquisition + drill tunneling
+  // ─────────────────────────────────────────────────────────────────
+
+  /** The longest prefix of `segments` that is safe to broadcast. A
+   *  segment is safe when it is a locally-held PUBLIC tile (the walk's
+   *  own filter), or when the swarm itself taught us the name (a
+   *  witnessed peer offering — broadcasting it back discloses nothing).
+   *  Locally-held PRIVATE names stop the prefix: presence and drill
+   *  requests must never stream a private branch's names to the zone,
+   *  even though the layer walk correctly prunes the tiles themselves. */
+  #broadcastablePrefix = (segments: readonly string[]): string[] => {
+    const out: string[] = []
+    for (let i = 0; i < segments.length; i++) {
+      const leaf = segments[i]
+      const location = '/' + segments.slice(0, i).join('/')
+      const foreign = this.#foreignPathKeys.has(lineageKey(segments.slice(0, i + 1)))
+      if (!foreign && !isCellPublic(location, leaf)) break
+      out.push(leaf)
+    }
+    return out
+  }
+
+  /** Remember that `segments` names a path whose leaf a PEER offered —
+   *  see #foreignPathKeys. Bounded FIFO. */
+  #noteForeignPath = (segments: readonly string[]): void => {
+    if (segments.length === 0) return
+    const key = lineageKey(segments)
+    if (this.#foreignPathKeys.has(key)) return
+    if (this.#foreignPathKeys.size >= 4096) {
+      const first = this.#foreignPathKeys.values().next().value
+      if (first !== undefined) this.#foreignPathKeys.delete(first)
+    }
+    this.#foreignPathKeys.add(key)
+  }
+
+  /** Visit signal — fires once per real location change. When the tile
+   *  just entered is a live PEER offering at the parent location, emit
+   *  `swarm:tile-visited` with the witnessed entry (sanitized wire
+   *  visual + publisher pubkey + sealed layerSig). SwarmAdoptDrone owns
+   *  what happens next (the one-level fold + genome record); this drone
+   *  only witnesses and signals. */
+  // Last visit-signal decision — exposed via debug() so a dead drill names
+  // its failing stage from the console instead of reading as "broken".
+  #lastVisitSignal: Record<string, unknown> | null = null
+
+  #announceVisit = async (segments: readonly string[]): Promise<void> => {
+    if (segments.length === 0) { this.#lastVisitSignal = { stage: 'root', atMs: Date.now() }; return }
+    const leaf = segments[segments.length - 1]
+    const parentSegments = segments.slice(0, -1)
+    let parentSig = ''
+    try { parentSig = await this.composeSigForSegments(parentSegments) } catch { /* fall through */ }
+    if (!parentSig) {
+      this.#lastVisitSignal = { stage: 'no-parent-sig', at: [...segments], atMs: Date.now() }
+      return
+    }
+    const bag = this.peerTilesAtSig(parentSig)
+    const offer = bag.find(t => t.name === leaf)
+    if (!offer) {
+      this.#lastVisitSignal = {
+        stage: 'not-offered', at: [...segments], parentSig: parentSig.slice(0, 12),
+        offered: bag.map(t => t.name), atMs: Date.now(),
+      }
+      return
+    }
+    // The swarm taught us this name (and every ancestor was recorded at
+    // ITS entry moment) — safe for presence/drill broadcasts from now on.
+    this.#noteForeignPath(segments)
+    this.#lastVisitSignal = {
+      stage: 'emitted', at: [...segments], peer: String(offer.peerPubkey ?? '').slice(0, 8), atMs: Date.now(),
+    }
+    this.emitEffect('swarm:tile-visited', {
+      segments: [...segments],
+      parentSegments: [...parentSegments],
+      name: leaf,
+      entry: offer,
+    })
+  }
+
+  /** Drill request (kind 30203 on the zone-wide lifecycle sig, d-tag
+   *  `drill:<pubkey>` — its own replaceable slot, never colliding with
+   *  the alive beacon). Interest events at a deep location's sig are
+   *  heard by NOBODY when the publisher is elsewhere — they subscribe
+   *  only at their own location. The lifecycle channel is the one sig
+   *  every zone member listens on, so the drill request always lands;
+   *  any member who publicly holds the path answers by publishing that
+   *  location's layer event (see #onDrillRequest). Refreshes past 2/3
+   *  TTL so an idle visitor keeps the frontier alive under them. */
+  #publishDrillRequest = async (segments: readonly string[]): Promise<void> => {
+    if (segments.length === 0) return
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+    const myPubkey = this.#myPubkey
+    if (!myPubkey) return
+    const share = this.#broadcastablePrefix(segments)
+    if (share.length === 0) return
+    const sig = this.#lifecycleSig || await this.#computeLifecycleSig()
+    if (!sig) return
+
+    const pathKey = lineageKey(share)
+    const nowMs = Date.now()
+    const lastExpMs = this.#myDrillExpMs.get(pathKey) ?? 0
+    if (lastExpMs - nowMs > Math.floor(EVENT_TTL_SECS * 1000 / 3)) return
+
+    const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
+    this.#myDrillExpMs.set(pathKey, expirationSecs * 1000)
+    try {
+      await mesh.publish(SWARM_INTEREST_KIND, sig, { pathSegments: share }, [
+        ['d', `drill:${myPubkey}`],
+        ['expiration', String(expirationSecs)],
+      ])
+    } catch {
+      this.#myDrillExpMs.delete(pathKey)  // allow retry next sync
+    }
+  }
+
+  /** Publisher side of the drill tunnel: a zone member asked for the
+   *  frontier at a path. If WE publicly hold that path, publish its
+   *  layer event so the driller's live subscription at that sig fills.
+   *  One level per request — the driller re-requests as they descend,
+   *  so the frontier follows them level by level. Throttled per path
+   *  to the layer-refresh cadence; a crowd drilling one branch costs
+   *  one walk. Never answers for private paths (every segment must be
+   *  public on OUR side) and never invents an empty location (a path
+   *  we don't hold is silently ignored — absence of an answer, never
+   *  a false empty slot). */
+  #onDrillRequest = async (evt: MeshEvtLike): Promise<void> => {
+    const from = String(evt.event?.pubkey ?? '').trim().toLowerCase()
+    if (!from || (this.#myPubkey && from === this.#myPubkey)) return
+    const payload = evt.payload as { pathSegments?: unknown } | undefined
+    const rawSegs = payload?.pathSegments
+    const segments: string[] = Array.isArray(rawSegs)
+      ? rawSegs
+          .map(s => (typeof s === 'string' ? s.trim() : ''))
+          .filter(s => s.length > 0 && s.length <= 256)
+          .slice(0, 16)
+      : []
+    if (segments.length === 0) return
+
+    // Only answer for paths that are public from OUR side, at every level.
+    for (let i = 0; i < segments.length; i++) {
+      if (!isCellPublic('/' + segments.slice(0, i).join('/'), segments[i])) return
+    }
+
+    const pathKey = lineageKey(segments)
+    const nowMs = Date.now()
+    const lastMs = this.#drillServedMs.get(pathKey) ?? 0
+    if (nowMs - lastMs < LAYER_REFRESH_MS) return
+    this.#drillServedMs.set(pathKey, nowMs)
+    if (this.#drillServedMs.size > 512) {
+      const oldest = this.#drillServedMs.keys().next().value
+      if (oldest !== undefined) this.#drillServedMs.delete(oldest)
+    }
+
+    const sigStore = this.#getSignatureStore()
+    const mesh = this.#getMesh()
+    const history = this.#getHistory()
+    if (!sigStore || !mesh?.publish || !history) return
+    const room = this.#getRoomStore()?.value?.trim() ?? ''
+    const secret = this.#getSecretStore()?.value?.trim() ?? ''
+    if (!room || !secret) return
+
+    // Hold the path? Resolve OUR layer there — a location we don't hold
+    // is not ours to answer for (and must never be announced as empty).
+    try {
+      const locSig = await history.sign({ explorerSegments: () => [...segments] })
+      const layer = await history.currentLayerAt(locSig)
+      if (!layer) return
+    } catch { return }
+
+    // Publish that location's slot (one node — dir=null stops recursion,
+    // which is exactly one frontier level per drill step).
+    const counter = { count: 0 }
+    try {
+      await this.#publishSubtree(null, segments, MAX_PUBLISH_DEPTH, counter, sigStore, mesh, room, secret)
+    } catch { /* best-effort — the driller re-requests on their heartbeat */ }
   }
 
   /** Express interest in a child tile at the current lineage. Publishes
@@ -3755,8 +4035,15 @@ const payload: SwarmLayerPayload = myLabel
     if (!myPubkey) return
     const mySig = await this.#computePresenceSig(myPubkey)
     if (!mySig) return
-    const segs = (Array.isArray(segments) ? segments : [])
+    const segsRaw = (Array.isArray(segments) ? segments : [])
       .map(s => String(s ?? '').trim()).filter(s => s.length > 0)
+    // PRIVACY: broadcast only the public/foreign prefix of the path. The
+    // layer walk prunes private TILES, but presence used to stream the
+    // NAMES of every segment — navigating your own private branch while
+    // public leaked its folder names to the whole zone. Followers land on
+    // the nearest broadcastable ancestor instead (they could never enter
+    // the private tile anyway).
+    const segs = this.#broadcastablePrefix(segsRaw)
     const expirationSecs = Math.floor(Date.now() / 1000) + EVENT_TTL_SECS
     try {
       await mesh.publish(SWARM_PRESENCE_KIND, mySig, { pathSegments: segs }, [
@@ -3848,12 +4135,21 @@ const payload: SwarmLayerPayload = myLabel
     if (!sig) return
     const withheld = withheldForShare()
     const json = JSON.stringify(withheld)
-    if (!force && json === this.#lastWithheldJson) return
+    // Refresh like the alive beacon, not only on change: the slot expires
+    // in EVENT_TTL_SECS on a NIP-40 relay, and a change-only send meant a
+    // visitor joining >90s after the last roster change never learned the
+    // publisher's withheld list — withheld behaviors then rendered as
+    // ENABLED under adopted/visited roots. Time-based re-send keeps the
+    // slot alive for late joiners; unchanged-and-fresh still no-ops.
+    const nowMs = Date.now()
+    const fresh = nowMs - this.#lastWithheldSentMs < LAYER_REFRESH_MS
+    if (!force && json === this.#lastWithheldJson && fresh) return
     this.#lastWithheldJson = json
+    this.#lastWithheldSentMs = nowMs
     try {
       await mesh.publish(SWARM_BEHAVIOR_KIND, sig, { withheld }, [
         ['d', myPubkey],
-        ['expiration', String(Math.floor(Date.now() / 1000) + EVENT_TTL_SECS)],
+        ['expiration', String(Math.floor(nowMs / 1000) + EVENT_TTL_SECS)],
       ])
     } catch (err) { console.warn('[swarm] publishWithheld failed', err) }
   }
@@ -3909,6 +4205,13 @@ const payload: SwarmLayerPayload = myLabel
   }
 
   #onLifecycleEvent = (evt: MeshEvtLike): void => {
+    // Drill requests ride the same zone-wide channel as interest events
+    // (kind 30203, d-tag `drill:<pubkey>`) — a member is asking whoever
+    // holds a path to publish its frontier. Answer best-effort.
+    if (Number(evt.event?.kind) === SWARM_INTEREST_KIND) {
+      void this.#onDrillRequest(evt)
+      return
+    }
     // Withheld-behaviors broadcast rides the same channel — record the
     // peer's list (replaceable slot: latest wins) and tell the adopt path.
     if (Number(evt.event?.kind) === SWARM_BEHAVIOR_KIND) {

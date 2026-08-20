@@ -61,7 +61,7 @@ export class SampleSwarmDrone extends Drone {
 
   protected override deps = {}
   protected override listens = ['render:cell-count', 'selection:changed', MOBILE_MODE_EFFECT]
-  protected override emits = ['sample:mode', 'tile:action', 'swarm:adopt-panel:open']
+  protected override emits = ['sample:mode', 'tile:action']
 
   #registered = false
   #bound = false
@@ -237,8 +237,10 @@ export class SampleSwarmDrone extends Drone {
   }
 
   /** Keep the picked peer tiles. Resolves each label to the publisher offering
-   *  it; a label offered by two or more hands off to the disambiguation panel
-   *  (a canvas pick cannot say WHOSE copy — the tile is one hex). */
+   *  it; a label offered by two or more folds WHAT THE CANVAS RENDERED — the
+   *  freshest publisher's copy, the same what-you-see-is-what-you-get rule
+   *  the visit fold and the adopt verb use (the disambiguation panel is
+   *  retired with the adopt button). */
   #keep(labels: readonly string[]): void {
     const swarm = window.ioc?.get?.(SWARM_DRONE_KEY) as SwarmShape | undefined
     const entries = [
@@ -257,11 +259,11 @@ export class SampleSwarmDrone extends Drone {
     }
 
     const selections: { label: string; pubkey?: string }[] = []
-    const ambiguous: string[] = []
     for (const label of labels) {
       const publishers = publishersFor(label)
-      if (publishers.length > 1) { ambiguous.push(label); continue }
-      selections.push({ label, pubkey: publishers[0] })
+      // Multiple publishers → pin NO pubkey: the resolver then takes the
+      // freshest entry, which is the copy the canvas rendered for this hex.
+      selections.push({ label, pubkey: publishers.length === 1 ? publishers[0] : undefined })
     }
 
     // Clear before acting: the fold re-renders, and a stale ring over a tile
@@ -269,12 +271,6 @@ export class SampleSwarmDrone extends Drone {
     this.#selectionService()?.clear()
     this.#disarm()
 
-    if (ambiguous.length > 0) {
-      // Several publishers offer at least one of these names — ask which,
-      // rather than silently keeping whoever published most recently.
-      this.emitEffect('swarm:adopt-panel:open', { preselect: [...ambiguous, ...selections.map(s => s.label)] })
-      return
-    }
     if (selections.length === 0) return
     this.emitEffect('tile:action', { action: 'adopt-selected', selections })
   }

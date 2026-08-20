@@ -110,26 +110,6 @@
   }
 }
 
-// One-gesture branch adoption for the selected participants — quiet
-// green chip, same accent family as every other adopt affordance.
-.adopt-chip {
-  appearance: none;
-  flex: 0 0 auto;
-  padding: 0.18rem 0.6rem;
-  background: transparent;
-  border: 1px solid rgba(111, 211, 154, 0.5);
-  border-radius: 999px;
-  color: #6fd39a;
-  font-family: var(--hc-font);
-  font-size: 0.68rem;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 120ms ease;
-
-  &:hover { background: rgba(111, 211, 154, 0.12); }
-}
-
 .name-input {
   flex: 0 0 auto;
   width: 8.5rem;

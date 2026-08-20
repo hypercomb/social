@@ -40,7 +40,9 @@ import {
 import {
   cellLocationSig,
   seedLayerKeyedTileProps,
+  writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
+import { recordVisit, dropVisitsWithin } from './visit-genome.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
 import { recordWithheldAtRoot } from './behavior-enablement.js'
 import { WEBSITE_SLOT } from '../commands/website-slot.js'
@@ -173,6 +175,36 @@ interface TileActionPayload {
   selections?: readonly { label: string; pubkey?: string }[]
 }
 
+/** SwarmDrone's `swarm:tile-visited` — a real navigation landed on a tile
+ *  a peer offers at the parent location. `entry` is the witnessed wire
+ *  visual (sanitizer-filtered on receive) plus the publisher pubkey.
+ *  `retry` is internal: the bounded re-attempt counter for folds refused
+ *  by a transiently-rewound cursor. */
+interface VisitPayload {
+  segments?: string[]
+  parentSegments?: string[]
+  name?: string
+  entry?: Record<string, unknown>
+  retry?: number
+}
+
+/** How many times a refused visit fold re-attempts, and how far apart.
+ *  The cursor falls legitimately behind for a beat after the PREVIOUS
+ *  fold's own commits at the current location; a couple of spaced
+ *  retries ride that out, while a participant genuinely viewing history
+ *  stays rewound and the last attempt honestly gives up. */
+const VISIT_RETRY_MAX = 2
+const VISIT_RETRY_DELAY_MS = 2_500
+
+/** The 0000 fields a visit fold carries — exactly the visual-sanitizer's
+ *  first-class property whitelist, minus swarm metadata (name, peerPubkey,
+ *  layerSig, inviteSig, label) and minus `index` (local layout owns slot
+ *  assignment — the standing adopt-time strip rule). */
+const VISIT_PROP_KEYS = [
+  'imageSig', 'small', 'flat', 'point', 'accent', 'tags', 'link',
+  'hideText', 'thread', 'contentSig', 'stopReason',
+] as const
+
 export class SwarmAdoptDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
@@ -181,8 +213,8 @@ export class SwarmAdoptDrone extends Drone {
   public override description =
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
-  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed']
-  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show']
+  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited']
+  protected override emits: string[] = ['adopt:started', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded']
 
   // Latest installer registry projection — cached for the Done-gated fold.
   #lastSnapshot: RegistrySnapshotLike | null = null
@@ -244,7 +276,23 @@ export class SwarmAdoptDrone extends Drone {
       markAdoptTombstone(target)
       unmarkAdoptedRoot(target)
       this.#dropSyncReceipts(target)
+      // A deleted tile's provenance should not linger in the visit genome.
+      dropVisitsWithin(target)
     })
+
+    // ── VISIT-DRIVEN ACQUISITION — the walk IS the adopt ───────────────
+    // There is no adopt button. SwarmDrone announces each real navigation
+    // into a PEER-offered tile; the handler folds that ONE tile — props
+    // straight from the (sanitized) wire visual, no closure pull, no
+    // network wait — and records the visit in the genome. One level per
+    // step: drilling deeper folds the next tile, siblings never entered
+    // are never folded ("painting a picture of only the pieces you need").
+    // Behaviors stay a separate explicit opt-in: a props fold carries NO
+    // bees/deps slots, so no code can enter this way; the features panel
+    // (and its code-consent/review gates) remains the one behaviors door.
+    // Tombstones are RESPECTED and never cleared here — delete is the
+    // unsubscribe, and a mere walk must not resurrect a deletion.
+    this.onEffect<VisitPayload>('swarm:tile-visited', (p) => { void this.#onTileVisited(p) })
 
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       const action = String(payload?.action ?? '')
@@ -286,11 +334,11 @@ export class SwarmAdoptDrone extends Drone {
       // still disambiguate through the participant-grouped panel first.
       if (action === 'adopt') {
         if (!this.#isPeerTile(label)) return
-        const publishers = this.#publishersFor(label)
-        if (publishers.length > 1) {
-          this.emitEffect('swarm:adopt-panel:open', { preselect: [label] })
-          return
-        }
+        // The participant-grouped disambiguation panel is retired with the
+        // adopt button. WHAT YOU SEE IS WHAT YOU GET: when two publishers
+        // offer the same name, the fold takes the entry the canvas rendered
+        // (freshest-publisher-first — the same ordering peerTilesAtSig gives
+        // the tile source), exactly like a visit-fold does.
         void this.#adoptInline(label)
         return
       }
@@ -415,20 +463,169 @@ export class SwarmAdoptDrone extends Drone {
     return { layerSig, at, domain: ownerDomain || undefined, label, pubkey: publisherPubkey || undefined }
   }
 
-  /** Distinct publisher pubkeys currently offering `label` (current-location
-   *  cache + subscribed channel). One → unambiguous, adopt inline; two+ → the
-   *  same name from different peers, so the choose-panel disambiguates. */
-  #publishersFor = (label: string): string[] => {
-    const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.peerTilesAtCurrentSig) return []
-    const keys = new Set<string>()
-    for (const p of swarm.peerTilesAtCurrentSig()) {
-      if (p.name === label) keys.add(String(p.peerPubkey ?? '').toLowerCase())
+  // ── visit-driven acquisition: the one-level fold ────────────────────
+  // The walk is the adopt. Landed-or-nothing: the fold is verified by
+  // read-back before ANY record (genome, receipt, root, public mark) is
+  // written — a committer that refused (preview active, transient error)
+  // leaves zero traces, and the next visit simply tries again.
+
+  /** Last visit-fold decision, console-readable via
+   *  ioc.get('@diamondcoreprocessor.com/SwarmAdoptDrone').visitDebug() —
+   *  a dead drill names its failing stage instead of reading as broken. */
+  #lastVisit: Record<string, unknown> | null = null
+  public visitDebug = (): Record<string, unknown> | null => this.#lastVisit
+  #visitStage = (stage: string, extra?: Record<string, unknown>): void => {
+    this.#lastVisit = { stage, atMs: Date.now(), ...(extra ?? {}) }
+  }
+
+  /** Bounded re-attempt for a refused visit fold. Idempotent by
+   *  construction — a fold that landed meanwhile short-circuits at the
+   *  held-here check; a participant who genuinely rewound stays rewound
+   *  and the final attempt gives up honestly. */
+  #scheduleVisitRetry = (p?: VisitPayload): void => {
+    const attempt = Number(p?.retry ?? 0)
+    if (attempt >= VISIT_RETRY_MAX) return
+    setTimeout(() => { void this.#onTileVisited({ ...(p ?? {}), retry: attempt + 1 }) }, VISIT_RETRY_DELAY_MS)
+  }
+
+  #onTileVisited = async (p?: VisitPayload): Promise<void> => {
+    const name = String(p?.name ?? '').trim()
+    const segments = Array.isArray(p?.segments)
+      ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+    const parentSegments = Array.isArray(p?.parentSegments)
+      ? p!.parentSegments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+    const entry = p?.entry && typeof p.entry === 'object' ? p.entry : null
+    if (!name || segments.length === 0 || !entry) { this.#visitStage('bad-payload', { name }); return }
+    if (segments[segments.length - 1] !== name) { this.#visitStage('path-mismatch', { name }); return }
+    // Same peer-authored name guard as every fold.
+    if (/[\\/\x00-\x1f]/.test(name)) { this.#visitStage('bad-name', { name }); return }
+
+    const layerSig = String(entry['layerSig'] ?? '').trim().toLowerCase()
+    const pubkey = String(entry['peerPubkey'] ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(pubkey)) { this.#visitStage('no-pubkey', { name }); return }
+
+    // DELETE IS THE UNSUBSCRIBE — a tombstoned path renders live as a
+    // witness but never re-folds on a walk. (Nothing here clears stones.)
+    if (isAdoptTombstoned(segments)) { this.#visitStage('tombstoned', { name }); return }
+
+    const ioc = this.#ioc()
+    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
+    const domain = SIG_RE.test(layerSig)
+      ? String(broker?.getKnownDomains?.(layerSig)?.[0] ?? '').trim() || undefined
+      : undefined
+
+    // Already ours — the visit changes nothing (foreign children inside
+    // fold as they are entered). Refresh the genome's provenance stamp
+    // when the path is one we acquired by visiting.
+    if (await this.#isHeldHere(parentSegments, name)) {
+      this.#visitStage('held', { name })
+      if (SIG_RE.test(layerSig)) recordVisit({ segments, layerSig, pubkey, domain })
+      return
     }
-    for (const p of swarm.subscribedTiles?.() ?? []) {
-      if (p.name === label) keys.add(String(p.peerPubkey ?? '').toLowerCase())
+
+    // Viewing history — the committer refuses rewound writes; don't try.
+    // state.rewound is the canonical test (same as #doCommitBranch) —
+    // currentLayerSig is a POSITION and can be set in perfectly normal
+    // operation; gating on it silently killed every visit fold.
+    //
+    // TRANSIENT rewound: during a rapid drill the cursor briefly reads
+    // rewound while it catches up with the markers the PREVIOUS visit just
+    // minted — a timing artifact, not participant intent. A person actually
+    // viewing history stays rewound for seconds, so give the cursor a short
+    // settle window before treating rewound as real; only a state that
+    // HOLDS refuses the fold.
+    const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+      | { state?: { rewound?: boolean } }
+      | undefined
+    if (cursor?.state?.rewound) {
+      let stillRewound = true
+      for (let i = 0; i < 4 && stillRewound; i++) {
+        await new Promise(r => setTimeout(r, 250))
+        stillRewound = cursor?.state?.rewound === true
+      }
+      if (stillRewound) { this.#visitStage('rewound', { name }); this.#scheduleVisitRetry(p); return }
     }
-    return [...keys]
+
+    // ONE-LEVEL fold. MATERIALIZE first — the EGG shape (importTree links
+    // the name into the parent and mints the child layer), the same
+    // primitive every fold rides; a slot write alone cannot create a tile
+    // that does not exist yet (commitSlotSet edits slots on EXISTING
+    // layers — gating the whole fold on it was a silent no-op).
+    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+    const committer = ioc?.get?.(COMMITTER_KEY) as CommitterLike | undefined
+    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+    if (!history || !committer?.importTree) { this.#visitStage('no-services', { name }); return }
+    try {
+      const parent = await resolveLayerAt(history, lineage?.domain, parentSegments)
+      const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
+      // Never SET a children list we couldn't fully read — the same
+      // cold-sibling wipe guard every fold honours.
+      if (coldMiss) { this.#visitStage('cold-parent', { name }); return }
+      if (!existing.includes(name)) {
+        await committer.importTree([
+          { segments: parentSegments, layer: { ...(parent ?? {}), children: [...existing, name] } },
+          { segments: [...segments], layer: { name, children: [] } },
+        ])
+      }
+    } catch (err) { this.#visitStage('import-threw', { name, err: String(err).slice(0, 120) }); return }
+
+    // Read-back: only a landed fold mints records. importTree refuses
+    // SILENTLY while the cursor is rewound (a beat of legitimate lag after
+    // the previous fold's own commits), so a failed read-back retries on
+    // the same schedule as a held rewound state.
+    if (!(await this.#isHeldHere(parentSegments, name))) {
+      this.#visitStage('not-landed', { name })
+      this.#scheduleVisitRetry(p)
+      return
+    }
+
+    // PROPS from the witnessed wire visual, through the canonical writer
+    // (per-tile lock, canonical bytes, participant mark, nurse cache
+    // events) — the tile lands with its real picture/tags/link, never a
+    // husk. Children stay []; deeper levels fold as they are walked.
+    const props: Record<string, unknown> = {}
+    for (const key of VISIT_PROP_KEYS) {
+      if (entry[key] !== undefined) props[key] = entry[key]
+    }
+    if (Object.keys(props).length > 0) {
+      try { await writeTilePropertiesAt(parentSegments, name, props) }
+      catch (err) { this.#visitStage('props-write-failed', { name, err: String(err).slice(0, 120) }) }
+    }
+    this.#visitStage('landed', { name, at: [...segments] })
+
+    if (SIG_RE.test(layerSig)) {
+      recordVisit({ segments, layerSig, pubkey, domain })
+      // The generation we saw IS the generation we hold — divergence
+      // detection baselines here instead of re-lighting immediately.
+      this.#recordSyncReceipt(segments, layerSig)
+      // Background enrichment: localize the branch's layer closure as
+      // inert content-addressed cache (tiny JSONs, layersOnly) so the
+      // drilled path can be re-walked offline. Cache, not adoption.
+      try { void broker?.adopt?.(layerSig, { layersOnly: true, silent: true }) } catch { /* best-effort */ }
+    }
+
+    // The topmost foreign tile of a drill is the adopted ROOT — it covers
+    // every deeper visit (first-visit fit, tombstone scoping, and the
+    // publisher's withheld-behaviors record all key off it). Deeper
+    // visits land inside it and mark nothing new.
+    if (!isWithinAdoptedRoot(parentSegments)) {
+      markAdoptedRoot(segments)
+      try { recordWithheldAtRoot(segments, [...(swarm?.withheldByPeer?.(pubkey) ?? [])]) } catch { /* never blocks a visit */ }
+    }
+
+    // Acquired from the zone, visible to the zone: SwarmDrone marks the
+    // visited tile public (the same default a tile CREATED in a swarm gets
+    // via #autoPublishInSwarm) and republishes — it owns share semantics,
+    // so the marking lives there, not here.
+    EffectBus.emit('swarm:visit-folded', { segments, parentSegments, name })
+
+    EffectBus.emit('fs:changed', { segments: parentSegments })
+    const i18n = this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+    EffectBus.emit('activity:log', {
+      message: i18n?.t('swarm.visited', { cell: name }) ?? `"${name}" is yours now — visited tiles join your hive`,
+      icon: '●',
+    })
   }
 
   // ── inline adopt: fold content in place, route only code to the installer ──
