@@ -87,6 +87,10 @@ import {
 // window is showing, so its own lifetime IS the "currently open" fact.
 import { holdWindow, type WindowSession } from '../window-session'
 
+// The one-window rule — opening a tool window puts the others away, with the
+// pheromone palette the single surface allowed to stay beside one.
+import { holdToolWindow } from '../window-rule'
+
 const t = (key: string, fallback: string, params?: Record<string, unknown>): string => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
     { t(k: string, p?: Record<string, unknown>): string } | undefined
@@ -266,6 +270,8 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   #laneOffset = 0
   /** Drops this window out of the "currently showing" set when it goes. */
   #releaseSession: (() => void) | null = null
+  /** Drops this window out of the one-window rule's set when it goes. */
+  #releaseRule: (() => void) | null = null
   /** Only when `ownsSize` is false: watches the window's self-driven resize so
    *  its group mates track it, exactly as the grip does for owned panels. */
   #sizeWatch: ResizeObserver | null = null
@@ -339,6 +345,11 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     // The root thunk is what lets the shell-wide Escape owner ask "is the focus
     // inside this window" — the gate that replaced every panel's own listener.
     if (this.hcSession) this.#releaseSession = holdWindow(this.id, this.hcSession, () => this.#el)
+    // And join the ONE-WINDOW-AT-A-TIME rule, which puts the others away.
+    // Separate from the lane on purpose: the lane is about POSITION and a
+    // window may sit outside it (the notes desk in fullscreen, every panel on
+    // a phone) while still being a window that owns the screen.
+    if (this.hcSession) this.#releaseRule = holdToolWindow(this.id, this.hcSession)
     // Take a place in this edge's lane. Deferred a microtask so the width set
     // below (or by the window's own first render) is what the lane measures.
     if (this.#dockExclusive) this.#scheduleLaneClaim()
@@ -403,6 +414,8 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     // session lives on in the parked list, which is what brings it back.
     this.#releaseSession?.()
     this.#releaseSession = null
+    this.#releaseRule?.()
+    this.#releaseRule = null
     this.#stopListeners()
     this.#closePopover()
     this.#sizeWatch?.disconnect()

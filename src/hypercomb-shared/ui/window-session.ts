@@ -49,6 +49,13 @@ export interface WindowSession {
   /** The participant's own close verb — the same thing the × does, including
    *  whatever state that window considers itself finished with. */
   close?(): void
+  /** True for the ONE surface that may share the screen with a window: the
+   *  pheromone palette. It is not a view of its own — it is the paint, and
+   *  marking a note means dragging from it onto the window that holds the
+   *  note, which cannot happen with one of them put away. Declared here, in
+   *  the same breath as park/close, so the rule (window-rule.ts) names no ids
+   *  and a future palette inherits the exception by saying so. */
+  companion?: boolean
 }
 
 /** A held window: its session, and how to find its element. The root is a

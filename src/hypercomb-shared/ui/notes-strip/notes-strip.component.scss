@@ -46,7 +46,13 @@
   // and is ~3rem tall, so we reserve 5rem at the bottom to clear it.
   // Top tracks the active header size (~3rem intrinsic × the header zoom);
   // flush against the command line — no extra gap.
-  top: max(calc(2.5rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.17rem));
+  //
+  // This is the EXACT expression every other docked tool window uses. It was
+  // 2.5rem here with a `+ 0.17rem` on the anchor, which is a 3px step: open
+  // this window beside the pheromone palette and the two headers started at
+  // different heights, with the seam visible where they meet. A window's top
+  // edge is not its own to choose — the anchor is shared or it is nothing.
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 5rem;
   left: 0;
   right: 0;
@@ -67,7 +73,7 @@
 // toolbar at the bottom IS covered intentionally — users asked for
 // "everything except the command line".
 :host.is-fullscreen {
-  top: max(calc(2.5rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.17rem));
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 0;
   padding: 0;
 }

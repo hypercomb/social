@@ -147,6 +147,11 @@ export class TagsViewerComponent implements OnDestroy {
     },
     dismiss: () => this.dismiss(),
     close: () => this.close(),
+    // The palette is not a window — it is the PAINT. Every other tool window
+    // is put away when one opens; this one may stay beside it, because a mark
+    // is applied by dragging FROM here ONTO what is open (a note in the notes
+    // window, a tile on the canvas). See window-rule.ts.
+    companion: true,
   }
 
   /** Per-page tag counts, last value from `render:tags`. */
