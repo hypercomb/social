@@ -7783,7 +7783,13 @@ export class ShowCellDrone extends Drone {
     // keeps the one under the pointer bright, which reads as "this is the
     // one you'd add". Presentation only — the fold, the guards, and
     // ownership never consult this.
-    if (c.external && !this.#wandTakingLabels.has(c.label)) return true
+    // A SPOTLIT PEER'S VERSION OF YOUR OWN TILE is not "somebody else's
+    // tile": under superimposition it is the SAME tile seen through their
+    // layer, and you hold it. It rides the external path for the BYTES
+    // (their streamed image), which must not read as "you don't have this".
+    if (c.external
+      && !this.#stackVariantLabels.has(c.label)
+      && !this.#wandTakingLabels.has(c.label)) return true
     return this.#cellIsPreloading(c)
   }
 
