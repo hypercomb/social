@@ -179,6 +179,56 @@ export function removeFromTree(
 }
 
 /**
+ * Insert `node` among the children of `parentId` at `index` — or among
+ * the roots, when `parentId` is null. The index is clamped, so a value
+ * past the end appends. Immutable.
+ *
+ * The ORDERING counterpart of `insertAsChild`, which can only append.
+ * Placing a node at a position among its siblings AT ANY DEPTH is what a
+ * hierarchical list needs and what neither `insertAsChild` (append) nor
+ * the top-level-only reorder of the notes slot could express.
+ */
+export function insertAtIndex(
+  tree: readonly Note[],
+  parentId: string | null,
+  node: Note,
+  index: number,
+): { tree: readonly Note[]; placed: boolean } {
+  const put = (list: readonly Note[]): Note[] => {
+    const at = Math.max(0, Math.min(index, list.length))
+    return [...list.slice(0, at), node, ...list.slice(at)]
+  }
+  if (parentId === null) return { tree: put(tree), placed: true }
+  let placed = false
+  const walk = (nodes: readonly Note[]): readonly Note[] => {
+    let mutated = false
+    const next: Note[] = []
+    for (const n of nodes) {
+      if (placed) {
+        next.push(n)
+        continue
+      }
+      if (n.id === parentId) {
+        placed = true
+        mutated = true
+        next.push({ ...n, children: put(n.children) })
+        continue
+      }
+      const newChildren = walk(n.children)
+      if (newChildren !== n.children) {
+        mutated = true
+        next.push({ ...n, children: newChildren as Note[] })
+      } else {
+        next.push(n)
+      }
+    }
+    return mutated ? next : nodes
+  }
+  const nextTree = walk(tree)
+  return { tree: nextTree, placed }
+}
+
+/**
  * Insert `node` as the last child of the first occurrence of
  * `targetParentId` in `tree`. Returns the new tree and a flag
  * indicating whether the parent was found. Immutable — input arrays /

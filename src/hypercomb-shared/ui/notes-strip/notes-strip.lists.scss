@@ -2,8 +2,10 @@
 //
 // LISTS — its own interface.
 // Not the prose surface with different content: a different surface. A
-// title, a column of one-liners, and a line that is always open at the
-// foot.
+// column of one-liners at every depth, and a line that is always open at
+// the foot. No title (it reads in the window's title bar, beside the tile)
+// and no selector (the card beside the window is the selector) — indent is
+// the only structure this pane draws.
 //
 // One of the notes strip's surface stylesheets. Each surface is its own
 // entry in the component's `styleUrls`, listed in the order the rules were
@@ -19,89 +21,6 @@
   flex-direction: column;
 }
 
-.cv2-listpane-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem 0.6rem 0.5rem 0.75rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
-}
-
-// Back out of a nested list — the list that contains this one, named.
-.cv2-list-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.1rem;
-  max-width: 8rem;
-  padding: 2px 6px 2px 2px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
-  font-family: inherit;
-  font-size: scaled(0.72rem);
-  cursor: pointer;
-  .mat-sym { font-size: scaled(16px); }
-  &:hover {
-    border-color: rgba($steel, 0.45);
-    color: color-mix(in srgb, #{$steel} 85%, white);
-  }
-}
-.cv2-list-back-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-// The list's own name. Click it to rename — the same in-place gesture its
-// lines use, so there is one way to change text on this tab.
-.cv2-list-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--md-on-surface);
-  font-family: var(--hc-notes-face);
-  font-size: scaled(0.95rem);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  text-align: left;
-  cursor: text;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  &:hover { border-color: color-mix(in srgb, var(--md-on-surface) 18%, transparent); }
-}
-.cv2-list-title-mark {
-  font-size: scaled(17px);
-  color: color-mix(in srgb, #{$steel} 80%, white);
-}
-.cv2-list-title-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid rgba($steel, 0.55);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--md-on-surface);
-  font-family: var(--hc-notes-face);
-  font-size: scaled(0.95rem);
-  font-weight: 600;
-  outline: none;
-}
-.cv2-list-count {
-  flex: 0 0 auto;
-  font-size: scaled(0.68rem);
-  letter-spacing: 0.06em;
-  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
-  font-variant-numeric: tabular-nums;
-}
-
 .cv2-list-lines {
   flex: 1 1 auto;
   min-height: 0;
@@ -110,17 +29,93 @@
 }
 
 // One line. A row of text with a bullet — no card, no border, nothing that
-// makes ten of them read as a wall.
+// makes ten of them read as a wall. Depth is the ONE thing a line draws
+// about itself, as an indent: capped, so a deep list in a narrow dock
+// still has room for its words.
 .cv2-line {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
   padding: 1px 2px;
   border-radius: 6px;
+  margin-left: calc(min(var(--depth, 0), 6) * 14px);
 
   &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
   &.is-editing { background: color-mix(in srgb, #{$steel} 12%, transparent); }
-  &:hover .cv2-line-btn { opacity: 1; }
+  &:hover .cv2-line-btn,
+  &:hover .cv2-line-grip { opacity: 1; }
+  &.is-dragging { opacity: 0.4; }
+
+  // Where a dragged line will land — the same two-pixel edge and ring the
+  // tree rows use, so one gesture reads the same on both surfaces.
+  &.is-drop-into {
+    background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--md-secondary) 65%, transparent);
+    outline-offset: -2px;
+  }
+  &.is-drop-before { box-shadow: inset 0 2px 0 0 color-mix(in srgb, var(--md-secondary) 75%, transparent); }
+  &.is-drop-after { box-shadow: inset 0 -2px 0 0 color-mix(in srgb, var(--md-secondary) 75%, transparent); }
+}
+
+// Grip — a CSS rail, no glyph, invisible until the line is hovered. The
+// tree's grip exactly: dragging a line and dragging a note are one gesture.
+.cv2-line-grip,
+.cv2-line-grip-slot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  min-height: 20px;
+}
+.cv2-line-grip {
+  opacity: 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
+
+  &::before {
+    content: '';
+    width: 2px;
+    height: 13px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--md-on-surface) 30%, transparent);
+  }
+  &:active { cursor: grabbing; }
+}
+
+// Fold a line's own lines away. Same pure-CSS triangle as the tree, and a
+// spacer of the same width on the lines that have nothing to fold — so the
+// bullets stay in one column whatever the list holds.
+.cv2-line-chevron,
+.cv2-line-chevron-spacer {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 20px;
+}
+.cv2-line-chevron {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--md-on-surface-faint);
+  cursor: pointer;
+
+  &:hover { color: var(--md-on-surface); }
+
+  .cv2-chevron-mark {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    transition: transform var(--md-dur-short, 0.12s) var(--md-easing-standard, ease);
+  }
+  &.is-collapsed .cv2-chevron-mark { transform: rotate(-90deg); }
 }
 
 // An unmarked line still holds the mark's SLOT — a bare hexagon, so the
@@ -191,13 +186,68 @@
   &:hover { color: color-mix(in srgb, #{$steel} 85%, white); }
   &.cv2-line-del:hover { color: var(--md-error, #ff6b6b); }
 }
-.cv2-line-sub { font-variant-numeric: tabular-nums; }
+// How many lines a folded line is holding — a count, not a control.
+.cv2-line-sub {
+  flex: 0 0 auto;
+  padding-right: 2px;
+  color: color-mix(in srgb, var(--md-on-surface) 40%, transparent);
+  font-size: scaled(0.68rem);
+  font-variant-numeric: tabular-nums;
+}
 
 // A mark dragged from the header, hovering a line — the same steel rim the
 // tree rows show, so one gesture reads the same wherever it lands.
 .cv2-line.is-mark-target {
   background: color-mix(in srgb, #{$steel} 18%, transparent);
   box-shadow: inset 0 0 0 1px rgba($steel, 0.65);
+}
+
+// Dropped past the last line — it joins the list at the end. The same
+// bottom-edge accent the tree body shows for its own root drop.
+.cv2-list-lines.has-root-drop {
+  box-shadow: inset 0 -3px 0 0 color-mix(in srgb, var(--md-secondary) 60%, transparent);
+}
+
+// ── The foot ─────────────────────────────────────────────
+// The two things you do TO a list rather than in it. Quiet, at the very
+// bottom, out of the writing: a new list on the left, and — armed by its
+// first click, acting on its second — the one that takes this list away.
+.cv2-listfoot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+.cv2-listfoot-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--md-on-surface) 52%, transparent);
+  font-family: inherit;
+  font-size: scaled(0.72rem);
+  cursor: pointer;
+  transition: color var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard),
+              background var(--md-dur-short) var(--md-easing-standard);
+
+  .mat-sym { font-size: scaled(15px); }
+  &:hover {
+    border-color: rgba($steel, 0.45);
+    color: color-mix(in srgb, #{$steel} 85%, white);
+  }
+  &.is-danger:hover { color: var(--md-error, #ff6b6b); border-color: color-mix(in srgb, var(--md-error, #ff6b6b) 45%, transparent); }
+  &.is-danger.is-armed {
+    color: var(--md-error, #ff6b6b);
+    border-color: color-mix(in srgb, var(--md-error, #ff6b6b) 70%, transparent);
+    background: color-mix(in srgb, var(--md-error, #ff6b6b) 12%, transparent);
+  }
 }
 
 .cv2-list-blank {

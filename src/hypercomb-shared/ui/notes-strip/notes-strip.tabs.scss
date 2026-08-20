@@ -39,6 +39,52 @@
 }
 
 .cv2-dragbar-sep { color: var(--md-on-surface-faint); }
+
+// The open list's name, right of the tile it is written on. Lighter than
+// the tile — the tile is WHERE you are, the list is WHAT is open there —
+// and in the notes face, because it is the participant's words, not an
+// address. Click it to rename in place.
+.cv2-dragbar-listname {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 14rem;
+  padding: 1px 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: color-mix(in srgb, var(--md-on-surface) 72%, transparent);
+  font-family: var(--hc-notes-face);
+  font-size: scaled(0.82rem);
+  font-weight: 500;
+  cursor: text;
+
+  &:hover { border-color: color-mix(in srgb, var(--md-on-surface) 20%, transparent); }
+}
+.cv2-dragbar-listtext {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv2-dragbar-listmark {
+  flex: 0 0 auto;
+  font-size: scaled(15px);
+  color: color-mix(in srgb, #{$steel} 80%, white);
+}
+.cv2-dragbar-listname-input {
+  min-width: 0;
+  max-width: 14rem;
+  padding: 1px 5px;
+  border: 1px solid rgba($steel, 0.55);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--md-on-surface);
+  font-family: var(--hc-notes-face);
+  font-size: scaled(0.82rem);
+  font-weight: 500;
+  outline: none;
+}
 .cv2-dragbar-faint { color: var(--md-on-surface-faint); }
 .cv2-dragbar-spacer { flex: 1; }
 

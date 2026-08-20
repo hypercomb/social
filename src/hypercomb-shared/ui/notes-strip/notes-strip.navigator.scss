@@ -199,3 +199,14 @@
   font-style: italic;
 }
 
+
+// Scope hint — the page's filter is narrowing this list. Quiet, one line,
+// under the tiles: it explains an absence, it is not a control.
+.cv2-tilelist-scopehint {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.7rem 0.45rem;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  font-size: scaled(0.72rem);
+}

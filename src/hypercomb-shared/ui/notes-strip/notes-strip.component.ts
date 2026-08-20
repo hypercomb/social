@@ -289,6 +289,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // A new tab is a new document — reading starts back at the top of it.
     this.readingIndex.set(0)
     this.listPathIdx.set([])
+    this.newItemDepth.set(0)
+    this.disarmListDelete()
     this.cancelItemEdit()
     try { localStorage.setItem('hc:annotations-tab', next) } catch { /* ignore */ }
   }
@@ -443,7 +445,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   /**
    * CLICK A NOTE, SEE IT IN THE VIEW. The one selection entry point — the
-   * pinned card's rows, the note tabs and the desk's tree all come here.
+   * pinned card's rows and the desk's tree both come here.
    *
    * Two things used to swallow a click. The card lists EVERY note of the
    * tile while the pane only cycles the rows of the ACTIVE TAB, so a note
@@ -492,10 +494,10 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  A row already visible is left exactly where it is: scrolling under a
    *  pointer that didn't ask for it is worse than not scrolling. */
   #revealRow(noteId: string): void {
-    // The tab strip docked, the tree column on the desk — whichever is the
+    // The pinned card docked, the tree column on the desk — whichever is the
     // selector in this layout.
     const list = this.#host.nativeElement.querySelector(
-      '.cv2-peek.is-pinned .cv2-peek-list, .cv2-notetabs, .cv2-list',
+      '.cv2-peek.is-pinned .cv2-peek-list, .cv2-list',
     ) as HTMLElement | null
     if (!list) return
     const row = list.querySelector(`[data-note-id="${CSS.escape(noteId)}"]`) as HTMLElement | null
@@ -571,13 +573,26 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // ── The LISTS interface ───────────────────────────────────
   // Lists are not prose and do not want the prose surface. A list is a
   // title and a column of one-liners, and it is built ONE LINE AT A TIME:
-  // type, Enter, type, Enter. So the lists tab keeps the shared bottom
-  // selector and replaces the pane entirely with this.
+  // type, Enter, type, Enter.
+  //
+  // The lines make a HIERARCHY, so the pane shows ONE list WHOLE — every
+  // depth at once — and the gestures that shape it are the outline
+  // gestures: Tab indents the line under the one above it, Shift+Tab moves
+  // it back out, and a line dragged by its grip lands wherever it is
+  // dropped. Nothing drills down; there is nowhere to go and nothing to
+  // come back from.
+  //
+  // Two things are deliberately NOT in this pane. The list's NAME reads in
+  // the window's title bar, right of the tile it is written on — a title
+  // belongs with the window's identity, not stacked on top of the lines.
+  // And there is no selector row: the pinned card beside the window
+  // already lists every line of every list on the tile, and clicking one
+  // opens its list (see `selectNote`).
   //
   // WHICH list is addressed BY POSITION, never by id: every write re-signs
   // the note it touched and every ancestor (new bytes, new sig), so an id
-  // held across a commit is a dangling id. A path of child indices survives
-  // the write — the list at position [2] is still the list at position [2].
+  // held across a commit is a dangling id. A position survives the write —
+  // the list at position [2] is still the list at position [2].
 
   /** Index path from the visible roots down to the open list. Empty = the
    *  first list on the tab, so the pane is never blank when there is
@@ -609,54 +624,35 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     return node
   })
 
-  /** The lines of the open list. */
-  readonly listItems = computed<readonly Note[]>(() => this.listRoot()?.children ?? [])
-
-  /** Titles of the open list's ancestors — the trail back out of a nested
-   *  list. Empty when the open list is a root. */
-  readonly listTrail = computed<readonly string[]>(() => {
-    const out: string[] = []
-    let nodes: readonly Note[] = this.visibleNotes()
-    const path = this.listPath()
-    for (let d = 0; d < path.length - 1; d++) {
-      const pick = nodes[Math.min(path[d]!, nodes.length - 1)]
-      if (!pick) break
-      out.push(this.noteDisplayText(pick))
-      nodes = pick.children
+  /** The open list, FLATTENED — every line at every depth in reading order,
+   *  each carrying the depth it sits at, the id of the line it hangs under
+   *  and its position among its siblings. This IS the list: one pass over
+   *  it renders the whole hierarchy, and the indent gestures read their
+   *  neighbours straight off it. Collapsed lines keep their subtree folded
+   *  away, the same collapse set the tree column uses. */
+  readonly listRows = computed<readonly { note: Note; depth: number; parentId: string; index: number }[]>(() => {
+    const root = this.listRoot()
+    if (!root) return []
+    const out: { note: Note; depth: number; parentId: string; index: number }[] = []
+    const walk = (nodes: readonly Note[], depth: number, parentId: string): void => {
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!
+        out.push({ note: n, depth, parentId, index: i })
+        if (n.children.length > 0 && !this.isCollapsed(n.id)) walk(n.children, depth + 1, n.id)
+      }
     }
+    walk(root.children, 0, root.id)
     return out
   })
 
-  /** Open the list at `path`. A line with children IS a list (click it to
-   *  go in); a leaf line opens the list it belongs to instead. */
+  /** Open the list a path lands in. Every path resolves to its ROOT list:
+   *  the pane shows one list whole, so a nested line is not a place of its
+   *  own to be — it is a line of the list it belongs to. */
   openListPath(path: readonly number[]): void {
-    const node = this.#noteAtPath(path)
-    const next = node && node.children.length > 0 ? path : path.slice(0, -1)
-    this.listPathIdx.set([...next])
+    if (path.length === 0) return
+    this.listPathIdx.set([path[0]!])
+    this.newItemDepth.set(0)
     this.cancelItemEdit()
-  }
-
-  /** Go INTO the line at `index` — a line with children is itself a list. */
-  enterItem(index: number): void {
-    this.openListPath([...this.listPath(), index])
-  }
-
-  /** Step out to the list that contains this one. */
-  exitList(): void {
-    this.listPathIdx.set(this.listPath().slice(0, -1))
-    this.cancelItemEdit()
-  }
-
-  #noteAtPath(path: readonly number[]): Note | null {
-    let nodes: readonly Note[] = this.visibleNotes()
-    let node: Note | null = null
-    for (const i of path) {
-      const pick = nodes[i]
-      if (!pick) return null
-      node = pick
-      nodes = pick.children
-    }
-    return node
   }
 
   /** The new-line input at the foot of the list — the whole write gesture.
@@ -688,20 +684,64 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       this.commitNewItem()
       return
     }
+    // Tab moves the OPEN LINE in and out, before it is anything: the
+    // bullet slides across, and that is where the next line lands. It is
+    // the same key an outline has always used, and it costs no write —
+    // the depth is a property of the gesture, not of the tree.
+    if (event.key === 'Tab') {
+      event.preventDefault(); event.stopPropagation()
+      this.stepNewLineDepth(event.shiftKey ? -1 : 1)
+      return
+    }
     if (event.key === 'Escape' && this.newItemText()) {
       event.preventDefault(); event.stopPropagation()
       this.#clearNewLine()
     }
   }
 
-  /** Enter on the new-line input — one more line on the open list. */
+  /** How deep the next line goes. 0 is a line of the open list itself; 1
+   *  hangs it under the last line above it, and so on. Held across commits
+   *  so a run of sub-lines is typed without re-indenting each one. */
+  readonly newItemDepth = signal(0)
+
+  /** The depth actually in force — never deeper than one step past the
+   *  last line, so the open line can't float free of the list while the
+   *  lines above it are edited away. */
+  readonly newLineDepth = computed<number>(() => {
+    const rows = this.listRows()
+    const deepest = rows.length === 0 ? -1 : rows[rows.length - 1]!.depth
+    return Math.max(0, Math.min(this.newItemDepth(), deepest + 1))
+  })
+
+  stepNewLineDepth(delta: number): void {
+    const rows = this.listRows()
+    const deepest = rows.length === 0 ? -1 : rows[rows.length - 1]!.depth
+    this.newItemDepth.set(Math.max(0, Math.min(this.newLineDepth() + delta, deepest + 1)))
+  }
+
+  /** Which line the next one hangs under — the last line one step shallower
+   *  than the open line, or the list itself at depth 0. */
+  #newLineParentId(): string | null {
+    const root = this.listRoot()
+    if (!root) return null
+    const depth = this.newLineDepth()
+    if (depth <= 0) return root.id
+    const rows = this.listRows()
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i]!.depth === depth - 1) return rows[i]!.note.id
+    }
+    return root.id
+  }
+
+  /** Enter on the new-line input — one more line on the open list, at
+   *  whatever depth the open line is sitting at. */
   commitNewItem(): void {
     const cellLabel = this.cell()
-    const root = this.listRoot()
+    const parentId = this.#newLineParentId()
     const text = this.newItemText().trim()
-    if (!cellLabel || !root || !text) return
-    EffectBus.emit('note:add-child', { cellLabel, parentId: root.id, text, mark: null })
-    this.#paintChildOptimistic(cellLabel, root.id, text)
+    if (!cellLabel || !parentId || !text) return
+    EffectBus.emit('note:add-child', { cellLabel, parentId, text, mark: null })
+    this.#paintChildOptimistic(cellLabel, parentId, text)
     this.#clearNewLine()
   }
 
@@ -712,6 +752,13 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   readonly editingItemId = signal<string | null>(null)
   readonly itemDraft = signal('')
+
+  /** The field a line is corrected in — the line's own input, or the title
+   *  bar's when the line being corrected IS the list's name (only one of
+   *  the two is ever in the DOM). Held so the caret can be put in it: a
+   *  click that opens a field you then have to click again is not an edit
+   *  gesture, it is two. */
+  readonly lineInput = viewChild<ElementRef<HTMLInputElement>>('lineInput')
 
   startItemEdit(item: Note, event?: Event): void {
     event?.stopPropagation()
@@ -729,10 +776,114 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       this.commitItemEdit()
       return
     }
+    // Tab on a line that already exists MOVES it: under the line above
+    // (Tab) or back out to its parent's level (Shift+Tab).
+    //
+    // Text in flight is written FIRST and the move waits for it. A retext
+    // and a move both re-sign the note and every ancestor, and the two
+    // writes race on the same layer — the later commit reads the same prior
+    // and wins, so one of them is silently lost. Nothing typed may be lost
+    // to a keypress that means "move", so the indent is held BY POSITION
+    // (the currency that survives a write) and applied when the note comes
+    // back. With no edit in flight there is no write to wait for.
+    if (event.key === 'Tab') {
+      event.preventDefault(); event.stopPropagation()
+      const delta = event.shiftKey ? -1 : 1
+      const noteId = this.editingItemId()
+      const note = noteId ? this.listRows().find(r => r.note.id === noteId)?.note ?? null : null
+      const draft = this.itemDraft().trim()
+      const dirty = !!note && !!draft && draft !== this.noteDisplayText(note)
+      const path = note ? this.#linePathOf(note.id) : null
+      this.commitItemEdit()
+      if (dirty && path) this.#pendingIndent = { path, delta }
+      else if (note) this.stepItemDepth(note.id, delta)
+      return
+    }
     if (event.key === 'Escape') {
       event.preventDefault(); event.stopPropagation()
       this.cancelItemEdit()
     }
+  }
+
+  /** An indent asked for while the line's text was still in flight, held
+   *  by POSITION until the text has been written (see `onItemKeydown`). */
+  #pendingIndent: { path: readonly number[]; delta: number } | null = null
+
+  /** Index path of a line inside the OPEN LIST — indices into the list
+   *  root's children, then that line's children, and so on. Collapse plays
+   *  no part: this is the tree, not what is on screen. */
+  #linePathOf(noteId: string): readonly number[] | null {
+    const root = this.listRoot()
+    if (!root) return null
+    const walk = (nodes: readonly Note[], trail: readonly number[]): readonly number[] | null => {
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!
+        if (n.id === noteId) return [...trail, i]
+        const found = walk(n.children, [...trail, i])
+        if (found) return found
+      }
+      return null
+    }
+    return walk(root.children, [])
+  }
+
+  #lineAtPath(path: readonly number[]): Note | null {
+    const root = this.listRoot()
+    if (!root) return null
+    let nodes: readonly Note[] = root.children
+    let node: Note | null = null
+    for (const i of path) {
+      const pick = nodes[i]
+      if (!pick) return null
+      node = pick
+      nodes = pick.children
+    }
+    return node
+  }
+
+  /** The reconcile came back — the line the participant asked to indent is
+   *  at the same POSITION under a fresh id, so the move can go now. */
+  #applyPendingIndent(): void {
+    const pending = this.#pendingIndent
+    if (!pending) return
+    this.#pendingIndent = null
+    const note = this.#lineAtPath(pending.path)
+    if (note) this.stepItemDepth(note.id, pending.delta)
+  }
+
+  /** Indent (+1) or outdent (-1) one line of the open list.
+   *
+   *  Indent hangs the line under the sibling ABOVE it — the outline rule,
+   *  and the only unambiguous parent a line has. A first line has none, so
+   *  it stays put. Outdent puts it back among its parent's siblings, just
+   *  after the parent; a line of the list itself has nowhere further out
+   *  to go (that would take it off the list and onto the tile). */
+  stepItemDepth(noteId: string, delta: number): void {
+    const cellLabel = this.cell()
+    const root = this.listRoot()
+    if (!cellLabel || !root) return
+    const rows = this.listRows()
+    const at = rows.findIndex(r => r.note.id === noteId)
+    if (at === -1) return
+    const row = rows[at]!
+    if (delta > 0) {
+      if (row.index === 0) return  // no sibling above to hang under
+      const above = rows.slice(0, at).reverse()
+        .find(r => r.parentId === row.parentId)
+      if (!above) return
+      EffectBus.emit('note:move', {
+        cellLabel, sourceId: noteId,
+        parentId: above.note.id, index: above.note.children.length,
+      })
+      return
+    }
+    if (row.parentId === root.id) return  // already a line of the list
+    const parent = rows.find(r => r.note.id === row.parentId)
+    if (!parent) return
+    EffectBus.emit('note:move', {
+      cellLabel, sourceId: noteId,
+      parentId: parent.parentId, index: parent.index + 1,
+    })
   }
 
   /** Save the line. Routed through `note:retext`, NOT the note form's
@@ -775,7 +926,44 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // The optimistic root is appended last, so the new list is the last
     // entry of the tab — open it and put the caret on its first line.
     this.listPathIdx.set([Math.max(0, this.visibleNotes().length - 1)])
+    this.newItemDepth.set(0)
+    this.disarmListDelete()
     this.cancelItemEdit()
+  }
+
+  /** Take the whole list away — the list note and every line under it.
+   *
+   *  TWO CLICKS, no dialogue. The first arms the button (it says so, in
+   *  the same red it will act in), the second acts; anything else — four
+   *  seconds, or opening another list — disarms it. A modal for this is
+   *  more ceremony than the act deserves, and a bare one-click delete next
+   *  to the line the user was typing is a trap. */
+  readonly listDeleteArmed = signal(false)
+  #listDeleteTimer: ReturnType<typeof setTimeout> | null = null
+
+  deleteList(event?: Event): void {
+    event?.stopPropagation()
+    const cellLabel = this.cell()
+    const root = this.listRoot()
+    if (!cellLabel || !root) return
+    if (!this.listDeleteArmed()) {
+      this.listDeleteArmed.set(true)
+      if (this.#listDeleteTimer) clearTimeout(this.#listDeleteTimer)
+      this.#listDeleteTimer = setTimeout(() => this.disarmListDelete(), 4000)
+      return
+    }
+    this.disarmListDelete()
+    this.remove(root.id, event ?? new Event('click'))
+    // The list under this one takes its place — the pane is never left
+    // pointing at something that isn't there.
+    this.listPathIdx.set([])
+    this.newItemDepth.set(0)
+    this.cancelItemEdit()
+  }
+
+  disarmListDelete(): void {
+    if (this.#listDeleteTimer) { clearTimeout(this.#listDeleteTimer); this.#listDeleteTimer = null }
+    if (this.listDeleteArmed()) this.listDeleteArmed.set(false)
   }
 
   /** A mark whose ROLE is list (or heading), minting one into the palette
@@ -1040,7 +1228,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       return null
     }
     return hit('article.cv2-note[data-note-id]', 'data-note-id')
-      ?? hit('.cv2-notetab[data-note-id]', 'data-note-id')
       ?? hit('.cv2-peek-row[data-note-id]', 'data-note-id')
       ?? hit('.cv2-line[data-pheromone-note]', 'data-pheromone-note')
       ?? hit('.cv2-reading-scroll[data-pheromone-note]', 'data-pheromone-note')
@@ -1253,6 +1440,34 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // navigator — maintained continuously (boot + lineage change + synchronize),
   // no longer gated behind a see-all toggle.
   readonly #layerCellLabels = signal<readonly string[]>([])
+
+  /** The labels the canvas actually painted on the last pass (`render:cell-count`).
+   *  Only consulted while a page filter is on — otherwise the layer's own list
+   *  is the truth, and a mid-navigation empty pass must not blank the list. */
+  readonly #renderedCellLabels = signal<readonly string[]>([])
+  readonly #tagFilterActive = signal(false)
+  readonly #searchFilterActive = signal(false)
+  readonly #viewFilterActive = signal(false)
+  /** Is the page showing a narrowed view right now? */
+  readonly pageFiltered = computed(() =>
+    this.#tagFilterActive() || this.#searchFilterActive() || this.#viewFilterActive())
+
+  /** The tiles the navigator may list: the page's surviving tiles while a
+   *  filter is on, else every tile in the layer.
+   *
+   *  Always intersected with the LAYER's own tiles, in the order the page
+   *  painted them. A flattening filter (tag scope 'children'/'global') draws
+   *  in tiles that live on pages below; the strip resolves a tile's notes from
+   *  its NAME against the current location, so listing a foreign tile here
+   *  would open some other tile's notes — or an empty set — under its name.
+   *  The page keeps showing them; the navigator stays honest about what it
+   *  can actually write on. */
+  readonly #navigatorCellLabels = computed<readonly string[]>(() => {
+    const layer = this.#layerCellLabels()
+    if (!this.pageFiltered()) return layer
+    const here = new Set(layer)
+    return this.#renderedCellLabels().filter(label => here.has(label))
+  })
 
   /** Re-poll the current layer's cell labels. Called on construct, on lineage
    *  change, and on `synchronize` so the navigator always reflects the tiles
@@ -1619,6 +1834,13 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly noteDropMode = signal<'before' | 'into' | 'after' | 'root' | null>(null)
   #noteDragPointerId: number | null = null
 
+  /** The surface the drag started on (`[data-note-drag-scope]` — the tree
+   *  column or the list pane). Rows are hit-tested WITHIN it: the desk
+   *  shows the same notes in two columns at the same heights, and a
+   *  hit-test over the whole panel would answer with whichever copy came
+   *  first in the DOM. */
+  #noteDragScope: HTMLElement | null = null
+
   onNoteGripPointerDown(cellLabel: string, noteId: string, event: PointerEvent): void {
     // Primary mouse button / pen / touch primary only. Don't initiate
     // if the user is already mid-panel-drag.
@@ -1626,6 +1848,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     if (this.#dragPointerId !== null) return
     event.preventDefault()
     event.stopPropagation()
+    const from = event.currentTarget as HTMLElement | null
+    this.#noteDragScope = from?.closest<HTMLElement>('[data-note-drag-scope]') ?? null
     this.#noteDragPointerId = event.pointerId
     this.noteDragSourceId.set(noteId)
     this.noteDragSourceCell.set(cellLabel)
@@ -1644,8 +1868,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // Tree mode — detect hovered row + zone (upper third =
     // before, middle = into, lower = after). Pointer below all rows =
     // root drop (promote to top level).
-    const root = this.#host.nativeElement
-    const rows = Array.from(root.querySelectorAll('article.cv2-note[data-note-id]')) as HTMLElement[]
+    const root = this.#noteDragScope ?? this.#host.nativeElement
+    const rows = Array.from(root.querySelectorAll('[data-note-row][data-note-id]')) as HTMLElement[]
     if (rows.length === 0) {
       this.noteDropTargetId.set(null)
       this.noteDropMode.set(null)
@@ -1708,36 +1932,57 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     window.removeEventListener('pointermove', this.#onNoteDragMove)
     window.removeEventListener('pointerup', this.#onNoteDragEnd)
     window.removeEventListener('pointercancel', this.#onNoteDragEnd)
+    const scope = this.#noteDragScope
+    this.#noteDragScope = null
     if (!sourceId || !sourceCell) return
 
-    // Tree-mode drops take precedence — they only fire in single-cell
-    // mode where data-note-id is set on each row.
+    // WHERE a drop lands is one question — which parent, which position —
+    // and `note:move` is the one op that answers it, at any depth. (The
+    // top-level-only `note:reorder` this used to fire could not put a line
+    // among its siblings inside a list.)
+    const inList = scope?.dataset['noteDragScope'] === 'list'
+    const listRootId = inList ? (this.listRoot()?.id ?? null) : null
+
     if (mode === 'into' && targetId) {
-      EffectBus.emit('note:nest', { cellLabel: sourceCell, sourceId, targetParentId: targetId })
+      EffectBus.emit('note:move', { cellLabel: sourceCell, sourceId, parentId: targetId })
       return
     }
     if (mode === 'root') {
-      EffectBus.emit('note:unnest', { cellLabel: sourceCell, sourceId })
+      // Dropped past the last row. On a list that means the last line OF
+      // THE LIST; on the tree it means out from under every parent.
+      EffectBus.emit('note:move', { cellLabel: sourceCell, sourceId, parentId: listRootId })
       return
     }
-    // 'before' / 'after' in tree mode → reorder among the cell's TOP-LEVEL
-    // notes (the slot the drone's note:reorder permutes). Compute the insert
-    // index against the array with the source removed, so dropping just
-    // above/below the target lands exactly there. Nested source/target fall
-    // through to a no-op (the drone ignores a sig not in the top-level slot);
-    // sibling-within-parent reorder would need a dedicated drone op.
+    // 'before' / 'after' → the target's parent, at the target's position.
+    // The index is read against the siblings with the source already taken
+    // out, which is the order the drone performs the move in.
     if ((mode === 'before' || mode === 'after') && targetId) {
-      const top = (this.#notesByCell().get(sourceCell) ?? []).map(n => n.id)
-      const sourcePos = top.indexOf(sourceId)
-      const targetPos = top.indexOf(targetId)
-      if (sourcePos !== -1 && targetPos !== -1) {
-        const withoutTargetIdx = targetPos > sourcePos ? targetPos - 1 : targetPos
-        const targetIndex = mode === 'after' ? withoutTargetIdx + 1 : withoutTargetIdx
-        EffectBus.emit('note:reorder', { cellLabel: sourceCell, sourceId, targetIndex })
-      }
-      return
+      const place = this.#placeOf(sourceCell, targetId)
+      if (!place) return
+      const siblings = place.siblings.filter(n => n.id !== sourceId)
+      const targetPos = siblings.findIndex(n => n.id === targetId)
+      if (targetPos === -1) return
+      EffectBus.emit('note:move', {
+        cellLabel: sourceCell,
+        sourceId,
+        parentId: place.parentId,
+        index: mode === 'after' ? targetPos + 1 : targetPos,
+      })
     }
+  }
 
+  /** Where a note sits in its cell's tree: the id of the note it hangs
+   *  under (null at the top level) and the siblings it sits among. */
+  #placeOf(cell: string, noteId: string): { parentId: string | null; siblings: readonly Note[] } | null {
+    const walk = (nodes: readonly Note[], parentId: string | null): { parentId: string | null; siblings: readonly Note[] } | null => {
+      for (const n of nodes) {
+        if (n.id === noteId) return { parentId, siblings: nodes }
+        const found = walk(n.children, n.id)
+        if (found) return found
+      }
+      return null
+    }
+    return walk(this.#allForCell(cell), null)
   }
 
   // ── ESC cascade + click-outside dismissal ────────────────
@@ -1940,7 +2185,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  A plain list — the count rides in a badge and every row is one size;
    *  the weighted tag cloud this used to be made a wall of jumbled type. */
   readonly tileList = computed<readonly { cell: string; count: number }[]>(() => {
-    return this.#layerCellLabels()
+    return this.#navigatorCellLabels()
       .filter(cell => this.#matchesFilter(cell))
       .map(cell => ({ cell, count: this.#cellCount(cell) }))
   })
@@ -1964,6 +2209,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // first note, and no half-typed line carried across.
     this.listPathIdx.set([])
     this.readingIndex.set(0)
+    this.newItemDepth.set(0)
+    this.disarmListDelete()
     this.cancelItemEdit()
     this.#clearNewLine()
   }
@@ -2421,6 +2668,27 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     window.addEventListener('synchronize', onSync)
     this.#cleanups.push(() => window.removeEventListener('synchronize', onSync))
 
+    // ── The page's filter is the navigator's filter ───────────
+    // When the participant narrows the page (a tag filter, a find keyword, a
+    // saved filter view), the tiles on screen ARE the working set — the
+    // navigator must not keep offering the ones the page just put away.
+    // The filter's own effects say WHETHER a filter is on; `render:cell-count`
+    // says WHICH tiles survived it (including tiles a flattening filter drew
+    // in from pages below). Both are last-value-replayed, so a panel opened
+    // after the filter was set still lands on the filtered list.
+    this.#cleanups.push(EffectBus.on<{ labels?: readonly string[] }>('render:cell-count', (p) => {
+      this.#renderedCellLabels.set(Array.isArray(p?.labels) ? [...p!.labels!] : [])
+    }))
+    this.#cleanups.push(EffectBus.on<{ active?: readonly string[] }>('tags:filter', (p) => {
+      this.#tagFilterActive.set((p?.active?.length ?? 0) > 0)
+    }))
+    this.#cleanups.push(EffectBus.on<{ keyword?: string }>('search:filter', (p) => {
+      this.#searchFilterActive.set(!!(p?.keyword ?? '').trim())
+    }))
+    this.#cleanups.push(EffectBus.on<{ active?: boolean }>('filter:view', (p) => {
+      this.#viewFilterActive.set(p?.active === true)
+    }))
+
     // A viewport resize moves the panel's own box (max-width, and fullscreen
     // where it IS the viewport) — re-measure so the plate's form follows, and
     // drop any open hover card, whose viewport anchor is now stale.
@@ -2517,6 +2785,19 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       })
     })
 
+    // Put the caret in the line being corrected, once it has rendered.
+    // Reading the viewChild makes this re-run when the field appears.
+    effect(() => {
+      const editing = this.editingItemId()
+      const el = this.lineInput()?.nativeElement
+      if (!editing || !el) return
+      untracked(() => {
+        el.focus()
+        const end = el.value.length
+        el.setSelectionRange(end, end)
+      })
+    })
+
     // Focus the form's textarea once it has rendered, whenever a focus is
     // requested (#openForm / cancelEdit). Reading formInput() makes the
     // effect re-run when the viewChild resolves post-render, so the first
@@ -2583,6 +2864,8 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
         })
       }
       this.#version.update(v => v + 1)
+      // A line indented mid-edit waits here for its text to land.
+      this.#applyPendingIndent()
     }))
 
     // Track command-line capture state so the strip pops in for the target

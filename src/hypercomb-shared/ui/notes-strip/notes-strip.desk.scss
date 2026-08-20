@@ -92,9 +92,9 @@
 
   // The lists interface gets the desk scale too — a list read across a
   // room is still a list, just with room for longer lines.
-  :host.is-fullscreen .cv2-listpane-head { padding: 0.8rem 1rem; }
-  :host.is-fullscreen .cv2-list-title { font-size: scaled(1.15rem); }
   :host.is-fullscreen .cv2-list-lines { padding: 0.8rem 1.2rem 1.6rem; }
+  :host.is-fullscreen .cv2-listfoot { padding: 0.45rem 1.2rem; }
+  :host.is-fullscreen .cv2-line { margin-left: calc(min(var(--depth, 0), 6) * 20px); }
   :host.is-fullscreen .cv2-line-text,
   :host.is-fullscreen .cv2-line-input { font-size: scaled(0.95rem); }
 }

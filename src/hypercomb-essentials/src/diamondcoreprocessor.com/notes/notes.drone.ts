@@ -33,6 +33,7 @@ import { EffectBus } from '@hypercomb/core'
 import {
   addChildInTree,
   insertAsChild,
+  insertAtIndex,
   isNoteTag,
   normalizeMark,
   normalizeShape,
@@ -261,6 +262,23 @@ export class NotesService {
       },
     )
 
+    // Move `sourceId` to a PLACE: among `parentId`'s children (or among the
+    // roots, with a null parent) at `index`. One op for everything a
+    // hierarchy needs — reorder among siblings AT ANY DEPTH, nest, un-nest —
+    // which `note:reorder` (top level only) and `note:nest` (append) could
+    // not express between them. The index is read against the tree with the
+    // source already plucked out, which is the order the move happens in.
+    EffectBus.on<{ cellLabel: string; sourceId: string; parentId?: string | null; index?: number }>(
+      'note:move',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.sourceId) return
+        const parentId = payload.parentId ?? null
+        if (parentId === payload.sourceId) return
+        const index = typeof payload.index === 'number' ? payload.index : undefined
+        void this.#moveNote(payload.cellLabel, payload.sourceId, parentId, index)
+      },
+    )
+
     // Drop a mark from the strip's icon rail onto an existing note. Only
     // the mark changes: the tree is read, the node found at ANY depth, its
     // mark replaced, and the tree re-materialized from leaves up — so a
@@ -468,6 +486,29 @@ export class NotesService {
   }
 
   /**
+   * Move `sourceId` to a PLACE at an explicit cell location: among
+   * `parentId`'s children (or among the roots, with a null parent) at
+   * `index`. Omit the index to append, which is what `nestAtSegments` /
+   * `unnestAtSegments` do. Headless equivalent of the `note:move` handler.
+   */
+  public async moveAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    sourceId: string,
+    parentId: string | null,
+    index?: number,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    if (!cleanedLabel || !sourceId) return
+    if (sourceId === parentId) return
+    const segments = [...cleanedParents, cleanedLabel]
+    await this.#moveNoteAtSegments(segments, sourceId, parentId ?? null, index)
+  }
+
+  /**
    * Set (or clear, with `null`) the MARK of `noteId` at an explicit cell
    * location. Works at any depth and preserves the note's text, children
    * and position. Headless equivalent of the `note:mark` handler.
@@ -660,16 +701,22 @@ export class NotesService {
    * Cycle prevention: if `targetParentId` lives inside `sourceId`'s
    * own subtree, the move is rejected (would create a cycle).
    */
-  async #moveNote(cellLabel: string, sourceId: string, targetParentId: string | null): Promise<void> {
+  async #moveNote(
+    cellLabel: string,
+    sourceId: string,
+    targetParentId: string | null,
+    index?: number,
+  ): Promise<void> {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) return
-    await this.#moveNoteAtSegments(resolved.segments, sourceId, targetParentId)
+    await this.#moveNoteAtSegments(resolved.segments, sourceId, targetParentId, index)
   }
 
   async #moveNoteAtSegments(
     segments: readonly string[],
     sourceId: string,
     targetParentId: string | null,
+    index?: number,
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
     const tree = await this.#readAtLocation(locSig)
@@ -685,15 +732,24 @@ export class NotesService {
       return
     }
 
-    // 3. Place the source back into the tree at its new home.
+    // 3. Place the source back into the tree at its new home. Without an
+    //    index the node APPENDS (nest / un-nest, unchanged); with one it
+    //    lands at that position among its new siblings.
     let nextTree: readonly Note[]
-    if (targetParentId === null) {
+    if (index === undefined && targetParentId === null) {
       // Un-nest: append to top level.
       nextTree = [...withoutSource, source]
-    } else {
-      const placed = insertAsChild(withoutSource, targetParentId, source)
+    } else if (index === undefined) {
+      const placed = insertAsChild(withoutSource, targetParentId!, source)
       if (!placed.placed) {
         console.warn('[notes] refused nest — target parent not found', { targetParentId })
+        return
+      }
+      nextTree = placed.tree
+    } else {
+      const placed = insertAtIndex(withoutSource, targetParentId, source, index)
+      if (!placed.placed) {
+        console.warn('[notes] refused move — target parent not found', { targetParentId })
         return
       }
       nextTree = placed.tree

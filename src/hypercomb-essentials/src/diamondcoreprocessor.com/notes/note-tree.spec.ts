@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addChildInTree, setTextInTree, splitInTree, type Note } from './note-tree.js'
+import { addChildInTree, insertAtIndex, removeFromTree, setTextInTree, splitInTree, type Note } from './note-tree.js'
 
 const note = (id: string, text: string, extra: Partial<Note> = {}): Note => ({
   id,
@@ -261,5 +261,56 @@ describe('setTextInTree', () => {
 
     expect(next[0]).toBe(sibling)
     expect(next[1]).not.toBe(tree[1])
+  })
+})
+
+describe('insertAtIndex', () => {
+
+  it('puts a node among its siblings at a depth, not just at the end', () => {
+    const tree = [note('a', 'a', { children: [note('a1', 'one'), note('a2', 'two')] })]
+
+    const { tree: next, placed } = insertAtIndex(tree, 'a', note('x', 'new'), 1)
+
+    expect(placed).toBe(true)
+    expect(next[0]!.children.map(c => c.id)).toEqual(['a1', 'x', 'a2'])
+  })
+
+  it('inserts among the roots when the parent is null, and clamps a long index', () => {
+    const tree = [note('a', 'a'), note('b', 'b')]
+
+    expect(insertAtIndex(tree, null, note('x', 'x'), 0).tree.map(n => n.id)).toEqual(['x', 'a', 'b'])
+    expect(insertAtIndex(tree, null, note('x', 'x'), 99).tree.map(n => n.id)).toEqual(['a', 'b', 'x'])
+  })
+
+  it('says so when the parent is not in the tree — nothing is placed', () => {
+    const { tree: next, placed } = insertAtIndex([note('a', 'a')], 'ghost', note('x', 'x'), 0)
+
+    expect(placed).toBe(false)
+    expect(next.map(n => n.id)).toEqual(['a'])
+  })
+
+  it('reorders a line among its siblings — pluck, then place', () => {
+    // The move the list pane makes: drag the third line above the first.
+    const tree = [note('L', 'list', {
+      children: [note('l1', 'one'), note('l2', 'two'), note('l3', 'three')],
+    })]
+
+    const { tree: without, removed } = removeFromTree(tree, 'l3')
+    const { tree: next } = insertAtIndex(without, 'L', removed!, 0)
+
+    expect(next[0]!.children.map(c => c.id)).toEqual(['l3', 'l1', 'l2'])
+  })
+
+  it('carries a moved line and the lines under it', () => {
+    const tree = [note('L', 'list', {
+      children: [note('l1', 'one', { children: [note('l1a', 'under one')] }), note('l2', 'two')],
+    })]
+
+    const { tree: without, removed } = removeFromTree(tree, 'l1')
+    const { tree: next } = insertAtIndex(without, 'l2', removed!, 0)
+
+    const moved = next[0]!.children[0]!.children[0]!
+    expect(moved.id).toBe('l1')
+    expect(moved.children.map(c => c.id)).toEqual(['l1a'])
   })
 })
