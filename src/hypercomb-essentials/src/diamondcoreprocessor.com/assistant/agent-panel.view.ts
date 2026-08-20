@@ -21,6 +21,7 @@ import type { Agent, AgentRegistry } from './agent-registry.service.js'
 // panel reaches it structurally through IoC instead.
 import type { OrchestratorFinding, OrchestratorSummary } from './orchestrator.drone.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/agent-avatar.js'
+import { AgentTilesRail } from './agent-tiles-rail.js'
 
 const STYLE_ID = 'hc-agent-panel-styles'
 const STEEL = '126, 182, 214'
@@ -64,6 +65,14 @@ export class AgentPanelView extends EventTarget {
   #expandedActivity = new Set<string>()
   #fullscreen = false
   #resizeCleanup: (() => void) | null = null
+  /** The Copilot-style left column, alive only in full screen: the hive as a
+   *  drillable vertical list, where agents are applied to tiles. */
+  #rail: AgentTilesRail | null = null
+  #railHost: HTMLDivElement | null = null
+  #chips: HTMLDivElement | null = null
+  #send: HTMLButtonElement | null = null
+  /** Model hint the Apply flow rides out on; the chip in the chips row cycles it. */
+  #askModel = 'opus'
   /** Where "back" goes — the agent this panel was opened FROM, when the
    *  participant stepped into one agent's log out of the orchestrator's
    *  report. '' when the panel was opened directly from a bee. */
@@ -74,7 +83,12 @@ export class AgentPanelView extends EventTarget {
   #swapping = false
 
   #onKey = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape' && this.#panel) { event.stopPropagation(); this.close() }
+    if (event.key !== 'Escape' || !this.#panel) return
+    event.stopPropagation()
+    // A handful of picked tiles is the smaller commitment — let Escape put
+    // that down first, and only a second press closes the panel.
+    if (this.#rail?.picks.length) { this.#rail.clearPicks(); return }
+    this.close()
   }
 
   constructor() {
@@ -82,11 +96,11 @@ export class AgentPanelView extends EventTarget {
     EffectBus.on<{ id?: string; from?: string }>('agent:open', payload => {
       const id = String(payload?.id ?? '')
       if (!id) return
-      // `from` means "opened out of that agent" — today, off the orchestrator's
-      // board of running commands. It has to be a STEP, not a fresh open: a
-      // fresh one closes the panel first, and `agent:closed` puts the perch and
-      // the board down, so hovering a hexagon would dismantle the board you
-      // hovered it on.
+      // `from` means "opened out of that agent" — today, clicking a bee inside
+      // the orchestrator's gathered view. It has to be a STEP, not a fresh
+      // open: a fresh one closes the panel first, and `agent:closed` puts the
+      // perch and the audit view down, so opening a bee would dismantle the
+      // view you clicked it in.
       const from = String(payload?.from ?? '')
       if (from && from !== id) { this.#stepTo(id, from); return }
       this.open(id)
@@ -94,11 +108,11 @@ export class AgentPanelView extends EventTarget {
     // Closed from outside — pressing a perched bee a second time puts its
     // panel down the same way its × would.
     //
-    // `#returnTo` counts as well: stepping off the orchestrator's board into
-    // one agent's log is a TRIP, and putting the board down ends the trip. Left
-    // open, that log would still be offering "‹ Back to the orchestrator" after
-    // the orchestrator had unperched and its board had gone — a way back to
-    // somewhere that is no longer there.
+    // `#returnTo` counts as well: stepping out of the orchestrator's gathered
+    // view into one agent's log is a TRIP, and putting the view down ends the
+    // trip. Left open, that log would still be offering "‹ Back to the
+    // orchestrator" after the orchestrator had unperched and its view had
+    // cleared — a way back to somewhere that is no longer there.
     EffectBus.on<{ id?: string }>('agent:close', payload => {
       const id = String(payload?.id ?? '')
       if (id && (this.#id === id || this.#returnTo === id)) this.close()
@@ -198,6 +212,9 @@ export class AgentPanelView extends EventTarget {
       panel.classList.toggle('fullscreen', this.#fullscreen)
       localStorage.setItem(FULLSCREEN_KEY, String(this.#fullscreen))
       updateFullscreenButton()
+      // The rail exists only where there is room for it. Once mounted it
+      // stays (hidden) across toggles, keeping its trail and picks.
+      if (this.#fullscreen) this.#mountRail()
     })
     const close = document.createElement('button')
     close.type = 'button'
@@ -222,6 +239,13 @@ export class AgentPanelView extends EventTarget {
     body.className = 'hc-agent-body'
     this.#body = body
 
+    // Picked tiles land here, as chips over the composer — the visible sign
+    // that Enter now APPLIES agents instead of adding context.
+    const chips = document.createElement('div')
+    chips.className = 'hc-agent-chips'
+    chips.hidden = true
+    this.#chips = chips
+
     const row = document.createElement('div')
     row.className = 'hc-agent-row'
     const input = document.createElement('textarea')
@@ -232,7 +256,11 @@ export class AgentPanelView extends EventTarget {
     send.type = 'button'
     send.className = 'hc-agent-btn hc-agent-ok'
     send.textContent = this.#t('agent.context-send', 'Add')
-    const submit = (): void => { void this.#addContext(send) }
+    this.#send = send
+    const submit = (): void => {
+      if (this.#rail?.picks.length) void this.#applyToTiles(send)
+      else void this.#addContext(send)
+    }
     send.addEventListener('click', submit)
     input.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit() }
@@ -240,13 +268,134 @@ export class AgentPanelView extends EventTarget {
     row.append(input, send, stop)
     this.#input = input
 
-    panel.append(resize, head, body, row)
+    // Two columns: the tiles rail (full screen only) and everything the
+    // panel already was. The rail host exists from the start so toggling
+    // full screen is a CSS matter, not a rebuild.
+    const railHost = document.createElement('div')
+    railHost.className = 'hc-agent-rail'
+    this.#railHost = railHost
+    const main = document.createElement('div')
+    main.className = 'hc-agent-main'
+    main.append(head, body, chips, row)
+
+    panel.append(resize, railHost, main)
     document.body.appendChild(panel)
     this.#panel = panel
 
+    if (this.#fullscreen) this.#mountRail()
     this.#render()
     this.#registry?.addEventListener('change', this.#render)
     document.addEventListener('keydown', this.#onKey, true)
+  }
+
+  /** Bring the rail up. One rail per panel LIFETIME, not per subject: a swap
+   *  rebuilds the panel's DOM, so the same rail re-mounts into the new host
+   *  with its trail, picks and icon cache intact — stepping into an agent's
+   *  log must not drop the tiles you were halfway through choosing. */
+  #mountRail(): void {
+    if (!this.#railHost) return
+    if (!this.#rail) {
+      this.#rail = new AgentTilesRail()
+      this.#rail.onPicksChanged = () => this.#renderChips()
+    }
+    this.#rail.mount(this.#railHost)
+    this.#renderChips()
+  }
+
+  /** The chips row mirrors the rail's picks: one chip per tile, and the
+   *  model the asks will ride out on. The composer's words follow suit. */
+  #renderChips(): void {
+    const chips = this.#chips
+    if (!chips) return
+    const picks = this.#rail?.picks ?? []
+    chips.textContent = ''
+    chips.hidden = picks.length === 0
+    if (this.#input) {
+      this.#input.placeholder = picks.length
+        ? this.#t('agent.apply-placeholder', 'What should they do on these tiles?')
+        : this.#t('agent.context-placeholder', 'Add context while it works…')
+    }
+    if (this.#send) {
+      this.#send.textContent = picks.length
+        ? this.#t('agent.apply-send', 'Apply')
+        : this.#t('agent.context-send', 'Add')
+    }
+    if (!picks.length) return
+
+    for (const pick of picks) {
+      const chip = document.createElement('span')
+      chip.className = 'hc-agent-chip'
+      const name = document.createElement('span')
+      name.className = 'hc-agent-chip-name'
+      name.textContent = pick.name
+      const off = document.createElement('button')
+      off.type = 'button'
+      off.className = 'hc-agent-chip-off'
+      off.textContent = '×'
+      off.setAttribute('aria-label', this.#t('agent.chip-remove', 'Remove'))
+      off.addEventListener('click', () => this.#rail?.unpick(pick.key))
+      chip.append(name, off)
+      chips.appendChild(chip)
+    }
+
+    // The model is part of the send, so it lives with the chips — one quiet
+    // word that cycles rather than a control that shouts.
+    const model = document.createElement('button')
+    model.type = 'button'
+    model.className = 'hc-agent-chip hc-agent-chip-model'
+    model.textContent = this.#askModel
+    model.title = this.#t('agent.model-cycle', 'Which model answers — click to change')
+    model.addEventListener('click', () => {
+      const models = ['opus', 'sonnet', 'haiku', 'fable']
+      this.#askModel = models[(models.indexOf(this.#askModel) + 1) % models.length]
+      model.textContent = this.#askModel
+    })
+    chips.appendChild(model)
+  }
+
+  /** APPLY — mint real asks for the picked tiles. Picks are grouped by the
+   *  level they live on (an ask names tiles on ONE page), so a selection
+   *  gathered across levels goes out as one agent per level, each carrying
+   *  that level's tile names. Any number of applications, one after another,
+   *  is exactly what the registry and the bees are built for. */
+  async #applyToTiles(button: HTMLButtonElement): Promise<void> {
+    const rail = this.#rail
+    const input = this.#input
+    const prompt = input?.value.trim() ?? ''
+    const picks = rail?.picks ?? []
+    if (!rail || !prompt || !picks.length) return
+
+    const queen = ioc<{ activeModel: string; submitAsk?: (prompt: string, targets: string[], at?: readonly string[]) => Promise<boolean> }>(
+      '@diamondcoreprocessor.com/LlmQueenBee')
+    if (!queen?.submitAsk) {
+      EffectBus.emit('toast:show', { type: 'warning', message: this.#t('agent.apply-error', 'Could not queue the work — try again.') })
+      return
+    }
+
+    const groups = new Map<string, { path: readonly string[]; names: string[] }>()
+    for (const pick of picks) {
+      const key = pick.path.join('\u0000')
+      const group = groups.get(key) ?? { path: pick.path, names: [] }
+      group.names.push(pick.name)
+      groups.set(key, group)
+    }
+
+    button.disabled = true
+    const prior = queen.activeModel
+    queen.activeModel = this.#askModel
+    let ok = true
+    try {
+      for (const group of groups.values()) {
+        ok = (await queen.submitAsk(prompt, group.names, group.path)) && ok
+      }
+    } finally {
+      queen.activeModel = prior
+      button.disabled = false
+    }
+    if (ok) {
+      if (input) input.value = ''
+      rail.clearPicks()
+    }
   }
 
   #render = (): void => {
@@ -712,14 +861,15 @@ export class AgentPanelView extends EventTarget {
   /** Step to an agent from a NAMED origin, without closing the panel.
    *
    *  Unlike `#swap`, "back" is pinned to the origin rather than to whatever was
-   *  showing a moment ago. Sweeping a board of hexagons would otherwise build a
-   *  chain — hex A, then B, then C, with back walking you through B — when what
-   *  the participant means by back is, always, the report they came from.
+   *  showing a moment ago. Clicking bee after bee in the gathered view would
+   *  otherwise build a chain — A, then B, then C, with back walking you through
+   *  B — when what the participant means by back is, always, the report they
+   *  came from.
    *
    *  `#returnTo` is set BEFORE opening because the head is built inside
    *  `open()`, and `#swapping` keeps the close it performs from announcing
-   *  itself: `agent:closed` puts down the perch and the board, which is exactly
-   *  what a step must not do. */
+   *  itself: `agent:closed` puts down the perch and the audit view, which is
+   *  exactly what a step must not do. */
   #stepTo(id: string, from: string): void {
     if (!id || id === this.#id) return
     this.#swapping = true
@@ -752,6 +902,14 @@ export class AgentPanelView extends EventTarget {
     }
     this.#resizeCleanup?.()
     this.#resizeCleanup = null
+    // A swap keeps the rail (see #mountRail); only a real close puts it down.
+    if (!this.#swapping) {
+      this.#rail?.dispose()
+      this.#rail = null
+    }
+    this.#railHost = null
+    this.#chips = null
+    this.#send = null
     this.#panel?.remove()
     this.#panel = null
     this.#body = null
@@ -792,11 +950,74 @@ export class AgentPanelView extends EventTarget {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-.hc-agent{position:fixed;z-index:99999;display:flex;flex-direction:column;gap:0.55rem;
+.hc-agent{position:fixed;z-index:99999;display:flex;flex-direction:row;align-items:stretch;
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
-  max-height:min(30rem,70vh);padding:0.75rem 0.85rem;box-sizing:border-box;
+  max-height:min(30rem,70vh);box-sizing:border-box;
   background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:10px;}
 .hc-agent.fullscreen{inset:0.75rem;width:auto!important;max-width:none;height:auto;max-height:none;}
+.hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:0.55rem;
+  padding:0.75rem 0.85rem;box-sizing:border-box;}
+.hc-agent-rail{display:none;}
+.hc-agent.fullscreen .hc-agent-rail{display:flex;flex-direction:column;min-height:0;
+  flex:0 0 clamp(15rem,24vw,19rem);border-right:1px solid rgba(${STEEL},0.16);
+  background:rgba(3,5,9,0.55);border-radius:10px 0 0 10px;}
+.hc-rail-head{display:flex;align-items:center;gap:0.35rem;flex:0 0 auto;
+  padding:0.8rem 0.85rem 0.5rem;}
+.hc-rail-back{width:1.7rem;height:1.9rem;flex:0 0 auto;border:none;background:none;
+  color:rgba(${STEEL},0.75);font-size:1.4rem;line-height:1;cursor:pointer;border-radius:6px;}
+.hc-rail-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
+.hc-rail-back[hidden]{display:none;}
+.hc-rail-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--hc-mono,monospace);font-size:0.72rem;font-weight:600;letter-spacing:0.12em;
+  text-transform:uppercase;color:rgba(${STEEL},0.85);}
+.hc-rail-list{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;
+  gap:2px;padding:0.15rem 0.5rem 0.7rem;}
+@keyframes hcRailIn{from{opacity:0;transform:translateX(0.6rem);}to{opacity:1;transform:none;}}
+@keyframes hcRailOut{from{opacity:0;transform:translateX(-0.6rem);}to{opacity:1;transform:none;}}
+.hc-rail-row{display:flex;align-items:center;border-radius:9px;}
+.hc-rail-row:hover{background:rgba(255,255,255,0.05);}
+.hc-rail-row.picked{background:rgba(${STEEL},0.1);box-shadow:inset 0 0 0 1px rgba(${STEEL},0.4);}
+.hc-rail-main{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:0.6rem;
+  padding:0.35rem 0.2rem 0.35rem 0.45rem;border:0;background:none;text-align:left;font:inherit;
+  cursor:pointer;border-radius:9px;color:inherit;}
+.hc-rail-main:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
+.hc-rail-icon{width:2.15rem;height:2.15rem;flex:0 0 auto;border-radius:8px;overflow:hidden;
+  display:grid;place-items:center;background:rgba(${STEEL},0.08);
+  border:1px solid rgba(${STEEL},0.14);color:rgba(${STEEL},0.55);
+  font-size:0.95rem;font-weight:600;}
+.hc-rail-icon img{width:100%;height:100%;object-fit:cover;display:block;}
+.hc-rail-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:0.86rem;color:rgba(238,244,250,0.92);}
+.hc-rail-bees{flex:0 0 auto;min-width:1.15rem;text-align:center;padding:0.06rem 0.3rem;
+  border-radius:999px;border:1px solid rgba(226,196,140,0.5);color:rgba(226,196,140,0.95);
+  font-size:0.66rem;line-height:1.2;}
+.hc-rail-bees[hidden]{display:none;}
+.hc-rail-chev{flex:0 0 auto;color:rgba(216,230,238,0.35);font-size:1.05rem;line-height:1;
+  padding-right:0.1rem;}
+.hc-rail-chev[hidden]{display:none;}
+.hc-rail-pick{flex:0 0 auto;width:1.05rem;height:1.05rem;margin:0 0.55rem 0 0.15rem;
+  border-radius:999px;border:1px solid rgba(${STEEL},0.45);background:none;cursor:pointer;
+  opacity:0.35;transition:opacity 0.12s ease,background 0.12s ease;}
+.hc-rail-row:hover .hc-rail-pick,.hc-rail-pick:focus-visible{opacity:1;outline:none;}
+.hc-rail-row.picked .hc-rail-pick{opacity:1;background:rgba(${STEEL},0.9);
+  box-shadow:inset 0 0 0 2px #0c1118;}
+.hc-rail-skel{height:2.5rem;border-radius:9px;background:rgba(255,255,255,0.045);
+  animation:hcRailPulse 1.1s ease-in-out infinite;}
+@keyframes hcRailPulse{0%,100%{opacity:0.5;}50%{opacity:1;}}
+.hc-rail-empty{padding:0.9rem 0.45rem;font-size:0.78rem;color:rgba(216,230,238,0.45);}
+.hc-agent-chips{display:flex;flex-wrap:wrap;gap:0.3rem;flex:0 0 auto;}
+.hc-agent-chips[hidden]{display:none;}
+.hc-agent-chip{display:inline-flex;align-items:center;gap:0.25rem;max-width:12rem;
+  padding:0.1rem 0.3rem 0.1rem 0.55rem;border:1px solid rgba(${STEEL},0.4);border-radius:999px;
+  color:rgba(238,244,250,0.92);font-size:0.76rem;background:rgba(${STEEL},0.08);}
+.hc-agent-chip-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-chip-off{border:0;background:none;color:rgba(238,244,250,0.55);font:inherit;
+  font-size:0.9rem;line-height:1;cursor:pointer;padding:0 0.15rem;border-radius:999px;}
+.hc-agent-chip-off:hover{color:whitesmoke;}
+.hc-agent-chip-model{cursor:pointer;font-family:var(--hc-mono,monospace);letter-spacing:0.06em;
+  text-transform:uppercase;font-size:0.68rem;color:rgba(${STEEL},0.9);background:none;
+  padding:0.14rem 0.6rem;margin-left:auto;}
+.hc-agent-chip-model:hover{background:rgba(${STEEL},0.12);}
 .hc-agent-resize{position:absolute;z-index:1;inset:0 auto 0 -0.35rem;width:0.7rem;cursor:ew-resize;}
 .hc-agent-resize::after{content:"";position:absolute;top:42%;bottom:42%;left:0.25rem;
   border-left:1px solid rgba(${STEEL},0.42);}

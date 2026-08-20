@@ -744,6 +744,15 @@ export const writeTilePropertiesAt = async (
       keys: Object.keys(updates),
     })
 
+    // A picture just landed — ask for its square thumbnail NOW, so the first
+    // list or tree that shows this tile finds the 96px webp already minted
+    // instead of decoding the original. The demand is only ever a demand:
+    // the optimize phase does the deriving, in its own idle pass, and a
+    // duplicate emit for an already-minted sig is a no-op there.
+    for (const sig of new Set(imageSigsOf(updates))) {
+      EffectBus.emit('thumbnail:wanted', { sig })
+    }
+
     // Central layer-keyed seed: the commit above moved the head, and
     // commitLayer keeps the warm head cache in sync, so this is a map
     // lookup — never an OPFS read. Every writer that commits canonically

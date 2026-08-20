@@ -172,12 +172,17 @@ export class LlmQueenBee extends QueenBee {
 
   /** Mint the ask record. Called by the ask screen with the CHOSEN targets
    *  (empty = the current page). Returns false when refused so the screen
-   *  can stay open. */
-  async submitAsk(prompt: string, targets: string[]): Promise<boolean> {
+   *  can stay open.
+   *
+   *  `at` names the LEVEL the targets live on. The agent panel's tiles rail
+   *  lets a participant pick tiles on pages they are not standing on, so
+   *  "wherever the lineage happens to be" stopped being a safe default for
+   *  every caller — omitted, it still reads the current location. */
+  async submitAsk(prompt: string, targets: string[], at?: readonly string[]): Promise<boolean> {
     if (!prompt.trim()) return false
 
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-    const segments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+    const segments = (at ?? lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
 
     // HIVE SCOPE — no tile chosen and standing at the root. This is not an
     // error: "go through the hive and …" is a legitimate ask with no single

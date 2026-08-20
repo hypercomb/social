@@ -983,6 +983,15 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "agent-panel-tiles-rail",
+      "title": "Mirror the agent panel's tiles rail — Copilot layout, drillable list, apply-to-tiles",
+      "run": null,
+      "note": "New part: hypercomb-essentials/src/diamondcoreprocessor.com/assistant/agent-tiles-rail.ts (the full-screen agent panel's left column — one hive level as a vertical list, square picture icons via the thumbnails:hex pool, back chevron drills out, pick circles feed chips over the composer, Apply mints one ask per level-group via LlmQueenBee.submitAsk(prompt,targets,at)). Add a part tile 1:1 with the file beside the agent panel's existing tiles, mark it part, note the drill/pick/apply flow. Also note on the tile-properties part: writeTilePropertiesAt now emits thumbnail:wanted at picture-set time so the optimize phase mints square thumbs at creation. note-add is additive - hands-on pass.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }
