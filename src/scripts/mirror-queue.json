@@ -923,15 +923,6 @@
       "status": "pending"
     },
     {
-      "id": "visit-driven-adoption",
-      "title": "Mirror visit-driven acquisition: the walk is the adopt",
-      "run": null,
-      "note": "The adopt button/panel/chip are retired: entering a peer-offered tile folds it one level (props from the wire) into the visitor's hive, records it in the visit genome (hc:visit-genome, sharing/visit-genome.ts), marks the drill's topmost tile as the adopted root, and drill requests on the lifecycle channel extend the publisher's broadcast frontier past MAX_PUBLISH_DEPTH. Mirror: tiles for visit-genome.ts + the SwarmAdoptDrone visit handler + the drill tunnel (swarm.drone #announceVisit/#publishDrillRequest/#onDrillRequest), pheromones marking them as sharing parts, notes carrying the doctrine (tombstones respected, code never auto-folds, behaviors stay the features-panel choice), and update the behaviors-mirror card for SwarmAdoptDrone. note-add is additive - needs a human.",
-      "unattended": false,
-      "created": "2026-08-20",
-      "status": "pending"
-    },
-    {
       "id": "behaviors-default-view",
       "title": "Default view per layer + views folded into Beehaviors (Views toolwindow retired)",
       "run": null,
@@ -962,6 +953,33 @@
       "title": "Mirror the native Windows/macOS hive backup — full-store export, self-verification, remembered folder",
       "run": null,
       "note": "Behaviour shipped in hypercomb-client: Hive menu backup switched from export_root (root closure, no pools) to the full-store export; new interchange::verify reads the folder back and hash-checks content from disk; restore refuses files that do not hash to their own name, tolerates the parent folder, and reloads the window when it changed; writes are atomic via .hcpart+rename; the folder is remembered in <hive dir>/backup-target.txt and topped up on every launch with a hypercomb-backup.json receipt. Mirror as a collection under behaviors/structure alongside the existing backup-choice: one tile per source resource — crates/store/src/interchange.rs, crates/host/src/lib.rs (verify_backup), app/src/main.rs (Hive menu + launch backup), crates/store/tests/store.rs, documentation/native-client.md. Pheromones: mark each tile part, mark the collection for structure/backup. Notes must carry WHY the closure export was not a backup.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "walk-is-a-look-wand-is-the-keep",
+      "title": "The walk is a look, the wand is the keep — swarm acquisition is one gesture",
+      "run": null,
+      "note": "SUPERSEDES the dropped 'visit-driven-adoption' entry (that doctrine — entering a peer tile folds it — is RETIRED, never mirror it). New model: walking a stranger's branch keeps NOTHING (no commit, no genome, no receipt, no adopted root, no public mark); the drill tunnel still lights one page per level entered, driven by the walk alone. Taking is THE WAND: hold ctrl (Cmd) and press a witnessed tile — SelectionInputDrone emits swarm:wand (transient) and SUPPRESSES the ordinary select for the whole gesture (adoption supplants select; two meanings on one press get in each other's way); drag on and every witnessed tile the pointer crosses is taken too. The wand takes the ITEM, never its children — deeper pages become yours only by walking in and wanding there. It clears a tombstone (explicit gesture = the way back in); giving back is still delete. Mirror: tiles for selection/selection-input.drone.ts (the wand gesture + #wandEligible) and sharing/swarm-adopt.drone.ts (#onWand, #foldPageTile as the ONE acquisition primitive, #onTileVisited now witness-only), marked as parts of the sharing collection; a note on each carrying the doctrine; update the behaviors-deck card for SwarmAdoptDrone and any note that still says 'the walk is the adopt'. i18n: swarm.visited REPLACED by swarm.kept + swarm.wand-hint across all 14 catalogs. note-add is additive - needs a human.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "orchestrator-audit-is-a-normal-layer",
+      "title": "Orchestrator audit is a normal layer - the hexagon board is deleted",
+      "run": null,
+      "note": "The orchestrator's press no longer raises the corner strip of custom mini hexagons (the 'board' in agent-bee.drone.ts - BoardHex, #showBoard/#drawBoard/#boardHit, hover-settle: ALL deleted). Opening the watcher now IS the audit view alone: it perches top-left and render:gather-set paints every tended tile as a NORMAL layer via the hive's own renderer, each agent's bee dancing over the tile it is tending (bees anchor to gathered cells by label via snapshotCells); agents with no tile target dance in the open in the same view (#anchorFor now grants #viewAnchor while perched, not only at root). Clicking a bee opens its usual request panel; clicking a tile travels to the real work. Mirror: note-add on the orchestrator-audit tile (and the agent-bee tile) under behaviors/assistant/orchestrator saying the board is gone and the audit is made of the same material as the hive; retire/correct any note or deck card that describes the hexagon board or hover-to-open. Doc updated: documentation/agents.md 'Opening it is the audit'. note-add is additive - needs a human.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "windows-client-ci",
+      "title": "Mirror the Windows client CI pipeline — the only place the Windows build can be produced",
+      "run": null,
+      "note": "New .github/workflows/build-client-windows.yml: twin of build-client-macos.yml on windows-latest — WebView2 assertion, library conformance/unit tests + clippy first, Angular build, bake-frontend, msi+nsis bundle, optional pfx signing via imported thumbprint, launch-and-wait-for-first-paint smoke test, artifacts + renderer.log upload. Exists because Smart App Control enforced refuses freshly built unsigned binaries locally (os error 4551). Mirror one tile per source resource: .github/workflows/build-client-windows.yml and the two documentation/native-client.md sections (Building Windows in CI, Windows signing). Gather under a collection beside the existing build/CI material; pheromones mark each tile part. Note must carry the Smart App Control one-way-door fact.",
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"

@@ -262,6 +262,44 @@ has passed, make it a hard gate.
 The `.app` and `.dmg` upload as run artifacts. Download and open on a real Mac
 when one is available.
 
+## Building Windows in CI
+
+`.github/workflows/build-client-windows.yml` is the Windows twin — and on a
+locked-down machine it is the ONLY place the Windows client can be built at
+all. Smart App Control, once enforced, refuses to EXECUTE freshly compiled
+unsigned binaries, and every cargo build script is exactly that: measured
+2026-08-20, `cargo build -p hypercomb-client` died with
+`os error 4551 — An Application Control policy has blocked this file` on
+tauri-build's own build script, before the bundler was ever reached. Moving the
+target directory elsewhere changes nothing; the policy is not path-based.
+
+What still works locally is worth knowing, because it bounds the damage:
+`cargo check`, and `cargo test`/`clippy` on the library crates, all pass. Only
+things that must RUN a new binary are blocked — the app bundle, and the
+`a_commit_survives_process_abort` durability test, which spawns a freshly built
+helper.
+
+Check the state before blaming the repo:
+
+```powershell
+(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').VerifiedAndReputablePolicyState
+# 0 = off, 1 = enforced, 2 = evaluation
+```
+
+Individual blocks are logged with the offending path under
+`Microsoft-Windows-CodeIntegrity/Operational`, event ID 3077 — which is how you
+tell "the policy blocked my build" from "the policy blocked something else".
+
+The workflow mirrors the macOS one step for step — library tests and lint
+first, then the Angular build, the bake, the bundle, and a
+launch-and-wait-for-first-paint smoke test — with three Windows-specific
+additions:
+
+- It asserts the **WebView2 runtime** is present before anything else. Without
+  it the window comes up blank and every other check still passes.
+- It runs the durability test, which on an enforced machine can only run here.
+- The bundle is **msi + nsis**, selected by `tauri.windows.conf.json`.
+
 ## Signing, notarization, distribution
 
 The CI build is **unsigned and un-notarized** — no Apple Developer credentials
@@ -319,11 +357,46 @@ honest answer to "will this open on someone else's Mac", because a bundle can
 be correctly signed and still be refused when the notarization ticket was
 never stapled.
 
+### Windows: signing, and why unsigned is worse here
+
+Same shape as the Apple wiring above — signs if the secrets are present,
+builds unsigned if they are not — but the mechanism differs. Tauri resolves a
+Windows signature by certificate THUMBPRINT against the machine's own
+certificate store, so the workflow imports the `.pfx` into
+`Cert:\CurrentUser\My` first and passes the resulting thumbprint through
+`--config`. Two secrets:
+
+| Secret | What it is |
+|---|---|
+| `WINDOWS_CERTIFICATE` | the code-signing `.pfx`, base64-encoded |
+| `WINDOWS_CERTIFICATE_PASSWORD` | the password it was exported with |
+
+Unexercised: no certificate has ever been configured for this repo, so that
+branch has never run. Treat its first green run as the test.
+
+What unsigned costs on Windows deserves precision, because it is worse than
+Gatekeeper:
+
+| | Unsigned | OV certificate | EV certificate |
+|---|---|---|---|
+| SmartScreen | warns; *More info ▸ Run anyway* | warns until the certificate earns download reputation | trusted immediately |
+| Smart App Control, enforced | **refuses — no override** | trusted | trusted |
+
+That last cell is the one that matters. Smart App Control has no "run anyway":
+the only way past it is turning the feature off, and that is a ONE-WAY DOOR —
+it cannot be re-enabled without resetting Windows. So an unsigned build is a
+test build for machines that do not enforce it, and nothing more. Handing the
+client to anyone else needs a certificate.
+
 ## Known gaps
 
 - 512/1024 icon slots are empty — needs a 1024 master (see above).
 - The universal (Intel + Apple silicon) build exists as a `workflow_dispatch`
   input but has not been exercised; the default is arm64.
-- Unsigned, per the section above.
+- Unsigned on both platforms, per the sections above. On Windows that is not
+  cosmetic: a machine with Smart App Control enforced refuses the build.
+- The Windows signing branch of the workflow has never run — no certificate is
+  configured.
+- Windows builds x64 only; there is no ARM64 target in the workflow.
 - No macOS-native window chrome work has been done — the window is the same
   1280x800 dark-themed window as on Windows.
