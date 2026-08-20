@@ -121,8 +121,18 @@ interface BeeDepCacheEntry {
 // The bump busts every version-3 cache so the first post-flip build can
 // never take the "Merkle root unchanged" early exit and re-deploy a dist
 // that still holds the typed `__x__` layout.
+//
+// version 5 = bee units keyed on their WHOLE bundle, not just the entry.
+// A bee is bundled with `external: allSpecifiers`, so a cross-namespace
+// import via the namespace specifier stays external — but a RELATIVE import
+// (`../../link/media.js`) is inlined, and every v4 bee unit recorded exactly
+// one file: its own entry. Editing an inlined module therefore left the bee
+// cached and the stale copy shipped, silently, while the namespace bundle
+// holding the same module rebuilt correctly. Found 2026-08-20: SlidesViewDrone
+// shipped a pre-change `embedUrlFor` while the `link` dependency carried the
+// new one. The bump busts every v4 unit so each bee re-records its real inputs.
 interface BuildCache {
-  version: 4
+  version: 5
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
@@ -138,7 +148,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 4) return raw
+    if (raw?.version === 5) return raw
   } catch {}
   return null
 }
@@ -665,7 +675,15 @@ const buildNamespaceDependency = async (
   return { sig, bytes }
 }
 
-const buildBee = async (entry: string, externals: string[]): Promise<Uint8Array> => {
+/** Compile one bee, and report every file esbuild actually inlined.
+ *
+ *  The input list is the point: a bee bundles its whole relative import graph,
+ *  so ANY of those files changing changes the bee. Keying the cache on the
+ *  entry alone (v4) shipped stale bees whenever a shared helper moved. */
+const buildBee = async (
+  entry: string,
+  externals: string[],
+): Promise<{ bytes: Uint8Array; inputs: string[] }> => {
   const r = await build({
     entryPoints: [entry],
     bundle: true,
@@ -676,11 +694,20 @@ const buildBee = async (entry: string, externals: string[]): Promise<Uint8Array>
     sourcemap: false,
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
+    metafile: true,
   })
 
   const compiled = r.outputFiles?.[0]?.text
   if (!compiled) throw new Error(`no output: ${entry}`)
-  return textToBytes(compiled)
+
+  // metafile keys are cwd-relative; virtual/synthetic entries resolve to
+  // nothing on disk and are dropped. The entry is always tracked.
+  const inputs = Object.keys(r.metafile?.inputs ?? {})
+    .map(rel => resolve(process.cwd(), rel))
+    .filter(abs => { try { return statSync(abs).isFile() } catch { return false } })
+  if (!inputs.includes(entry)) inputs.push(entry)
+
+  return { bytes: textToBytes(compiled), inputs }
 }
 
 // -------------------------------------------------
@@ -905,13 +932,20 @@ const main = async (): Promise<void> => {
   let beeCacheMisses = 0
 
   for (const src of beeSources) {
-    const { leaves, inputSig } = await resolveUnitInputs(
-      [src.entry],
-      cache?.bees[src.relPath]?.files
-    )
-
-    allUnitSigs.push(inputSig)
     const cachedUnit = cache?.bees[src.relPath]
+
+    // The unit's inputs are the LAST build's actual bundle contents, not the
+    // entry alone — that is the whole point of v5. Cold cache falls back to
+    // the entry; the build below then records the real set. A recorded input
+    // that has since been deleted is dropped (its absence changes the entry
+    // that imported it, which is tracked).
+    const recorded = cachedUnit
+      ? Object.keys(cachedUnit.files).filter(f => { try { return statSync(f).isFile() } catch { return false } })
+      : []
+    const inputPaths = recorded.includes(src.entry) ? recorded : [src.entry, ...recorded]
+
+    let { leaves, inputSig } = await resolveUnitInputs(inputPaths, cachedUnit?.files)
+
     const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
 
     let bytes: Uint8Array
@@ -923,12 +957,18 @@ const main = async (): Promise<void> => {
       newBees[src.relPath] = { files: leaves, inputSig, outputSig: cachedUnit.outputSig }
       beeCacheHits++
     } else {
-      bytes = await buildBee(src.entry, beeExternals)
+      const built = await buildBee(src.entry, beeExternals)
+      bytes = built.bytes
       sig = await SignatureService.sign(toArrayBuffer(bytes))
       writeFileSync(join(OUTPUT_CACHE_DIR, `${sig}.js`), bytes)
+      // Re-key on what was really bundled, so the NEXT run sees a change in
+      // any inlined module rather than only in this file.
+      ;({ leaves, inputSig } = await resolveUnitInputs(built.inputs, cachedUnit?.files))
       newBees[src.relPath] = { files: leaves, inputSig, outputSig: sig }
       beeCacheMisses++
     }
+
+    allUnitSigs.push(inputSig)
 
     resourceBytes.set(sig, bytes)
     addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
@@ -1201,7 +1241,7 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 4,
+    version: 5,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,
