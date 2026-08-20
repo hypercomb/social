@@ -12,8 +12,8 @@
 // tiles land in the ordinary SelectionService, so they ring on the canvas with
 // the selection visuals that already exist, and every other verb that reads a
 // selection — marking with a pheromone, the command line's bracket form — sees
-// the same set. The only thing this adds is a way for a FINGER to build one: a
-// pointer says "pick this too" by holding ctrl, and a finger has no modifiers.
+// the same set. The only thing this adds is a way for a FINGER to build one —
+// a finger has no modifier key to hold.
 //
 // It shows up only when there is something to sample (peer tiles on screen),
 // so it costs no permanent chrome — the mobile control bar is deliberately
@@ -31,8 +31,14 @@
 // picked set contains somebody else's tile, which it asks for here
 // (`keepSelected`). Two pills on a phone claimed there were two selections,
 // and the general picker used to disappear in a swarm — exactly where picking
-// matters most. On a pointer this pill stays: there is no always-up picker
-// there, because ctrl-click already is one.
+// matters most. On a pointer this pill stays: a finger has no modifier key,
+// and this is the surface that lends "keep" to a picked set.
+//
+// THE WAND IS THE OTHER DOOR (2026-08-20). On a pointer, ctrl+press over a
+// witnessed tile takes it OUTRIGHT — no set, no pill, no keep step
+// (SelectionInputDrone → `swarm:wand`). This pill is the deliberate,
+// several-at-once path, and while it is ARMED the wand stands down: inside
+// a picking session the taps build a set, and `keep` is what takes it.
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'

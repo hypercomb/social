@@ -273,6 +273,59 @@ async function ownChildren(page) {
   }))
 }
 
+/** Where a tile IS on screen. The render's own numbers, inverted: the
+ *  forward hex formula (documented in HexDetector) → mesh-local → the
+ *  container's global space → client px. Needed because the wand is a
+ *  REAL ctrl+press on the canvas, not a synthesized effect — a gesture
+ *  that never touches a native pointer proves nothing about the gesture. */
+async function tileClientPoint(page, label) {
+  return evalSafe(() => page.evaluate((name) => {
+    const bus = window.__hypercombEffectBus
+    const last = bus?.lastValue
+    if (!last) return { ok: false, reason: 'no bus' }
+    const host = last.get('render:host-ready')
+    const cells = last.get('render:cell-count')
+    const off = last.get('render:mesh-offset') ?? { x: 0, y: 0 }
+    const flat = !!(last.get('render:set-orientation') ?? {}).flat
+    if (!host?.container || !host?.canvas || !host?.renderer) return { ok: false, reason: 'no host' }
+    const i = (cells?.labels ?? []).indexOf(name)
+    if (i < 0) return { ok: false, reason: 'not rendered', labels: cells?.labels ?? [] }
+    const { q, r } = cells.coords[i]
+    const detector = window.ioc?.get?.('@diamondcoreprocessor.com/HexDetector')
+    const s = detector?.spacing
+    if (!s) return { ok: false, reason: 'no detector' }
+    const mx = flat ? 1.5 * s * q : Math.sqrt(3) * s * (q + r / 2)
+    const my = flat ? Math.sqrt(3) * s * (r + q / 2) : s * 1.5 * r
+    const pt = host.container.toGlobal({ x: mx + off.x, y: my + off.y })
+    const rect = host.canvas.getBoundingClientRect()
+    const screen = host.renderer.screen
+    return {
+      ok: true,
+      x: rect.left + pt.x * (rect.width / screen.width),
+      y: rect.top + pt.y * (rect.height / screen.height),
+    }
+  }, label))
+}
+
+/** THE WAND — a real ctrl+press over a witnessed tile. */
+async function wandTile(page, label) {
+  const at = await tileClientPoint(page, label)
+  if (!at.ok) return at
+  await page.keyboard.down('Control')
+  await page.mouse.move(at.x, at.y)
+  await page.mouse.down()
+  await sleep(120)
+  await page.mouse.up()
+  await page.keyboard.up('Control')
+  return at
+}
+
+/** What the ordinary selection holds — the wand must leave it alone. */
+async function selectedNow(page) {
+  return evalSafe(() => page.evaluate(() =>
+    [...(window.ioc?.get?.('@diamondcoreprocessor.com/SelectionService')?.selected ?? [])]))
+}
+
 async function adopt(page, label) {
   return evalSafe(() => page.evaluate((cellLabel) => {
     const bee = window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')
@@ -480,15 +533,17 @@ async function main() {
     check('a swarm tile is adoptable', false, 'skipped — no swarm tiles arrived')
   }
 
-  // ── THE DRILL TUNNEL — visit-driven acquisition, past the depth wall ──
+  // ── THE DRILL TUNNEL — walking a stranger's branch, past the wall ────
   // B builds a deep branch under `delta` (4 levels), then returns to root.
   // B's publish walk only broadcasts MAX_PUBLISH_DEPTH=3 levels below root,
   // so the DEEPEST level is invisible to the initial broadcast — only the
   // drill request/response tunnel (lifecycle-channel ask, publisher answers
-  // with that location's layer event) can light it. A then WALKS the path:
-  // every visited tile must fold into A's own tree (no adopt button — the
-  // walk is the adopt), the genome must record the path, and the final
-  // level must become visible despite the depth wall.
+  // with that location's layer event) can light it. A then WALKS the path.
+  //
+  // THE WALK IS A LOOK (2026-08-20): A must reach every level WITHOUT
+  // holding any of it — the tunnel is driven by the walk, not by ownership
+  // — and A's own tree must be untouched when the walk is over. Taking is
+  // the WAND, tested after the drill with a real ctrl+press.
   if (seesB.ok) {
     log('drill', 'B builds delta/tunnel1/tunnel2/tunnel3/tunnel4, then returns home')
     const levels = ['tunnel1', 'tunnel2', 'tunnel3', 'tunnel4']
@@ -511,57 +566,108 @@ async function main() {
     // tunnel; an earlier break means the wall was never even tested.
     let wallOk = false
     let detail = ''
+    const walked = []
     for (const name of path) {
       const isPastWall = name === 'tunnel4'
       const seen = await waitFor(() => peerTilesNow(A.page), tiles => tiles.includes(name), 60000)
       if (!seen.ok) {
         drillOk = false
-        detail = `"${name}" never offered at [${parent.join('/')}] — saw ${JSON.stringify(seen.value)}`
+        const stages = await evalSafe(() => A.page.evaluate(() => ({
+          visit: window.ioc?.get?.('@diamondcoreprocessor.com/SwarmAdoptDrone')?.visitDebug?.() ?? null,
+          signal: (window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')?.debug?.() ?? {}).lastVisitSignal ?? null,
+          drill: (window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')?.debug?.() ?? {}).lastDrillRequest ?? null,
+        }))).catch(() => null)
+        detail = `"${name}" never offered at [${parent.join('/')}] — saw ` +
+          `${JSON.stringify(seen.value)} stages=${JSON.stringify(stages)}`
         break
       }
       if (isPastWall) { wallOk = true; detail = `deep level offered after ${seen.waitedMs}ms` }
       await navTo(A.page, [...parent, name])
-      const folded = await waitFor(() => childrenAt(A.page, parent),
-        c => (c.names ?? []).includes(name), 30000)
-      if (!folded.ok) {
-        drillOk = false
-        // Name the failing stage — the drones' own diagnostics say exactly
-        // where the fold died instead of leaving a generic "never folded".
-        const stages = await evalSafe(() => A.page.evaluate(async (parentSegs) => {
-          const history = window.ioc?.get?.('@diamondcoreprocessor.com/HistoryService')
-          const sig = await history.sign({ explorerSegments: () => parentSegs })
-          const layer = await history.currentLayerAt(sig)
-          const childLayers = []
-          for (const cs of (Array.isArray(layer?.children) ? layer.children : [])) {
-            try { childLayers.push(await history.getLayerBySig(cs)) } catch { childLayers.push(null) }
-          }
-          return {
-            visit: window.ioc?.get?.('@diamondcoreprocessor.com/SwarmAdoptDrone')?.visitDebug?.() ?? null,
-            signal: (window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')?.debug?.() ?? {}).lastVisitSignal ?? null,
-            // Full child layers of the failing parent — a husk's slots
-            // fingerprint whichever writer minted it.
-            childLayers,
-          }
-        }, parent)).catch(() => null)
-        detail = `"${name}" was offered but never folded at [${parent.join('/')}] — ` +
-          `${JSON.stringify(folded.value)} stages=${JSON.stringify(stages)}`
-        break
-      }
+      await sleep(1200)
+      walked.push({ parent: [...parent], name })
       parent = [...parent, name]
     }
     check('the drill tunnels past the publisher\'s depth-3 wall', wallOk, detail)
-    check('every visited tile folds into the visitor\'s hive', drillOk,
+    check('the walk alone reaches every level of a stranger\'s branch', drillOk,
       drillOk ? `path ${parent.join('/')}` : detail)
 
-    const genome = await genomePaths(A.page)
-    const expect = ['delta', 'delta/tunnel1', 'delta/tunnel1/tunnel2']
-    const genomeOk = expect.every(p => genome.includes(p))
-    check('the drilled path is recorded in the visit genome', genomeOk,
-      `records: ${JSON.stringify(genome)}`)
+    // THE WALK KEEPS NOTHING. Every level A just walked must still be
+    // somebody else's: nothing in A's own layers, nothing in the genome.
+    let keptSomething = null
+    for (const step of walked) {
+      const mine = await childrenAt(A.page, step.parent)
+      if ((mine.names ?? []).includes(step.name)) {
+        keptSomething = `"${step.name}" landed in [${step.parent.join('/')}] just from walking`
+        break
+      }
+    }
+    const genomeAfterWalk = await genomePaths(A.page)
+    const walkedPaths = walked.map(s => [...s.parent, s.name].join('/'))
+    const genomeLeak = walkedPaths.filter(p => genomeAfterWalk.includes(p))
+    check('a walk keeps nothing — the visitor\'s tree is untouched', !keptSomething && genomeLeak.length === 0,
+      keptSomething || (genomeLeak.length ? `genome recorded ${JSON.stringify(genomeLeak)}` : `${walked.length} levels walked, none kept`))
+
+    // THE WAND TAKES ONE. Back at the root, a REAL ctrl+press over the
+    // witnessed `delta`: that tile — and only that tile — becomes A's.
+    await navTo(A.page, []); await sleep(1500)
+    const offered = await waitFor(() => peerTilesNow(A.page), tiles => tiles.includes('delta'), 30000)
+    if (offered.ok) {
+      // Arm a probe on the bus so a miss says WHICH half missed: the
+      // gesture (no swarm:wand at all) or the take (event, no fold).
+      const pre = await evalSafe(() => A.page.evaluate(() => {
+        const bus = window.__hypercombEffectBus
+        window.__hcWand = []
+        bus.on('swarm:wand', p => window.__hcWand.push(p))
+        const cc = bus.lastValue.get('render:cell-count')
+        return {
+          rendered: (cc?.labels ?? []).includes('delta'),
+          external: (cc?.externalLabels ?? []).includes('delta'),
+          eligible: window.ioc?.get?.('@diamondcoreprocessor.com/SwarmAdoptDrone')?.wandEligible?.('delta') ?? null,
+        }
+      })).catch(() => null)
+      const at = await wandTile(A.page, 'delta')
+      const post = await evalSafe(() => A.page.evaluate((pt) => ({
+        events: window.__hcWand ?? null,
+        hitTag: pt ? (document.elementFromPoint(pt.x, pt.y) || {}).tagName ?? null : null,
+      }), at.ok ? { x: at.x, y: at.y } : null)).catch(() => null)
+      log('wand', `pre=${JSON.stringify(pre)} post=${JSON.stringify(post)}`)
+      const took = await waitFor(() => childrenAt(A.page, []),
+        c => (c.names ?? []).includes('delta'), 30000)
+      const stages = took.ok ? null : await evalSafe(() => A.page.evaluate(() => ({
+        visit: window.ioc?.get?.('@diamondcoreprocessor.com/SwarmAdoptDrone')?.visitDebug?.() ?? null,
+      }))).catch(() => null)
+      check('the wand takes the tile under it', took.ok,
+        took.ok ? `${took.waitedMs}ms at ${JSON.stringify(at)}`
+          : `point=${JSON.stringify(at)} pre=${JSON.stringify(pre)} post=${JSON.stringify(post)} stages=${JSON.stringify(stages)}`)
+
+      // THE ITEM, NOT ITS CHILDREN: delta's own children stay the
+      // publisher's until A walks in and wands them there too.
+      const inside = await childrenAt(A.page, ['delta'])
+      check('the wand takes the ITEM, never its children', (inside.names ?? []).length === 0,
+        JSON.stringify(inside.names ?? inside))
+
+      // SELECT STANDS DOWN: the same press must not also build a selection.
+      const sel = await selectedNow(A.page)
+      check('the wand suppresses the ordinary select', Array.isArray(sel) && sel.length === 0,
+        JSON.stringify(sel))
+
+      const genome = await genomePaths(A.page)
+      check('what the wand took is recorded in the visit genome', genome.includes('delta'),
+        `records: ${JSON.stringify(genome)}`)
+    } else {
+      check('the wand takes the tile under it', false, 'skipped — delta not offered at root')
+      check('the wand takes the ITEM, never its children', false, 'skipped')
+      check('the wand suppresses the ordinary select', false, 'skipped')
+      check('what the wand took is recorded in the visit genome', false, 'skipped')
+    }
   } else {
     check('the drill tunnels past the publisher\'s depth-3 wall', false, 'skipped — no swarm tiles arrived')
-    check('every visited tile folds into the visitor\'s hive', false, 'skipped')
-    check('the drilled path is recorded in the visit genome', false, 'skipped')
+    check('the walk alone reaches every level of a stranger\'s branch', false, 'skipped')
+    check('a walk keeps nothing — the visitor\'s tree is untouched', false, 'skipped')
+    check('the wand takes the tile under it', false, 'skipped')
+    check('the wand takes the ITEM, never its children', false, 'skipped')
+    check('the wand suppresses the ordinary select', false, 'skipped')
+    check('what the wand took is recorded in the visit genome', false, 'skipped')
   }
 
   // ── the dead-swarm regression ──────────────────────────────────────

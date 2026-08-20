@@ -424,11 +424,12 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // as private. `features` (puzzle-piece) opens the SHOW FEATURES
   // panel for any tile carrying a registered visual bee — it stays in the
   // hive and has NO peer-broadcast requirement. (No `sync`, no `adopt`
-  // icon — the walk is the adopt.)
+  // icon — taking is the wand.)
   'public-own': ['features', 'break-apart', 'files', 'invite', 'remove'],
-  // Peer-only mesh tiles. There is no adopt button: WALKING INTO the tile
-  // is the acquisition (SwarmAdoptDrone folds each visited tile, one
-  // level at a time). `features` reads the tile's behavior metadata
+  // Peer-only mesh tiles. There is still no adopt button, and walking in
+  // takes NOTHING (2026-08-20): acquisition is the WAND — ctrl (⌘) +
+  // press over the tile, which takes that one item (SwarmAdoptDrone's
+  // one-level fold). `features` reads the tile's behavior metadata
   // before you step in; `hide` dismisses a peer tile from view without
   // taking ownership.
   'public-external': ['features', 'hide', 'files', 'invite'],

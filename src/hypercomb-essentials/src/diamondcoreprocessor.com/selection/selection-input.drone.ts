@@ -7,7 +7,13 @@ import type { SelectionService } from './selection.service.js'
 import type { InputGate } from '../navigation/input-gate.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; externalLabels?: string[] }
+
+/** SwarmAdoptDrone, asked STRUCTURALLY. An older bundle (or a hive with the
+ *  sharing drones absent) simply resolves undefined — then there is no wand
+ *  and ctrl behaves exactly as it always did. */
+const SWARM_ADOPT_KEY = '@diamondcoreprocessor.com/SwarmAdoptDrone'
+type WandOracle = { wandEligible?: (label: string) => boolean }
 /** `toggle` carries the ADD-TO-SET intent that ctrl/meta expresses on a
  *  pointer. A finger has no modifier keys, so sampling mode sets it instead —
  *  the intent is the same ("pick this one too"), only the way of saying it
@@ -18,7 +24,7 @@ type TileClickPayload = { q: number; r: number; label: string; index: number; ct
 class SelectionInputDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description =
-    'Translates pointer clicks and drag gestures into tile selection changes.'
+    'Translates pointer clicks and drag gestures into tile selection changes — and, over somebody else\'s tiles in a swarm, into the wand that takes them (select stands down for that gesture).'
 
   #renderContainer: Container | null = null
   #canvas: HTMLCanvasElement | null = null
@@ -36,6 +42,24 @@ class SelectionInputDrone extends Drone {
   #lastOp: 'add' | 'remove' | null = null
   #touched = new Set<string>()
   #justDragged = false
+
+  // ── THE WAND ────────────────────────────────────────────────────────
+  // In a swarm, ctrl+press over somebody else's tile MEANS take-this. The
+  // gesture is a wand: the tile under the press is taken, and so is every
+  // witnessed tile the pointer crosses while it stays down. For its whole
+  // duration the ordinary select is suppressed — adoption supplants it, and
+  // two meanings on one gesture is how they get in each other's way.
+  #wandActive = false     // a wand gesture is in progress
+  #wandArmed = false      // ...and the modifier is still down (sweeping)
+  /** Labels the renderer reported as somebody else's (`render:cell-count`
+   *  externalLabels) — the wand never touches a tile of your own. */
+  #externalLabels = new Set<string>()
+  /** An armed picking mode (the swarm's pick-tiles pill, the mobile
+   *  picker) is a deliberate build-a-set session with its own keep verb.
+   *  The wand stands down inside one rather than folding behind its back.
+   *  Two modes, two flags: one disarming must not clear the other's. */
+  #sampleArmed = false
+  #selectModeArmed = false
 
   // selection-mode drag: pending until pointer moves beyond threshold
   #pendingDrag = false
@@ -66,8 +90,8 @@ class SelectionInputDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end']
-  protected override emits: string[] = ['selection:painted']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode']
+  protected override emits: string[] = ['selection:painted', 'swarm:wand']
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -89,8 +113,15 @@ class SelectionInputDrone extends Drone {
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
       this.#cellCoords = payload.coords
+      this.#externalLabels = new Set(payload.externalLabels ?? [])
       this.#rebuildOccupiedMap()
     })
+
+    // An explicit picking mode is armed — the wand yields to it (see
+    // #pickingArmed). Both modes suppress navigation and turn taps into
+    // picks; the keep verb they offer is the acquisition path there.
+    this.onEffect<{ active?: boolean }>('sample:mode', (p) => { this.#sampleArmed = !!p?.active })
+    this.onEffect<{ active?: boolean }>('select:mode', (p) => { this.#selectModeArmed = !!p?.active })
 
     // click selection via tile:click effect from TileOverlayDrone
     this.onEffect<TileClickPayload>('tile:click', (payload) => {
@@ -118,12 +149,14 @@ class SelectionInputDrone extends Drone {
     this.onEffect('navigation:guard-start', () => {
       this.#navigationBlocked = true
       // Abort any in-progress drag/pending gesture so stale state doesn't bleed into the new view
-      if (this.#dragActive || this.#pendingDrag || this.#reorderDragActive) {
+      if (this.#dragActive || this.#pendingDrag || this.#reorderDragActive || this.#wandActive) {
         this.#dragActive = false
         this.#pendingDrag = false
         this.#pendingStartLabel = null
         this.#reorderDragActive = false
         this.#reorderSourceLabel = null
+        this.#wandActive = false
+        this.#wandArmed = false
         this.#activePointerId = null
         this.#lastOp = null
         this.#touched.clear()
@@ -193,6 +226,22 @@ class SelectionInputDrone extends Drone {
 
     if (!this.#gate?.claim('tile-selection')) return
 
+    // ── THE WAND comes FIRST ────────────────────────────────────────
+    // Ctrl+press over somebody else's tile is not a selection at all: it
+    // is "this one is mine now". It outranks every other reading of the
+    // same press — the copy-drag hand-off below, the paint, and the
+    // trailing ctrl-click's toggle (suppressed in #endWand) — because in
+    // a swarm that IS what ctrl+press means, and a second meaning riding
+    // along would only get in its way.
+    if ((e.ctrlKey || e.metaKey) && this.#wandEligible(label)) {
+      this.#activePointerId = e.pointerId
+      this.#wandActive = true
+      this.#wandArmed = true
+      this.#touched.clear()
+      this.#sweepWand(label)
+      return
+    }
+
     // Press on an already-selected tile — hand off to DesktopMoveInput, which
     // owns drag-to-move (plain) AND Ctrl-drag-to-COPY. This now fires for Ctrl
     // too: Ctrl-drag a selected tile = copy, not paint. A Ctrl-CLICK (no drag)
@@ -219,6 +268,15 @@ class SelectionInputDrone extends Drone {
 
   #onPointerMove = (e: PointerEvent): void => {
     if (e.pointerId !== this.#activePointerId) return
+
+    // A wand in progress: every witnessed tile the pointer crosses is taken
+    // (once — #touched). Dragging is optional; a plain press already took
+    // the first one.
+    if (this.#wandActive) {
+      const label = this.#labelAtClient(e.clientX, e.clientY)
+      if (label) this.#sweepWand(label)
+      return
+    }
 
     // pending drag: check if pointer moved beyond threshold to promote to real drag
     if (this.#pendingDrag) {
@@ -247,6 +305,7 @@ class SelectionInputDrone extends Drone {
 
   #onPointerUp = (e: PointerEvent): void => {
     if (e.pointerId !== this.#activePointerId) return
+    if (this.#wandActive) { this.#endWand(); return }
     if (this.#reorderDragActive) {
       this.#endReorderDrag(e.clientX, e.clientY)
       return
@@ -266,6 +325,7 @@ class SelectionInputDrone extends Drone {
 
   #onPointerCancel = (e: PointerEvent): void => {
     if (e.pointerId !== this.#activePointerId) return
+    if (this.#wandActive) { this.#endWand(); return }
     this.#reorderDragActive = false
     this.#reorderSourceLabel = null
     this.#pendingDrag = false
@@ -274,11 +334,17 @@ class SelectionInputDrone extends Drone {
   }
 
   #onKeyUp = (e: KeyboardEvent): void => {
-    if (!this.#dragActive) return
-    if (e.key === 'Control' || e.key === 'Meta') this.#endDrag()
+    if (e.key !== 'Control' && e.key !== 'Meta') return
+    // Releasing the modifier mid-wand stops the sweep but does NOT end the
+    // gesture: the pointer is still down, and the click it will fire must
+    // still be swallowed (#endWand on pointerup does that). Ending here
+    // instead let a trailing plain click land as a fresh selection.
+    if (this.#wandActive) { this.#wandArmed = false; return }
+    if (this.#dragActive) this.#endDrag()
   }
 
   #onBlur = (): void => {
+    if (this.#wandActive) { this.#endWand(); return }
     if (this.#dragActive) this.#endDrag()
   }
 
@@ -296,6 +362,53 @@ class SelectionInputDrone extends Drone {
     this.#touched.clear()
   }
 
+  // ── wand helpers ───────────────────────────────────────────
+
+  /** Is this press a wand? Two keys, both cheap and synchronous so the
+   *  decision can be made ON POINTERDOWN: the renderer says the tile is
+   *  somebody else's (external), and SwarmAdoptDrone says a live peer
+   *  offers it here in a zone. Either one alone is not enough — a stack
+   *  variant is external without being takeable, and a name you already
+   *  hold can be offered without being external. */
+  #wandEligible(label: string): boolean {
+    if (this.#sampleArmed || this.#selectModeArmed) return false
+    if (!this.#externalLabels.has(label)) return false
+    const adopt = window.ioc?.get?.(SWARM_ADOPT_KEY) as WandOracle | undefined
+    return !!adopt?.wandEligible?.(label)
+  }
+
+  /** One tile, once per gesture. Ineligible tiles the sweep crosses are
+   *  marked touched too, so a long drag over your own tiles costs one
+   *  check each and never re-asks. */
+  #sweepWand(label: string): void {
+    if (!this.#wandArmed) return
+    if (this.#touched.has(label)) return
+    this.#touched.add(label)
+    if (!this.#wandEligible(label)) return
+    // SwarmAdoptDrone owns what taking means (the one-level fold, the
+    // tombstone clear, every guard) — this drone only says where the wand
+    // touched. NOTHING is added to the selection: the wand supplants it.
+    //
+    // TRANSIENT, deliberately: a gesture is a moment, not a state. A
+    // replayed last-value would re-take a tile for any listener that
+    // subscribes later (a re-registered bundle), including one the
+    // participant has since given back.
+    EffectBus.emitTransient('swarm:wand', { label })
+  }
+
+  #endWand(): void {
+    if (!this.#wandActive) return
+    this.#wandActive = false
+    this.#wandArmed = false
+    this.#activePointerId = null
+    this.#touched.clear()
+    this.#gate?.release('tile-selection')
+    // The gesture's trailing click must not toggle a selection — the same
+    // one-frame guard the paint drag uses.
+    this.#justDragged = true
+    requestAnimationFrame(() => { this.#justDragged = false })
+  }
+
   #applyOp(label: string): void {
     if (this.#touched.has(label)) return
     this.#touched.add(label)
@@ -309,11 +422,10 @@ class SelectionInputDrone extends Drone {
       if (selection.isSelected(label)) selection.remove(label)
     }
 
-    // THE SWARM OVERLOAD (Jaime, 2026-08-20): the same ctrl+drag paint,
-    // in a zone, paints ADOPTION — sweep witnessed tiles to take them,
-    // sweep your swarm-acquired ones to give them back. This drone stays
-    // selection-only; SwarmAdoptDrone owns what "painted" means there
-    // (fold / remove, with all its guards — native tiles are untouchable).
+    // The paint reports what it painted. It no longer carries adoption:
+    // taking somebody else's tile is the WAND (see #sweepWand), a gesture
+    // of its own that suppresses selection instead of riding on it — one
+    // press must not mean two things at once.
     EffectBus.emit('selection:painted', { label, op: this.#lastOp })
   }
 

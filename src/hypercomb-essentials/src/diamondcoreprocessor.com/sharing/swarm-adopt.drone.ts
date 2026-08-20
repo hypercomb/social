@@ -44,7 +44,6 @@ import {
 } from '../editor/tile-properties.js'
 import { recordVisit, dropVisitsWithin, visitRecordAt } from './visit-genome.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
-import { removeTilesAt } from '../commands/remove.queen.js'
 import { recordWithheldAtRoot } from './behavior-enablement.js'
 import { WEBSITE_SLOT } from '../commands/website-slot.js'
 import { extractPageRefSigs } from './decoration-closure.js'
@@ -215,7 +214,7 @@ export class SwarmAdoptDrone extends Drone {
   public override description =
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
-  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited', 'selection:painted']
+  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited', 'swarm:wand']
   protected override emits: string[] = ['adopt:started', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded']
 
   // Latest installer registry projection — cached for the Done-gated fold.
@@ -251,7 +250,7 @@ export class SwarmAdoptDrone extends Drone {
     //      works without ever having navigated into the tile.
     // Debounced off the peers-changed burst; the result is a sync-readable
     // set the overlay reads, never a commit.
-    this.onEffect('swarm:peers-changed', () => this.#scheduleDivergenceScan())
+    this.onEffect('swarm:peers-changed', () => { this.#scheduleDivergenceScan(); this.#hintWand() })
 
     // The answer is LOCATION-scoped. Leaving invalidates it immediately —
     // carrying it across would light adopt on a same-named tile somewhere
@@ -282,30 +281,37 @@ export class SwarmAdoptDrone extends Drone {
       dropVisitsWithin(target)
     })
 
-    // ── VISIT-DRIVEN ACQUISITION — the walk IS the adopt ───────────────
-    // There is no adopt button. SwarmDrone announces each real navigation
-    // into a PEER-offered tile; the handler folds that ONE tile — props
-    // straight from the (sanitized) wire visual, no closure pull, no
-    // network wait — and records the visit in the genome. One level per
-    // step: drilling deeper folds the next tile, siblings never entered
-    // are never folded ("painting a picture of only the pieces you need").
-    // Behaviors stay a separate explicit opt-in: a props fold carries NO
-    // bees/deps slots, so no code can enter this way; the features panel
-    // (and its code-consent/review gates) remains the one behaviors door.
-    // Tombstones are RESPECTED and never cleared here — delete is the
-    // unsubscribe, and a mere walk must not resurrect a deletion.
+    // ── THE WALK IS A LOOK, NOT A KEEP ─────────────────────────────────
+    // (Jaime's ruling, 2026-08-20 — this REPLACES visit-driven
+    // acquisition.) Walking into a peer's tile writes NOTHING. You are
+    // browsing somebody else's hive: every tile you pass renders as a
+    // witness (WITNESSED_BORDER), the drill keeps serving one page per
+    // level entered, and your own hive is exactly as it was when you set
+    // out. Nothing is permanent until you say so with the wand.
+    //
+    // The signal is still worth hearing: it names the entered tile in the
+    // debug ladder, and when the tile is one you ALREADY hold it refreshes
+    // that path's provenance stamp. It never MINTS a genome record — the
+    // genome means "I took this", and a walk takes nothing.
     this.onEffect<VisitPayload>('swarm:tile-visited', (p) => { void this.#onTileVisited(p) })
 
-    // ── CTRL+DRAG PAINT — the selection sweep's swarm overload ─────────
-    // In a zone, the ordinary ctrl+drag paint-select doubles as an
-    // adoption brush: sweeping a WITNESSED tile takes it (an explicit
-    // gesture, so it also clears a tombstone — the way back in after a
-    // deletion); sweeping one of your SWARM-ACQUIRED tiles gives it back
-    // (removal → tombstone, delete-is-the-unsubscribe as usual). Tiles
-    // native to your hive are untouchable here — the brush only ever
-    // moves swarm content in and out of the collection.
-    this.onEffect<{ label?: string; op?: string }>('selection:painted', (p) => {
-      void this.#onSelectionPainted(String(p?.label ?? '').trim(), p?.op === 'remove' ? 'remove' : 'add')
+    // ── THE WAND — ctrl + press over a witnessed tile takes it ─────────
+    // Hold ctrl (⌘ on a Mac) and press a tile: that ONE tile is yours.
+    // Drag on if you like and every witnessed tile the pointer crosses is
+    // taken too — the gesture is a wand, not a marquee. It takes the ITEM
+    // and never its children: what is inside a taken tile stays somebody
+    // else's until you walk in and wand it as well.
+    //
+    // SELECT IS SUPPRESSED FOR THE WHOLE GESTURE (SelectionInputDrone):
+    // in a swarm, ctrl+press already MEANS take-this, so the ordinary
+    // add-to-selection must not also fire and get in the way.
+    //
+    // The wand is explicit, so — unlike a walk — it CLEARS a tombstone:
+    // it is the way back in after a delete. Native tiles are untouchable
+    // (SelectionInputDrone never wands a tile that isn't external, and
+    // wandEligible demands a live peer offer at this location).
+    this.onEffect<{ label?: string }>('swarm:wand', (p) => {
+      void this.#onWand(String(p?.label ?? '').trim())
     })
 
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
@@ -499,7 +505,17 @@ export class SwarmAdoptDrone extends Drone {
   #scheduleVisitRetry = (p?: VisitPayload): void => {
     const attempt = Number(p?.retry ?? 0)
     if (attempt >= VISIT_RETRY_MAX) return
-    setTimeout(() => { void this.#onTileVisited({ ...(p ?? {}), retry: attempt + 1 }) }, VISIT_RETRY_DELAY_MS)
+    const name = String(p?.name ?? '').trim()
+    const parentSegments = Array.isArray(p?.parentSegments)
+      ? p!.parentSegments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+    const entry = p?.entry && typeof p.entry === 'object' ? p.entry : null
+    if (!name || !entry) return
+    // Re-enter the FOLD, never the visit signal: a visit keeps nothing now,
+    // so routing the retry back through #onTileVisited would silently drop
+    // the owed acquisition the wand (or a verb) asked for.
+    setTimeout(() => {
+      void this.#foldPageTile(parentSegments, name, entry, { ...(p ?? {}), retry: attempt + 1 })
+    }, VISIT_RETRY_DELAY_MS)
   }
 
   #onTileVisited = async (p?: VisitPayload): Promise<void> => {
@@ -511,15 +527,36 @@ export class SwarmAdoptDrone extends Drone {
     const entry = p?.entry && typeof p.entry === 'object' ? p.entry : null
     if (!name || segments.length === 0 || !entry) { this.#visitStage('bad-payload', { name }); return }
     if (segments[segments.length - 1] !== name) { this.#visitStage('path-mismatch', { name }); return }
-    await this.#foldPageTile(parentSegments, name, entry, p)
+
+    // A WALK KEEPS NOTHING. No commit, no genome, no receipt, no adopted
+    // root, no public mark — the wand is the only thing that takes a tile.
+    // The one write left is a provenance REFRESH on a path already in the
+    // genome (a tile you took earlier, re-entered): its record follows the
+    // publisher's current handle so divergence keeps baselining honestly.
+    // A path with no record stays recordless — minting one here would
+    // paint the collection rim green on tiles you never took.
+    if (visitRecordAt(segments) !== null && (await this.#isHeldHere(parentSegments, name))) {
+      const layerSig = String(entry['layerSig'] ?? '').trim().toLowerCase()
+      const pubkey = String(entry['peerPubkey'] ?? '').trim().toLowerCase()
+      if (SIG_RE.test(layerSig) && SIG_RE.test(pubkey)) {
+        const broker = this.#ioc()?.get?.(BROKER_KEY) as BrokerLike | undefined
+        const domain = String(broker?.getKnownDomains?.(layerSig)?.[0] ?? '').trim() || undefined
+        recordVisit({ segments, layerSig, pubkey, domain })
+      }
+      this.#visitStage('held', { name })
+      return
+    }
+    this.#visitStage('witnessed', { name })
   }
 
   /** THE one-level fold — the single acquisition primitive of the swarm
-   *  surface. Visits ride it per navigation; the programmatic verbs and
-   *  the pick-tiles pill ride it per picked tile. It acquires exactly ONE
-   *  tile of the current page — never a branch: deeper pages exist for
-   *  the participant only once they walk into them. Returns true when
-   *  the tile is held here after the call (landed now or already ours). */
+   *  surface. The WAND rides it per wanded tile; the programmatic verbs
+   *  and the pick-tiles pill ride it per picked tile. Walking rides it
+   *  no longer (a walk keeps nothing). It acquires exactly ONE tile of
+   *  the current page — never a branch, never the children: what is
+   *  inside a taken tile becomes the participant's only when they walk
+   *  in and take it there too. Returns true when the tile is held here
+   *  after the call (landed now or already ours). */
   #foldPageTile = async (
     parentSegments: string[],
     name: string,
@@ -658,7 +695,7 @@ export class SwarmAdoptDrone extends Drone {
     }
 
     // Acquired from the zone, visible to the zone: SwarmDrone marks the
-    // visited tile public (the same default a tile CREATED in a swarm gets
+    // taken tile public (the same default a tile CREATED in a swarm gets
     // via #autoPublishInSwarm) and republishes — it owns share semantics,
     // so the marking lives there, not here.
     EffectBus.emit('swarm:visit-folded', { segments, parentSegments, name })
@@ -666,41 +703,65 @@ export class SwarmAdoptDrone extends Drone {
     EffectBus.emit('fs:changed', { segments: parentSegments })
     const i18n = this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
     EffectBus.emit('activity:log', {
-      message: i18n?.t('swarm.visited', { cell: name }) ?? `"${name}" is yours now — visited tiles join your hive`,
+      message: i18n?.t('swarm.kept', { cell: name }) ?? `"${name}" is yours now — kept from the swarm`,
       icon: '●',
     })
     return true
   }
 
-  /** The ctrl+drag adoption brush (see the constructor comment). Every
-   *  guard the walk-fold has applies — plus paint-ON is an explicit
-   *  re-subscribe, so it clears a tombstone where a mere walk never does. */
-  #onSelectionPainted = async (label: string, op: 'add' | 'remove'): Promise<void> => {
-    if (!label) return
+  /** Is `label` something the wand can take right here? Synchronous, so
+   *  SelectionInputDrone can decide ON POINTERDOWN whether this press is a
+   *  wand (and therefore whether to suppress the ordinary select). Two
+   *  conditions: we are in a zone, and a live peer offers this name at the
+   *  current location. HELD-ness is the caller's half of the test — the
+   *  selection drone only ever wands a tile the renderer reported EXTERNAL
+   *  — which keeps the whole check off the async layer reads. */
+  public wandEligible = (label: string): boolean => {
+    const name = String(label ?? '').trim()
+    if (!name) return false
     let inZone = false
     try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
-    if (!inZone) return
+    if (!inZone) return false
+    return this.#peerEntryFor(name) !== null
+  }
+
+  /** THE WAND (see the constructor comment). One witnessed tile per touch,
+   *  the item only — never its children. Every guard the fold has applies;
+   *  the wand additionally CLEARS a tombstone, because it is an explicit
+   *  gesture and that is the way back in after a delete. Giving a tile back
+   *  stays what it always was: delete it (delete is the unsubscribe). */
+  #onWand = async (label: string): Promise<void> => {
+    if (!label) { this.#visitStage('wand-no-label'); return }
+    if (!this.wandEligible(label)) { this.#visitStage('wand-ineligible', { name: label }); return }
 
     const at = this.#currentSegments()
     const path = [...at, label]
+    if (await this.#isHeldHere(at, label)) { this.#visitStage('wand-held', { name: label }); return }
+    const entry = this.#peerEntryFor(label)
+    if (!entry) { this.#visitStage('wand-no-entry', { name: label }); return }
+    this.#visitStage('wand-folding', { name: label, at: [...path] })
+    clearAdoptTombstone(path)
+    await this.#foldPageTile(at, label, entry)
+  }
 
-    if (op === 'add') {
-      if (await this.#isHeldHere(at, label)) return
-      const entry = this.#peerEntryFor(label)
-      if (!entry) return
-      clearAdoptTombstone(path)   // painting it back on IS the way back in
-      await this.#foldPageTile(at, label, entry)
-      return
-    }
-
-    // op === 'remove' — give back ONLY what the swarm brought you.
-    if (!(await this.#isHeldHere(at, label))) return
-    if (visitRecordAt(path) === null && !isWithinAdoptedRoot(path)) return
-    try {
-      // The paint IS the confirmation; removal mints the tombstone via the
-      // ordinary cell:removed path, so it won't re-fold on the next walk.
-      await removeTilesAt(at, [label], {})
-    } catch { /* best-effort — the tile simply stays */ }
+  /** The wand has no chrome — nothing on screen says "hold ctrl". Say it
+   *  ONCE per session, the first time the participant is standing among
+   *  tiles they could take. (An activity line, not a tile: the hive gains
+   *  nothing from a hint.) */
+  #wandHinted = false
+  #hintWand = (): void => {
+    if (this.#wandHinted) return
+    let inZone = false
+    try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
+    if (!inZone) return
+    const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    if (!(swarm?.peerTilesAtCurrentSig?.().length)) return
+    this.#wandHinted = true
+    const i18n = this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+    EffectBus.emit('activity:log', {
+      message: i18n?.t('swarm.wand-hint') ?? 'hold Ctrl (⌘) and press a tile to keep it — walking only looks',
+      icon: '✦',
+    })
   }
 
   /** Resolve the witnessed wire entry for `label` at the current location

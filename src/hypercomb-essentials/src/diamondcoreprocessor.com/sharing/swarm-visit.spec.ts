@@ -1,19 +1,26 @@
-// swarm-visit.spec.ts — THE WALK IS THE ADOPT (visit-driven acquisition).
+// swarm-visit.spec.ts — THE WALK IS A LOOK, THE WAND IS THE KEEP.
 //
-// The rules this file guards, now that the adopt button is gone:
-//   1. Entering a peer-offered tile folds THAT ONE tile with the
-//      publisher's real props from the wire — never a husk, never the
-//      subtree (children fold only as they are themselves entered), and
-//      never the swarm metadata (index/layerSig/inviteSig stay out).
-//   2. A landed fold mints the records: visit genome, sync receipt
-//      (divergence baselines instead of re-lighting), adopted root at the
-//      drill's TOPMOST foreign tile.
-//   3. DELETE IS THE UNSUBSCRIBE: a tombstoned path never re-folds on a
-//      walk, and the walk never clears the stone.
-//   4. A held tile's visit is a no-op — visiting what is already yours
-//      writes nothing.
-//   5. LANDED-OR-NOTHING: a fold the committer refused mints no records.
-//   6. A rewound history cursor refuses the fold up front.
+// Jaime's ruling (2026-08-20) replaced visit-driven acquisition: walking
+// into somebody's tile no longer makes it yours. Taking is one deliberate
+// gesture — ctrl (⌘) + press over a witnessed tile — and it takes THAT
+// ITEM, never its children.
+//
+// The rules this file guards:
+//   1. A WALK KEEPS NOTHING: entering a peer-offered tile commits nothing
+//      and mints no record (no genome, no receipt, no adopted root).
+//   2. THE WAND takes that ONE tile with the publisher's real props from
+//      the wire — never a husk, never the subtree, never the swarm
+//      metadata (index/layerSig/inviteSig stay out) — and a landed take
+//      mints the records: visit genome, sync receipt, adopted root.
+//   3. The wand is EXPLICIT, so it CLEARS a tombstone — the way back in
+//      after a delete. (A walk, keeping nothing, can't resurrect one.)
+//   4. Outside a zone, or over a tile nobody offers here, the wand does
+//      nothing at all.
+//   5. LANDED-OR-NOTHING: a take the committer refused mints no records.
+//   6. A rewound history cursor refuses the take up front.
+//   7. Walking into a tile you ALREADY took REFRESHES its provenance;
+//      walking into a held tile you never took mints no record (the
+//      genome means "I took this", and the collection rim reads it).
 //
 // Real machinery runs (writeTilePropertiesAt's read-merge-commit,
 // resolveCurrentLayer, childLayerOf); only IoC leaves — history, store,
@@ -23,10 +30,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
-import { visitRecordAt, _resetVisitGenomeCache } from './visit-genome.js'
+import { visitRecordAt, recordVisit, _resetVisitGenomeCache } from './visit-genome.js'
 import { markAdoptTombstone, isAdoptTombstoned } from './adopted-roots.js'
 
-const GARDEN = 'a'.repeat(64)        // local layer sig once folded
+const GARDEN = 'a'.repeat(64)        // local layer sig once taken
 const PEER_GARDEN = '9'.repeat(64)   // the publisher's sealed branch handle
 const IMG = '3'.repeat(64)
 const PROPS_SIG = 'f'.repeat(64)
@@ -42,6 +49,8 @@ let committer: { commitSlotSet: ReturnType<typeof vi.fn>; update: ReturnType<typ
 let broker: { adopt: ReturnType<typeof vi.fn>; getKnownDomains: ReturnType<typeof vi.fn> }
 let cursor: { state: { rewound: boolean }; currentLayerSig?: string }
 let commitLands: boolean
+/** What the zone offers HERE — what the wand can reach. */
+let peerTiles: Record<string, unknown>[]
 
 const history = {
   sign: vi.fn(async (l: { explorerSegments?: () => readonly string[] }) => 'loc:' + (l.explorerSegments?.() ?? []).join('/')),
@@ -53,8 +62,8 @@ const history = {
 
 const iocRegistry = (): Record<string, unknown> => ({
   '@diamondcoreprocessor.com/SwarmDrone': {
-    peerTilesAtCurrentSig: () => [],
-    subscribedTiles: () => [],
+    peerTilesAtCurrentSig: () => peerTiles,
+    subscribedTiles: () => peerTiles,
     peerTilesAtSig: () => [],
     withheldByPeer: () => ['visual:website:page'],
   },
@@ -73,14 +82,26 @@ const iocRegistry = (): Record<string, unknown> => ({
 
 await import('./swarm-adopt.drone.js')
 
+const GARDEN_OFFER = {
+  name: 'garden',
+  peerPubkey: PK,
+  layerSig: PEER_GARDEN,
+  imageSig: IMG,
+  tags: ['flowers'],
+  hideText: true,
+  index: 4,            // swarm metadata — must NOT be taken
+  inviteSig: '2'.repeat(64),
+}
+
 /** Fresh world: I hold an EMPTY root; a peer offers `garden` there. */
 const freshWorld = () => {
   layers = new Map<string, Layer>([[GARDEN, { name: 'garden', children: [] }]])
   headByLoc = new Map<string, Layer>([['loc:', { name: 'root', children: [] }]])
   putBodies = []
+  peerTiles = [{ ...GARDEN_OFFER }]
   // The REAL cursor service exposes a position sig even at head — only
-  // state.rewound means "viewing the past". Gating a fold on the mere
-  // presence of currentLayerSig killed every visit fold in the live shell;
+  // state.rewound means "viewing the past". Gating a take on the mere
+  // presence of currentLayerSig killed every fold in the live shell;
   // this stub pins the honest shape so that regression stays caught.
   cursor = { state: { rewound: false }, currentLayerSig: 'c'.repeat(64) }
   commitLands = true
@@ -126,23 +147,21 @@ const freshWorld = () => {
   }
 }
 
+/** Walk into the peer's tile — the signal SwarmDrone emits per navigation. */
 const visitGarden = () => {
   EffectBus.emit('swarm:tile-visited', {
     segments: ['garden'],
     parentSegments: [],
     name: 'garden',
-    entry: {
-      name: 'garden',
-      peerPubkey: PK,
-      layerSig: PEER_GARDEN,
-      imageSig: IMG,
-      tags: ['flowers'],
-      hideText: true,
-      index: 4,            // swarm metadata — must NOT fold
-      inviteSig: '2'.repeat(64),
-    },
+    entry: { ...GARDEN_OFFER },
   })
 }
+
+/** Ctrl+press over the witnessed tile — what SelectionInputDrone emits. */
+const wandGarden = () => { EffectBus.emitTransient('swarm:wand', { label: 'garden' }) }
+
+/** Standing in a zone is the wand's first condition. */
+const inZone = () => { localStorage.setItem('hc:mesh-public', 'true') }
 
 const settle = async () => {
   for (let i = 0; i < 4; i++) { await Promise.resolve(); await new Promise(r => setTimeout(r, 0)) }
@@ -153,23 +172,70 @@ beforeEach(() => {
   _resetVisitGenomeCache()
 })
 
-describe('the walk is the adopt', () => {
+describe('the walk is a look', () => {
 
-  it('entering a peer-offered tile folds it with the publisher\'s props — never a husk, never swarm metadata', async () => {
+  it('entering a peer-offered tile keeps NOTHING — no commit, no records', async () => {
     freshWorld()
+    inZone()
+
     visitGarden()
     await settle()
 
-    // The fold MATERIALIZED the tile — parent link + child layer via
-    // importTree (the egg shape) — then wrote its properties slot.
+    expect(committer.importTree).not.toHaveBeenCalled()
+    expect(committer.commitSlotSet).not.toHaveBeenCalled()
+    expect(store.putResource).not.toHaveBeenCalled()
+    expect(visitRecordAt(['garden'])).toBeNull()
+    expect(localStorage.getItem('hc:synced-publisher-roots')).toBeNull()
+    expect(localStorage.getItem('hc:adopted-roots')).toBeNull()
+  })
+
+  it('re-entering a tile you TOOK refreshes its provenance', async () => {
+    freshWorld()
+    inZone()
+    headByLoc.set('loc:', { name: 'root', children: [GARDEN] })   // garden is mine
+    recordVisit({ segments: ['garden'], layerSig: '4'.repeat(64), pubkey: PK })
+
+    visitGarden()
+    await settle()
+
+    expect(committer.importTree).not.toHaveBeenCalled()
+    // The publisher's CURRENT handle is now the baseline.
+    expect(visitRecordAt(['garden'])!.layerSig).toBe(PEER_GARDEN)
+  })
+
+  it('a held tile you never took stays recordless — the rim is not green for a walk', async () => {
+    freshWorld()
+    inZone()
+    headByLoc.set('loc:', { name: 'root', children: [GARDEN] })   // mine, but authored here
+
+    visitGarden()
+    await settle()
+
+    expect(visitRecordAt(['garden'])).toBeNull()
+  })
+
+})
+
+describe('the wand is the keep', () => {
+
+  it('takes THAT ONE tile with the publisher\'s props — never a husk, never swarm metadata', async () => {
+    freshWorld()
+    inZone()
+
+    wandGarden()
+    await settle()
+
+    // The take MATERIALIZED the tile — parent link + child layer via
+    // importTree (the egg shape) — with its properties in the SAME commit.
     expect(committer.importTree).toHaveBeenCalled()
     const updates = committer.importTree.mock.calls[0][0] as { segments: string[]; layer: Layer }[]
-    expect(updates.some(u => u.segments.join('/') === 'garden' && u.layer.name === 'garden')).toBe(true)
+    const child = updates.find(u => u.segments.join('/') === 'garden')
+    expect(child?.layer.name).toBe('garden')
+    // THE ITEM, NOT ITS CHILDREN: what is inside stays the publisher's
+    // until the participant walks in and wands it there too.
+    expect(child?.layer.children).toEqual([])
     const rootUpdate = updates.find(u => u.segments.length === 0)
     expect(rootUpdate?.layer.children).toContain('garden')
-    // Props ride the SAME commit — the child layer carries the properties
-    // slot, so there is never an imageless frame for theming to fill.
-    const child = updates.find(u => u.segments.join('/') === 'garden')
     expect(child?.layer.properties).toEqual([PROPS_SIG])
     expect(committer.commitSlotSet).not.toHaveBeenCalled()
 
@@ -178,13 +244,13 @@ describe('the walk is the adopt', () => {
     expect(body['imageSig']).toBe(IMG)
     expect(body['tags']).toEqual(['flowers'])
     expect(body['hideText']).toBe(true)
-    // Swarm metadata stays OUT of the folded 0000.
+    // Swarm metadata stays OUT of the taken 0000.
     expect(body['index']).toBeUndefined()
     expect(body['layerSig']).toBeUndefined()
     expect(body['inviteSig']).toBeUndefined()
     expect(body['peerPubkey']).toBeUndefined()
 
-    // Records of a LANDED fold: genome, receipt, adopted root.
+    // Records of a LANDED take: genome, receipt, adopted root.
     const rec = visitRecordAt(['garden'])
     expect(rec).toBeTruthy()
     expect(rec!.layerSig).toBe(PEER_GARDEN)
@@ -198,35 +264,40 @@ describe('the walk is the adopt', () => {
     expect(Object.keys(withheld).length).toBeGreaterThan(0)
   })
 
-  it('a tombstoned path never re-folds on a walk, and the walk never clears the stone', async () => {
+  it('CLEARS a tombstone — an explicit gesture is the way back in', async () => {
     freshWorld()
+    inZone()
     markAdoptTombstone(['garden'])
 
-    visitGarden()
+    wandGarden()
     await settle()
 
-    expect(committer.importTree).not.toHaveBeenCalled()
-    expect(store.putResource).not.toHaveBeenCalled()
-    expect(visitRecordAt(['garden'])).toBeNull()
-    expect(isAdoptTombstoned(['garden'])).toBe(true)   // still stoned
+    expect(committer.importTree).toHaveBeenCalled()
+    expect(isAdoptTombstoned(['garden'])).toBe(false)
+    expect(visitRecordAt(['garden'])).toBeTruthy()
   })
 
-  it('a held tile\'s visit writes nothing — visiting what is yours is free', async () => {
-    freshWorld()
-    headByLoc.set('loc:', { name: 'root', children: [GARDEN] })  // garden already mine
-
-    visitGarden()
+  it('does nothing outside a zone, and nothing over a name nobody offers here', async () => {
+    freshWorld()                       // no zone
+    wandGarden()
     await settle()
-
     expect(committer.importTree).not.toHaveBeenCalled()
-    expect(store.putResource).not.toHaveBeenCalled()
+
+    freshWorld()
+    inZone()
+    peerTiles = []                     // the offer is gone
+    wandGarden()
+    await settle()
+    expect(committer.importTree).not.toHaveBeenCalled()
+    expect(visitRecordAt(['garden'])).toBeNull()
   })
 
   it('LANDED-OR-NOTHING: a refused commit mints no records', async () => {
     freshWorld()
+    inZone()
     commitLands = false   // committer refuses (preview active / transient)
 
-    visitGarden()
+    wandGarden()
     await settle()
 
     // The props blob is content-addressed and inert — a refused commit
@@ -236,11 +307,12 @@ describe('the walk is the adopt', () => {
     expect(localStorage.getItem('hc:adopted-roots')).toBeNull()
   })
 
-  it('a rewound history cursor refuses the fold up front', async () => {
+  it('a rewound history cursor refuses the take up front', async () => {
     freshWorld()
+    inZone()
     cursor.state.rewound = true   // viewing the past
 
-    visitGarden()
+    wandGarden()
     await settle()
 
     expect(committer.importTree).not.toHaveBeenCalled()
