@@ -47,7 +47,7 @@ use std::sync::Mutex;
 use hypercomb_protocol::{bag_addr, LayerSig, Marker, PoolRegistry, Sig};
 use hypercomb_store::{
     gc,
-    interchange::{export, restore, Transfer},
+    interchange::{export, restore, verify, Transfer, Verification},
     Collected, ContentStore, RedbStore,
 };
 use serde::{Deserialize, Serialize};
@@ -429,8 +429,22 @@ impl Host {
 
     /// Export this hive to a folder in the interchange form. Writes into the
     /// target; never deletes.
+    ///
+    /// This — not [`Host::export_root`] — is the backup. `export_root` is the
+    /// drain: one root's closure, pools left behind, which is what you want
+    /// when handing a branch to someone else and exactly what you do not want
+    /// when the question is "can I get my hive back". Everything the hive holds
+    /// travels here: unreachable roots, every pool of meaning, every revision.
     pub fn export(&self, target: impl AsRef<Path>) -> Result<Transfer> {
         Ok(export(&self.store, target)?)
+    }
+
+    /// Read a backup folder back and confirm it holds this hive whole.
+    ///
+    /// Costs one pass over the folder. Run it at the end of a backup, so the
+    /// answer is known before it is needed.
+    pub fn verify_backup(&self, target: impl AsRef<Path>) -> Result<Verification> {
+        Ok(verify(&self.store, target)?)
     }
 }
 
@@ -572,6 +586,66 @@ mod tests {
 
         assert_eq!(host.pool_get("bees", "member").unwrap().as_deref(), Some(&b"pool bytes"[..]));
         assert!(host.head(&["bees".to_string()]).unwrap().is_some());
+    }
+
+    #[test]
+    fn the_backup_the_menu_takes_is_verifiable_and_restores_whole() {
+        // Exactly the sequence "Back Up Hive…" runs, and then the sequence
+        // "Restore Into Hive…" runs on a machine where the first hive is gone.
+        // The menu cannot be unit-tested; this is the path underneath it.
+        let (_a, source) = host();
+        source.put(b"a picture").unwrap();
+        source
+            .append(&["place".to_string()], &Layer::empty("place").sig().to_hex())
+            .unwrap();
+        source.put(Layer::empty("place").canonical_json().as_bytes()).unwrap();
+        // A root NO WALK BY NAME can reach, and pools holding the things a
+        // closure export leaves at home. Both used to be lost silently.
+        source
+            .append(&["orphaned".to_string()], &Layer::empty("orphaned").sig().to_hex())
+            .unwrap();
+        source.pool_put("threads", "conversation", b"what was said").unwrap();
+        source.pool_put("clipboard", "entry", b"clip").unwrap();
+
+        let folder = TempDir::new().unwrap();
+        let moved = source.export(folder.path()).unwrap();
+        assert!(moved.changed());
+        assert!(moved.pool_members > 0, "pools belong in a backup");
+
+        let checked = source.verify_backup(folder.path()).unwrap();
+        assert!(checked.complete(), "the backup must verify before it is trusted: {checked:?}");
+
+        let (_b, target) = host();
+        target.restore(folder.path()).unwrap();
+
+        assert_eq!(
+            target.pool_get("threads", "conversation").unwrap().as_deref(),
+            Some(&b"what was said"[..]),
+            "conversations come back"
+        );
+        assert!(
+            target.head(&["orphaned".to_string()]).unwrap().is_some(),
+            "a root nothing links to comes back"
+        );
+        // And the restored hive is itself backed up by that same folder.
+        assert!(target.verify_backup(folder.path()).unwrap().complete());
+    }
+
+    #[test]
+    fn the_root_closure_is_not_a_backup_and_verification_says_so() {
+        let (_a, source) = host();
+        source
+            .append(&["place".to_string()], &Layer::empty("place").sig().to_hex())
+            .unwrap();
+        source.put(Layer::empty("place").canonical_json().as_bytes()).unwrap();
+        source.pool_put("threads", "conversation", b"what was said").unwrap();
+
+        let folder = TempDir::new().unwrap();
+        source.export_root(&[], folder.path()).unwrap();
+
+        let checked = source.verify_backup(folder.path()).unwrap();
+        assert!(!checked.complete(), "the closure drain leaves pools behind — by design");
+        assert!(checked.pool_members_missing > 0);
     }
 
     #[test]

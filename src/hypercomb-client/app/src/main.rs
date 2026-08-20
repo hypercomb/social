@@ -19,6 +19,9 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 #![forbid(unsafe_code)]
 
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use hypercomb_host::{Head, Host, HostError};
 use tauri::{Manager, State};
 
@@ -366,6 +369,147 @@ const RENDERER_DIAGNOSTICS: &str = r#"
 })();
 "#;
 
+// ---------------------------------------------------------------------------
+// backup — the folder this hive can be rebuilt from
+//
+// Three things separate a backup from an export, and all three live here:
+// something has to REMEMBER where it goes, something has to say WHEN it last
+// happened, and only one of them may run at a time.
+// ---------------------------------------------------------------------------
+
+/// One backup or restore at a time, process-wide.
+///
+/// Two exports into one folder would each write temp files for the same paths
+/// and each report a count that is not the whole story; a restore racing an
+/// export would read a folder being written underneath it. The menu can be
+/// clicked twice before the first dialog appears, and the launch backup starts
+/// on its own — so the guard is not defensive, it is reachable.
+static HIVE_TRANSFER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Clears [`HIVE_TRANSFER_RUNNING`] however the transfer ends — a cancelled
+/// picker and an early `return` included. A flag released only on the happy
+/// path is a flag that eventually stays set and disables the menu for the rest
+/// of the session.
+struct BusyGuard;
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        HIVE_TRANSFER_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Where the remembered backup folder is written down.
+///
+/// Beside the hive, not inside it. The store holds the hive's content; this is
+/// a fact about THIS MACHINE, and it must survive a restore of someone else's
+/// backup without travelling in one. Beside the hive also means a named
+/// instance remembers its own folder, which is the only sane answer when two
+/// instances back up to two places.
+fn backup_target_path(hive_dir: &Path) -> PathBuf {
+    hive_dir.join("backup-target.txt")
+}
+
+/// The folder this hive backs itself up to, if one has ever been chosen.
+fn read_backup_target(hive_dir: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(backup_target_path(hive_dir)).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+fn write_backup_target(hive_dir: &Path, target: &Path) {
+    if let Err(e) = std::fs::write(backup_target_path(hive_dir), target.to_string_lossy().as_bytes()) {
+        eprintln!("[hypercomb] could not remember the backup folder: {e}");
+    }
+}
+
+fn forget_backup_target(hive_dir: &Path) {
+    let _ = std::fs::remove_file(backup_target_path(hive_dir));
+}
+
+/// Is `path` the same place as `root`, or somewhere beneath it?
+///
+/// Canonicalized first, so a junction, a `..` and a short 8.3 name all answer
+/// honestly. A path that cannot be canonicalized (it does not exist yet) is
+/// compared as given — the wrong answer there is "not inside", which is the
+/// safe direction: it declines to block a folder it cannot prove is a problem.
+fn is_inside(path: &Path, root: &Path) -> bool {
+    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    real(path).starts_with(real(root))
+}
+
+/// Leave a note in the folder saying what it is and when it was last written.
+///
+/// `restore` ignores every name that is not signature-shaped, so this is inert
+/// to the format. It exists for the person who opens the folder a year from now
+/// and finds forty thousand hex names with no other clue — and for the question
+/// that actually matters in a recovery, which is not "is there a backup" but
+/// "how old is it, and did it verify".
+fn write_backup_receipt(
+    target: &Path,
+    instance: &str,
+    moved: &hypercomb_store::interchange::Transfer,
+    checked: Option<&hypercomb_store::interchange::Verification>,
+) {
+    let receipt = serde_json::json!({
+        "what": "A Hypercomb hive in interchange form. Restore it with Hive ▸ Restore Into Hive… \
+                 Content is named by the SHA-256 of its own bytes; directories are lineage sigbags \
+                 and pools of meaning. Nothing here is ever deleted by a backup.",
+        "format": "hypercomb-interchange/1",
+        "written": iso_utc_now(),
+        "instance": instance,
+        "app_version": env!("CARGO_PKG_VERSION"),
+        "last_transfer": moved,
+        "verified": checked.map(|v| v.complete()),
+        "verification": checked,
+    });
+    let path = target.join("hypercomb-backup.json");
+    match serde_json::to_vec_pretty(&receipt) {
+        Ok(bytes) => {
+            if let Err(e) = std::fs::write(&path, bytes) {
+                eprintln!("[hypercomb] could not write {}: {e}", path.display());
+            }
+        }
+        Err(e) => eprintln!("[hypercomb] could not build the backup receipt: {e}"),
+    }
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ` from the system clock.
+///
+/// Hinnant's civil-from-days, exact for every date the epoch can express. A
+/// date library for one timestamp in one file would be a poor trade: this is
+/// twenty lines, has no version, and cannot break.
+fn iso_utc_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (days, time) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+
+    // Shift the epoch to 0000-03-01 so leap day lands at the END of the cycle
+    // and every month has a fixed length in the sequence.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_position = (5 * day_of_year + 2) / 153;
+
+    let day = day_of_year - (153 * month_position + 2) / 5 + 1;
+    let month = if month_position < 10 { month_position + 3 } else { month_position - 9 };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        time / 3_600,
+        (time % 3_600) / 60,
+        time % 60
+    )
+}
+
 /// The instance name from `--instance <name>`, sanitized to [a-z0-9-] so it
 /// is always a safe directory suffix. Absent flag = "default". Each named
 /// instance is a fully separate client install (own hive, own identity) —
@@ -444,15 +588,40 @@ fn main() {
             // File operations live in a NATIVE menu with NATIVE pickers, on
             // purpose: the renderer never supplies a filesystem path (see the
             // module docs — that rule is what keeps adopted content from ever
-            // reaching the disk). Backup is the root-scoped closure drain;
-            // restore is the generalized union (exists → skip, bags merge,
+            // reaching the disk).
+            //
+            // Backup is the FULL-STORE export, not the root closure. That is
+            // the whole difference between an interchange form and a backup:
+            // `export_root` walks one root by NAME and deliberately leaves
+            // pools behind, so a hive backed up that way came back without its
+            // threads, its clipboard, its hidden marks, its collections and
+            // its behaviour roster — and without any root the walk could not
+            // reach by name. Everything the store holds travels here.
+            //
+            // Restore is the generalized union (exists → skip, bags merge,
             // idempotent), so restoring a backup twice or restoring another
             // hive's backup over this one is always safe.
             {
                 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+                let remembered = read_backup_target(&dir);
+
                 let backup = MenuItemBuilder::with_id("hive-backup", "Back Up Hive…").build(app)?;
+                let backup_again = MenuItemBuilder::with_id("hive-backup-again", "Back Up Again")
+                    .enabled(remembered.is_some())
+                    .build(app)?;
                 let restore = MenuItemBuilder::with_id("hive-restore", "Restore Into Hive…").build(app)?;
-                let hive = SubmenuBuilder::new(app, "Hive").item(&backup).item(&restore).build()?;
+                let forget = MenuItemBuilder::with_id("hive-forget-backup", "Forget Backup Folder")
+                    .enabled(remembered.is_some())
+                    .build(app)?;
+                let hive = SubmenuBuilder::new(app, "Hive")
+                    .item(&backup)
+                    .item(&backup_again)
+                    .separator()
+                    .item(&restore)
+                    .separator()
+                    .item(&forget)
+                    .build()?;
 
                 // On macOS the menu bar is the APPLICATION's, not the window's,
                 // and the standard submenus carry key equivalents the system
@@ -472,39 +641,259 @@ fn main() {
                 };
                 app.set_menu(menu)?;
 
+                // ── The backup that happens without being asked ────────────
+                //
+                // A menu item is not a backup strategy; it is a thing you
+                // remember to click until the day it matters. Once a folder has
+                // been chosen ONCE, every launch tops it up. The export is
+                // skip-if-exists, so a second run writes only what is new and
+                // costs a stat per signature — and because the target is never
+                // cleared, the folder is a growing archive rather than a
+                // rolling window: content that leaves the hive stays in it.
+                //
+                // Silent by design. It reports to the launch log; a modal on
+                // startup would only teach the user to dismiss backups.
+                if let Some(target) = remembered.clone() {
+                    let handle = app.handle().clone();
+                    let launch_instance = instance.clone();
+                    std::thread::spawn(move || {
+                        if !target.is_dir() {
+                            eprintln!(
+                                "[hypercomb] backup folder {} is not reachable — skipping launch backup",
+                                target.display()
+                            );
+                            return;
+                        }
+                        if HIVE_TRANSFER_RUNNING.swap(true, Ordering::SeqCst) {
+                            return;
+                        }
+                        let _busy = BusyGuard;
+                        match handle.state::<Host>().export(&target) {
+                            Ok(moved) => {
+                                eprintln!(
+                                    "[hypercomb] launch backup -> {}: {} new content, {} new markers, {} new pool members",
+                                    target.display(),
+                                    moved.content,
+                                    moved.markers,
+                                    moved.pool_members
+                                );
+                                // Not verified — a full read of the folder on
+                                // every launch would be a tax on a machine that
+                                // may never need it. The receipt still lands, so
+                                // "how old is my backup" has an answer without
+                                // one.
+                                write_backup_receipt(&target, &launch_instance, &moved, None);
+                            }
+                            Err(e) => eprintln!("[hypercomb] launch backup failed: {e}"),
+                        }
+                    });
+                }
+
+                let hive_dir = dir.clone();
+                let instance_label = instance.clone();
                 app.on_menu_event(move |app, event| {
                     let id = event.id().as_ref().to_string();
-                    if id != "hive-backup" && id != "hive-restore" {
+                    if !matches!(
+                        id.as_str(),
+                        "hive-backup" | "hive-backup-again" | "hive-restore" | "hive-forget-backup"
+                    ) {
                         return;
                     }
                     let app = app.clone();
+                    let hive_dir = hive_dir.clone();
+                    let instance_label = instance_label.clone();
+                    let backup_again = backup_again.clone();
+                    let forget = forget.clone();
                     // Off the main thread: the folder picker blocks, and the
                     // walk over a large hive is real work.
                     std::thread::spawn(move || {
                         use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-                        let Some(folder) = app.dialog().file().blocking_pick_folder() else {
+
+                        if id == "hive-forget-backup" {
+                            forget_backup_target(&hive_dir);
+                            let _ = backup_again.set_enabled(false);
+                            let _ = forget.set_enabled(false);
+                            app.dialog()
+                                .message(
+                                    "This hive will stop backing itself up on launch.\n\n\
+                                     The folder and everything already in it is untouched.",
+                                )
+                                .title("Backup Folder Forgotten")
+                                .blocking_show();
+                            return;
+                        }
+
+                        // Two transfers at once would walk the same paths with
+                        // two sets of temp files and report two half-truths.
+                        if HIVE_TRANSFER_RUNNING.swap(true, Ordering::SeqCst) {
+                            app.dialog()
+                                .message("A backup or restore is already running.\n\nWait for it to finish, then try again.")
+                                .kind(MessageDialogKind::Warning)
+                                .title("Hive")
+                                .blocking_show();
+                            return;
+                        }
+                        let _busy = BusyGuard;
+
+                        // "Back Up Again" reuses the remembered folder and asks
+                        // nothing; everything else opens the picker.
+                        let path = if id == "hive-backup-again" {
+                            read_backup_target(&hive_dir)
+                        } else {
+                            app.dialog()
+                                .file()
+                                .blocking_pick_folder()
+                                .and_then(|folder| folder.into_path().ok())
+                        };
+                        let Some(path) = path else {
                             return; // user cancelled — not an event
                         };
-                        let Ok(path) = folder.into_path() else { return };
+
+                        // A backup folder inside the hive folder is a hive that
+                        // backs up its own backup: every launch copies what the
+                        // last launch wrote, the store's own directory fills
+                        // with tens of thousands of hex names, and the copy dies
+                        // with the thing it was insurance against. The picker
+                        // will happily let you do it, so this will not.
+                        if id != "hive-restore" && is_inside(&path, &hive_dir) {
+                            app.dialog()
+                                .message(format!(
+                                    "That folder is inside the hive itself ({}).\n\n\
+                                     A backup has to live somewhere the hive does not — another drive, \
+                                     another machine, a synced folder. Pick one outside it.",
+                                    hive_dir.display()
+                                ))
+                                .kind(MessageDialogKind::Warning)
+                                .title("Backup")
+                                .blocking_show();
+                            return;
+                        }
+
                         let host = app.state::<Host>();
 
-                        let (title, outcome) = if id == "hive-backup" {
-                            ("Backup", host.export_root(&[], &path))
-                        } else {
-                            ("Restore", host.restore(&path))
-                        };
+                        if id == "hive-restore" {
+                            let (kind, message, changed) = match host.restore(&path) {
+                                Ok(moved) => {
+                                    let mut text = format!(
+                                        "Restored from {}\n\n\
+                                         {} content items ({} already present)\n\
+                                         {} history markers ({} already present)\n\
+                                         {} pool members ({} already present)",
+                                        path.display(),
+                                        moved.content,
+                                        moved.content_skipped,
+                                        moved.markers,
+                                        moved.markers_skipped,
+                                        moved.pool_members,
+                                        moved.pool_members_skipped,
+                                    );
+                                    if moved.markers_skipped > 0 {
+                                        text.push_str(&format!(
+                                            "\n\n{} markers were already at those positions and were left alone — \
+                                             this hive has its own history there.",
+                                            moved.markers_skipped
+                                        ));
+                                    }
+                                    if moved.content_corrupt > 0 {
+                                        text.push_str(&format!(
+                                            "\n\nWARNING: {} files did not match their own signature and were REFUSED. \
+                                             That folder is damaged; whatever those files held is still missing.",
+                                            moved.content_corrupt
+                                        ));
+                                    }
+                                    let changed = moved.changed();
+                                    if changed {
+                                        text.push_str("\n\nThe hive will reload so you can see it.");
+                                    }
+                                    let kind = if moved.content_corrupt > 0 {
+                                        MessageDialogKind::Warning
+                                    } else {
+                                        MessageDialogKind::Info
+                                    };
+                                    (kind, text, changed)
+                                }
+                                Err(e) => (MessageDialogKind::Error, format!("Restore failed: {e}"), false),
+                            };
+                            app.dialog().message(message).kind(kind).title("Restore").blocking_show();
+                            // A restore that changes nothing on screen reads as
+                            // a restore that did not happen. The running shell
+                            // holds the pre-restore head in memory and would go
+                            // on painting it until the next launch.
+                            if changed {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.reload();
+                                }
+                            }
+                            return;
+                        }
 
-                        let (kind, message) = match outcome {
-                            Ok(moved) => (
-                                MessageDialogKind::Info,
-                                format!(
-                                    "{title} complete.\n\n{} content items ({} already present)\n{} history markers ({} already present)",
-                                    moved.content, moved.content_skipped, moved.markers, moved.markers_skipped,
-                                ),
-                            ),
-                            Err(e) => (MessageDialogKind::Error, format!("{title} failed: {e}")),
+                        // ── Backup ────────────────────────────────────────
+                        let (kind, message) = match host.export(&path) {
+                            Ok(moved) => {
+                                let checked = host.verify_backup(&path);
+                                write_backup_target(&hive_dir, &path);
+                                let _ = backup_again.set_enabled(true);
+                                let _ = forget.set_enabled(true);
+
+                                let mut text = format!(
+                                    "Backed up to {}\n\n\
+                                     {} content items ({} already there)\n\
+                                     {} history markers ({} already there)\n\
+                                     {} pool members ({} already there)",
+                                    path.display(),
+                                    moved.content,
+                                    moved.content_skipped,
+                                    moved.markers,
+                                    moved.markers_skipped,
+                                    moved.pool_members,
+                                    moved.pool_members_skipped,
+                                );
+
+                                let kind = match &checked {
+                                    Ok(found) if found.complete() => {
+                                        text.push_str(&format!(
+                                            "\n\nVerified: all {} content items, {} markers and {} pool members \
+                                             are in that folder and hash clean.",
+                                            found.content, found.markers, found.pool_members
+                                        ));
+                                        if found.markers_differ > 0 {
+                                            text.push_str(&format!(
+                                                "\n\n{} markers in the folder hold different bytes at the same \
+                                                 position — another hive was backed up here too. Yours are safe; \
+                                                 restoring this folder into an empty hive would give you theirs.",
+                                                found.markers_differ
+                                            ));
+                                        }
+                                        MessageDialogKind::Info
+                                    }
+                                    Ok(found) => {
+                                        text.push_str(&format!(
+                                            "\n\nVERIFY FAILED — this folder cannot restore this hive on its own:\n\
+                                             {} content items missing, {} corrupt\n\
+                                             {} markers missing\n\
+                                             {} pool members missing\n\n\
+                                             Check the drive has room and is not syncing mid-write, then back up \
+                                             again — the export skips what is already there, so a second run is \
+                                             cheap.",
+                                            found.content_missing,
+                                            found.content_corrupt,
+                                            found.markers_missing,
+                                            found.pool_members_missing,
+                                        ));
+                                        MessageDialogKind::Warning
+                                    }
+                                    Err(e) => {
+                                        text.push_str(&format!("\n\nCould not verify the folder: {e}"));
+                                        MessageDialogKind::Warning
+                                    }
+                                };
+
+                                write_backup_receipt(&path, &instance_label, &moved, checked.as_ref().ok());
+                                (kind, text)
+                            }
+                            Err(e) => (MessageDialogKind::Error, format!("Backup failed: {e}")),
                         };
-                        app.dialog().message(message).kind(kind).title(title).show(|_| {});
+                        app.dialog().message(message).kind(kind).title("Backup").blocking_show();
                     });
                 });
             }

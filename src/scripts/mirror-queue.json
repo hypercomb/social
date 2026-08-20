@@ -956,6 +956,15 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "native-hive-backup",
+      "title": "Mirror the native Windows/macOS hive backup — full-store export, self-verification, remembered folder",
+      "run": null,
+      "note": "Behaviour shipped in hypercomb-client: Hive menu backup switched from export_root (root closure, no pools) to the full-store export; new interchange::verify reads the folder back and hash-checks content from disk; restore refuses files that do not hash to their own name, tolerates the parent folder, and reloads the window when it changed; writes are atomic via .hcpart+rename; the folder is remembered in <hive dir>/backup-target.txt and topped up on every launch with a hypercomb-backup.json receipt. Mirror as a collection under behaviors/structure alongside the existing backup-choice: one tile per source resource — crates/store/src/interchange.rs, crates/host/src/lib.rs (verify_backup), app/src/main.rs (Hive menu + launch backup), crates/store/tests/store.rs, documentation/native-client.md. Pheromones: mark each tile part, mark the collection for structure/backup. Notes must carry WHY the closure export was not a backup.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 use hypercomb_protocol::{bag_addr, Layer, Marker, PoolAddr, PoolRegistry};
 use hypercomb_store::{
-    interchange::{export, restore},
+    interchange::{export, export_root, restore, verify},
     ContentStore, RedbStore, BLOB_THRESHOLD,
 };
 use tempfile::TempDir;
@@ -424,7 +424,6 @@ fn a_pool_address_is_not_treated_as_a_bag_on_restore() {
 
 #[test]
 fn export_root_carries_the_closure_and_nothing_else() {
-    use hypercomb_store::interchange::export_root;
     let (_dir_a, source) = store();
 
     // The subtree to back up: home -> child (with a deep image), plus the
@@ -468,4 +467,142 @@ fn export_root_carries_the_closure_and_nothing_else() {
     // One item at a time, skip-if-exists: a second run moves nothing.
     let again = export_root(&source, &["home".to_string()], folder.path()).unwrap();
     assert!(!again.changed(), "root export is idempotent");
+}
+
+// ---------------------------------------------------------------------------
+// a backup you can trust
+//
+// The round trip above proves a backup CAN be restored. These prove the two
+// things that decide whether it can be trusted when it matters: that damage is
+// refused rather than imported, and that the folder is checked rather than
+// assumed.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_truncated_backup_file_is_refused_not_imported_under_another_name() {
+    let (_dir_a, source) = store();
+    let sig = source.put(b"the bytes that matter").unwrap();
+
+    let folder = TempDir::new().unwrap();
+    export(&source, folder.path()).unwrap();
+
+    // The destination drive lost half the file — the exact failure a backup is
+    // supposed to survive being noticed.
+    std::fs::write(folder.path().join(sig.to_hex()), b"the bytes that").unwrap();
+
+    let (_dir_b, target) = store();
+    let moved = restore(&target, folder.path()).unwrap();
+
+    assert_eq!(moved.content_corrupt, 1, "the mismatch must be counted");
+    assert_eq!(moved.content, 0, "and nothing imported");
+    assert!(!target.has(sig).unwrap(), "the signature is still missing — honestly");
+    assert_eq!(
+        target.signatures().unwrap().len(),
+        0,
+        "the truncated bytes must NOT land under a signature of their own"
+    );
+}
+
+#[test]
+fn verify_confirms_a_backup_it_just_wrote() {
+    let (_dir, source) = store();
+    populate(&source);
+
+    let folder = TempDir::new().unwrap();
+    export(&source, folder.path()).unwrap();
+
+    let found = verify(&source, folder.path()).unwrap();
+    assert!(found.complete(), "a fresh export must verify: {found:?}");
+    assert_eq!(found.faults(), 0);
+    assert_eq!(found.content, source.signatures().unwrap().len());
+    assert!(found.markers > 0 && found.pool_members > 0, "pools and history are backed up too");
+}
+
+#[test]
+fn verify_catches_what_a_backup_lost() {
+    let (_dir, source) = store();
+    populate(&source);
+    let vanished = source.put(b"deleted from the backup by something else").unwrap();
+    let damaged = source.put(b"rotted on the destination drive").unwrap();
+
+    let folder = TempDir::new().unwrap();
+    export(&source, folder.path()).unwrap();
+    std::fs::remove_file(folder.path().join(vanished.to_hex())).unwrap();
+    std::fs::write(folder.path().join(damaged.to_hex()), b"not that any more").unwrap();
+
+    let found = verify(&source, folder.path()).unwrap();
+    assert!(!found.complete(), "a backup missing content is not complete");
+    assert_eq!(found.content_missing, 1);
+    assert_eq!(found.content_corrupt, 1);
+}
+
+#[test]
+fn verify_notices_a_pool_the_backup_never_received() {
+    let (_dir, source) = store();
+    populate(&source);
+
+    let folder = TempDir::new().unwrap();
+    // The root-closure export — the one that used to be wired to the Back Up
+    // menu — leaves every pool behind. Verification is what turns that from a
+    // silent loss into a refusal.
+    export_root(&source, &[], folder.path()).unwrap();
+
+    let found = verify(&source, folder.path()).unwrap();
+    assert!(!found.complete(), "a closure export is not a whole-hive backup");
+    assert!(found.pool_members_missing > 0, "the pools are what it left behind");
+}
+
+#[test]
+fn restore_finds_the_hive_one_folder_down() {
+    let (_dir_a, source) = store();
+    populate(&source);
+
+    let parent = TempDir::new().unwrap();
+    let nested = parent.path().join("hypercomb-hive");
+    export(&source, &nested).unwrap();
+
+    // The picker landed on the parent, which is what a picker does.
+    let (_dir_b, target) = store();
+    let moved = restore(&target, parent.path()).unwrap();
+    assert!(moved.changed(), "restoring the parent must find the hive inside it");
+
+    let mut before = source.signatures().unwrap();
+    let mut after = target.signatures().unwrap();
+    before.sort();
+    after.sort();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn two_candidate_folders_are_an_ambiguity_not_a_guess() {
+    let (_dir_a, source) = store();
+    populate(&source);
+
+    let parent = TempDir::new().unwrap();
+    export(&source, parent.path().join("monday")).unwrap();
+    export(&source, parent.path().join("tuesday")).unwrap();
+
+    let (_dir_b, target) = store();
+    let moved = restore(&target, parent.path()).unwrap();
+    assert!(!moved.changed(), "two hives below: restore neither rather than pick one");
+}
+
+#[test]
+fn an_unfinished_write_is_not_a_pool_member() {
+    let (_dir_a, source) = store();
+    let mut registry = PoolRegistry::new();
+    source.pool_put(registry.address("clipboard"), "entry", b"clip").unwrap();
+
+    let folder = TempDir::new().unwrap();
+    export(&source, folder.path()).unwrap();
+
+    // What an export killed mid-rename leaves behind.
+    let pool_dir = folder.path().join(registry.address("clipboard").to_hex());
+    std::fs::write(pool_dir.join("entry.hcpart"), b"half of something").unwrap();
+
+    let (_dir_b, target) = store();
+    restore(&target, folder.path()).unwrap();
+
+    let members = target.pool_list(registry.address("clipboard")).unwrap();
+    assert_eq!(members.len(), 1, "the litter must not become a member: {members:?}");
 }

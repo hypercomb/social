@@ -58,6 +58,11 @@ pub struct Transfer {
     /// Pool members already present with identical bytes, and therefore
     /// skipped.
     pub pool_members_skipped: usize,
+    /// Content files whose bytes did NOT hash to their own filename, and were
+    /// therefore refused rather than imported. See [`restore`] for why this
+    /// count exists at all.
+    #[serde(default)]
+    pub content_corrupt: usize,
 }
 
 impl Transfer {
@@ -82,8 +87,52 @@ fn as_sig(name: &str) -> Option<Sig> {
 /// Unrecognized files and directories are ignored rather than treated as
 /// errors — a hive folder may reasonably contain a README, and refusing to
 /// restore because of one would be worse than skipping it.
+///
+/// # Picking the wrong folder is not a failure
+///
+/// The interchange form is a folder FULL of hex names, so it is routinely kept
+/// one level down (`Backups\hypercomb`) and the picker lands on the parent.
+/// A source with no interchange entries of its own, holding exactly one
+/// subdirectory that has them, restores from that subdirectory. One level, and
+/// only when there is no ambiguity about which folder was meant — two
+/// candidates restore nothing rather than guess.
 pub fn restore(store: &impl ContentStore, source: impl AsRef<Path>) -> Result<Transfer> {
     let source = source.as_ref();
+    if !holds_interchange_entries(source) {
+        if let Some(nested) = sole_interchange_child(source) {
+            return restore_dir(store, &nested);
+        }
+    }
+    restore_dir(store, source)
+}
+
+/// Does this directory hold anything the interchange form recognizes?
+fn holds_interchange_entries(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    entries
+        .flatten()
+        .any(|e| as_sig(&e.file_name().to_string_lossy()).is_some())
+}
+
+/// The one immediate subdirectory that looks like a hive, if there is exactly
+/// one. Two candidates is an ambiguity, and guessing at a restore source is
+/// the kind of helpfulness that restores the wrong hive.
+fn sole_interchange_child(dir: &Path) -> Option<std::path::PathBuf> {
+    let mut found: Option<std::path::PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || !holds_interchange_entries(&path) {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(path);
+    }
+    found
+}
+
+fn restore_dir(store: &impl ContentStore, source: &Path) -> Result<Transfer> {
     let mut moved = Transfer::default();
 
     let entries = match std::fs::read_dir(source) {
@@ -102,11 +151,22 @@ pub fn restore(store: &impl ContentStore, source: impl AsRef<Path>) -> Result<Tr
             // Flat sig-named content.
             if store.has(sig)? {
                 moved.content_skipped += 1;
-            } else {
-                let bytes = std::fs::read(&path)?;
-                store.put(&bytes)?;
-                moved.content += 1;
+                continue;
             }
+            let bytes = std::fs::read(&path)?;
+            // The FILENAME is a claim about the bytes; this is the only place
+            // that ever checks it. `put` re-signs what it is handed, so a
+            // truncated or half-written file would land under a DIFFERENT
+            // signature: the content the hive actually asks for stays missing,
+            // the restore counts it as imported, and the damage surfaces later
+            // as a tile with no picture and no explanation. Refuse it here and
+            // say so.
+            if hypercomb_protocol::sign(&bytes) != sig {
+                moved.content_corrupt += 1;
+                continue;
+            }
+            store.put(&bytes)?;
+            moved.content += 1;
             continue;
         }
 
@@ -125,6 +185,12 @@ pub fn restore(store: &impl ContentStore, source: impl AsRef<Path>) -> Result<Tr
                 continue;
             }
             let member_name = member.file_name().to_string_lossy().to_string();
+            // A partial write this export never finished. It is not a member
+            // and it is not a marker — importing one would mint a pool member
+            // named after our own temp suffix.
+            if member_name.ends_with(PART_SUFFIX) {
+                continue;
+            }
             let bytes = std::fs::read(member.path())?;
 
             match marker_index(&member_name) {
@@ -224,7 +290,7 @@ pub fn export_root(
                 if path.exists() {
                     moved.content_skipped += 1;
                 } else {
-                    std::fs::write(&path, &bytes)?;
+                    write_atomic(&path, &bytes)?;
                     moved.content += 1;
                 }
             }
@@ -268,7 +334,7 @@ pub fn export(store: &impl ContentStore, target: impl AsRef<Path>) -> Result<Tra
             continue;
         }
         if let Some(bytes) = store.get(sig)? {
-            std::fs::write(&path, bytes)?;
+            write_atomic(&path, &bytes)?;
             moved.content += 1;
         }
     }
@@ -302,6 +368,144 @@ pub fn export(store: &impl ContentStore, target: impl AsRef<Path>) -> Result<Tra
     Ok(moved)
 }
 
+/// What a verification found in a backup folder.
+///
+/// Every field is a count of items **this hive holds**, measured against what
+/// the folder actually contains. It is deliberately not a boolean: "3 markers
+/// differ" after backing two hives into one folder is expected and harmless,
+/// while "3 content items missing" is a backup you cannot restore from.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Verification {
+    /// Content files found and confirmed to hash to their own name.
+    pub content: usize,
+    /// Signatures this hive holds that the folder does not have at all.
+    pub content_missing: usize,
+    /// Content files present but whose bytes no longer hash to their name.
+    pub content_corrupt: usize,
+    /// Markers found byte-for-byte.
+    pub markers: usize,
+    /// Markers this hive holds that the folder is missing.
+    pub markers_missing: usize,
+    /// Markers present at that bag and index but holding other bytes — what a
+    /// second, diverged hive backed into the same folder looks like.
+    pub markers_differ: usize,
+    /// Pool members found byte-for-byte.
+    pub pool_members: usize,
+    /// Pool members this hive holds that the folder is missing.
+    pub pool_members_missing: usize,
+    /// Pool members present with different bytes.
+    pub pool_members_differ: usize,
+}
+
+impl Verification {
+    /// Can this hive be restored from that folder in full?
+    pub fn complete(&self) -> bool {
+        self.content_missing == 0
+            && self.content_corrupt == 0
+            && self.markers_missing == 0
+            && self.pool_members_missing == 0
+    }
+
+    /// Everything that did not check out, differing markers included.
+    pub fn faults(&self) -> usize {
+        self.content_missing
+            + self.content_corrupt
+            + self.markers_missing
+            + self.markers_differ
+            + self.pool_members_missing
+            + self.pool_members_differ
+    }
+}
+
+/// Read a backup folder back and confirm it holds this hive.
+///
+/// A backup nobody has read is a hope, not a backup. [`export`] can only report
+/// what it believed it wrote; this reads the DESTINATION and answers the three
+/// questions the export cannot:
+///
+///   1. is every signature this hive holds present in the folder?
+///   2. does each of those files still hash to its own name? The filename is a
+///      claim, and this is the only thing that ever checks it — it catches a
+///      truncated write, a full disk, and bit rot on the destination drive.
+///   3. is every marker and every pool member there, byte for byte?
+///
+/// Content is verified by hashing the file **on disk**, so the expensive half —
+/// pulling every blob back out of redb — is never paid. Markers and pool
+/// members are byte-compared instead: they carry no self-check, and reading
+/// them out of the store is cheap.
+///
+/// Cost is therefore one pass over the backup folder. That is the price of
+/// knowing, and it is worth paying at the end of a backup rather than at the
+/// start of a recovery.
+pub fn verify(store: &impl ContentStore, target: impl AsRef<Path>) -> Result<Verification> {
+    let target = target.as_ref();
+    let mut found = Verification::default();
+
+    for sig in store.signatures()? {
+        match std::fs::read(target.join(sig.to_hex())) {
+            Ok(bytes) if hypercomb_protocol::sign(&bytes) == sig => found.content += 1,
+            Ok(_) => found.content_corrupt += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => found.content_missing += 1,
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    for bag in store.bags()? {
+        let dir = target.join(bag.to_hex());
+        for (index, marker) in store.markers(bag)? {
+            match std::fs::read(dir.join(marker_filename(index))) {
+                Ok(bytes) if bytes == marker.to_bytes() => found.markers += 1,
+                Ok(_) => found.markers_differ += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => found.markers_missing += 1,
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    for pool in store.pools()? {
+        let dir = target.join(pool.to_hex());
+        for member in store.pool_list(pool)? {
+            let Some(expected) = store.pool_get(pool, &member)? else { continue };
+            match std::fs::read(dir.join(&member)) {
+                Ok(bytes) if bytes == expected => found.pool_members += 1,
+                Ok(_) => found.pool_members_differ += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => found.pool_members_missing += 1,
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    Ok(found)
+}
+
+/// Suffix for a write that has not landed yet. Restore skips these, so an
+/// export killed mid-flight leaves litter rather than a fake member.
+const PART_SUFFIX: &str = ".hcpart";
+
+/// Write bytes so that a reader never sees a half-written file.
+///
+/// A backup is read back by machines that trust what they find. Content files
+/// carry their own hash in their name and [`restore`] checks it, but markers
+/// and pool members do not and cannot — a truncated one restores as truth. So
+/// every write in this module lands in a sibling temp file first and is then
+/// renamed, which is atomic within a directory on NTFS and APFS alike: a file
+/// present under its real name is a file that was written whole.
+///
+/// The temp name APPENDS rather than replacing an extension, because pool
+/// member names are user-facing strings that may already contain a dot, and
+/// `en.json` and `en.txt` must not race each other through one temp path.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let mut tmp = path.as_os_str().to_os_string();
+    tmp.push(PART_SUFFIX);
+    let tmp = std::path::PathBuf::from(tmp);
+    std::fs::write(&tmp, bytes)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    Ok(())
+}
+
 /// Write only when the target differs. Keeps [`Transfer::changed`] a truthful
 /// answer, so exporting twice into the same folder reports no second change.
 fn write_if_different(path: &Path, bytes: &[u8]) -> Result<bool> {
@@ -310,7 +514,7 @@ fn write_if_different(path: &Path, bytes: &[u8]) -> Result<bool> {
             return Ok(false);
         }
     }
-    std::fs::write(path, bytes)?;
+    write_atomic(path, bytes)?;
     Ok(true)
 }
 
@@ -328,6 +532,6 @@ fn write_marker_union(path: &Path, bytes: &[u8]) -> Result<bool> {
     if path.exists() {
         return Ok(false);
     }
-    std::fs::write(path, bytes)?;
+    write_atomic(path, bytes)?;
     Ok(true)
 }

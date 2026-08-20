@@ -47,6 +47,70 @@ appeared to do nothing there.
 The comparison is a local asset read and the adopt happens at most once per
 installed version, so the ordinary launch pays nothing.
 
+## Backing up the hive
+
+`Hive ▸ Back Up Hive…` picks a folder and writes the whole store into it in the
+interchange form — flat sig-named content at the root, lineage sigbags and
+pools of meaning as sig-named directories. It is the same layout the web shell
+keeps in OPFS, so a folder written here restores there and the other way round.
+
+**Backup is the full-store `export`, not `export_root`.** The two are easy to
+confuse, and were confused: the menu ran the root closure until 2026-08-20.
+`export_root` is the *drain* — it walks one root BY NAME, follows children
+through their layers, and deliberately leaves every pool behind. That is right
+for handing a branch to someone else and wrong for the only question a backup
+answers. A closure backup came back without threads, clipboard, hidden marks,
+collections and the behaviour roster, and without any root the walk could not
+reach by name.
+
+### It verifies itself
+
+An export can only report what it believed it wrote. `verify` reads the
+DESTINATION back: every signature the store holds must be present, each of
+those files must still hash to its own name, and every marker and pool member
+must be there byte for byte. Content is hashed **from disk**, so the expensive
+half — pulling every blob back out of redb — is never paid. The cost is one
+pass over the folder, spent at the end of a backup rather than at the start of
+a recovery.
+
+The dialog says which it was, and `VERIFY FAILED` names what is missing.
+
+### Damage is refused, never imported
+
+`restore` re-signs every content file and compares the result to the filename.
+This is the only place that check ever happens, and without it a truncated file
+lands under a *different* signature: the content the hive asks for stays
+missing, the restore counts it as imported, and the damage surfaces months
+later as a tile with no picture and no explanation. Mismatches are counted as
+`content_corrupt` and reported.
+
+Every write in the interchange module lands in a `.hcpart` sibling and is then
+renamed, so a file present under its real name is a file that was written
+whole. Markers and pool members carry no self-check, and this is what protects
+them.
+
+### It happens without being asked
+
+The chosen folder is remembered in `<hive dir>/backup-target.txt` — beside the
+store, never inside it, so it survives restoring someone else's backup and each
+named instance keeps its own. Every launch tops that folder up on a background
+thread and refreshes `hypercomb-backup.json`: what the folder is, when it was
+last written, and what last verified. `Hive ▸ Back Up Again` runs it on demand
+with no picker; `Forget Backup Folder` stops it.
+
+Because export never deletes and never overwrites a marker, the folder is a
+growing archive rather than a rolling window — content that leaves the hive
+stays in it.
+
+### The rules the menu enforces
+
+| Rule | Why |
+|---|---|
+| One transfer at a time | Two exports would write the same temp paths and each report half a truth; a restore racing an export reads a folder being written underneath it. |
+| Never inside the hive | A target under the hive directory would back up its own backup, fill the store's directory with tens of thousands of hex names, and die with the thing it was insurance against. |
+| A restore reloads | The running shell holds the pre-restore head in memory and would keep painting it. A restore you cannot see reads as a restore that did not happen. |
+| The parent folder is fine | A picked folder with no hive in it, holding exactly one subfolder that has one, restores from that subfolder. Two candidates restore nothing rather than guess which hive was meant. |
+
 ## Nothing in the shell may navigate the document
 
 A native window has no address bar. Three behaviours were measured in
