@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/assistant/organize.drone.ts
 //
-// ORGANIZE — INSERT A LEVEL. The inverse of atomize: it mints no leaves and
+// ORGANIZE — INSERT A LEVEL. The inverse of break-apart: it mints no leaves and
 // asks for no new meaning. It takes the children a layer ALREADY has and
 // re-homes them into a handful of group tiles, so `parent → 60 tiles` becomes
 // `parent → 6 groups → ~10 each`. Haiku's job here is naming the clusters,
@@ -40,7 +40,7 @@ import { ReceiptBuilder, describeReceipt } from './receipt.js'
 /** Below this, a layer is already manageable — organizing it would add a
  *  level of navigation to save nothing. Above it, a layer is CROWDED, and
  *  crowded is the condition that decides which operation a page needs:
- *  `/atomize` on a crowded layer routes here instead of deepening. The
+ *  `/break-apart` on a crowded layer routes here instead of deepening. The
  *  participant should never have to know which of the two they want. */
 export const ORGANIZE_THRESHOLD = 12
 
@@ -103,7 +103,7 @@ export class OrganizeDrone extends Drone {
 
   /** One structural ask per branch. Organize holds the WHOLE layer it stands
    *  on, because it re-homes that layer's children — so it conflicts with a
-   *  second organize there AND with any atomize on a tile inside it, whose
+   *  second organize there AND with any break-apart on a tile inside it, whose
    *  target would move out from under the responder mid-flight. */
   #pending = new PendingAskIndex()
 

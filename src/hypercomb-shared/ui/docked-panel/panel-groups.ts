@@ -25,8 +25,15 @@
  *  `text` is the content scale a window's body renders at. ABSENT means auto —
  *  the scale the panel derives from its own width. A member reads the
  *  difference between "no opinion" and "auto" from whether the KEY is there,
- *  which is why `adopt` tests `'text' in attrs` rather than the value. */
-export type GroupAttrs = { width?: number; text?: number }
+ *  which is why `adopt` tests `'text' in attrs` rather than the value.
+ *
+ *  `font` is a CODE_FONTS key, not a font stack: the key is what survives a
+ *  stack being edited, a face being swapped for a better cut, or a family
+ *  being dropped. ABSENT means the window has no opinion and inherits the
+ *  --hc-code default from :root — which is why it, too, is read by key
+ *  presence. `ligatures` rides with it, because it is a property of the face
+ *  that was chosen rather than a separate taste. */
+export type GroupAttrs = { width?: number; text?: number; font?: string; ligatures?: boolean }
 
 /** The text sizes a window (or a group) can be set to. AUTO — `null` — is the
  *  old behaviour: the content scales with the window's width. The rest hold it
@@ -43,6 +50,87 @@ export const TEXT_SIZES: readonly { key: string; label: string; scale: number | 
   { key: 'large', label: 'Large', scale: 1.15 },
   { key: 'larger', label: 'Larger', scale: 1.32 },
 ]
+
+// ── the code font ────────────────────────────────────────────────────
+//
+// Which face a window READS CODE IN. Separate from --hc-mono, the UI mono that
+// draws sig strings and chips: that one is monospace as a signal, a few
+// characters at chrome size, and the system font is the right answer for it.
+// This is the font you read whole blocks in, in a panel narrow enough that the
+// measure matters, which is a different question with a different answer.
+//
+// A short ladder rather than a free font field: every entry here is a face the
+// app can actually produce — two are shipped with it, two ship with Windows,
+// and the last is whatever the participant's system already resolves. A typed
+// font name that silently falls through to the fallback is a setting that lies
+// about what it did.
+
+/** One offered face. `stack` ends in `var(--hc-mono)` so a face that is not
+ *  there degrades down the system chain rather than to bare `monospace`;
+ *  `ligatures` is whether this face HAS any, which is what decides whether the
+ *  switch is worth offering at all — a dead control is worse than no control. */
+export interface CodeFont {
+  key: string
+  label: string
+  stack: string
+  ligatures: boolean
+  /** Shown under the name, drawn in the face itself. The characters a
+   *  monospace font is actually judged on: the ones that get confused with
+   *  each other, and the operators that ligate. */
+  specimen: string
+}
+
+const SPECIMEN = 'Il1| O0o {}[]() -> => !=='
+
+export const CODE_FONTS: readonly CodeFont[] = [
+  { key: 'plex', label: 'IBM Plex Mono', stack: "'IBM Plex Mono', var(--hc-mono)", ligatures: false, specimen: SPECIMEN },
+  { key: 'jetbrains', label: 'JetBrains Mono', stack: "'JetBrains Mono', var(--hc-mono)", ligatures: true, specimen: SPECIMEN },
+  { key: 'cascadia', label: 'Cascadia Mono', stack: "'Cascadia Mono', var(--hc-mono)", ligatures: false, specimen: SPECIMEN },
+  { key: 'consolas', label: 'Consolas', stack: 'Consolas, var(--hc-mono)', ligatures: false, specimen: SPECIMEN },
+  { key: 'system', label: 'System', stack: 'var(--hc-mono)', ligatures: true, specimen: SPECIMEN },
+]
+
+/** What :root's --hc-code already resolves to. A window with no record renders
+ *  in this WITHOUT holding a record — so changing the app's default later moves
+ *  every window that never chose, and leaves every window that did. */
+export const DEFAULT_CODE_FONT = 'plex'
+
+export const codeFont = (key: string | undefined): CodeFont | undefined =>
+  CODE_FONTS.find(f => f.key === key)
+
+export const fontKey = (window: string): string => `hc:panel-font:${window}`
+export const ligaturesKey = (window: string): string => `hc:panel-ligatures:${window}`
+
+/** This window's chosen face, or `undefined` for "never chose" — the state that
+ *  inherits the app default rather than pinning today's value of it. */
+export const readCodeFont = (window: string): string | undefined => {
+  try {
+    const raw = localStorage.getItem(fontKey(window))
+    return raw && codeFont(raw) ? raw : undefined
+  } catch { return undefined }
+}
+
+export const writeCodeFont = (window: string, key: string | undefined): void => {
+  try {
+    if (key) localStorage.setItem(fontKey(window), key)
+    else localStorage.removeItem(fontKey(window))
+  } catch { /* ignore */ }
+}
+
+/** Ligatures OFF by default, for every face that has them. In a window where
+ *  you read code you did NOT write, a `!==` redrawn as one glyph is a place to
+ *  guess at what you are looking at; turning them on is one click for the
+ *  people who prefer the face as its designer drew it. */
+export const readLigatures = (window: string): boolean => {
+  try { return localStorage.getItem(ligaturesKey(window)) === '1' } catch { return false }
+}
+
+export const writeLigatures = (window: string, on: boolean): void => {
+  try {
+    if (on) localStorage.setItem(ligaturesKey(window), '1')
+    else localStorage.removeItem(ligaturesKey(window))
+  } catch { /* ignore */ }
+}
 
 /** A live tool window, as the sharing cares about it. The directive implements
  *  this; `adopt` is where a member clamps an incoming attribute to its own

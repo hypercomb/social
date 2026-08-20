@@ -132,7 +132,7 @@ silently dropped (`run-bridge.cjs:106-113`). Adding renderer→client fanout is
    key; the minted sigs lose. **Rename one.**
 2. **`creationId` is not projected by `watch-asks.cjs`.** The skill says "no
    `creationId` means stamp nothing" — so a parked session stamps nothing on
-   *every* atomize and expand. That is exactly the failure that stranded eight
+   *every* break-apart and expand. That is exactly the failure that stranded eight
    unidentifiable empty groups at `ai-inside`. Also unprojected:
    `contextTruncated`, `scopePath`, `count`, `focus`, `groupsMin/Max`.
 3. **`list`, `list-at`, `inflate` hang.** `list-at` walks named OPFS

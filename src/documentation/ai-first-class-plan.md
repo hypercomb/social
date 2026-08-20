@@ -140,7 +140,7 @@ The command line follows the same roster: today's hardcoded
 1. **Markdown rendering** of turns (headings, lists, tables, fenced code with
    copy button, autolinked URLs) + **hive-path links** — an answer naming
    `dolphin/site` navigates there. `highlight.js` is already a dependency.
-2. **Per-message actions** — copy, "put this on the current tile", atomize
+2. **Per-message actions** — copy, "put this on the current tile", break apart
    this, retry, edit-and-resend.
 3. **Stop button** — `HostAiService.ask` already accepts an AbortSignal nobody
    passes; the bridge tier already has `AgentRegistry.stop`.

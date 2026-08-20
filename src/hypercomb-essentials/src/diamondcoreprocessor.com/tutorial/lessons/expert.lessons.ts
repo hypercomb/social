@@ -517,7 +517,7 @@ tutorialLessons.register({
       'While a question is in flight a bee flies over the tiles it is working on. Click the bee to see what was asked, where the answer will land, and add more context mid-flight.')
 
     await stage.say('assistant-window-done', 'Answers land as notes',
-      'Answers come back as NOTES on the tiles they are about — never a chat log you have to keep somewhere else. /atomize asks it to break a tile into its pieces; /organize asks it to insert a level into a crowded page. Both hand back a plan the hive checks before it moves anything.')
+      'Answers come back as NOTES on the tiles they are about — never a chat log you have to keep somewhere else. /break-apart asks it to break a tile into its pieces; /organize asks it to insert a level into a crowded page. Both hand back a plan the hive checks before it moves anything.')
   },
 })
 

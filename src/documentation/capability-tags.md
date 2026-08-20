@@ -78,7 +78,7 @@ These are **co-operating**, not competing — they must stay untagged so every m
 - **Editor input feeders (5)** — `image-drop`, `image-paste`, `resource-attach`, link feeders supply content into `editor:tile`. Complementary, not the editor slot.
 - **Icon providers (registry-fed)** — many drones register overlay icons into `IconProviderRegistry`/`ICON_REGISTRY`; they additively populate one action set.
 - **`movement` (4)** — move + layout.queen + move-preview + input handlers (complementary).
-- **`assistant` orchestration (7)** beyond the single `assistant:bridge` slot — conversation, atomize, structure-drop, ai-key, llm.queen, etc.
+- **`assistant` orchestration (7)** beyond the single `assistant:bridge` slot — conversation, break-apart, structure-drop, ai-key, llm.queen, etc.
 - **`meeting` (5)** — signaling, video, controls, hive WebRTC state (complementary).
 - **`history` (6), `selection`, `format`, slash-command queens (~25), `notes`, `settings`, `recording`, `computation`** — single-owner / additive, no competing alternative.
 

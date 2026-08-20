@@ -60,8 +60,10 @@ import { EffectBus } from '@hypercomb/core'
 // panel-groups.ts. This file is the chrome that drives it.
 import {
   type GroupAttrs, type GroupMember, STEEL, TEXT_SIZES,
+  CODE_FONTS, DEFAULT_CODE_FONT, codeFont,
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
   readPairing, writePairing, readTextScale, writeTextScale,
+  readCodeFont, writeCodeFont, readLigatures, writeLigatures,
 } from './panel-groups'
 
 // The EDITOR — how a settings popover is drawn from declared rows, and the one
@@ -259,6 +261,14 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
   #group = ''
   /** The picked text scale, or `null` for auto (derive it from the width). */
   #text: number | null = null
+
+  /** The CODE_FONTS key this window reads code in, or `undefined` for "never
+   *  chose" — which inherits :root's --hc-code rather than pinning a copy of
+   *  today's value of it. */
+  #font: string | undefined = undefined
+
+  /** Ligatures on the chosen face. Off unless asked for; see readLigatures. */
+  #ligatures = false
   #width = 0
   #startX = 0
   #startWidth = 0
@@ -286,8 +296,10 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     // clear a size the group was holding, and the key being present is how a
     // mate tells "the group says auto" from "the group has no opinion".
     const text = this.#text ?? undefined
-    if (this.ownsSize) return { width: this.#width, text }
-    return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth, text }
+    const font = this.#font
+    const ligatures = this.#ligatures
+    if (this.ownsSize) return { width: this.#width, text, font, ligatures }
+    return { width: this.sizeOwner?.panelWidth() || this.#width || this.#el.offsetWidth, text, font, ligatures }
   }
 
   // ── LaneMember ─────────────────────────────────────────────────────
@@ -373,6 +385,15 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#text = ('text' in groupAttrs)
       ? (groupAttrs.text ?? null)
       : (ownText === undefined ? this.defaultText : ownText)
+
+    // The face reads the same way — the group's word if the group has one, the
+    // window's own record otherwise, and "no record anywhere" left as
+    // undefined so :root's default reaches it untouched.
+    this.#font = ('font' in groupAttrs) ? groupAttrs.font : readCodeFont(this.id)
+    this.#ligatures = ('ligatures' in groupAttrs)
+      ? groupAttrs.ligatures === true
+      : readLigatures(this.id)
+    this.#applyFont()
 
     if (!this.ownsSize) {
       // Settings-only: the window keeps its own size and store. Take the
@@ -579,6 +600,22 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     const auto = this.#measuredWidth() / this.defaultWidth
     const scale = Math.min(this.maxScale, Math.max(this.minScale, this.#text ?? auto))
     this.#el.style.setProperty('--hc-panel-scale', String(scale))
+  }
+
+  /** Put the chosen face on the host, where everything the window renders
+   *  inherits it. A window that never chose sets NOTHING — the property is
+   *  removed rather than written with the default, so :root stays the one
+   *  place the app's default face is decided.
+   *
+   *  Ligatures are a separate property because they are a separate question:
+   *  the same face can be read either way, and the code that sizes off
+   *  --hc-code should not have to know which face is behind it. */
+  #applyFont(): void {
+    const face = codeFont(this.#font)
+    if (face) this.#el.style.setProperty('--hc-code', face.stack)
+    else this.#el.style.removeProperty('--hc-code')
+    if (this.#ligatures) this.#el.style.setProperty('--hc-code-ligatures', 'normal')
+    else this.#el.style.removeProperty('--hc-code-ligatures')
   }
 
   /** The width the auto scale reads. A self-sizing window may not have been
@@ -899,6 +936,40 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
       pick: (value) => { this.#setText(value === 'auto' ? null : parseFloat(value)) },
     }]
 
+    // The face code is READ in. Offered here rather than in the chat window's
+    // own settings because it is not the chat window's question: any tool
+    // window that shows a code block, a path or a command asks it, and a group
+    // whose windows disagreed about their typeface would not look like one
+    // group. The chosen key may be undefined — that is a window inheriting
+    // :root's default, which is what the picker shows as selected.
+    const face = this.#font ?? DEFAULT_CODE_FONT
+    shared.push({
+      kind: 'specimen', key: 'code-font',
+      label: this.#t('panel.code-font.label', 'Code font'),
+      value: face,
+      options: CODE_FONTS.map(font => ({
+        value: font.key,
+        // Only the system entry is a WORD; the rest are the names of the
+        // faces themselves and are the same in every language.
+        label: font.key === 'system' ? this.#t('panel.code-font.system', font.label) : font.label,
+        family: font.stack,
+        specimen: font.specimen,
+      })),
+      hint: this.#t('panel.code-font.hint', 'Code blocks, paths and commands read in this face.'),
+      pick: (value) => { this.#setFont(value) },
+    })
+    // Offered ONLY by a face that has them: a switch that cannot change what
+    // you are looking at is a worse answer than no switch at all.
+    if (codeFont(face)?.ligatures) {
+      shared.push({
+        kind: 'switch', key: 'ligatures',
+        label: this.#t('panel.ligatures.label', 'Ligatures'),
+        checked: this.#ligatures,
+        hint: this.#t('panel.ligatures.hint', 'Draws ->, => and !== as single glyphs. Off keeps every character its own.'),
+        toggle: (on) => { this.#setLigatures(on) },
+      })
+    }
+
     // This window's own.
     const own: SettingRow[] = []
     if (this.pairWindow && this.pairOpenEffect) {
@@ -967,6 +1038,7 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     const after = <T>(run: (value: T) => void) => (value: T): void => { run(value); this.#refreshPopover() }
     switch (row.kind) {
       case 'choice': return { ...row, pick: after(row.pick) }
+      case 'specimen': return { ...row, pick: after(row.pick) }
       case 'switch': return { ...row, toggle: after(row.toggle) }
       case 'text': return { ...row, commit: after(row.commit) }
       case 'action': return { ...row, run: () => { row.run(); this.#refreshPopover() } }
@@ -981,6 +1053,33 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     this.#text = next
     writeTextScale(this.id, next)
     this.#applyScale()
+    if (this.#group) publishAttrs(this)
+    this.#refreshPopover()
+  }
+
+  /** Pick the face code reads in. Same shape as the text size, and for the same
+   *  reason: kept on the window so it reopens in it, published to the group so
+   *  the group reads as one setting. */
+  #setFont(next: string): void {
+    if (next === this.#font) return
+    this.#font = next
+    writeCodeFont(this.id, next)
+    // A face with no ligatures cannot be showing any, so a switch left on from
+    // the last face would be a control claiming an effect it does not have.
+    if (!codeFont(next)?.ligatures && this.#ligatures) {
+      this.#ligatures = false
+      writeLigatures(this.id, false)
+    }
+    this.#applyFont()
+    if (this.#group) publishAttrs(this)
+    this.#refreshPopover()
+  }
+
+  #setLigatures(on: boolean): void {
+    if (on === this.#ligatures) return
+    this.#ligatures = on
+    writeLigatures(this.id, on)
+    this.#applyFont()
     if (this.#group) publishAttrs(this)
     this.#refreshPopover()
   }
@@ -1040,6 +1139,21 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
         this.#text = text
         writeTextScale(this.id, text)
         this.#applyScale()
+        this.#refreshPopover()
+      }
+    }
+    // The face travels with the size — a group is a settings SET, and a mate
+    // that took the group's text size but kept its own typeface would make
+    // that a half-truth.
+    if ('font' in attrs || 'ligatures' in attrs) {
+      const font = ('font' in attrs) ? attrs.font : this.#font
+      const ligatures = ('ligatures' in attrs) ? attrs.ligatures === true : this.#ligatures
+      if (font !== this.#font || ligatures !== this.#ligatures) {
+        this.#font = font
+        this.#ligatures = ligatures
+        writeCodeFont(this.id, font)
+        writeLigatures(this.id, ligatures)
+        this.#applyFont()
         this.#refreshPopover()
       }
     }

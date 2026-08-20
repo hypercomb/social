@@ -9,12 +9,12 @@
 // layer. The hive asks; the parked session builds.
 //
 // The three structural verbs, side by side:
-//   • atomize  — go DEEPER:  give a leaf its first level of parts
+//   • break-apart — go DEEPER: give a leaf its first level of parts
 //   • organize — go SHALLOWER: insert a level, re-home a crowded layer
 //   • expand   — go WIDER:   add new siblings the subject is missing
 //
 // THE UNIT IS THE LAYER. Expand never targets a single tile — deepening one
-// tile is atomize's job. It reads what the layer ALREADY holds (the `existing`
+// tile is break-apart's job. It reads what the layer ALREADY holds (the `existing`
 // list rides in the ask so nothing is duplicated) and asks for the concrete
 // aspects of the subject that are NOT yet represented. Standing on a page
 // about a subject you are interested in and wanting more of it is the whole
@@ -26,7 +26,7 @@
 // participant asked for — so it declines and names /organize instead.
 //
 // `task:'expand'` is what tells the responder this ask asks for STRUCTURE,
-// not a note — the same sanctioned exception atomize uses (see
+// not a note — the same sanctioned exception break-apart uses (see
 // .claude/skills/bridge-listen/SKILL.md).
 import { Drone, EffectBus } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
@@ -44,7 +44,7 @@ const ASK_KIND = 'ask'
 const EXPAND_TASK = 'expand'
 
 /** The model hint carried to the responder. Expansion is structural and
- *  high-volume like atomize, so it asks the Haiku tier by name. */
+ *  high-volume like break-apart, so it asks the Haiku tier by name. */
 const EXPAND_MODEL = 'haiku'
 
 type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
@@ -95,7 +95,7 @@ export class ExpandDrone extends Drone {
       return false
     }
 
-    // A crowded layer does not get wider. Unlike atomize (where "break this
+    // A crowded layer does not get wider. Unlike break-apart (where "break this
     // up" and "group this" are one intent), asking for MORE on a page that
     // already has too much is a request worth declining out loud.
     if (children.length > ORGANIZE_THRESHOLD) {

@@ -1,6 +1,6 @@
 // The three structural verbs, in one short reel.
 //
-// atomize goes DEEPER, organize goes SHALLOWER, expand goes WIDER — the three
+// break apart goes DEEPER, organize goes SHALLOWER, expand goes WIDER — the three
 // are only really legible next to each other, which is what this cut is for.
 // Same shell, same narrator and the same audio contract as the full piece
 // (en-US-AndrewMultilingualNeural at +2%, cached by the words), so a line can
@@ -66,7 +66,7 @@ const link = (x1, y1, x2, y2, op) => op <= 0.01 ? '' :
 // Each takes normalised time and returns the drawing at that instant.
 
 // DEEPER — one leaf, then the parts it is composed of, fanning out beneath it.
-function drawAtomize(t) {
+function drawBreakApart(t) {
   const PX = 640, PY = 208, PR = 62, CY = 452, CR = 44, N = 5
   let s = ''
   for (let i = 0; i < N; i++) {
@@ -136,7 +136,7 @@ function drawExpand(t) {
   return s
 }
 
-const MOVEMENT = { atomize: drawAtomize, organize: drawOrganize, expand: drawExpand }
+const MOVEMENT = { 'break-apart': drawBreakApart, organize: drawOrganize, expand: drawExpand }
 
 // ---------- the reel ---------------------------------------------------------
 const BEATS = [
@@ -145,8 +145,8 @@ const BEATS = [
            <p class="sub">One goes deeper. One goes shallower. One goes wider.</p>`,
     say: `A hive has three structural verbs. One goes deeper, one goes shallower, and one goes wider.` },
 
-  { id: 'atomize', kind: 'move', verb: '/atomize', gloss: 'go deeper',
-    say: `Atomize goes deeper. Point at a tile that has no parts yet, and it is broken into the pieces that compose it.` },
+  { id: 'break-apart', kind: 'move', verb: '/break-apart', gloss: 'go deeper',
+    say: `Break apart goes deeper. Point at a tile that has no parts yet, and it is broken into the pieces that compose it.` },
 
   { id: 'organize', kind: 'move', verb: '/organize', gloss: 'go shallower',
     say: `Organize goes the other way. A crowded layer has a level inserted above it, and the tiles already there are re-homed into named groups.` },
@@ -160,10 +160,10 @@ const BEATS = [
     say: `All three ask the same way, over the bridge. The hive mints an ask and a Claude session you have parked answers it. Nothing is billed to a pasted key, and no model ever moves a tile — it advises, and the hive moves.` },
 
   { id: 'close', kind: 'still',
-    body: `<div class="eyebrow">deeper · shallower · wider</div><h1><b>atomize</b> · <b>organize</b> · <b>expand</b></h1>
+    body: `<div class="eyebrow">deeper · shallower · wider</div><h1><b>break apart</b> · <b>organize</b> · <b>expand</b></h1>
            <p class="sub">Type the slash and the verb. The layer takes the shape you meant.</p>
            <div class="golink" style="margin-top:1.5vh">hypercomb.io</div>`,
-    say: `Atomize, organize, expand. Three words, and the shape of your hive follows what you actually mean.` },
+    say: `Break apart, organize, expand. Three words, and the shape of your hive follows what you actually mean.` },
 ]
 
 // ---------- narration --------------------------------------------------------

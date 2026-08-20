@@ -3,17 +3,17 @@
 // ONE STRUCTURAL ASK PER BRANCH — and none while an ANCESTOR is being
 // restructured. Unrelated branches run at the same time.
 //
-// A structural ask (`task:'atomize'`, `task:'organize'`) reshapes a subtree.
+// A structural ask (`task:'break-apart'`, `task:'organize'`) reshapes a subtree.
 // Two of them are only safe together when their subtrees do not overlap:
 //
-//   /a/b  atomize   +  /a/c  atomize   → CONCURRENT. Different subtrees;
+//   /a/b  break-apart + /a/c break-apart → CONCURRENT. Different subtrees;
 //                                        neither can see the other's work.
-//   /a    organize  +  /a/b  atomize   → CONFLICT. Organize re-homes b into a
+//   /a    organize    + /a/b break-apart → CONFLICT. Organize re-homes b into a
 //                                        group, so b is no longer at /a/b —
-//                                        the atomize would create children
+//                                       the break-apart would create children
 //                                        under a path that moved out from
 //                                        under it.
-//   /a/b  atomize   +  /a/b  atomize   → CONFLICT. The same work twice: both
+//   /a/b  break-apart + /a/b break-apart → CONFLICT. The same work twice: both
 //                                        drain, both create, and the second
 //                                        either duplicates tiles or gets
 //                                        stopped by hand. (Observed live: a
@@ -122,7 +122,7 @@ export class PendingAskIndex {
  *
  *  Minters write `scopePath` explicitly — the drone knows its own topology
  *  and should not make this module infer it. The fallback derives it the way
- *  the two current tasks do (atomize creates UNDER its target; organize
+ *  the two current tasks do (break-apart creates UNDER its target; organize
  *  reshapes the layer it stands on) so a record minted before `scopePath`
  *  existed still holds the right branch instead of the root. */
 export const scopePathOf = (payload: Record<string, unknown>): string[] => {

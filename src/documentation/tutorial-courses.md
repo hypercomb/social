@@ -99,7 +99,7 @@ primary window**, each carrying every behaviour that lives in that window:
 | `window-rewind` | rewind window | `/rewind` |
 | `window-views` | views viewer | `/views`, `/tree`, `/website`, `/present`, `/tutor` |
 | `window-features` | features viewer | enable, remove, download, cascade origin |
-| `window-assistant` | chat window + bee | `/opus`, `/sonnet`, `/haiku`, `/ask`, `/atomize`, `/organize` |
+| `window-assistant` | chat window + bee | `/opus`, `/sonnet`, `/haiku`, `/ask`, `/break-apart`, `/organize` |
 | `window-context` | context window | `/context`, attached-context (portal-drop) narrated |
 | `window-observe` | observe viewer | `/observe`, and `/host` / `/invite` narrated |
 

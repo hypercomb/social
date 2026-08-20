@@ -1535,8 +1535,8 @@
   "color": "#8a63c9",
   "glyph": "data_object"
  },
- "behaviors/assistant/atomize": {
-  "file": "behaviors__assistant__atomize.png",
+ "behaviors/assistant/break-apart": {
+  "file": "behaviors__assistant__break-apart.png",
   "tier": "behavior",
   "color": "#8a63c9",
   "glyph": "smart_toy"

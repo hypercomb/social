@@ -302,14 +302,14 @@ function drawSeed(t) {
   s += tile(640, 320, 100 * e, 'bakery', { sw: 2.6, op: e, label: 'the bakery', labelSize: 17 })
   return s
 }
-function drawAskAtomize(t) {
+function drawAskBreakApart(t) {
   let s = tile(640, 268, 84, 'bakery', { sw: 2.4, label: 'the bakery', labelSize: 15 })
-  s += bar('/atomize', t, { from: 0.06, typedBy: 0.42, flashAt: 0.46 })
+  s += bar('/break-apart', t, { from: 0.06, typedBy: 0.42, flashAt: 0.46 })
   s += badge(t, { from: 0.38, pulseFrom: 0.72, pulseSpeed: 3 })
   s += askFlight(t, 0.5, 0.72)
   return s
 }
-function drawAtomize(t) {
+function drawBreakApart(t) {
   const PX = 640, PY = 168, PR = 58
   let s = badge(t, { pulseFrom: 0, pulseSpeed: 3 })
   for (let i = 0; i < 5; i++) {
@@ -416,7 +416,7 @@ function drawOrganize(t) {
   })
   return s
 }
-function drawDeepAtomize(t) {
+function drawDeepBreakApart(t) {
   const PX = 640, PY = 168, PR = 56
   let s = badge(t, { pulseFrom: 0.05, pulseSpeed: 3 })
   for (let i = 0; i < 5; i++) {
@@ -472,9 +472,9 @@ function drawMap(t) {
 }
 
 const MOVEMENT = {
-  seed: drawSeed, askatomize: drawAskAtomize, atomize: drawAtomize, travel: drawTravel,
+  seed: drawSeed, askbreakapart: drawAskBreakApart, breakapart: drawBreakApart, travel: drawTravel,
   expand: drawExpand, crowded: drawCrowded, organize: drawOrganize,
-  deepatomize: drawDeepAtomize, map: drawMap,
+  deepbreakapart: drawDeepBreakApart, map: drawMap,
 }
 
 // ---------- the reel ----------------------------------------------------------
@@ -487,11 +487,11 @@ const BEATS = [
   { id: 'seed', kind: 'move', verb: 'the seed', gloss: 'one tile',
     say: `This is the whole hive so far. One tile — the bakery. Everything it will become is still folded inside it.` },
 
-  { id: 'askatomize', kind: 'move', verb: '/atomize', gloss: 'mint the ask',
-    say: `Type atomize. The hive doesn't call a model directly — it mints an ask, and the Claude session you have parked on the bridge picks it up.` },
+  { id: 'askbreakapart', kind: 'move', verb: '/break-apart', gloss: 'mint the ask',
+    say: `Type break apart. The hive doesn't call a model directly — it mints an ask, and the Claude session you have parked on the bridge picks it up.` },
 
-  { id: 'atomize', kind: 'move', verb: '/atomize', gloss: 'go deeper',
-    say: `The session reads the tile and answers with its parts. Recipes. Equipment. The space. Paperwork. Opening day. Atomize goes deeper — one tile becomes the pieces that compose it.` },
+  { id: 'breakapart', kind: 'move', verb: '/break-apart', gloss: 'go deeper',
+    say: `The session reads the tile and answers with its parts. Recipes. Equipment. The space. Paperwork. Opening day. Break apart goes deeper — one tile becomes the pieces that compose it.` },
 
   { id: 'travel', kind: 'move', verb: 'recipes', gloss: 'travel inside',
     say: `Click a tile and you travel into it. Inside recipes, three ideas are already waiting.` },
@@ -505,17 +505,17 @@ const BEATS = [
   { id: 'organize', kind: 'move', verb: '/organize', gloss: 'go shallower',
     say: `Organize goes shallower. The session answers with a plan — groups, and where each tile belongs — and the hive applies it. No model ever moves your tiles.` },
 
-  { id: 'deepatomize', kind: 'move', verb: '/atomize', gloss: 'stack the verbs',
-    say: `And the verbs stack. Atomize sourdough, and the method fans out beneath it — starter, schedule, shaping, scoring, the bake.` },
+  { id: 'deepbreakapart', kind: 'move', verb: '/break-apart', gloss: 'stack the verbs',
+    say: `And the verbs stack. Break apart sourdough, and the method fans out beneath it — starter, schedule, shaping, scoring, the bake.` },
 
   { id: 'map', kind: 'move', verb: 'the plan', gloss: 'three levels deep',
     say: `Step back. One tile is now a working plan, three levels deep — and every level was a request you could read, answered by a session you parked yourself.` },
 
   { id: 'close', kind: 'still',
-    body: `<div class="eyebrow">deeper · shallower · wider</div><h1><b>atomize</b> · <b>organize</b> · <b>expand</b></h1>
+    body: `<div class="eyebrow">deeper · shallower · wider</div><h1><b>break apart</b> · <b>organize</b> · <b>expand</b></h1>
            <p class="sub">Say what you mean, and the hive takes that shape.</p>
            <div class="golink" style="margin-top:1.5vh">hypercomb.io</div>`,
-    say: `Atomize. Organize. Expand. Say what you mean, and the hive takes that shape.` },
+    say: `Break apart. Organize. Expand. Say what you mean, and the hive takes that shape.` },
 ]
 
 // ---------- narration ---------------------------------------------------------
@@ -639,7 +639,7 @@ function drawMovementFrames(b, motionSeconds) {
 
 // ---------- assemble ----------------------------------------------------------
 ;(async () => {
-  // single-frame check: node walkthrough.cjs --check atomize 0.8
+  // single-frame check: node walkthrough.cjs --check breakapart 0.8
   const ci = process.argv.indexOf('--check')
   if (ci > -1) {
     const id = process.argv[ci + 1], t = parseFloat(process.argv[ci + 2] ?? '0.8')

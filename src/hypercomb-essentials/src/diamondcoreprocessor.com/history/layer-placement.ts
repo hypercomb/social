@@ -426,7 +426,7 @@ export async function flattenLayerTree(
 // already happened once; this wraps it at the level callers actually work at —
 // a LOCATION — so nobody has to remember to assemble the pieces correctly.
 //
-// It had been hand-reimplemented three times (atomize's #currentChildren,
+// It had been hand-reimplemented three times (break-apart's #currentChildren,
 // organize's #currentMembers, and a cleanup script) before it lived anywhere.
 // Every copy got the null-vs-empty distinction right by luck rather than by
 // construction, which is not a property to rely on for a data-loss guard.

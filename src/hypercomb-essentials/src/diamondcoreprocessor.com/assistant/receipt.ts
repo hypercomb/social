@@ -5,7 +5,7 @@
 // A batch act touches N things and, in practice, does fewer. Tiles are
 // skipped, refused, already done, or unreadable. Each of those is a legitimate
 // outcome; what is NOT legitimate is reporting only the successes, because
-// "atomized 3 tiles" on a layer of 8 reads as completion rather than as a
+// "broke apart 3 tiles" on a layer of 8 reads as completion rather than as a
 // shortfall with five explanations behind it.
 //
 // This session produced four hand-written tally blocks in three files, and one

@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/ui/slash-behaviour/slash-behaviour.drone.ts
 import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
-import { ATOMIZE_SKIP_LABELS } from '../assistant/atomize.drone.js'
+import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'
 
 export class SlashBehaviourDrone extends EventTarget {
@@ -321,29 +321,30 @@ class MoveProvider implements SlashBehaviourProvider {
   }
 }
 
-// ATOMIZE — GO DEEPER. Breaks a tile into the pieces that compose it, on
-// Claude Haiku's advice, ASKED OVER THE BRIDGE (AtomizeDrone mints a
-// `task:'atomize'` ask — no API key; a bridge-connected session creates the
-// parts).
+// BREAK APART — GO DEEPER. Breaks a tile into the pieces that compose it, on
+// Claude Haiku's advice, ASKED OVER THE BRIDGE (BreakApartDrone mints a
+// `task:'break-apart'` ask — no API key; a bridge-connected session creates
+// the parts).
 //
 // With no selection the drone first asks whether the LAYER is crowded: more
 // than a dozen tiles means the page needs a level inserted, so it routes to
 // /organize instead. Otherwise the unit is a TILE, applied foreach: selection
 // → each selected tile; no selection → each leaf on the current layer.
 //
-// Not `/atomize-ui`, which toggles the atomizer toolbar. Not `/organize`,
+// Not `/atomize-ui`, which toggles the atomizer toolbar — a different
+// mechanism that splits dropped input, not this verb. Not `/organize`,
 // which goes the OTHER way — mints no leaves, inserts a level and re-homes
 // existing children into groups. Not `/expand`, which grows the CURRENT
 // layer sideways with new siblings instead of deepening a leaf.
-class AtomizeProvider implements SlashBehaviourProvider {
-  readonly name = 'atomize-provider'
+class BreakApartProvider implements SlashBehaviourProvider {
+  readonly name = 'break-apart-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'atomize',
-      description: 'Break tiles into the pieces that compose them, via Claude Haiku', descriptionKey: 'slash.atomize',
+    { name: 'break-apart',
+      description: 'Break tiles into the pieces that compose them, via Claude Haiku', descriptionKey: 'slash.break-apart',
       examples: [
-        { input: '/atomize', result: 'With tiles selected: breaks down each selected tile' },
-        { input: '/atomize', result: 'With nothing selected: breaks down every leaf tile on this layer' },
+        { input: '/break-apart', result: 'With tiles selected: breaks down each selected tile' },
+        { input: '/break-apart', result: 'With nothing selected: breaks down every leaf tile on this layer' },
       ] }
   ]
 
@@ -355,13 +356,13 @@ class AtomizeProvider implements SlashBehaviourProvider {
     // No selection: the drone runs the foreach over the layer's leaves and
     // owns the reporting (it knows what it skipped).
     if (targets.length === 0) {
-      EffectBus.emit('atomize:layer', {})
+      EffectBus.emit('break-apart:layer', {})
       return
     }
 
-    const drone = get('@diamondcoreprocessor.com/AtomizeDrone') as
-      { atomizeTile?: (label: string) => Promise<string> } | undefined
-    if (!drone?.atomizeTile) {
+    const drone = get('@diamondcoreprocessor.com/BreakApartDrone') as
+      { breakApartTile?: (label: string) => Promise<string> } | undefined
+    if (!drone?.breakApartTile) {
       // Fallback to the quick-menu channel if the drone isn't up yet — it
       // enforces the leaf rule on the same path.
       for (const label of targets) {
@@ -376,7 +377,7 @@ class AtomizeProvider implements SlashBehaviourProvider {
     // Report the REASON, not just the shortfall.
     const receipt = new ReceiptBuilder()
     for (const label of targets) {
-      const outcome = await drone.atomizeTile(label)
+      const outcome = await drone.breakApartTile(label)
       if (outcome === 'queued') receipt.landed()
       else receipt.skipped(outcome)
     }
@@ -384,19 +385,19 @@ class AtomizeProvider implements SlashBehaviourProvider {
     const r = receipt.build()
     EffectBus.emit('toast:show', {
       type: 'tip',
-      message: describeReceipt(r, 'Atomizing', 'tile', ATOMIZE_SKIP_LABELS)
+      message: describeReceipt(r, 'Breaking apart', 'tile', BREAK_APART_SKIP_LABELS)
         + (r.landed ? ' — Haiku is working out the parts.'
            : r.skipped.has('has-children') ? ' Use /organize to group a crowded level.' : ''),
     })
   }
 }
 
-// EXPAND — GO WIDER. The third structural verb next to atomize (deeper) and
+// EXPAND — GO WIDER. The third structural verb next to break-apart (deeper) and
 // organize (shallower): it asks Claude Haiku over the bridge (ExpandDrone
 // mints a `task:'expand'` ask — no API key) to look at what the CURRENT layer
 // already holds and CREATE the sibling tiles its subject is still missing.
 // The unit is the layer, never a single tile — deepening one tile is
-// /atomize. An optional argument narrows the direction of interest.
+// /break-apart. An optional argument narrows the direction of interest.
 class ExpandProvider implements SlashBehaviourProvider {
   readonly name = 'expand-provider'
   readonly priority = 100
@@ -480,7 +481,7 @@ class AtomizeUiProvider implements SlashBehaviourProvider {
   }
 }
 
-// ORGANIZE — the inverse of atomize. Mints no leaves: it inserts a level and
+// ORGANIZE — the inverse of break-apart. Mints no leaves: it inserts a level and
 // re-homes the layer's existing children into named groups, so a crowded page
 // becomes a handful of groups. Haiku plans the clusters over the bridge; the
 // hive performs the moves (OrganizeDrone.applyPlan) because a membership
@@ -581,7 +582,7 @@ _slashBehaviours.addProvider(new KeywordProvider())
 _slashBehaviours.addProvider(new RemoveProvider())
 _slashBehaviours.addProvider(new AccentProvider())
 _slashBehaviours.addProvider(new MoveProvider())
-_slashBehaviours.addProvider(new AtomizeProvider())
+_slashBehaviours.addProvider(new BreakApartProvider())
 _slashBehaviours.addProvider(new ExpandProvider())
 _slashBehaviours.addProvider(new OrganizeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())

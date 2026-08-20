@@ -38,6 +38,13 @@ export type SettingRow =
   /** Something that happens when you press it. `on` lights it when the thing it
    *  toggles is currently in effect. */
   | { kind: 'action'; key: string; label: string; on?: boolean; hint?: string; run: () => void }
+  /** A choice you judge by LOOKING at it, not by reading its name — options
+   *  stack full-width, each drawn in what it does, over a line of specimen
+   *  text. A typeface forced it: its name, set in the editor's own font, tells
+   *  you nothing whatever about the face it names, and five real names do not
+   *  fit across a 272px strip anyway. `family` is the CSS font-family each
+   *  option is drawn in. */
+  | { kind: 'specimen'; key: string; label: string; value: string; options: readonly { value: string; label: string; family: string; specimen: string }[]; hint?: string; pick: (value: string) => void }
 
 /** A titled run of rows. The title is what the rows APPLY TO — the group's
  *  string, or this window — which is the whole navigation of this editor. */
@@ -119,6 +126,36 @@ const SETTINGS_CSS = `
 }
 .hc-settings input.hc-settings-field:focus { border-color: rgba(${STEEL}, 0.6); background: rgba(255, 255, 255, 0.055); }
 .hc-settings input.hc-settings-field::placeholder { color: #5d7280; }
+
+/* Stacked options, each drawn in itself. The name is set in the face too, not
+   only the specimen — a picker where the label is neutral and only the sample
+   is styled makes you look in two places to answer one question. */
+.hc-settings-specimens { display: flex; flex-direction: column; gap: 4px; }
+.hc-settings-specimens > button {
+  display: block; width: 100%; text-align: left;
+  padding: 5px 7px 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(${STEEL}, 0.18); border-radius: 4px;
+  color: #a9bcc9; cursor: pointer;
+  /* The specimen has to be TRUTHFUL: it inherits the same ligature setting the
+     chosen face is rendered with, so a row previewing => as one glyph means
+     the code block will too. It also makes the ligature switch demonstrate
+     itself — flip it and every specimen answers. */
+  font-variant-ligatures: var(--hc-code-ligatures, none);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.hc-settings-specimens > button:hover { background: rgba(255, 255, 255, 0.055); color: #dcecf5; }
+.hc-settings-specimens > button[aria-pressed='true'] {
+  background: rgba(${STEEL}, 0.16); border-color: rgba(${STEEL}, 0.5); color: #eaf5fb;
+}
+.hc-settings-specimen-name { display: block; font-size: 11.5px; line-height: 1.3; }
+/* The specimen is the point of the row, so it is not dimmed into decoration —
+   just stepped back one notch from the name it sits under. */
+.hc-settings-specimen-line {
+  display: block; margin-top: 1px; font-size: 11px; line-height: 1.35;
+  color: #7f95a3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hc-settings-specimens > button[aria-pressed='true'] .hc-settings-specimen-line { color: #a9c2d1; }
 
 /* One strip, divided — a ladder reads as one control with a position on it,
    which a row of separate buttons never does. */
@@ -248,6 +285,24 @@ const renderRow = (row: SettingRow): HTMLElement => {
     input.setAttribute('aria-label', row.label)
     input.addEventListener('change', () => { row.commit(input.value) })
     wrap.appendChild(input)
+  } else if (row.kind === 'specimen') {
+    const list = el('div', 'hc-settings-specimens')
+    list.setAttribute('role', 'group')
+    list.setAttribute('aria-label', row.label)
+    for (const option of row.options) {
+      const button = el('button')
+      button.type = 'button'
+      button.dataset['hcRow'] = `${row.key}:${option.value}`
+      button.setAttribute('aria-pressed', option.value === row.value ? 'true' : 'false')
+      // The face is set on the BUTTON, so the name and the specimen under it
+      // are both drawn in the thing being chosen.
+      button.style.fontFamily = option.family
+      button.appendChild(el('span', 'hc-settings-specimen-name', option.label))
+      button.appendChild(el('span', 'hc-settings-specimen-line', option.specimen))
+      button.addEventListener('click', () => { row.pick(option.value) })
+      list.appendChild(button)
+    }
+    wrap.appendChild(list)
   } else {
     const strip = el('div', 'hc-settings-seg')
     strip.setAttribute('role', 'group')

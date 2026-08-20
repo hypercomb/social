@@ -6,7 +6,7 @@
  * moment it registers — nothing to remember, nothing to keep in sync.
  *
  * This used to be a frozen list, and the failure was silent in the worst
- * direction: `[a, b]/atomize` did not error, it parsed `atomize` as a
+ * direction: `[a, b]/break-apart` did not error, it parsed `break-apart` as a
  * DESTINATION and tried to move the tiles into it. A command the list had
  * never heard of became a move. Any list that has to be updated from three
  * projects away will drift, and this one drifts into data movement.

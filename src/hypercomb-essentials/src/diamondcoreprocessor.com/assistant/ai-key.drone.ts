@@ -4,7 +4,7 @@
 //
 // One command-line indicator per CONFIGURED provider. If a key is on this
 // device, something in this hive can spend the participant's money without
-// asking again — translation, expand, atomize, chat — so the fact that it
+// asking again — translation, expand, break-apart, chat — so the fact that it
 // CAN is always on screen, one light per vendor, labelled with the vendor's
 // own name.
 //

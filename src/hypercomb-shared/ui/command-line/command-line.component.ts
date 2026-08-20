@@ -2965,7 +2965,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // branch here to be reachable.
     //
     // Without this the if-chain simply fell through to "no operation" and
-    // collapsed to a bare select — which is why `[item]/atomize` did NOTHING.
+    // collapsed to a bare select — which is why `[item]/break-apart` did NOTHING.
     // The selection was made, the behaviour never ran, and nothing reported a
     // problem. A hardcoded op list in the PARSER (SELECT_OPS, now isSelectOp)
     // and a second one in the EXECUTOR both had to know a command's name; the
@@ -2975,7 +2975,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         { has?: (n: string) => boolean; execute?: (n: string, args: string) => unknown } | undefined
       if (slash?.has?.(op) && slash.execute) {
         // The tiles are already selected above, which is the contract a
-        // selection-driven behaviour reads (AtomizeProvider, etc.).
+        // selection-driven behaviour reads (BreakApartProvider, etc.).
         const args = afterBracket.slice(opMatch![0].length).trim()
         await slash.execute(op, args)
         this.#collapseToSelect(labels)

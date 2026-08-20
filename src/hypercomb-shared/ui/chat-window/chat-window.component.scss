@@ -292,6 +292,7 @@ $accent: #7eb6d6;
     white-space: nowrap;
     scrollbar-width: none;
     font-family: var(--hc-code);
+    font-variant-ligatures: var(--hc-code-ligatures);
     font-size: 0.72em;
     color: #d9e4ee;
   }

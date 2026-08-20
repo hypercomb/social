@@ -166,7 +166,7 @@ In the hive command line:
 - `/opus`, `/sonnet`, `/haiku`, `/fable` open the **chat window** on that
   model. Type there like any chat; each send becomes an ask record.
 - Select tiles first and the answer lands as a **note on those tiles**.
-- `/atomize` asks for structure (the responder creates child tiles),
+- `/break-apart` asks for structure (the responder creates child tiles),
   `/expand` asks for new siblings, `/organize` asks for a grouping plan.
 
 Your parked session (Step 5) wakes up, reads the tiles for context, and

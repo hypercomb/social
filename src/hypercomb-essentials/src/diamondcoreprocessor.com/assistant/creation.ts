@@ -73,7 +73,7 @@ export const stampCreation = async (
       kind: CREATION_KIND,
       appliesTo: [...segments],
       // `role` says what this tile WAS in the act — 'group' for a container
-      // organize minted, 'part' for a piece atomize created. A resume needs
+      // organize minted, 'part' for a piece break-apart created. A resume needs
       // to tell a container it should fill from a leaf it already finished.
       payload: { id: creationId, task, role, at: Date.now() },
       mark: 'persistent',

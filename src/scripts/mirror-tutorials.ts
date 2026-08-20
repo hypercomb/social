@@ -187,7 +187,7 @@ const COURSES: Course[] = [
       ['window-rewind', 'Undo you can SEE: recent moments drawn as they looked, so you pick the one you meant instead of counting.', ['history', 'view']],
       ['window-views', 'The library of ways to draw the same tiles — tree, website, slides, study games. Attached, never converted.', ['view', 'appearance']],
       ['window-features', 'What is actually acting on a tile, and where each behaviour came from — direct mark or inherited from an ancestor.', ['structure', 'appearance']],
-      ['window-assistant', 'The ask screen and the bee that flies it: question first, tiles as context, answers landing as notes. /atomize and /organize hand back plans the hive checks before it moves anything.', ['assistant']],
+      ['window-assistant', 'The ask screen and the bee that flies it: question first, tiles as context, answers landing as notes. /break-apart and /organize hand back plans the hive checks before it moves anything.', ['assistant']],
       ['window-observe', 'The window onto the swarm — who is here and what they share. Watching is free; publishing is always your own deliberate act.', ['swarm']],
     ],
   },

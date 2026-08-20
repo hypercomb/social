@@ -14,18 +14,23 @@
   font-style: normal;
 }
 
-// IBM Plex Mono — the READING mono, for surfaces where code is the content
-// rather than the label (see --hc-code below). Self-hosted, latin subset:
-// three cuts only, because that is all a code block asks for — regular,
-// italic (comments), semibold (the highlighter's `strong`). SIL OFL 1.1,
-// license alongside in IBMPlexMono-OFL.txt.
+// The READING monos — the faces offered for surfaces where code is the
+// CONTENT rather than the label (see --hc-code below, and the picker in every
+// tool window's settings gear). Self-hosted, latin subset, three cuts each:
+// regular, italic, semibold. That is all a code block asks for — italic
+// because comments are italic, semibold because the highlighter's `strong`
+// is. Both SIL OFL 1.1, licenses alongside.
+//
+// A face costs nothing until it is CHOSEN: the browser fetches a @font-face
+// only when something on the page actually renders in it, so the two families
+// here are two files' worth of repo, not two files' worth of page weight.
 //
 // The unicode-range is what keeps this honest: a CJK identifier or a box-
 // drawing glyph is NOT in the latin subset, so the browser never waits on
 // these files for it — it falls straight through to --hc-mono's system
 // stack, which has the coverage. Widening the subset means shipping more
 // bytes for characters code blocks rarely hold.
-$plex-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+$code-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
   U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 
@@ -35,7 +40,7 @@ $plex-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
   font-weight: 400;
   font-style: normal;
   font-display: swap;
-  unicode-range: $plex-latin;
+  unicode-range: $code-latin;
 }
 
 @font-face {
@@ -44,7 +49,7 @@ $plex-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
   font-weight: 400;
   font-style: italic;
   font-display: swap;
-  unicode-range: $plex-latin;
+  unicode-range: $code-latin;
 }
 
 @font-face {
@@ -53,7 +58,34 @@ $plex-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
   font-weight: 600;
   font-style: normal;
   font-display: swap;
-  unicode-range: $plex-latin;
+  unicode-range: $code-latin;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: $code-latin;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./JetBrainsMono-Italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  unicode-range: $code-latin;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./JetBrainsMono-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: $code-latin;
 }
 
 // ── typography tokens ─────────────────────────────────────
@@ -72,4 +104,9 @@ $plex-latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
   // face with a real italic and a measure that fits the panel. Falls through
   // to --hc-mono, so the chain stays declared in ONE place.
   --hc-code: 'IBM Plex Mono', var(--hc-mono);
+
+  // Ligatures OFF unless a window asks: in a panel where you read code you did
+  // not write, a `!==` redrawn as one glyph is a place to guess. Tool windows
+  // override this on their own host (hc-docked-panel.directive.ts).
+  --hc-code-ligatures: none;
 }
