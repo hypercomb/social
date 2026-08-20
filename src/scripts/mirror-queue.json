@@ -859,6 +859,33 @@
       "unattended": false,
       "created": "2026-08-19",
       "status": "pending"
+    },
+    {
+      "id": "notes-navigator-page-filter",
+      "title": "Notes tile navigator follows the page filter",
+      "run": null,
+      "note": "While a page filter is on (tags:filter / search:filter / filter:view) the notes-strip tile selector lists only the tiles the page kept, intersected with the current layer; new i18n key notes.pageFiltered says so under the list. Mirror: note on the annotations/notes-strip tile.",
+      "unattended": false,
+      "created": "2026-08-19",
+      "status": "pending"
+    },
+    {
+      "id": "lists-outline-hierarchy",
+      "title": "Lists tab: one list whole, hierarchy by Tab/drag, name in the title bar; the note-tab selector row deleted",
+      "run": null,
+      "note": "Built this session, no live bridge (broker up on 2401, renderer not answering — bridge:check times out). The annotations window's LISTS tab was reshaped: (1) the docked note-tab selector row is GONE ENTIRELY — on BOTH tabs, markup and stylesheet: it rendered under exactly the condition the PINNED CARD does (docked, tile active), so it was the same notes listed twice, stealing height from the pane. The card is the selector on both tabs — every note and every line of every list, clickable, with its own '+' for one more note (selectNote -> openListPath on lists); #revealRow and the mark-drop hit list dropped their .cv2-notetab arms; (2) the pane's head row is GONE — the open list's NAME reads in the dragbar, right of the tile name, and is renamed in place there; (3) drill-down (enter/exit/trail) is REPLACED by one list shown WHOLE: listRows() flattens the open list at every depth, collapse chevrons fold subtrees; (4) HIERARCHY GESTURES — Tab/Shift+Tab move the always-open new line in and out (the bullet shows where the next line lands, newItemDepth/newLineDepth) and move an existing line under its previous sibling / back out to its parent's level (stepItemDepth); a line drags by its grip to before/into/after any other line; (5) a quiet FOOT BAR carries the only two list-level acts — new list, and delete list (arms on the first click, acts on the second, disarms after 4s); (6) NEW DRONE OP note:move { cellLabel, sourceId, parentId, index } + insertAtIndex() in note-tree.ts + moveAtSegments() — the first op that can place a note among its siblings AT ANY DEPTH (note:reorder was top-level only, note:nest could only append); the tree column's own drag now goes through it too, and the drag hit-test is scoped to [data-note-drag-scope] so the desk's two columns don't answer for each other. i18n: notes.lists.delete + notes.lists.deleteConfirm added to all 14 catalogs, notes.lists.{back,open,count.*} removed. Files: hypercomb-shared/ui/notes-strip/{notes-strip.component.ts,.html,notes-strip.lists.scss,notes-strip.tabs.scss,notes-strip.desk.scss}, hypercomb-essentials/src/diamondcoreprocessor.com/notes/{note-tree.ts,notes.drone.ts,note-tree.spec.ts}, scripts/drive-notes-lists.cjs (the harness that proves it). Owed: notes on the annotations-window cell restating the lists interface (the older 'annotations-two-pane-lists' entry describes the drill-in model this replaces — correct that note, do not add a second), a part tile for note-tree.ts's insertAtIndex + notes.drone.ts note:move, and a part tile for scripts/drive-notes-lists.cjs.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "lanes-shared-switch",
+      "title": "Note the lane switch's bus-backed state on the lanes mirror tiles",
+      "run": null,
+      "note": "Bees are bundled standalone, so lane-viewport-mode.ts was inlined per bee and the /lanes switch only existed inside the sequence bee — pan/zoom read their own copy, permanently false, so the axis lock never engaged in the runtime (web/DCP/deployed) shell while working in dev. The switch now travels on EffectBus (LANE_VIEWPORT_EFFECT, globalThis singleton + last-value replay) and the rung reads localStorage. Add this to the lanes/mobile mirror tiles.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

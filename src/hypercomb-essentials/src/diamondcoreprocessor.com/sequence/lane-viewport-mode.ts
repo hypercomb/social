@@ -15,14 +15,41 @@
 // now is leave the hexes packed the old way for a moment, with the viewport
 // already scrolling the right direction.
 
+import { EffectBus } from '@hypercomb/core'
 import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { LANE_DEFAULT, LANE_MAX, LANE_MIN, clampLanes } from './arrangements.js'
 
 const LANE_COUNT_KEY = 'hc:lane-count'
 
+/** The switch itself travels on the BUS, because module scope is not shared.
+ *
+ *  Every bee is bundled standalone, so this file is INLINED SEPARATELY into
+ *  each one that imports it — the sequence drone that engages lanes and the
+ *  pan/zoom inputs that must obey the lock each got their own private copy of
+ *  the variable below. In the dev shell (one TypeScript graph, one module)
+ *  they are the same variable and everything worked; in the runtime shell —
+ *  the web app, the DCP install, the deployed phone — `setLaneViewport(true)`
+ *  set the SEQUENCE bee's copy while pan kept reading its own, permanently
+ *  false. The strip re-packed and the hexes turned, because those ride the
+ *  bus, and the travel stayed free in both directions: exactly the "lanes do
+ *  not constrain anything on my phone" report, invisible on desktop.
+ *
+ *  EffectBus is a `globalThis` singleton with last-value replay, so it IS
+ *  shared across bundles: the boolean below is now a per-copy MIRROR of one
+ *  bus value, and a copy loaded later replays into step on subscribe. */
+export const LANE_VIEWPORT_EFFECT = 'lanes:viewport'
+
 export type LaneScrollAxis = 'x' | 'y'
 
 let laneViewport = false
+try {
+  EffectBus.on<{ active?: boolean }>(LANE_VIEWPORT_EFFECT, (p) => {
+    laneViewport = p?.active === true
+  })
+} catch {
+  /* no bus (unit context) — the local mirror is still authoritative */
+}
+
 // The ladder rung the phone is reading at: 3 = scan, 2 = browse, 1 = read.
 // Runtime + participant-local only. It is a legibility choice, never tile
 // truth — the ARRANGEMENT it produces is the truth, and that is written by
@@ -51,8 +78,20 @@ export const getLaneScrollAxis = (): LaneScrollAxis | null =>
 
 /** The ladder rung, restored per participant. Readable on desktop too — it
  *  says nothing about the desktop viewport, it is simply the last rung the
- *  phone chose, and `/lanes` on a phone resumes there. */
-export const getLaneCount = (): number => laneCount
+ *  phone chose, and `/lanes` on a phone resumes there.
+ *
+ *  Read from storage, for the same reason the switch rides the bus: the
+ *  in-memory rung belongs to whichever bundle set it. localStorage is the one
+ *  copy every bee can see. */
+export const getLaneCount = (): number => {
+  try {
+    const stored = Number(window.localStorage?.getItem(LANE_COUNT_KEY))
+    if (Number.isFinite(stored) && stored > 0) laneCount = clampLanes(stored)
+  } catch {
+    /* storage disabled — the local rung is the best we have */
+  }
+  return laneCount
+}
 
 export const setLaneCount = (lanes: number): number => {
   laneCount = clampLanes(lanes)
@@ -68,10 +107,10 @@ export const setLaneCount = (lanes: number): number => {
  *  scans wider. Clamped at both ends — a step past the edge is a no-op the
  *  caller can report, never a wrap that jumps from read back to scan. */
 export const stepLaneCount = (dir: number): number =>
-  setLaneCount(laneCount + (dir < 0 ? -1 : 1))
+  setLaneCount(getLaneCount() + (dir < 0 ? -1 : 1))
 
 export const laneCountAtEdge = (dir: number): boolean =>
-  dir < 0 ? laneCount <= LANE_MIN : laneCount >= LANE_MAX
+  dir < 0 ? getLaneCount() <= LANE_MIN : getLaneCount() >= LANE_MAX
 
 try {
   const stored = Number(window.localStorage?.getItem(LANE_COUNT_KEY))
@@ -88,5 +127,13 @@ export const setLaneViewport = (active: boolean): boolean => {
   const next = active && mobileModeActive()
   if (laneViewport === next) return false
   laneViewport = next
+  // Publish so every OTHER copy of this module — pan, zoom, anything bundled
+  // separately — flips with it. Without this the lock only ever existed
+  // inside the bundle that engaged it.
+  try {
+    EffectBus.emit(LANE_VIEWPORT_EFFECT, { active: next })
+  } catch {
+    /* no bus — single-copy contexts still read the local mirror */
+  }
   return true
 }

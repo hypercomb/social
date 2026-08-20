@@ -88,3 +88,34 @@ describe('lane viewport axis', () => {
     expect(laneStripHorizontal()).toBe(false)
   })
 })
+
+// The regression that made lanes a desktop-only illusion: every bee is bundled
+// standalone, so this module is INLINED SEPARATELY into the sequence drone that
+// engages lanes and into the pan/zoom inputs that must obey it. Module scope is
+// therefore NOT shared at runtime — the deployed phone had one copy set to true
+// and another, the one pan reads,permanently false. A second copy is exactly what a
+// second bee is; it must come into step through the bus.
+describe('lane viewport across separately bundled copies', () => {
+  beforeEach(() => {
+    setMobile(true)
+    portrait()
+    setLaneViewport(false)
+  })
+
+  it('engaging in one copy locks the axis in another', async () => {
+    setLaneViewport(true)
+    // A fresh module instance = the pan bee's private copy of this file.
+    const other = await import('./lane-viewport-mode.js?copy=pan')
+    expect(other.getLaneScrollAxis()).toBe('y')
+    landscape()
+    expect(other.getLaneScrollAxis()).toBe('x')
+  })
+
+  it('releasing in one copy releases it in the other', async () => {
+    setLaneViewport(true)
+    const other = await import('./lane-viewport-mode.js?copy=zoom')
+    expect(other.getLaneScrollAxis()).not.toBeNull()
+    setLaneViewport(false)
+    expect(other.getLaneScrollAxis()).toBeNull()
+  })
+})
