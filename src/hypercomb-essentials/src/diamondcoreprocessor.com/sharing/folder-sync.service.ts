@@ -908,14 +908,24 @@ export class FolderSyncService {
           // re-verification of the whole mirror belongs to import (which
           // re-hashes every listed file) and to an explicit verify pass —
           // not to every drain.
-          const sourceBuffer = await file.arrayBuffer()
-          stamp.sha256 = contentSig ?? await SignatureService.sign(sourceBuffer)
+          // arrayBuffer() is the SAME vanishing race as getFile(), one step
+          // later — the bytes are read here, not at getFile(), so a file
+          // replaced in between throws right at this line. Signing and writing
+          // share the guard: a full disk, an unrepresentable name and a
+          // rewritten source all land here, and every one of them is worth
+          // finishing the other ten thousand files for.
+          let sourceBuffer: ArrayBuffer
           try {
+            sourceBuffer = await file.arrayBuffer()
+          } catch (error) {
+            vanished++
+            console.warn('[folder-sync] entry rewritten before its bytes were read:', entry.path, error)
+            continue
+          }
+          try {
+            stamp.sha256 = contentSig ?? await SignatureService.sign(sourceBuffer)
             await writeFile(targetDir, name, sourceBuffer)
           } catch (error) {
-            // Same rule as the directory above: count it, name it, keep going.
-            // A full disk and an unrepresentable filename both land here, and
-            // both are worth finishing the other files for.
             unrepresentable.push(entry.path)
             console.warn('[folder-sync] could not write:', entry.path, error)
             continue
@@ -927,11 +937,18 @@ export class FolderSyncService {
         scanned++
         totalBytes += stamp.size
         if (scanned % CHECKPOINT_FILES === 0) {
+          // Best-effort: the checkpoint is a RESUME HINT, not the copy. Losing
+          // one costs a little repeated work next pass; throwing here would
+          // discard the copy it was recording.
           // Checkpoint: the manifest is the resume cursor. Union with the
           // prior record so an interrupted pass never discards knowledge of
           // files it has not reached yet, and mark the pass active so this
           // partial record is never mistaken for a completion.
-          await this.#checkpoint(device, manifest, { ...previousFiles, ...nextFiles })
+          try {
+            await this.#checkpoint(device, manifest, { ...previousFiles, ...nextFiles })
+          } catch (error) {
+            console.warn('[folder-sync] checkpoint failed; the copy continues', error)
+          }
         }
         this.#reportLatestPath(
           agentId,
