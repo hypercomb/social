@@ -71,6 +71,19 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
 
   await store.initialize()
 
+  // The localStorage flag is only a summary of the install cache. A reset,
+  // interrupted install, or origin/store change can leave it true after the
+  // manifest has disappeared. Normalize that impossible state here, AFTER
+  // Store.initialize() but BEFORE the browser gates below, so first-run UI and
+  // reload decisions cannot trust a claim whose required manifest is absent.
+  // The gates return early, and a claim that survives them keeps
+  // `shouldBootstrap` (runtime-mediator) and main.ts's first-run path believing
+  // this hive is installed while nothing is on disk. The claim describes
+  // localStorage's own manifest, so it is answerable whether or not OPFS opened.
+  const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+  const usableCache = cachedManifest && cachedManifest.bees.length > 0
+  if (!usableCache) localStorage.removeItem(INSTALLED_FLAG_KEY)
+
   if (!store.opfsAvailable) {
     // 'no-storage', not 'no-sentinel' — the welcome card renders an
     // explanation (private window / old Safari) instead of a Start button
@@ -102,14 +115,6 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   // silently reinstall from the shell's bundled content even when DCP
   // was the user's intended source of truth. Push-only means: DCP
   // initiates upgrades, the user initiates upgrades. Boot never does.
-  const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  const usableCache = cachedManifest && cachedManifest.bees.length > 0
-  // The localStorage flag is only a summary of the install cache. A reset,
-  // interrupted install, or origin/store change can leave it true after the
-  // manifest has disappeared. Normalize that impossible state here, AFTER
-  // Store.initialize(), so first-run UI and reload decisions cannot trust a
-  // claim whose required manifest is absent.
-  if (!usableCache) localStorage.removeItem(INSTALLED_FLAG_KEY)
   if (usableCache) {
     // Verify EVERY bee + EVERY dep + EVERY layer file is in OPFS. Partial
     // installs (e.g. Edge cold-load with SW race, network glitch mid-fetch)
