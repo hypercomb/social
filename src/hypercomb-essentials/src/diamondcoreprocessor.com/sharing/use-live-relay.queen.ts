@@ -51,6 +51,11 @@ interface MeshLike {
   configureRelays?: (urls: string[], persist?: boolean) => void
   connectAll?: () => void
 }
+interface HostSyncLike {
+  isEnabled?: () => boolean
+  isPublicHostEnabled?: () => boolean
+  enablePublicHost?: () => void
+}
 
 const ioc = () => (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc
 
@@ -130,6 +135,21 @@ export class UseLiveRelayQueenBee {
 
     // 3. The availability gate — reliability ruling (see header).
     localStorage.setItem(UNGATED_KEY, '1')
+
+    // 3b. A BYTE TARGET — the pictures half. The wire carries signatures,
+    // never image bytes: a visitor fetches each picture from a host, so a
+    // participant with no target announces tiles whose pictures 404 for
+    // everyone (the "tiles show, images don't" bug, hit live 2026-08-20 —
+    // a stale hc:public-host='0' silently kept a whole hive's backlog off
+    // every host). Typing the setup command IS the consent gesture, so it
+    // (re-)enables the public content endpoint whenever no target is on —
+    // including over a stale opt-out. A configured self-domain still wins;
+    // the publish walk then stages the public backlog via markPublic and
+    // the 30s drain ticks upload it.
+    const hostSync = ioc()?.get?.<HostSyncLike>('@diamondcoreprocessor.com/HostSyncService')
+    if (hostSync && !hostSync.isEnabled?.() && !hostSync.isPublicHostEnabled?.()) {
+      hostSync.enablePublicHost?.()
+    }
 
     // 4. Public — the guarded gesture, only ever toward ON.
     if (localStorage.getItem(PUBLIC_KEY) !== 'true') this.#togglePublic()
