@@ -1081,6 +1081,15 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "click-adopts-each-layer",
+      "title": "Each layer is adopted on click — the swarm's shade is standing, and the click adds + walks in",
+      "run": null,
+      "note": "Jaime's ruling 2026-08-20, SUPERSEDES the acquisition half of 'walk-is-a-look-wand-is-the-keep' (the shade is no longer a ctrl-held preview and the click is no longer only a look). New model: in a zone every EXTERNAL tile renders SHADED from the moment you arrive (show-cell #cellIsShaded, standing rule; wand:armed coupling and #applyWandShadeToExternals deleted; hover still lifts the tile under the pointer). A plain CLICK on a shaded tile ADDS it and walks into it — tile-overlay #takeFromSwarm at the #navigateInto choke point, so click/hold-to-enter/tap all take, and a peer tile always enters even without a branch dot (structure travels only by walking). The take rides swarm:wand, so it is transient, clears a tombstone (click a tile you gave back and you add it again) and takes the ITEM only. The ctrl sweep survives for taking without going in. A bare visit still keeps nothing — a deep link or back button browses without collecting. LIVE TRAP PAID: #onWand resolved the peer offer AFTER its first await, by which time the click had already navigated — it must resolve location + offer synchronously at gesture time (pinned by swarm-visit.spec 'a CLICK takes from where the gesture happened'). ALSO: the per-tile FEATURES icon returns, EARNED not standing — the doors-off-tiles ruling stands, but a tile carrying a behaviour of its OWN (a visual-bee decoration on it, or a kind bound to its exact location) shows the puzzle piece again, which is how an added swarm tile shows what it arrived carrying (tile-actions tileCarriesOwnBehavior). Mirror owed under behaviors/swarm + the behaviors deck: update the swarm-adopt / selection-input part tiles and the SwarmAdoptDrone card so they say CLICK, not ctrl-only; a part tile for the standing shade in show-cell; a note on the features/beehaviors card that the per-tile icon is earned by a binding; part tiles for the two harnesses (scripts/drive-swarm-connectivity.cjs now 26 checks incl. shade+click, scripts/drive-tile-behavior-icon.cjs 4/4). i18n: swarm.wand-hint text replaced in all 14 catalogs. note-add is additive - needs a human.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

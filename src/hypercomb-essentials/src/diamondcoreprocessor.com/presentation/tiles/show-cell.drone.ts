@@ -7793,6 +7793,19 @@ export class ShowCellDrone extends Drone {
       .map(c => c.label)
   }
 
+  /** Diagnostic: which tiles on this page are dim right now, split by WHY —
+   *  `swarm` (somebody else's, not yours yet) or `readiness` (yours, still
+   *  loading). Reads the live predicates the geometry write consults, so a
+   *  "the shade isn't showing" report names its half instead of guessing.
+   *  Nothing in the app reads this; the swarm harness does. */
+  public shadeDebug = (): { swarm: string[]; readiness: string[] } => {
+    const cells = [...this.renderedCells.values()]
+    return {
+      swarm: cells.filter(c => c.external && this.#cellIsShaded(c)).map(c => c.label),
+      readiness: cells.filter(c => !c.external && this.#cellIsShaded(c)).map(c => c.label),
+    }
+  }
+
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
     const out: Cell[] = []
     // during move drag, use reordered names so labels map to correct indices

@@ -1,13 +1,15 @@
-// swarm-visit.spec.ts — THE WALK IS A LOOK, THE WAND IS THE KEEP.
+// swarm-visit.spec.ts — EACH LAYER IS ADOPTED ON CLICK.
 //
-// Jaime's ruling (2026-08-20) replaced visit-driven acquisition: walking
-// into somebody's tile no longer makes it yours. Taking is one deliberate
-// gesture — ctrl (⌘) + press over a witnessed tile — and it takes THAT
-// ITEM, never its children.
+// Jaime's ruling (2026-08-20): in a swarm the tiles you don't own render
+// shaded, and CLICKING one adds it — permanently — while walking you into
+// it. Taking is always a GESTURE (the click, or the ctrl sweep that takes
+// without going in), never a side effect of where the URL points, and it
+// takes THAT ITEM, never its children.
 //
 // The rules this file guards:
-//   1. A WALK KEEPS NOTHING: entering a peer-offered tile commits nothing
-//      and mints no record (no genome, no receipt, no adopted root).
+//   1. A BARE VISIT KEEPS NOTHING: the visit signal alone commits nothing
+//      and mints no record (no genome, no receipt, no adopted root) — a
+//      deep link or a back button browses without collecting.
 //   2. THE WAND takes that ONE tile with the publisher's real props from
 //      the wire — never a husk, never the subtree, never the swarm
 //      metadata (layerSig/inviteSig/peerPubkey stay out). `index` DOES
@@ -15,8 +17,14 @@
 //      a witness, and taking it must not move it — it loses its
 //      transparency and shows static, exactly where it stood. A landed
 //      take mints the records: visit genome, sync receipt, adopted root.
-//   3. The wand is EXPLICIT, so it CLEARS a tombstone — the way back in
-//      after a delete. (A walk, keeping nothing, can't resurrect one.)
+//   3. A take is EXPLICIT, so it CLEARS a tombstone — the way back in
+//      after a delete: click a tile you gave back and you add it again.
+//      (A bare visit, keeping nothing, can't resurrect one.)
+//   3b. THE GESTURE'S OWN MOMENT: the click that takes also navigates, so
+//      the parent path AND the peer's offer are resolved synchronously,
+//      before the first await — read them afterwards and they describe the
+//      page just entered (the live bug: clicked tiles walked in but never
+//      landed).
 //   4. Outside a zone, or over a tile nobody offers here, the wand does
 //      nothing at all.
 //   5. LANDED-OR-NOTHING: a take the committer refused mints no records.
@@ -52,8 +60,10 @@ let committer: { commitSlotSet: ReturnType<typeof vi.fn>; update: ReturnType<typ
 let broker: { adopt: ReturnType<typeof vi.fn>; getKnownDomains: ReturnType<typeof vi.fn> }
 let cursor: { state: { rewound: boolean }; currentLayerSig?: string }
 let commitLands: boolean
-/** What the zone offers HERE — what the wand can reach. */
+/** What the zone offers HERE — what a take can reach. */
 let peerTiles: Record<string, unknown>[]
+/** Where the participant is standing. A click MOVES this mid-gesture. */
+let hereSegments: string[] = []
 
 const history = {
   sign: vi.fn(async (l: { explorerSegments?: () => readonly string[] }) => 'loc:' + (l.explorerSegments?.() ?? []).join('/')),
@@ -70,7 +80,7 @@ const iocRegistry = (): Record<string, unknown> => ({
     peerTilesAtSig: () => [],
     withheldByPeer: () => ['visual:website:page'],
   },
-  '@hypercomb.social/Lineage': { explorerSegments: () => [], domain: () => 'hypercomb.io' },
+  '@hypercomb.social/Lineage': { explorerSegments: () => [...hereSegments], domain: () => 'hypercomb.io' },
   '@hypercomb.social/Store': store,
   '@diamondcoreprocessor.com/ContentBrokerDrone': broker,
   '@diamondcoreprocessor.com/HistoryService': history,
@@ -102,6 +112,7 @@ const freshWorld = () => {
   headByLoc = new Map<string, Layer>([['loc:', { name: 'root', children: [] }]])
   putBodies = []
   peerTiles = [{ ...GARDEN_OFFER }]
+  hereSegments = []
   // The REAL cursor service exposes a position sig even at head — only
   // state.rewound means "viewing the past". Gating a take on the mere
   // presence of currentLayerSig killed every fold in the live shell;
@@ -267,6 +278,30 @@ describe('the wand is the keep', () => {
     // The publisher's withheld roster landed at the root.
     const withheld = JSON.parse(localStorage.getItem('hc:withheld-at-roots') ?? '{}')
     expect(Object.keys(withheld).length).toBeGreaterThan(0)
+  })
+
+  it('a CLICK takes from where the gesture happened, then walks in', async () => {
+    freshWorld()
+    inZone()
+
+    // What the click does, in the order the shell does it: emit the take,
+    // then commit the entry — synchronously, in the same turn. Everything
+    // after this line is the CHILD page: a different location, and the
+    // offers of a level we have not taken anything from.
+    wandGarden()
+    hereSegments = ['garden']
+    peerTiles = []
+    await settle()
+
+    // The take still landed at the page it was made on, with the
+    // publisher's real props — not at the page the click travelled to.
+    expect(committer.importTree).toHaveBeenCalled()
+    const updates = committer.importTree.mock.calls[0][0] as { segments: string[]; layer: Layer }[]
+    expect(updates.find(u => u.segments.length === 0)?.layer.children).toContain('garden')
+    expect(updates.find(u => u.segments.join('/') === 'garden')?.layer.properties).toEqual([PROPS_SIG])
+    const rec = visitRecordAt(['garden'])
+    expect(rec).toBeTruthy()
+    expect(rec!.layerSig).toBe(PEER_GARDEN)
   })
 
   it('CLEARS a tombstone — an explicit gesture is the way back in', async () => {

@@ -750,11 +750,18 @@ export class SwarmAdoptDrone extends Drone {
     if (!label) { this.#visitStage('wand-no-label'); return }
     if (!this.wandEligible(label)) { this.#visitStage('wand-ineligible', { name: label }); return }
 
+    // RESOLVE WHERE AND WHAT SYNCHRONOUSLY, before the first await. The
+    // click that takes a tile also WALKS INTO IT — the entry commits in the
+    // same turn, right behind this emit — so anything read after an await
+    // describes the page we just entered instead of the one we took from.
+    // (Live trap: the offer lookup used to sit after the held-here read and
+    // resolved null every time, so a clicked tile navigated but never
+    // landed.) The location and the offer are both gesture-time facts.
     const at = this.#currentSegments()
-    const path = [...at, label]
-    if (await this.#isHeldHere(at, label)) { this.#visitStage('wand-held', { name: label }); return }
     const entry = this.#peerEntryFor(label)
     if (!entry) { this.#visitStage('wand-no-entry', { name: label }); return }
+    const path = [...at, label]
+    if (await this.#isHeldHere(at, label)) { this.#visitStage('wand-held', { name: label }); return }
     this.#visitStage('wand-folding', { name: label, at: [...path] })
     clearAdoptTombstone(path)
     await this.#foldPageTile(at, label, entry)

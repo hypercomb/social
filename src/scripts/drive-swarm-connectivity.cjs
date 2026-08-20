@@ -25,6 +25,7 @@
 //   --relay <ws url>   relay override          (default: the shell's own default)
 //   --headed           show the browsers
 //   --keep             leave browsers open at the end
+//   --shots <dir>      save PNGs of the swarm page (shaded, then added)
 
 const { chromium, webkit, firefox } = require('playwright')
 
@@ -53,6 +54,7 @@ const URL_ = arg('url', 'http://localhost:4250/')
 const RELAY = arg('relay', null)
 const ENGINE_A = arg('engine-a', 'chromium')
 const ENGINE_B = arg('engine-b', 'chromium')
+const SHOTS = arg('shots', null)   // dir: save what the swarm LOOKS like
 const HEADED = process.argv.includes('--headed')
 const KEEP = process.argv.includes('--keep')
 
@@ -278,8 +280,8 @@ async function ownChildren(page) {
  *  container's global space → client px. Needed because the wand is a
  *  REAL ctrl+press on the canvas, not a synthesized effect — a gesture
  *  that never touches a native pointer proves nothing about the gesture. */
-async function tileClientPoint(page, label) {
-  return evalSafe(() => page.evaluate((name) => {
+async function tileClientPoint(page, label, offset) {
+  return evalSafe(() => page.evaluate(({ name, off: nudge }) => {
     const bus = window.__hypercombEffectBus
     const last = bus?.lastValue
     if (!last) return { ok: false, reason: 'no bus' }
@@ -296,7 +298,10 @@ async function tileClientPoint(page, label) {
     if (!s) return { ok: false, reason: 'no detector' }
     const mx = flat ? 1.5 * s * q : Math.sqrt(3) * s * (q + r / 2)
     const my = flat ? Math.sqrt(3) * s * (r + q / 2) : s * 1.5 * r
-    const pt = host.container.toGlobal({ x: mx + off.x, y: my + off.y })
+    const pt = host.container.toGlobal({
+      x: mx + off.x + (nudge?.x ?? 0),
+      y: my + off.y + (nudge?.y ?? 0),
+    })
     const rect = host.canvas.getBoundingClientRect()
     const screen = host.renderer.screen
     return {
@@ -304,7 +309,7 @@ async function tileClientPoint(page, label) {
       x: rect.left + pt.x * (rect.width / screen.width),
       y: rect.top + pt.y * (rect.height / screen.height),
     }
-  }, label))
+  }, { name: label, off: offset ?? null }))
 }
 
 /** THE WAND — a real ctrl+press over a witnessed tile. */
@@ -318,6 +323,45 @@ async function wandTile(page, label) {
   await page.mouse.up()
   await page.keyboard.up('Control')
   return at
+}
+
+/** THE CLICK — a plain left press over a shaded peer tile: it adds the tile
+ *  AND walks in. No modifier: this is the gesture a finger performs too. */
+async function clickTile(page, label) {
+  // ABOVE THE HOVER BAND. The icon block centres on ICON_Y=5 in hex-local
+  // units and its buttons cover the hex's exact centre, so a click at the
+  // centre lands on an ICON (on a peer tile that is `hide` — which is how an
+  // earlier run silently hid the tile it meant to add). Nudge up into the
+  // tile body, where a participant aiming at the tile itself clicks.
+  const at = await tileClientPoint(page, label, { x: 0, y: -14 })
+  if (!at.ok) return at
+  await page.mouse.move(at.x, at.y)
+  await sleep(80)
+  await page.mouse.down()
+  await sleep(60)
+  await page.mouse.up()
+  return at
+}
+
+/** Save what the page LOOKS like — the shade is a visual rule, so a run can
+ *  hand back the picture as well as the predicate. No-op without --shots. */
+async function shot(page, name) {
+  if (!SHOTS) return null
+  const path = require('path').join(SHOTS, name + '.png')
+  try { await page.screenshot({ path }); log('shot', path); return path }
+  catch (err) { log('shot', 'failed: ' + String(err).slice(0, 120)); return null }
+}
+
+/** Which tiles are dim right now, split by why (swarm vs readiness). */
+async function shadeNow(page) {
+  return evalSafe(() => page.evaluate(() =>
+    window.ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone')?.shadeDebug?.() ?? null))
+}
+
+/** Where this client is standing. */
+async function locationNow(page) {
+  return evalSafe(() => page.evaluate(() =>
+    [...(window.ioc?.get?.('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])]))
 }
 
 /** What the ordinary selection holds — the wand must leave it alone. */
@@ -540,10 +584,13 @@ async function main() {
   // drill request/response tunnel (lifecycle-channel ask, publisher answers
   // with that location's layer event) can light it. A then WALKS the path.
   //
-  // THE WALK IS A LOOK (2026-08-20): A must reach every level WITHOUT
-  // holding any of it — the tunnel is driven by the walk, not by ownership
-  // — and A's own tree must be untouched when the walk is over. Taking is
-  // the WAND, tested after the drill with a real ctrl+press.
+  // TAKING IS A GESTURE, NEVER A SIDE EFFECT OF THE URL (2026-08-20): this
+  // walk is programmatic (Navigation.go), so A must reach every level
+  // WITHOUT holding any of it — the tunnel is driven by the walk, not by
+  // ownership — and A's own tree must be untouched when the walk is over.
+  // The gestures that DO take are tested after the drill: a real plain
+  // CLICK (adds the tile and walks in) and a real ctrl+press (adds without
+  // going in).
   if (seesB.ok) {
     log('drill', 'B builds delta/tunnel1/tunnel2/tunnel3/tunnel4, then returns home')
     const levels = ['tunnel1', 'tunnel2', 'tunnel3', 'tunnel4']
@@ -604,12 +651,78 @@ async function main() {
     const genomeAfterWalk = await genomePaths(A.page)
     const walkedPaths = walked.map(s => [...s.parent, s.name].join('/'))
     const genomeLeak = walkedPaths.filter(p => genomeAfterWalk.includes(p))
-    check('a walk keeps nothing — the visitor\'s tree is untouched', !keptSomething && genomeLeak.length === 0,
+    check('a programmatic walk keeps nothing — only a gesture takes', !keptSomething && genomeLeak.length === 0,
       keptSomething || (genomeLeak.length ? `genome recorded ${JSON.stringify(genomeLeak)}` : `${walked.length} levels walked, none kept`))
 
-    // THE WAND TAKES ONE. Back at the root, a REAL ctrl+press over the
-    // witnessed `delta`: that tile — and only that tile — becomes A's.
+    // ── THE SHADE IS STANDING, AND A CLICK ADDS THE TILE ──────────────
+    // Back at the root with NO modifier held: every tile A doesn't own must
+    // already be dim — that is what says "these are somebody else's, and
+    // this is what you can add". Then a REAL plain click on `charlie`: it
+    // becomes A's AND A walks into it, in one gesture.
     await navTo(A.page, []); await sleep(1500)
+    const clickOffered = await waitFor(() => peerTilesNow(A.page),
+      tiles => tiles.includes('charlie'), 30000)
+    if (clickOffered.ok) {
+      const shade = await shadeNow(A.page)
+      await shot(A.page, 'swarm-shaded')
+      check('a peer\'s tiles are shaded on arrival, no modifier held',
+        Array.isArray(shade?.swarm) && shade.swarm.includes('charlie'),
+        JSON.stringify(shade))
+
+      // Arm the bus so a miss says WHICH half missed: the click never
+      // dispatched (capture silent), a guard ate it (diag:click names the
+      // stage), the entry never ran (no tile:navigate-in), or the take never
+      // fired (no swarm:wand).
+      await evalSafe(() => A.page.evaluate(() => {
+        const bus = window.__hypercombEffectBus
+        window.__hcClick = { capture: [], diag: [], nav: [], click: [], wand: [] }
+        bus.on('diag:click-capture', p => window.__hcClick.capture.push(p))
+        bus.on('diag:click', p => window.__hcClick.diag.push(p))
+        bus.on('tile:navigate-in', p => window.__hcClick.nav.push(p))
+        bus.on('tile:click', p => window.__hcClick.click.push(p))
+        bus.on('swarm:wand', p => window.__hcClick.wand.push(p))
+      })).catch(() => null)
+      const clickAt = await clickTile(A.page, 'charlie')
+      const added = await waitFor(() => childrenAt(A.page, []),
+        c => (c.names ?? []).includes('charlie'), 30000)
+      const clickStages = added.ok ? null : await evalSafe(() => A.page.evaluate((pt) => {
+        const cc = window.__hypercombEffectBus?.lastValue?.get('render:cell-count')
+        return {
+          bus: window.__hcClick ?? null,
+          hitTag: pt ? (document.elementFromPoint(pt.x, pt.y) || {}).tagName ?? null : null,
+          selected: [...(window.ioc?.get?.('@diamondcoreprocessor.com/SelectionService')?.selected ?? [])],
+          rendered: cc?.labels ?? null,
+          external: cc?.externalLabels ?? null,
+          branch: cc?.branchLabels ?? null,
+          visit: window.ioc?.get?.('@diamondcoreprocessor.com/SwarmAdoptDrone')?.visitDebug?.() ?? null,
+        }
+      }, clickAt.ok ? { x: clickAt.x, y: clickAt.y } : null)).catch(() => null)
+      check('a click on a shaded tile ADDS it', added.ok,
+        added.ok ? `${added.waitedMs}ms at ${JSON.stringify(clickAt)}`
+          : `point=${JSON.stringify(clickAt)} stages=${JSON.stringify(clickStages)}`)
+
+      const where = await waitFor(() => locationNow(A.page),
+        segs => Array.isArray(segs) && segs.join('/') === 'charlie', 15000)
+      check('the same click walks into the child', where.ok, JSON.stringify(where.value))
+
+      // PERMANENT AND FULLY VISIBLE: back at the root the tile A added is
+      // its own — no longer external, so nothing shades it any more.
+      await navTo(A.page, []); await sleep(1500)
+      const afterShade = await shadeNow(A.page)
+      await shot(A.page, 'swarm-after-add')
+      check('an added tile stops being shaded — it is yours now',
+        Array.isArray(afterShade?.swarm) && !afterShade.swarm.includes('charlie'),
+        JSON.stringify(afterShade))
+    } else {
+      check('a peer\'s tiles are shaded on arrival, no modifier held', false, 'skipped — charlie not offered at root')
+      check('a click on a shaded tile ADDS it', false, 'skipped')
+      check('the same click walks into the child', false, 'skipped')
+      check('an added tile stops being shaded — it is yours now', false, 'skipped')
+    }
+
+    // THE CTRL SWEEP TAKES WITHOUT GOING IN. A REAL ctrl+press over the
+    // witnessed `delta`: that tile — and only that tile — becomes A's, and
+    // A stays where it is.
     const offered = await waitFor(() => peerTilesNow(A.page), tiles => tiles.includes('delta'), 30000)
     if (offered.ok) {
       // Arm a probe on the bus so a miss says WHICH half missed: the
@@ -617,9 +730,7 @@ async function main() {
       const pre = await evalSafe(() => A.page.evaluate(() => {
         const bus = window.__hypercombEffectBus
         window.__hcWand = []
-        window.__hcArmed = []
         bus.on('swarm:wand', p => window.__hcWand.push(p))
-        bus.on('wand:armed', p => window.__hcArmed.push({ ...p }))
         const cc = bus.lastValue.get('render:cell-count')
         return {
           rendered: (cc?.labels ?? []).includes('delta'),
@@ -657,32 +768,32 @@ async function main() {
       check('what the wand took is recorded in the visit genome', genome.includes('delta'),
         `records: ${JSON.stringify(genome)}`)
 
-      // THE MODIFIER SHOWS ITS REACH: ctrl going down over witnessed tiles
-      // announced wand:armed (show-cell shades what you don't own), and the
-      // release lifted it — one true, one false, in that order, from the
-      // REAL keydown/keyup the wandTile gesture performed.
-      const armed = await evalSafe(() => A.page.evaluate(() => window.__hcArmed ?? []))
-      const armedOk = armed.length >= 2
-        && armed[0]?.active === true
-        && armed[armed.length - 1]?.active === false
-      check('ctrl down announces the wand (shade on), release lifts it', armedOk,
-        JSON.stringify(armed))
+      // THE SWEEP DOESN'T TRAVEL: taking with ctrl leaves A standing where
+      // it was — that is the whole difference from the click, which adds the
+      // tile by walking into it.
+      const stayed = await locationNow(A.page)
+      check('the ctrl sweep takes without going in', Array.isArray(stayed) && stayed.length === 0,
+        JSON.stringify(stayed))
     } else {
       check('the wand takes the tile under it', false, 'skipped — delta not offered at root')
       check('the wand takes the ITEM, never its children', false, 'skipped')
       check('the wand suppresses the ordinary select', false, 'skipped')
       check('what the wand took is recorded in the visit genome', false, 'skipped')
-      check('ctrl down announces the wand (shade on), release lifts it', false, 'skipped')
+      check('the ctrl sweep takes without going in', false, 'skipped')
     }
   } else {
     check('the drill tunnels past the publisher\'s depth-3 wall', false, 'skipped — no swarm tiles arrived')
     check('the walk alone reaches every level of a stranger\'s branch', false, 'skipped')
-    check('a walk keeps nothing — the visitor\'s tree is untouched', false, 'skipped')
+    check('a programmatic walk keeps nothing — only a gesture takes', false, 'skipped')
+    check('a peer\'s tiles are shaded on arrival, no modifier held', false, 'skipped')
+    check('a click on a shaded tile ADDS it', false, 'skipped')
+    check('the same click walks into the child', false, 'skipped')
+    check('an added tile stops being shaded — it is yours now', false, 'skipped')
     check('the wand takes the tile under it', false, 'skipped')
     check('the wand takes the ITEM, never its children', false, 'skipped')
     check('the wand suppresses the ordinary select', false, 'skipped')
     check('what the wand took is recorded in the visit genome', false, 'skipped')
-    check('ctrl down announces the wand (shade on), release lifts it', false, 'skipped')
+    check('the ctrl sweep takes without going in', false, 'skipped')
   }
 
   // ── WEBSITES BELONG TO A TILE — the attachment at intent time ────────
@@ -697,6 +808,10 @@ async function main() {
   const sitePaths = (bound?.['visual:website:page'] ?? []).map(b => b?.path)
   check('a flagged site root attaches to its tile (websites belong to a tile)',
     sitePaths.includes('/charlie'), JSON.stringify(bound))
+
+  // (The per-tile FEATURES icon that a bound behaviour earns is a local
+  // behaviour, not a swarm one — it has its own harness:
+  // scripts/drive-tile-behavior-icon.cjs.)
 
   // ── the dead-swarm regression ──────────────────────────────────────
   // A client with no zone (what every visitor to a bare-domain origin has:
