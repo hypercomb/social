@@ -128,10 +128,25 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // so neither can collide with a tile slugged 'context' or 'changes'.
   'context:basket',
   'context:draft',
+  // The feedback inbox's summary log — one append-only record per bridge
+  // start, saying who was waiting on whom at that moment (see
+  // assistant/feedback-summaries.ts). TRUTH POOL, never minted from the
+  // optimize phase: a past inbox state is not derivable from layers, so a
+  // cold client could never rebuild it (optimize-phase.md litmus). Colon-
+  // scoped so it can never collide with a tile slugged 'feedback'.
+  'feedback:summaries',
   'substrate:references',
   'substrate:sources',
   'tutorial:artifacts',
   'usage:dwell',
+  // Default tile art, keyed by the tile's NAME and holding a SIGNATURE (not
+  // bytes) that points at an ordinary content-root resource. This is how a
+  // behaviour supplies its own picture without any code knowing about it:
+  // rendering reads the pool, so new art is a resource plus one member, never
+  // an edit. TRUTH POOL — a cold client cannot derive an author's chosen
+  // picture from layers, so it is state and never minted from the optimize
+  // phase. Colon-scoped so it can never collide with a tile slugged 'visual'.
+  'visual:tile-art',
   'websites:menu',
 ])
 

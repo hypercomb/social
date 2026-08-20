@@ -1045,6 +1045,33 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "agents-out-of-sight-in-a-swarm",
+      "title": "Mirror: agents stand down in a swarm",
+      "run": null,
+      "note": "A note on the agent-bee tile in the behaviors mirror (and the agent panel's part): in a swarm, agents working for you LOCALLY go out of sight — their bees fade where they stand and the open report closes — while an agent with origin:'swarm' keeps flying and keeps its panel. Nothing is stopped: the registry, the work and the answers are untouched, and leaving the swarm fades the same bees back in. Pheromone the part for what it is; note-add is additive, so check for an existing note first.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "websites-belong-to-a-tile",
+      "title": "Websites belong to a tile — every site binds to its root",
+      "run": null,
+      "note": "Jaime's ruling 2026-08-20: a website divorced from its tile is lost in the Behaviors panel. Every website now follows the behaviour-binding protocol automatically: its ROOT tile (first ancestor carrying a visual:website:page decoration or website slot) is bound as visual:website:page in hc:behavior-bound — derived from content, so shared/adopted sites re-attach on discovery; first attachment of a session sweeps the whole tree so no site withdraws another; descent stops at a root. Panel: the website row shows anywhere within the branch and its control acts at the ROOT from wherever you stand (features-viewer toggleRow/toggleWebsite/isOn via scopeSegments); a child carrying its own page still turns that page off in place. Mirror: tile for commands/website-binding.ts under the sharing/website collection, pheromone marking it part, note carrying the doctrine (derived never authored, first-binding sweep, apply-at-the-parent); update the behaviors-deck card for the website behavior + doc section in behavior-binding.md 'Websites always bind'. note-add is additive - needs a human.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "visual-tile-art-pool",
+      "title": "Mirror the tile-art pool — a behaviour supplies its own picture as a resolvable resource",
+      "run": null,
+      "note": "New sign('visual:tile-art') pool: member name = tile name, member bytes = a 64-hex SIGNATURE pointing at an ordinary content-root resource. Read order in tile-view.drone.ts#pictureSig is small.image -> large.image -> pool -> Material glyph, so it is a default and never an override. Authoring surface is putResource + setTileArt(name, sig) — no build step, no registration, no release. Mirror one tile per source resource: hypercomb-core/src/core/pool-registry.ts (the meaning), presentation/tiles/tile-art.ts, presentation/tiles/tile-art.spec.ts, the tile-view.drone.ts hook, documentation/known-location-pools.md section. Gather as a collection beside the existing pool material; pheromones mark each tile part. The note must carry WHY the pool holds a pointer rather than bytes (dedup, cache-by-signature, travels in a backup, adopted like any resource) and WHY it is keyed by name rather than location.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

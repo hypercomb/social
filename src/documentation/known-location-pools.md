@@ -107,6 +107,30 @@ Marks-first, with structure as local scaffolding — not the reverse.
 - Consumer: the `/websites` aggregation layer reads members + marks;
   the pool is derived caches/menu state, never truth.
 
+## Reference implementation: tile art (shipped 2026-08-20)
+
+- Pool: `sign('visual:tile-art')`
+  (`.../presentation/tiles/tile-art.ts` — colon-scoped, so it can never
+  collide with a tile slugged `visual`).
+- **Members hold a SIGNATURE, not the image.** `<name> → <64-hex>`, and
+  the bytes are an ordinary content-root resource. That is the whole
+  reason this costs nothing: the picture dedupes against any other copy
+  of the same bytes, caches by signature, travels in a backup and is
+  adopted by a peer exactly like every other resource. A pool of image
+  bytes would have none of that.
+- **Keyed by NAME, not by location.** A location key would tie the art
+  to one cell and leave every other instance of the same behaviour
+  bare; a registry entry would put the mapping back in code and make a
+  new picture need a release. The consequence — two tiles sharing a
+  name share a default — is the intent for behaviour tiles, and the
+  tile's own `large.image` still wins.
+- Read order in `tile-view.drone.ts#pictureSig`:
+  `small.image` → `large.image` → **pool** → the Material glyph. LAST,
+  so it is a default and never an override.
+- TRUTH, not a cache: an author's chosen picture is not derivable from
+  layers by a cold client, so by the optimize-phase litmus it is state,
+  gets its own pool, and is never minted from the optimize phase.
+
 ## Worked example: hives (NOT BUILT — design sketch; Jaime, 2026-07-21)
 
 - Pool: `sign('hives:names')` — never bare `'hives'` (the ratchet

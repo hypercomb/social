@@ -91,6 +91,7 @@ import { sniffImageMime } from '../../link/photo.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
+import { tileArtSig } from './tile-art.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
 import { MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
@@ -1899,7 +1900,12 @@ export class TileViewDrone extends Drone {
       const indexed = lookupTilePropsSig(readTilePropsIndex(), key, label)
       if (indexed) return await fromPropsSig(indexed)
     } catch { /* index unavailable */ }
-    return ''
+
+    // No picture of its own. A tile that stands for a BEHAVIOUR can still have
+    // one, supplied by name from the `visual:tile-art` pool — see tile-art.ts.
+    // LAST, so an author's own picture always wins: this is a default, not an
+    // override.
+    return await tileArtSig(label)
   }
 
   /** Object URL for a content signature. Sig-addressed bytes carry NO MIME and
