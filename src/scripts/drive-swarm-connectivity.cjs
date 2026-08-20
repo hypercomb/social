@@ -184,16 +184,16 @@ async function settle(page, quietMs = 3000, timeoutMs = 30000) {
 // flip the flag, tell the mesh, announce it. Emitted through a live bee so
 // it travels the real EffectBus rather than a harness-only side channel.
 async function joinSwarm(page) {
-  return page.evaluate(() => {
+  return evalSafe(() => page.evaluate(() => {
     const bee = window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')
     if (!bee?.emitEffect) return { ok: false, reason: 'no SwarmDrone' }
     bee.emitEffect('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
     return { ok: true }
-  })
+  }))
 }
 
 async function meshState(page) {
-  return page.evaluate(() => {
+  return evalSafe(() => page.evaluate(() => {
     const mesh = window.ioc?.get?.('@diamondcoreprocessor.com/NostrMeshDrone')
     if (!mesh) return { err: 'no mesh' }
     const d = mesh.getDebug?.() ?? {}
@@ -204,11 +204,11 @@ async function meshState(page) {
       stats: d.stats ?? null,
       buckets: Array.isArray(d.buckets) ? d.buckets.length : null,
     }
-  })
+  }))
 }
 
 async function swarmState(page) {
-  return page.evaluate(() => {
+  return evalSafe(() => page.evaluate(() => {
     const swarm = window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')
     if (!swarm) return { err: 'no swarm' }
     let dbg = {}
@@ -228,18 +228,18 @@ async function swarmState(page) {
         : (dbg.peerLayers ?? null),
       peerTiles: tiles.map(t => ({ name: t.name, peer: t.peerPubkey?.slice(0, 8) ?? null })),
     }
-  })
+  }))
 }
 
 async function pubkeyOf(page) {
-  return page.evaluate(async () => {
+  return evalSafe(() => page.evaluate(async () => {
     const s = window.ioc?.get?.('@diamondcoreprocessor.com/NostrSigner')
     return s?.getPublicKeyHex ? await s.getPublicKeyHex() : null
-  })
+  }))
 }
 
 async function addTile(page, name) {
-  return page.evaluate(async (cellName) => {
+  return evalSafe(() => page.evaluate(async (cellName) => {
     const input = document.querySelector('hc-command-line input')
       || document.querySelector('input[type="text"]')
     if (!input) return { ok: false, reason: 'no command line input' }
@@ -249,11 +249,11 @@ async function addTile(page, name) {
     await new Promise(r => setTimeout(r, 120))
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
     return { ok: true }
-  }, name)
+  }, name))
 }
 
 async function ownChildren(page) {
-  return page.evaluate(async () => {
+  return evalSafe(() => page.evaluate(async () => {
     const lineage = window.ioc?.get?.('@hypercomb.social/Lineage')
     const history = window.ioc?.get?.('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !history) return { err: 'no lineage/history' }
@@ -265,16 +265,16 @@ async function ownChildren(page) {
       try { const c = await history.getLayerBySig(cs); if (c?.name) names.push(c.name) } catch { /* skip */ }
     }
     return { segments, names: names.sort() }
-  })
+  }))
 }
 
 async function adopt(page, label) {
-  return page.evaluate((cellLabel) => {
+  return evalSafe(() => page.evaluate((cellLabel) => {
     const bee = window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')
     if (!bee?.emitEffect) return { ok: false, reason: 'no SwarmDrone' }
     bee.emitEffect('tile:action', { action: 'adopt', label: cellLabel, q: 0, r: 0, index: 0 })
     return { ok: true }
-  }, label)
+  }, label))
 }
 
 // Poll instead of sleeping on a guess — a slow relay should read as slow,
