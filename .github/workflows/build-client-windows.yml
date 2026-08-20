@@ -296,9 +296,21 @@ jobs:
         working-directory: src/hypercomb-client
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path target -Recurse -Filter Hypercomb.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch 'bundle' } | Select-Object -First 1
-          if (-not $exe) { "no Hypercomb.exe was built"; exit 1 }
+          # Cargo names the binary after the CRATE — hypercomb-client.exe.
+          # `productName` ("Hypercomb") only takes effect INSIDE the bundle, so
+          # searching for Hypercomb.exe outside bundle/ finds nothing: the
+          # first run of this workflow reported "no Hypercomb.exe was built"
+          # while both installers sat next to it. The macOS twin looks for a
+          # .app and never had the problem.
+          #
+          # The raw release binary is the right target anyway — the frontend is
+          # baked into it by generate_context!, so it needs no install.
+          $exe = Get-Item 'target/release/hypercomb-client.exe' -ErrorAction SilentlyContinue
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path target -Recurse -File -Filter 'hypercomb-client.exe' -ErrorAction SilentlyContinue |
+              Where-Object { $_.DirectoryName -notmatch 'deps|build' } | Select-Object -First 1
+          }
+          if (-not $exe) { "no client binary was built"; exit 1 }
           "launching $($exe.FullName)"
 
           $log = Join-Path $env:APPDATA 'io.hypercomb.client\hive\renderer.log'
