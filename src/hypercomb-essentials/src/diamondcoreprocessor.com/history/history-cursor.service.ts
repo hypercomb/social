@@ -96,6 +96,18 @@ export class HistoryCursorService extends EventTarget {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) return
 
+    // Follow-the-head capture, BEFORE re-listing. When this load re-reads
+    // the SAME location and the bag grew underneath us (a visit fold, a
+    // concurrent commit landing during another load's await), a cursor
+    // that was sitting at the head of the PREVIOUS list must follow the
+    // new head — exactly the rule onNewLayer/refreshForLocation already
+    // apply. Without it the second load left position at the old (often
+    // empty-bag) head, `rewound` read TRUE with nobody time-traveling,
+    // and the committer then refused every next fold: the drill wedge.
+    // A genuinely rewound cursor (position below the previous head) keeps
+    // its position — the time-travel gate is untouched.
+    const wasAtLatest = this.#locationSig === locationSig && this.#position >= this.#layers.length
+
     // NOTE: we intentionally do NOT await `preloadAllBags()` here.
     // The global preloader is fired from `runtime-initializer` as
     // fire-and-forget at boot; gating cursor.load on it made every
@@ -148,7 +160,7 @@ export class HistoryCursorService extends EventTarget {
       const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
       if (typeof ric === 'function') ric(warm, { timeout: 8000 })
       else setTimeout(warm, 2000)
-    } else if (this.#position > this.#layers.length) {
+    } else if (wasAtLatest || this.#position > this.#layers.length) {
       this.#position = this.#layers.length
     }
 

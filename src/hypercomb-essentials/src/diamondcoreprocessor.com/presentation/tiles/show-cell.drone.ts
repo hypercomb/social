@@ -8701,12 +8701,20 @@ export class ShowCellDrone extends Drone {
         latestMarkerSigFor?: (locSig: string, label: string) => Promise<string | undefined>
       } | undefined
       const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as {
-        currentSig?: () => Promise<string>; explorerLabel?: () => string
+        currentSig?: () => Promise<string>; explorerSegments?: () => readonly string[]
       } | undefined
       if (!store || !history?.latestMarkerSigFor || !history.getLayerBySig) return
       const locSig = (await lineage?.currentSig?.()) ?? ''
       if (!locSig) return
-      const parentLayerSig = (await history.latestMarkerSigFor(locSig, String(lineage?.explorerLabel?.() ?? '/'))) ?? ''
+      // The LEAF name, never explorerLabel(): the label is '/'+path.join('/'),
+      // and latestMarkerSigFor AUTO-MINTS `{name: <arg>}` into a COLD bag —
+      // passing the label here minted husk layers literally named
+      // "/delta/tunnel1" at every never-held location this pass touched
+      // (drilled peer paths, cold deep-link boots), which name-relisting
+      // commits then linked into the parent as a phantom child.
+      const prebakeSegs = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      const prebakeLeaf = prebakeSegs.length ? prebakeSegs[prebakeSegs.length - 1] : '/'
+      const parentLayerSig = (await history.latestMarkerSigFor(locSig, prebakeLeaf)) ?? ''
       if (!parentLayerSig) return
       // COHERENCE GATE (same rule as the readiness compute): mid-navigation
       // segments and currentSig can straddle two locations — baking for a
@@ -8921,7 +8929,10 @@ export class ShowCellDrone extends Drone {
       }
       const locSig = (await lineage?.currentSig?.()) ?? ''
       if (!locSig || gen !== this.#readinessGen) return
-      const head = (await history?.latestMarkerSigFor?.(locSig, String(lineage?.explorerLabel?.() ?? '/'))) ?? ''
+      // LEAF name, never explorerLabel() — same cold-bag auto-mint trap as
+      // the prebake walk above: the label is a PATH, and passing it minted
+      // path-named husk layers at never-held locations.
+      const head = (await history?.latestMarkerSigFor?.(locSig, segsNow.length ? segsNow[segsNow.length - 1] : '/')) ?? ''
       if (gen !== this.#readinessGen) return
       this.#passLocSig = locSig
       this.#passParentSig = head
