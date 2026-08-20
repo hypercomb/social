@@ -26,6 +26,17 @@
 //
 // Placing emits the eager `cell:added` path in the clipboard worker, so the
 // dropped tile renders on the page IMMEDIATELY — no refresh, no navigation.
+//
+// ── THE SWAP ──────────────────────────────────────────────────────────
+// One gesture, both directions. A row clicked HERE leaves the window and
+// lands on the page behind it; a tile clicked THERE leaves the page and
+// lands here (TileOverlayDrone reads the same `clipboard:open` this panel
+// emits, and answers a plain click with `clipboard:take-items`). Ctrl is
+// the walk on both sides: ctrl+click a row to step into its children, or a
+// tile on the hive to go where you want to place. That is the whole
+// interface — there is no per-row place button, no discard button that
+// isn't the hover ×, and no target-slot field. A placed tile lands in the
+// next free slot, the way any paste does.
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
@@ -41,6 +52,24 @@ import { onSelection } from '../../core/selection-context'
 interface ClipboardItem {
   label: string
   sourceSegments: readonly string[]
+}
+
+/** What the template renders — resolved ONCE per change instead of by
+ *  per-row lookups on every check. `key` is the item's identity (label +
+ *  source path): the clipboard can legitimately hold two same-named tiles
+ *  from different parents, and it is what the thumbnail and count caches
+ *  are keyed by. */
+interface ClipboardRow {
+  item: ClipboardItem
+  key: string
+  label: string
+  thumb: string | undefined
+  count: number
+}
+
+/** Identity of a clipboard row — never the bare label. */
+function rowKey(item: ClipboardItem): string {
+  return item.label + '\u0000' + item.sourceSegments.join('/')
 }
 
 interface ClipboardChangedPayload {
@@ -108,17 +137,12 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
    *  (documentation/selection-tool-windows.md): while tiles are selected, the
    *  panel offers capturing THEM, right where the captured result lands. */
   readonly selectionCount = signal(0)
-  /** label -> thumbnail object-URL, for the template. Empty entry => glyph. */
+  /** rowKey -> thumbnail object-URL. Absent => the ⬢ glyph. */
   readonly thumbs = signal<Record<string, string>>({})
-  /** label -> number of children at that source location. Best-effort, resolved
-   *  off the render path; absent/0 => no badge. Foreshadows the drill-down:
-   *  the hex is your handle into that subtree. */
+  /** rowKey -> number of children at that source location. Best-effort,
+   *  resolved off the render path; absent/0 => no badge. The badge is also
+   *  the walk-in handle, so it says "there is somewhere to go here". */
   readonly counts = signal<Record<string, number>>({})
-  /** label -> the tile's current index (its spiral slot) — the DEFAULT paste
-   *  target, resolved best-effort. */
-  readonly indexes = signal<Record<string, number>>({})
-  /** label -> user-chosen paste target index, overriding the default. */
-  readonly targets = signal<Record<string, number>>({})
 
   // ── drill-down ─────────────────────────────────────────────────────
   // The clipboard is just another hierarchy: clicking a tile's hex descends
@@ -136,6 +160,17 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   readonly drillCrumb = computed(() => this.#drillStack().map(d => d.label).join(' / '))
   /** What the list renders: the drilled level, or the clipboard at the top. */
   readonly displayItems = computed(() => this.drilled() ? this.#drillChildren() : this.items())
+  /** The template's whole model — one pass over the display set folding in
+   *  the resolved thumbnail and count. Rows are what `@for` tracks, so no
+   *  per-row map lookup runs on a change-detection pass. */
+  readonly rows = computed<ClipboardRow[]>(() => {
+    const thumbs = this.thumbs()
+    const counts = this.counts()
+    return this.displayItems().map(item => {
+      const key = rowKey(item)
+      return { item, key, label: item.label, thumb: thumbs[key], count: counts[key] ?? 0 }
+    })
+  })
   /** Drag-resized panel width (px), restored from localStorage on construct. */
   readonly width = signal<number>(this.#restoreWidth())
   /** True while a left-grip drag is in progress (drives cursor/handle style). */
@@ -147,15 +182,19 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   // template, which is the same curve this panel used to compute for itself.
 
   #cleanups: (() => void)[] = []
-  // Live object-URLs by label, so they can be revoked on change/destroy.
+  // Live object-URLs by row identity, so they can be revoked on change/destroy.
   #urls = new Map<string, string>()
   // Monotonic token so a stale async thumbnail resolve can't overwrite a
   // newer clipboard state (rapid copy/clear races).
   #thumbToken = 0
   // Same guard for the (separate) child-count resolution.
   #countToken = 0
-  // …and the default-index resolution.
-  #indexToken = 0
+  /** rowKey -> child count, kept across displays. A child count is a fact
+   *  about a source location, and taking a tile republishes the whole list —
+   *  without this, every click would re-read every held tile's children, so
+   *  the cost of filling the window grew with what was already in it. Numbers
+   *  only; drilling in and back out costs nothing the second time. */
+  #countCache = new Map<string, number>()
   // Guards the auto-open: EffectBus replays the LAST `clipboard:captured`
   // to a late subscriber, which would pop the panel open on every mount.
   // We only auto-open for captures that arrive AFTER the initial sync.
@@ -173,9 +212,10 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
       const next = items.map(i => ({ label: i.label, sourceSegments: [...(i.sourceSegments ?? [])] }))
       this.items.set(next)
       if (p?.op === 'copy' || p?.op === 'cut') this.op.set(p.op)
-      // An emptied clipboard (e.g. a cut fully consumed by a place) closes
-      // the panel — there is nothing left to show.
-      if (next.length === 0) this.#setVisible(false)
+      // An emptied clipboard USED to close the panel ("nothing left to show").
+      // It stays open now: with the swap grammar an empty window is still
+      // live — click a tile on the hive and it lands here. Closing is the
+      // ×, Escape, or the controls-bar button, and nothing else.
       // Clipboard membership changed (capture / place / clear) — the worker
       // resets exclusions on a fresh capture, so re-read them, and drop back to
       // the top level.
@@ -242,7 +282,11 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     // Every fresh OPEN starts at the top-level clipboard list — never a stale
     // drill level left over from a previous open (which would show the wrong
     // children, or none, and read as "my items vanished").
-    if (v) { this.#drillStack.set([]); this.#drillChildren.set([]) }
+    // The count cache is scoped to ONE open session: within a session the only
+    // things that move are whole subtrees (takes and places), so a cached
+    // count stays true; across sessions the hive may have been edited, so it
+    // starts empty rather than badging a stale number forever.
+    if (v) { this.#drillStack.set([]); this.#drillChildren.set([]); this.#countCache.clear() }
     this.visible.set(v)
     EffectBus.emit('clipboard:open', { open: v })
   }
@@ -299,57 +343,19 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     return excl.size === 0 ? names : names.filter(name => !excl.has([...segments, name].join('/')))
   }
 
-  /** Resolve thumbnails + counts + default indexes for the on-screen set. */
+  /** Resolve thumbnails + counts for the on-screen set. */
   #syncDisplay(items: readonly ClipboardItem[]): void {
     void this.#syncThumbs(items).catch(() => { /* best-effort thumbnails */ })
     void this.#syncCounts(items).catch(() => { /* best-effort child counts */ })
-    void this.#syncIndexes(items).catch(() => { /* best-effort indexes */ })
   }
 
-  // ── paste targets (hover number) ───────────────────────────────────
-  // Each item's DEFAULT target is its current index (resolved best-effort from
-  // the worker, off the render path). The user can override per item; on paste
-  // we hand the overrides to the worker, which sets each placed tile's `index`.
-
-  async #syncIndexes(items: readonly ClipboardItem[]): Promise<void> {
-    const token = ++this.#indexToken
-    const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
-    const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
-      { indexAt?: (segments: readonly string[]) => Promise<number | null> } | undefined
-    if (!worker?.indexAt) { this.indexes.set({}); return }
-    const out: Record<string, number> = {}
-    for (let i = 0; i < items.length; i += COUNT_BATCH) {
-      if (token !== this.#indexToken) return
-      const batch = items.slice(i, i + COUNT_BATCH)
-      await Promise.all(batch.map(async (item) => {
-        try {
-          const n = await worker.indexAt!([...item.sourceSegments, item.label])
-          if (n != null) out[item.label] = n
-        } catch { /* best-effort */ }
-      }))
-      if (token === this.#indexToken) this.indexes.set({ ...out })
-    }
-  }
-
-  /** Effective paste target for a label: the user's override, else the default
-   *  index, else null (auto). */
-  targetFor(label: string): number | null {
-    const t = this.targets()[label]
-    if (typeof t === 'number') return t
-    const d = this.indexes()[label]
-    return typeof d === 'number' ? d : null
-  }
-
-  /** Set / clear the user's target from the editable field. Empty = back to
-   *  the default. */
-  setTarget(label: string, raw: string): void {
-    const n = parseInt(raw, 10)
-    this.targets.update(t => {
-      const next = { ...t }
-      if (Number.isFinite(n)) next[label] = n
-      else delete next[label]
-      return next
-    })
+  // ── the swap ───────────────────────────────────────────────────────
+  // A row click puts the tile on the page behind this window; ctrl+click
+  // walks into it instead, so its children can be placed one at a time. The
+  // hive answers the same pair with the window open — see the header note.
+  rowClick(item: ClipboardItem, event: MouseEvent): void {
+    if (event.ctrlKey || event.metaKey) { void this.drillInto(item); return }
+    this.placeOne(item)
   }
 
   // ── resize (left grip) ─────────────────────────────────────────────
@@ -441,7 +447,6 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   placeAll(): void {
     EffectBus.emit('clipboard:place-items', {
       labels: this.items().map(i => i.label),
-      targets: this.targets(),
       targetSegments: this.#targetSegments(),
     })
   }
@@ -454,11 +459,10 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     if (this.drilled()) {
       EffectBus.emit('clipboard:place-entries', {
         entries: [{ label: item.label, sourceSegments: [...item.sourceSegments] }],
-        targets: this.targets(),
         targetSegments,
       })
     } else {
-      EffectBus.emit('clipboard:place-items', { labels: [item.label], targets: this.targets(), targetSegments })
+      EffectBus.emit('clipboard:place-items', { labels: [item.label], targetSegments })
     }
   }
 
@@ -508,32 +512,37 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   // reads. A miss stays absent — no badge, never a hang.
   async #syncCounts(items: readonly ClipboardItem[]): Promise<void> {
     const token = ++this.#countToken
+    // Everything already known is on screen at once — only the rows this
+    // display has never resolved cost a read.
+    const out: Record<string, number> = {}
+    const pending: { item: ClipboardItem; key: string }[] = []
+    for (const item of items) {
+      const key = rowKey(item)
+      const cached = this.#countCache.get(key)
+      if (cached === undefined) pending.push({ item, key })
+      else if (cached > 0) out[key] = cached
+    }
+    this.counts.set({ ...out })
+    if (pending.length === 0) return
+
     const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
     const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
       { childCountAt?: (segments: readonly string[]) => Promise<number> } | undefined
-    if (!worker?.childCountAt) { this.counts.set({}); return }
+    if (!worker?.childCountAt) return
 
-    const out: Record<string, number> = {}
-    for (let i = 0; i < items.length; i += COUNT_BATCH) {
+    for (let i = 0; i < pending.length; i += COUNT_BATCH) {
       if (token !== this.#countToken) return
-      const batch = items.slice(i, i + COUNT_BATCH)
-      await Promise.all(batch.map(async (item) => {
+      const batch = pending.slice(i, i + COUNT_BATCH)
+      await Promise.all(batch.map(async ({ item, key }) => {
         try {
           const n = await worker.childCountAt!([...item.sourceSegments, item.label])
-          if (n > 0) out[item.label] = n
-        } catch { /* best-effort */ }
+          this.#countCache.set(key, n)
+          if (n > 0) out[key] = n
+        } catch { /* best-effort — stays unresolved, retried next display */ }
       }))
       // Publish progressively so badges appear as they resolve.
       if (token === this.#countToken) this.counts.set({ ...out })
     }
-  }
-
-  trackByLabel(_i: number, item: ClipboardItem): string {
-    // Identity = label + source path. The clipboard can legitimately hold
-    // two same-named items from different source folders (a multi-parent
-    // cut), and keying on label alone would make @for reuse one <li> for
-    // both — a render glitch.
-    return item.label + '\u0000' + item.sourceSegments.join('/')
   }
 
   // ── thumbnails ─────────────────────────────────────────────────────
@@ -544,19 +553,20 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
 
   async #syncThumbs(items: readonly ClipboardItem[]): Promise<void> {
     const token = ++this.#thumbToken
-    const wanted = new Set(items.map(i => i.label))
-    // Revoke + drop any label that's no longer present.
-    for (const label of [...this.#urls.keys()]) {
-      if (!wanted.has(label)) this.#revoke(label)
+    const wanted = new Set(items.map(rowKey))
+    // Revoke + drop any row that's no longer on screen. Bitmaps, unlike the
+    // counts, are not free to hold — this is where the memory stays bounded.
+    for (const key of [...this.#urls.keys()]) {
+      if (!wanted.has(key)) this.#revoke(key)
     }
-    // Resolve labels we don't already have a URL for, in parallel.
-    const pending = items.filter(i => !this.#urls.has(i.label))
+    // Resolve rows we don't already have a URL for, in parallel.
+    const pending = items.filter(i => !this.#urls.has(rowKey(i)))
     if (pending.length === 0) { this.#publishThumbs(); return }
     await Promise.all(pending.map(async (item) => {
       const url = await this.#resolveImageUrl(item.label, item.sourceSegments).catch(() => null)
       // A newer clipboard state superseded this resolve — discard.
       if (token !== this.#thumbToken) { if (url) URL.revokeObjectURL(url); return }
-      if (url) this.#urls.set(item.label, url)
+      if (url) this.#urls.set(rowKey(item), url)
     }))
     if (token === this.#thumbToken) this.#publishThumbs()
   }
@@ -634,10 +644,10 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     return undefined
   }
 
-  #revoke(label: string): void {
-    const url = this.#urls.get(label)
+  #revoke(key: string): void {
+    const url = this.#urls.get(key)
     if (url) URL.revokeObjectURL(url)
-    this.#urls.delete(label)
+    this.#urls.delete(key)
   }
 
   #revokeAll(): void {

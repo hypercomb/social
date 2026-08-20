@@ -1027,6 +1027,24 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "reach-three-stage-toggle",
+      "title": "The reach control is a three-stage toggle everywhere",
+      "run": null,
+      "note": "The segmented reach trio (blur_on/account_tree/public as three side-by-side buttons) is GONE from all four surfaces - pheromone panel header (tags-viewer), feedback panel reach row (feedback-viewer), files panel header (files-viewer), and the opened-out bottom tag strip (controls-bar tag-scope-set). Each is now ONE three-stage toggle: a single button reading out the current reach and stepping page -> children -> global on click, wrapping - the same walk the lane ladder does. Tooltips reuse the existing tags.scope-local/children/global catalog keys (already translated in all 14 catalogs, already worded as click-to-widen). Mirror owed: note-add on the pheromones/reach cells under behaviors saying the reach control is one toggle now (retire/correct any note or deck card describing the segmented trio), and a part-tile check that the reach tiles still point 1:1 at tags-viewer/feedback-viewer/files-viewer/controls-bar. Proof harness: scripts/drive-reach-toggle.cjs (walks the full cycle on all four surfaces and asserts the tags:filter/files:reach broadcasts). note-add is additive - hence --manual.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "clipboard-swap-grammar",
+      "title": "The clipboard window is a swap: click moves a tile, ctrl+click walks",
+      "run": null,
+      "note": "The clipboard tool window and the hive now share ONE grammar, both directions. In the window: a row click places that tile on the page behind (clipboard:place-items), ctrl+click walks into its children, the child-count badge is the walk handle a finger can use, and the discard x only appears on row hover. Gone from the row: the target-slot number field, the per-row place (+) button. On the hive: while the window is open TileOverlayDrone is in swap mode (#clipboardSwap, fed by clipboard:open) - a plain POINTER click on a tile body emits clipboard:take-items and the tile leaves the page into the window (ClipboardWorker #capture('cut', {labels, append:true}) - additive, never replacing), ctrl+click walks in instead, and SelectionInputDrone stands down for the whole mode the way it does for the wand. Touch is untouched (no ctrl to walk with). The window now stays open when the clipboard empties, because an empty window is still live. Mirror owed: part-tiles 1:1 with the sources - hypercomb-shared/ui/clipboard-panel/clipboard-panel.component.{ts,html,scss}, hypercomb-essentials/src/diamondcoreprocessor.com/clipboard/clipboard.{service,worker}.ts, presentation/tiles/tile-overlay.drone.ts, selection/selection-input.drone.ts - gathered in a clipboard collection under behaviors, marked for what each part IS, plus a note on the clipboard cell stating the swap grammar and RETIRING any note or deck card that describes the old per-row place button / target-slot field. Proof harnesses (scratchpad): drive-clipboard-swap.cjs (18/18, panel half, headless) and drive-clipboard-canvas.cjs (10/10, canvas half, headed real GPU). note-add is additive - hence --manual.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

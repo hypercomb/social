@@ -839,7 +839,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.#editMode() && VIEWPORT_CONTROLS.has(ctrl.id) && this.pinnedHere()) return false
     switch (ctrl.visibleWhen) {
       case 'always': return true
-      case 'clipboardHasItems': return this.#clipboardAvailable() && this.clipboardCount() > 0
+      // …or while the window is OPEN. It can now be open on an empty clipboard
+      // (swap mode: click a tile on the hive and it lands there), and the button
+      // is both its light and the way to close it.
+      case 'clipboardHasItems': return this.#clipboardAvailable() && (this.clipboardCount() > 0 || this.#clipboardPanelOpen())
       case 'voiceSupported': return this.voiceSupported
       case 'public': return !!this.meshPublic()
       case 'hasSelection': return this.#hasSelection()

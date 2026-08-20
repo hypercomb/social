@@ -437,6 +437,19 @@ export class TileOverlayDrone extends Drone {
    *  unstage tiles instead of entering or opening them. Cleared when the
    *  removal commits or is cancelled. */
   #tagRemovalArmed = false
+  /** The clipboard window is open — see the `clipboard:open` listener. */
+  #clipboardArmed = false
+
+  /** Swap mode proper: the window is open AND the gesture came from a
+   *  POINTER. A finger has no ctrl to walk with, so on touch the clipboard
+   *  window changes nothing about the hive — a tap still walks in, and the
+   *  window's own rows stay the way tiles move there. */
+  get #clipboardSwap(): boolean {
+    return this.#clipboardArmed && !this.#lastPressWasTouch && !this.#mobileMode()
+  }
+
+  /** Pointer kind of the most recent press, set before every guard. */
+  #lastPressWasTouch = false
   // NOTE: there is deliberately NO apply-brush takeover here any more. A
   // bouquet in hand does not hijack the hive — you keep walking (click,
   // enter, hold) exactly as always, and ctrl+click COLLECTS the tile into
@@ -510,10 +523,11 @@ export class TileOverlayDrone extends Drone {
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
     'tags:view-state', 'tags:removal-pending',
+    'clipboard:open',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'clipboard:take-items']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -1048,6 +1062,20 @@ export class TileOverlayDrone extends Drone {
         this.#tagRemovalArmed = payload?.active === true
         this.#updateVisibility()
         this.#updatePerTileVisibility()
+      })
+
+      // ── THE SWAP ────────────────────────────────────────────────────
+      // While the clipboard window is open the hive is in swap mode: a click
+      // on a tile TAKES it into the window (and a click on a row in the
+      // window puts it back on the page). Walking still has to work — that is
+      // how you get to where you want to paste — so ctrl+click enters the
+      // tile instead. Two readings of one click, told apart by the modifier,
+      // and the same pair the window's own rows use.
+      //
+      // The window announces itself on `clipboard:open` (last-value replayed,
+      // so a drone that registers late is current at once).
+      this.onEffect<{ open?: boolean }>('clipboard:open', (payload) => {
+        this.#clipboardArmed = payload?.open === true
       })
 
       // (No `tags:apply-pending` listener: a bouquet in hand no longer takes
@@ -2653,6 +2681,12 @@ export class TileOverlayDrone extends Drone {
 
   // ── Instant branch navigation on pointerdown ────────────────────────
   #onPointerDown = (e: PointerEvent): void => {
+    // What KIND of pointer is pressing, recorded before any guard can return.
+    // (#pressWasTouch is set much further down, past a dozen early returns, so
+    // it is only trustworthy on the path that reaches it — swap mode has to
+    // ask on paths that don't, e.g. a ctrl press or a press with a live
+    // selection.)
+    this.#lastPressWasTouch = e.pointerType === 'touch'
     // Every new press invalidates the previous press-capture — a click must
     // only ever pair with ITS OWN pointerdown's capture.
     this.#pressCapture = null
@@ -2740,6 +2774,16 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
+    // ── SWAP MODE: the press decides nothing ────────────────────────────
+    // A mouse press on a branch tile normally walks straight in, right here,
+    // before any click is dispatched. While the clipboard window is open the
+    // decision belongs to the CLICK instead (plain = take it into the window,
+    // ctrl = walk in), so the press has to let go — of the walk, of the
+    // launcher open, and of the hold-to-enter below. Placed AFTER the overlay
+    // action-button branch so Edit / Note / the feature row keep working with
+    // the window open. Touch is untouched (see #clipboardSwap).
+    if (this.#clipboardSwap) { this.#cancelEnterHold(); return }
+
     // On a launch-group aggregator page EVERY tile is a launcher: a body press
     // OPENS its target directly (no arming, nothing to block). Gate on the
     // LOCATION, which is race-free — the per-cell `launch:target` decoration
@@ -2808,6 +2852,7 @@ export class TileOverlayDrone extends Drone {
       if (this.#editing || this.#editCooldown) return
       if (this.#hasSelection || this.#touchDragging) return
       if (this.#tagRemovalArmed) return
+      if (this.#clipboardSwap) return
       this.#consumedPointerId = pointerId
       consumePointerGesture(pointerId)
       this.#pressCapture = null
@@ -2883,6 +2928,14 @@ export class TileOverlayDrone extends Drone {
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       if (!entry?.label) return
+      // Swap mode: ctrl is the WALK. It outranks the selection toggle for as
+      // long as the clipboard window is open — with plain click spoken for by
+      // the take, ctrl is the only way left to get where you want to paste.
+      if (this.#clipboardSwap) {
+        this.#pressCapture = null
+        this.#navigateInto(entry.label)
+        return
+      }
       this.emitEffect('tile:click', {
         q: axial.q,
         r: axial.r,
@@ -2942,7 +2995,11 @@ export class TileOverlayDrone extends Drone {
     // do not reliably send the pointer-move/hover events that maintain
     // #currentAxial, so reusing that state can make a second tap toggle the
     // first tile back off instead of adding the tile under the finger.
-    if (this.#hasSelection || this.#picking) {
+    // A live selection normally turns every click into a selection change.
+    // Swap mode outranks it — the window is open, so a click is a take. An
+    // explicit PICKING mode still wins over both: it is a deliberate
+    // build-a-set session with its own keep verb.
+    if ((this.#hasSelection && !this.#clipboardSwap) || this.#picking) {
       const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
       if (!detector) { diag('selection-no-detector'); return }
       const tapGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
@@ -3023,6 +3080,17 @@ export class TileOverlayDrone extends Drone {
           return
         }
       }
+    }
+
+    // ── SWAP MODE: a plain click TAKES the tile ─────────────────────────
+    // The window is open, the overlay's action buttons have had their chance
+    // above, and no modifier is held: this tile leaves the page and lands in
+    // the clipboard window. ClipboardWorker cuts it and APPENDS, so clicking
+    // one tile after another fills the window. (Ctrl already walked, higher
+    // up.) Branch or leaf makes no difference — a take carries the subtree.
+    if (this.#clipboardSwap) {
+      this.emitEffect('clipboard:take-items', { labels: [entry.label] })
+      return
     }
 
     if (this.#branchLabels.has(entry.label) || referenceTargetForLabel(entry.label) !== null) {

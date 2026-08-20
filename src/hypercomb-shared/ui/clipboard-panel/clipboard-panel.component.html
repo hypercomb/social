@@ -63,54 +63,45 @@
       </div>
     }
 
-    @if (displayItems().length === 0) {
+    @if (rows().length === 0) {
       <p class="clipboard-empty">{{ (drilled() ? 'clipboard.noChildren' : 'clipboard.empty') | t }}</p>
     } @else {
       <div class="clipboard-scroll">
         <ul class="clipboard-items">
-          @for (item of displayItems(); track trackByLabel($index, item)) {
+          @for (row of rows(); track row.key) {
             <li class="clipboard-item">
+              <!-- THE SWAP: the row IS the tile. Click and it leaves the
+                   window for the page behind; ctrl+click walks into it
+                   instead, so its children can be placed one by one. -->
               <button
-                class="item-hex"
+                class="item-swap"
                 type="button"
-                (click)="drillInto(item)"
-                [class.has-children]="counts()[item.label] > 0"
-                [attr.aria-label]="'clipboard.drillIn' | t"
-                [title]="'clipboard.drillIn' | t"
+                (click)="rowClick(row.item, $event)"
+                [attr.aria-label]="'clipboard.swap' | t"
+                [title]="(row.count > 0 ? 'clipboard.swapOrWalk' : 'clipboard.swap') | t"
               >
-                @if (thumbs()[item.label]; as url) {
-                  <span class="item-thumb"><img [src]="url" [alt]="item.label" draggable="false" /></span>
+                @if (row.thumb; as url) {
+                  <span class="item-thumb"><img [src]="url" [alt]="row.label" draggable="false" /></span>
                 } @else {
                   <span class="item-glyph" aria-hidden="true">⬢</span>
                 }
+                <span class="item-label">{{ row.label }}</span>
               </button>
-              <span class="item-label" [title]="item.label">{{ item.label }}</span>
-              @if (counts()[item.label]; as n) {
-                <span class="item-count" [attr.aria-label]="'clipboard.children' | t: { count: n }" [title]="'clipboard.children' | t: { count: n }">{{ n }}</span>
+              <!-- The count badge doubles as the walk-in handle — the whole
+                   affordance a finger has, since ctrl is a keyboard word. -->
+              @if (row.count > 0) {
+                <button
+                  class="item-count"
+                  type="button"
+                  (click)="drillInto(row.item)"
+                  [attr.aria-label]="'clipboard.children' | t: { count: row.count }"
+                  [title]="'clipboard.walkIn' | t"
+                >{{ row.count }}</button>
               }
-              <input
-                class="item-index"
-                type="number"
-                inputmode="numeric"
-                [value]="targetFor(item.label)"
-                (change)="setTarget(item.label, $any($event.target).value)"
-                (click)="$event.stopPropagation()"
-                [attr.aria-label]="'clipboard.target' | t"
-                [title]="'clipboard.target' | t"
-              />
-              <button
-                class="item-place"
-                type="button"
-                (click)="placeOne(item)"
-                [attr.aria-label]="'clipboard.place' | t"
-                [title]="'clipboard.place' | t"
-              >
-                <span class="mat-sym">add</span>
-              </button>
               <button
                 class="item-discard"
                 type="button"
-                (click)="discardOne(item)"
+                (click)="discardOne(row.item)"
                 [attr.aria-label]="'clipboard.discard' | t"
                 [title]="'clipboard.discard' | t"
               >×</button>
@@ -118,17 +109,22 @@
           }
         </ul>
       </div>
+    }
 
-      @if (!drilled()) {
-        <footer class="clipboard-foot">
-        <button class="place-all" type="button" (click)="placeAll()">
-          {{ 'clipboard.placeAll' | t }} · {{ items().length }}
-        </button>
-        <button class="clear-all" type="button" (click)="clearAll()">
-          {{ 'clipboard.clear' | t }}
-        </button>
-        </footer>
-      }
+    @if (!drilled()) {
+      <footer class="clipboard-foot">
+        @if (items().length > 0) {
+          <button class="place-all" type="button" (click)="placeAll()">
+            {{ 'clipboard.placeAll' | t }} · {{ items().length }}
+          </button>
+          <button class="clear-all" type="button" (click)="clearAll()">
+            {{ 'clipboard.clear' | t }}
+          </button>
+        }
+      </footer>
+      <!-- The grammar, said once, where it is needed: the hive behind this
+           window is in swap mode for as long as it is open. -->
+      <p class="clipboard-hint">{{ 'clipboard.hint' | t }}</p>
     }
   </aside>
 }

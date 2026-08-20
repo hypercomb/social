@@ -38,6 +38,33 @@ export class ClipboardService extends EventTarget {
     this.#notify()
   }
 
+  /** ADD entries without dropping what is already held — the click-take path
+   *  (a tile clicked on the hive while the clipboard window is open swaps
+   *  INTO it, one at a time). Keyed by label + source path, so the eager
+   *  pre-commit call and the enriching post-seal call for the same tile
+   *  upsert one row instead of minting two; an absent `sig` on the second
+   *  pass never erases the one the first pass captured.
+   *
+   *  `op` is a label on the SET (the header chip) and placement consumes an
+   *  item either way, so a take arriving over a copy-set is safe: every entry
+   *  carries its own source path and sealed sig, which is what paste reads. */
+  appendEntries(entries: readonly ClipboardEntry[], op: ClipboardOp): void {
+    if (entries.length === 0) return
+    const keyOf = (e: ClipboardEntry): string => e.label + '\u0000' + e.sourceSegments.join('/')
+    const byKey = new Map(this.#items.map(i => [keyOf(i), i]))
+    for (const e of entries) {
+      const key = keyOf(e)
+      byKey.set(key, {
+        label: e.label,
+        sourceSegments: [...e.sourceSegments],
+        sig: e.sig ?? byKey.get(key)?.sig,
+      })
+    }
+    this.#items = [...byKey.values()]
+    this.#op = op
+    this.#notify()
+  }
+
   consume(): { items: readonly ClipboardEntry[]; op: ClipboardOp } {
     const result = { items: this.#items, op: this.#op }
     if (this.#op === 'cut') {

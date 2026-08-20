@@ -229,23 +229,28 @@ $steel: rgb(126, 182, 214);
   &:hover { background: rgba($steel, 0.07); }
 }
 
-// The hex is the drill handle: a bare button wrapping the thumb/glyph. It
-// only reads as clickable when the tile actually has children.
-.item-hex {
-  flex: 0 0 auto;
-  display: inline-flex;
+// THE SWAP: the row IS the tile. One button carries the hex and the name, so
+// the whole strip is the target — click and the tile goes to the page behind
+// this window (ctrl+click walks into it instead). Bare and flush; the row's
+// own hover is the only affordance it needs.
+.item-swap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.6em;
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: tw.$radius-card;
-  cursor: default;
-  transition: background 0.12s ease;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 
-  &.has-children {
-    cursor: pointer;
-    &:hover { background: rgba($steel, 0.16); }
+  &:focus-visible {
+    outline: 1px solid rgba($steel, 0.8);
+    outline-offset: 2px;
+    border-radius: tw.$radius-card;
   }
 }
 
@@ -280,100 +285,41 @@ $steel: rgb(126, 182, 214);
 
 .item-label {
   flex: 1;
+  min-width: 0;
   font-size: 0.82em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-// Child-count badge — how many children this tile's subtree holds. A quiet
-// steel pill; it doubles as the cue that the hex is a handle into that subtree
-// (the drill-down target).
+// Child-count badge — how many children this tile's subtree holds, and the
+// WALK-IN handle: the affordance a finger has, since ctrl is a keyboard word.
+// A quiet steel pill that brightens on hover like the button it is.
 .item-count {
   flex: 0 0 auto;
   min-width: 1.4em;
   padding: 0.05em 0.4em;
   border-radius: 999px;
+  font-family: inherit;
   font-size: 0.62em;
   font-variant-numeric: tabular-nums;
   text-align: center;
   color: rgba($steel, 0.9);
   background: rgba($steel, 0.14);
   border: 1px solid rgba($steel, 0.3);
-}
-
-// Per-item paste target — the tile's index (spiral slot) it'll land in. Quiet
-// by default, brightening on row hover / focus (the "hover number"). Edit it to
-// aim the paste; leave it to fall to the tile's default index.
-.item-index {
-  flex: 0 0 auto;
-  width: 2.6em;
-  padding: 0.1em 0.25em;
-  background: rgba($steel, 0.06);
-  border: 1px solid rgba($steel, 0.18);
-  border-radius: tw.$radius-control;
-  color: rgba($steel, 0.85);
-  font-family: inherit;
-  font-size: 0.72em;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  opacity: 0.4;
-  transition: opacity 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-  -moz-appearance: textfield;
-  appearance: textfield;
-
-  &::-webkit-outer-spin-button,
-  &::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-
-  &:hover, &:focus {
-    opacity: 1;
-    border-color: rgba($steel, 0.5);
-    background: rgba($steel, 0.12);
-    outline: none;
-  }
-}
-
-.clipboard-item:hover .item-index { opacity: 0.85; }
-
-// Hovering the tile's icon (or its count badge) HIGHLIGHTS that row's target
-// slot — so before you set it you can see exactly which slot the icon's tile
-// will land in. The index sits after both in the DOM, so the general-sibling
-// combinator reaches it. Clean steel emphasis (no glow) per the chrome aesthetic.
-.item-hex:hover ~ .item-index,
-.item-count:hover ~ .item-index {
-  opacity: 1;
-  border-color: rgba($steel, 0.6);
-  background: rgba($steel, 0.16);
-}
-
-.item-place {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.7em;
-  height: 1.7em;
-  background: transparent;
-  border: 1px solid rgba($steel, 0.35);
-  border-radius: tw.$radius-control;
-  color: rgba($steel, 0.9);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 
-  .mat-sym {
-    font-family: 'Material Symbols Rounded', 'Material Symbols Outlined', sans-serif;
-    font-size: 1.05em;
-    line-height: 1;
-  }
-
   &:hover {
-    background: rgba($steel, 0.18);
+    background: rgba($steel, 0.26);
     border-color: rgba($steel, 0.7);
   }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
 }
 
-// Per-item discard — drop one pointer without placing it. Quiet by default
-// (secondary to the place button), warms red on hover like the clear-all.
+// Per-item discard — drop one pointer without placing it. Invisible until the
+// row is hovered (or it takes focus), so the row reads as just the tile; warms
+// red on hover like the clear-all.
 .item-discard {
   flex: 0 0 auto;
   display: inline-flex;
@@ -387,10 +333,15 @@ $steel: rgb(126, 182, 214);
   font-size: 1.15em;
   line-height: 1;
   cursor: pointer;
-  transition: color 0.12s ease;
+  opacity: 0;
+  transition: color 0.12s ease, opacity 0.12s ease;
 
   &:hover { color: rgba(255, 140, 140, 0.9); }
+  &:focus-visible { opacity: 1; outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
 }
+
+.clipboard-item:hover .item-discard,
+.clipboard-item:focus-within .item-discard { opacity: 1; }
 
 .clipboard-foot {
   display: flex;
@@ -427,3 +378,19 @@ $steel: rgb(126, 182, 214);
 
   &:hover { color: rgba(255, 140, 140, 0.9); }
 }
+
+// The swap grammar, said once at the bottom of the window: while it is open,
+// the hive behind it answers the same two clicks. Quiet — a caption, not a
+// banner; it is there to be found, not to be read every time.
+.clipboard-hint {
+  margin: 0;
+  padding: 0.55em 0.85em 0.75em;
+  font-size: 0.62em;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.38);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+// An empty window is not a dead one any more — it is where clicked tiles
+// land — so the empty line sits close to the hint that explains it.
+.clipboard-empty { flex: 1; }
