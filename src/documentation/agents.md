@@ -184,6 +184,16 @@ where its activity log IS the findings list. When there is nothing running and
 nothing outstanding it stands down completely: an idle hive should be an empty
 hive.
 
+**Opening it is the audit.** The watcher perches top-left, out of the way, and
+every tile an agent is tending is gathered into ONE NORMAL VIEW — real tiles,
+painted by the hive's own renderer, each with its bee dancing over it, exactly
+the way work is read everywhere else in the hive. Agents with no tile target
+dance in the open in the same view. Clicking a bee opens its request as usual;
+clicking a tile travels to the real work (which puts the gathered view down —
+the click takes you to the real place). Pressing the watcher again, or closing
+its panel, puts everything down. There is no separate console, board, or list:
+the audit is made of the same material as the hive.
+
 **It reports, it never intervenes.** A stalled ask is still the participant's
 request, and a slow routine may be slow for a good reason. Retiring or
 restarting someone else's work on a timer would destroy data to satisfy a
