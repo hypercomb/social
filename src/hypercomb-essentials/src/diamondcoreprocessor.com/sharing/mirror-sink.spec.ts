@@ -14,10 +14,15 @@
 //
 // The one wrinkle is descent: a record names further content INSIDE itself, so
 // skipping it outright would stop the walk. Only a record can do that, and a
-// record is small — so an already-saved item above the record ceiling is
-// skipped unread, and a small one is read back off the destination rather than
-// re-fetched. Reading every already-saved IMAGE back on every pass would make
-// a current backup as expensive as a new one.
+// record is JSON — so the decision costs ONE BYTE. An already-saved item is
+// skipped after peeking a `{` or `[` that never came, and read back in full
+// only when it is genuinely a record. Anything past the record ceiling is not
+// even peeked.
+//
+// That byte is the whole steady state. Reading every already-saved item back
+// in full would make a pass over an unchanged backup cost as much as building
+// a new one — measured on a real hive, 10,784 files of which THREE exceed 1 MB,
+// so a full read-back is 205 MB of disk to discover nothing changed.
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -44,16 +49,22 @@ let fetched: string[]
 const makeSink = (initial: Map<string, Uint8Array> = new Map()) => {
   const held = new Map(initial)
   const reads: string[] = []
+  const peeks: string[] = []
   const writes: string[] = []
   let failWrites = false
   return {
     held,
     reads,
+    peeks,
     writes,
     failNextWrites: () => { failWrites = true },
     sink: {
       has: async (sig: string) => held.get(sig)?.byteLength ?? null,
       read: async (sig: string) => { reads.push(sig); return held.get(sig) ?? null },
+      peek: async (sig: string, bytes: number) => {
+        peeks.push(sig)
+        return held.get(sig)?.slice(0, bytes) ?? null
+      },
       write: async (sig: string, bytes: Uint8Array) => {
         if (failWrites) throw new Error('destination is gone')
         writes.push(sig)
@@ -133,17 +144,36 @@ describe('a mirrored walk', () => {
     expect(writes).toEqual([NESTED_RECORD, IMAGE])
   })
 
+  it('never reads an already-saved item back unless it could be a record', async () => {
+    // The steady state. An image cannot name further content, so one byte is
+    // the whole decision — reading it back in full would make a pass over an
+    // unchanged backup cost as much as building a new one.
+    const image = SIG('f')
+    const bytes = new TextEncoder().encode('PNG definitely-not-json')
+    served.set(image, bytes)
+    const { sink, reads, peeks } = makeSink(new Map([[image, bytes]]))
+    const broker = makeBroker()
+
+    await broker.adoptResources([image], { deepResources: true, quiet: true, mirror: sink })
+
+    expect(peeks).toEqual([image])
+    expect(reads).toEqual([])
+    expect(fetched).toEqual([])
+  })
+
   it('skips an already-saved item too large to be a record, without reading it', async () => {
     // 9 MB is past the record ceiling, so nothing inside it could name more
     // content. Reading it back would be pure I/O for no possible finding.
     const big = SIG('e')
     served.set(big, new Uint8Array(9 * 1024 * 1024))
-    const { sink, reads } = makeSink(new Map([[big, new Uint8Array(9 * 1024 * 1024)]]))
+    const { sink, reads, peeks } = makeSink(new Map([[big, new Uint8Array(9 * 1024 * 1024)]]))
     const broker = makeBroker()
 
     await broker.adoptResources([big], { deepResources: true, quiet: true, mirror: sink })
 
+    // Above the ceiling it does not even pay the byte.
     expect(reads).toEqual([])
+    expect(peeks).toEqual([])
     expect(fetched).toEqual([])
   })
 

@@ -1241,6 +1241,16 @@ export class FolderSyncService {
           return null
         }
       },
+      // A File is a Blob: slicing it reads only the requested range off disk,
+      // so this is genuinely one byte and not a full read discarded.
+      peek: async (sig, bytes) => {
+        try {
+          const file = await (await destination.getFileHandle(sig, { create: false })).getFile()
+          return new Uint8Array(await file.slice(0, bytes).arrayBuffer())
+        } catch {
+          return null
+        }
+      },
       // writeFile commits through createWritable().close(), so a partial write
       // never lands under the real name. Presence is therefore trustworthy,
       // which is the assumption `has` above is built on.

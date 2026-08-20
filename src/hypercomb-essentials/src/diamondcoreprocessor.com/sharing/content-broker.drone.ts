@@ -156,8 +156,12 @@ const DEEP_RECORD_MAX_BYTES = 8 * 1024 * 1024
 export interface MirrorSink {
   /** Byte size if the destination already holds this signature, else null. */
   has: (sig: string) => Promise<number | null>
-  /** Read one back. Only ever called for something `has` reported small. */
+  /** Read one back. Only ever called for something that peeked as a record. */
   read: (sig: string) => Promise<Uint8Array | null>
+  /** The first `bytes` of a held item, for deciding whether a full read is
+   *  worth it. A record is JSON and starts `{` or `[`; nothing else can name
+   *  further content, so nothing else is worth reading. */
+  peek: (sig: string, bytes: number) => Promise<Uint8Array | null>
   /** Take newly resolved bytes. Must be atomic per item. */
   write: (sig: string, bytes: Uint8Array) => Promise<void>
 }
@@ -1302,6 +1306,16 @@ export class ContentBrokerDrone extends Drone {
           stats.leaves++
           stats.alreadyMirrored = (stats.alreadyMirrored ?? 0) + 1
           if (size > DEEP_RECORD_MAX_BYTES) continue
+          // ONE BYTE decides it. Only a record can name further content, and a
+          // record is JSON — so `{` or `[` is the entire test. Without this the
+          // walk read every already-saved item back IN FULL just to discover
+          // most of them are images: on a real hive, 10,784 files of which
+          // THREE exceed 1 MB, that is re-reading the whole backup to learn
+          // nothing. A steady-state pass should cost a stat and a byte.
+          let first: Uint8Array | null = null
+          try { first = await sink.peek(sig, 1) } catch { first = null }
+          const opener = first?.[0]
+          if (opener !== 0x7b /* { */ && opener !== 0x5b /* [ */) continue
           try { got = await sink.read(sig) } catch { got = null }
           if (!got) continue
         }
