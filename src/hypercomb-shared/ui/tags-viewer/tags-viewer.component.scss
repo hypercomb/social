@@ -946,6 +946,45 @@ $mint: #6fbf94;
   &.painting { background: rgba($mint, 0.16); }
 }
 
+// ── Pointing at a mark: this panel's half of the answer ───────────────────
+//
+// The hive lights every tile carrying the mark (show-cell `tags:preview`);
+// here, the thing being pointed AT wears the same light, so the two surfaces
+// read as one gesture. The colour is the MARK'S OWN (`--mark-color`, set on
+// the element): every other state on these rows — filtered, staging, picked,
+// painting — is a fixed hue, so a mark's own colour can never be mistaken for
+// one of them, and it is literally the colour that just appeared on the hive.
+//
+// A bar, a wash and a lit swatch. Nothing moves and nothing resizes: the
+// cursor travels the whole list, and a row that grew or shifted under it would
+// make the list unusable at exactly the moment it became most useful.
+.tags-row.previewing,
+.bouquet-head.previewing,
+.painter-chip.previewing {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--mark-color, #{$steel}) 30%, transparent),
+    color-mix(in srgb, var(--mark-color, #{$steel}) 8%, transparent) 55%,
+    transparent
+  );
+  box-shadow: inset 3px 0 0 var(--mark-color, #{$steel});
+}
+
+.previewing {
+  .tag-swatch,
+  .bouquet-mark-swatch,
+  .painter-chip-swatch {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.4) inset,
+      0 0 0 2px color-mix(in srgb, var(--mark-color, #{$steel}) 70%, transparent),
+      0 0 10px color-mix(in srgb, var(--mark-color, #{$steel}) 55%, transparent);
+  }
+
+  .tag-name,
+  .bouquet-name,
+  .painter-chip-name { color: #fff; }
+}
+
 .tag-swatch {
   flex: 0 0 auto;
   width: 1.1em;

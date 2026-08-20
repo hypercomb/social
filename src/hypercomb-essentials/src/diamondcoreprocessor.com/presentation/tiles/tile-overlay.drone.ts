@@ -427,32 +427,21 @@ export class TileOverlayDrone extends Drone {
   /** Either picking mode is armed: a press must not navigate and the trailing
    *  tap is an ADD-TO-SET toggle. The one thing both modes mean. */
   get #picking(): boolean { return this.#sampling || this.#selectMode }
-  /** The Pheromones window is open. While it is, the hive belongs to it: hover
-   *  pops that tile's keyword card, a dragged pheromone lands on the tile under
-   *  the release, and the brush paints. The hover band would sit on top of all
-   *  three, so it stands down for as long as the window is up — not just while
-   *  a takeover is armed. This one flag REPLACES a per-takeover visibility
-   *  check: closing the window disarms both takeovers (tags-viewer `close()`),
-   *  so "window open" already contains "removal armed" and "brush armed". */
+  /** The Pheromones window is open. While it is, hover pops that tile's
+   *  keyword card and a dragged pheromone lands on the tile under the release.
+   *  The hover band would sit on top of both, so it stands down for as long as
+   *  the window is up — not just while the removal takeover is armed (closing
+   *  the window disarms that anyway, via tags-viewer `close()`). */
   #pheromoneWindowOpen = false
   /** A pheromone removal is armed (TagRemovalDrone): tile clicks stage and
    *  unstage tiles instead of entering or opening them. Cleared when the
    *  removal commits or is cancelled. */
   #tagRemovalArmed = false
-  /** A pheromone APPLY brush is armed (PheromoneTilesDrone): the painter picked
-   *  a keyword set to paint on. Same takeover as removal, but it is a BRUSH:
-   *  pressing/dragging over tiles STAGES them (they are committed later by
-   *  Done). The hive shows a paint cursor while armed. */
-  #tagApplyArmed = false
-  /** The tiles currently STAGED by the brush, mirrored from
-   *  `tags:apply-pending {cells}`. Lets a press compute its stroke intent —
-   *  press an unpainted tile to paint (add), a painted one to lift (remove). */
-  #tagApplyStaged = new Set<string>()
-  /** An in-flight paint stroke: `add` is fixed at press time so a drag paints
-   *  (or lifts) consistently across every tile it crosses; `touched` dedupes so
-   *  re-entering a tile mid-drag doesn't re-emit. null between strokes. */
-  #applyStroke: { add: boolean } | null = null
-  #applyStrokeTouched = new Set<string>()
+  // NOTE: there is deliberately NO apply-brush takeover here any more. A
+  // bouquet in hand does not hijack the hive — you keep walking (click,
+  // enter, hold) exactly as always, and ctrl+click COLLECTS the tile into
+  // the grouping. That gesture belongs to SelectionInputDrone, the canonical
+  // owner of ctrl-as-add-to-set; the paint brush it replaced lived here.
   /** The cursor is on chrome above the canvas, so the hive is standing down.
    *  Latched so the "nothing hovered" broadcast fires once per entry. */
   #hoverSuppressed = false
@@ -520,11 +509,11 @@ export class TileOverlayDrone extends Drone {
     'behavior:enablement-changed',
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
-    'tags:view-state', 'tags:removal-pending', 'tags:apply-pending',
+    'tags:view-state', 'tags:removal-pending',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-toggle']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -1061,19 +1050,9 @@ export class TileOverlayDrone extends Drone {
         this.#updatePerTileVisibility()
       })
 
-      // The apply brush is the additive twin of the removal takeover: while a
-      // keyword set is armed, pressing/dragging over tiles STAGES them (see
-      // #beginApplyStroke / #onPointerMove) instead of navigating, and the hive
-      // wears a paint cursor. `cells` is the staged set, mirrored so a press
-      // knows whether it is painting or lifting.
-      this.onEffect<{ active?: boolean; cells?: string[] }>('tags:apply-pending', (payload) => {
-        this.#tagApplyArmed = payload?.active === true
-        this.#tagApplyStaged = new Set(Array.isArray(payload?.cells) ? payload!.cells : [])
-        if (!this.#tagApplyArmed) { this.#applyStroke = null; this.#applyStrokeTouched.clear() }
-        this.#applyPaintCursor()
-        this.#updateVisibility()
-        this.#updatePerTileVisibility()
-      })
+      // (No `tags:apply-pending` listener: a bouquet in hand no longer takes
+      // the hive over. Collecting rides ctrl+click in SelectionInputDrone, and
+      // show-cell still reads the staged set for the future-add marks.)
 
       this.onEffect<{ active: boolean; groupOnly?: boolean }>('drop:dragging', ({ active, groupOnly }) => {
         this.#dropDragging = active
@@ -2374,19 +2353,6 @@ export class TileOverlayDrone extends Drone {
     }
     this.#hoverSuppressed = false
 
-    // Painting a stroke: extend it to whatever tile the cursor is now over. The
-    // stroke's `add` was fixed at press time, so a drag paints (or lifts)
-    // consistently; `#applyStrokeTouched` dedupes re-entered tiles. This runs
-    // alongside the normal hover resolution below (the overlay stays hidden
-    // while armed), so the brush keeps working as the pointer keeps moving.
-    if (this.#applyStroke) {
-      const label = this.labelAtClient(e.clientX, e.clientY)
-      if (label && !this.#applyStrokeTouched.has(label)) {
-        this.#applyStrokeTouched.add(label)
-        this.emitEffect('tags:apply-paint', { label, add: this.#applyStroke.add })
-      }
-    }
-
     const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return
 
@@ -2715,10 +2681,8 @@ export class TileOverlayDrone extends Drone {
     // Armed removal: the press must not navigate — the trailing click stages
     // the tile instead (see #onClick).
     if (this.#tagRemovalArmed) return
-    // Armed apply is a BRUSH: the press starts a paint stroke (stages the tile
-    // under it), a drag extends it across tiles, pointerup ends it. Staging
-    // happens here, not on the trailing click.
-    if (this.#tagApplyArmed) { this.#beginApplyStroke(e); return }
+    // A bouquet in hand is NOT a takeover: the press navigates as always.
+    // Collecting is ctrl+click, owned by SelectionInputDrone.
     if (this.#touchDragging) return
     if (e.ctrlKey || e.metaKey) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
@@ -2843,7 +2807,7 @@ export class TileOverlayDrone extends Drone {
       if (this.#arrangeMode || this.#navigationBlocked) return
       if (this.#editing || this.#editCooldown) return
       if (this.#hasSelection || this.#touchDragging) return
-      if (this.#tagRemovalArmed || this.#tagApplyArmed) return
+      if (this.#tagRemovalArmed) return
       this.#consumedPointerId = pointerId
       consumePointerGesture(pointerId)
       this.#pressCapture = null
@@ -2904,13 +2868,6 @@ export class TileOverlayDrone extends Drone {
       this.emitEffect('tags:removal-toggle', { label: staged.label })
       return
     }
-
-    // ── Armed pheromone apply brush ──────────────────────────────────────
-    // The brush stages on pointerdown (and drags across tiles) — see
-    // #beginApplyStroke — so the trailing click has nothing to do but decline
-    // to navigate. Swallowing it here keeps a paint press from ALSO entering
-    // the tile.
-    if (this.#tagApplyArmed) { diag('apply-armed'); return }
 
     // For Ctrl/Meta clicks, resolve axial from click coordinates directly
     // rather than relying on pointermove having set #currentIndex
@@ -3123,13 +3080,6 @@ export class TileOverlayDrone extends Drone {
     // Any armed hold-to-enter dies on the release — it only ever fires from
     // its own timer, on a press that never moved and never let go.
     this.#cancelEnterHold()
-    // End a paint stroke on release — the staged set persists (Done commits it),
-    // only the stroke does. Left button, before the nav-gesture guards below.
-    if (e.button === 0 && this.#applyStroke) {
-      this.#applyStroke = null
-      this.#applyStrokeTouched.clear()
-      return
-    }
     // Suppress orphaned pointerup from navigation gesture (click/contextmenu still pending)
     if (this.#consumedPointerId === e.pointerId) return
     if (e.button !== 2) return
@@ -3471,7 +3421,7 @@ export class TileOverlayDrone extends Drone {
     if (this.#hiveHidden) { this.#overlay.visible = false; return }
 
     // The Pheromones window owns the hive while it is up — hover pops that
-    // tile's keyword card, and a drag or the brush lands on the tile under the
+    // tile's keyword card, and a dragged pheromone lands on the tile under the
     // pointer. The band would cover the card and eat the press, so it stands
     // down for the whole session rather than only while a takeover is armed.
     if (this.#pheromoneWindowOpen) { this.#overlay.visible = false; return }
@@ -3596,7 +3546,7 @@ export class TileOverlayDrone extends Drone {
 
   /** Which tile sits under a VIEWPORT point, or null for empty hex / off-canvas.
    *
-   *  The same pixel→axial→occupied resolution the armed-brush click branch does,
+   *  The same pixel→axial→occupied resolution the click branches do,
    *  exposed because a drop must land where the pointer was RELEASED. Consumers
    *  that instead remember the last `tile:hover` are wrong in three situations
    *  this drone creates: #suppressHover nulls the hovered tile whenever the
@@ -3642,46 +3592,6 @@ export class TileOverlayDrone extends Drone {
       radius: this.#geo.circumRadiusPx * Math.hypot(wt.a, wt.b) * sx,
     }
   }
-
-  /** Start a paint stroke at the press. Stages the tile under the cursor and
-   *  fixes the stroke's intent: pressing an unpainted tile PAINTS (add), a
-   *  painted one LIFTS (remove) — and a drag then applies that same intent to
-   *  every tile it crosses, so you never toggle back and forth mid-stroke.
-   *  A plain press with no drag is just a one-tile stroke. */
-  #beginApplyStroke(e: PointerEvent): void {
-    if (e.target !== this.#canvas) return
-    const label = this.labelAtClient(e.clientX, e.clientY)
-    // Empty hex: no stroke starts, so a press on empty canvas doesn't arm a
-    // phantom drag.
-    if (!label) return
-    const add = !this.#tagApplyStaged.has(label)
-    this.#applyStroke = { add }
-    this.#applyStrokeTouched = new Set([label])
-    this.emitEffect('tags:apply-paint', { label, add })
-  }
-
-  /** A brush cursor over the hive while the apply brush is armed — the "painter
-   *  icon" that follows the pointer, telling you the tiles are a paint surface.
-   *  Cleared back to default when the brush is put down. Set on the canvas
-   *  element, so it only reads over the hive, not the panel. */
-  #applyPaintCursor(): void {
-    if (!this.#canvas) return
-    this.#canvas.style.cursor = this.#tagApplyArmed ? TileOverlayDrone.#PAINT_CURSOR : ''
-  }
-
-  /** A small paintbrush, hotspot at the tip (bottom-left), as a CSS cursor. */
-  static readonly #PAINT_CURSOR =
-    "url('data:image/svg+xml;utf8," +
-    encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
-      '<g fill="none" stroke="#0b0e14" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M20 4l4 4-9 9-4-4z"/><path d="M11 13l-4 4c-1.5 1.5-1.5 4 0 5.5"/><path d="M7 22.5c-2 .5-3.5 0-4.5-1"/>' +
-      '</g>' +
-      '<g fill="none" stroke="#6fbf94" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M20 4l4 4-9 9-4-4z"/><path d="M11 13l-4 4c-1.5 1.5-1.5 4 0 5.5"/><path d="M7 22.5c-2 .5-3.5 0-4.5-1"/>' +
-      '</g></svg>',
-    ) +
-    "') 4 24, crosshair"
 
   /** Stand the hive down while the cursor sits on chrome above it: hide the
    *  icon overlay and tell every hover consumer nothing is hovered, ONCE per

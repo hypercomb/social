@@ -94,13 +94,32 @@
       </button>
     }
 
-    <!-- The painter. Pick pheromones (below), then hold-and-drag across tiles
-         to paint them. Painting only STAGES — the tiles mark on the hive and
-         list here as you go; Done persists them in one transaction. -->
+    <!-- The collecting walk. Gather pheromones (below), then walk the hive as
+         usual — ctrl+click tiles to collect them into the grouping, ctrl+click
+         again to release one. Collecting only STAGES — the tiles mark on the
+         hive and list here as you go; Done persists them in one transaction. -->
     @if (painterOpen()) {
       <section class="tags-painter-section" [class.armed]="selectedCount() > 0">
         <h3 class="tags-section-title apply-title">{{ 'tags.painter.title' | t }}</h3>
         <p class="apply-hint">{{ (selectedCount() === 0 ? 'tags.painter.pick' : 'tags.painter.paint.hint') | t }}</p>
+
+        <!-- THE GROUPING, sectioned at the top: the tiles collected so far on
+             this walk. The panel's half of the mark the hive shows on the same
+             tiles; grows with every ctrl+click out there. -->
+        @if (paintedCount() > 0) {
+          <h3 class="tags-section-title grouping-title">
+            {{ 'tags.grouping.title' | t }}
+            <span class="tags-total">{{ paintedCount() }}</span>
+          </h3>
+          <ul class="painter-painted">
+            @for (cell of paintedCells(); track cell) {
+              <li class="painted-cell">
+                <span class="mat-sym painted-cell-icon">check</span>
+                <span class="painted-cell-name">{{ cell }}</span>
+              </li>
+            }
+          </ul>
+        }
 
         @if (selectedCount() === 0) {
           <p class="painter-empty">{{ 'tags.painter.none' | t }}</p>
@@ -117,7 +136,13 @@
           }
           <ul class="painter-picked">
             @for (pick of selectedChips(); track pick.name) {
-              <li class="painter-chip">
+              <li
+                class="painter-chip"
+                [style.--mark-color]="pick.color"
+                [class.previewing]="isPreviewing(pick.name)"
+                (pointerenter)="preview([pick.name], pick.color)"
+                (pointerleave)="endPreview()"
+              >
                 <span class="painter-chip-swatch" [style.background]="pick.color" aria-hidden="true"></span>
                 <span class="painter-chip-name">{{ pick.name }}</span>
                 <button
@@ -154,19 +179,6 @@
               <button class="bouquet-name-cancel" type="button" (click)="cancelNaming()">{{ 'tags.painter.cancel' | t }}</button>
             </form>
           }
-        }
-
-        <!-- The tiles staged so far — the panel's half of "a visual cue to show
-             you painted that one"; the hive marks the same tiles. -->
-        @if (paintedCount() > 0) {
-          <ul class="painter-painted">
-            @for (cell of paintedCells(); track cell) {
-              <li class="painted-cell">
-                <span class="mat-sym painted-cell-icon">check</span>
-                <span class="painted-cell-name">{{ cell }}</span>
-              </li>
-            }
-          </ul>
         }
 
         <!-- Selection response: with the brush armed and tiles selected on the
@@ -224,7 +236,13 @@
         <ul class="bouquet-list">
           @for (bouquet of bouquets(); track bouquet.name) {
             <li class="bouquet-row" [class.loaded]="loadedBouquet() === bouquet.name" [class.open]="isBouquetOpen(bouquet.name)">
-              <div class="bouquet-head">
+              <div
+                class="bouquet-head"
+                [style.--mark-color]="bouquetColor(bouquet)"
+                [class.previewing]="isPreviewing(bouquet.marks[0])"
+                (pointerenter)="preview(bouquet.marks, bouquetColor(bouquet))"
+                (pointerleave)="endPreview()"
+              >
                 <button
                   class="bouquet-open"
                   type="button"
@@ -323,12 +341,21 @@
          controls wherever it is listed — the grouping decides where you find
          it, never what you can do with it. -->
     <ng-template #tagRow let-row>
+      <!-- Pointing at a row asks the hive which tiles carry this mark, and the
+           hive answers on itself. The row lights in the SAME colour, so the
+           panel and the hive read as one gesture rather than two surfaces that
+           happen to agree. Enter/leave on the whole row (swatch, name, count
+           and both verbs) — every part of a mark asks the same question. -->
       <li
         class="tags-row"
+        [style.--mark-color]="row.color"
         [class.filtered]="isFiltered(row.name)"
         [class.staging]="isStaging(row.name)"
         [class.picked]="isSelected(row.name)"
         [class.painting]="isApplying(row.name)"
+        [class.previewing]="isPreviewing(row.name)"
+        (pointerenter)="preview([row.name], row.color)"
+        (pointerleave)="endPreview()"
       >
         <label class="tag-swatch" [style.background]="row.color" [attr.title]="'tags.recolor' | t">
           <input type="color" [value]="row.color" (change)="recolor(row.name, $event)" />

@@ -5,19 +5,21 @@
 // participant put those keywords ON tiles and take them OFF, directly on the
 // hive, while the window is open.
 //
-//   PAINT (the painter) — a STAGING brush, the additive twin of bulk removal.
-//     The panel opens the painter and picks a set of keywords; picking arms the
-//     brush (`tags:apply-begin {tags}`) — there is no separate "start" step.
-//     TileOverlayDrone then turns the hive into a paint surface: hovering shows
-//     a brush cursor, and pressing/dragging over tiles STAGES them
-//     (`tags:apply-paint {label, add}`). Staged tiles are pure intent — nothing
-//     is written — shown as a future-add mark on the hive (show-cell reads the
-//     same `tags:apply-pending {cells}`) and listed in the panel. `Done`
-//     (`tags:apply-commit`) writes every staged tile in one pass and pulses the
-//     processor; closing or Escape (`tags:apply-cancel` / `tags:apply-end`)
-//     throws the staging away. This mirrors TagRemovalDrone exactly, opposite
-//     sign — stage, review, commit — so the two takeovers are one gesture the
-//     participant already knows.
+//   THE COLLECTING WALK — the staging path, the additive twin of bulk removal.
+//     The panel gathers a bouquet of keywords; gathering arms it
+//     (`tags:apply-begin {tags}`) — there is no separate "start" step. The hive
+//     is NOT taken over: you walk it exactly as always (click, enter, hold),
+//     and ctrl+click COLLECTS the tile under the pointer into the grouping
+//     (`tags:apply-paint {label, add}` — SelectionInputDrone owns the gesture;
+//     ctrl+click a collected tile to release it, ctrl+drag to sweep). Collected
+//     tiles are pure intent — nothing is written — shown as a future-add mark
+//     on the hive (show-cell reads the same `tags:apply-pending {cells}`) and
+//     listed as the grouping at the top of the panel. `Done`
+//     (`tags:apply-commit`) writes every collected tile in one pass and pulses
+//     the processor; closing or Escape (`tags:apply-cancel` / `tags:apply-end`)
+//     throws the staging away. This mirrors TagRemovalDrone — stage, review,
+//     commit — and replaced the paint brush: painting hijacked every click, so
+//     you could not walk while marking, and collecting is the easier verb.
 //
 //   DROP — a pheromone dragged out of the panel onto a tile lands immediately
 //     (`pheromone:drop`). Unlike the brush this is one unambiguous act, so it
@@ -55,7 +57,7 @@ export class PheromoneTilesDrone extends Drone {
   override genotype = 'pheromones'
 
   public override description =
-    'Puts pheromone keywords onto tiles and takes them off: the staging paint brush (paint tiles, then Done commits), the drag-drop quick apply, and the on-tile ×-to-remove card — all while the Pheromones window is open.'
+    'Puts pheromone keywords onto tiles and takes them off: the collecting walk (ctrl+click tiles into the grouping, then Done commits), the drag-drop quick apply, and the on-tile ×-to-remove card — all while the Pheromones window is open.'
 
   protected override listens = [
     'tags:view-state', 'tags:removal-pending',

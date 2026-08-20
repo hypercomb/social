@@ -24,7 +24,7 @@ type TileClickPayload = { q: number; r: number; label: string; index: number; ct
 class SelectionInputDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description =
-    'Translates pointer clicks and drag gestures into tile selection changes — and, over somebody else\'s tiles in a swarm, into the wand that takes them (select stands down for that gesture).'
+    'Translates pointer clicks and drag gestures into tile selection changes — and, over somebody else\'s tiles in a swarm, into the wand that takes them; with a pheromone bouquet in hand, ctrl+click becomes the collecting walk that gathers tiles into the grouping (select stands down for both gestures).'
 
   #renderContainer: Container | null = null
   #canvas: HTMLCanvasElement | null = null
@@ -51,6 +51,25 @@ class SelectionInputDrone extends Drone {
   // two meanings on one gesture is how they get in each other's way.
   #wandActive = false     // a wand gesture is in progress
   #wandArmed = false      // ...and the modifier is still down (sweeping)
+
+  // ── THE COLLECTING WALK ─────────────────────────────────────────────
+  // While the Pheromones window has a bouquet in hand (`tags:apply-pending`
+  // active), ctrl+press over a tile COLLECTS it into the grouping — it
+  // stages the tile (`tags:apply-paint`; Done commits) instead of toggling
+  // the selection. Ctrl is the canonical add-to-set gesture, and with marks
+  // in hand the set being built IS the grouping, so select stands down for
+  // the gesture exactly as it does for the wand. A drag sweeps, with the
+  // intent fixed at press time (an uncollected first tile collects, a
+  // collected one releases); walking the hive stays untouched — plain
+  // clicks navigate, there is no brush and no takeover.
+  #scentArmed = false
+  /** Tiles already in the grouping, mirrored from `tags:apply-pending
+   *  {cells}` — a ctrl+press on one of them releases it instead. */
+  #scentStaged = new Set<string>()
+  /** An in-flight collect stroke; `sweeping` drops on modifier keyup (the
+   *  gesture itself ends on pointerup, which must still swallow the trailing
+   *  click — same shape as the wand). */
+  #scentStroke: { add: boolean; sweeping: boolean } | null = null
   /** Labels the renderer reported as somebody else's (`render:cell-count`
    *  externalLabels) — the wand never touches a tile of your own. */
   #externalLabels = new Set<string>()
@@ -90,8 +109,8 @@ class SelectionInputDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode']
-  protected override emits: string[] = ['selection:painted', 'swarm:wand']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode', 'tags:apply-pending']
+  protected override emits: string[] = ['selection:painted', 'swarm:wand', 'tags:apply-paint']
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -123,6 +142,14 @@ class SelectionInputDrone extends Drone {
     this.onEffect<{ active?: boolean }>('sample:mode', (p) => { this.#sampleArmed = !!p?.active })
     this.onEffect<{ active?: boolean }>('select:mode', (p) => { this.#selectModeArmed = !!p?.active })
 
+    // A bouquet in hand (sticky, PheromoneTilesDrone owns it). `cells` is the
+    // grouping so far — a ctrl+press needs it to choose collect vs release.
+    this.onEffect<{ active?: boolean; cells?: string[] }>('tags:apply-pending', (p) => {
+      this.#scentArmed = p?.active === true
+      this.#scentStaged = new Set(Array.isArray(p?.cells) ? p.cells : [])
+      if (!this.#scentArmed) this.#scentStroke = null
+    })
+
     // click selection via tile:click effect from TileOverlayDrone
     this.onEffect<TileClickPayload>('tile:click', (payload) => {
       if (this.#justDragged) return
@@ -149,7 +176,7 @@ class SelectionInputDrone extends Drone {
     this.onEffect('navigation:guard-start', () => {
       this.#navigationBlocked = true
       // Abort any in-progress drag/pending gesture so stale state doesn't bleed into the new view
-      if (this.#dragActive || this.#pendingDrag || this.#reorderDragActive || this.#wandActive) {
+      if (this.#dragActive || this.#pendingDrag || this.#reorderDragActive || this.#wandActive || this.#scentStroke) {
         this.#dragActive = false
         this.#pendingDrag = false
         this.#pendingStartLabel = null
@@ -157,6 +184,7 @@ class SelectionInputDrone extends Drone {
         this.#reorderSourceLabel = null
         this.#wandActive = false
         this.#wandArmed = false
+        this.#scentStroke = null
         this.#activePointerId = null
         this.#lastOp = null
         this.#touched.clear()
@@ -242,6 +270,19 @@ class SelectionInputDrone extends Drone {
       return
     }
 
+    // ── THE COLLECTING WALK comes next ──────────────────────────────
+    // A bouquet in hand: ctrl+press collects this tile into the grouping
+    // (or releases a collected one), a drag sweeps the same intent. It
+    // outranks the copy-drag hand-off and the select paint below — while
+    // marks are in hand, ctrl means "this one too", into the GROUPING.
+    if ((e.ctrlKey || e.metaKey) && this.#scentArmed) {
+      this.#activePointerId = e.pointerId
+      this.#scentStroke = { add: !this.#scentStaged.has(label), sweeping: true }
+      this.#touched.clear()
+      this.#collectScent(label)
+      return
+    }
+
     // Press on an already-selected tile — hand off to DesktopMoveInput, which
     // owns drag-to-move (plain) AND Ctrl-drag-to-COPY. This now fires for Ctrl
     // too: Ctrl-drag a selected tile = copy, not paint. A Ctrl-CLICK (no drag)
@@ -278,6 +319,14 @@ class SelectionInputDrone extends Drone {
       return
     }
 
+    // A collect stroke in progress: every tile the pointer crosses joins the
+    // grouping (or leaves it — the intent was fixed at press), once each.
+    if (this.#scentStroke) {
+      const label = this.#labelAtClient(e.clientX, e.clientY)
+      if (label) this.#collectScent(label)
+      return
+    }
+
     // pending drag: check if pointer moved beyond threshold to promote to real drag
     if (this.#pendingDrag) {
       const dx = e.clientX - this.#pendingStartX
@@ -306,6 +355,7 @@ class SelectionInputDrone extends Drone {
   #onPointerUp = (e: PointerEvent): void => {
     if (e.pointerId !== this.#activePointerId) return
     if (this.#wandActive) { this.#endWand(); return }
+    if (this.#scentStroke) { this.#endScentStroke(); return }
     if (this.#reorderDragActive) {
       this.#endReorderDrag(e.clientX, e.clientY)
       return
@@ -326,6 +376,7 @@ class SelectionInputDrone extends Drone {
   #onPointerCancel = (e: PointerEvent): void => {
     if (e.pointerId !== this.#activePointerId) return
     if (this.#wandActive) { this.#endWand(); return }
+    if (this.#scentStroke) { this.#endScentStroke(); return }
     this.#reorderDragActive = false
     this.#reorderSourceLabel = null
     this.#pendingDrag = false
@@ -340,11 +391,15 @@ class SelectionInputDrone extends Drone {
     // still be swallowed (#endWand on pointerup does that). Ending here
     // instead let a trailing plain click land as a fresh selection.
     if (this.#wandActive) { this.#wandArmed = false; return }
+    // Same rule for a collect stroke: stop sweeping, but the gesture ends on
+    // pointerup so the trailing click is still swallowed there.
+    if (this.#scentStroke) { this.#scentStroke.sweeping = false; return }
     if (this.#dragActive) this.#endDrag()
   }
 
   #onBlur = (): void => {
     if (this.#wandActive) { this.#endWand(); return }
+    if (this.#scentStroke) { this.#endScentStroke(); return }
     if (this.#dragActive) this.#endDrag()
   }
 
@@ -405,6 +460,32 @@ class SelectionInputDrone extends Drone {
     this.#gate?.release('tile-selection')
     // The gesture's trailing click must not toggle a selection — the same
     // one-frame guard the paint drag uses.
+    this.#justDragged = true
+    requestAnimationFrame(() => { this.#justDragged = false })
+  }
+
+  // ── collecting-walk helpers ────────────────────────────────────────
+
+  /** One tile, once per stroke: stage it into (or release it from) the
+   *  grouping. Pure intent on the wire — PheromoneTilesDrone stages, the hive
+   *  marks it, the panel lists it, and only Done writes. */
+  #collectScent(label: string): void {
+    const stroke = this.#scentStroke
+    if (!stroke?.sweeping) return
+    if (this.#touched.has(label)) return
+    this.#touched.add(label)
+    EffectBus.emit('tags:apply-paint', { label, add: stroke.add })
+  }
+
+  /** The pointer came up: the stroke is over. The collected tiles persist —
+   *  they are the grouping, and Done in the panel commits them — only the
+   *  gesture state ends here. Trailing-click guard as for the wand. */
+  #endScentStroke(): void {
+    if (!this.#scentStroke) return
+    this.#scentStroke = null
+    this.#activePointerId = null
+    this.#touched.clear()
+    this.#gate?.release('tile-selection')
     this.#justDragged = true
     requestAnimationFrame(() => { this.#justDragged = false })
   }

@@ -24,12 +24,17 @@
 // tile's location and splices the decoration on commit. `tags:removal-pending`
 // is the shared truth between the two, and the renderer marks the same set.
 //
-// ── Scenting, and the bouquet ─────────────────────────────────────────────
+// ── The collecting walk, and the bouquet ──────────────────────────────────
 // Putting pheromones ON tiles is deliberately explicit: open the surface,
-// gather the pheromones you want (any number — ＋ on each row), then walk the
-// tiles. Every click leaves the whole gathered set at once, scented tiles mark
-// on the hive as they land (show-cell reads the same `tags:apply-pending`), and
-// the panel lists them as it goes.
+// gather the pheromones you want (any number — ＋ on each row), then WALK the
+// hive as usual — nothing is hijacked, plain clicks still navigate. Ctrl+click
+// collects a tile into the grouping (the canonical add-to-set gesture,
+// rerouted by SelectionInputDrone while the bouquet is in hand); ctrl+click a
+// collected tile to release it. Collected tiles mark on the hive as they land
+// (show-cell reads the same `tags:apply-pending`) and list here as THE
+// GROUPING, sectioned at the top. Done commits in one transaction. This
+// replaced the paint brush: painting took over every click, so you could not
+// walk while marking — collecting is the easier verb.
 //
 // WHAT IS IN HAND IS ALWAYS A BOUQUET — a bee never emits one compound, and
 // neither do you. One mark or six, the gathered set has an identity from the
@@ -138,6 +143,8 @@ export class TagsViewerComponent implements OnDestroy {
    *  brush alone when it sees it. */
   readonly session: WindowSession = {
     park: () => {
+      // Parked rows never get their pointerleave (see endPreview at close()).
+      this.endPreview()
       this.visible.set(false)
       EffectBus.emit('tags:view-state', { open: false, parked: true })
     },
@@ -417,6 +424,9 @@ export class TagsViewerComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    // A row that is torn down never gets its pointerleave, so the hive would
+    // hold the preview forever.
+    this.endPreview()
     for (const c of this.#cleanups) c()
     this.#phoneQuery?.removeEventListener('change', this.#phoneHandler)
   }
@@ -565,6 +575,47 @@ export class TagsViewerComponent implements OnDestroy {
     return this.#active().has(name)
   }
 
+  // ── Point at a mark, see its tiles ────────────────────────────────────────
+  //
+  // Every pheromone listed here is the same question — WHICH TILES CARRY THIS?
+  // — and this panel cannot answer it: the answer is the hive. So pointing at
+  // one asks the hive, and the hive answers on itself (show-cell `tags:preview`
+  // → the carriers light in the mark's own colour, the rest of the page
+  // recedes behind them). Nothing is written, armed or staged; moving off puts
+  // the page back exactly as it was.
+  //
+  // Kept here as well as on the wire so the row you are pointing at wears the
+  // SAME colour the hive is wearing — one gesture, not two surfaces that
+  // happen to agree.
+
+  readonly #previewing = signal<readonly string[]>([])
+
+  isPreviewing(name: string): boolean { return this.#previewing().includes(name) }
+
+  /** Ask for one mark (a row) or a whole set (a bouquet — every mark it holds
+   *  at once). The hive treats both the same, which is what makes a bouquet
+   *  legible: point at it and see everything any of its marks reaches. */
+  preview(marks: readonly string[], color: string): void {
+    const next = marks.filter(Boolean)
+    const now = this.#previewing()
+    if (next.length === now.length && next.every((m, i) => m === now[i])) return
+    this.#previewing.set(next)
+    EffectBus.emit('tags:preview', { marks: next, color })
+  }
+
+  endPreview(): void {
+    if (this.#previewing().length === 0) return
+    this.#previewing.set([])
+    EffectBus.emit('tags:preview', { marks: [] })
+  }
+
+  /** A bouquet's colour for the preview: its first mark's. The hive lights ONE
+   *  colour at a time, and the bouquet's own row shows every swatch beside the
+   *  name, so the set stays readable there. */
+  bouquetColor(bouquet: BouquetRow): string {
+    return bouquet.rows[0]?.color ?? '#7eb6d6'
+  }
+
   /** A pheromone row was CLICKED (not dragged). What that means depends on the
    *  painter, which is itself the mode switch — no separate filter/apply toggle
    *  for the participant to manage:
@@ -661,12 +712,13 @@ export class TagsViewerComponent implements OnDestroy {
     return this.#selected().has(name)
   }
 
-  // ── scenting ───────────────────────────────────────────────────────
+  // ── the collecting walk ────────────────────────────────────────────
   //
-  // Open it, pick pheromones (which IS arming — no separate step), then
-  // hold-and-walk across the tiles to scent them. Scenting only STAGES: the
-  // tiles mark on the hive as you go, and `Done` persists them in one layer
-  // transaction. Close / Escape / closing the window all discard.
+  // Open it, pick pheromones (which IS arming — no separate step), then walk
+  // the hive and ctrl+click the tiles to collect them into the grouping.
+  // Collecting only STAGES: the tiles mark on the hive as you go, and `Done`
+  // persists them in one layer transaction. Close / Escape / closing the
+  // window all discard.
   //
   // WHAT IS IN HAND IS ALWAYS A BOUQUET — one mark or six, named or not. So
   // arming goes through one place, which works out the bouquet's signature and
@@ -745,11 +797,11 @@ export class TagsViewerComponent implements OnDestroy {
     this.#naming.set(false)
   }
 
-  /** Pick / unpick a pheromone for the brush. Opens the painter if it was shut,
+  /** Pick / unpick a pheromone for the bouquet. Opens the tray if it was shut,
    *  so the ＋ on any row is a valid way in. Picking IS arming — a non-empty
-   *  brush turns the hive into a paint surface at once; emptying it stands the
-   *  brush down. The drone keeps the staged tiles across a re-arm, so "actually,
-   *  this one too" costs one click, not a restart. */
+   *  bouquet makes ctrl+click out on the hive collect at once; emptying it
+   *  stands the walk down. The drone keeps the collected tiles across a re-arm,
+   *  so "actually, this one too" costs one click, not a restart. */
   togglePheromone(name: string): void {
     if (this.#removalTag()) this.cancelRemoval()
     const next = new Set(this.#selected())
@@ -890,6 +942,7 @@ export class TagsViewerComponent implements OnDestroy {
   close(): void {
     if (this.#removalTag()) this.cancelRemoval()
     if (this.#painterOpen()) this.closePainter()
+    this.endPreview()
     this.visible.set(false)
     EffectBus.emit('tags:view-state', { open: false })
   }

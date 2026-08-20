@@ -992,6 +992,32 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "feedback-summary-log",
+      "title": "Mirror the feedback summary log (feedback:summaries pool)",
+      "run": null,
+      "note": "One tile per source part, gathered in a collection, each marked for what it is, each with a note saying what it does. Parts (1:1 with source resources): hypercomb-essentials/src/diamondcoreprocessor.com/assistant/feedback-summaries.ts (the pool module: putSummary/listSummaries/listSummaryRuns, run-collapsing by digest); claude-bridge.worker.ts summary-add + summary-list ops (the outside-the-hive write/read path, with the untrusted-input clamp and hive-stamped time); .claude/skills/feedback-loop/fb.cjs summarize/summaries commands (computes the three buckets: participants/host/routine); hypercomb-core/src/core/pool-registry.ts 'feedback:summaries' entry (colon-scoped, sign = 3c9c20ce937dc57d2f516c7384c60fa6691f2c1ac388a9427e0819a746910ae5); .claude/skills/bridge-listen/SKILL.md preflight step 2. The behaviour: the feedback inbox gains a MEMORY of itself - one append-only record per bridge start saying who was waiting on whom, so 'how long has Susan been waiting' becomes answerable. Truth pool, never minted from the optimize phase. Manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "pheromone-collecting-walk",
+      "title": "Pheromone grouping — the collecting walk replaced the paint brush",
+      "run": null,
+      "note": "The apply brush takeover is GONE: a bouquet in hand no longer hijacks the hive (no paint cursor, no press hijack — TileOverlayDrone), and ctrl+click became the collecting gesture (SelectionInputDrone reroutes the canonical add-to-set press to tags:apply-paint while tags:apply-pending is armed; ctrl+drag sweeps, select stands down like the wand). The panel lists the grouping sectioned at the top (tags-viewer). Mirror owed: update the behaviors/assistant-era pheromones/scenting cells — the scenting card's note still describes hold-and-drag painting; retitle to the collecting walk, note the ctrl+click grammar, and add a part tile for selection-input.drone.ts if the scenting collection carries parts. note-add is additive, hence --manual.",
+      "unattended": false,
+      "created": "2026-08-20",
+      "status": "pending"
+    },
+    {
+      "id": "pheromone-preview-highlight",
+      "title": "Point at a pheromone, its tiles light up (hover preview)",
+      "run": null,
+      "note": "Built this pass, NO mirror run (bridge probe timed out — broker up on 2401, no renderer attached). Owed under behaviors: extend the pheromones/tags creation with a part tile for the PREVIEW behaviour, marked 'part', plus a note saying what it is — pointing at a mark ANYWHERE in the chrome (panel row, bouquet head, painter chip, bottom crumb) emits tags:preview {marks,color}; show-cell resolves the carriers on the current page and writes divergence 3 STRAIGHT INTO the aDivergence buffer (an in-place attribute push, never a render pass), the hex-sdf fragment paints them with a rim band in the mark's OWN colour sized as a fraction of u_radiusPx and lifts them, and every other tile recedes; u_markPreview ramps the whole treatment 0..1 so nothing snaps, and 3 is the one divergence value nothing persists — no Cell record holds it, so clearing is a restore. Files: presentation/grid/hex-sdf.shader.ts, presentation/tiles/show-cell.drone.ts, hypercomb-shared/ui/tags-viewer/{ts,html,scss}, hypercomb-shared/ui/controls-bar/{ts,html}, scripts/drive-pheromone-preview.cjs (the proof harness). Also mint its card in the behaviors theme sweep.",
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }
