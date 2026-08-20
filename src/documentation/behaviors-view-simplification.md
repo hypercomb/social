@@ -99,3 +99,46 @@ adopted-first ordering.
 - Revision list in the website's view (jump-between-versions)
 - Mirror pass: update the behaviors mirror tiles/notes to the new model
   (run or queued — never neither)
+
+## 2026-08-19 — One control: the bulb (opt-in polarity + deposit-and-wait)
+
+Jaime's rule, verbatim: *"the idea is everything is off and then you turn it
+on globally. Then back in local (to this layer) beehaviors everything is off
+but you can turn them on."* And: *"when you apply that behavior it should be
+waiting on objects down the hierarchical tree and then when they meet those
+objects they begin to take upon their meaning however context behavior
+applies them."* The second sentence is `context-behaviors.md`'s availability
+doctrine — turning a feature on deposits its record and nothing else — now
+applied to the panel for real.
+
+**The panel is two copies of the same list, one bulb per row, no other
+controls.**
+
+- **The pool** (one header button away): every behavior, A→Z, flat — no
+  categories, no used-badge, no verbs. Click = flip the ONE global light.
+  Off = dormant everywhere and withheld from every swarm.
+- **This layer** (the default; the header literally carries the layer's
+  name): every globally-lit behavior, same rows, same bulb. Lit = its record
+  is deposited here (directly or flowing from an ancestor/scope root); dim =
+  not here yet. Click ON = **the deposit** — the record WAITS on the objects
+  beneath and the behavior gives them meaning when they meet. Bees whose
+  content is authored later (website, tutor) deposit their PENDING marker,
+  the same record `/website here` writes, consumed by the next generation
+  pass. Click OFF = remove the record here (undoable). Website scope roots
+  keep their one meaning: the bulb is membership of the /websites menu.
+  Inherited rows explain themselves ("from {cell}") and flip at their
+  origin. The only other affordance is hover-only: Open on a lit view row.
+
+**Opt-in polarity.** `hc:behavior-global-on` is the truth once it exists: a
+kind it doesn't name is off. It is seeded ONCE (show-features drone, boot +
+first roster build) from the census minus the legacy off-list, so no
+existing hive goes dark and first-boot in-house behaviors stay lit; from
+then on every NEW or foreign kind arrives dark until lit in the pool.
+`hc:behavior-global-off` stays as a written mirror because the swarm's
+withheld wire (kind 30208) needs an enumerable list. Wake exceptions,
+bindings, hidden records: unchanged.
+
+**Deleted from the panel:** the OPEN/×/✓ row buttons, the bind (belongs-here)
+button (bindings still display; `features:bind` remains wired drone-side),
+the add (+) rows, the applied/available section split, store categories, the
+in-use badge, bulk-open.

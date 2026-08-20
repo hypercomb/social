@@ -64,6 +64,7 @@ import { kindsForLabel, countLabelsWithKind } from '../../commands/decoration-ki
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import {
   isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds,
+  readGlobalOnKinds, seedGlobalOnKinds,
   bindingAt, bindingsFor, isWithdrawnByBinding, allBindings,
   behaviorPath, bindBehaviorTo, unbindBehavior, type BehaviorBinding,
 } from '../../sharing/behavior-enablement.js'
@@ -171,6 +172,17 @@ const CAPABILITIES: Readonly<Record<string, {
     cascades: true,
     addable: false,
   },
+}
+
+/** The WAITING record for behaviours whose content is authored later: the
+ *  panel's turn-on deposits the same build-intent marker their own
+ *  `/website here` / `/tutor here` writes, and the next generation pass
+ *  meets it and mints the content. Everything else deposits its own kind
+ *  payload-free — the record waits on the objects beneath it, and the
+ *  behaviour gives them meaning when they meet (context-behaviors.md). */
+const PENDING_FOR: Readonly<Record<string, string>> = {
+  'visual:website:page': 'visual:website:pending',
+  'visual:tutor:deck': 'visual:tutor:pending',
 }
 
 /** Human name for a decoration kind nobody here declares — `visual:x:y` → "Y",
@@ -486,22 +498,44 @@ export class ShowFeaturesDrone extends Drone {
       void this.#paint(source, kinds, targets)
     })
 
-    // The GLOBAL ROSTER — the Beehaviors window's third mode. No tile
-    // subject, no belonging: every behavior the app knows, one switch each.
-    // Off = dormant everywhere AND withheld from every swarm (one switch,
-    // one meaning). Opened pre-swarm from the WORLD stage / join selector,
-    // and any time from the panel header. This drone owns the census
-    // (registry + CAPABILITIES + off-kinds whose module isn't here — those
-    // must stay listed or they could never be turned back on).
+    // The GLOBAL ROSTER — the pool of behaviors. No tile subject, no
+    // belonging: every behavior the app knows, one light each. Off =
+    // dormant everywhere AND withheld from every swarm (one switch, one
+    // meaning). Opened pre-swarm from the WORLD stage / join selector, and
+    // any time from the panel header. This drone owns the census (registry
+    // + CAPABILITIES + lit/off kinds whose module isn't here — those must
+    // stay listed or they could never be flipped again).
     this.onEffect('features:roster-open', () => { this.#emitRoster() })
 
+    // Seed the opt-in on-list once the whole module graph has registered —
+    // and again before any roster build, whichever comes first. Idempotent.
+    setTimeout(() => this.#seedEnablement(), 8000)
+
+  }
+
+  /** Materialize `hc:behavior-global-on` once: the census minus the legacy
+   *  off-list, so a hive that predates the opt-in model keeps exactly the
+   *  lights it had. From then on the on-list is the truth — a kind it
+   *  doesn't name (a new module, a foreign decoration) arrives OFF until
+   *  it is lit in the pool. */
+  #seedEnablement(): void {
+    if (readGlobalOnKinds()) return
+    const bees = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)?.all?.() ?? []
+    if (bees.length === 0) return   // registry not up yet — the next caller seeds
+    seedGlobalOnKinds([
+      ...bees.map(b => b.decorationKind),
+      ...Object.keys(CAPABILITIES),
+      // Bound kinds are ON — binding scopes a behaviour, it never switches
+      // it off — so a binding made ahead of its module must stay lit.
+      ...Object.keys(allBindings()),
+    ])
   }
 
   /** Build + emit the global roster. Sync — the census is in-memory. */
   #emitRoster(): void {
+    this.#seedEnablement()
     const registry = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
     const i18n = this.#ioc()?.get<I18nProvider>(I18N_KEY)
-    const off = readGlobalOffKinds()
     const seen = new Set<string>()
     const rows: Array<{
       view: string; icon: string; kind: string; label: string; description: string
@@ -530,10 +564,7 @@ export class ShowFeaturesDrone extends Drone {
         description: this.#t(i18n, bee.descriptionKey, ''),
         category: bee.behavior || 'view',
         ...(bee.slashCommand ? { slashCommand: bee.slashCommand } : {}),
-        on: !off.has(bee.decorationKind),
-        // IN USE — the badge. Derived by counting decorations the hot index
-        // has seen this session, never stored (complete-or-absent honesty:
-        // an unvisited branch's uses simply aren't counted yet).
+        on: !isKindGloballyOff(bee.decorationKind),
         used: countLabelsWithKind(bee.decorationKind),
         ...boundOf(bee.decorationKind),
       })
@@ -549,17 +580,20 @@ export class ShowFeaturesDrone extends Drone {
         description: this.#t(i18n, cap.descriptionKey, ''),
         category: 'capability',
         ...(cap.slashCommand ? { slashCommand: cap.slashCommand } : {}),
-        on: !off.has(kind),
+        on: !isKindGloballyOff(kind),
         used: countLabelsWithKind(kind),
         ...boundOf(kind),
       })
     }
-    // Off-kinds and BOUND kinds nobody here declares (a community module's
-    // behavior turned off before the module left, or on another device, or an
-    // author who scoped a kind to a tile ahead of its module arriving) — named
-    // from the kind, still switchable and still freeable, so neither exception
-    // can strand itself.
-    for (const kind of new Set([...off, ...Object.keys(allBindings())])) {
+    // Kinds nobody here declares but that carry a record — lit or explicitly
+    // off on another device, or bound to a tile ahead of their module
+    // arriving. Named from the kind, still switchable and still freeable,
+    // so no exception can strand itself.
+    for (const kind of new Set([
+      ...readGlobalOffKinds(),
+      ...(readGlobalOnKinds() ?? []),
+      ...Object.keys(allBindings()),
+    ])) {
       if (seen.has(kind)) continue
       seen.add(kind)
       const moduleName = moduleFromKind(kind)
@@ -574,7 +608,7 @@ export class ShowFeaturesDrone extends Drone {
         ...(moduleName ? { module: moduleName } : {}),
         // A kind reaching this loop only because it is BOUND is still ON —
         // binding scopes a behaviour, it never switches it off.
-        on: !off.has(kind),
+        on: !isKindGloballyOff(kind),
         used: countLabelsWithKind(kind),
         ...boundOf(kind),
       })
@@ -675,38 +709,54 @@ export class ShowFeaturesDrone extends Drone {
     }
   }
 
-  /** Attach an addable feature at `segments`. Only cascading capabilities are
-   *  mechanically attachable today (dropbox — a payload-free decoration);
-   *  anything else is refused loudly rather than half-applied. */
+  /** Turn a behaviour ON for this layer — THE DEPOSIT. Writing its record
+   *  here is the whole gesture (context-behaviors.md: "turning a feature on
+   *  deposits its record and nothing else"): the record waits on the objects
+   *  beneath, and the behaviour gives them meaning when they meet. Bees whose
+   *  content is authored later deposit their PENDING marker instead — the
+   *  same record their own `/x here` writes, which the next generation pass
+   *  turns into the content. Only a kind nobody declares is refused. */
   async #enableAt(segments: readonly string[], kind: string, cellLabel = ''): Promise<void> {
     // Root group: no last segment — the panel's cell name (display-only)
     // keeps the outcome routed back to the row that asked.
     const label = segments[segments.length - 1] ?? cellLabel
     try {
-      const attachable = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)?.byDecorationKind?.(kind)
+      const bee = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)?.byDecorationKind?.(kind)
+      const cap = CAPABILITIES[kind]
+      let settleKind = kind
       if (kind === 'files:dropbox') {
         await writeDropbox(segments, parseAccept(''))
         this.emitEffect('activity:log', { message: `dropbox on "${label}"`, icon: '●' })
-        this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
-      } else if (attachable?.attachable) {
-        // Declaratively attachable view bee — the same write `name@lightbox`
-        // performs, so the panel's switch and the command line agree.
-        await this.#applyFeature(attachable.view, segments, false)
-        this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
+      } else if (bee || cap) {
+        settleKind = PENDING_FOR[kind] ?? kind
+        const existing = await listDecorations({ kind: settleKind, segments: [...segments] })
+        if (existing.length === 0) {
+          await writeDecoration({
+            kind: settleKind,
+            appliesTo: [...segments],
+            segments: [...segments],
+            payload: settleKind !== kind
+              ? { requestedAt: Date.now() }             // the /x-here marker shape
+              : bee?.toggleIcon ? { icon: bee.toggleIcon } : {},
+            mark: 'persistent',
+          })
+        }
+        this.emitEffect('activity:log', { message: `${bee?.view ?? cap!.view} on "${label}"`, icon: '▶' })
       } else {
         // Row-level outcome: the refusal lands on the panel row that asked,
         // not only in the transient activity log (the busy switch settles
         // immediately instead of waiting out its leash).
-        this.emitEffect('activity:log', { message: `"${kind}" can't be added from the panel — use its command`, icon: '○' })
-        this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `"${kind}" can't be added from the panel — use its command` })
+        this.emitEffect('activity:log', { message: `nothing here declares "${kind}" — its module isn't loaded`, icon: '○' })
+        this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `nothing here declares "${kind}" — its module isn't loaded` })
         return
       }
+      this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
       // The decoration write returns as soon as the append is QUEUED — the
       // layer commit rides the committer's FIFO. Refreshing straight away read
       // the pre-commit layer, so the row the participant just switched on came
       // back missing until they re-opened the panel. Wait (briefly, bounded)
       // for the kind to actually be on the layer, then refresh in place.
-      await this.#settleKind(segments, kind)
+      await this.#settleKind(segments, settleKind)
       // refresh the panel group in place ([] = the hive-root group)
       if (label) await this.#open(label, segments.length ? undefined : [])
     } catch (err) {
@@ -1144,7 +1194,9 @@ export class ShowFeaturesDrone extends Drone {
     const out: AvailableItem[] = []
     const seen = new Set<string>()
     for (const bee of registry.all?.() ?? []) {
-      if (appliedViews.has(bee.view) || seen.has(bee.view)) continue
+      // A bee whose PENDING marker is already deposited here is on and
+      // waiting for the generation pass — not available a second time.
+      if (appliedViews.has(bee.view) || appliedViews.has(`${bee.view}-pending`) || seen.has(bee.view)) continue
       seen.add(bee.view)
       out.push({
         view: bee.view,
@@ -1154,17 +1206,17 @@ export class ShowFeaturesDrone extends Drone {
         label: this.#t(i18n, bee.labelKey, bee.view),
         description: this.#t(i18n, bee.descriptionKey, ''),
         cascades: bee.cascades === true,
-        // An ATTACHABLE view bee (the lightbox: its content is what the tile
-        // already holds) can be added right here — writing the decoration IS
-        // the install. Bees whose content must be authored (a website page, a
-        // tutor deck) keep the slash-command chip instead of a switch.
-        addable: bee.attachable === true,
+        // Every bee can be turned on here — the on is a DEPOSIT (its own
+        // kind payload-free, or its pending marker when the content is
+        // authored later), waiting on what's beneath to give it meaning.
+        addable: true,
       })
     }
     for (const [kind, cap] of Object.entries(CAPABILITIES)) {
-      // Only ATTACHABLE capabilities are offerable — a gallery with no images
-      // is not a thing you can add, so it never shows as "available".
-      if (!cap.addable || appliedViews.has(cap.view) || seen.has(cap.view)) continue
+      // Subtree capabilities (dropbox, contacts) are offerable — their on is
+      // the same deposit. Sub-records (a slide, a pending marker) are not
+      // behaviours of their own and are never offered.
+      if (!(cap.addable || cap.cascades) || appliedViews.has(cap.view) || seen.has(cap.view)) continue
       seen.add(cap.view)
       out.push({
         view: cap.view,

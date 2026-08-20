@@ -3,14 +3,19 @@
 // The READ side of the behavior-ENABLEMENT lens (essentials) — the third
 // lens beside hidden (feature-hidden.ts) and verified (feature-availability.ts).
 //
-// One switch, one meaning: a behavior switched off on the GLOBAL roster is
-// DORMANT everywhere — not rendered, not offered, not shared into a swarm —
-// even though its decorations stay on their tiles untouched. Nothing is
-// migrated or rewritten; this is pure read-time precedence:
+// One switch, one meaning — and the model is OPT-IN: everything is off
+// until it is lit in the pool. `hc:behavior-global-on` is the truth once it
+// exists: a kind it doesn't name is DORMANT everywhere — not rendered, not
+// offered, not shared into a swarm — even though its decorations stay on
+// their tiles untouched. The list is seeded ONCE on boot from the census
+// minus the legacy off-list (`seedGlobalOnKinds`), so a hive that predates
+// the opt-in model keeps exactly the lights it had; until the seed lands,
+// the legacy `hc:behavior-global-off` polarity still answers. Nothing is
+// migrated or rewritten in any lineage; this is pure read-time precedence:
 //
 //   local wake (ON, per tile/branch)  >  global OFF  >  per-tile hidden  >  ON
 //
-// Re-enabling a behavior globally wakes it wherever it lives; wake
+// Re-lighting a behavior globally wakes it wherever it lives; wake
 // exceptions and hidden records are never touched by the global flip.
 //
 // Participant-local, localStorage only — never in any lineage (same principle
@@ -53,6 +58,7 @@
 
 import { EffectBus, normalizeCell } from '@hypercomb/core'
 
+export const GLOBAL_ON_KEY = 'hc:behavior-global-on'
 export const GLOBAL_OFF_KEY = 'hc:behavior-global-off'
 export const WAKE_KEY = 'hc:behavior-wake'
 export const WITHHELD_ROOTS_KEY = 'hc:withheld-at-roots'
@@ -122,6 +128,7 @@ function readPathMap(key: string): Record<string, string[]> {
 // Live caches — visibleWhen runs per tile per frame, so reads must be sync
 // and cheap. Invalidated on the change event (both sides emit it after every
 // write) and on cross-tab `storage`.
+let onCache: ReadonlySet<string> | null | undefined // undefined = unread; null = not yet seeded
 let offCache: Set<string> | null = null
 let wakeCache: Record<string, string[]> | null = null
 let withheldCache: Record<string, string[]> | null = null
@@ -129,7 +136,7 @@ let boundCache: Record<string, BehaviorBinding[]> | null = null
 let wired = false
 
 function dropCaches(): void {
-  offCache = null; wakeCache = null; withheldCache = null; boundCache = null
+  onCache = undefined; offCache = null; wakeCache = null; withheldCache = null; boundCache = null
 }
 
 function wire(): void {
@@ -138,21 +145,50 @@ function wire(): void {
   EffectBus.on(ENABLEMENT_CHANGED, dropCaches)
   try {
     window.addEventListener('storage', (e) => {
-      if (e.key === GLOBAL_OFF_KEY || e.key === WAKE_KEY
+      if (e.key === GLOBAL_ON_KEY || e.key === GLOBAL_OFF_KEY || e.key === WAKE_KEY
         || e.key === WITHHELD_ROOTS_KEY || e.key === BOUND_KEY) dropCaches()
     })
   } catch { /* non-window context */ }
 }
 
-/** The global-off set — decoration kinds the participant turned off on the
- *  roster. Absence means ON: we store only the exceptions, so a participant
- *  who never opens the screen shares and sees everything. */
+/** The opt-in ON set — the kinds whose global light is lit. `null` until the
+ *  seed has landed (legacy hives answer from the off-list meanwhile). */
+export function readGlobalOnKinds(): ReadonlySet<string> | null {
+  wire()
+  if (onCache !== undefined) return onCache
+  let raw: string | null = null
+  try { raw = localStorage.getItem(GLOBAL_ON_KEY) } catch { /* non-window context */ }
+  onCache = raw == null ? null : new Set(readStringArray(GLOBAL_ON_KEY))
+  return onCache
+}
+
+/** Materialize the opt-in on-list ONCE: everything the census knows minus
+ *  the legacy off-list, so nothing that renders today goes dark. From then
+ *  on the on-list is the truth and a kind it doesn't name — a new module's
+ *  behavior, a foreign decoration — arrives OFF until lit in the pool.
+ *  No-op (false) once the list exists. */
+export function seedGlobalOnKinds(census: readonly string[]): boolean {
+  if (readGlobalOnKinds()) return false
+  const off = new Set(readStringArray(GLOBAL_OFF_KEY))
+  const list = [...new Set(census.map(k => String(k ?? '').trim()).filter(Boolean))]
+    .filter(k => !off.has(k))
+  try { localStorage.setItem(GLOBAL_ON_KEY, JSON.stringify(list)) } catch { return false }
+  dropCaches()
+  EffectBus.emit(ENABLEMENT_CHANGED, { seeded: list.length })
+  return true
+}
+
+/** The legacy/mirror off set — kinds explicitly turned off. Still the truth
+ *  until the on-list is seeded; afterwards kept only because the swarm's
+ *  withheld wire (kind 30208) needs an enumerable list. */
 export function readGlobalOffKinds(): ReadonlySet<string> {
   wire()
   return offCache ??= new Set(readStringArray(GLOBAL_OFF_KEY))
 }
 
 export function isKindGloballyOff(kind: string): boolean {
+  const on = readGlobalOnKinds()
+  if (on) return !on.has(kind)
   return readGlobalOffKinds().has(kind)
 }
 

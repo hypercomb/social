@@ -1,22 +1,31 @@
 // hypercomb-shared/ui/features-viewer/behavior-enablement.ts
 //
-// The WRITE side of the behavior-enablement lens (shell) — the roster's
-// global switches and the per-tile "wake here" exception. The READER lives
+// The WRITE side of the behavior-enablement lens (shell) — the pool's
+// global lights and the per-tile "wake here" exception. The READER lives
 // essentials-side in `sharing/behavior-enablement.ts`; the two never import
 // each other — they agree ONLY on the localStorage keys, the record shapes,
 // and the `behavior:enablement-changed` event (the hidden/verified split).
 //
-// Model (one switch, one meaning):
-//   • `hc:behavior-global-off` — decoration kinds turned OFF on the roster.
-//     Off = dormant everywhere AND withheld from every swarm. Absence = ON:
-//     only exceptions are stored, so an untouched roster shares everything.
+// Model (OPT-IN — everything is off until it is lit in the pool):
+//   • `hc:behavior-global-on` — THE truth once it exists: the decoration
+//     kinds whose global light is ON. A kind it doesn't name is OFF — a new
+//     module's behavior, a foreign decoration, anything that arrives later,
+//     all dark until someone lights it in the pool. The essentials side
+//     seeds this list once, on boot, from the census minus the legacy
+//     off-list, so a hive that predates the opt-in model keeps exactly the
+//     lights it had.
+//   • `hc:behavior-global-off` — the LEGACY list, still answered while the
+//     on-list hasn't been seeded, and kept written as a MIRROR afterwards
+//     (kinds explicitly turned off) because the swarm's withheld wire
+//     (kind 30208) needs an enumerable list to broadcast.
 //   • `hc:behavior-wake` — { "/path": [kinds] } local ON exceptions. A wake
 //     covers its subtree; it outranks a global off (and a publisher's
 //     withheld mark) at that tile. Never touched by the global flip, so
-//     re-enabling globally simply wakes everything wherever it lives.
+//     re-lighting globally simply wakes everything wherever it lives.
 
 import { EffectBus, normalizeCell } from '@hypercomb/core'
 
+export const GLOBAL_ON_KEY = 'hc:behavior-global-on'
 export const GLOBAL_OFF_KEY = 'hc:behavior-global-off'
 export const WAKE_KEY = 'hc:behavior-wake'
 export const ENABLEMENT_CHANGED = 'behavior:enablement-changed'
@@ -28,30 +37,51 @@ export function behaviorPath(segments: readonly string[]): string {
   return '/' + segs.join('/')
 }
 
-export function readGlobalOffKinds(): string[] {
+function readStringArray(key: string): string[] {
   try {
-    const arr = JSON.parse(localStorage.getItem(GLOBAL_OFF_KEY) ?? '[]')
+    const arr = JSON.parse(localStorage.getItem(key) ?? '[]')
     return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
   } catch { return [] }
 }
 
+/** True once the opt-in on-list has been seeded — from then on it is the
+ *  single truth and the off-list is only the withheld-wire mirror. */
+export function hasGlobalOnList(): boolean {
+  try { return localStorage.getItem(GLOBAL_ON_KEY) != null } catch { return false }
+}
+
+export function readGlobalOffKinds(): string[] {
+  return readStringArray(GLOBAL_OFF_KEY)
+}
+
 export function isKindGloballyOff(kind: string): boolean {
+  if (hasGlobalOnList()) return !readStringArray(GLOBAL_ON_KEY).includes(kind)
   return readGlobalOffKinds().includes(kind)
 }
 
-/** Flip a behavior kind on/off globally. Emits the change event so every
- *  reader cache invalidates and every surface repaints at once. */
+/** Flip one global light. Writes the on-list (the truth, once seeded) AND
+ *  the off-list mirror in the same gesture, then emits the change event so
+ *  every reader cache invalidates and every surface repaints at once. */
 export function setKindGlobalOn(kind: string, on: boolean): void {
   const k = String(kind ?? '').trim()
   if (!k) return
-  const list = readGlobalOffKinds()
-  const has = list.includes(k)
-  let next = list
-  if (on && has) next = list.filter(x => x !== k)
-  else if (!on && !has) next = [...list, k]
-  if (next === list) return
-  try { localStorage.setItem(GLOBAL_OFF_KEY, JSON.stringify(next)) } catch { /* private-browsing */ }
+  let changed = false
+  if (hasGlobalOnList()) {
+    const list = readStringArray(GLOBAL_ON_KEY)
+    const has = list.includes(k)
+    if (on && !has) { changed = true; write(GLOBAL_ON_KEY, [...list, k]) }
+    else if (!on && has) { changed = true; write(GLOBAL_ON_KEY, list.filter(x => x !== k)) }
+  }
+  const off = readGlobalOffKinds()
+  const wasOff = off.includes(k)
+  if (on && wasOff) { changed = true; write(GLOBAL_OFF_KEY, off.filter(x => x !== k)) }
+  else if (!on && !wasOff) { changed = true; write(GLOBAL_OFF_KEY, [...off, k]) }
+  if (!changed) return
   EffectBus.emit(ENABLEMENT_CHANGED, { kind: k, on })
+}
+
+function write(key: string, list: string[]): void {
+  try { localStorage.setItem(key, JSON.stringify(list)) } catch { /* private-browsing */ }
 }
 
 function readWakeMap(): Record<string, string[]> {

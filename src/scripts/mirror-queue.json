@@ -896,6 +896,14 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "beehaviors-one-bulb",
+      "title": "Beehaviors panel: one bulb, opt-in pool, deposit-and-wait",
+      "run": null,
+      "note": "Note on the behaviors-mirror tiles (panel + enablement): the Beehaviors panel is now TWO COPIES OF THE SAME LIST with one control — a light bulb per row. The pool lists every behavior flat A-Z; everything is OFF until lit there (opt-in: hc:behavior-global-on is the truth, seeded once from the census minus the old off-list so no existing hive went dark; new/foreign kinds arrive dark). The layer view (default; the header carries the layer name) lists every globally-lit behavior; clicking ON is a DEPOSIT — the record waits on the objects beneath and the behavior gives them meaning when they meet (context-behaviors availability doctrine); website/tutor deposit their PENDING marker for the next generation pass. Clicking OFF removes the record here (undoable). Website scope roots keep the /websites-menu meaning. Gone from rows: OPEN/x/check buttons, bind tap, add rows, section split, store categories, in-use badge (Open survives hover-only on lit view rows). Doc: documentation/behaviors-view-simplification.md section 2026-08-19.",
+      "created": "2026-08-20",
+      "status": "pending"
     }
   ]
 }

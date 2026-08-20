@@ -1,25 +1,22 @@
 // hypercomb-shared/ui/features-viewer/features-viewer.component.ts
 //
-// Right-docked "Beehaviors" panel — TWO surfaces, one state model (see
+// Right-docked "Beehaviors" panel — TWO surfaces, ONE control (see
 // src/documentation/behaviors-view-simplification.md):
 //
-//   • THE STORE — no tile subject. Every behavior the app knows, one row
-//     each. The row reads dim (off) / lit (on) / lit + badge (in use —
-//     decorations referencing it exist). Clicking the row flips the ONE
-//     global switch: off = dormant everywhere AND withheld from every swarm.
-//     No verbs, no tabs, no gate chips — the light is the whole story.
+//   • THE POOL — no tile subject. Every behavior the app knows, one row
+//     each, one light bulb each. Everything starts OFF; clicking lights it
+//     globally. Off = dormant everywhere AND withheld from every swarm.
 //
-//   • ON THIS TILE — opened from a tile's puzzle-piece icon (or the ADOPT
-//     fold). The rows ARE the tile's decorations; membership is positive.
-//     Remove = remove the decoration. Inherited behaviors get one quiet
-//     "from {cell}" line, never a tab ladder. The Apply picker below offers
-//     only behaviors whose light is on. While open the panel FOLLOWS
-//     NAVIGATION — behaviors are managed where they apply.
+//   • THIS LAYER — the same rows, the same bulb, scoped here. Every
+//     globally-lit behavior is listed; lit = its record is deposited on
+//     this layer (directly, or flowing from an ancestor), dim = not here
+//     yet. Clicking ON deposits the record and nothing else — it WAITS on
+//     the objects beneath, and the behavior gives them meaning when they
+//     meet (context-behaviors.md). Clicking OFF removes the record here
+//     (undoable). Inherited rows carry one quiet "from {cell}" line and
+//     flip at their origin. While open the panel FOLLOWS NAVIGATION.
 //
-// Three facts, never conflated: adopted (you have it) · lit (the global
-// switch) · in use (derived — counted decorations, never stored). What is
-// gone from the old panel: the reach ladder, the hidden/carve-out pool UI,
-// scope attribution, master-switch resets, per-row gate chips. Legacy
+// No verbs, no buttons on rows — the bulb is the whole story. Legacy
 // hidden-pool records remain READABLE (a suppressed row renders dim with a
 // one-tap restore) but are never minted again.
 //
@@ -134,6 +131,29 @@ interface AvailableRow {
   /** Set when this behaviour belongs to this tile: it is offered HERE because
    *  this is the one place it means anything. */
   bound?: BehaviorBinding
+}
+
+/** One row of THIS LAYER's single list — an applied row and an available
+ *  row flattened to the same shape, so the template renders one control:
+ *  the bulb. `feat` keeps the source row for the selection/bulk helpers. */
+interface LayerRow {
+  kind: string
+  view: string
+  icon: string
+  label: string
+  description: string
+  slashCommand?: string
+  on: boolean
+  applied: boolean
+  /** Lit from an ancestor (or a website scope root) — flips at its origin. */
+  inherited: boolean
+  /** A lit view behaviour can be ENTERED — the hover-only Open affordance. */
+  openable: boolean
+  originCell?: string
+  foreign?: boolean
+  module?: string
+  bound?: BehaviorBinding
+  feat: FeatureRow | AvailableRow
 }
 
 /** Minimal shape the selection / bulk helpers need. */
@@ -307,21 +327,18 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   readonly isStore = computed(() => this.mode() === 'store')
 
-  /** Store rows surviving the header query, grouped by category. */
-  readonly storeGroups = computed<{ category: string; rows: StoreRow[] }[]>(() => {
+  /** The pool, flat: one row per behavior, A→Z, through the header query.
+   *  No categories, no badges — a list of lights. */
+  readonly storeList = computed<StoreRow[]>(() => {
     const q = this.query().trim().toLowerCase()
-    const rows = this.storeRows().filter(r => !q
-      || r.label.toLowerCase().includes(q)
-      || r.kind.toLowerCase().includes(q)
-      || r.description.toLowerCase().includes(q)
-      || (r.slashCommand ?? '').toLowerCase().includes(q))
-    const byCat = new Map<string, StoreRow[]>()
-    for (const r of rows) {
-      const list = byCat.get(r.category) ?? []
-      list.push(r)
-      byCat.set(r.category, list)
-    }
-    return [...byCat.entries()].map(([category, list]) => ({ category, rows: list }))
+    return this.storeRows()
+      .filter(r => !q
+        || r.label.toLowerCase().includes(q)
+        || r.kind.toLowerCase().includes(q)
+        || r.description.toLowerCase().includes(q)
+        || (r.slashCommand ?? '').toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => a.label.localeCompare(b.label))
   })
 
   readonly storeOnCount = computed(() => this.storeRows().filter(r => r.on).length)
@@ -449,18 +466,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     let n = 0
     for (const { feat } of this.#selectedRows()) {
       if (feat.branchSig || feat.gateSig) n++
-    }
-    return n
-  })
-
-  /** Selected APPLIED rows that are enterable views AND on. */
-  readonly openableSelectedCount = computed(() => {
-    const group = this.group()
-    if (!group) return 0
-    const picked = this.selectedKeys()
-    let n = 0
-    for (const feat of group.applied) {
-      if (feat.openable && picked.has(this.rowKey(group, feat)) && this.isOn(group, feat)) n++
     }
     return n
   })
@@ -909,9 +914,78 @@ export class FeaturesViewerComponent implements OnDestroy {
     return group.applied.filter(f => !f.dormant && this.#matchesQuery(group, f))
   }
 
-  /** The Apply picker rows: only behaviors whose light is on. */
+  /** The offerable rows: only behaviors whose global light is on. */
   visibleAvailable(group: FeatureGroup): AvailableRow[] {
     return group.available.filter(f => !f.globalOff && this.#matchesQuery(group, f))
+  }
+
+  /** THIS LAYER, one list: every behavior that could live here — lit when
+   *  its record is deposited (directly, or flowing from an ancestor), dim
+   *  when not here yet. Same rows, same bulb as the pool. */
+  layerRows(group: FeatureGroup): LayerRow[] {
+    const rows: LayerRow[] = []
+    for (const f of this.visibleApplied(group)) {
+      rows.push({
+        kind: f.kind, view: f.view, icon: f.icon, label: f.label,
+        description: f.description, slashCommand: f.slashCommand,
+        on: this.isOn(group, f), applied: true,
+        inherited: f.origin === 'cascade',
+        openable: f.openable === true && this.isOn(group, f),
+        originCell: f.originCell, foreign: f.foreign, module: f.module,
+        bound: f.bound, feat: f,
+      })
+    }
+    for (const f of this.visibleAvailable(group)) {
+      rows.push({
+        kind: f.kind, view: f.view, icon: f.icon, label: f.label,
+        description: f.description, slashCommand: f.slashCommand,
+        on: false, applied: false, inherited: false, openable: false,
+        bound: f.bound, feat: f,
+      })
+    }
+    return rows
+  }
+
+  /** ENTER a lit view behaviour — the hover-only Open. Navigates to the
+   *  row's scope root (a cascade row's surface lives there, not here) and
+   *  flips the render surface to its view; in-place views mount over the
+   *  current layer instead. */
+  openBehavior(group: FeatureGroup, row: LayerRow): void {
+    if (!row.openable || !row.view) return
+    const feat = row.feat as FeatureRow
+    if (feat.opensInPlace) {
+      EffectBus.emit('view:open-for-tile', { view: row.view, segments: [...group.segments] })
+      this.close()
+      return
+    }
+    const nav = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ go?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+    nav?.go?.([...(feat.scopeSegments?.length ? feat.scopeSegments : group.segments)])
+    EffectBus.emit('view:toggle', { view: row.view, mode: 'on' })
+    this.close()
+  }
+
+  /** The one gesture: click flips the row's light for this layer.
+   *  Off → on is a DEPOSIT; on → off removes the record here. A website at
+   *  its own root keeps its one meaning (membership of the /websites menu);
+   *  a legacy-suppressed row restores; an inherited row flips at its origin,
+   *  so here it only explains itself. Ctrl/Shift still selects for the
+   *  bulk download bar. */
+  toggleRow(group: FeatureGroup, row: LayerRow, event?: MouseEvent): void {
+    if (event && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+      this.selectRow(group, row.feat)
+      return
+    }
+    if (this.isPending(group, row.feat)) return
+    if (!row.applied) {
+      this.enableHere(group, row.feat as AvailableRow)
+      return
+    }
+    const feat = row.feat as FeatureRow
+    if (this.isSuppressed(group, feat)) { this.restoreLegacy(group, feat); return }
+    if (this.isWebsiteRoot(group, feat)) { void this.toggleWebsite(group, feat); return }
+    if (feat.origin === 'cascade') return
+    this.removeHere(group, feat)
   }
 
   /** Is this row live here? Suppression is the legacy drain; a WEBSITE at
@@ -944,11 +1018,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     return feat.origin !== 'cascade'
       && !this.isWebsiteRoot(group, feat)
       && !this.isSuppressed(group, feat)
-  }
-
-  /** Can this row be ENTERED as a view? */
-  isOpenable(group: FeatureGroup, feat: FeatureRow): boolean {
-    return feat.openable === true && this.isOn(group, feat)
   }
 
   // ── paint mode ────────────────────────────────────────────────────
@@ -1011,36 +1080,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     })
   }
 
-  /** Row click. PAINT mode: pick into the brush. Ctrl/Shift: select for the
-   *  bulk bar. A suppressed row: restore (the legacy drain). The website
-   *  root: flip menu membership. Anything else: select — actions live on the
-   *  row's own buttons, a plain click never destroys anything. */
-  rowClick(group: FeatureGroup, feat: FeatureRow, event?: MouseEvent): void {
-    if (this.mode() === 'paint') {
-      this.pick(feat)
-      return
-    }
-    if (event && (event.ctrlKey || event.metaKey || event.shiftKey)) {
-      this.selectRow(group, feat)
-      return
-    }
-    if (this.isPending(group, feat)) return
-    if (this.isSuppressed(group, feat)) { this.restoreLegacy(group, feat); return }
-    if (this.isWebsiteRoot(group, feat)) { void this.toggleWebsite(group, feat); return }
-    this.selectRow(group, feat)
-  }
-
-  /** An available row's click: ADD when mechanically addable; Ctrl/Shift
-   *  selects; non-addable rows only select. */
-  availableRowClick(group: FeatureGroup, feat: AvailableRow, event?: MouseEvent): void {
-    if (event && (event.ctrlKey || event.metaKey || event.shiftKey)) {
-      this.selectRow(group, feat)
-      return
-    }
-    if (feat.addable) this.enableAvailable(group, feat)
-    else this.selectRow(group, feat)
-  }
-
   /** The website root's ONE toggle: membership of the websites menu —
    *  positive membership, consistent with the model (the /websites link
    *  exists exactly while the site is a member). Optimistic both ways. */
@@ -1078,32 +1117,6 @@ export class FeaturesViewerComponent implements OnDestroy {
       kind: feat.kind,
     })
     this.#armRowLeash(key)
-  }
-
-  /** BELONGS HERE — one tap. Bound rows free, unbound rows bind to the tile
-   *  the panel is describing. The panel never writes the record: binding is
-   *  keyed by the tile's LOCATION SIGNATURE and only the drone side has the
-   *  signer, so this states the intent and `features:bind` carries it — the
-   *  same shape remove and enable already use. */
-  bindHere(group: FeatureGroup, feat: FeatureRow): void {
-    if (group.segments.length === 0) return   // the hive root is not a tile
-    const key = this.rowKey(group, feat)
-    if (this.pending().has(key)) return
-    this.pending.update(set => new Set([...set, key]))
-    this.#clearNote(key)
-    EffectBus.emit('features:bind', {
-      cell: group.cell,
-      segments: [...group.segments],
-      kind: feat.kind,
-      bound: !feat.bound,
-    })
-    this.#armRowLeash(key)
-  }
-
-  /** Can this row be bound at all? Not at the hive root (not a tile), and not
-   *  for a row with no kind to key the record by. */
-  canBind(group: FeatureGroup, feat: FeatureRow): boolean {
-    return group.segments.length > 0 && !!feat.kind
   }
 
   /** Resolve an i18n key at runtime (shell-side — the provider lives in ioc). */
@@ -1158,35 +1171,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     return this.downloading().size > 0
   }
 
-  /** OPEN this view behaviour — navigate in (or mount in place) and flip the
-   *  render surface to its view. */
-  openBehavior(group: FeatureGroup, feat: FeatureRow): void {
-    if (!feat.openable || !feat.view) return
-    if (feat.opensInPlace) {
-      EffectBus.emit('view:open-for-tile', { view: feat.view, segments: [...group.segments] })
-      this.close()
-      return
-    }
-    const nav = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-      ?.get<{ go?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
-    // A CASCADE row is the scope's behaviour seen from a member cell — its
-    // surface lives at the scope root (a website's home page), not here.
-    // Navigating to the clicked cell mounted a page-less member and the view
-    // came up empty; `scopeSegments` is the root the row was minted from.
-    nav?.go?.([...(feat.scopeSegments?.length ? feat.scopeSegments : group.segments)])
-    EffectBus.emit('view:toggle', { view: feat.view, mode: 'on' })
-    this.close()
-  }
-
-  /** Bulk-bar Open — enter the first selected openable behaviour. */
-  openSelected(): void {
-    const group = this.group()
-    if (!group) return
-    const feat = group.applied.find(f =>
-      f.openable && this.selectedKeys().has(this.rowKey(group, f)) && this.isOn(group, f))
-    if (feat) this.openBehavior(group, feat)
-  }
-
   isPending(group: FeatureGroup, feat: RowLike): boolean {
     return this.pending().has(this.rowKey(group, feat))
   }
@@ -1229,10 +1213,10 @@ export class FeaturesViewerComponent implements OnDestroy {
     }, 4000)
   }
 
-  /** ADD an available feature to the tile. Explicit segments — never the
-   *  current selection or location — so the attach can't land wrong. */
-  enableAvailable(group: FeatureGroup, feat: AvailableRow): void {
-    if (!feat.addable) return
+  /** Turn a behavior ON for this layer — the drone deposits its record at
+   *  these explicit segments (never the current selection or location), and
+   *  the record waits on what's beneath. */
+  enableHere(group: FeatureGroup, feat: AvailableRow): void {
     const key = this.rowKey(group, feat)
     if (this.pending().has(key)) return
     this.pending.update(set => new Set([...set, key]))

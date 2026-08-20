@@ -20,7 +20,8 @@
         <span class="features-brand-mark" aria-hidden="true">
           <span class="mat-sym">extension</span>
         </span>
-        <span class="features-title">{{ 'features.viewer.title' | t }}</span>
+        <!-- The panel IS the layer (by name); the pool keeps the app title. -->
+        <span class="features-title">{{ isStore() || !group() ? ('features.viewer.title' | t) : group()!.cell }}</span>
       </div>
       <!-- THE STORE: every behavior the app knows, one light each. -->
       <button
@@ -142,14 +143,6 @@
     @if (selectedCount() > 0) {
       <div class="bulk-bar">
         <span class="bulk-count">{{ 'features.selected' | t: { count: selectedCount() } }}</span>
-        @if (openableSelectedCount() > 0) {
-          <button
-            class="bulk-open"
-            type="button"
-            (click)="openSelected()"
-            [attr.title]="'features.bulk.open.hint' | t"
-          >▶ {{ 'features.bulk.open' | t }}</button>
-        }
         @if (downloadableCount() > 0) {
           <button
             class="bulk-download"
@@ -257,70 +250,60 @@
     }
 
     @if (isStore()) {
-      <!-- ══ THE STORE ══════════════════════════════════════════════
-           No tile subject, no verbs. One row per behavior; the row reads
-           dim (off) / lit (on) / lit + badge (in use). Clicking flips the
-           ONE global light: off = dormant everywhere AND withheld from
-           every swarm. Decorations stay put on their tiles. -->
+      <!-- ══ THE POOL ═══════════════════════════════════════════════
+           No tile subject, no verbs, no buttons. One row per behavior,
+           one bulb each — everything is off until it is lit here.
+           Clicking flips the ONE global light: off = dormant everywhere
+           AND withheld from every swarm. Decorations stay on their tiles. -->
       <div class="features-scroll store">
         <section class="features-group">
-          @for (grp of storeGroups(); track grp.category) {
-            <div class="section-head">
-              <span class="section-label">{{ grp.category }}</span>
-              <span class="section-count">{{ grp.rows.length }}</span>
-            </div>
-            <ul class="features-list">
-              @for (row of grp.rows; track row.kind) {
-                <li
-                  class="features-row store-row"
-                  role="switch"
-                  tabindex="0"
-                  [attr.aria-checked]="row.on"
-                  [class.lit]="row.on"
-                  [class.off]="!row.on"
-                  (click)="storeToggle(row)"
-                  (keydown.enter)="storeToggle(row)"
-                  (keydown.space)="storeToggle(row); $event.preventDefault()"
-                  [attr.title]="(row.on ? 'features.roster.off.hint' : 'features.roster.on.hint') | t"
-                >
-                  <span class="feature-icon" aria-hidden="true">
-                    <span class="mat-sym">{{ row.icon }}</span>
+          <ul class="features-list">
+            @for (row of storeList(); track row.kind) {
+              <li
+                class="features-row"
+                role="switch"
+                tabindex="0"
+                [attr.aria-checked]="row.on"
+                [class.lit]="row.on"
+                [class.off]="!row.on"
+                (click)="storeToggle(row)"
+                (keydown.enter)="storeToggle(row)"
+                (keydown.space)="storeToggle(row); $event.preventDefault()"
+                [attr.title]="(row.on ? 'features.roster.off.hint' : 'features.roster.on.hint') | t"
+              >
+                <span class="feature-icon" aria-hidden="true">
+                  <span class="mat-sym">{{ row.icon }}</span>
+                </span>
+                <div class="feature-meta">
+                  <span class="feature-name">
+                    {{ row.label }}
+                    @if (row.slashCommand) {
+                      <code class="feature-cmd">{{ row.slashCommand }}</code>
+                    }
                   </span>
-                  <div class="feature-meta">
-                    <span class="feature-name">
-                      {{ row.label }}
-                      @if (row.slashCommand) {
-                        <code class="feature-cmd">{{ row.slashCommand }}</code>
-                      }
-                    </span>
-                    @if (row.foreign) {
-                      <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
-                    }
-                    <!-- BOUND: this behavior belongs to a tile, not to the
-                         hive. The store is the only place every binding is
-                         visible at once — everywhere else the behavior has
-                         simply withdrawn. -->
-                    @if (row.bound?.length) {
-                      <span class="feature-bound">
-                        <span class="mat-sym" aria-hidden="true">link</span>
-                        {{ 'features.bound.to' | t: { cell: boundTo(row.bound) } }}
-                      </span>
-                    }
-                    @if (row.description) {
-                      <span class="feature-desc">{{ row.description }}</span>
-                    }
-                  </div>
-                  <!-- The badge: this behavior is IN USE — decorations
-                       referencing it exist. Derived by counting, never
-                       stored. No badge = adopted but idle. -->
-                  @if (row.on && (row.used ?? 0) > 0) {
-                    <span class="feat-used" [attr.title]="'features.used.hint' | t: { count: row.used ?? 0 }">{{ row.used }}</span>
+                  @if (row.foreign) {
+                    <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
                   }
-                  <span class="feat-light" aria-hidden="true"></span>
-                </li>
-              }
-            </ul>
-          }
+                  <!-- BOUND: this behavior belongs to a tile, not to the
+                       hive. The pool is the only place every binding is
+                       visible at once — everywhere else the behavior has
+                       simply withdrawn. -->
+                  @if (row.bound?.length) {
+                    <span class="feature-bound">
+                      <span class="mat-sym" aria-hidden="true">link</span>
+                      {{ 'features.bound.to' | t: { cell: boundTo(row.bound) } }}
+                    </span>
+                  }
+                  @if (row.description) {
+                    <span class="feature-desc">{{ row.description }}</span>
+                  }
+                </div>
+                <span class="feat-bulb" [class.on]="row.on" aria-hidden="true">
+                  <span class="mat-sym">lightbulb</span>
+                </span>
+              </li>
+            }
+          </ul>
         </section>
       </div>
       <footer class="features-foot">
@@ -351,9 +334,9 @@
                     [attr.aria-checked]="isPicked(feat)"
                     [class.picked]="isPicked(feat)"
                     [class.unpaintable]="!canPaint(feat)"
-                    (click)="rowClick(group, feat, $event)"
-                    (keydown.enter)="rowClick(group, feat)"
-                    (keydown.space)="rowClick(group, feat); $event.preventDefault()"
+                    (click)="pick(feat)"
+                    (keydown.enter)="pick(feat)"
+                    (keydown.space)="pick(feat); $event.preventDefault()"
                     [attr.title]="(canPaint(feat) ? 'features.paint.pick.hint' : 'features.paint.unpaintable.hint') | t"
                   >
                     <span class="feature-icon" aria-hidden="true">
@@ -377,55 +360,65 @@
             }
             } @else {
 
-            <!-- ── On this tile: the decorations it carries. Membership is
-                 positive — these rows ARE the applied behaviors. Remove (×)
-                 removes the decoration; inherited rows say where they flow
-                 from in one quiet line and are managed at their origin.
-                 A row a LEGACY hidden record still suppresses renders dim —
-                 clicking it restores (the one-tap drain). -->
-            <div class="section-head">
-              <span class="section-label">{{ 'features.section.applied' | t }}</span>
-              <span class="section-count">{{ visibleApplied(group).length }}</span>
-            </div>
-            @if (visibleApplied(group).length === 0) {
+            <!-- ── THIS LAYER — the same list as the pool, scoped here.
+                 One row per behavior, one bulb each. Lit = its record is
+                 deposited on this layer (directly, or flowing from an
+                 ancestor); dim = not here yet. Click flips it: on is a
+                 DEPOSIT that waits on what's beneath, off removes the
+                 record here (undoable). Inherited rows say where they flow
+                 from and flip at their origin. A row a LEGACY hidden record
+                 still suppresses renders dim — clicking it restores. -->
+            @if (layerRows(group).length === 0) {
               <p class="section-empty">{{ 'features.applied.empty' | t }}</p>
             } @else {
               <ul class="features-list">
-                @for (feat of visibleApplied(group); track feat.kind) {
+                @for (row of layerRows(group); track row.kind) {
                   <li
                     class="features-row"
+                    role="switch"
                     tabindex="0"
-                    [class.selected]="isSelected(group, feat)"
-                    [class.off]="!isOn(group, feat)"
-                    [class.busy]="isPending(group, feat)"
-                    (click)="rowClick(group, feat, $event)"
-                    (keydown.enter)="rowClick(group, feat)"
-                    (keydown.space)="rowClick(group, feat); $event.preventDefault()"
+                    [attr.aria-checked]="row.on"
+                    [class.lit]="row.on"
+                    [class.off]="!row.on"
+                    [class.inherited]="row.inherited"
+                    [class.selected]="isSelected(group, row.feat)"
+                    [class.busy]="isPending(group, row.feat)"
+                    (click)="toggleRow(group, row, $event)"
+                    (keydown.enter)="toggleRow(group, row)"
+                    (keydown.space)="toggleRow(group, row); $event.preventDefault()"
+                    [attr.title]="(row.inherited
+                      ? (row.originCell ? 'features.origin.cascade' : 'features.origin.cascade.root')
+                      : row.on ? 'features.remove.hint' : 'features.enable.hint') | t: { cell: row.originCell ?? '' }"
                   >
                     <span class="feature-icon" aria-hidden="true">
-                      <span class="mat-sym">{{ feat.icon }}</span>
+                      <span class="mat-sym">{{ row.icon }}</span>
                     </span>
                     <div class="feature-meta">
-                      <span class="feature-name">{{ feat.label }}</span>
+                      <span class="feature-name">
+                        {{ row.label }}
+                        @if (row.slashCommand) {
+                          <code class="feature-cmd">{{ row.slashCommand }}</code>
+                        }
+                      </span>
                       <!-- Inherited: ONE quiet line saying where it flows
-                           from. Direct rows say nothing — being listed is
-                           the whole statement. -->
-                      @if (feat.origin === 'cascade') {
+                           from. Direct rows say nothing — the bulb is the
+                           whole statement. -->
+                      @if (row.inherited) {
                         <span class="feature-origin cascade">
-                          @if (feat.originCell) {
-                            {{ 'features.origin.cascade' | t: { cell: feat.originCell } }}
+                          @if (row.originCell) {
+                            {{ 'features.origin.cascade' | t: { cell: row.originCell } }}
                           } @else {
                             {{ 'features.origin.cascade.root' | t }}
                           }
                         </span>
                       }
-                      @if (feat.foreign) {
-                        <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
+                      @if (row.foreign) {
+                        <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
                       }
                       <!-- BELONGS HERE: bound to this tile's location
                            signature. The same record that withdrew it from
                            every other tile is what marks it as this one's. -->
-                      @if (feat.bound; as bound) {
+                      @if (row.bound; as bound) {
                         <span
                           class="feature-bound"
                           [attr.title]="'features.bound.hint' | t: { sig: boundSigShort(bound) }"
@@ -434,10 +427,10 @@
                           {{ 'features.bound.here' | t: { cell: bound.name ?? bound.path } }}
                         </span>
                       }
-                      @if (feat.description) {
-                        <span class="feature-desc">{{ feat.description }}</span>
+                      @if (row.description) {
+                        <span class="feature-desc">{{ row.description }}</span>
                       }
-                      @if (rowNote(group, feat); as note) {
+                      @if (rowNote(group, row.feat); as note) {
                         <span class="feature-note">
                           {{ note }}
                           @if (healthWhy(); as why) {
@@ -446,113 +439,19 @@
                         </span>
                       }
                     </div>
-                    <!-- Open: ENTER this view behaviour. -->
-                    @if (isOpenable(group, feat)) {
+                    <!-- Hover-only: a lit view behaviour can be entered. -->
+                    @if (row.openable) {
                       <button
                         class="feat-open"
                         type="button"
-                        (click)="openBehavior(group, feat); $event.stopPropagation()"
+                        (click)="openBehavior(group, row); $event.stopPropagation()"
                         [attr.title]="'features.open.hint' | t"
                         [attr.aria-label]="'features.open' | t"
                       >▶ {{ 'features.open' | t }}</button>
                     }
-                    <!-- BELONGS HERE — the whole gesture is one tap. You are
-                         standing on the tile and the row is in front of you;
-                         the tap says "this is this tile's". Lit = bound, and
-                         tapping again gives it back to the hive. -->
-                    @if (canBind(group, feat)) {
-                      <button
-                        class="feat-bind"
-                        type="button"
-                        [class.bound]="feat.bound"
-                        [attr.aria-pressed]="!!feat.bound"
-                        (click)="bindHere(group, feat); $event.stopPropagation()"
-                        [attr.title]="(feat.bound ? 'features.bind.off.hint' : 'features.bind.on.hint') | t: { cell: group.cell }"
-                        [attr.aria-label]="(feat.bound ? 'features.bind.off' : 'features.bind.on') | t"
-                      ><span class="mat-sym" aria-hidden="true">{{ feat.bound ? 'link' : 'add_link' }}</span></button>
-                    }
-                    <!-- Remove the decoration — the whole off for a direct
-                         row. Its own control, never the row body. -->
-                    @if (canRemove(group, feat)) {
-                      <button
-                        class="feat-remove"
-                        type="button"
-                        (click)="removeHere(group, feat); $event.stopPropagation()"
-                        [attr.title]="'features.remove.hint' | t"
-                        [attr.aria-label]="'features.remove' | t"
-                      ><span class="mat-sym" aria-hidden="true">close</span></button>
-                    }
-                    <!-- The website root's ONE toggle: membership of the
-                         /websites menu. -->
-                    @if (isWebsiteRoot(group, feat)) {
-                      <span class="feat-light" role="switch" [attr.aria-checked]="isOn(group, feat)" aria-hidden="false"></span>
-                    } @else if (isOn(group, feat)) {
-                      <span class="feat-check" aria-hidden="true">✓</span>
-                    }
-                  </li>
-                }
-              </ul>
-            }
-
-            <!-- ── Apply here: behaviors whose light is on, not yet on this
-                 tile. Addable rows attach on click; view bees whose content
-                 must be authored carry their command chip instead. -->
-            <div class="section-head">
-              <span class="section-label">{{ 'features.section.available' | t }}</span>
-              <span class="section-count">{{ visibleAvailable(group).length }}</span>
-            </div>
-            @if (visibleAvailable(group).length === 0) {
-              <p class="section-empty">{{ 'features.available.empty' | t }}</p>
-            } @else {
-              <ul class="features-list">
-                @for (feat of visibleAvailable(group); track feat.kind) {
-                  <li
-                    class="features-row available"
-                    [class.addable]="feat.addable"
-                    [class.selected]="isSelected(group, feat)"
-                    [class.busy]="isPending(group, feat)"
-                    [attr.role]="feat.addable ? 'button' : null"
-                    [attr.tabindex]="feat.addable ? 0 : null"
-                    [attr.title]="feat.addable ? ('features.enable.hint' | t) : null"
-                    (click)="availableRowClick(group, feat, $event)"
-                    (keydown.enter)="feat.addable && availableRowClick(group, feat)"
-                    (keydown.space)="feat.addable && availableRowClick(group, feat); $event.preventDefault()"
-                  >
-                    <span class="feature-icon available-icon" aria-hidden="true">
-                      <span class="mat-sym">{{ feat.icon }}</span>
+                    <span class="feat-bulb" [class.on]="row.on" aria-hidden="true">
+                      <span class="mat-sym">lightbulb</span>
                     </span>
-                    <div class="feature-meta">
-                      <span class="feature-name">
-                        {{ feat.label }}
-                        @if (feat.slashCommand) {
-                          <code class="feature-cmd">{{ feat.slashCommand }}</code>
-                        }
-                      </span>
-                      <!-- Offered here BECAUSE this is where it belongs. -->
-                      @if (feat.bound; as bound) {
-                        <span
-                          class="feature-bound"
-                          [attr.title]="'features.bound.hint' | t: { sig: boundSigShort(bound) }"
-                        >
-                          <span class="mat-sym" aria-hidden="true">link</span>
-                          {{ 'features.bound.here' | t: { cell: bound.name ?? bound.path } }}
-                        </span>
-                      }
-                      @if (feat.description) {
-                        <span class="feature-desc">{{ feat.description }}</span>
-                      }
-                      @if (rowNote(group, feat); as note) {
-                        <span class="feature-note">
-                          {{ note }}
-                          @if (healthWhy(); as why) {
-                            <span class="note-why">{{ why }}</span>
-                          }
-                        </span>
-                      }
-                    </div>
-                    @if (feat.addable) {
-                      <span class="feat-add mat-sym" aria-hidden="true">add</span>
-                    }
                   </li>
                 }
               </ul>
