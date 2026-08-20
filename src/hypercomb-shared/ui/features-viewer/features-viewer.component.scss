@@ -157,42 +157,6 @@ $accent: #c8b8ff;
   padding-top: 0.35em;
 }
 
-// ── section header (On this layer / Available to add) ─────────────
-.section-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.45em 1em 0.25em;
-
-  &::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: rgba(255, 255, 255, 0.07);
-  }
-}
-
-.section-label {
-  flex: 0 0 auto;
-  font-size: 0.6em;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.section-count {
-  flex: 0 0 auto;
-  min-width: 1.1em;
-  padding: 0.02em 0.3em;
-  border-radius: 999px;
-  text-align: center;
-  font-size: 0.6em;
-  font-family: var(--hc-mono, monospace);
-  color: rgba($accent, 0.85);
-  background: rgba($accent, 0.12);
-}
-
 .section-empty {
   margin: 0;
   padding: 0.1em 1em 0.5em;
@@ -208,6 +172,7 @@ $accent: #c8b8ff;
 }
 
 .features-row {
+  position: relative;   // anchors the hover-only whence chip
   display: flex;
   align-items: flex-start;
   gap: 0.5em;
@@ -216,28 +181,6 @@ $accent: #c8b8ff;
   transition: background 120ms ease;
 
   &:hover { background: rgba($accent, 0.06); }
-}
-
-// ── the ACTIVE mark ───────────────────────────────────────────────
-// The ROW is the toggle; this mark exists ONLY on an activated row —
-// far right, vertically centered. A solid accent square with a dark
-// check: unmistakable at a glance against an inactive row, which shows
-// nothing. No motion, no glow — cold and clean.
-.feat-check {
-  flex: 0 0 auto;
-  align-self: center;
-  margin-left: 0.35em;
-  width: 1.15em;
-  height: 1.15em;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  background: $accent;
-  font-size: 0.9em;
-  font-weight: 700;
-  line-height: 1;
-  color: #14141c;
 }
 
 .features-row.busy { opacity: 0.55; cursor: progress; }
@@ -371,7 +314,6 @@ $accent: #c8b8ff;
   .features-panel.reviewing {
     .features-header,
     .features-selection,
-    .paint-bar,
     .bulk-bar,
     .download-status,
     .features-scroll,
@@ -801,9 +743,8 @@ $path-fail: #e08a8a;     // failed terminal
 }
 
 // ── mode switch (header) ──────────────────────────────────────────
-// Two modes, one control: MANAGE (rows are on/off switches for this tile)
-// and PAINT (rows narrow to what's on here and each click loads the brush).
-// Cold chrome — a lit border when armed, no glow.
+// One control, two subjects: this tile's rows, or THE POOL — every behavior
+// the app knows. Cold chrome — a lit border when armed, no glow.
 .features-mode {
   flex: 0 0 auto;
   display: flex;
@@ -829,73 +770,6 @@ $path-fail: #e08a8a;     // failed terminal
   }
 
   &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
-}
-
-// ── paint bar ─────────────────────────────────────────────────────
-// The two halves of the gesture, always in view: what's in the brush, and
-// how many tiles are selected to receive it. Sits where the bulk bar does.
-.paint-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  flex-wrap: wrap;
-  padding: 0.5em 1em;
-  border-bottom: 1px solid rgba($accent, 0.25);
-  background: rgba($accent, 0.07);
-}
-
-.paint-count {
-  flex: 0 0 auto;
-  font-size: 0.7em;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.65);
-}
-
-.paint-apply {
-  flex: 0 0 auto;
-  margin-left: auto;
-  background: rgba($accent, 0.18);
-  border: 1px solid rgba($accent, 0.55);
-  border-radius: tw.$radius-control;
-  color: #f3f3f3;
-  font-family: inherit;
-  font-size: 0.66em;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  @include tw.compact-button-padding;
-  cursor: pointer;
-
-  &:hover:not(:disabled) { background: rgba($accent, 0.32); }
-  &:active:not(:disabled) { transform: scale(0.94); }
-  &:disabled { opacity: 0.4; cursor: default; }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
-}
-
-// The why-nothing-happens line and the paint's own answer — same slot, plain
-// words, full width under the button.
-.paint-hint,
-.paint-note {
-  flex: 1 0 100%;
-  font-size: 0.66em;
-  line-height: 1.35;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.paint-note { color: rgba($accent, 0.85); }
-
-// ── paint rows ────────────────────────────────────────────────────
-// A picked row reads exactly like an activated one (same accent inset + check)
-// — picking IS the state, so it uses the panel's existing on-vocabulary.
-.features-row.paint.picked {
-  background: rgba($accent, 0.14);
-  box-shadow: inset 2px 0 0 rgba($accent, 0.8);
-}
-
-// Nothing to copy — the row stays listed and says why, but never pretends to
-// be pickable.
-.features-row.paint.unpaintable {
-  cursor: default;
-  .feature-name { color: rgba(245, 245, 245, 0.5); }
 }
 
 // A behaviour whose module hasn't arrived. Provenance, not an error: quiet
@@ -979,12 +853,35 @@ $path-fail: #e08a8a;     // failed terminal
 }
 
 .features-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.32rem;
   overflow: hidden;
-  text-overflow: ellipsis;
   font-size: 0.98rem;
   font-weight: 650;
   letter-spacing: 0.01em;
   color: rgba(250, 249, 255, 0.96);
+}
+
+// The subject hangs off the app name: `Beehaviors / tile`. The name is what
+// gives way when the panel narrows — the app word is one glance, the tile is
+// the part that can run long.
+.features-title-sep {
+  flex: 0 0 auto;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.features-title-app { flex: 0 0 auto; }
+
+.features-title-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 620;
+  color: rgba(233, 228, 255, 0.78);
 }
 
 .features-mode,
@@ -1029,6 +926,35 @@ $path-fail: #e08a8a;     // failed terminal
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: tw.$radius-control;
   background: rgba(255, 255, 255, 0.035);
+
+  // Sticky pool filter — anchored (tile-bound) behaviors in or out.
+  // Active = the filter is ON (anchored hidden, only hive-wide rows).
+  .features-anchored {
+    flex: 0 0 auto;
+    width: 1.7rem;
+    height: 1.7rem;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: tw.$radius-control;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.35);
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+
+    .mat-sym { font-size: 1rem; }
+
+    &:hover { color: rgba(255, 214, 138, 0.9); }
+
+    &.active {
+      color: rgba(255, 214, 138, 0.92);
+      border-color: rgba(255, 214, 138, 0.3);
+      background: rgba(255, 214, 138, 0.08);
+    }
+
+    &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+  }
   color: rgba(255, 255, 255, 0.34);
   transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 
@@ -1056,102 +982,6 @@ $path-fail: #e08a8a;     // failed terminal
   &:focus { border: 0; background: transparent; }
 }
 
-.features-context {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.68rem;
-  margin: 0 1rem 0.78rem;
-  padding: 0.72rem 0.78rem;
-  border: 1px solid rgba($accent, 0.16);
-  border-radius: tw.$radius-card;
-  background:
-    linear-gradient(120deg, rgba($accent, 0.09), rgba(255, 255, 255, 0.025));
-}
-
-.features-context-icon {
-  width: 2rem;
-  height: 2rem;
-  display: grid;
-  place-items: center;
-  border-radius: tw.$radius-card;
-  color: rgba($accent, 0.9);
-  background: rgba($accent, 0.11);
-
-  .mat-sym { font-size: 1rem; }
-}
-
-.features-context-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.14rem;
-}
-
-.features-context-label {
-  font-size: 0.58rem;
-  font-weight: 650;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-// ── the subject crumb: self › tile ────────────────────────────────
-// Two steps at most. The self step is a BUTTON whenever it isn't the
-// subject — the one-press way back to the loaded layer — and goes inert
-// (not hidden, not removed) once you are on it, so the row never reflows
-// as the subject changes.
-.features-crumbs {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  min-width: 0;
-}
-
-.features-crumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 0.84rem;
-  font-weight: 620;
-  letter-spacing: 0;
-  color: rgba(233, 228, 255, 0.62);
-  cursor: pointer;
-  transition: color 140ms ease;
-
-  .mat-sym { font-size: 0.9em; opacity: 0.75; }
-
-  .crumb-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &:hover:not(:disabled) { color: #f6f3ff; }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 2px; border-radius: 2px; }
-
-  // The step you are on: full weight, no affordance.
-  &.current {
-    color: rgba(249, 247, 255, 0.9);
-    cursor: default;
-
-    .mat-sym { opacity: 1; color: rgba($accent, 0.9); }
-  }
-}
-
-.features-crumb-sep {
-  flex: 0 0 auto;
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.28);
-}
-
 .features-scroll {
   padding: 0 0.75rem 1rem;
   scrollbar-width: thin;
@@ -1159,29 +989,6 @@ $path-fail: #e08a8a;     // failed terminal
 }
 
 .features-group { padding: 0; }
-
-.section-head {
-  gap: 0.48rem;
-  padding: 0.72rem 0.25rem 0.5rem;
-
-  &::after { display: none; }
-}
-
-.section-label {
-  font-size: 0.63rem;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.48);
-}
-
-.section-count {
-  min-width: 1.45rem;
-  padding: 0.12rem 0.38rem;
-  font-size: 0.58rem;
-  color: rgba(228, 221, 255, 0.78);
-  background: rgba($accent, 0.09);
-  border: 1px solid rgba($accent, 0.12);
-}
 
 .section-empty {
   margin: 0;
@@ -1304,6 +1111,40 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.56rem;
 }
 
+// ── hover-only WHENCE — provenance never sits on the row ──────────
+// Bound ("for {cell} only") or inherited ("from {cell}") — the row at
+// rest just IS; the quiet label floats in at the top-right on hover.
+// Absolute, so nothing shifts when it appears.
+.feature-whence {
+  position: absolute;
+  top: 0.3rem;
+  right: 3rem;   // clear of the bulb
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.08rem 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  font-size: 0.55rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(16, 14, 24, 0.92);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+
+  .mat-sym { font-size: 0.72rem; }
+
+  &.bound {
+    color: rgba(255, 214, 138, 0.85);
+    border-color: rgba(255, 214, 138, 0.28);
+  }
+}
+
+.features-row:hover .feature-whence,
+.features-row:focus-within .feature-whence { opacity: 1; }
+
 // ── hover-only Open — a lit view behaviour can be ENTERED ─────────
 // Out of the way until the row is pointed at (or holds focus); the bulb
 // stays the only always-visible control.
@@ -1407,14 +1248,9 @@ $path-fail: #e08a8a;     // failed terminal
   .features-header { padding-top: env(safe-area-inset-top, 0px); }
   .features-searchbar { margin-top: 0.25rem; }
 
-  .features-context {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
   .features-scroll { padding-inline: 0.65rem; }
 
   .features-panel.reviewing {
-    .features-searchbar,
-    .features-context { display: none; }
+    .features-searchbar { display: none; }
   }
 }

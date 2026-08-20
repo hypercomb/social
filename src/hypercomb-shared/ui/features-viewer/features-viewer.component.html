@@ -20,8 +20,15 @@
         <span class="features-brand-mark" aria-hidden="true">
           <span class="mat-sym">extension</span>
         </span>
-        <!-- The panel IS the layer (by name); the pool keeps the app title. -->
-        <span class="features-title">{{ isStore() || !group() ? ('features.viewer.title' | t) : group()!.cell }}</span>
+        <!-- The title says WHAT and, for a layer subject, WHICH — the pool
+             keeps the bare app title, a tile subject hangs off it. -->
+        <span class="features-title">
+          <span class="features-title-app">{{ 'features.viewer.title' | t }}</span>
+          @if (!isStore() && group(); as g) {
+            <span class="features-title-sep" aria-hidden="true">/</span>
+            <span class="features-title-cell" [title]="g.cell">{{ g.cell }}</span>
+          }
+        </span>
       </div>
       <!-- THE STORE: every behavior the app knows, one light each. -->
       <button
@@ -32,18 +39,6 @@
         [attr.title]="'features.mode.roster.hint' | t"
         [attr.aria-pressed]="isStore()"
       ><span class="mat-sym" aria-hidden="true">storefront</span></button>
-      <!-- PAINT: rows narrow to what's ON here; each click picks it into the
-           brush, which lands on the selected tiles in one press. -->
-      @if (!isStore()) {
-      <button
-        class="features-mode"
-        type="button"
-        [class.active]="isPainting()"
-        (click)="toggleMode()"
-        [attr.title]="(isPainting() ? 'features.mode.manage.hint' : 'features.mode.paint.hint') | t"
-        [attr.aria-pressed]="isPainting()"
-      ><span class="mat-sym" aria-hidden="true">format_paint</span></button>
-      }
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">
         <span class="mat-sym" aria-hidden="true">close</span>
       </button>
@@ -61,48 +56,22 @@
         spellcheck="false"
         autocomplete="off"
       />
+      <!-- Sticky pool filter: anchored (tile-bound) behaviors in or out, so
+           the pool can be read as just the hive-wide ones. -->
+      @if (isStore()) {
+        <button
+          class="features-anchored"
+          type="button"
+          [class.active]="!showAnchored()"
+          [attr.aria-pressed]="!showAnchored()"
+          (click)="toggleAnchored()"
+          [attr.title]="(showAnchored() ? 'features.pool.anchored.hide' : 'features.pool.anchored.show') | t"
+        ><span class="mat-sym" aria-hidden="true">anchor</span></button>
+      }
     </div>
 
-    <!-- WHAT THE PANEL IS DESCRIBING — self, or a tile on self.
-         Two steps at most: the loaded layer (always there, always the way
-         back) and, when a tile's puzzle-piece put one in the subject, that
-         tile. Walking the hive re-targets the panel at the layer you arrive
-         on, so the second step only exists while you deliberately asked
-         about a child. -->
+    <!-- The subject, on the phone: the way to hand the panel a tile. -->
     @if (!isStore() && group(); as g) {
-      <nav class="features-context" [attr.aria-label]="'features.context.aria' | t">
-        <span class="features-context-icon" aria-hidden="true">
-          <span class="mat-sym">{{ subjectIsSelf() ? 'layers' : 'grid_view' }}</span>
-        </span>
-        <div class="features-context-copy">
-          <span class="features-context-label">{{ 'features.context.label' | t }}</span>
-          <div class="features-crumbs">
-            <button
-              class="features-crumb self"
-              type="button"
-              [class.current]="subjectIsSelf()"
-              [disabled]="subjectIsSelf()"
-              (click)="goSelf()"
-              [attr.aria-current]="subjectIsSelf() ? 'true' : null"
-              [title]="(subjectIsSelf() ? 'features.context.self.here' : 'features.context.self.hint') | t: { cell: selfName() }"
-            >
-              <span class="mat-sym" aria-hidden="true">layers</span>
-              <span class="crumb-name">{{ selfName() }}</span>
-            </button>
-            @if (!subjectIsSelf()) {
-              <span class="features-crumb-sep" aria-hidden="true">›</span>
-              @if (subjectGap(); as gap) {
-                <span class="features-crumb-sep" aria-hidden="true">{{ gap }}</span>
-                <span class="features-crumb-sep" aria-hidden="true">›</span>
-              }
-              <span class="features-crumb current" [title]="g.cell" aria-current="true">
-                <span class="mat-sym" aria-hidden="true">grid_view</span>
-                <span class="crumb-name">{{ g.cell }}</span>
-              </span>
-            }
-          </div>
-        </div>
-      </nav>
       @if (isPhone() && !reviewTarget() && g.segments.length) {
         <button class="features-select-tile" type="button" (click)="selectTile()">
           <span class="mat-sym" aria-hidden="true">select_all</span>
@@ -111,27 +80,8 @@
       }
     }
 
-    <!-- Paint bar: the brush and where it lands. -->
-    @if (isPainting()) {
-      <div class="paint-bar" role="status" aria-live="polite">
-        <span class="paint-count">{{ 'features.paint.picked' | t: { count: brushCount() } }}</span>
-        <button
-          class="paint-apply"
-          type="button"
-          [disabled]="!canApplyBrush()"
-          (click)="applyBrush()"
-          [attr.title]="'features.paint.apply.hint' | t"
-        >{{ 'features.paint.apply' | t: { count: canvasSelectionCount() } }}</button>
-        @if (paintNote(); as note) {
-          <span class="paint-note">{{ note }}</span>
-        } @else if (canvasSelectionCount() === 0) {
-          <span class="paint-hint">{{ 'features.paint.noselection' | t }}</span>
-        }
-      </div>
-    }
-
     <!-- Canvas-selection response: selected tiles carry behaviors. -->
-    @if (showCanvasSelectionAffordance() && !isPainting() && !isStore()) {
+    @if (showCanvasSelectionAffordance() && !isStore()) {
       <button class="features-selection" type="button" (click)="openSelectionFeatures()"
               [attr.aria-label]="'features.selection' | t: { count: canvasSelectionCount() }">
         <span class="mat-sym" aria-hidden="true">extension</span>
@@ -316,50 +266,6 @@
       <div class="features-scroll">
           <section class="features-group">
 
-            @if (isPainting()) {
-            <!-- ══ PAINT MODE: pick behaviours ON here into the brush. ══ -->
-            <div class="section-head">
-              <span class="section-label">{{ 'features.section.paint' | t }}</span>
-              <span class="section-count">{{ paintable(group).length }}</span>
-            </div>
-            @if (paintable(group).length === 0) {
-              <p class="section-empty">{{ 'features.paint.empty' | t }}</p>
-            } @else {
-              <ul class="features-list">
-                @for (feat of paintable(group); track feat.kind) {
-                  <li
-                    class="features-row paint"
-                    role="checkbox"
-                    tabindex="0"
-                    [attr.aria-checked]="isPicked(feat)"
-                    [class.picked]="isPicked(feat)"
-                    [class.unpaintable]="!canPaint(feat)"
-                    (click)="pick(feat)"
-                    (keydown.enter)="pick(feat)"
-                    (keydown.space)="pick(feat); $event.preventDefault()"
-                    [attr.title]="(canPaint(feat) ? 'features.paint.pick.hint' : 'features.paint.unpaintable.hint') | t"
-                  >
-                    <span class="feature-icon" aria-hidden="true">
-                      <span class="mat-sym">{{ feat.icon }}</span>
-                    </span>
-                    <div class="feature-meta">
-                      <span class="feature-name">{{ feat.label }}</span>
-                      @if (feat.foreign) {
-                        <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: feat.module ?? '' } }}</span>
-                      }
-                      @if (!canPaint(feat)) {
-                        <span class="feature-desc">{{ 'features.paint.unpaintable' | t }}</span>
-                      }
-                    </div>
-                    @if (isPicked(feat)) {
-                      <span class="feat-check" aria-hidden="true">✓</span>
-                    }
-                  </li>
-                }
-              </ul>
-            }
-            } @else {
-
             <!-- ── THIS LAYER — the same list as the pool, scoped here.
                  One row per behavior, one bulb each. Lit = its record is
                  deposited on this layer (directly, or flowing from an
@@ -400,32 +306,8 @@
                           <code class="feature-cmd">{{ row.slashCommand }}</code>
                         }
                       </span>
-                      <!-- Inherited: ONE quiet line saying where it flows
-                           from. Direct rows say nothing — the bulb is the
-                           whole statement. -->
-                      @if (row.inherited) {
-                        <span class="feature-origin cascade">
-                          @if (row.originCell) {
-                            {{ 'features.origin.cascade' | t: { cell: row.originCell } }}
-                          } @else {
-                            {{ 'features.origin.cascade.root' | t }}
-                          }
-                        </span>
-                      }
                       @if (row.foreign) {
                         <span class="feature-awaiting">{{ 'features.chip.awaiting' | t: { module: row.module ?? '' } }}</span>
-                      }
-                      <!-- BELONGS HERE: bound to this tile's location
-                           signature. The same record that withdrew it from
-                           every other tile is what marks it as this one's. -->
-                      @if (row.bound; as bound) {
-                        <span
-                          class="feature-bound"
-                          [attr.title]="'features.bound.hint' | t: { sig: boundSigShort(bound) }"
-                        >
-                          <span class="mat-sym" aria-hidden="true">link</span>
-                          {{ 'features.bound.here' | t: { cell: bound.name ?? bound.path } }}
-                        </span>
                       }
                       @if (row.description) {
                         <span class="feature-desc">{{ row.description }}</span>
@@ -439,6 +321,21 @@
                         </span>
                       }
                     </div>
+                    <!-- Hover-only WHENCE — the row itself never specifies.
+                         Bound: this beehavior is for this tile only.
+                         Inherited: where it flows from (flips there). -->
+                    @if (row.bound || row.inherited) {
+                      <span class="feature-whence" [class.bound]="!!row.bound" aria-hidden="true">
+                        @if (row.bound; as bound) {
+                          <span class="mat-sym">link</span>
+                          {{ 'features.bound.only' | t: { cell: bound.name ?? bound.path } }}
+                        } @else if (row.originCell) {
+                          {{ 'features.origin.cascade' | t: { cell: row.originCell } }}
+                        } @else {
+                          {{ 'features.origin.cascade.root' | t }}
+                        }
+                      </span>
+                    }
                     <!-- Hover-only: a lit view behaviour can be entered. -->
                     @if (row.openable) {
                       <button
@@ -455,7 +352,6 @@
                   </li>
                 }
               </ul>
-            }
             }
 
           </section>

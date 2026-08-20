@@ -69,8 +69,6 @@ interface FeatureRow {
    *  inert until its module arrives. */
   foreign?: boolean
   module?: string
-  /** True when the behaviour rides a decoration the painter can copy. */
-  paintable?: boolean
   /** Gate data still stamped by the producer — the download path uses the
    *  sig; the panel renders no chip for it (the review surface is the gate). */
   gated?: boolean
@@ -202,6 +200,9 @@ interface FeaturesOpenPayload {
 type SelectModeLike = { arm(): void }
 const SELECT_MODE_KEY = '@diamondcoreprocessor.com/SelectModeDrone'
 
+/** Sticky pool filter: '0' = anchored (tile-bound) behaviors hidden. */
+const ANCHORED_PREF_KEY = 'hc:behaviors-pool-anchored'
+
 @Component({
   selector: 'hc-features-viewer',
   standalone: true,
@@ -236,49 +237,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   //     self, and it stays there. Standing on the parent does not drag the
   //     panel back up; you asked about the tile.
   //
-  // The crumb above the rows says which of the two you are looking at, and
-  // its self step is the way back — no navigation required.
-
-  /** Where the participant is STANDING — the loaded layer's path. Kept fresh
-   *  even while the panel is closed, so the crumb is right the moment it
-   *  opens. Empty = the hive root. */
-  readonly contextPath = signal<readonly string[]>([])
-
-  /** The loaded layer's display name — its last segment, the hive at `/`. */
-  readonly selfName = computed(() => {
-    const segs = this.contextPath()
-    return segs.length ? segs[segs.length - 1] : this.#t('features.context.hive', 'the hive')
-  })
-
-  /** True while the subject IS the loaded layer rather than a tile on it. */
-  readonly subjectIsSelf = computed(() => {
-    const g = this.group()
-    if (!g) return true
-    const here = this.contextPath()
-    // Step by step: a tile name may hold any character, so no joined-string
-    // key is safe as an identity test here.
-    return g.segments.length === here.length && here.every((s, i) => g.segments[i] === s)
-  })
-
-  /** Ellipsis crumb between self and the subject — raised when the subject is
-   *  more than one hop down, or off this branch entirely (the adopt fold can
-   *  point the panel anywhere). '' = the subject is a direct child. */
-  readonly subjectGap = computed(() => {
-    const g = this.group()
-    if (!g || this.subjectIsSelf()) return ''
-    const here = this.contextPath()
-    const beneath = g.segments.length > here.length
-      && here.every((s, i) => g.segments[i] === s)
-    if (!beneath) return '…'
-    return g.segments.length - here.length > 1 ? '…' : ''
-  })
-
-  /** Put the subject back on the LOADED LAYER — the crumb's self step. Same
-   *  pipeline navigation uses, so the arrival is indistinguishable. */
-  readonly goSelf = (): void => {
-    if (this.subjectIsSelf()) return
-    this.#openAt(this.contextPath())
-  }
+  // Either way the header says which subject you are looking at.
 
   /** A foreign feature the participant has been asked to REVIEW before
    *  enabling — set from `feature:review:open` (the website gate). */
@@ -314,24 +273,35 @@ export class FeaturesViewerComponent implements OnDestroy {
   /** The header search — filters every section's rows live. */
   readonly query = signal('')
 
-  // ── the three modes ──────────────────────────────────────────────
+  // ── the two modes ────────────────────────────────────────────────
   //
   // TILE (default) — the decorations this tile carries + the Apply picker.
-  // PAINT — rows narrow to what's ON here; each row is a PICK for the brush.
   // STORE — no tile subject: every behavior, one light each.
 
-  readonly mode = signal<'tile' | 'paint' | 'store'>('tile')
+  readonly mode = signal<'tile' | 'store'>('tile')
 
   /** The store rows, as last delivered by `features:roster`. */
   readonly storeRows = signal<StoreRow[]>([])
 
   readonly isStore = computed(() => this.mode() === 'store')
 
+  /** STICKY POOL FILTER — anchored (tile-bound) behaviors in or out, so the
+   *  pool can be read as just the hive-wide ones. The icon is the filter;
+   *  the choice persists across sessions. */
+  readonly showAnchored = signal(localStorage.getItem(ANCHORED_PREF_KEY) !== '0')
+
+  readonly toggleAnchored = (): void => {
+    const next = !this.showAnchored()
+    this.showAnchored.set(next)
+    try { localStorage.setItem(ANCHORED_PREF_KEY, next ? '1' : '0') } catch { /* private-browsing */ }
+  }
+
   /** The pool, flat: one row per behavior, A→Z, through the header query.
    *  No categories, no badges — a list of lights. */
   readonly storeList = computed<StoreRow[]>(() => {
     const q = this.query().trim().toLowerCase()
     return this.storeRows()
+      .filter(r => this.showAnchored() || !(r.bound?.length))
       .filter(r => !q
         || r.label.toLowerCase().includes(q)
         || r.kind.toLowerCase().includes(q)
@@ -352,11 +322,6 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  the author said it and how the panel says it back. */
   readonly boundTo = (bindings: readonly BehaviorBinding[] | undefined): string =>
     (bindings ?? []).map(b => b.name || b.path).join(', ')
-
-  /** The short form of a binding's location signature — enough to recognise
-   *  it, and to check it against a tile without reading 64 characters. */
-  readonly boundSigShort = (binding: BehaviorBinding | undefined): string =>
-    (binding?.sig ?? '').slice(0, 8)
 
   /** Flip one light. Optimistic row update — the writer emits
    *  `behavior:enablement-changed`, so every other surface reacts at once.
@@ -414,15 +379,6 @@ export class FeaturesViewerComponent implements OnDestroy {
       ?.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
   }
-
-  /** The behaviour kinds loaded in the brush (paint mode). */
-  readonly brush = signal<ReadonlySet<string>>(new Set())
-
-  /** Names of the tiles currently selected on the canvas — paint targets. */
-  readonly canvasSelection = signal<readonly string[]>([])
-
-  /** Plain-words outcome of the last paint ('' = none). */
-  readonly paintNote = signal('')
 
   /** Multi-selected rows (Ctrl/Shift-click) — what the bulk bar acts on. */
   readonly selectedKeys = signal<ReadonlySet<string>>(new Set())
@@ -489,23 +445,7 @@ export class FeaturesViewerComponent implements OnDestroy {
 
     this.#cleanups.push(onSelection(({ selected }) => {
       this.canvasSelectionCount.set(selected.length)
-      this.canvasSelection.set(selected.map(String).filter(Boolean))
     }))
-
-    // The painter's answer — how many behaviours landed on how many tiles.
-    this.#cleanups.push(EffectBus.on<{ painted?: number; tiles?: number; skipped?: string[] }>(
-      'features:paint-result',
-      (p) => {
-        const painted = Number(p?.painted ?? 0) || 0
-        const tiles = Number(p?.tiles ?? 0) || 0
-        if (painted > 0) {
-          this.paintNote.set(this.#tp('features.paint.done', { count: painted, tiles }, `${painted} on ${tiles} tiles`))
-          this.brush.set(new Set())
-        } else {
-          this.paintNote.set(this.#t('features.paint.nothing', 'nothing to paint — no record to copy'))
-        }
-      },
-    ))
     this.#cleanups.push(EffectBus.on<{ value?: boolean }>('selection:has-features', (p) => {
       this.canvasSelectionHasFeatures.set(p?.value === true)
     }))
@@ -553,8 +493,6 @@ export class FeaturesViewerComponent implements OnDestroy {
         this.selectedKeys.set(new Set())
         this.rowNotes.set(new Map())
         this.query.set('')
-        this.brush.set(new Set())
-        this.paintNote.set('')
       }
       this.group.set(group)
       if (!this.visible()) {
@@ -575,7 +513,6 @@ export class FeaturesViewerComponent implements OnDestroy {
       this.storeRows.set(rows)
       this.query.set('')
       this.selectedKeys.set(new Set())
-      this.brush.set(new Set())
       this.mode.set('store')
       if (!this.visible()) {
         this.visible.set(true)
@@ -589,20 +526,15 @@ export class FeaturesViewerComponent implements OnDestroy {
     // Everything after that is the ordinary pipeline: the drone answers with
     // `features:open`, and that is what raises the panel.
     this.#cleanups.push(EffectBus.on('features:context-open', () => {
-      const segs = this.#currentSegments()
-      this.contextPath.set(segs)
-      this.#openAt(segs)
+      this.#openAt(this.#currentSegments())
     }))
 
     // ── the panel FOLLOWS NAVIGATION ──────────────────────────────────
     //
     // Arriving on a layer makes it the subject — SELF — even when a tile's
-    // puzzle-piece had pinned a child before the walk. The context is tracked
-    // whether the panel is open or shut, so the crumb is already right the
-    // moment it opens.
+    // puzzle-piece had pinned a child before the walk.
     const lineage = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<EventTarget & { explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-    this.contextPath.set(this.#currentSegments())
     if (lineage?.addEventListener) {
       this.#lastNavKey = (lineage.explorerSegments?.() ?? []).join('\u0000')
       const onNav = (): void => {
@@ -610,7 +542,6 @@ export class FeaturesViewerComponent implements OnDestroy {
         const key = segs.join('\u0000')
         if (key === this.#lastNavKey) return
         this.#lastNavKey = key
-        this.contextPath.set(segs)
         if (!this.visible()) return
         // Root is a context too — the hive itself. Leaving the panel on the
         // previous tile's group after backing out to `/` showed a subject the
@@ -798,8 +729,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.rowNotes.set(new Map())
     this.query.set('')
     this.mode.set('tile')
-    this.brush.set(new Set())
-    this.paintNote.set('')
     this.downloadResults.set([])
     // In-flight downloads keep running — only the panel-local status resets.
   }
@@ -1020,66 +949,6 @@ export class FeaturesViewerComponent implements OnDestroy {
       && !this.isSuppressed(group, feat)
   }
 
-  // ── paint mode ────────────────────────────────────────────────────
-
-  toggleMode(): void {
-    if (this.mode() === 'paint') {
-      this.mode.set('tile')
-      this.brush.set(new Set())
-      this.paintNote.set('')
-      return
-    }
-    this.mode.set('paint')
-    this.selectedKeys.set(new Set())   // row selection is a tile-mode idea
-  }
-
-  isPainting(): boolean {
-    return this.mode() === 'paint'
-  }
-
-  /** The rows paint mode shows: behaviours ON at this tile. */
-  paintable(group: FeatureGroup): FeatureRow[] {
-    return this.visibleApplied(group).filter(f => this.isOn(group, f))
-  }
-
-  /** Only decoration-backed behaviours can ride the brush. */
-  canPaint(feat: FeatureRow): boolean {
-    return feat.paintable === true
-  }
-
-  isPicked(feat: FeatureRow): boolean {
-    return this.brush().has(feat.kind)
-  }
-
-  /** Pick / unpick a behaviour into the brush. */
-  pick(feat: FeatureRow): void {
-    if (!this.canPaint(feat)) return
-    this.paintNote.set('')
-    this.brush.update(cur => {
-      const next = new Set(cur)
-      if (next.has(feat.kind)) next.delete(feat.kind)
-      else next.add(feat.kind)
-      return next
-    })
-  }
-
-  readonly brushCount = computed(() => this.brush().size)
-
-  readonly canApplyBrush = computed(() =>
-    this.brush().size > 0 && this.canvasSelection().length > 0)
-
-  /** Land the brush: every picked behaviour onto every selected tile. */
-  applyBrush(): void {
-    const group = this.group()
-    if (!group || !this.canApplyBrush()) return
-    this.paintNote.set('')
-    EffectBus.emit('features:paint', {
-      source: [...group.segments],
-      kinds: [...this.brush()],
-      targets: [...this.canvasSelection()],
-    })
-  }
-
   /** The website root's ONE toggle: membership of the websites menu —
    *  positive membership, consistent with the model (the /websites link
    *  exists exactly while the site is a member). Optimistic both ways. */
@@ -1124,14 +993,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ t: (k: string) => string }>('@hypercomb.social/I18n')
     const v = i18n?.t?.(key)
-    return typeof v === 'string' && v && v !== key ? v : fallback
-  }
-
-  /** Same as `#t`, with interpolation params. */
-  #tp(key: string, params: Record<string, unknown>, fallback: string): string {
-    const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-      ?.get<{ t: (k: string, p?: Record<string, unknown>) => string }>('@hypercomb.social/I18n')
-    const v = i18n?.t?.(key, params)
     return typeof v === 'string' && v && v !== key ? v : fallback
   }
 
@@ -1230,12 +1091,11 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#armRowLeash(key)
   }
 
-  /** One level back per press: a review, then paint, then the search, then the
-   *  store. False = nothing of ours was open, and the shell cascade carries on.
+  /** One level back per press: a review, then the search, then the store.
+   *  False = nothing of ours was open, and the shell cascade carries on.
    *  Reached from the session; there is no listener here. */
   dismiss(): boolean {
     if (this.reviewTarget()) { this.cancelReview(); return true }
-    if (this.mode() === 'paint') { this.toggleMode(); return true }
     if (this.query()) { this.query.set(''); return true }
     if (this.mode() === 'store') { this.closeStore(); return true }
     return false

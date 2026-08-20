@@ -126,8 +126,15 @@ controls.**
   the same record `/website here` writes, consumed by the next generation
   pass. Click OFF = remove the record here (undoable). Website scope roots
   keep their one meaning: the bulb is membership of the /websites menu.
-  Inherited rows explain themselves ("from {cell}") and flip at their
-  origin. The only other affordance is hover-only: Open on a lit view row.
+  Provenance never sits on the row: a bound row's "for {cell} only" and an
+  inherited row's "from {cell}" float in as a quiet chip at the row's
+  top-right ON HOVER ONLY (Jaime: "you don't specify, you just show that
+  item… the label only on hover — this is subtle"). Same for Open on a lit
+  view row — hover-only. Nothing else.
+- **The pool filter**: anchored (tile-bound) behaviors stay listed in the
+  pool — the census — but behind a STICKY anchor-icon filter beside the
+  search field (`hc:behaviors-pool-anchored`), so the pool can be read as
+  just the hive-wide behaviors. Active = anchored hidden.
 
 **Opt-in polarity.** `hc:behavior-global-on` is the truth once it exists: a
 kind it doesn't name is off. It is seeded ONCE (show-features drone, boot +
@@ -142,3 +149,23 @@ bindings, hidden records: unchanged.
 button (bindings still display; `features:bind` remains wired drone-side),
 the add (+) rows, the applied/available section split, store categories, the
 in-use badge, bulk-open.
+
+## 2026-08-19 — one control, and the subject in the title
+
+The panel keeps shedding what isn't the light. Removed in this pass:
+
+- **Paint mode.** The brush (header `format_paint` toggle, paint bar, pick
+  rows, `features:paint` → the drone's `#paint` copier, `features:paint-result`,
+  the `paintable` row flag) is gone end to end. One control remains in the
+  header: the pool switch. Copying a behavior onto other tiles is no longer
+  something this panel does.
+- **The "BEEHAVIORS OF" crumb row.** The subject was announced twice — once in
+  a boxed row under the search field, once in the header title. It now reads
+  in the header alone: `Beehaviors / <tile>` for a layer or tile subject, the
+  bare app title for the pool. The rail switch is still the way back to the
+  loaded layer, so nothing became unreachable.
+
+The search field is unchanged — `search beehaviors…`, filtering both lists.
+i18n: the 18 dead keys (`features.context.*`, `features.paint.*`,
+`features.mode.paint.hint`, `features.mode.manage.hint`,
+`features.section.paint`) were removed from all 15 catalogs.
