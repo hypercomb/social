@@ -134,9 +134,16 @@ export class UseLiveRelayQueenBee {
     // 4. Public — the guarded gesture, only ever toward ON.
     if (localStorage.getItem(PUBLIC_KEY) !== 'true') this.#togglePublic()
 
+    // 5. The WARM-UP PLACE (Jaime, 2026-08-20): joining opens the global
+    // Beehaviors roster so the participant explicitly decides which
+    // BEHAVIORS travel with what they share (the withheld list is the
+    // 30208 broadcast) — the tile half of the ritual is world mode's
+    // share toggles, named in the toast.
+    EffectBus.emit('features:roster-open', {})
+
     console.log(`[use-live-relay] participant setup: room='${room}' relay=${relayNote}`)
     this.#toast('success',
-      `you're in "${room}" via ${relayNote} — tiles you create here are shared; world mode shares what you already have`)
+      `you're in "${room}" via ${relayNote} — the roster picks which behaviors you share; world mode picks the tiles`)
   }
 
   /** The same guarded toggle the keymap rides — with a complete zone it

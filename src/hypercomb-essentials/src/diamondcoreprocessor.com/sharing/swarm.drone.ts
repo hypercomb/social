@@ -27,7 +27,7 @@
 // arrives, so we don't need to dispatch a render signal ourselves.
 
 import { Drone, EffectBus, poolAddresses, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { readTilePropertiesAt, writeTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
@@ -162,11 +162,14 @@ const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
 const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
 
-// How deep we walk our local subtree on each publish. Capped so a
-// publisher's entire OPFS isn't dumped onto the relay at boot — but
-// deep enough that a receiver navigating into a peer tile actually
-// sees the peer's children there. 3 = current + 3 descendant levels.
-const MAX_PUBLISH_DEPTH = 3
+// How deep we walk our local subtree on each publish. ZERO — the
+// CURRENT PAGE ONLY (Jaime's ruling, 2026-08-20: "you never give away
+// the structure unless the participant navigates"). A publisher's
+// proactive broadcast is exactly the tiles at the location they stand
+// on; every DEEPER page is revealed one level at a time, in response
+// to a visitor's drill request (#onDrillRequest), i.e. only when a
+// participant actually walks in. Privacy and economy in one number.
+const MAX_PUBLISH_DEPTH = 0
 
 // Hard cap on per-publish-burst event count. Defensive against a
 // publisher with thousands of cells filling the relay in one wave.
@@ -653,14 +656,17 @@ export class SwarmDrone extends Drone {
   // locally-held private name. Bounded; oldest dropped first.
   #foreignPathKeys = new Set<string>()
 
-  // Our own drill-request slots, keyed by path key → expirationMs, so an
-  // idle stay at a deep location re-requests the frontier only when the
-  // slot is past 2/3 TTL (same refresh shape as interest/presence).
-  #myDrillExpMs = new Map<string, number>()
+  // Our own drill-request send times, keyed by path key. While the page
+  // we're standing on is still EMPTY the re-ask runs on a short clock —
+  // the publisher's first answer can be blank (a fresh tile's bytes still
+  // draining past the availability gate), and stalling a whole minute on
+  // a blank first answer reads as a dead tunnel. A filled page relaxes to
+  // the TTL-refresh cadence.
+  #myDrillSentMs = new Map<string, number>()
 
-  // Publisher-side throttle for answered drill requests: pathKey → last
-  // response walk ms. A crowd drilling the same branch coalesces to one
-  // frontier walk per LAYER_REFRESH_MS per location.
+  // Publisher-side cooldown for answered drill requests: pathKey → last
+  // response walk ms. Short — a page response is ONE event; the cooldown
+  // exists to coalesce a crowd, not to starve a waiting visitor.
   #drillServedMs = new Map<string, number>()
 
   // Peer label cache. Each participant can stamp a human-readable
@@ -1178,7 +1184,7 @@ export class SwarmDrone extends Drone {
         // Visit/drill state falls with the rest of the swarm session.
         this.#lastVisitKey = ''
         this.#foreignPathKeys.clear()
-        this.#myDrillExpMs.clear()
+        this.#myDrillSentMs.clear()
         this.#drillServedMs.clear()
         // Drop the zone key so hide reads/writes fall back to
         // device-scoped storage while in private mode.
@@ -1209,6 +1215,8 @@ export class SwarmDrone extends Drone {
   public debug = (): object => ({
     lastSyncInput: this.#lastSyncInput,
     lastVisitSignal: this.#lastVisitSignal,
+    lastDrillRequest: this.#lastDrillRequest,
+    lastDrillServed: this.#lastDrillServed,
     currentSig: this.#currentSig.slice(0, 12),
     myPubkey: this.#myPubkey?.slice(0, 8) ?? null,
     room: this.#getRoomStore()?.value ?? null,
@@ -1684,25 +1692,32 @@ export class SwarmDrone extends Drone {
     // glow on the tile we're exploring. No-op at root. Fire-and-forget.
     void this.#publishPresenceToParent(segments)
 
-    // Drill request — tell the zone (lifecycle channel, which every
-    // member hears regardless of location) which path we are standing
-    // on, so a publisher who holds it can extend their broadcast
-    // frontier to us. This is what lets a visitor tunnel DEEPER than
-    // MAX_PUBLISH_DEPTH below the publisher's own position: each level
-    // entered re-requests, the publisher answers with that level's
-    // layer event, and the drill never goes dark. Fire-and-forget.
-    void this.#publishDrillRequest(segments)
-
     // Visit signal — visit-driven acquisition's trigger. When the tile
     // just entered is offered by a peer at the parent location, announce
     // the visit; SwarmAdoptDrone folds it (one level, props from the
     // wire) and records it in the visit genome. Fired once per actual
     // location change — the heartbeat's re-sync of the same location is
     // not a new visit.
+    //
+    // ORDER MATTERS: the visit runs BEFORE the drill request below —
+    // #announceVisit is what records the entered tile as swarm-taught
+    // (#noteForeignPath), and the drill request's privacy prefix reads
+    // that record. Reversed, every FIRST entry into a foreign tile
+    // computed an empty broadcastable prefix and silently sent no drill
+    // request — with page-only publishing, that stalled the whole
+    // tunnel one level in.
     if (pathKey !== this.#lastVisitKey) {
       this.#lastVisitKey = pathKey
-      void this.#announceVisit(segments)
+      await this.#announceVisit(segments)
     }
+
+    // Drill request — tell the zone (lifecycle channel, which every
+    // member hears regardless of location) which path we are standing
+    // on, so a publisher who holds it can extend their broadcast
+    // frontier to us. With page-only publishing this is THE deep
+    // transport: each level entered re-requests, the publisher answers
+    // with that one page, and the drill never goes dark. Fire-and-forget.
+    void this.#publishDrillRequest(segments)
 
     // Initial presence emit — fires once per location after sync sets
     // up, even when nobody else is here. The UI presence banner needs
@@ -1756,7 +1771,7 @@ export class SwarmDrone extends Drone {
     // first location is a fresh visit.
     this.#lastVisitKey = ''
     this.#foreignPathKeys.clear()
-    this.#myDrillExpMs.clear()
+    this.#myDrillSentMs.clear()
     this.#drillServedMs.clear()
     // Tear down resource subs and the published-resource memo too —
     // a zone change means a different audience for our resources, so
@@ -3397,6 +3412,11 @@ const payload: SwarmLayerPayload = myLabel
    *  any member who publicly holds the path answers by publishing that
    *  location's layer event (see #onDrillRequest). Refreshes past 2/3
    *  TTL so an idle visitor keeps the frontier alive under them. */
+  /** Last drill decision on each side — debug()-visible so a stalled
+   *  tunnel names its leg from the console. */
+  #lastDrillRequest: Record<string, unknown> | null = null
+  #lastDrillServed: Record<string, unknown> | null = null
+
   #publishDrillRequest = async (segments: readonly string[]): Promise<void> => {
     if (segments.length === 0) return
     const mesh = this.#getMesh()
@@ -3404,24 +3424,32 @@ const payload: SwarmLayerPayload = myLabel
     const myPubkey = this.#myPubkey
     if (!myPubkey) return
     const share = this.#broadcastablePrefix(segments)
-    if (share.length === 0) return
+    if (share.length === 0) {
+      this.#lastDrillRequest = { stage: 'no-sharable-prefix', at: [...segments], atMs: Date.now() }
+      return
+    }
     const sig = this.#lifecycleSig || await this.#computeLifecycleSig()
-    if (!sig) return
+    if (!sig) { this.#lastDrillRequest = { stage: 'no-lifecycle-sig', atMs: Date.now() }; return }
 
+    // Fast clock while this page is still empty (the publisher's first
+    // answer may have been blank mid-drain); TTL cadence once filled.
+    const pageEmpty = this.peerTilesAtSig(this.#currentSig).length === 0
+    const minGapMs = pageEmpty ? 5_000 : Math.floor(EVENT_TTL_SECS * 1000 * 2 / 3)
     const pathKey = lineageKey(share)
     const nowMs = Date.now()
-    const lastExpMs = this.#myDrillExpMs.get(pathKey) ?? 0
-    if (lastExpMs - nowMs > Math.floor(EVENT_TTL_SECS * 1000 / 3)) return
+    if (nowMs - (this.#myDrillSentMs.get(pathKey) ?? 0) < minGapMs) return
+    this.#myDrillSentMs.set(pathKey, nowMs)
 
     const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
-    this.#myDrillExpMs.set(pathKey, expirationSecs * 1000)
     try {
       await mesh.publish(SWARM_INTEREST_KIND, sig, { pathSegments: share }, [
         ['d', `drill:${myPubkey}`],
         ['expiration', String(expirationSecs)],
       ])
-    } catch {
-      this.#myDrillExpMs.delete(pathKey)  // allow retry next sync
+      this.#lastDrillRequest = { stage: 'sent', share: [...share], pageEmpty, atMs: nowMs }
+    } catch (err) {
+      this.#myDrillSentMs.delete(pathKey)  // allow retry next sync
+      this.#lastDrillRequest = { stage: 'publish-threw', err: String(err).slice(0, 80), atMs: nowMs }
     }
   }
 
@@ -3450,13 +3478,19 @@ const payload: SwarmLayerPayload = myLabel
 
     // Only answer for paths that are public from OUR side, at every level.
     for (let i = 0; i < segments.length; i++) {
-      if (!isCellPublic('/' + segments.slice(0, i).join('/'), segments[i])) return
+      if (!isCellPublic('/' + segments.slice(0, i).join('/'), segments[i])) {
+        this.#lastDrillServed = { stage: 'not-public-here', at: [...segments], level: i, atMs: Date.now() }
+        return
+      }
     }
 
+    // SHORT cooldown — one page event per answer; the cooldown coalesces
+    // a crowd, it must never starve a visitor whose first answer was
+    // blank (fresh children mid-drain past the availability gate).
     const pathKey = lineageKey(segments)
     const nowMs = Date.now()
     const lastMs = this.#drillServedMs.get(pathKey) ?? 0
-    if (nowMs - lastMs < LAYER_REFRESH_MS) return
+    if (nowMs - lastMs < 5_000) return
     this.#drillServedMs.set(pathKey, nowMs)
     if (this.#drillServedMs.size > 512) {
       const oldest = this.#drillServedMs.keys().next().value
@@ -3476,15 +3510,20 @@ const payload: SwarmLayerPayload = myLabel
     try {
       const locSig = await history.sign({ explorerSegments: () => [...segments] })
       const layer = await history.currentLayerAt(locSig)
-      if (!layer) return
-    } catch { return }
+      if (!layer) { this.#lastDrillServed = { stage: 'not-held-here', at: [...segments], atMs: nowMs }; return }
+    } catch { this.#lastDrillServed = { stage: 'resolve-threw', at: [...segments], atMs: nowMs }; return }
 
     // Publish that location's slot (one node — dir=null stops recursion,
-    // which is exactly one frontier level per drill step).
+    // which is exactly one frontier level per drill step). The walk stamps
+    // its own dedupe memo, so a re-serve of unchanged content is one
+    // no-op sign, not a re-publish.
     const counter = { count: 0 }
     try {
       await this.#publishSubtree(null, segments, MAX_PUBLISH_DEPTH, counter, sigStore, mesh, room, secret)
-    } catch { /* best-effort — the driller re-requests on their heartbeat */ }
+      this.#lastDrillServed = { stage: 'served', at: [...segments], from: from.slice(0, 8), atMs: nowMs }
+    } catch (err) {
+      this.#lastDrillServed = { stage: 'walk-threw', err: String(err).slice(0, 80), atMs: nowMs }
+    }
   }
 
   /** Express interest in a child tile at the current lineage. Publishes
@@ -3891,119 +3930,14 @@ const payload: SwarmLayerPayload = myLabel
     return this.peerTilesAtSig(sig)
   }
 
-  /**
-   * Merkle pull. Given any layer signature you've seen on the wire,
-   * ask the content broker for the bytes and recursively walk the
-   * subtree, committing each found layer under the caller's current
-   * location. "You are always free to send out a layer request based
-   * on the merkle tree — you might not get it but you can always try."
-   *
-   * Behavior:
-   *  - Best effort. A sig with no responding peer fails silently
-   *    (recorded in the failed counter) but doesn't throw.
-   *  - sha256-verified end-to-end by the broker. Tampered responses
-   *    are dropped at the broker layer.
-   *  - Capped by maxNodes (default 256) to bound runaway pulls. Each
-   *    visited sig is deduped so cycles can't loop.
-   *  - Structure-only for v1: only the names are committed. Tile
-   *    properties (images, accent, link, …) ride a separate fetch
-   *    pipeline keyed by their own sigs — invoke that path after
-   *    requestSubtree if you want a fully painted subtree.
-   *  - Idempotent: re-adopting a name that's already at this location
-   *    is a no-op via the layer's name-keyed deduplication.
-   *  - Side effect: writeTilePropertiesAt commits trigger a normal
-   *    layer cascade, so the new subtree integrates with history,
-   *    undo/redo, and downstream peers' merkle roots.
-   */
-  public requestSubtree = async (
-    parentSig: string,
-    opts?: { maxNodes?: number; timeoutMs?: number },
-  ): Promise<{ adopted: number; failed: number }> => {
-    const max = Math.max(1, Math.min(opts?.maxNodes ?? 256, 1024))
-    const timeoutMs = Math.max(500, opts?.timeoutMs ?? 5000)
-
-    const sigClean = String(parentSig ?? '').trim().toLowerCase()
-    if (!/^[0-9a-f]{64}$/.test(sigClean)) return { adopted: 0, failed: 0 }
-
-    const broker = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
-      '@diamondcoreprocessor.com/ContentBrokerDrone',
-    ) as { fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null> } | undefined
-    if (!broker?.fetchBySig) {
-      console.warn('[swarm] requestSubtree: no content broker available')
-      return { adopted: 0, failed: 0 }
-    }
-
-    const lineage = this.#getLineage()
-    const baseSegmentsRaw = lineage?.explorerSegments?.() ?? []
-    const baseSegments = (Array.isArray(baseSegmentsRaw) ? baseSegmentsRaw : [])
-      .map((x: unknown) => String(x ?? '').trim())
-      .filter((x: string) => x.length > 0)
-
-    const seen = new Set<string>()
-    let adopted = 0, failed = 0
-
-    /** Adopt one layer at parentSegments + [its name], then recurse
-     *  into its grandchildren. Hard cap via `seen.size` so cycles or
-     *  pathological fan-outs can't run away. */
-    const adoptChild = async (childSig: string, parentSegments: readonly string[]): Promise<void> => {
-      if (seen.size >= max) return
-      if (seen.has(childSig)) return
-      seen.add(childSig)
-
-      let bytes: Uint8Array | null = null
-      try { bytes = await broker.fetchBySig!(childSig, 'layer', timeoutMs) }
-      catch { /* network error — count as failed */ }
-      if (!bytes) { failed++; return }
-
-      let layer: { name?: string; children?: string[] }
-      try { layer = JSON.parse(new TextDecoder().decode(bytes)) }
-      catch { failed++; return }
-
-      const name = typeof layer.name === 'string' ? layer.name.trim() : ''
-      if (!name || name.length > 256) { failed++; return }
-
-      try {
-        await writeTilePropertiesAt(parentSegments, name, {})
-        adopted++
-      } catch (err) {
-        console.warn('[swarm] requestSubtree: writeTilePropertiesAt failed', { name, err })
-        failed++
-        return
-      }
-
-      const childSegments = [...parentSegments, name]
-      const grandSigs = Array.isArray(layer.children) ? layer.children : []
-      for (const gs of grandSigs) {
-        if (seen.size >= max) break
-        await adoptChild(gs, childSegments)
-      }
-    }
-
-    // Top level: fetch the parent layer (whose CHILDREN we want),
-    // iterate its children. Each child gets adopted under baseSegments
-    // and recursed into for grandchildren — matching the publisher's
-    // own layout where parentSig describes "what's at this location."
-    seen.add(sigClean)
-    let parentBytes: Uint8Array | null = null
-    try { parentBytes = await broker.fetchBySig(sigClean, 'layer', timeoutMs) }
-    catch {}
-    if (!parentBytes) { failed++; return { adopted, failed } }
-
-    let parentLayer: { children?: string[] }
-    try { parentLayer = JSON.parse(new TextDecoder().decode(parentBytes)) }
-    catch { failed++; return { adopted, failed } }
-
-    const childSigs = Array.isArray(parentLayer.children) ? parentLayer.children : []
-    for (const cs of childSigs) {
-      if (seen.size >= max) break
-      await adoptChild(cs, baseSegments)
-    }
-
-    this.emitEffect('swarm:subtree-requested', {
-      parentSig: sigClean, adopted, failed, atSegments: baseSegments,
-    })
-    return { adopted, failed }
-  }
+  // `requestSubtree` — the recursive merkle pull that committed a peer's
+  // ENTIRE subtree (as husks) under the caller's location — is DELETED
+  // (Jaime's ruling, 2026-08-20: "you never give away the structure unless
+  // the participant navigates", and the audit had already flagged it as an
+  // ungated fold entry point: no code consent, no receipts, no committer
+  // cascade). Structure now travels one PAGE at a time: the publisher
+  // broadcasts only the current page, drill requests reveal each deeper
+  // page as a visitor walks in, and the visit fold acquires per-tile.
 
   // ─────────────────────────────────────────────────────────────────
   // Follow — navigation sync (independent of subscribe / auto-adopt)

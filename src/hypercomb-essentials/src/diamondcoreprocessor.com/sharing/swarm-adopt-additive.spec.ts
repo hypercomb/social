@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 
+const P1 = '1'.repeat(64)        // publisher pubkey — folds verify the 64-hex shape
 const RECIPES = 'a'.repeat(64)        // MY recipes — children [bread, soup]
 const BREAD = 'b'.repeat(64)
 const SOUP = 'c'.repeat(64)
@@ -77,27 +78,31 @@ const heldWithPeerSuperset = () => {
     noteDomainsForSig: vi.fn(),
     getKnownDomains: () => [],
   }
-  // importTree LANDS: mark the fold target's own bag and link it into its
-  // parent's children — so the drone's post-fold read-back reports 'committed'
-  // through either the location bag or the parent-chain path.
+  // importTree LANDS like the real committer: the fold target gets a marker
+  // in its own bag AND its sig is linked into the parent's live children —
+  // the read-back resolves through either the location bag or the
+  // parent-chain path, so both must reflect the commit.
   committer = {
     update: vi.fn(async () => 'f'.repeat(64)),
     importTree: vi.fn(async (updates: { segments: string[]; layer: Layer }[]) => {
       for (const u of updates) {
         const loc = 'loc:' + u.segments.join('/')
-        headByLoc.set(loc, { name: u.layer.name ?? u.segments[u.segments.length - 1] ?? 'root', children: [] })
         if (u.segments.join('/') === 'recipes/pasta') {
+          headByLoc.set(loc, { name: 'pasta', children: [] })
           const rec = layers.get(RECIPES)!
           rec.children = [...(rec.children ?? []), PASTA]
+          headByLoc.set('loc:recipes', { name: 'recipes', children: [...rec.children] })
+        } else {
+          headByLoc.set(loc, { name: u.layer.name ?? u.segments[u.segments.length - 1] ?? 'root', children: [] })
         }
       }
     }),
   }
-  peerTiles = [{ name: 'recipes', peerPubkey: 'pk1', layerSig: PEER_RECIPES }]
+  peerTiles = [{ name: 'recipes', peerPubkey: P1, layerSig: PEER_RECIPES }]
   peerByLoc = new Map<string, Record<string, unknown>[]>([
     [PEER_RECIPES_LOC, [
-      { name: 'bread', peerPubkey: 'pk1', layerSig: BREAD },
-      { name: 'pasta', peerPubkey: 'pk1', layerSig: PASTA },
+      { name: 'bread', peerPubkey: P1, layerSig: BREAD },
+      { name: 'pasta', peerPubkey: P1, layerSig: PASTA },
     ]],
   ])
 }
@@ -151,7 +156,7 @@ describe('adopt on a held tile is additive', () => {
   it('a held tile with nothing new imports nothing', async () => {
     heldWithPeerSuperset()
     // Peer offers only what I already hold → no missing child.
-    peerByLoc.set(PEER_RECIPES_LOC, [{ name: 'bread', peerPubkey: 'pk1', layerSig: BREAD }])
+    peerByLoc.set(PEER_RECIPES_LOC, [{ name: 'bread', peerPubkey: P1, layerSig: BREAD }])
 
     EffectBus.emit('tile:action', { action: 'adopt', label: 'recipes' })
     await settle()

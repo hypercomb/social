@@ -22,18 +22,32 @@ const KEY = 'hc:adopted-roots'
 const TOMBSTONE_KEY = 'hc:adopt-tombstones'
 const SEP = ''
 
+// Parse cache — these predicates run in hot paths now (the render loop's
+// collection rim, the divergence scan's per-tile sweep), and re-parsing a
+// localStorage JSON blob per call was a flagged scaling hazard. Writes in
+// this module invalidate; a different tab is not coherent here, which
+// matches the one-tab rule the packed store already imposes.
+const pathCache = new Map<string, string[][]>()
+
 const readPaths = (key: string): string[][] => {
+  const cached = pathCache.get(key)
+  if (cached) return cached
+  let paths: string[][] = []
   try {
     const parsed = JSON.parse(localStorage.getItem(key) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter(Array.isArray) : []
-  } catch {
-    return []
-  }
+    paths = Array.isArray(parsed) ? parsed.filter(Array.isArray) : []
+  } catch { /* corrupt / absent — empty */ }
+  pathCache.set(key, paths)
+  return paths
 }
 
 const writePaths = (key: string, paths: string[][]): void => {
+  pathCache.delete(key)
   try { localStorage.setItem(key, JSON.stringify(paths)) } catch { /* quota — best effort */ }
 }
+
+/** Test seam — specs swap localStorage under the module. */
+export const _resetAdoptedRootsCache = (): void => { pathCache.clear() }
 
 /** True when `prefix` is a non-empty element-wise prefix of (or equal to) `segs`. */
 const isPrefixOf = (prefix: readonly string[], segs: readonly string[]): boolean =>

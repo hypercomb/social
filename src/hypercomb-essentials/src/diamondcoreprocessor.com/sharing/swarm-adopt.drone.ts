@@ -42,8 +42,9 @@ import {
   seedLayerKeyedTileProps,
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
-import { recordVisit, dropVisitsWithin } from './visit-genome.js'
+import { recordVisit, dropVisitsWithin, visitRecordAt } from './visit-genome.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
+import { removeTilesAt } from '../commands/remove.queen.js'
 import { recordWithheldAtRoot } from './behavior-enablement.js'
 import { WEBSITE_SLOT } from '../commands/website-slot.js'
 import { extractPageRefSigs } from './decoration-closure.js'
@@ -213,7 +214,7 @@ export class SwarmAdoptDrone extends Drone {
   public override description =
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
-  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited']
+  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited', 'selection:painted']
   protected override emits: string[] = ['adopt:started', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded']
 
   // Latest installer registry projection — cached for the Done-gated fold.
@@ -294,6 +295,18 @@ export class SwarmAdoptDrone extends Drone {
     // unsubscribe, and a mere walk must not resurrect a deletion.
     this.onEffect<VisitPayload>('swarm:tile-visited', (p) => { void this.#onTileVisited(p) })
 
+    // ── CTRL+DRAG PAINT — the selection sweep's swarm overload ─────────
+    // In a zone, the ordinary ctrl+drag paint-select doubles as an
+    // adoption brush: sweeping a WITNESSED tile takes it (an explicit
+    // gesture, so it also clears a tombstone — the way back in after a
+    // deletion); sweeping one of your SWARM-ACQUIRED tiles gives it back
+    // (removal → tombstone, delete-is-the-unsubscribe as usual). Tiles
+    // native to your hive are untouchable here — the brush only ever
+    // moves swarm content in and out of the collection.
+    this.onEffect<{ label?: string; op?: string }>('selection:painted', (p) => {
+      void this.#onSelectionPainted(String(p?.label ?? '').trim(), p?.op === 'remove' ? 'remove' : 'add')
+    })
+
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       const action = String(payload?.action ?? '')
 
@@ -334,12 +347,12 @@ export class SwarmAdoptDrone extends Drone {
       // still disambiguate through the participant-grouped panel first.
       if (action === 'adopt') {
         if (!this.#isPeerTile(label)) return
-        // The participant-grouped disambiguation panel is retired with the
-        // adopt button. WHAT YOU SEE IS WHAT YOU GET: when two publishers
-        // offer the same name, the fold takes the entry the canvas rendered
-        // (freshest-publisher-first — the same ordering peerTilesAtSig gives
-        // the tile source), exactly like a visit-fold does.
-        void this.#adoptInline(label)
+        // PAGE TILES ONLY (Jaime's ruling, 2026-08-20): the adopt verb —
+        // like the walk and the pick-tiles pill — acquires the ONE tile as
+        // it stands on this page, never its branch. WHAT YOU SEE IS WHAT
+        // YOU GET on name collisions: the freshest entry, the copy the
+        // canvas rendered.
+        void this.#adoptPageTile(label)
         return
       }
 
@@ -497,16 +510,32 @@ export class SwarmAdoptDrone extends Drone {
     const entry = p?.entry && typeof p.entry === 'object' ? p.entry : null
     if (!name || segments.length === 0 || !entry) { this.#visitStage('bad-payload', { name }); return }
     if (segments[segments.length - 1] !== name) { this.#visitStage('path-mismatch', { name }); return }
+    await this.#foldPageTile(parentSegments, name, entry, p)
+  }
+
+  /** THE one-level fold — the single acquisition primitive of the swarm
+   *  surface. Visits ride it per navigation; the programmatic verbs and
+   *  the pick-tiles pill ride it per picked tile. It acquires exactly ONE
+   *  tile of the current page — never a branch: deeper pages exist for
+   *  the participant only once they walk into them. Returns true when
+   *  the tile is held here after the call (landed now or already ours). */
+  #foldPageTile = async (
+    parentSegments: string[],
+    name: string,
+    entry: Record<string, unknown>,
+    retrySrc?: VisitPayload,
+  ): Promise<boolean> => {
+    const segments = [...parentSegments, name]
     // Same peer-authored name guard as every fold.
-    if (/[\\/\x00-\x1f]/.test(name)) { this.#visitStage('bad-name', { name }); return }
+    if (/[\\/\x00-\x1f]/.test(name)) { this.#visitStage('bad-name', { name }); return false }
 
     const layerSig = String(entry['layerSig'] ?? '').trim().toLowerCase()
     const pubkey = String(entry['peerPubkey'] ?? '').trim().toLowerCase()
-    if (!SIG_RE.test(pubkey)) { this.#visitStage('no-pubkey', { name }); return }
+    if (!SIG_RE.test(pubkey)) { this.#visitStage('no-pubkey', { name }); return false }
 
     // DELETE IS THE UNSUBSCRIBE — a tombstoned path renders live as a
     // witness but never re-folds on a walk. (Nothing here clears stones.)
-    if (isAdoptTombstoned(segments)) { this.#visitStage('tombstoned', { name }); return }
+    if (isAdoptTombstoned(segments)) { this.#visitStage('tombstoned', { name }); return false }
 
     const ioc = this.#ioc()
     const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
@@ -521,7 +550,7 @@ export class SwarmAdoptDrone extends Drone {
     if (await this.#isHeldHere(parentSegments, name)) {
       this.#visitStage('held', { name })
       if (SIG_RE.test(layerSig)) recordVisit({ segments, layerSig, pubkey, domain })
-      return
+      return true
     }
 
     // Viewing history — the committer refuses rewound writes; don't try.
@@ -544,7 +573,7 @@ export class SwarmAdoptDrone extends Drone {
         await new Promise(r => setTimeout(r, 250))
         stillRewound = cursor?.state?.rewound === true
       }
-      if (stillRewound) { this.#visitStage('rewound', { name }); this.#scheduleVisitRetry(p); return }
+      if (stillRewound) { this.#visitStage('rewound', { name }); this.#scheduleVisitRetry(retrySrc ?? { segments, parentSegments, name, entry }); return false }
     }
 
     // ONE-LEVEL fold. MATERIALIZE first — the EGG shape (importTree links
@@ -555,20 +584,20 @@ export class SwarmAdoptDrone extends Drone {
     const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
     const committer = ioc?.get?.(COMMITTER_KEY) as CommitterLike | undefined
     const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
-    if (!history || !committer?.importTree) { this.#visitStage('no-services', { name }); return }
+    if (!history || !committer?.importTree) { this.#visitStage('no-services', { name }); return false }
     try {
       const parent = await resolveLayerAt(history, lineage?.domain, parentSegments)
       const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
       // Never SET a children list we couldn't fully read — the same
       // cold-sibling wipe guard every fold honours.
-      if (coldMiss) { this.#visitStage('cold-parent', { name }); return }
+      if (coldMiss) { this.#visitStage('cold-parent', { name }); return false }
       if (!existing.includes(name)) {
         await committer.importTree([
           { segments: parentSegments, layer: { ...(parent ?? {}), children: [...existing, name] } },
           { segments: [...segments], layer: { name, children: [] } },
         ])
       }
-    } catch (err) { this.#visitStage('import-threw', { name, err: String(err).slice(0, 120) }); return }
+    } catch (err) { this.#visitStage('import-threw', { name, err: String(err).slice(0, 120) }); return false }
 
     // Read-back: only a landed fold mints records. importTree refuses
     // SILENTLY while the cursor is rewound (a beat of legitimate lag after
@@ -576,8 +605,8 @@ export class SwarmAdoptDrone extends Drone {
     // the same schedule as a held rewound state.
     if (!(await this.#isHeldHere(parentSegments, name))) {
       this.#visitStage('not-landed', { name })
-      this.#scheduleVisitRetry(p)
-      return
+      this.#scheduleVisitRetry(retrySrc ?? { segments, parentSegments, name, entry })
+      return false
     }
 
     // PROPS from the witnessed wire visual, through the canonical writer
@@ -599,10 +628,10 @@ export class SwarmAdoptDrone extends Drone {
       // The generation we saw IS the generation we hold — divergence
       // detection baselines here instead of re-lighting immediately.
       this.#recordSyncReceipt(segments, layerSig)
-      // Background enrichment: localize the branch's layer closure as
-      // inert content-addressed cache (tiny JSONs, layersOnly) so the
-      // drilled path can be re-walked offline. Cache, not adoption.
-      try { void broker?.adopt?.(layerSig, { layersOnly: true, silent: true }) } catch { /* best-effort */ }
+      // NO branch-closure pre-cache here (removed 2026-08-20): "you never
+      // give away the structure unless the participant navigates" — deeper
+      // pages arrive only as they are walked, via the drill tunnel. The
+      // genome keeps the sealed handle as provenance, nothing more.
     }
 
     // The topmost foreign tile of a drill is the adopted ROOT — it covers
@@ -626,6 +655,58 @@ export class SwarmAdoptDrone extends Drone {
       message: i18n?.t('swarm.visited', { cell: name }) ?? `"${name}" is yours now — visited tiles join your hive`,
       icon: '●',
     })
+    return true
+  }
+
+  /** The ctrl+drag adoption brush (see the constructor comment). Every
+   *  guard the walk-fold has applies — plus paint-ON is an explicit
+   *  re-subscribe, so it clears a tombstone where a mere walk never does. */
+  #onSelectionPainted = async (label: string, op: 'add' | 'remove'): Promise<void> => {
+    if (!label) return
+    let inZone = false
+    try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
+    if (!inZone) return
+
+    const at = this.#currentSegments()
+    const path = [...at, label]
+
+    if (op === 'add') {
+      if (await this.#isHeldHere(at, label)) return
+      const entry = this.#peerEntryFor(label)
+      if (!entry) return
+      clearAdoptTombstone(path)   // painting it back on IS the way back in
+      await this.#foldPageTile(at, label, entry)
+      return
+    }
+
+    // op === 'remove' — give back ONLY what the swarm brought you.
+    if (!(await this.#isHeldHere(at, label))) return
+    if (visitRecordAt(path) === null && !isWithinAdoptedRoot(path)) return
+    try {
+      // The paint IS the confirmation; removal mints the tombstone via the
+      // ordinary cell:removed path, so it won't re-fold on the next walk.
+      await removeTilesAt(at, [label], {})
+    } catch { /* best-effort — the tile simply stays */ }
+  }
+
+  /** Resolve the witnessed wire entry for `label` at the current location
+   *  (freshest publisher first — the copy the canvas rendered; a pinned
+   *  pubkey narrows when the caller knows whose). */
+  #peerEntryFor = (label: string, pubkey?: string): Record<string, unknown> | null => {
+    const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    if (!swarm?.peerTilesAtCurrentSig) return null
+    const matches = (p: { name: string; peerPubkey: string }): boolean =>
+      p.name === label && (!pubkey || p.peerPubkey === pubkey)
+    return (swarm.peerTilesAtCurrentSig().find(matches)
+      ?? swarm.subscribedTiles?.().find(matches)
+      ?? swarm.peerTilesAtCurrentSig().find(p => p.name === label)
+      ?? null) as Record<string, unknown> | null
+  }
+
+  /** The current explorer path — where a picked page tile folds. */
+  #currentSegments = (): string[] => {
+    const lineage = this.#ioc()?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+    return [...(lineage?.explorerSegments?.() ?? [])].map(s => String(s ?? '').trim()).filter(Boolean)
   }
 
   // ── inline adopt: fold content in place, route only code to the installer ──
@@ -647,59 +728,73 @@ export class SwarmAdoptDrone extends Drone {
     EffectBus.emit('features:outcome', { cell, kind: kind ?? '', ok, message })
   }
 
-  /** Fold a SET of peer tiles — the verb behind "select several, keep them".
-   *  Sequential so commits land in pick order rather than racing the committer
-   *  queue, and every fold is SILENT so the Beehaviors panel opens exactly
-   *  once, at the end, on the first tile that actually landed. Without this
-   *  each adopt re-targeted the panel and wiped the one before it, so a
-   *  five-tile adopt flashed five times and left you on whichever finished
-   *  last. Nothing lands ⇒ no panel, and the per-tile failure messages
-   *  already said why. */
+  /** Fold a SET of picked page tiles — the verb behind the pick-tiles pill
+   *  and `adopt-selected`. PAGE TILES ONLY: each pick folds as the ONE tile
+   *  it is on this page (props from the wire), never its branch — deeper
+   *  pages join the hive only when the participant walks into them.
+   *
+   *  ENTRIES FIRST, FOLDS AFTER: every pick's wire entry is snapshotted
+   *  before any fold — each fold commits and re-renders, which invalidates
+   *  the live peer cache, so resolving inside the loop silently dropped the
+   *  tail of a big selection. Sequential folds keep commit order; the
+   *  Beehaviors panel lands once, on the first tile that made it in. */
   #adoptMany = async (picks: readonly { label: string; pubkey?: string }[]): Promise<void> => {
-    // ── SIGNATURES FIRST, FOLDS AFTER ─────────────────────────────────
-    // Resolve EVERY pick to its branch before folding ANY of them. The old
-    // loop resolved inside itself, off the live peer cache — but each fold
-    // commits and re-renders, which invalidates that cache, so the tail of a
-    // big selection resolved to null and was dropped in silence. That is the
-    // "it shows a bunch of tiles and adopts some of them" report.
-    //
-    // A signature is a permanent handle: captured here, while the peer
-    // entries are still warm, it stays fetchable from any host that serves
-    // it — through commits, navigation, and reloads. So we snapshot the whole
-    // gesture up front and never consult the peer cache again.
-    const resolved: { sig: string; label: string; at: string[]; domain?: string }[] = []
-    for (const pick of picks) {
-      const branch = this.#resolvePeerBranch(pick.label, pick.pubkey || undefined)
-      if (!branch) {
-        this.#rowOutcome(pick.label, undefined, false, `couldn't adopt "${pick.label}" — the peer's branch is no longer offered here`)
+    const resolved = picks.map(pick => ({
+      label: pick.label,
+      pubkey: pick.pubkey || undefined,
+      entry: this.#peerEntryFor(pick.label, pick.pubkey || undefined),
+    }))
+    let first: string | null = null
+    let landed = 0
+    for (const r of resolved) {
+      if (!r.entry) {
+        this.#rowOutcome(r.label, undefined, false, `couldn't keep "${r.label}" — it's no longer offered here`)
         continue
       }
-      resolved.push({ sig: branch.layerSig, label: branch.label, at: branch.at, domain: branch.domain })
+      const ok = await this.#adoptPageTile(r.label, r.pubkey, { entry: r.entry, silent: true })
+      if (ok) { landed++; if (!first) first = r.label }
     }
-    if (resolved.length === 0) return
-
-    // One batch per gesture, so the behaviours hand-off can wait for the LAST
-    // tile rather than firing per fold (which re-targeted the panel N times).
-    const batch = `${Date.now()}-${resolved.length}`
-    const queue = this.#adoptQueue()
-    if (!queue) {
-      // No queue service (an older bundle) — fall back to the direct serial
-      // fold rather than dropping the gesture entirely. Behaviours still land
-      // once, at the end, on the first tile that actually made it in.
-      let first: string | null = null
-      for (const r of resolved) {
-        const ok = await this.#adoptInline(r.label, undefined, { silent: true })
-        if (ok && !first) first = r.label
-      }
+    if (landed > 0) {
+      EffectBus.emit('activity:log', {
+        message: `kept ${landed} tile${landed === 1 ? '' : 's'} from this page`,
+        icon: '●',
+      })
       if (first) this.#openBehaviours(first)
-      return
     }
-    queue.enqueueAll(resolved, batch)
-    EffectBus.emit('activity:log', {
-      message: `adopting ${resolved.length} tile${resolved.length === 1 ? '' : 's'} — they keep arriving in the background`,
-      icon: '●',
-    })
-    void this.#drainAdoptQueue(batch, resolved[0].label)
+  }
+
+  /** One picked page tile. Held → additive (its missing PAGE children fold,
+   *  one level, nothing removed); foreign → the one-level fold. True when
+   *  the tile is held here afterwards. */
+  #adoptPageTile = async (
+    label: string,
+    pubkey?: string,
+    opts?: { entry?: Record<string, unknown> | null; silent?: boolean },
+  ): Promise<boolean> => {
+    const at = this.#currentSegments()
+    if (await this.#isHeldHere(at, label)) {
+      const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
+      const layerSig = String(entry?.['layerSig'] ?? '').trim().toLowerCase()
+      await this.#additiveAdoptHeld({
+        layerSig: SIG_RE.test(layerSig) ? layerSig : '',
+        at, label,
+      })
+      return true
+    }
+    const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
+    if (!entry) {
+      this.#rowOutcome(label, undefined, false, `couldn't keep "${label}" — it's no longer offered here`)
+      return false
+    }
+    const ok = await this.#foldPageTile(at, label, entry)
+    if (ok && !opts?.silent) {
+      this.#rowOutcome(label, undefined, true, `"${label}" is yours now`)
+      this.#openBehaviours(label)
+    }
+    if (!ok && !opts?.silent) {
+      this.#rowOutcome(label, undefined, false, `couldn't keep "${label}" just now — step into it or try again in a moment`)
+    }
+    return ok
   }
 
   #adoptQueue = (): AdoptQueueLike | undefined =>
@@ -807,43 +902,11 @@ export class SwarmAdoptDrone extends Drone {
     }
   }
 
-  /** Fold one peer tile. `silent` suppresses this tile's own Beehaviors
-   *  landing so a BULK adopt can open the panel ONCE at the end instead of
-   *  re-targeting it N times (the panel replaces its subject, so N adopts
-   *  meant N wipes and last-one-wins). Resolves true when the tile is in. */
-  #adoptInline = async (label: string, pubkey?: string, opts?: { silent?: boolean }): Promise<boolean> => {
-    const branch = this.#resolvePeerBranch(label, pubkey)
-    if (!branch) {
-      // The peer cache expired / navigation changed since the click — say so
-      // instead of doing nothing (the silent dead-end reads as "adopt broken").
-      this.#rowOutcome(label, undefined, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
-      return false
-    }
-    // ADDITIVE when already held. A tile you hold that a peer diverged on is
-    // adopted by ADDING the children they publish that you don't have — never
-    // by re-homing the tile, which SETs its children list to the peer's and so
-    // drops any child you have that they lack. Only a tile you DON'T hold folds
-    // whole. (This is the standing rule: adopt is additive, never removes or
-    // overwrites — a shared tile stays one tile.)
-    if (await this.#isHeldHere(branch.at, branch.label)) {
-      await this.#additiveAdoptHeld(branch)
-      return true
-    }
-    const res = await this.adoptResolvedBranch(branch, opts)
-    const ok = res === 'committed' || res === 'exists'
-    // The publisher's WITHHELD BEHAVIORS (their global-off roster, wire kind
-    // 30208) land as a record at the adopted root: the snapshot arrives
-    // intact — layers are signed and never edited — but the enablement lens
-    // renders those decoration kinds inert under this root. An empty list
-    // clears any earlier record (they stopped withholding). Participant-
-    // local, never in the lineage.
-    if (ok && branch.pubkey) {
-      const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-      const withheld = swarm?.withheldByPeer?.(branch.pubkey) ?? []
-      try { recordWithheldAtRoot([...branch.at, branch.label], withheld) } catch { /* never blocks an adopt */ }
-    }
-    return ok
-  }
+  // (#adoptInline — the whole-branch mesh fold — is deleted: every swarm
+  // acquisition rides #foldPageTile / #adoptPageTile now. adoptResolvedBranch
+  // remains the branch primitive for the NON-mesh flows that legitimately
+  // install a whole bundle: hive-link previews, the DCP round-trip, the
+  // example-hives first-boot offer, and the legacy queue drain.)
 
   /** Is `label` a live child of the layer at `at` right now? Routes adopt to
    *  its additive branch. Cursor-aware; resolves through the parent chain so a
@@ -915,29 +978,27 @@ export class SwarmAdoptDrone extends Drone {
     const missing = theirs
       .map(t => ({
         name: String(t?.name ?? '').trim(),
-        sig: String((t as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase(),
+        entry: t as Record<string, unknown>,
       }))
-      .filter(t => t.name.length > 0 && SIG_RE.test(t.sig) && !mine.has(t.name.toLowerCase()))
+      .filter(t => t.name.length > 0 && !mine.has(t.name.toLowerCase()))
 
-    // Fold each missing child at the held tile's location. adoptResolvedBranch
-    // gives every child the SAME code-consent + complete-or-defer + receipt as
-    // a normal adopt; `silent` suppresses the per-tile Beehaviors landing so N
-    // children don't open N panels. A not-held child's `sync` commit APPENDS
-    // (its parent has no update in the tree, so importTree's swap/append path
-    // links it) — additive, your existing children untouched.
+    // Fold each missing child as the ONE PAGE TILE it is (props from the
+    // wire) — never its branch: "only the tiles on the current page are
+    // adopted"; anything deeper joins when the participant walks in. A
+    // props fold cannot carry code, so no consent modal can interrupt a
+    // bulk additive pass — and no fold is ever counted landed without the
+    // read-back (the old path counted a routed-away install as success and
+    // dark-cleared the divergence light over missing content).
     let failed = 0
     for (const child of missing) {
-      const res = await this.adoptResolvedBranch(
-        { layerSig: child.sig, at: childLoc, domain: branch.domain, label: child.name },
-        { silent: true },
-      )
-      if (res !== 'committed' && res !== 'exists' && res !== 'code-routed') failed++
+      const ok = await this.#foldPageTile(childLoc, child.name, child.entry)
+      if (!ok) failed++
     }
 
     // Acknowledge the peer's current generation for the HELD tile so rule 1
     // (adopted-root receipt ≠ announced sig) clears — but only when nothing was
     // left owed, so a deferred/failed child keeps the affordance lit to retry.
-    if (failed === 0) this.#recordSyncReceipt(childLoc, branch.layerSig.toLowerCase())
+    if (failed === 0 && SIG_RE.test(branch.layerSig)) this.#recordSyncReceipt(childLoc, branch.layerSig.toLowerCase())
 
     // Recompute the diverged set now so the adopt icon updates without waiting
     // for the next peer burst.

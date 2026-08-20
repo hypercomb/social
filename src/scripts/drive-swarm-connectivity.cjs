@@ -183,8 +183,13 @@ async function settle(page, quietMs = 3000, timeoutMs = 30000) {
 // THE JOIN GESTURE. Identical to the swarm control and the keymap binding:
 // flip the flag, tell the mesh, announce it. Emitted through a live bee so
 // it travels the real EffectBus rather than a harness-only side channel.
+// The availability gate is bypassed the same way the sanctioned setup
+// command does it (/use-live-relay sets hc:swarm:ungated — the "reliable
+// and simple" ruling, 2026-08-20) so the harness joins like a real
+// participant joins today.
 async function joinSwarm(page) {
   return evalSafe(() => page.evaluate(() => {
+    localStorage.setItem('hc:swarm:ungated', '1')
     const bee = window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')
     if (!bee?.emitEffect) return { ok: false, reason: 'no SwarmDrone' }
     bee.emitEffect('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })

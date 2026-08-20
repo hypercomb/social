@@ -67,7 +67,7 @@ class SelectionInputDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end']
-  protected override emits: string[] = []
+  protected override emits: string[] = ['selection:painted']
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -308,6 +308,13 @@ class SelectionInputDrone extends Drone {
     } else {
       if (selection.isSelected(label)) selection.remove(label)
     }
+
+    // THE SWARM OVERLOAD (Jaime, 2026-08-20): the same ctrl+drag paint,
+    // in a zone, paints ADOPTION — sweep witnessed tiles to take them,
+    // sweep your swarm-acquired ones to give them back. This drone stays
+    // selection-only; SwarmAdoptDrone owns what "painted" means there
+    // (fold / remove, with all its guards — native tiles are untouchable).
+    EffectBus.emit('selection:painted', { label, op: this.#lastOp })
   }
 
   #selection(): SelectionService | undefined {

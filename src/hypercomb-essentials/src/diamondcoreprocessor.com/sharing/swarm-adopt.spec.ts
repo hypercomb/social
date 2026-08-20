@@ -13,6 +13,12 @@
 // window.ioc is stubbed BEFORE the module import (the drone self-registers
 // at load). History is a tiny in-memory (locKey, sig) store; the committer
 // stub decides whether importTree actually "lands" the fold target.
+//
+// ENTRY POINT (since the page-fold redesign, 2026-08-20): these pins drive
+// `adoptResolvedBranch` DIRECTLY — the branch primitive that hive-link
+// previews, the DCP round-trip, example hives, and the legacy queue drain
+// still ride. The swarm's own verbs fold page tiles now (swarm-visit.spec
+// pins those); the ladder below belongs to the branch flows.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
@@ -63,6 +69,10 @@ const iocRegistry = (): Record<string, unknown> => ({
 
 const { SwarmAdoptDrone } = await import('./swarm-adopt.drone.js')
 
+// One shared instance for the direct-call tests (module import already
+// registered another; both are inert without tile:action emissions).
+const drone = new SwarmAdoptDrone()
+
 const pendingFolds = (): { sig: string; at: string[] }[] =>
   JSON.parse(localStorage.getItem(PENDING_KEY) ?? '[]')
 
@@ -90,15 +100,6 @@ const landOnImport = (label: string) => {
   })
 }
 
-const nextOutcome = (cell: string): Promise<{ ok: boolean; message: string }> =>
-  new Promise((resolve) => {
-    const off = EffectBus.on<{ cell?: string; ok?: boolean; message?: string }>('features:outcome', (p) => {
-      if (p?.cell !== cell) return
-      off()
-      resolve({ ok: !!p.ok, message: String(p.message ?? '') })
-    })
-  })
-
 beforeEach(() => {
   localStorage.clear()
 })
@@ -113,12 +114,9 @@ describe('swarm-adopt fold — landed-or-owed', () => {
     offerBranch('phantom-tile', SIG_PHANTOM)
     // committer.importTree resolves void but lands nothing — the rewound
     // no-op / machine-refusal shape. Pre-fix this surfaced as 'committed'.
-    const outcome = nextOutcome('phantom-tile')
-    EffectBus.emit('tile:action', { action: 'adopt-selected', selections: [{ label: 'phantom-tile' }] })
-    const res = await outcome
+    const res = await drone.adoptResolvedBranch({ layerSig: SIG_PHANTOM, at: [], label: 'phantom-tile' })
 
-    expect(res.ok).toBe(false)
-    expect(res.message).toMatch(/isn't reachable/)
+    expect(res).toBe('unavailable')
     expect(committer.importTree).toHaveBeenCalledTimes(1)
     // The intent survives as a pending fold — a refresh resumes it.
     expect(pendingFolds().map(f => f.sig)).toContain(SIG_PHANTOM)
@@ -128,12 +126,9 @@ describe('swarm-adopt fold — landed-or-owed', () => {
     offerBranch('rewound-tile', SIG_REWOUND)
     cursor.state.rewound = true
 
-    const outcome = nextOutcome('rewound-tile')
-    EffectBus.emit('tile:action', { action: 'adopt-selected', selections: [{ label: 'rewound-tile' }] })
-    const res = await outcome
+    const res = await drone.adoptResolvedBranch({ layerSig: SIG_REWOUND, at: [], label: 'rewound-tile' })
 
-    expect(res.ok).toBe(false)
-    expect(res.message).toMatch(/viewing history/)
+    expect(res).toBe('rewound')
     expect(committer.importTree).not.toHaveBeenCalled()
     // Only the user can return to head — no retry pretends otherwise.
     expect(pendingFolds()).toHaveLength(0)
@@ -145,11 +140,9 @@ describe('swarm-adopt fold — landed-or-owed', () => {
     // Simulate an earlier deferral of this same branch.
     localStorage.setItem(PENDING_KEY, JSON.stringify([{ sig: SIG_LANDED, at: [], mode: 'fold' }]))
 
-    const outcome = nextOutcome('landed-tile')
-    EffectBus.emit('tile:action', { action: 'adopt-selected', selections: [{ label: 'landed-tile' }] })
-    const res = await outcome
+    const res = await drone.adoptResolvedBranch({ layerSig: SIG_LANDED, at: [], label: 'landed-tile' })
 
-    expect(res.ok).toBe(true)
+    expect(res).toBe('committed')
     expect(committer.importTree).toHaveBeenCalledTimes(1)
     expect(pendingFolds()).toHaveLength(0)
   })

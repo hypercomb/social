@@ -10,6 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
+import { visitRecordAt } from '../../sharing/visit-genome.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
 import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
@@ -103,6 +104,16 @@ function launchShapeToMode(shape: string): number {
  *  TITLE tiles, so a header reads as a header without any new tile shape —
  *  the per-cell borderColor attribute already exists. */
 const HEADER_BORDER: [number, number, number] = [0.494, 0.714, 0.839]
+
+/** COLLECTION RIM — the swarm's "which of these are mine now" answer, on
+ *  the rim channel so it's unmistakable at a glance (Jaime, 2026-08-20:
+ *  "very clear on the fact that we have now included that in our
+ *  collection"). Green = acquired from the swarm (the visit genome or an
+ *  adopted root covers it); dim slate = witnessed only, not yours yet;
+ *  the ordinary gold rim stays for tiles native to your hive. A user-set
+ *  border decoration still overrides (applied later in the pass). */
+const COLLECTED_BORDER: [number, number, number] = [0.435, 0.827, 0.604]
+const WITNESSED_BORDER: [number, number, number] = [0.302, 0.365, 0.447]
 /** Cold grey-blue for a tile that more than one participant holds, mixed into
  *  its own border while YOUR version is the one showing. It marks depth, not
  *  ownership — the moment you roll onto a participant the border takes that
@@ -7623,6 +7634,9 @@ export class ShowCellDrone extends Drone {
     // once; isCellPublic() is branch-aware (own flag or any ancestor branch).
     const worldMode = this.#worldMode
     const worldLocation = worldMode ? String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/') : ''
+    // Current path once per pass — the collection-rim predicates key on it.
+    const collectionSegs = ((this.resolve<any>('lineage')?.explorerSegments?.() ?? []) as unknown[])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
 
     // Stage diagnosis: any occupied slot at or past `max` is CUT from this
     // render entirely — those tiles only appear when a later pass renders
@@ -7669,7 +7683,16 @@ export class ShowCellDrone extends Drone {
       // it. Dismissing the spotlight empties the set and the tile is
       // plainly yours again.
       const external = !localCellSet.has(label) || this.#stackVariantLabels.has(label)
-      out.push({ q: a.q, r: a.r, label, external, heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared, borderColor, plain: !!cluster })
+      // COLLECTION RIM (see COLLECTED_BORDER): mark what the swarm brought
+      // you vs what it merely shows you. Both predicates are parse-cached
+      // map lookups — render-loop safe.
+      let rim = borderColor
+      if (!rim) {
+        const tilePath = [...collectionSegs, label]
+        if (!external && (visitRecordAt(tilePath) !== null || isWithinAdoptedRoot(tilePath))) rim = COLLECTED_BORDER
+        else if (external) rim = WITNESSED_BORDER
+      }
+      out.push({ q: a.q, r: a.r, label, external, heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared, borderColor: rim, plain: !!cluster })
     }
 
     return out
