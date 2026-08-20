@@ -126,6 +126,9 @@ interface DeviceManifest {
    *  disk. Capped for size; `unrepresentableCount` is the true total. */
   unrepresentable?: string[]
   unrepresentableCount?: number
+  /** Entries gone between enumeration and read. Not a fault — a live hive
+   *  rewrites as the walk runs — but never silent either. */
+  vanishedCount?: number
   files: Record<string, FileStamp>
 }
 
@@ -413,6 +416,12 @@ async function* walkFiles(
 ): AsyncGenerator<{ path: string; handle: FileSystemFileHandle }> {
   for await (const [name, handle] of (dir as any).entries()) {
     const path = prefix ? `${prefix}/${name}` : name
+    // Chromium writes `<name>.crswap` beside a file for the duration of a
+    // createWritable() and removes it on close. They are not content, they are
+    // MID-WRITE, and the hive writes while the backup reads — so copying one
+    // is both meaningless and a race that ends in NotFoundError. Not counted
+    // as refused: nothing was lost by skipping something that is not data.
+    if (name.endsWith('.crswap')) continue
     if (!validSegment(name)) {
       refused.push(path)
       continue
@@ -834,9 +843,24 @@ export class FolderSyncService {
       let totalBytes = 0
       /** Paths this filesystem refused. Reported, never fatal. */
       const unrepresentable: string[] = []
+      /** Entries that existed at enumeration and were gone at read. A live
+       *  hive does this; the next pass picks up whatever replaced them. */
+      let vanished = 0
 
       for await (const entry of walkFiles(source, '', unrepresentable)) {
-        const file = await entry.handle.getFile()
+        // The source is a LIVE filesystem: the hive keeps writing while this
+        // walk runs, so an entry can be enumerated and then be gone before it
+        // is read. That is ordinary, and it threw `NotFoundError` straight out
+        // of the pass — measured on the real hive, reported as
+        // "A requested file or directory could not be found".
+        let file: File
+        try {
+          file = await entry.handle.getFile()
+        } catch (error) {
+          vanished++
+          console.warn('[folder-sync] entry disappeared mid-walk:', entry.path, error)
+          continue
+        }
         const parts = entry.path.split('/')
         const name = parts.pop()!
         // A root-level sig-named file is content-addressed: the NAME is the
@@ -949,6 +973,7 @@ export class FolderSyncService {
       manifest.categories = summary.categories
       manifest.unrepresentable = unrepresentable.slice(0, 200)
       manifest.unrepresentableCount = unrepresentable.length
+      manifest.vanishedCount = vanished
       const complete = manifest.mode === 'hard-copy'
         && manifest.closure.resolverAvailable
         && manifest.closure.missing === 0
@@ -1597,6 +1622,9 @@ export class FolderSyncService {
       `Missing referenced items: ${hardCopy.missing}`,
       // Named, not just counted: "3 files could not be written" is unusable,
       // and the whole point of a report is that the next person can act on it.
+      ...(manifest.vanishedCount
+        ? [`Entries rewritten by the hive mid-walk (next pass catches them): ${manifest.vanishedCount}`]
+        : []),
       ...(manifest.unrepresentableCount
         ? [
             `Items this filesystem refused (copy is NOT portable): ${manifest.unrepresentableCount}`,
