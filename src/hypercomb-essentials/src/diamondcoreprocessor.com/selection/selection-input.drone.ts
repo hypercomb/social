@@ -51,6 +51,13 @@ class SelectionInputDrone extends Drone {
   // two meanings on one gesture is how they get in each other's way.
   #wandActive = false     // a wand gesture is in progress
   #wandArmed = false      // ...and the modifier is still down (sweeping)
+  /** The modifier is down over a page with takeable tiles — announced as
+   *  `wand:armed` so the renderer can SHOW the grammar: tiles you don't own
+   *  shade out the moment ctrl goes down, and each one the wand touches
+   *  lights back up as it becomes yours. Announced only when the wand could
+   *  actually act (zone + witnessed tiles + no other ctrl-mode in charge),
+   *  so holding ctrl in your own hive changes nothing. */
+  #wandAnnounced = false
 
   // ── THE COLLECTING WALK ─────────────────────────────────────────────
   // While the Pheromones window has a bouquet in hand (`tags:apply-pending`
@@ -118,7 +125,7 @@ class SelectionInputDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end', 'sample:mode', 'select:mode', 'tags:apply-pending', 'clipboard:open']
-  protected override emits: string[] = ['selection:painted', 'swarm:wand', 'tags:apply-paint']
+  protected override emits: string[] = ['selection:painted', 'swarm:wand', 'wand:armed', 'tags:apply-paint']
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -187,6 +194,9 @@ class SelectionInputDrone extends Drone {
     // navigation guard — block clicks during layer transitions and reset drag state
     this.onEffect('navigation:guard-start', () => {
       this.#navigationBlocked = true
+      // Leaving the page lifts the armed shade — the next page announces
+      // afresh if ctrl is still down over takeable tiles.
+      this.#disarmWandAnnounce()
       // Abort any in-progress drag/pending gesture so stale state doesn't bleed into the new view
       if (this.#dragActive || this.#pendingDrag || this.#reorderDragActive || this.#wandActive || this.#scentStroke) {
         this.#dragActive = false
@@ -230,6 +240,7 @@ class SelectionInputDrone extends Drone {
       document.removeEventListener('pointermove', this.#onPointerMove)
       document.removeEventListener('pointerup', this.#onPointerUp)
       document.removeEventListener('pointercancel', this.#onPointerCancel)
+      document.removeEventListener('keydown', this.#onKeyDown)
       document.removeEventListener('keyup', this.#onKeyUp)
       window.removeEventListener('blur', this.#onBlur)
       this.#listening = false
@@ -245,6 +256,7 @@ class SelectionInputDrone extends Drone {
     document.addEventListener('pointermove', this.#onPointerMove)
     document.addEventListener('pointerup', this.#onPointerUp)
     document.addEventListener('pointercancel', this.#onPointerCancel)
+    document.addEventListener('keydown', this.#onKeyDown)
     document.addEventListener('keyup', this.#onKeyUp)
     window.addEventListener('blur', this.#onBlur)
   }
@@ -401,8 +413,37 @@ class SelectionInputDrone extends Drone {
     this.#endDrag()
   }
 
+  /** Ctrl went down. If the wand could act on this page, SAY SO — the
+   *  renderer shades everything you don't own, so the modifier itself
+   *  announces "these are takeable" before any press. Auto-repeat and the
+   *  other ctrl-modes (collecting walk, swap, picking pills) stay silent:
+   *  where the wand yields, the shade would be a lie. */
+  #onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key !== 'Control' && e.key !== 'Meta') return
+    if (e.repeat || this.#wandAnnounced) return
+    if (this.#scentArmed || this.#clipboardArmed || this.#sampleArmed || this.#selectModeArmed) return
+    if (this.#externalLabels.size === 0) return
+    const adopt = window.ioc?.get?.(SWARM_ADOPT_KEY) as WandOracle | undefined
+    if (!adopt?.wandEligible) return
+    let takeable = false
+    for (const label of this.#externalLabels) {
+      if (adopt.wandEligible(label)) { takeable = true; break }
+    }
+    if (!takeable) return
+    this.#wandAnnounced = true
+    EffectBus.emit('wand:armed', { active: true })
+  }
+
+  /** The modifier is up (or focus left) — the shade lifts. */
+  #disarmWandAnnounce(): void {
+    if (!this.#wandAnnounced) return
+    this.#wandAnnounced = false
+    EffectBus.emit('wand:armed', { active: false })
+  }
+
   #onKeyUp = (e: KeyboardEvent): void => {
     if (e.key !== 'Control' && e.key !== 'Meta') return
+    this.#disarmWandAnnounce()
     // Releasing the modifier mid-wand stops the sweep but does NOT end the
     // gesture: the pointer is still down, and the click it will fire must
     // still be swallowed (#endWand on pointerup does that). Ending here
@@ -415,6 +456,7 @@ class SelectionInputDrone extends Drone {
   }
 
   #onBlur = (): void => {
+    this.#disarmWandAnnounce()
     if (this.#wandActive) { this.#endWand(); return }
     if (this.#scentStroke) { this.#endScentStroke(); return }
     if (this.#dragActive) this.#endDrag()

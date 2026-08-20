@@ -1082,20 +1082,39 @@ export class FeaturesViewerComponent implements OnDestroy {
     }
     const feat = row.feat as FeatureRow
     if (this.isSuppressed(group, feat)) { this.restoreLegacy(group, feat); return }
-    if (this.isWebsiteRoot(group, feat)) { void this.toggleWebsite(group, feat); return }
+    // A WEBSITE BELONGS TO ITS ROOT TILE (Jaime, 2026-08-20): the row shows
+    // anywhere within the site's branch, and its control acts at THAT
+    // parent — the tile the website belongs to — from wherever you stand.
+    // Never "apply it here": a site applied where you happen to be standing
+    // is a site divorced from its tile. The one exception stays local: a
+    // child that CARRIES its own page (a direct decoration) turns that page
+    // off in place via removeHere below — the site itself is still managed
+    // at its root.
+    if (feat.view === 'website' && (this.#isScopeRoot(group, feat) || feat.origin === 'cascade')) {
+      void this.toggleWebsite(group, feat)
+      return
+    }
     if (feat.origin === 'cascade') return
     this.removeHere(group, feat)
   }
 
-  /** Is this row live here? Suppression is the legacy drain; a WEBSITE at
-   *  its scope root is additionally on only when the site is a MEMBER of the
-   *  websites menu (membership IS what mints the /websites link). */
+  /** Is this row live here? Suppression is the legacy drain; a WEBSITE row is
+   *  additionally on only when its SITE — keyed by the scope root, wherever
+   *  in the branch you stand — is a MEMBER of the websites menu (membership
+   *  IS what mints the /websites link). */
   isOn(group: FeatureGroup, feat: FeatureRow): boolean {
     if (this.isSuppressed(group, feat)) return false
-    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) {
-      return this.websiteMembers().has(group.segments.join('/'))
+    if (feat.view === 'website' && (this.#isScopeRoot(group, feat) || feat.origin === 'cascade')) {
+      return this.websiteMembers().has(this.#websiteRootSegments(group, feat).join('/'))
     }
     return true
+  }
+
+  /** The tile a website row's control acts on: its scope ROOT — the parent
+   *  the site belongs to — falling back to the row's own tile when the row
+   *  IS the root (or a fresh site is being declared here). */
+  #websiteRootSegments(group: FeatureGroup, feat: FeatureRow): string[] {
+    return [...(feat.scopeSegments?.length ? feat.scopeSegments : group.segments)]
   }
 
   /** Is this node the row's scope ROOT (the site's declaring tile)? */
@@ -1119,11 +1138,13 @@ export class FeaturesViewerComponent implements OnDestroy {
       && !this.isSuppressed(group, feat)
   }
 
-  /** The website root's ONE toggle: membership of the websites menu —
-   *  positive membership, consistent with the model (the /websites link
-   *  exists exactly while the site is a member). Optimistic both ways. */
+  /** The website's ONE toggle: membership of the websites menu — positive
+   *  membership, consistent with the model (the /websites link exists
+   *  exactly while the site is a member). Acts at the site's ROOT — the
+   *  tile the website belongs to — from anywhere within the branch.
+   *  Optimistic both ways. */
   async toggleWebsite(group: FeatureGroup, feat: FeatureRow): Promise<void> {
-    const segments = [...group.segments]
+    const segments = this.#websiteRootSegments(group, feat)
     const memberKey = segments.join('/')
     const wasMember = this.websiteMembers().has(memberKey)
     if (wasMember) {

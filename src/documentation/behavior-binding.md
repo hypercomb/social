@@ -122,3 +122,37 @@ rather than `isBehaviorDormant`, so they see the global switch but not wake,
 publisher-withheld, or binding. That predates this work and is left as it was;
 moving them onto the full answer is its own change, because it would alter
 their behaviour for withheld kinds too.
+
+## Websites always bind (2026-08-20)
+
+A website divorced from its tile is just a row in the Behaviors panel — no
+meaning. Every website therefore follows the binding protocol automatically:
+its ROOT tile (the first ancestor carrying a page — `visual:website:page`
+decoration or first-class `website` slot) is what the site belongs to, and
+`commands/website-binding.ts` records that as an ordinary binding of
+`visual:website:page` to the root's location signature.
+
+The attachment is **derived, never authored**: the root is where the pages
+live, so a shared or adopted website re-attaches on the receiving side from
+content alone — the binding record itself stays a participant-local lens and
+never travels. Discovery paths call `ensureWebsiteBoundAt(root)`:
+
+- the Beehaviors panel's website scope pass (`show-features.drone.ts`) — any
+  site the panel ever sees attaches, covering authored, generated, adopted,
+  and legacy sites alike;
+- `/website here` — the flag names a new root, so the attachment is made at
+  intent time, before the first page exists.
+
+**First-binding sweep**: the binding model withdraws a bound kind everywhere
+outside its bindings, so the first site bound would silently withdraw every
+other site until each was visited. The first attachment of a session that
+finds no bindings walks the tree once and binds every existing root
+together. Descent stops at a root — a page deeper inside a site is part of
+that site, never a second root.
+
+Consequences, all the binding's own: the website row shows anywhere within
+the bound branch and is withdrawn everywhere else; and in the panel the
+row's control acts at the site's ROOT from wherever you stand
+(`features-viewer.component.ts` routes root and inherited rows to the
+membership toggle at `scopeSegments`). The one local exception: a child that
+carries its own page decoration still turns that page off in place.

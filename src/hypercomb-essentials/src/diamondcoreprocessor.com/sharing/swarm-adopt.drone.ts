@@ -197,13 +197,20 @@ interface VisitPayload {
 const VISIT_RETRY_MAX = 2
 const VISIT_RETRY_DELAY_MS = 2_500
 
-/** The 0000 fields a visit fold carries — exactly the visual-sanitizer's
+/** The 0000 fields a take carries — exactly the visual-sanitizer's
  *  first-class property whitelist, minus swarm metadata (name, peerPubkey,
- *  layerSig, inviteSig, label) and minus `index` (local layout owns slot
- *  assignment — the standing adopt-time strip rule). */
+ *  layerSig, inviteSig, label). `index` IS carried (Jaime, 2026-08-20:
+ *  "when I click the tiles the indexes change — this should not be the
+ *  case"): the tile was already rendered at the publisher's slot while
+ *  witnessed, so taking it must keep it exactly there — it loses its
+ *  transparency and shows static, it never jumps. The old strip rule
+ *  ("local layout owns slot assignment") made every take land unindexed
+ *  and score-fill to a NEW slot — the visible shuffle. A local tile
+ *  already holding the slot still wins: the ordinary collision demotion
+ *  in #orderByIndexPinned applies unchanged. */
 const VISIT_PROP_KEYS = [
   'imageSig', 'small', 'flat', 'point', 'accent', 'tags', 'link',
-  'hideText', 'thread', 'contentSig', 'stopReason',
+  'hideText', 'thread', 'contentSig', 'stopReason', 'index',
 ] as const
 
 export class SwarmAdoptDrone extends Drone {

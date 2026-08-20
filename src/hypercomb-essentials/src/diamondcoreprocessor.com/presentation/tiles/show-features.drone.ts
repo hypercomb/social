@@ -74,6 +74,7 @@ import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
+import { ensureWebsiteBoundAt } from '../../commands/website-binding.js'
 import { writeDecoration, listDecorations, removeDecoration, removeDecorationAndWait } from '../../commands/decoration-manifest.js'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 
@@ -1069,6 +1070,12 @@ export class ShowFeaturesDrone extends Drone {
       if (websiteRow) {
         websiteRow.scopeSegments = [...(scopeRoot ?? segments)]
         websiteRow.hideAt = 'node'
+        // WEBSITES BELONG TO A TILE: any site the panel sees — authored,
+        // generated, adopted, or legacy — attaches to its root as a
+        // behaviour binding (website-binding.ts). Fire-and-forget; the
+        // attachment is derived from where the pages live, so this is a
+        // recall, never a decision.
+        void ensureWebsiteBoundAt(websiteRow.scopeSegments)
       }
     }
 

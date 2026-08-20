@@ -114,6 +114,12 @@ const HEADER_BORDER: [number, number, number] = [0.494, 0.714, 0.839]
  *  border decoration still overrides (applied later in the pass). */
 const COLLECTED_BORDER: [number, number, number] = [0.435, 0.827, 0.604]
 const WITNESSED_BORDER: [number, number, number] = [0.302, 0.365, 0.447]
+/** THE WAND'S TOUCH — the instant the ctrl+press/sweep crosses a witnessed
+ *  tile it lights this bright gold rim and lifts out of the armed shade,
+ *  ahead of the fold landing; the next render then paints it native with
+ *  the COLLECTED green. Prominent by design: taking must read as taking
+ *  at the moment of the gesture, not a beat later. */
+const WAND_TAKING_BORDER: [number, number, number] = [1.0, 0.83, 0.42]
 /** Cold grey-blue for a tile that more than one participant holds, mixed into
  *  its own border while YOUR version is the one showing. It marks depth, not
  *  ownership — the moment you roll onto a participant the border takes that
@@ -129,6 +135,20 @@ const STACK_BORDER_MIX = 0.5
  *  site. The peak offset is √2× this (two summed axes), still well under the
  *  ~0.87·spacing neighbour boundary. */
 const LAUNCHER_DRIFT_FRACTION = 0.18
+
+/** `#rrggbb` (or bare `rrggbb`) → [r, g, b] in 0–1, or null if it isn't one.
+ *  A pheromone's colour arrives from the registry as CSS text; the shader wants
+ *  a triple. Null (never a guessed colour) so the caller keeps the last good
+ *  one instead of flashing a wrong mark colour. */
+function hexToRgbTriple(css: string): [number, number, number] | null {
+  const raw = String(css ?? '').trim().replace('#', '')
+  if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null
+  return [
+    parseInt(raw.slice(0, 2), 16) / 255,
+    parseInt(raw.slice(2, 4), 16) / 255,
+    parseInt(raw.slice(4, 6), 16) / 255,
+  ]
+}
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -598,7 +618,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'wand:armed', 'swarm:wand']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -637,6 +657,14 @@ export class ShowCellDrone extends Drone {
    *  are inert to clicks; read locally to suppress the hover ring.
    *  Bright means "preloaded — a click lands instantly". */
   readonly #shadedLabels = new Set<string>()
+
+  /** Ctrl is down over a takeable page (`wand:armed`) — witnessed tiles
+   *  render shaded so the wand's reach is visible before any press. */
+  #wandShadeArmed = false
+  /** Tiles the current wand gesture has touched — lifted out of the armed
+   *  shade and stamped with WAND_TAKING_BORDER while their fold lands.
+   *  Cleared on disarm; a re-render paints landed folds native anyway. */
+  readonly #wandTakingLabels = new Set<string>()
 
   /** The hideText tile currently under the pointer, if any. A tile that
    *  hides its name gets it back for as long as it is hovered — nothing
@@ -1250,6 +1278,25 @@ export class ShowCellDrone extends Drone {
    *  Without it painting is blind — the click writes and nothing on the hive
    *  says so. Cleared when the brush is put down. */
   #tagApplyPainted = new Set<string>()
+  /** ── Pheromone preview (hover a mark → its tiles light up) ──────────────
+   *  The marks under the cursor somewhere in the chrome, and the labels on
+   *  THIS page that carry any of them. Wholly transient: the carriers are
+   *  painted straight into the divergence buffer as the value 3 and nothing
+   *  else ever writes or persists that value — no Cell record holds it, so
+   *  clearing the preview is a restore from the records, not a recomputation.
+   *  A hover must not cost a render pass, hence the in-place attribute push. */
+  #markPreviewMarks: string[] = []
+  #markPreviewLabels = new Set<string>()
+  #markPreviewColor: [number, number, number] = [0.55, 0.85, 1.0]
+  /** 0..1 ramp — the whole treatment fades in and out (see u_markPreview). */
+  #markPreviewK = 0
+  #markPreviewTarget = 0
+  #markPreviewRaf = 0
+  /** The geometry the carrier flags were painted into. A rebuild (a repaint, a
+   *  navigation, a warm-mesh swap) makes a NEW buffer with the baked values, so
+   *  the preview repaints itself when this stops matching — one reference
+   *  compare per frame, and no hook into the render path. */
+  #markPreviewGeom: unknown = null
   /** When cursor is rewound, holds cell→propertiesSig overrides from content-state ops. */
   #cursorPropsOverride: Map<string, string> | null = null
   /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
@@ -5633,6 +5680,43 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // ── THE WAND'S SHADE + TOUCH ─────────────────────────────────────
+    // wand:armed — ctrl is down over a page with takeable tiles
+    // (SelectionInputDrone announces only when the wand could act). Shade
+    // every witnessed tile; lift on release. Attribute writes only — a
+    // modifier press must never cost a render pass.
+    this.onEffect<{ active?: boolean }>('wand:armed', ({ active }) => {
+      const next = active === true
+      if (next === this.#wandShadeArmed) return
+      this.#wandShadeArmed = next
+      if (!next) this.#wandTakingLabels.clear()
+      this.#applyWandShadeToExternals(next)
+    })
+    // swarm:wand — the gesture crossed this tile (transient, one per tile
+    // per gesture). Lift it out of the shade NOW and stamp the taking rim;
+    // the fold lands behind it and the next render paints it native.
+    this.onEffect<{ label?: string }>('swarm:wand', ({ label }) => {
+      const l = String(label ?? '').trim()
+      if (l) this.#flashWandTake(l)
+    })
+
+    // tags:preview — a pheromone is under the cursor in the chrome (a panel
+    // row, a bouquet, a bottom crumb). A hovered mark asks ONE question —
+    // which tiles carry this? — and the hive is the only surface that can
+    // answer it, so it answers there: every carrier on the page lights in the
+    // mark's own colour and the rest of the page recedes behind them. Purely a
+    // look: nothing is written, nothing is staged, nothing is armed, and
+    // leaving the mark puts the page back exactly as it was.
+    this.onEffect<{ marks?: readonly string[]; color?: string }>('tags:preview', ({ marks, color }) => {
+      const next = (Array.isArray(marks) ? marks : []).map(m => String(m ?? '').trim()).filter(Boolean)
+      const rgb = color ? hexToRgbTriple(color) : null
+      if (rgb) this.#markPreviewColor = rgb
+      if (next.length === this.#markPreviewMarks.length
+        && next.every((m, i) => m === this.#markPreviewMarks[i])) return
+      this.#markPreviewMarks = next
+      this.#refreshMarkPreview()
+    })
+
     // A programmatic mark change (e.g. /mobile sweep) deposits tags via
     // DecorationService directly, bypassing the painter's tags:apply
     // invalidation. Clear the render cache so tag chips refresh without
@@ -6604,6 +6688,92 @@ export class ShowCellDrone extends Drone {
     }
   }
 
+  /** Resolve the hovered marks against this page and paint the answer.
+   *
+   *  The carrier set goes STRAIGHT into the divergence buffer and is pushed to
+   *  the GPU — a hover must never cost a render pass, and nothing here belongs
+   *  in one: no geometry moves and no cell record changes. The flag value (3)
+   *  is deliberately outside the divergence vocabulary (0/1/2), so a rebuild
+   *  bakes the tile's REAL divergence and the preview simply repaints itself
+   *  over the fresh buffer (see #markPreviewGeom). */
+  #refreshMarkPreview(): void {
+    const marks = new Set(this.#markPreviewMarks)
+    const next = new Set<string>()
+    if (marks.size > 0) {
+      for (const label of this.renderedCells.keys()) {
+        for (const t of this.#tagsFor(label)) if (marks.has(t)) { next.add(label); break }
+      }
+    }
+    this.#markPreviewLabels = next
+    if (next.size > 0) this.#paintMarkPreviewBuffer()
+    this.#setMarkPreview(next.size > 0)
+  }
+
+  /** Write the carrier flag for every cell in the current buffer. Non-carriers
+   *  are restored to their BAKED divergence (from the cell record), which is
+   *  what makes moving from one mark to the next a single push rather than a
+   *  clear-then-paint. */
+  #paintMarkPreviewBuffer(): void {
+    if (!this.#buf.divergence || !this.geom) return
+    for (const [label, i] of this.#labelToIndex) {
+      const baked = this.renderedCells.get(label)?.divergence ?? 0
+      this.#writeCellScalar(this.#buf.divergence, i, this.#markPreviewLabels.has(label) ? 3 : baked)
+    }
+    this.#pushBuffer('aDivergence')
+    this.#markPreviewGeom = this.geom
+  }
+
+  /** Put every cell back to its baked divergence. Runs at the END of the fade
+   *  out, not at the moment the cursor leaves: u_markPreview is already ramping
+   *  to 0, so restoring the flags early would snap the lit tiles dark while the
+   *  rest of the page was still fading back. */
+  #restoreMarkPreviewBuffer(): void {
+    this.#markPreviewGeom = null
+    if (!this.#buf.divergence || !this.geom) return
+    for (const [label, i] of this.#labelToIndex) {
+      this.#writeCellScalar(this.#buf.divergence, i, this.renderedCells.get(label)?.divergence ?? 0)
+    }
+    this.#pushBuffer('aDivergence')
+  }
+
+  /** Ramp the preview in or out. The rAF runs for as long as the treatment is
+   *  showing — it owns three things at once: the 0..1 strength ramp, the breath
+   *  clock (u_time, frozen on a normal hive page), and re-pushing the uniforms
+   *  after a shader swap, which is why it reads `this.shader` every frame
+   *  instead of capturing it. */
+  #setMarkPreview = (active: boolean): void => {
+    this.#markPreviewTarget = active ? 1 : 0
+    if (!this.#markPreviewRaf) this.#markPreviewRaf = requestAnimationFrame(this.#markPreviewTick)
+  }
+
+  #markPreviewTick = (): void => {
+    const target = this.#markPreviewTarget
+    const step = 0.11                                   // ≈ 150ms edge to edge
+    const k = target > this.#markPreviewK
+      ? Math.min(target, this.#markPreviewK + step)
+      : Math.max(target, this.#markPreviewK - step)
+    this.#markPreviewK = k
+    const shader = this.shader
+    shader?.setMarkPreview(k)
+    if (k > 0) {
+      shader?.setMarkColor(this.#markPreviewColor[0], this.#markPreviewColor[1], this.#markPreviewColor[2])
+      // The breath needs a clock. u_time is frozen on an ordinary hive page and
+      // shared with launcher drift, which owns it whenever it is running.
+      if (!this.#driftActive) {
+        if (!this.#driftStart) this.#driftStart = performance.now()
+        shader?.setTime((performance.now() - this.#driftStart) / 1000)
+      }
+      // A repaint or a navigation replaced the buffer under us — paint again.
+      if (this.geom !== this.#markPreviewGeom) this.#refreshMarkPreview()
+    }
+    if (k === 0 && target === 0) {
+      this.#markPreviewRaf = 0
+      this.#restoreMarkPreviewBuffer()
+      return
+    }
+    this.#markPreviewRaf = requestAnimationFrame(this.#markPreviewTick)
+  }
+
   // settledEmpty: TRUE only when the caller has confirmed the render pipeline
   // was READY (pixi + axial + lineage up) and the location genuinely resolved
   // to zero tiles — i.e. this is a real "empty layer", not a "not ready yet"
@@ -6758,6 +6928,7 @@ export class ShowCellDrone extends Drone {
       this.#buf = {}
       this.#labelToIndex.clear()
       this.#shadedLabels.clear()
+      this.#wandTakingLabels.clear()
       // No buffer to ramp into any more; a fade that outlived its geometry
       // would write into the next page's indexes.
       this.#shadeFadeStartedAt.clear()
@@ -7612,6 +7783,13 @@ export class ShowCellDrone extends Drone {
     // Shade off and hover affect presentation only. Neither can weaken the
     // independent readiness predicate the payload publishes.
     if (!TILE_SHADE || this.#hoverOpaqueLabel === c.label) return false
+    // THE WAND'S SHADE: while ctrl is down over a takeable page, every tile
+    // you don't own recedes — the modifier itself shows what the wand can
+    // reach. A tile the gesture has touched lifts out (it is becoming
+    // yours); the hover clause above keeps the one under the pointer bright,
+    // which reads as "this is the one you'd take". Presentation only — the
+    // fold, the guards, and ownership never consult this.
+    if (this.#wandShadeArmed && c.external && !this.#wandTakingLabels.has(c.label)) return true
     return this.#cellIsPreloading(c)
   }
 
@@ -7774,10 +7952,22 @@ export class ShowCellDrone extends Drone {
     const renderLineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as
       { explorerSegments?: () => readonly string[] } | undefined
     const renderSegments: readonly string[] = segmentsOverride ?? renderLineage?.explorerSegments?.() ?? []
+    // A gathered/flattened tile (orchestrator audit, tag flatten) lives at
+    // its OWN absolute path, not on the page the view was raised from.
+    // Signing the render location for it mints a key no writer ever wrote,
+    // so the props lookup missed and every gathered tile painted imageless.
+    // #flatPathByLabel carries the absolute path (ending in the label) for
+    // exactly those tiles; empty for ordinary renders.
+    const segmentsForLabel = (label: string): readonly string[] => {
+      const flat = this.#flatPathByLabel.get(label)
+      return flat && flat.length > 0 && flat[flat.length - 1] === label
+        ? flat.slice(0, -1)
+        : renderSegments
+    }
     const indexKeyByLabel = new Map<string, string>()
     for (const c of cells) {
       if (!indexKeyByLabel.has(c.label)) {
-        indexKeyByLabel.set(c.label, await cellLocationSig(renderSegments, c.label))
+        indexKeyByLabel.set(c.label, await cellLocationSig(segmentsForLabel(c.label), c.label))
       }
     }
 
@@ -8120,8 +8310,10 @@ export class ShowCellDrone extends Drone {
             const headSig = headSigByLabel.get(label)
             if (!headSig || this.#propslessHeads.has(headSig)) continue
             // Heads are warm, so each canonical ask is map lookups — no
-            // resource fetches, no OPFS walks.
-            const canonical = await readTilePropsSigAt(renderSegments, label)
+            // resource fetches, no OPFS walks. The tile's OWN location, not
+            // the render's — a gathered tile resolved at the render location
+            // would conclude "propsless" against a page it never lived on.
+            const canonical = await readTilePropsSigAt(segmentsForLabel(label), label)
             if (!canonical) {
               // Concluded absence, memoised BY HEAD SIG — an edit mints a
               // new head, so the memo can never mask a later props write.
@@ -8997,6 +9189,48 @@ export class ShowCellDrone extends Drone {
     // #repaintReadinessInPlace for the mid-navigation failure it caused).
     this.#writeShadeFor(previous)   // back to its honest state
     this.#writeShadeFor(next)       // lifted under the pointer
+  }
+
+  /** The wand's armed shade, applied (or lifted) for every EXTERNAL cell in
+   *  one batch — a single aShaded upload however many tiles the page shows.
+   *  Lifting begins the ordinary ease-out fade so release reads as release
+   *  rather than a snap. */
+  #applyWandShadeToExternals(arming: boolean): void {
+    const shadedBuf = this.#buf?.shaded
+    if (!shadedBuf || !this.geom) return
+    let wrote = false
+    for (const [label, cell] of this.renderedCells) {
+      if (!cell.external) continue
+      const i = this.#labelToIndex.get(label)
+      if (i === undefined) continue
+      const shaded = this.#cellIsShaded(cell)
+      if (shaded) this.#shadedLabels.add(label)
+      else if (this.#shadedLabels.delete(label) && !arming) this.#beginShadeFade(label)
+      this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
+      wrote = true
+    }
+    if (wrote) this.#pushBuffer('aShaded')
+  }
+
+  /** The wand crossed `label`: lift it out of the armed shade this frame and
+   *  stamp the bright taking rim — the prominent "this one is now being
+   *  taken" the gesture needs while its fold is still landing. Attribute
+   *  writes only; the next full render paints the tile native. */
+  #flashWandTake(label: string): void {
+    this.#wandTakingLabels.add(label)
+    const i = this.#labelToIndex.get(label)
+    if (i === undefined || !this.geom) return
+    const shadedBuf = this.#buf?.shaded
+    if (shadedBuf) {
+      this.#shadedLabels.delete(label)
+      this.#writeCellScalar(shadedBuf, i, 0)
+      this.#pushBuffer('aShaded')
+    }
+    const borderBuf = this.#buf?.borderColor
+    if (borderBuf) {
+      this.#writeCellRgb(borderBuf, i, WAND_TAKING_BORDER[0], WAND_TAKING_BORDER[1], WAND_TAKING_BORDER[2])
+      this.#pushBuffer('aBorderColor')
+    }
   }
 
   /** Write one cell's current shade value into the geometry and push it. */

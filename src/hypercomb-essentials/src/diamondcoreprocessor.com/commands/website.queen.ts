@@ -54,6 +54,7 @@ import {
 } from '../editor/tile-properties.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import { showWebsiteListPanel } from './website-instances.js'
+import { ensureWebsiteBoundAt } from './website-binding.js'
 // `/website save` / `/website load` — portable .zip export/import of a branch,
 // folded in from the former standalone /website-save and /website-load commands
 // so they no longer crowd the /website autocomplete.
@@ -551,6 +552,10 @@ export class WebsiteQueenBee extends QueenBee {
         payload: { requestedAt: Date.now() },
         mark: 'persistent',
       })
+      // WEBSITES BELONG TO A TILE: the flag names this cell as a site root,
+      // so the attachment is made at intent time — the panel shows whose
+      // website it is before the first page even exists.
+      void ensureWebsiteBoundAt(segments)
       console.log(`[/website here] flagged ${where} for the next /website build`)
       toast('success', 'website', `${where} flagged — run /website build (or the website skill) to generate its page`)
     } catch (err) {

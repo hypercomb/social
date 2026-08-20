@@ -10,8 +10,11 @@
 //      and mints no record (no genome, no receipt, no adopted root).
 //   2. THE WAND takes that ONE tile with the publisher's real props from
 //      the wire — never a husk, never the subtree, never the swarm
-//      metadata (index/layerSig/inviteSig stay out) — and a landed take
-//      mints the records: visit genome, sync receipt, adopted root.
+//      metadata (layerSig/inviteSig/peerPubkey stay out). `index` DOES
+//      travel (Jaime, 2026-08-20): the tile was rendered at that slot as
+//      a witness, and taking it must not move it — it loses its
+//      transparency and shows static, exactly where it stood. A landed
+//      take mints the records: visit genome, sync receipt, adopted root.
 //   3. The wand is EXPLICIT, so it CLEARS a tombstone — the way back in
 //      after a delete. (A walk, keeping nothing, can't resurrect one.)
 //   4. Outside a zone, or over a tile nobody offers here, the wand does
@@ -89,7 +92,7 @@ const GARDEN_OFFER = {
   imageSig: IMG,
   tags: ['flowers'],
   hideText: true,
-  index: 4,            // swarm metadata — must NOT be taken
+  index: 4,            // the rendered slot — MUST travel (the tile never jumps)
   inviteSig: '2'.repeat(64),
 }
 
@@ -245,7 +248,9 @@ describe('the wand is the keep', () => {
     expect(body['tags']).toEqual(['flowers'])
     expect(body['hideText']).toBe(true)
     // Swarm metadata stays OUT of the taken 0000.
-    expect(body['index']).toBeUndefined()
+    // THE SLOT TRAVELS: the tile was rendered at the publisher's slot as
+    // a witness; the take keeps it there — no score-fill jump on landing.
+    expect(body['index']).toBe(4)
     expect(body['layerSig']).toBeUndefined()
     expect(body['inviteSig']).toBeUndefined()
     expect(body['peerPubkey']).toBeUndefined()

@@ -617,7 +617,9 @@ async function main() {
       const pre = await evalSafe(() => A.page.evaluate(() => {
         const bus = window.__hypercombEffectBus
         window.__hcWand = []
+        window.__hcArmed = []
         bus.on('swarm:wand', p => window.__hcWand.push(p))
+        bus.on('wand:armed', p => window.__hcArmed.push({ ...p }))
         const cc = bus.lastValue.get('render:cell-count')
         return {
           rendered: (cc?.labels ?? []).includes('delta'),
@@ -654,11 +656,23 @@ async function main() {
       const genome = await genomePaths(A.page)
       check('what the wand took is recorded in the visit genome', genome.includes('delta'),
         `records: ${JSON.stringify(genome)}`)
+
+      // THE MODIFIER SHOWS ITS REACH: ctrl going down over witnessed tiles
+      // announced wand:armed (show-cell shades what you don't own), and the
+      // release lifted it — one true, one false, in that order, from the
+      // REAL keydown/keyup the wandTile gesture performed.
+      const armed = await evalSafe(() => A.page.evaluate(() => window.__hcArmed ?? []))
+      const armedOk = armed.length >= 2
+        && armed[0]?.active === true
+        && armed[armed.length - 1]?.active === false
+      check('ctrl down announces the wand (shade on), release lifts it', armedOk,
+        JSON.stringify(armed))
     } else {
       check('the wand takes the tile under it', false, 'skipped — delta not offered at root')
       check('the wand takes the ITEM, never its children', false, 'skipped')
       check('the wand suppresses the ordinary select', false, 'skipped')
       check('what the wand took is recorded in the visit genome', false, 'skipped')
+      check('ctrl down announces the wand (shade on), release lifts it', false, 'skipped')
     }
   } else {
     check('the drill tunnels past the publisher\'s depth-3 wall', false, 'skipped — no swarm tiles arrived')
@@ -668,7 +682,21 @@ async function main() {
     check('the wand takes the ITEM, never its children', false, 'skipped')
     check('the wand suppresses the ordinary select', false, 'skipped')
     check('what the wand took is recorded in the visit genome', false, 'skipped')
+    check('ctrl down announces the wand (shade on), release lifts it', false, 'skipped')
   }
+
+  // ── WEBSITES BELONG TO A TILE — the attachment at intent time ────────
+  // B flags a tile with /website here: the flag names a new site root, so
+  // ensureWebsiteBoundAt attaches visual:website:page to that location
+  // (hc:behavior-bound) before any page exists. Swarm-independent.
+  await navTo(B.page, ['charlie']); await sleep(1200)
+  await addTile(B.page, '/website here'); await sleep(1500)
+  const bound = await evalSafe(() => B.page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('hc:behavior-bound') ?? '{}') } catch { return {} }
+  }))
+  const sitePaths = (bound?.['visual:website:page'] ?? []).map(b => b?.path)
+  check('a flagged site root attaches to its tile (websites belong to a tile)',
+    sitePaths.includes('/charlie'), JSON.stringify(bound))
 
   // ── the dead-swarm regression ──────────────────────────────────────
   // A client with no zone (what every visitor to a bare-domain origin has:
