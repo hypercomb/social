@@ -146,11 +146,15 @@ export class FeedbackViewerComponent implements OnDestroy {
 
   // ── reach scope (mirrors the pheromone panel's three reaches) ──
   readonly scope = signal<Scope>('local')
+  /** The three reaches in cycle order — the toggle's walk, and each stage's
+   *  glyph. Same ids and glyphs as everywhere else. */
   readonly scopeOptions: readonly { id: Scope; icon: string }[] = [
     { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
     { id: 'global', icon: 'public' },
   ]
+  /** The glyph for the reach currently in force — the toggle's readout. */
+  readonly scopeIcon = computed(() => this.scopeOptions.find(o => o.id === this.scope())!.icon)
   /** Current location as a route string — re-read immediately on every
    *  committed browser navigation and again after the renderer settles. */
   readonly #route = signal('')
@@ -291,6 +295,12 @@ export class FeedbackViewerComponent implements OnDestroy {
 
   setScope(id: Scope): void {
     this.scope.set(id)
+  }
+
+  /** Step to the next reach and wrap — local → children → global → local. */
+  cycleScope(): void {
+    const at = this.scopeOptions.findIndex(o => o.id === this.scope())
+    this.setScope(this.scopeOptions[(at + 1) % this.scopeOptions.length].id)
   }
 
   toggleHidden(): void {

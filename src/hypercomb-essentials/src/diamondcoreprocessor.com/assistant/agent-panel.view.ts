@@ -96,6 +96,17 @@ export class AgentPanelView extends EventTarget {
     EffectBus.on<{ id?: string; from?: string }>('agent:open', payload => {
       const id = String(payload?.id ?? '')
       if (!id) return
+      // Some agents have their OWN window, and opening them must not touch
+      // this panel at all: routed here, before the step/open split, a click
+      // from inside the orchestrator's report leaves the report standing and
+      // simply raises the agent's window over it. Routed inside `open()` it
+      // would close the report first — the audit you were reading, dismantled
+      // by the thing it pointed you at.
+      const agent = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')?.get(id)
+      if (agent?.behavior === 'folder-sync') {
+        EffectBus.emit('folder-sync:open', { agentId: id })
+        return
+      }
       // `from` means "opened out of that agent" — today, clicking a bee inside
       // the orchestrator's gathered view. It has to be a STEP, not a fresh
       // open: a fresh one closes the panel first, and `agent:closed` puts the
@@ -116,6 +127,16 @@ export class AgentPanelView extends EventTarget {
     EffectBus.on<{ id?: string }>('agent:close', payload => {
       const id = String(payload?.id ?? '')
       if (id && (this.#id === id || this.#returnTo === id)) this.close()
+    })
+    // Joining a swarm takes LOCAL agents out of sight (agent-bee.drone.ts):
+    // their bees fade out, so a report left open would be a report on an
+    // agent with nothing behind it — and, once closed, no bee left to reopen
+    // it from. An agent that belongs to the swarm is a different matter: its
+    // bee keeps flying, so its panel stays up.
+    EffectBus.on<{ public?: boolean }>('mesh:public-changed', payload => {
+      if (payload?.public !== true || !this.#panel) return
+      const agent = this.#registry?.get(this.#id)
+      if ((agent?.origin ?? 'local') === 'local') this.close()
     })
     // The report is live. Findings clear on their own when work recovers, and
     // the orchestrator's running commentary lands on its own clock — neither
@@ -139,6 +160,9 @@ export class AgentPanelView extends EventTarget {
     this.#registry = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
     const agent = this.#registry?.get(id)
     if (!agent) return
+    // Own-window agents (folder-sync) are routed by the `agent:open` handler
+    // and by #swap before this runs — this is the last resort for a direct
+    // caller, kept so the generic panel can never open on one of them.
     if (agent.behavior === 'folder-sync') {
       EffectBus.emit('folder-sync:open', { agentId: id })
       return
@@ -881,6 +905,12 @@ export class AgentPanelView extends EventTarget {
    *  where it came from so the head can offer the way back. */
   #swap(id: string): void {
     if (!id || id === this.#id) return
+    // An own-window agent is not a subject this panel can show — raise its
+    // window and leave the panel (the report, usually) exactly as it stands.
+    if (this.#registry?.get(id)?.behavior === 'folder-sync') {
+      EffectBus.emit('folder-sync:open', { agentId: id })
+      return
+    }
     const from = this.#id
     this.#swapping = true
     // Going back to where we came from ends the trip; going deeper keeps the

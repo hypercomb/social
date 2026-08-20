@@ -671,7 +671,13 @@ export class FolderSyncService {
       behavior: 'folder-sync',
       kind: 'script',
       request: `Import private folder backup from ${sources.length} device snapshot${sources.length === 1 ? '' : 's'}`,
-      targets: ['opfs'],
+      // Hive-wide, deliberately. `targets` are TILE labels — a pseudo-label
+      // ('opfs', 'folder-backup') matches no painted tile, so the bee never
+      // showed anywhere and the orchestrator's audit gathered a phantom husk
+      // tile named after it. No targets = the bee dances in the open, where
+      // it can actually be clicked (the click opens the Backup & Restore
+      // window, agent-panel.view.ts).
+      targets: [],
       segments: [],
     })
     try {
@@ -769,7 +775,8 @@ export class FolderSyncService {
       behavior: 'folder-sync',
       kind: 'script',
       request: `Back up this device to ${selected.name}`,
-      targets: ['folder-backup'],
+      // Hive-wide — 'folder-backup' is not a tile (see the import agent above).
+      targets: [],
       segments: [],
     })
     if (mode === 'hard-copy') {
@@ -1086,7 +1093,8 @@ export class FolderSyncService {
       behavior: 'folder-sync',
       kind: 'script',
       request: `Re-hash every backed-up file in ${selected.name}`,
-      targets: ['folder-backup'],
+      // Hive-wide — 'folder-backup' is not a tile (see the import agent above).
+      targets: [],
       segments: [],
     })
     try {

@@ -257,13 +257,16 @@ export class TagsViewerComponent implements OnDestroy {
   readonly activeNames = computed(() => [...this.#active()].sort((a, b) => a.localeCompare(b)))
   readonly hasFilter = computed(() => this.#active().size > 0)
 
-  /** The three reaches, each named and explained. The whole point of the panel:
-   *  a reach you can read instead of a glyph you have to decode. */
+  /** The three reaches in cycle order — the toggle's walk, and each stage's
+   *  glyph. Same ids and glyphs as every other reach control. */
   readonly scopeOptions: readonly { id: Scope; icon: string }[] = [
     { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
     { id: 'global', icon: 'public' },
   ]
+
+  /** The glyph for the reach currently in force — the toggle's readout. */
+  readonly scopeIcon = computed(() => this.scopeOptions.find(o => o.id === this.#scope())!.icon)
 
   /** Sorted tag rows: every registry tag plus any page tag not yet registered,
    *  each with its colour and current visible count. */
@@ -595,7 +598,11 @@ export class TagsViewerComponent implements OnDestroy {
   /** Ask for one mark (a row) or a whole set (a bouquet — every mark it holds
    *  at once). The hive treats both the same, which is what makes a bouquet
    *  legible: point at it and see everything any of its marks reaches. */
-  preview(marks: readonly string[], color: string): void {
+  preview(event: PointerEvent, marks: readonly string[], color: string): void {
+    // A MOUSE hovers; a finger does not. Touch fires pointerenter on tap and
+    // never a matching pointerleave, so on a phone the tap that filters (or
+    // paints) would light the hive and leave it lit with no way back.
+    if (event.pointerType !== 'mouse') return
     const next = marks.filter(Boolean)
     const now = this.#previewing()
     if (next.length === now.length && next.every((m, i) => m === now[i])) return
@@ -666,8 +673,11 @@ export class TagsViewerComponent implements OnDestroy {
     this.#emitFilter(next)
   }
 
-  isScope(id: Scope): boolean {
-    return this.#scope() === id
+  /** Step to the next reach and wrap — local → children → global → local.
+   *  One button carries the three stages — the same walk the lane ladder does. */
+  cycleScope(): void {
+    const at = this.scopeOptions.findIndex(o => o.id === this.#scope())
+    this.setScope(this.scopeOptions[(at + 1) % this.scopeOptions.length].id)
   }
 
   /** Pick a reach. Re-broadcasts immediately so a live filter re-scans at the

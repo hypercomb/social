@@ -38,17 +38,14 @@
       >
         <span class="mat-sym" aria-hidden="true">{{ showHidden() ? 'visibility' : 'visibility_off' }}</span>
       </button>
-      <div class="fv-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
-        @for (opt of scopeOptions; track opt.id) {
-          <button
-            type="button"
-            class="fv-scope-btn"
-            [class.active]="scope() === opt.id"
-            [attr.aria-pressed]="scope() === opt.id"
-            [title]="('tags.scope.' + opt.id + '.label') | t"
-            (click)="setScope(opt.id)"
-          ><span class="mat-sym">{{ opt.icon }}</span></button>
-        }
+      <div class="fv-scope">
+        <button
+          type="button"
+          class="fv-scope-btn active"
+          [title]="'tags.scope-' + scope() | t"
+          [attr.aria-label]="'tags.scope-' + scope() | t"
+          (click)="cycleScope()"
+        ><span class="mat-sym">{{ scopeIcon() }}</span></button>
       </div>
     </div>
 

@@ -92,6 +92,13 @@ export interface Agent {
   segments: string[]
   /** Hive-wide asks have no single tile to sit on. */
   scope?: 'hive'
+  /** WHOSE work this is. `local` (the default) is work running for YOU on
+   *  this machine — an ask you queued, a routine you started. `swarm` is
+   *  work that belongs to the swarm and is meant to be seen inside one.
+   *  The distinction is a VISIBILITY one: in a swarm the sky says "somebody
+   *  is here", so local bees stand down and swarm bees keep flying
+   *  (presentation/avatars/agent-bee.drone.ts). */
+  origin?: 'local' | 'swarm'
   status: AgentStatus
   /** Newest last. The panel reads this as the activity log. */
   activity: AgentActivity[]
@@ -189,6 +196,9 @@ export class AgentRegistry extends EventTarget {
         // A behaviour may declare what sort of work this is; otherwise the
         // name decides. A plain script gets the script waggle, not a dance.
         ...(p.kind ? { kind: p.kind } : {}),
+        // Only a behaviour that KNOWS it belongs to the swarm says so —
+        // everything else is local work and hides inside one.
+        ...(p.origin === 'swarm' ? { origin: 'swarm' as const } : {}),
         model: p.model,
         request: String(p.request ?? ''),
         targets: [...(p.targets ?? [])],
@@ -486,6 +496,7 @@ export class AgentRegistry extends EventTarget {
       status: 'pending',
       activity: [],
       context: [],
+      origin: 'local',
       startedAt: now,
       updatedAt: now,
       ...seed,

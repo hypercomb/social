@@ -32,6 +32,14 @@ export class HexSdfTextureShader {
       // vertexSource.
       u_time: { value: 0, type: 'f32' },
       u_driftAmp: { value: 0, type: 'f32' },
+      // Pheromone preview (fragment stage). While a mark is under the cursor
+      // ANYWHERE in the chrome — a panel row, a bouquet, a bottom crumb — every
+      // tile carrying it lights in u_markColor and the rest of the page recedes.
+      // u_markPreview is the 0..1 strength of the whole treatment, so it fades
+      // in and out instead of snapping; 0 (nothing hovered) is the common case
+      // and costs one branch. The carrier flag is per-tile: aDivergence == 3.
+      u_markColor: { value: [0.55, 0.85, 1.0], type: 'vec3<f32>' },
+      u_markPreview: { value: 0, type: 'f32' },
       // Tile silhouette is PER-TILE — the `aShapeMode` vertex attribute (0 =
       // hexagon · 2 = Space Invader; 1 retired), so a mixed
       // launch-group page renders each group's OWN shape and groups never share a
@@ -112,6 +120,21 @@ export class HexSdfTextureShader {
    *  leaves its pointer→axial click catchment. */
   public setDriftAmp = (amp: number): void => {
     this.#ug.uniforms.u_driftAmp = amp
+    this.#ug.update()
+  }
+
+  /** The hovered pheromone's own colour — what its carriers light up in. */
+  public setMarkColor = (r: number, g: number, b: number): void => {
+    const v = this.#ug.uniforms.u_markColor
+    v[0] = r; v[1] = g; v[2] = b
+    this.#ug.update()
+  }
+
+  /** Strength of the pheromone preview, 0..1. 0 disables it entirely (no tile
+   *  is lit, nothing is dimmed); the caller ramps it so the hive breathes into
+   *  the answer rather than flashing it. */
+  public setMarkPreview = (k: number): void => {
+    this.#ug.uniforms.u_markPreview = k
     this.#ug.update()
   }
 
@@ -227,6 +250,8 @@ export class HexSdfTextureShader {
     uniform float u_imageMix;
     uniform vec3 u_accentColor;
     uniform float u_time;
+    uniform vec3 u_markColor;
+    uniform float u_markPreview;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
@@ -613,8 +638,10 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, branchColor, chevronMask * 0.125);
       }
 
-      // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked)
-      if (vDivergence > 0.5) {
+      // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked).
+      // 3 is NOT a divergence — it is the transient pheromone-preview carrier
+      // flag, painted at the very end of this shader, so it is excluded here.
+      if (vDivergence > 0.5 && vDivergence < 2.5) {
         if (vDivergence < 1.5) {
           // future-add: translucent cyan ghost
           color.rgb = mix(color.rgb, vec3(0.15, 0.35, 0.45), 0.5);
@@ -709,6 +736,46 @@ export class HexSdfTextureShader {
           vec3 leafHover = vec3(0.74, 0.82, 0.94);
           float leafRing = 1.0 - smoothstep(0.0, aa * 1.15, abs(d));
           color.rgb = mix(color.rgb, leafHover, leafRing * 0.6);
+        }
+      }
+
+      // ── Pheromone preview: which tiles carry the mark under the cursor ───
+      // A hovered mark asks exactly one question, and the hive is the only
+      // surface that can answer it. So it answers on the hive: the carriers
+      // take the mark's OWN colour, hold a slow breath, and everything else
+      // recedes to a grey backdrop, which is what makes them findable at a
+      // glance across a full page. Drawn last, after the hover accent, so the
+      // answer is never washed out by whatever the cursor is also sitting on.
+      if (u_markPreview > 0.002) {
+        float mk = clamp(u_markPreview, 0.0, 1.0);
+        if (vDivergence > 2.5) {
+          float breathe = 0.84 + 0.16 * sin(u_time * 2.4);
+          vec3 bright = mix(u_markColor, vec3(1.0), 0.35);
+          // A carrier gets BRIGHTER. Dimming its neighbours alone reads as "the
+          // page broke", not as "these ones" — the answer has to come forward.
+          color.rgb = mix(color.rgb, u_markColor, 0.12 * mk);
+          color.rgb *= 1.0 + 0.12 * mk;
+          // The prominent part: a rim band painted in the mark's own colour,
+          // sized as a FRACTION OF THE TILE (u_radiusPx) rather than in
+          // antialias widths — an aa-wide hairline disappears the moment the
+          // page is zoomed out, which is exactly when you most need to find
+          // the marked tiles.
+          float markBand = 1.0 - smoothstep(u_radiusPx * 0.06, u_radiusPx * 0.16, abs(d));
+          color.rgb = mix(color.rgb, u_markColor, markBand * 0.62 * mk * breathe);
+          // a crisp lit edge riding on top of the band
+          float markEdge = 1.0 - smoothstep(0.0, aa * 2.0, abs(d));
+          color.rgb = mix(color.rgb, bright, markEdge * 0.95 * mk);
+          // and the band bleeding inward — the scent coming off the tile
+          float markBloom = 1.0 - smoothstep(0.0, u_radiusPx * 0.30, abs(d));
+          color.rgb += u_markColor * markBloom * 0.07 * mk * breathe;
+        } else {
+          // Everything unmarked recedes. Enough to leave the carriers alone on
+          // the page, not so much that the hive looks switched off — the page
+          // is still there, and the cursor is still travelling a list.
+          float markGray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+          color.rgb = mix(color.rgb, vec3(markGray), 0.72 * mk);
+          color.rgb *= mix(1.0, 0.50, mk);
+          color.a *= mix(1.0, 0.62, mk);
         }
       }
 

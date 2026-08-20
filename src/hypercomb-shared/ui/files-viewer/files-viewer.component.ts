@@ -64,12 +64,22 @@ export class FilesViewerComponent implements OnDestroy {
   readonly files = signal<FileItem[]>([])
   readonly #segments = signal<string[]>([])
 
-  /** The three reaches, in order — same ids and glyphs as everywhere else. */
+  /** The three reaches in cycle order — the toggle's walk, and each stage's
+   *  glyph. Same ids and glyphs as everywhere else. */
   readonly scopeOptions: readonly { id: Reach; icon: string }[] = [
     { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
     { id: 'global', icon: 'public' },
   ]
+
+  /** The glyph for the reach currently in force — the toggle's readout. */
+  readonly scopeIcon = computed(() => this.scopeOptions.find(o => o.id === this.reach())!.icon)
+
+  /** Step to the next reach and wrap — local → children → global → local. */
+  cycleReach(): void {
+    const at = this.scopeOptions.findIndex(o => o.id === this.reach())
+    this.setReach(this.scopeOptions[(at + 1) % this.scopeOptions.length].id)
+  }
 
   /** Active type filters — empty means "all". */
   readonly activeTypes = signal<ReadonlySet<FileTypeKey>>(new Set())

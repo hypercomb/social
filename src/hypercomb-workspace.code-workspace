@@ -76,7 +76,7 @@
         }
       },
       {
-        "label": "dev",
+        "label": "dev app",
         "type": "shell",
         "command": "npm run start:dev",
         "options": {
@@ -89,6 +89,30 @@
           "panel": "dedicated",
           "group": "servers"
         }
+      },
+      {
+        "label": "dcp",
+        "type": "shell",
+        "command": "npm run start:dcp",
+        "options": {
+          "cwd": "${workspaceFolder:hypercomb-dev}/.."
+        },
+        "isBackground": true,
+        "problemMatcher": [],
+        "presentation": {
+          "reveal": "always",
+          "panel": "dedicated",
+          "group": "servers"
+        }
+      },
+      {
+        "label": "dev",
+        "dependsOn": [
+          "dev app",
+          "dcp"
+        ],
+        "dependsOrder": "parallel",
+        "problemMatcher": []
       },
       {
         "label": "web dev",

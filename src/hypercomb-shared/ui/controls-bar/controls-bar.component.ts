@@ -1172,9 +1172,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly tagScope = this.#tagScope.asReadonly()
   readonly tagsExpanded = this.#tagsExpanded.asReadonly()
 
-  /** The three reaches, in order, for the expanded strip's scope row. Same ids
-   *  and glyphs as the pheromone panel — one vocabulary for reach, wherever
-   *  you meet it. */
+  /** The three reaches in cycle order — the expanded strip's toggle walks this
+   *  list. Same ids and glyphs as the pheromone panel — one vocabulary for
+   *  reach, wherever you meet it. */
   readonly tagScopeOptions: readonly { id: 'local' | 'children' | 'global'; icon: string }[] = [
     { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
@@ -1199,7 +1199,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     localStorage.setItem('hc:tags-expanded', next ? '1' : '0')
   }
 
-  readonly isTagScope = (id: 'local' | 'children' | 'global'): boolean => this.#tagScope() === id
+  /** Step to the next reach and wrap — local → children → global → local. The
+   *  expanded strip's three-stage toggle, same walk as the lane ladder. */
+  readonly cycleTagScope = (): void => {
+    const opts = this.tagScopeOptions
+    const at = opts.findIndex(o => o.id === this.#tagScope())
+    this.setTagScope(opts[(at + 1) % opts.length].id)
+  }
 
   /** Set the reach from the expanded strip. Always re-broadcasts `tags:filter`
    *  carrying the CURRENT filter set — a live filter must re-scan at the new
@@ -1272,6 +1278,23 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly isTagHovered = (name: string): boolean => {
     return this.#hoveredTags().has(name)
+  }
+
+  /** Point at a crumb and the hive shows WHICH TILES CARRY THAT MARK — the
+   *  carriers light in the mark's own colour, everything else recedes. The
+   *  exact inverse of `tag-hovered` above (hover a TILE, its marks light up
+   *  here), so the strip now answers in both directions. A look only: nothing
+   *  is filtered until the crumb is clicked. Same effect the pheromone panel's
+   *  rows emit — one behaviour, wherever a mark is shown. */
+  readonly previewTag = (event: PointerEvent, name: string): void => {
+    // Mouse only — touch fires pointerenter on tap with no pointerleave to
+    // follow, which would strand the hive in a preview it cannot leave.
+    if (event.pointerType !== 'mouse') return
+    EffectBus.emit('tags:preview', { marks: [name], color: this.tagColor(name) })
+  }
+
+  readonly endTagPreview = (): void => {
+    EffectBus.emit('tags:preview', { marks: [] })
   }
 
   readonly tagColor = (name: string): string => {

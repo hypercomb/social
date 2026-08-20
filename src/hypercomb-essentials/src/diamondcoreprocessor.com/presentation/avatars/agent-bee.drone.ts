@@ -114,6 +114,7 @@ export class AgentBeeDrone extends Drone {
 
   protected override listens = [
     'render:host-ready', 'render:geometry-changed', 'render:set-hive-visible', 'agent:closed',
+    'mesh:public-changed',
   ]
   protected override emits = ['agent:open', 'agent:close', 'toast:show']
 
@@ -132,6 +133,9 @@ export class AgentBeeDrone extends Drone {
   #time = 0
   #lastAnchorAt = 0
   #hiveHidden = false
+  /** In a swarm — LOCAL agents go out of sight for as long as it lasts
+   *  (see the `mesh:public-changed` handler). */
+  #inSwarm = false
 
   /** Scratch point for pointer mapping — one allocation, not one per move. */
   readonly #probe = new Point()
@@ -185,7 +189,54 @@ export class AgentBeeDrone extends Drone {
       this.#hiveHidden = visible === false
       if (this.#layer) this.#layer.visible = !this.#hiveHidden
     })
+
+    // ── in a swarm, the sky belongs to the participants ─────────────
+    //
+    // A bee over a tile means SOMEBODY IS HERE. In a swarm that sentence is
+    // the peer swarm's to say (avatar-swarm.drone.ts, one layer below this
+    // one), and it has to stay unambiguous: a unit of work running for YOU,
+    // on this machine, must not be read as a person who just arrived.
+    //
+    // So the rule is PER AGENT, not per layer — an agent that belongs to the
+    // swarm (`origin:'swarm'`) is exactly what a swarm is for and keeps
+    // flying. Local agents — the default, and everything the hive raises
+    // today — go out of sight for as long as the swarm lasts: their bees
+    // fade out where they stand (`#grounded`), which also takes them out of
+    // the gesture, since `#hitTest` skips a faded bee and the press falls
+    // through to the hive.
+    //
+    // NOTHING IS STOPPED. The registry keeps every agent, the work keeps
+    // running, answers keep landing as notes, and the queued-ask pill and
+    // its toast still say so. Leaving the swarm fades the same bees back in
+    // over the same tiles.
+    //
+    // Last-value replayed, so joining a swarm before this drone mounts still
+    // grounds the local bees.
+    this.onEffect<{ public?: boolean }>('mesh:public-changed', ({ public: isPublic }) => {
+      const next = isPublic === true
+      if (next === this.#inSwarm) return
+      this.#inSwarm = next
+      // Both directions re-resolve at once: leaving must fade the bees back
+      // in now, not at the end of the slow anchor cadence.
+      this.#lastAnchorAt = 0
+      if (!next) return
+      this.#setHover('')
+      // A perch and an audit view are both "this agent is open" made
+      // visible. Grounding the bee without putting them down would leave the
+      // hive gathered around agents with nothing dancing over it.
+      const perched = this.#perched
+      const agent = perched ? this.#registry()?.get(perched) : undefined
+      if (!agent || !this.#grounded(agent)) return
+      this.#perched = ''
+      ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')?.clearAudit?.()
+      this.emitEffect('agent:close', { id: perched })
+    })
   }
+
+  /** Out of sight: work running for you locally, while you are in a swarm.
+   *  Grounded is not stopped — the agent is untouched, only its bee is. */
+  #grounded = (agent: Agent): boolean =>
+    this.#inSwarm && (agent.origin ?? 'local') === 'local'
 
   #registry = (): AgentRegistry | undefined =>
     ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
@@ -274,7 +325,7 @@ export class AgentBeeDrone extends Drone {
       seed: Math.random() * 6.28,
       danceTime: 0,
       alpha: 0,
-      fadeTarget: resolved ? 1 : 0,
+      fadeTarget: resolved && !this.#grounded(agent) ? 1 : 0,
       facing: 1,
     }
     this.#bees.set(agent.id, bee)
@@ -344,13 +395,23 @@ export class AgentBeeDrone extends Drone {
     return this.#world.toLocal(new Point(screen.width * PERCH_X, screen.height * PERCH_Y))
   }
 
-  /** A stable spot in the current view, spread per agent so several hive-wide
-   *  bees don't stack on one another. */
+  /** A stable spot in the current view, spread so hive-wide bees never stack.
+   *
+   *  Spaced by RANK among the hive-wide agents, not by an id hash: a hash can
+   *  park two bees on one spot, and the press then belongs to whichever bee
+   *  is nearer that frame — a click aimed at the backup bee opening the
+   *  orchestrator. Sorted ids keep each bee's slot stable while the set
+   *  stands; when the set changes, the eased dance centres glide to the new
+   *  slots rather than jumping. */
   #viewAnchor = (id: string): { x: number; y: number } => {
     if (!this.#app || !this.#world) return { x: 0, y: 0 }
-    let h = 5381
-    for (let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) | 0
-    const spread = ((h >>> 0) % 100) / 100 // 0..1
+    const open = (this.#registry()?.list() ?? [])
+      .filter(a => a.targets.length === 0)
+      .map(a => a.id)
+      .sort()
+    const index = Math.max(0, open.indexOf(id))
+    const count = Math.max(1, open.length)
+    const spread = (index + 0.5) / count // 0..1, evenly spaced
     const screen = this.#app.renderer.screen
     // Kept clear of the top edge: the header bar owns that band, and a bee
     // wanders ±60px around its anchor.
@@ -379,8 +440,11 @@ export class AgentBeeDrone extends Drone {
 
     for (const [id, bee] of this.#bees) {
       const agent = this.#registry()?.get(id)
+      // In a swarm, your own work is out of sight — same treatment as a bee
+      // whose work is on another layer: it fades where it stands and waits.
+      const grounded = !!agent && this.#grounded(agent)
 
-      if (reanchor && agent) {
+      if (reanchor && agent && !grounded) {
         const anchor = this.#anchorFor(agent)
         if (anchor) {
           // Coming back into view after a navigation: the eased centre still
@@ -399,7 +463,7 @@ export class AgentBeeDrone extends Drone {
         }
         bee.kind = agent.kind
       }
-      if (!agent) bee.fadeTarget = 0
+      if (!agent || grounded) bee.fadeTarget = 0
 
       // The dance CENTRE eases onto the anchor; the bee then dances around the
       // centre. Two layers, so a pan or a repaint moves the whole dance
@@ -534,8 +598,13 @@ export class AgentBeeDrone extends Drone {
     let bestDistance = HIT_PX * HIT_PX
     let inArea = ''
     let areaDistance = Number.POSITIVE_INFINITY
+    // A grounded bee stops being a target the instant you join, not when it
+    // finishes fading — resolved once for the whole sweep, and only in a
+    // swarm, so the common case costs nothing.
+    const grounding = this.#inSwarm ? this.#registry() : undefined
     for (const [id, bee] of this.#bees) {
       if (bee.alpha < 0.25) continue
+      if (grounding && (grounding.get(id)?.origin ?? 'local') === 'local') continue
       const dx = (local.x - bee.x) * worldScale
       const dy = (local.y - bee.y) * worldScale
       const distance = dx * dx + dy * dy

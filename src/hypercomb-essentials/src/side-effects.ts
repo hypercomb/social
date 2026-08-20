@@ -6,6 +6,7 @@
 
 import './diamondcoreprocessor.com/assistant/agent-panel.view'
 import './diamondcoreprocessor.com/assistant/agent-registry.service'
+import './diamondcoreprocessor.com/assistant/agent-tiles-rail'
 import './diamondcoreprocessor.com/assistant/ai-key.drone'
 import './diamondcoreprocessor.com/assistant/atomizer-drop.worker'
 import './diamondcoreprocessor.com/assistant/break-apart.drone'

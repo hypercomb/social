@@ -11,6 +11,7 @@ import { inflate } from '../history/inflate.js'
 import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closure.js'
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 import { mintBuildRecord } from '../history/builds-slot.js'
+import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -66,6 +67,8 @@ type BridgeRequest = {
   /** build-record probe mode: seal + compare, never write (the
    *  atomicity audit's non-mutating check). */
   dryRun?: boolean
+  /** How many entries to return (summary-list). Clamped receiver-side. */
+  limit?: number
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -236,6 +239,8 @@ export class ClaudeBridgeWorker extends Worker {
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
       case 'feedback-channel-status': return this.#feedbackChannelStatus(req)
+      case 'summary-add':  return this.#summaryAdd(req)
+      case 'summary-list': return this.#summaryList(req)
       case 'behaviors-list': return this.#behaviorsList(req)
       case 'ui-state': return this.#uiState(req)
       case 'diag-open': return this.#diagOpen(req)
@@ -346,6 +351,95 @@ export class ClaudeBridgeWorker extends Worker {
       EffectBus.emit('optimization:added', { sig, kind: typeof kind === 'string' ? kind : '' })
     } catch { /* parse already validated above; a listener threw — not ours to report */ }
     return { id: req.id, ok: true, data: { sig, bytes: bytes.byteLength } }
+  }
+  // ─── summary-add / summary-list ────────────────────────────────────
+  //
+  // The feedback inbox's memory (see feedback-summaries.ts). A live read only
+  // ever answers "what is true right now", so nothing could say how long a
+  // participant had been waiting or whether the backlog was growing. The
+  // responder takes the three buckets at every bridge start and appends one
+  // record here; `summary-list` reads them back, collapsed into runs.
+  //
+  // The record arrives from OUTSIDE the hive and is untrusted third-party
+  // data — feedback text reaches the responder over a public channel. Every
+  // field is re-derived or clamped here rather than trusted: the caller
+  // cannot choose the digest (it is computed from the state it sent), cannot
+  // choose the pool, and cannot land a record big enough to wedge a reader.
+  async #summaryAdd(req: BridgeRequest): Promise<BridgeResponse> {
+    if (typeof req.text !== 'string' || req.text.length === 0) {
+      return { id: req.id, ok: false, error: 'summary-add needs `text` (JSON summary)' }
+    }
+    let raw: Record<string, unknown>
+    try { raw = JSON.parse(req.text) as Record<string, unknown> } catch {
+      return { id: req.id, ok: false, error: 'summary-add: `text` must be valid JSON' }
+    }
+
+    // Drop control and invisible/bidi codepoints — a summary is READ by a
+    // human in a list view, and disguised text must not survive the write.
+    const str = (v: unknown, cap = 4000): string => {
+      const t = typeof v === 'string' ? v : ''
+      const clean = t.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+      return clean.length > cap ? clean.slice(0, cap) : clean
+    }
+    const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+    const arr = (v: unknown, cap = 200): unknown[] => (Array.isArray(v) ? v.slice(0, cap) : [])
+    const segs = (v: unknown): string[] => arr(v, 24).map(x => str(x, 200)).filter(Boolean)
+
+    const totalsRaw = (raw['totals'] ?? {}) as Record<string, unknown>
+    const record: Omit<FeedbackSummaryRecord, 'digest'> = {
+      kind: 'feedback-summary',
+      // The HIVE stamps the time, never the caller: a log whose timestamps
+      // come from outside can be written out of order or backdated.
+      at: Date.now(),
+      totals: {
+        feedback: num(totalsRaw['feedback']),
+        unseen: num(totalsRaw['unseen']),
+        openQuestions: num(totalsRaw['openQuestions']),
+        answerRecords: num(totalsRaw['answerRecords']),
+        answeredQuestions: num(totalsRaw['answeredQuestions']),
+        contested: num(totalsRaw['contested']),
+      },
+      participants: arr(raw['participants']).map(p => {
+        const o = (p ?? {}) as Record<string, unknown>
+        return { route: str(o['route'], 300), category: str(o['category'], 60), text: str(o['text']), id: str(o['id'], 120), at: num(o['at']) }
+      }),
+      host: arr(raw['host']).map(h => {
+        const o = (h ?? {}) as Record<string, unknown>
+        return { appliesTo: segs(o['appliesTo']), question: str(o['question']), qId: str(o['qId'], 120) }
+      }),
+      routine: arr(raw['routine']).map(c => {
+        const o = (c ?? {}) as Record<string, unknown>
+        return { appliesTo: segs(o['appliesTo']), qId: str(o['qId'], 120), count: num(o['count']) }
+      }),
+      source: str(raw['source'], 60) || 'bridge-start',
+    }
+
+    const sig = await putSummary(record)
+    if (!sig) return { id: req.id, ok: false, error: 'summary pool unavailable — summary NOT recorded' }
+    return { id: req.id, ok: true, data: { sig, at: record.at } }
+  }
+
+  async #summaryList(req: BridgeRequest): Promise<BridgeResponse> {
+    const runs = await listSummaryRuns()
+    const limitRaw = typeof req.limit === 'number' ? req.limit : 20
+    const limit = Math.max(1, Math.min(200, Math.floor(limitRaw) || 20))
+    return {
+      id: req.id, ok: true,
+      data: {
+        runs: runs.slice(0, limit).map(r => ({
+          at: r.record.at,
+          since: r.since,
+          starts: r.starts,
+          digest: r.record.digest,
+          totals: r.record.totals,
+          participants: r.record.participants,
+          host: r.record.host,
+          routine: r.record.routine,
+          source: r.record.source,
+        })),
+        runCount: runs.length,
+      },
+    }
   }
 
   // ─── chat-reply ────────────────────────────────────────────────────

@@ -14,25 +14,24 @@
     tabindex="-1"
     [attr.aria-label]="'tags.viewer.title' | t"
   >
-    <!-- Reach rides in the header, the same segmented trio the feedback panel
-         and the bottom strip use — one place to look for reach, whichever
-         surface you're on. The label and its explanation live in the tooltip. -->
+    <!-- Reach rides in the header as a THREE-STAGE TOGGLE, the same cycle the
+         feedback and files panels and the bottom strip use — one glyph that
+         reads out the current reach and steps to the next on click:
+         page → children → global, wrapping. The tooltip names the stage and
+         says where the next click goes. -->
     <header class="tags-header">
       <div class="tags-heading">
         <span class="tags-title">{{ 'tags.viewer.title' | t }}</span>
         <span class="tags-total">{{ totalTags() }}</span>
       </div>
-      <div class="tags-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
-        @for (opt of scopeOptions; track opt.id) {
-          <button
-            type="button"
-            class="tags-scope-btn"
-            [class.active]="isScope(opt.id)"
-            [attr.aria-pressed]="isScope(opt.id)"
-            [title]="('tags.scope.' + opt.id + '.label' | t) + ' — ' + ('tags.scope.' + opt.id + '.desc' | t)"
-            (click)="setScope(opt.id)"
-          ><span class="mat-sym">{{ opt.icon }}</span></button>
-        }
+      <div class="tags-scope">
+        <button
+          type="button"
+          class="tags-scope-btn active"
+          [title]="'tags.scope-' + scope() | t"
+          [attr.aria-label]="'tags.scope-' + scope() | t"
+          (click)="cycleScope()"
+        ><span class="mat-sym">{{ scopeIcon() }}</span></button>
       </div>
       <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'tags.close' | t">×</button>
     </header>
@@ -140,7 +139,7 @@
                 class="painter-chip"
                 [style.--mark-color]="pick.color"
                 [class.previewing]="isPreviewing(pick.name)"
-                (pointerenter)="preview([pick.name], pick.color)"
+                (pointerenter)="preview($event, [pick.name], pick.color)"
                 (pointerleave)="endPreview()"
               >
                 <span class="painter-chip-swatch" [style.background]="pick.color" aria-hidden="true"></span>
@@ -240,7 +239,7 @@
                 class="bouquet-head"
                 [style.--mark-color]="bouquetColor(bouquet)"
                 [class.previewing]="isPreviewing(bouquet.marks[0])"
-                (pointerenter)="preview(bouquet.marks, bouquetColor(bouquet))"
+                (pointerenter)="preview($event, bouquet.marks, bouquetColor(bouquet))"
                 (pointerleave)="endPreview()"
               >
                 <button
@@ -354,7 +353,7 @@
         [class.picked]="isSelected(row.name)"
         [class.painting]="isApplying(row.name)"
         [class.previewing]="isPreviewing(row.name)"
-        (pointerenter)="preview([row.name], row.color)"
+        (pointerenter)="preview($event, [row.name], row.color)"
         (pointerleave)="endPreview()"
       >
         <label class="tag-swatch" [style.background]="row.color" [attr.title]="'tags.recolor' | t">

@@ -13,25 +13,22 @@
     tabindex="-1"
     [attr.aria-label]="'files.viewer.title' | t"
   >
-    <!-- Reach in the header, the same segmented trio as the pheromone and
-         feedback panels: gather files from this page, this page and
-         everything under it, or the whole hive. -->
+    <!-- Reach in the header, the same three-stage toggle as the pheromone and
+         feedback panels: one glyph, stepping this page → this page and
+         everything under it → the whole hive, wrapping. -->
     <header class="files-header">
       <div class="files-heading">
         <span class="files-title">{{ 'files.viewer.title' | t }}</span>
         <span class="files-cell">{{ title() }}</span>
       </div>
-      <div class="files-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
-        @for (opt of scopeOptions; track opt.id) {
-          <button
-            type="button"
-            class="files-scope-btn"
-            [class.active]="reach() === opt.id"
-            [attr.aria-pressed]="reach() === opt.id"
-            [title]="('tags.scope.' + opt.id + '.label' | t) + ' — ' + ('tags.scope.' + opt.id + '.desc' | t)"
-            (click)="setReach(opt.id)"
-          ><span class="mat-sym">{{ opt.icon }}</span></button>
-        }
+      <div class="files-scope">
+        <button
+          type="button"
+          class="files-scope-btn active"
+          [title]="'tags.scope-' + reach() | t"
+          [attr.aria-label]="'tags.scope-' + reach() | t"
+          (click)="cycleReach()"
+        ><span class="mat-sym">{{ scopeIcon() }}</span></button>
       </div>
       <button class="files-close" type="button" (click)="close()" [attr.aria-label]="'files.close' | t">×</button>
     </header>

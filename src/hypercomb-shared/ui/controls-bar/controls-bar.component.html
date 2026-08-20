@@ -204,17 +204,16 @@
       @if (tagsExpanded()) {
         <!-- Reach lives INSIDE the opened-out strip: the tags you're looking at
              are the ones this reach admits, so the control that changes which
-             ones those are belongs beside them, not only in the panel. -->
-        <span class="tag-scope-set" role="group" [attr.aria-label]="'tags.scope.title' | t">
-          @for (opt of tagScopeOptions; track opt.id) {
-            <button class="tag-scope-opt"
-                    [class.selected]="isTagScope(opt.id)"
-                    [attr.aria-pressed]="isTagScope(opt.id)"
-                    (click)="setTagScope(opt.id)"
-                    [title]="('tags.scope.' + opt.id + '.label' | t) + ' — ' + ('tags.scope.' + opt.id + '.desc' | t)">
-              <span class="mat-sym">{{ opt.icon }}</span>
-            </button>
-          }
+             ones those are belongs beside them, not only in the panel. A
+             three-stage toggle like everywhere else reach appears: one glyph,
+             stepping page → children → global and wrapping. -->
+        <span class="tag-scope-set">
+          <button class="tag-scope-opt selected"
+                  (click)="cycleTagScope()"
+                  [attr.aria-label]="'tags.scope-' + tagScope() | t"
+                  [title]="'tags.scope-' + tagScope() | t">
+            <span class="mat-sym">{{ scopeIcon() }}</span>
+          </button>
         </span>
       }
       @for (tag of tags(); track tag.name) {
@@ -222,6 +221,8 @@
                 [class.tag-active]="isTagFilterActive(tag.name)"
                 [class.tag-hovered]="isTagHovered(tag.name)"
                 [style.--tag-color]="tagColor(tag.name)"
+                (pointerenter)="previewTag($event, tag.name)"
+                (pointerleave)="endTagPreview()"
                 (click)="toggleTagFilter(tag.name)">{{ tag.name }}</button>
       }
     </div>
