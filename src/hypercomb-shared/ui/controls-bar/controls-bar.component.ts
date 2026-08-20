@@ -92,7 +92,7 @@ interface ControlItem {
   id: string
   label: string
   action: string
-  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection'
+  visibleWhen: 'always' | 'voiceSupported' | 'public' | 'hasSelection'
 }
 
 /** A row in the tour picker: the course, and the individual lessons under it.
@@ -151,10 +151,13 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // World-mode bulk privacy (make-public / make-branch-public) is off the bar
   // too — privacy is set on the tile, not from the shell rail. The header's
   // world-mode toggle is untouched.
-  // The clipboard icon is the way back into the side panel once it's been
-  // closed — it appears whenever the clipboard holds something and toggles the
-  // panel. (Auto-open on copy/cut alone left no way to reopen.)
-  { id: 'clipboard',    label: 'controls.clipboard',    action: 'toggleClipboard',    visibleWhen: 'clipboardHasItems' },
+  // The clipboard icon opens the window — and the window is a SWAP now (click a
+  // tile on the hive and it lands there), so it is worth opening on an empty
+  // clipboard too. That makes it an ordinary rail icon rather than a
+  // state-gated one: no `clipboardHasItems`, just the enable switch every other
+  // control has. It defaults MUTED (see DEFAULT_ENABLED_MAP) — turn it on in
+  // edit mode if you want it — and carries the held count as its badge.
+  { id: 'clipboard',    label: 'controls.clipboard',    action: 'toggleClipboard',    visibleWhen: 'always' },
   { id: 'voice',        label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
   // 'room' (the location icon) is gone from the bar — the location dialog now
   // pops as the JOIN step when the participant flips solo → public (see
@@ -180,7 +183,10 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   // Selection verbs default ON (they only appear while a selection exists;
   // the retired floating menu was the old primary path).
   'promote-to-parent': true,
-  'clipboard': true, 'voice': false, 'bees': false,
+  // Clipboard defaults OFF: it is no longer state-gated, so leaving it on would
+  // put a permanent icon on every rail. Enable it in edit mode. Copy/cut still
+  // pop the window open on their own — this icon is the way BACK in.
+  'clipboard': false, 'voice': false, 'bees': false,
 }
 
 /** Only the entries that DIFFER from the current default. Storing the whole map
@@ -830,19 +836,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       && !this.#editMode() && !this.isEnabled(ctrl)) return false
     // In edit mode the user is picking which icons should be active — show
     // candidates that are normally state-gated so they can be toggled even
-    // when their state isn't currently met (empty clipboard, no selection).
-    if (this.#editMode() && (ctrl.visibleWhen === 'clipboardHasItems'
-      || ctrl.visibleWhen === 'hasSelection')) return true
+    // when their state isn't currently met (no selection).
+    if (this.#editMode() && ctrl.visibleWhen === 'hasSelection') return true
     // A pinned layer is frozen — the viewport controls come off the bar so
     // there is literally nothing left to drag or zoom with. Edit mode keeps
     // them visible so the rail can still be configured from a pinned page.
     if (!this.#editMode() && VIEWPORT_CONTROLS.has(ctrl.id) && this.pinnedHere()) return false
     switch (ctrl.visibleWhen) {
       case 'always': return true
-      // …or while the window is OPEN. It can now be open on an empty clipboard
-      // (swap mode: click a tile on the hive and it lands there), and the button
-      // is both its light and the way to close it.
-      case 'clipboardHasItems': return this.#clipboardAvailable() && (this.clipboardCount() > 0 || this.#clipboardPanelOpen())
       case 'voiceSupported': return this.voiceSupported
       case 'public': return !!this.meshPublic()
       case 'hasSelection': return this.#hasSelection()
@@ -2781,12 +2782,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Opening must NEVER mutate the clipboard — viewing your items can't lose
     // them. (The old `validate()` ghost-sweep on open could drop live entries
-    // on a cold read; ghost cleanup now happens only on restore.) Just bail if
-    // there's genuinely nothing to show.
-    const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
-      { items?: { label: string; sourceSegments: readonly string[] }[]; operation?: 'cut' | 'copy'; isEmpty?: boolean } | undefined
-    if (clipSvc?.isEmpty) return
-
+    // on a cold read; ghost cleanup now happens only on restore.) An EMPTY
+    // clipboard opens too: the window is a swap, so an empty one is where the
+    // next tile you click on the hive will land.
+    //
     // Open the non-navigating clipboard SIDE PANEL. The current page stays
     // fully rendered and interactive behind it — no `'clipboard'` mode, no
     // `clipboard:view` page-replacement, no viewport snapshot/restore dance.

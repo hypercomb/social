@@ -235,8 +235,11 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     // The controls-bar clipboard button toggles the panel. Opening only
     // takes effect when there is something to place.
     this.#cleanups.push(EffectBus.on<{ visible?: boolean }>('clipboard:panel', (p) => {
-      const next = p?.visible ?? !this.visible()
-      this.#setVisible(next && this.items().length > 0)
+      // An explicit toggle does what it says — including opening on an EMPTY
+      // clipboard, which used to be refused ("nothing to show"). With the swap
+      // grammar an empty window is where the next tile you click on the hive
+      // lands, so it is worth opening on its own.
+      this.#setVisible(p?.visible ?? !this.visible())
     }))
 
     // escape-cascade owns Escape ORDERING (editor > viewers > selection >
