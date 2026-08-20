@@ -122,6 +122,10 @@ interface DeviceManifest {
    * an active pass means `files` is a partial union, never a completion record.
    */
   pass?: { active: boolean; startedAt: number }
+  /** Source paths this filesystem refused — a Windows-illegal name, a full
+   *  disk. Capped for size; `unrepresentableCount` is the true total. */
+  unrepresentable?: string[]
+  unrepresentableCount?: number
   files: Record<string, FileStamp>
 }
 
@@ -248,8 +252,33 @@ type MarkerPayload = {
   bytes: ArrayBuffer
 }
 
+/** Windows device names, reserved at EVERY directory level, with or without
+ *  an extension. */
+const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
+
+/**
+ * Can this name be written as a real file or directory on the destination?
+ *
+ * The File System Access API enforces the HOST platform's rules, and Windows
+ * is the strict one: `: * ? " < > |` are forbidden, and so are control
+ * characters, trailing dots and spaces, and the reserved device names. A name
+ * that passed a slashes-only check and then reached `getDirectoryHandle` threw
+ * `Name is not allowed` — which is how a single entry took an entire backup
+ * down at 65 MB.
+ *
+ * OPFS is bound by none of those rules, so a hive can legitimately hold a name
+ * that simply cannot exist in a Windows folder. That is a fact to REPORT, not
+ * a reason to stop copying the other ten thousand files.
+ */
 const validSegment = (name: string): boolean =>
-  !!name && name !== '.' && name !== '..' && !/[\\/]/.test(name)
+  !!name
+  && name !== '.'
+  && name !== '..'
+  && !/[\\/:*?"<>|]/.test(name)
+  // eslint-disable-next-line no-control-regex
+  && !/[\x00-\x1f]/.test(name)
+  && !/[. ]$/.test(name)
+  && !RESERVED_NAMES.test(name)
 
 // Effect payloads cross module and worker boundaries, where `instanceof`
 // compares against a different realm's constructor and reports false for a
@@ -367,17 +396,31 @@ const directoryAt = async (
   return current
 }
 
+/**
+ * Every file under `dir`, depth-unlimited.
+ *
+ * A name the destination cannot hold is COLLECTED into `refused`, never
+ * dropped on the floor. Skipping it silently was survivable while the check
+ * only rejected slashes; once it rejects everything Windows rejects, a silent
+ * skip becomes silent data loss — the copy would simply not contain files
+ * nobody was told about. A backup is allowed to be incomplete. It is not
+ * allowed to be quietly incomplete.
+ */
 async function* walkFiles(
   dir: FileSystemDirectoryHandle,
   prefix = '',
+  refused: string[] = [],
 ): AsyncGenerator<{ path: string; handle: FileSystemFileHandle }> {
   for await (const [name, handle] of (dir as any).entries()) {
-    if (!validSegment(name)) continue
     const path = prefix ? `${prefix}/${name}` : name
+    if (!validSegment(name)) {
+      refused.push(path)
+      continue
+    }
     if (handle.kind === 'file') {
       yield { path, handle: handle as FileSystemFileHandle }
     } else if (handle.kind === 'directory') {
-      yield* walkFiles(handle as FileSystemDirectoryHandle, path)
+      yield* walkFiles(handle as FileSystemDirectoryHandle, path, refused)
     }
   }
 }
@@ -789,8 +832,10 @@ export class FolderSyncService {
       let copied = 0
       let copiedBytes = 0
       let totalBytes = 0
+      /** Paths this filesystem refused. Reported, never fatal. */
+      const unrepresentable: string[] = []
 
-      for await (const entry of walkFiles(source)) {
+      for await (const entry of walkFiles(source, '', unrepresentable)) {
         const file = await entry.handle.getFile()
         const parts = entry.path.split('/')
         const name = parts.pop()!
@@ -811,7 +856,19 @@ export class FolderSyncService {
         const cheapMatch = contentSig !== null
           || (!!old?.sha256 && old.size === file.size && old.modified === file.lastModified)
 
-        const targetDir = await directoryAt(destination, parts, true)
+        // A destination the source can name but the platform cannot hold is a
+        // FINDING, not a stopping condition. Before this, one such entry threw
+        // out of the loop and took the whole pass with it — measured on a real
+        // hive, `getDirectoryHandle: Name is not allowed` at 65 MB, with
+        // everything after it uncopied and nothing saying which name did it.
+        let targetDir: FileSystemDirectoryHandle
+        try {
+          targetDir = await directoryAt(destination, parts, true)
+        } catch (error) {
+          unrepresentable.push(entry.path)
+          console.warn('[folder-sync] cannot represent on this filesystem:', entry.path, error)
+          continue
+        }
         let present = false
         if (cheapMatch) {
           try {
@@ -829,7 +886,16 @@ export class FolderSyncService {
           // not to every drain.
           const sourceBuffer = await file.arrayBuffer()
           stamp.sha256 = contentSig ?? await SignatureService.sign(sourceBuffer)
-          await writeFile(targetDir, name, sourceBuffer)
+          try {
+            await writeFile(targetDir, name, sourceBuffer)
+          } catch (error) {
+            // Same rule as the directory above: count it, name it, keep going.
+            // A full disk and an unrepresentable filename both land here, and
+            // both are worth finishing the other files for.
+            unrepresentable.push(entry.path)
+            console.warn('[folder-sync] could not write:', entry.path, error)
+            continue
+          }
           copied++
           copiedBytes += stamp.size
         }
@@ -881,16 +947,22 @@ export class FolderSyncService {
       const summary = summarizeFiles(nextFiles)
       manifest.totalBytes = summary.totalBytes
       manifest.categories = summary.categories
+      manifest.unrepresentable = unrepresentable.slice(0, 200)
+      manifest.unrepresentableCount = unrepresentable.length
       const complete = manifest.mode === 'hard-copy'
         && manifest.closure.resolverAvailable
         && manifest.closure.missing === 0
         && (manifest.closure.rootsFailed ?? 0) === 0
+        // A file the destination refused is a file the restore will not find.
+        // The copy is then a partial one and must never be sealed as portable.
+        && unrepresentable.length === 0
       await this.#writeManifestAndSeal(device, manifest, complete)
       await this.#writeDeviceInventory(device, manifest, manifest.mode, manifest.closure)
       await this.#writeBackupReport(backup)
       this.#manifest = manifest
-      const passSucceeded = mode === 'local'
-        || (hardCopy.resolverAvailable && hardCopy.missing === 0 && hardCopy.rootsFailed === 0)
+      const passSucceeded = unrepresentable.length === 0
+        && (mode === 'local'
+          || (hardCopy.resolverAvailable && hardCopy.missing === 0 && hardCopy.rootsFailed === 0))
       let dcpManifest: DcpBackupManifest | null = null
       if (mode === 'hard-copy') {
         try {
@@ -905,7 +977,9 @@ export class FolderSyncService {
         mode: manifest.mode,
         phase: passSucceeded
           ? mode === 'hard-copy' ? 'Portable hard copy verified' : 'Exact local mirror verified'
-          : 'Local bytes verified; some referenced bytes could not be materialized',
+          : unrepresentable.length > 0
+            ? `${unrepresentable.length} item${unrepresentable.length === 1 ? '' : 's'} could not be written to this filesystem — see BACKUP-REPORT.txt`
+            : 'Local bytes verified; some referenced bytes could not be materialized',
         copied,
         scanned,
         copiedBytes,
@@ -1521,6 +1595,14 @@ export class FolderSyncService {
       `Referenced layers made local: ${hardCopy.layers}`,
       `Referenced resources made local: ${hardCopy.resources}`,
       `Missing referenced items: ${hardCopy.missing}`,
+      // Named, not just counted: "3 files could not be written" is unusable,
+      // and the whole point of a report is that the next person can act on it.
+      ...(manifest.unrepresentableCount
+        ? [
+            `Items this filesystem refused (copy is NOT portable): ${manifest.unrepresentableCount}`,
+            ...(manifest.unrepresentable ?? []).map(path => `  refused: ${path}`),
+          ]
+        : []),
       // The three numbers that answer "am I actually getting payloads". A pass
       // over an unchanged hive is all `already here` and no fetching; a first
       // pass into a new folder is the reverse. `could not be written` is never
