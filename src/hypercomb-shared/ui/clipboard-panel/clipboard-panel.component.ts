@@ -48,6 +48,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
 import { type WindowSession } from '../window-session'
 import { onSelection } from '../../core/selection-context'
+import { resolveEntryImageUrl } from '../clipboard-thumbs'
 
 interface ClipboardItem {
   label: string
@@ -77,14 +78,10 @@ interface ClipboardChangedPayload {
   count?: number
 }
 
-const SIG_RE = /^[0-9a-f]{64}$/i
-const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
 // Participant-local set of absolute source paths a nested-discard has dropped.
 // Shared verbatim with the clipboard worker, which prunes these branches on
 // paste. localStorage, never the layer — clipboard state is participant-local.
 const EXCLUSIONS_KEY = 'hc:clipboard-exclusions'
-const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
-const STORE_KEY = '@hypercomb.social/Store'
 const CLIPBOARD_WORKER_KEY = '@diamondcoreprocessor.com/ClipboardWorker'
 // Resolve child counts in small batches so a many-item clipboard can't fire a
 // burst of (possibly cold) layer reads at once — keeps it off the render path.
@@ -99,10 +96,6 @@ const DEFAULT_WIDTH = 320
 const MIN_WIDTH = 260
 const MAX_WIDTH = 760
 
-type HistoryLike = {
-  sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
-}
-type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
 
 @Component({
   selector: 'hc-clipboard-panel',
@@ -563,7 +556,9 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     const pending = items.filter(i => !this.#urls.has(rowKey(i)))
     if (pending.length === 0) { this.#publishThumbs(); return }
     await Promise.all(pending.map(async (item) => {
-      const url = await this.#resolveImageUrl(item.label, item.sourceSegments).catch(() => null)
+      // 'small' — the panel's rows are hex chrome, so the hex capture is
+      // the right face here (the chat header's squares ask for 'large').
+      const url = await resolveEntryImageUrl(item.label, item.sourceSegments, 'small').catch(() => null)
       // A newer clipboard state superseded this resolve — discard.
       if (token !== this.#thumbToken) { if (url) URL.revokeObjectURL(url); return }
       if (url) this.#urls.set(rowKey(item), url)
@@ -575,73 +570,6 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     const map: Record<string, string> = {}
     for (const [k, v] of this.#urls) map[k] = v
     this.thumbs.set(map)
-  }
-
-  async #resolveImageUrl(label: string, sourceSegments: readonly string[]): Promise<string | null> {
-    const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
-    const history = ioc?.get?.(HISTORY_KEY) as HistoryLike | undefined
-    const store = ioc?.get?.(STORE_KEY) as StoreLike | undefined
-    if (!store?.getResource) return null
-
-    // Thumbnails are best-effort and must NEVER block the UI. Resolve ONLY
-    // through the participant-local props-index (localStorage, O(1)) — the
-    // same cache the renderer reads. It is populated for any tile that has
-    // been rendered, which a copied tile always has been. We deliberately do
-    // NOT fall back to `history.currentLayerAt`: for a tile with no index
-    // entry that read can trigger a cold `preloadAllBags` whole-tree scan,
-    // and a clipboard of N such items would fire N scans and hang the panel.
-    // A miss simply shows the ⬢ glyph.
-    let locSig = ''
-    if (history?.sign) {
-      try { locSig = await history.sign({ explorerSegments: () => [...sourceSegments, label] }) } catch { /* cold */ }
-    }
-    let propsSig = this.#lookupPropsSig(locSig, label)
-    if (!propsSig) {
-      // Render-index miss — the tile was never rendered with this image (a cut
-      // tile, or a freshly generated image). Fall back to the CANONICAL props
-      // sig from the tile's layer, resolved the warm way by the worker, so the
-      // thumbnail shows WITHOUT a render and a generated image is never lost.
-      propsSig = (await this.#canonicalPropsSig([...sourceSegments, label])) ?? undefined
-    }
-    if (!propsSig) return null
-
-    const propsBlob = await store.getResource(propsSig)
-    if (!propsBlob) return null
-    let props: Record<string, unknown>
-    try { props = JSON.parse(await propsBlob.text()) } catch { return null }
-
-    const imageSig = this.#imageSigOf(props)
-    if (!imageSig) return null
-    const imgBlob = await store.getResource(imageSig)
-    if (!imgBlob) return null
-    return URL.createObjectURL(imgBlob)
-  }
-
-  #lookupPropsSig(locSig: string, label: string): string | undefined {
-    try {
-      const idx = JSON.parse(localStorage.getItem(TILE_PROPS_INDEX_KEY) ?? '{}') as Record<string, string>
-      const v = (locSig && idx[locSig]) ?? idx[label]
-      return (typeof v === 'string' && SIG_RE.test(v)) ? v : undefined
-    } catch { return undefined }
-  }
-
-  /** Canonical props sig from the tile's LAYER (via the worker's warm path),
-   *  used only when the localStorage render-index has no entry. Best-effort. */
-  async #canonicalPropsSig(segments: readonly string[]): Promise<string | undefined> {
-    const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
-    const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
-      { propsSigAt?: (s: readonly string[]) => Promise<string | null> } | undefined
-    if (!worker?.propsSigAt) return undefined
-    try { return (await worker.propsSigAt(segments)) ?? undefined } catch { return undefined }
-  }
-
-  #imageSigOf(props: Record<string, unknown>): string | undefined {
-    const small = (props as { small?: { image?: unknown } }).small
-    if (small && typeof small === 'object' && typeof small.image === 'string' && SIG_RE.test(small.image)) return small.image
-    const flat = (props as { flat?: { small?: { image?: unknown } } }).flat
-    const fi = flat?.small?.image
-    if (typeof fi === 'string' && SIG_RE.test(fi)) return fi
-    return undefined
   }
 
   #revoke(key: string): void {

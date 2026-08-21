@@ -66,12 +66,19 @@
           }
         </button>
 
-        <!-- SUPPORTING CONTEXT — signatures the responder may read. -->
+        <!-- SUPPORTING CONTEXT — signatures the responder may read. A tile
+             with a picture shows AS its picture, a square in the row; the
+             name lives in the title. No picture yet → the name chip. -->
         @for (pick of railContext(); track pick.key; let i = $index) {
           <button class="chat-box chat-box-context filled" type="button"
+            [class.pictured]="contextThumbs()[pick.key]"
             (click)="removeContext(i)"
             [title]="'chat.context.one' | t: { tile: pick.name }">
-            <span class="chat-box-name">{{ pick.name }}</span>
+            @if (contextThumbs()[pick.key]; as url) {
+              <img class="chat-box-img" [src]="url" alt="">
+            } @else {
+              <span class="chat-box-name">{{ pick.name }}</span>
+            }
             <span class="chat-box-off" aria-hidden="true">×</span>
           </button>
         }

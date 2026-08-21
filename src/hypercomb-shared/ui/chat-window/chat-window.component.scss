@@ -185,6 +185,40 @@ $accent: #7eb6d6;
   color: rgba($accent, 0.6);
 }
 
+// THE SQUARES. A gathered reference wears its PICTURE — resolved 'large'
+// (never the hex capture when a real picture exists), edge to edge in a
+// square. The name rides the title attr; the × sits over the corner so
+// removal stays one click without stealing room from the image.
+.chat-box-context.pictured {
+  position: relative;
+  width: 1.9rem;
+  height: 1.9rem;
+  min-width: 1.9rem;
+  padding: 0;
+  overflow: hidden;
+
+  .chat-box-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .chat-box-off {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 0 0.15em;
+    line-height: 1.2;
+    background: rgba(10, 14, 20, 0.72);
+    border-bottom-left-radius: var(--hc-radius-control, 2px);
+    opacity: 0;
+  }
+
+  &:hover .chat-box-off,
+  &:focus-visible .chat-box-off { opacity: 0.95; }
+}
+
 // THE TITLE IS A CONTROL. It names the conversation and opens the roster, so
 // "which tile am I in" and "how do I get back" are answered by the same word.
 .chat-title {

@@ -92,6 +92,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
+import { resolveEntryImageUrl } from '../clipboard-thumbs'
 import { hivePathSegments, renderChatMarkdown } from './chat-markdown'
 
 type TurnRole = 'user' | 'assistant'
@@ -420,6 +421,40 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** The gathered tiles, named, for the chip's tooltip. */
   readonly contextNames = computed(() => this.railContext().map(pick => pick.name).join(', '))
+
+  /** pick.key → blob: URL of the tile's PICTURE ('large' — a square must
+   *  never wear the hex capture when the tile has a real picture). Absent →
+   *  the box falls back to its name chip. Shares the panel's resolver, so
+   *  the two faces of the gathered set can never show different images. */
+  readonly contextThumbs = signal<Record<string, string>>({})
+  #thumbUrls = new Map<string, string>()
+  #thumbToken = 0
+
+  /** Same bounded-cache discipline as the panel: revoke what left the set,
+   *  resolve only what is new, and let a superseding change win the race. */
+  async #refreshContextThumbs(entries: readonly { key: string; name: string; path: readonly string[] }[]): Promise<void> {
+    const token = ++this.#thumbToken
+    const wanted = new Set(entries.map(entry => entry.key))
+    for (const key of [...this.#thumbUrls.keys()]) {
+      if (!wanted.has(key)) {
+        const url = this.#thumbUrls.get(key)
+        if (url) URL.revokeObjectURL(url)
+        this.#thumbUrls.delete(key)
+      }
+    }
+    const pending = entries.filter(entry => !this.#thumbUrls.has(entry.key))
+    if (pending.length) {
+      await Promise.all(pending.map(async (entry) => {
+        const url = await resolveEntryImageUrl(entry.name, entry.path, 'large').catch(() => null)
+        if (token !== this.#thumbToken) { if (url) URL.revokeObjectURL(url); return }
+        if (url) this.#thumbUrls.set(entry.key, url)
+      }))
+    }
+    if (token !== this.#thumbToken) return
+    const map: Record<string, string> = {}
+    for (const [k, v] of this.#thumbUrls) map[k] = v
+    this.contextThumbs.set(map)
+  }
 
   // ── TWO KINDS OF DATA IN ONE REQUEST ──────────────────────────────────
   //
@@ -890,13 +925,15 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ items?: readonly { label: string; sourceSegments: readonly string[]; sig?: string }[] }>(
       'clipboard:changed', (payload) => {
         const items = Array.isArray(payload?.items) ? payload!.items! : []
-        this.railContext.set(items.map(item => ({
+        const picks = items.map(item => ({
           key: '/' + [...item.sourceSegments, item.label].join('/'),
           path: [...item.sourceSegments],
           name: item.label,
           sig: item.sig,
-        })))
+        }))
+        this.railContext.set(picks)
         this.#announceSet()
+        void this.#refreshContextThumbs(picks)
       }))
 
     // The retired ask screen's channel. Kept because other surfaces open a
@@ -974,6 +1011,9 @@ export class ChatWindowComponent implements OnDestroy {
     this.#abort?.abort()
     this.#rail?.dispose()
     this.#rail = null
+    this.#thumbToken++
+    for (const url of this.#thumbUrls.values()) URL.revokeObjectURL(url)
+    this.#thumbUrls.clear()
   }
 
   #retryTimer: ReturnType<typeof setInterval> | null = null
