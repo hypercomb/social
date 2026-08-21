@@ -178,6 +178,8 @@
   "clipboard.walkIn": "इस टाइल के अंदर जाएँ",
   "clipboard.noChildren": "यहाँ कोई बच्चे नहीं",
   "clipboard.hint": "रखने के लिए क्लिक करें · अंदर जाने के लिए Ctrl+क्लिक। हाइव में: क्लिक टाइल उठाता है, Ctrl+क्लिक उसकी प्रति बनाता है, देर तक दबाने पर अंदर जाता है।",
+  "clipboard.cue.take": "लें",
+  "clipboard.cue.copy": "कॉपी",
   "clipboard.close": "क्लिपबोर्ड बंद करें",
   "clipboard.resize": "आकार बदलने के लिए खींचें",
   "controls.room-placeholder": "स्थान",

@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Walk into this tile",
   "clipboard.noChildren": "No children here",
   "clipboard.hint": "Click to place · Ctrl+click to walk in. On the hive: click takes a tile, Ctrl+click copies it, hold to walk in.",
+  "clipboard.cue.take": "take",
+  "clipboard.cue.copy": "copy",
   "clipboard.close": "Close clipboard",
   "clipboard.resize": "Drag to resize",
   "controls.room-placeholder": "space",

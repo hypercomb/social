@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Entra in questa tessera",
   "clipboard.noChildren": "Nessun figlio qui",
   "clipboard.hint": "Clic per posizionare · Ctrl+clic per entrare. Nell'alveare: il clic prende una tessera, Ctrl+clic la copia, la pressione prolungata entra.",
+  "clipboard.cue.take": "prendi",
+  "clipboard.cue.copy": "copia",
   "clipboard.close": "Chiudi appunti",
   "clipboard.resize": "Trascina per ridimensionare",
   "controls.room-placeholder": "spazio",

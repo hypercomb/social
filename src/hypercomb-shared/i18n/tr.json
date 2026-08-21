@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Bu döşemenin içine gir",
   "clipboard.noChildren": "Burada alt öğe yok",
   "clipboard.hint": "Yerleştirmek için tıklayın · İçine girmek için Ctrl+tıklayın. Kovanda: tıklama bir döşeme alır, Ctrl+tıklama kopyalar, basılı tutmak içine girer.",
+  "clipboard.cue.take": "al",
+  "clipboard.cue.copy": "kopyala",
   "clipboard.close": "Panoyu kapat",
   "clipboard.resize": "Boyutlandırmak için sürükle",
   "controls.room-placeholder": "alan",

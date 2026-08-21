@@ -279,6 +279,18 @@ const HINT_PILL_RADIUS = 2
 // (rasterise at 4× viewBox — see hex-icon-button.ts).
 const HINT_TEXT_RESOLUTION = Math.max(6, (typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1) * 4)
 
+// ── Swap-mode verb cue ────────────────────────────────────────────────
+// While the clipboard window is open, the hovered tile says what a click
+// will DO to it: "✂ take" (plain click cuts it into the window) or
+// "⊕ copy" (ctrl held — it lands in the window AND stays on the page).
+// The pill floats ABOVE the hex so it never collides with the name band,
+// the icon rows, or the action hint below — and it lives in its own
+// container because the ctrl hover path hides #overlay entirely.
+const SWAP_CUE_FONT_SIZE = 4.5
+const SWAP_CUE_TAKE_COLOR = 0xffc480   // the retired cut chip's amber
+const SWAP_CUE_COPY_COLOR = 0xeaf0ff   // hint near-white
+const SWAP_CUE_MARGIN = 4              // gap between hex top edge and pill
+
 // ── Pool icon wrapper (tracks identity for drag) ──────────────────
 
 type PoolIcon = {
@@ -511,6 +523,10 @@ export class TileOverlayDrone extends Drone {
   #hintTimer: ReturnType<typeof setTimeout> | null = null
   #hintActionName: string | null = null
   #hintExpanded = false
+  /** The swap-mode verb pill over the hovered tile (see SWAP_CUE_* consts). */
+  #swapCue: Container | null = null
+  /** Last rendered cue verb: null = hidden, false = take, true = copy. */
+  #swapCueCopy: boolean | null = null
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
@@ -876,6 +892,8 @@ export class TileOverlayDrone extends Drone {
         if (detector) detector.spacing = geo.spacing
         this.#updateHexBg()
         if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
+        // The swap cue's pill offset was built against the old radius.
+        this.#clearSwapCuePill()
         this.#positionViewPending()
       })
 
@@ -1078,15 +1096,18 @@ export class TileOverlayDrone extends Drone {
       // ── THE SWAP ────────────────────────────────────────────────────
       // While the clipboard window is open the hive is in swap mode: a click
       // on a tile TAKES it into the window (and a click on a row in the
-      // window puts it back on the page). Walking still has to work — that is
-      // how you get to where you want to paste — so ctrl+click enters the
-      // tile instead. Two readings of one click, told apart by the modifier,
-      // and the same pair the window's own rows use.
+      // window puts it back on the page), ctrl+click COPIES it in (the tile
+      // stays put), and walking in is the LONG PRESS — hold-to-enter, the
+      // same gesture as everywhere else. The hovered tile announces the
+      // pending verb with the swap cue pill (#refreshSwapCue).
       //
       // The window announces itself on `clipboard:open` (last-value replayed,
       // so a drone that registers late is current at once).
       this.onEffect<{ open?: boolean }>('clipboard:open', (payload) => {
         this.#clipboardArmed = payload?.open === true
+        // Opening over a hovered tile marks it at once; closing drops the cue.
+        if (this.#clipboardArmed) this.#refreshSwapCue(false)
+        else this.#hideSwapCue()
       })
 
       // (No `tags:apply-pending` listener: a bouquet in hand no longer takes
@@ -1113,6 +1134,9 @@ export class TileOverlayDrone extends Drone {
 
   protected override dispose(): void {
     this.#clearHint()
+    this.#hideSwapCue()
+    document.removeEventListener('keydown', this.#onSwapModifier)
+    document.removeEventListener('keyup', this.#onSwapModifier)
     this.#unregisterBackingWatch?.()
     this.#unregisterBackingWatch = undefined
     if (this.#arrangeMode) this.#exitArrangeMode()
@@ -2318,6 +2342,10 @@ export class TileOverlayDrone extends Drone {
     // longer holding anything.
     document.addEventListener('pointercancel', () => this.#cancelEnterHold())
     window.addEventListener('blur', () => this.#cancelEnterHold())
+    // Swap-mode verb cue: the pill flips take↔copy the moment ctrl goes
+    // down or up, without waiting for the pointer to move.
+    document.addEventListener('keydown', this.#onSwapModifier)
+    document.addEventListener('keyup', this.#onSwapModifier)
     // CAPTURE-phase witness: records every raw click before any handler can
     // stopPropagation it. Read remotely via the bridge's `effect-last` —
     // `diag:click-capture` fired while `diag:click` stayed silent = something
@@ -2449,6 +2477,7 @@ export class TileOverlayDrone extends Drone {
       // Ctrl/Meta held: track position but hide overlay (selection mode, not navigation)
       if (e.ctrlKey || e.metaKey) {
         this.#overlay.visible = false
+        this.#refreshSwapCue(true, e.pointerType)
         this.emitEffect('tile:hover', {
           q: axial.q,
           r: axial.r,
@@ -2474,9 +2503,11 @@ export class TileOverlayDrone extends Drone {
     // Ctrl/Meta held but hex didn't change — still hide overlay
     if (e.ctrlKey || e.metaKey) {
       this.#overlay.visible = false
+      this.#refreshSwapCue(true, e.pointerType)
       return
     }
 
+    this.#refreshSwapCue(false, e.pointerType)
     this.#updateIconHover(local)
   }
 
@@ -3280,6 +3311,8 @@ export class TileOverlayDrone extends Drone {
     // Navigation itself never uses a cooldown, and readiness never refuses:
     // a shaded destination is entered like any other, with the preloader
     // redirected at it on the way in.
+    // The swap cue describes a tile on the level being LEFT — drop it.
+    this.#hideSwapCue()
 
     // Backstop latch: input was force-released after NAV_GUARD_BACKSTOP_MS
     // but the axial map still describes the LEAVING level — entering a tile
@@ -3769,12 +3802,96 @@ export class TileOverlayDrone extends Drone {
     this.#currentAxial = null
     this.#currentIndex = undefined
     this.#clearHint()
+    this.#hideSwapCue()
     // "Nothing hovered" carries NO hex. Broadcasting a placeholder axial here
     // lied to every q/r consumer: (0,0) is the origin slot, so crossing any
     // chrome (docked panel, edit-actions cluster) lit the hover ring on
     // whatever tile happens to sit at index 0 and yanked the avatar-swarm
     // anchor there. Absence, not a sentinel.
     this.emitEffect('tile:hover', { label: null, bandRows: 1 })
+  }
+
+  // ── Swap-mode verb cue ─────────────────────────────────────────────
+  // Show/refresh the "what will this click do" pill over the hovered tile.
+  // Pointer-only, window open, a real tile under the cursor — else hide.
+  // Called from pointermove (both ctrl branches) and from the Control/Meta
+  // keydown/keyup listener, so the verb flips live while the pointer sits
+  // still. The cheap same-state guard makes per-move calls free.
+  #refreshSwapCue(copy: boolean, pointerType?: string): void {
+    if (!this.#clipboardArmed || this.#mobileMode() || pointerType === 'touch'
+      || !this.#renderContainer || !this.#currentAxial) { this.#hideSwapCue(); return }
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
+    if (!entry?.label) { this.#hideSwapCue(); return }
+
+    // The native copy cursor rides along (the Explorer ctrl-drag convention).
+    if (this.#canvas) {
+      if (copy) this.#canvas.style.cursor = 'copy'
+      else if (this.#canvas.style.cursor === 'copy') this.#canvas.style.cursor = ''
+    }
+
+    if (this.#swapCue && this.#swapCueCopy === copy) {
+      this.#positionSwapCue()
+      return
+    }
+    this.#clearSwapCuePill()
+
+    const i18n = this.#resolveI18n()
+    const word = copy
+      ? (i18n?.t('clipboard.cue.copy') ?? 'copy')
+      : (i18n?.t('clipboard.cue.take') ?? 'take')
+    const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
+    const text = new Text({
+      text: `${copy ? '⊕' : '✂'} ${word}`,
+      style: new TextStyle({
+        fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
+        fontSize: SWAP_CUE_FONT_SIZE,
+        fontWeight: '600',
+        fill: copy ? SWAP_CUE_COPY_COLOR : SWAP_CUE_TAKE_COLOR,
+        align: 'center',
+      }),
+      resolution: HINT_TEXT_RESOLUTION,
+    })
+    // Pill bottom edge sits SWAP_CUE_MARGIN above the hex's circumradius.
+    const topY = -(this.#geo.circumRadiusPx + SWAP_CUE_MARGIN) - text.height - HINT_PILL_PAD_Y
+    text.anchor.set(0.5, 0)
+    text.position.set(0, topY)
+
+    const cue = new Container()
+    cue.zIndex = 10000
+    cue.eventMode = 'none'
+    cue.addChild(this.#makeHintPill(text, 0, topY))
+    cue.addChild(text)
+    this.#renderContainer.addChild(cue)
+    this.#swapCue = cue
+    this.#swapCueCopy = copy
+    this.#positionSwapCue()
+  }
+
+  #positionSwapCue(): void {
+    if (!this.#swapCue || !this.#currentAxial) return
+    const px = this.#axialToPixel(this.#currentAxial.q, this.#currentAxial.r)
+    this.#swapCue.position.set(px.x + this.#meshOffset.x, px.y + this.#meshOffset.y)
+  }
+
+  /** Drop the pill only — the cursor may be mid-refresh. */
+  #clearSwapCuePill(): void {
+    if (!this.#swapCue) return
+    this.#swapCue.parent?.removeChild(this.#swapCue)
+    this.#swapCue.destroy({ children: true })
+    this.#swapCue = null
+    this.#swapCueCopy = null
+  }
+
+  #hideSwapCue(): void {
+    this.#clearSwapCuePill()
+    if (this.#canvas && this.#canvas.style.cursor === 'copy') this.#canvas.style.cursor = ''
+  }
+
+  /** Control/Meta pressed or released — flip the cue verb in place. */
+  #onSwapModifier = (e: KeyboardEvent): void => {
+    if (!this.#clipboardArmed) return
+    if (e.key !== 'Control' && e.key !== 'Meta') return
+    this.#refreshSwapCue(e.type === 'keydown' ? true : (e.ctrlKey || e.metaKey))
   }
 
   #positionOverlay(q: number, r: number): void {
@@ -3803,6 +3920,8 @@ export class TileOverlayDrone extends Drone {
     // same pixel position now describes a different layer's tile.
     this.#mapGeneration++
     this.#occupiedByAxial.clear()
+    // The cue may describe a tile the fresh map no longer holds.
+    this.#hideSwapCue()
 
     for (let i = 0; i < this.#cellCount; i++) {
       const coord = this.#cellCoords[i]

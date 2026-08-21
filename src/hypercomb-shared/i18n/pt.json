@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Entrar neste bloco",
   "clipboard.noChildren": "Nenhum filho aqui",
   "clipboard.hint": "Clique para colocar · Ctrl+clique para entrar. Na colmeia: o clique pega um bloco, Ctrl+clique o copia, pressionar e segurar entra.",
+  "clipboard.cue.take": "pegar",
+  "clipboard.cue.copy": "copiar",
   "clipboard.close": "Fechar área de transferência",
   "clipboard.resize": "Arraste para redimensionar",
   "controls.room-placeholder": "espaço",

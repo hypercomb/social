@@ -178,6 +178,8 @@
   "clipboard.walkIn": "In diese Kachel hineingehen",
   "clipboard.noChildren": "Keine Unterelemente vorhanden",
   "clipboard.hint": "Klicken zum Platzieren · Strg+Klick zum Hineingehen. Im Stock: Klick nimmt eine Kachel, Strg+Klick kopiert sie, langes Drücken geht hinein.",
+  "clipboard.cue.take": "nehmen",
+  "clipboard.cue.copy": "kopieren",
   "clipboard.close": "Zwischenablage schließen",
   "clipboard.resize": "Zum Vergrößern ziehen",
   "controls.room-placeholder": "Raum",

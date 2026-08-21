@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Masuk ke ubin ini",
   "clipboard.noChildren": "Tidak ada anak di sini",
   "clipboard.hint": "Klik untuk menempatkan · Ctrl+klik untuk masuk. Di sarang: klik mengambil ubin, Ctrl+klik menyalinnya, tekan lama untuk masuk.",
+  "clipboard.cue.take": "ambil",
+  "clipboard.cue.copy": "salin",
   "clipboard.close": "Tutup papan klip",
   "clipboard.resize": "Seret untuk mengubah ukuran",
   "controls.room-placeholder": "ruang",

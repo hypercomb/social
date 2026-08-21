@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Войти в эту плитку",
   "clipboard.noChildren": "Нет дочерних элементов",
   "clipboard.hint": "Клик — поместить · Ctrl+клик — войти. В улье: клик забирает плитку, Ctrl+клик копирует её, долгое нажатие открывает её.",
+  "clipboard.cue.take": "взять",
+  "clipboard.cue.copy": "копировать",
   "clipboard.close": "Закрыть буфер обмена",
   "clipboard.resize": "Перетащите для изменения размера",
   "controls.room-placeholder": "пространство",

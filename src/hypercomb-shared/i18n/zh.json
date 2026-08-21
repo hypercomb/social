@@ -178,6 +178,8 @@
   "clipboard.walkIn": "进入此磁贴",
   "clipboard.noChildren": "此处无子项",
   "clipboard.hint": "单击放置 · Ctrl+单击进入。在蜂巢中：单击取走磁贴，Ctrl+单击复制磁贴，长按进入。",
+  "clipboard.cue.take": "取走",
+  "clipboard.cue.copy": "复制",
   "clipboard.close": "关闭剪贴板",
   "clipboard.resize": "拖动调整大小",
   "controls.room-placeholder": "空间",

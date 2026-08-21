@@ -178,6 +178,8 @@
   "clipboard.walkIn": "이 타일 안으로 들어가기",
   "clipboard.noChildren": "여기에 하위 항목 없음",
   "clipboard.hint": "클릭하면 배치 · Ctrl+클릭하면 들어갑니다. 하이브에서는 클릭이 타일을 가져오고 Ctrl+클릭이 복사하며 길게 누르면 들어갑니다.",
+  "clipboard.cue.take": "가져오기",
+  "clipboard.cue.copy": "복사",
   "clipboard.close": "클립보드 닫기",
   "clipboard.resize": "드래그하여 크기 조절",
   "controls.room-placeholder": "공간",

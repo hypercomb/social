@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Entrer dans cette tuile",
   "clipboard.noChildren": "Aucun enfant ici",
   "clipboard.hint": "Clic pour placer · Ctrl+clic pour entrer. Dans la ruche : le clic prend une tuile, Ctrl+clic la copie, un appui long entre.",
+  "clipboard.cue.take": "prendre",
+  "clipboard.cue.copy": "copier",
   "clipboard.close": "Fermer le presse-papiers",
   "clipboard.resize": "Glisser pour redimensionner",
   "controls.room-placeholder": "espace",

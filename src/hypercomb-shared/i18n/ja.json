@@ -178,6 +178,8 @@
   "clipboard.walkIn": "このタイルの中へ",
   "clipboard.noChildren": "子はありません",
   "clipboard.hint": "クリックで配置 · Ctrl+クリックで中へ。ハイブ側では、クリックでタイルを取り込み、Ctrl+クリックでコピーし、長押しで中へ進みます。",
+  "clipboard.cue.take": "取り込む",
+  "clipboard.cue.copy": "コピー",
   "clipboard.close": "クリップボードを閉じる",
   "clipboard.resize": "ドラッグでサイズ変更",
   "controls.room-placeholder": "スペース",

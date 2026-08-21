@@ -178,6 +178,8 @@
   "clipboard.walkIn": "ادخل إلى هذه البلاطة",
   "clipboard.noChildren": "لا توجد عناصر فرعية هنا",
   "clipboard.hint": "انقر للوضع · Ctrl+نقر للدخول. في الخلية: النقر يأخذ بلاطة، وCtrl+نقر ينسخها، والضغط المطوّل يدخل إليها.",
+  "clipboard.cue.take": "أخذ",
+  "clipboard.cue.copy": "نسخ",
   "clipboard.close": "إغلاق الحافظة",
   "clipboard.resize": "اسحب لتغيير الحجم",
   "controls.room-placeholder": "مساحة",

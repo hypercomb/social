@@ -178,6 +178,8 @@
   "clipboard.walkIn": "Entrar en este mosaico",
   "clipboard.noChildren": "Sin hijos aquí",
   "clipboard.hint": "Clic para colocar · Ctrl+clic para entrar. En la colmena: el clic toma un mosaico, Ctrl+clic lo copia, mantener pulsado entra.",
+  "clipboard.cue.take": "tomar",
+  "clipboard.cue.copy": "copiar",
   "clipboard.close": "Cerrar portapapeles",
   "clipboard.resize": "Arrastrar para redimensionar",
   "controls.room-placeholder": "espacio",
