@@ -27,6 +27,9 @@ function check(name, ok, detail) {
 }
 
 async function typeCommand(page, text) {
+  // The shell mounts the command line after boot; on a cold, busy machine the
+  // fixed wait after goto is not always enough.
+  await page.waitForSelector('input.command-input', { timeout: 60000 })
   await page.evaluate((value) => {
     const input = document.querySelector('input.command-input')
     if (!input) throw new Error('no command input')

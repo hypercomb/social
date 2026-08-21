@@ -47,10 +47,16 @@ const PAGE_HTML = [
   'h1{font-size:2rem;margin:0 0 1rem}</style>',
   '<h1 id="probe-heading">The information inside</h1>',
   '<p id="probe-body">Doors at 7. Bring the humidor.</p>',
-  '<script>document.getElementById("probe-body").dataset.ran = "yes"</scr' + 'ipt>',
+  // A window flag, not a DOM lookup: this page mounts INSIDE a shadow root,
+  // where `document.getElementById` finds nothing — a script that threw would
+  // read as a script that never ran.
+  '<script>window.__probeScriptRan = "yes"</scr' + 'ipt>',
 ].join('\n')
 
 async function typeCommand(page, text) {
+  // The shell mounts the command line after boot; on a cold, busy machine the
+  // fixed wait after goto is not always enough.
+  await page.waitForSelector('input.command-input', { timeout: 60000 })
   await page.evaluate((value) => {
     const input = document.querySelector('input.command-input')
     if (!input) throw new Error('no command input')
@@ -110,6 +116,17 @@ async function main() {
       replaceKind: true,
     })
     check('the post-it record landed', deco.ok, deco.ok ? String(deco.data.sig).slice(0, 12) + '…' : deco.error)
+
+    // ONE build-record seals the pass. This probe writes to two anchors (a
+    // resource and a decoration), and a multi-anchor producer that ends
+    // without a seal leaves a hive no one can point at as a revision —
+    // atomicity is not optional, scratch hive or not.
+    // Sealed at the BRANCH the pass wrote to — `build-record` takes segments
+    // (the whole-hive seal is /snapshot, which is not what a probe wants).
+    const seal = await ask({ op: 'build-record', segments: ['probe'], label: 'postit page probe' })
+    check('the pass is sealed', seal.ok,
+      seal.ok ? String(seal.data.seal || seal.data.label || '').slice(0, 12) : seal.error)
+
     await page.waitForTimeout(3500)
     await shot('page-01-marked')
 
@@ -142,7 +159,7 @@ async function main() {
         paper: !!paper,
         shadow: !!shadow,
         heading: shadow?.getElementById?.('probe-heading')?.textContent ?? null,
-        scriptRan: shadow?.getElementById?.('probe-body')?.dataset?.ran ?? null,
+        scriptRan: window.__probeScriptRan ?? null,
         html: (shadow?.innerHTML ?? host?.innerHTML ?? '').slice(0, 160),
       }
     })

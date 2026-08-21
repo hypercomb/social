@@ -1108,6 +1108,25 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "rail-one-row-per-name-and-search",
+      "title": "Mirror the tiles rail's one-row-per-name collapse + level search",
+      "run": null,
+      "note": "Copilot rail (assistant/agent-tiles-rail.ts) + presentation/tiles/tree-walk.ts: rows are now ONE PER NAME — a superseded child sig no longer shows as a second row, so the rail agrees with the canvas (this is what made 'pheromone-workflow' appear three times in the chat window) — and the rail carries a search box that filters the level in hand (Escape clears, drilling drops it). Owes: a note on the copilot-rail tile recording both; a part tile for tree-walk's collapse under the rail's collection; a pheromone marking the search as part of the rail. Manual — note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
+    },
+    {
+      "id": "postit-takeover-absence-and-asleep-mark",
+      "title": "Mirror the two takeover fixes: a layer of post-its is not empty, and a stand-in hexagon wears the asleep mark",
+      "run": null,
+      "note": "Two tiles under behaviors/views/postit (or a new behaviors/views/takeover part if that reads better): (1) 'a takeover is not an absence' — decoration-kind-index.isClaimedByTakeoverAt + collection-empty-prompt asks the LAYER, not the glass; (2) 'the asleep mark' — visual-bee-icons view-asleep:<view>, shown only for replacesTileRender kinds that are dormant here, tinted 0x6b7681, click opens Beehaviors on that tile. Notes carry the WHY (a switched-off takeover used to look like a broken feature). Proof harnesses: scripts/drive-postit-light.cjs 13/13, drive-postit-open.cjs 8/8, drive-postit-page.cjs 8/8.",
+      "commit": "02cc172b2",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }
