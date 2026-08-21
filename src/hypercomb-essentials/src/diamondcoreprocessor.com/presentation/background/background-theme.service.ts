@@ -78,19 +78,19 @@ export type BackgroundTheme = {
 export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
   // Nature is the SHIP DEFAULT — twenty scenes, first in the list, and what an
   // unchosen `active` reads as. Its tiles set is the substrate's default too.
-  { id: 'nature',    label: 'Nature',    tiles: 'builtin:theme-nature',    preview: '/substrate/theme-nature/1.png' },
+  { id: 'nature',    label: 'Nature',    tiles: 'builtin:theme-nature',    preview: '/substrate/theme-nature/1.jpg' },
   { id: 'steel',     label: 'Steel',     screen: { archetype: 'contour', palette: 'steel' },      tiles: 'builtin:steel' },
   { id: 'daylight',  label: 'Daylight',  screen: { archetype: 'honeycomb', palette: 'daylight' }, tiles: 'builtin:daylight' },
   { id: 'indigo',    label: 'Indigo',    screen: { archetype: 'mesh', palette: 'indigo' },        tiles: 'builtin:indigo' },
   { id: 'teal',      label: 'Teal',      screen: { archetype: 'dots', palette: 'teal' },          tiles: 'builtin:teal' },
   { id: 'ember',     label: 'Ember',     screen: { archetype: 'sheen', palette: 'ember' },        tiles: 'builtin:ember' },
   { id: 'photos',    label: 'Photos',    tiles: 'builtin:defaults',        preview: '/substrate/sunset.webp' },
-  { id: 'minimal',   label: 'Minimal',   tiles: 'builtin:theme-minimal',   preview: '/substrate/theme-minimal/1.png' },
-  { id: 'geometric', label: 'Geometric', tiles: 'builtin:theme-geometric', preview: '/substrate/theme-geometric/1.png' },
-  { id: 'abstract',  label: 'Abstract',  tiles: 'builtin:theme-abstract',  preview: '/substrate/theme-abstract/1.png' },
-  { id: 'cosmos',    label: 'Cosmos',    tiles: 'builtin:theme-cosmos',    preview: '/substrate/theme-cosmos/1.png' },
-  { id: 'ink',       label: 'Ink',       tiles: 'builtin:theme-ink',       preview: '/substrate/theme-ink/1.png' },
-  { id: 'botanical', label: 'Botanical', tiles: 'builtin:theme-botanical', preview: '/substrate/theme-botanical/1.png' },
+  { id: 'minimal',   label: 'Minimal',   tiles: 'builtin:theme-minimal',   preview: '/substrate/theme-minimal/1.jpg' },
+  { id: 'geometric', label: 'Geometric', tiles: 'builtin:theme-geometric', preview: '/substrate/theme-geometric/1.jpg' },
+  { id: 'abstract',  label: 'Abstract',  tiles: 'builtin:theme-abstract',  preview: '/substrate/theme-abstract/1.jpg' },
+  { id: 'cosmos',    label: 'Cosmos',    tiles: 'builtin:theme-cosmos',    preview: '/substrate/theme-cosmos/1.jpg' },
+  { id: 'ink',       label: 'Ink',       tiles: 'builtin:theme-ink',       preview: '/substrate/theme-ink/1.jpg' },
+  { id: 'botanical', label: 'Botanical', tiles: 'builtin:theme-botanical', preview: '/substrate/theme-botanical/1.jpg' },
 ]
 
 /** What `active` reads as before anyone has chosen — the ship default. */

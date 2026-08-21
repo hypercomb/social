@@ -940,13 +940,16 @@ const run = async () => {
       const s = t.build(i)
       await writeFile(`${SRC_DIR}/${t.id}/${name}.svg`, s)
       await page.setContent(`<!doctype html><meta charset="utf-8"><style>*{margin:0;padding:0}svg{display:block}</style><body>${s}</body>`, { waitUntil: 'load' })
-      const png = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: W, height: H } })
-      for (const dir of PUBLIC_DIRS) await writeFile(`${dir}/${t.id}/${name}.png`, png)
-      names.push(`${name}.png`)
+      // JPEG, not PNG: film grain is incompressible noise to PNG (~250KB a
+      // plate); as JPEG the same plate is ~40KB, and full-bleed art has no
+      // alpha to lose. Nature is the ship default — its weight is boot weight.
+      const jpg = await page.screenshot({ type: 'jpeg', quality: 82, clip: { x: 0, y: 0, width: W, height: H } })
+      for (const dir of PUBLIC_DIRS) await writeFile(`${dir}/${t.id}/${name}.jpg`, jpg)
+      names.push(`${name}.jpg`)
     }
     const manifest = JSON.stringify({ images: names }, null, 2)
     for (const dir of PUBLIC_DIRS) await writeFile(`${dir}/${t.id}/manifest.json`, manifest)
-    console.log(`✓ ${t.label.padEnd(10)} → ${t.count} png × ${PUBLIC_DIRS.length} dirs`)
+    console.log(`✓ ${t.label.padEnd(10)} → ${t.count} jpg × ${PUBLIC_DIRS.length} dirs`)
   }
   await browser.close()
 }
