@@ -79,7 +79,8 @@ async function tileClientPoint(page, label, nudge) {
     if (!s) return { ok: false, reason: 'no detector' }
     const mx = flat ? 1.5 * s * q : Math.sqrt(3) * s * (q + r / 2)
     const my = flat ? Math.sqrt(3) * s * (r + q / 2) : s * 1.5 * r
-    const pt = host.container.toGlobal({ x: mx + off.x + (n?.x ?? 0), y: my + off.y + (n?.y ?? 0) })
+    // nudge in fractions of the hex spacing, so it scales with the tile
+    const pt = host.container.toGlobal({ x: mx + off.x + (n?.fx ?? 0) * s, y: my + off.y + (n?.fy ?? 0) * s })
     const rect = host.canvas.getBoundingClientRect()
     const screen = host.renderer.screen
     return { ok: true, x: rect.left + pt.x * (rect.width / screen.width), y: rect.top + pt.y * (rect.height / screen.height) }
@@ -104,24 +105,34 @@ async function typeName(page, text, { perKey = 85, settle = 2400 } = {}) {
 }
 
 async function clickIntoTile(page, label) {
-  // first click stays put (select), the second walks in — the click grammar
-  const at = await tileClientPoint(page, label, { x: 0, y: -14 })
+  // press the LOWER tile body (the hover icon block owns the centre) and HOLD:
+  // a branch enters on pointerdown, a childless tile enters at the 450ms hold —
+  // one gesture walks into either
+  const at = await tileClientPoint(page, label, { fy: 0.42 })
   if (!at.ok) { log('clickIntoTile MISS', label, at.reason); return at }
   await page.mouse.move(at.x, at.y, { steps: 24 })
   await sleep(450)
-  await page.mouse.down(); await sleep(70); await page.mouse.up()
-  await sleep(900)
-  await page.mouse.down(); await sleep(70); await page.mouse.up()
+  await page.mouse.down(); await sleep(700); await page.mouse.up()
   await sleep(2400)
-  log('at', await page.evaluate(() => location.pathname))
+  log('at', await segmentsOf(page))
   return at
 }
 
+async function segmentsOf(page) {
+  return page.evaluate(() =>
+    [...(window.ioc?.get?.('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])].join('/') || '(root)')
+}
+
 async function rightClickBack(page) {
-  await page.mouse.move(VP.width / 2, VP.height / 2, { steps: 10 })
-  await sleep(300)
-  await page.mouse.click(VP.width / 2, VP.height / 2, { button: 'right' })
-  await sleep(2200)
+  const before = await segmentsOf(page)
+  for (let tries = 0; tries < 3; tries++) {
+    await page.mouse.move(VP.width / 2, VP.height / 2, { steps: 10 })
+    await sleep(300)
+    await page.mouse.click(VP.width / 2, VP.height / 2, { button: 'right' })
+    await sleep(2200)
+    if (await segmentsOf(page) !== before) return
+  }
+  log('rightClickBack stuck at', before)
 }
 
 async function boot(browser, videoDir) {
@@ -149,10 +160,13 @@ async function boot(browser, videoDir) {
   if (!await waitForShell(page)) throw new Error('shell never became ready')
   if (!await waitForRender(page)) throw new Error('renderer never became ready')
   await sleep(2500)
-  // never film the example-hives offer mid-frame
   await page.evaluate(() => {
     const bus = window.__hypercombEffectBus
+    // never film the example-hives offer mid-frame
     bus?.emit?.('examples:dismiss', {})
+    // and disarm the empty-layer beehaviors offer: telling the prompt drone the
+    // panel is already open means it never raises one over the footage
+    bus?.emit?.('features:viewer-state', { open: true })
   }).catch(() => {})
   await sleep(800)
   return { ctx, page, t0 }
@@ -168,8 +182,8 @@ const CLIPS = {
     mark.begin('hive-create')
     await typeName(page, 'journal')
     await sleep(600)
-    const at = await tileClientPoint(page, 'journal')
-    if (at.ok) { await page.mouse.move(at.x, at.y - 14, { steps: 30 }); await sleep(1200) }
+    const at = await tileClientPoint(page, 'journal', { fy: 0.42 })
+    if (at.ok) { await page.mouse.move(at.x, at.y, { steps: 30 }); await sleep(1200) }
     mark.end()
   },
 
@@ -185,39 +199,45 @@ const CLIPS = {
     mark.end()
   },
 
-  // the hive: go in, go deeper, and right-click comes back out
+  // the hive: go in, go deeper, and right-click comes back out —
+  // every room entered on film already has something in it
   async navigate(page, mark) {
-    await typeName(page, 'journal', { settle: 1600 })
-    await typeName(page, 'archive', { settle: 1600 })
-    await typeName(page, 'garden', { settle: 1600 })
+    await typeName(page, 'journal', { settle: 1500 })
+    await typeName(page, 'archive', { settle: 1500 })
+    await typeName(page, 'garden', { settle: 1500 })
     await clickIntoTile(page, 'journal')
-    await typeName(page, 'sketches', { settle: 1400 })
-    await typeName(page, 'recordings', { settle: 1400 })
+    await typeName(page, 'sketches', { settle: 1300 })
+    await typeName(page, 'recordings', { settle: 1300 })
+    await typeName(page, 'plans', { settle: 1300 })
     await rightClickBack(page)
+    await clickIntoTile(page, 'garden')
+    await typeName(page, 'roses', { settle: 1300 })
+    await typeName(page, 'herbs', { settle: 1300 })
+    await rightClickBack(page)
+    await sleep(800)
     mark.begin('hive-navigate')
     await clickIntoTile(page, 'journal')
-    await clickIntoTile(page, 'sketches')
-    await rightClickBack(page)
     await rightClickBack(page)
     await clickIntoTile(page, 'garden')
     await rightClickBack(page)
+    await sleep(600)
     mark.end()
   },
 
   // one hive, many worlds: wheel out until the world is small, then dive back
   async zoom(page, mark) {
-    await typeName(page, 'journal', { settle: 1500 })
-    await typeName(page, 'archive', { settle: 1500 })
-    await typeName(page, 'garden', { settle: 1500 })
-    await typeName(page, 'postcards', { settle: 1500 })
-    await clickIntoTile(page, 'journal')
-    await typeName(page, 'sketches', { settle: 1300 })
-    await typeName(page, 'recordings', { settle: 1500 })
+    await typeName(page, 'journal', { settle: 1400 })
+    await typeName(page, 'archive', { settle: 1400 })
+    await typeName(page, 'garden', { settle: 1400 })
+    await typeName(page, 'postcards', { settle: 1400 })
+    await typeName(page, 'recordings', { settle: 1600 })
+    // park the cursor in open sky so no tile overlay joins the shot
+    await page.mouse.move(VP.width / 2, VP.height * 0.82, { steps: 12 })
+    await sleep(700)
     mark.begin('hive-zoom')
-    await page.mouse.move(VP.width / 2, VP.height / 2)
-    for (let i = 0; i < 10; i++) { await page.mouse.wheel(0, 240); await sleep(260) }
-    await sleep(1400)
-    for (let i = 0; i < 10; i++) { await page.mouse.wheel(0, -240); await sleep(260) }
+    for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 220); await sleep(300) }
+    await sleep(1500)
+    for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, -220); await sleep(300) }
     await sleep(1200)
     mark.end()
   },

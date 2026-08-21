@@ -119,7 +119,7 @@ function visualHtml(s) {
       const clip = (s.visual.split(':')[1] || '').trim()
       // drawn concept clips (concepts.cjs) are labelled as drawings, not captures
       const DRAWN = { vocabulary: 'the flow of it', integrity: 'proof, not trust', time: 'the past, kept' }
-      const tag = { navigate: 'localhost hive', zoom: 'one hive, many worlds',
+      const tag = { navigate: 'localhost hive', zoom: 'the whole hive at a glance',
                     create: 'your first tile', children: 'creating structure' }[clip] || DRAWN[clip] || 'live capture'
       const cls = DRAWN[clip] ? 'filmtag drawn' : 'filmtag'
       return `\n  <div class="filmwrap"><span class="${cls}">${DRAWN[clip] ? 'drawn' : 'live capture'} · ${esc(tag)}</span>` +

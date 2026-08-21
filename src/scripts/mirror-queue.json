@@ -1181,6 +1181,15 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "presentation-visual-plates",
+      "title": "Presentation visual pass — 7 drawn plates, 4 re-captured clips, measured caption fit",
+      "run": "node scripts/presentation/instructions.cjs --push",
+      "note": "Scenes 1/4/5/9/17/18/22 traded bare sig lines for drawn SVG plates (visuals/*.svg); the four hive-*.mp4 live captures were re-recorded against the current interface via capture-clips.cjs; scenes 3/10 re-narrated to only claim what the new footage shows. The scene tiles under presentation/{what-is-hypercomb,why-hypercomb,roadmap} hold stale instruction notes for those 9 scenes. instructions.cjs --push is ADDITIVE and re-sends all 24 instruction notes — delete the prior instruction notes first or accept duplicates (same caveat as presentation-scene-24, which this pass can drain together with).",
+      "created": "2026-08-21",
+      "status": "pending",
+      "unattended": false
     }
   ]
 }

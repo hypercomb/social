@@ -10,6 +10,7 @@ verbs/
 concepts/
 .shots/
 .shots.cjs
+capture-out/
 # a reference recording is enough to clone the voice in it — publishing one is
 # a deliberate act, not a side effect of a commit. Raw takes are pre-master.
 voice/reference/
