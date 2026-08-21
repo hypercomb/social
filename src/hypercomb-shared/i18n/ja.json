@@ -670,6 +670,8 @@
   "features.enable.hint": "このレイヤーでオンにします — ビヘイビアは下にあるものを待ち、出会ったときに意味を与えます。",
   "features.open": "開く",
   "features.open.hint": "このビヘイビアを今すぐ開きます — そのビューに入ります（スライドを再生、ページを表示）。スイッチはオン/オフの切り替え用のままです。",
+  "features.asleep": "オフになっています",
+  "features.asleep.description": "このタイルは、オフになっているビヘイビアの代わりに表示されています — ノートはそのまま残っています。明かりのあるビヘイビア一覧を開きます。",
   "features.selected.one": "1 件選択中",
   "features.selected.other": "{count} 件選択中",
   "features.selection.clear": "選択を解除",

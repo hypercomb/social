@@ -567,6 +567,8 @@
   "features.enable.hint": "Bu katman için aç — davranış altındakileri bekler ve karşılaştıklarında onlara anlam verir.",
   "features.open": "aç",
   "features.open.hint": "Bu özelliği şimdi aç — görünümüne gir (slaytları oynat, sayfayı göster). Açma/kapama denetimi anahtarda kalır.",
+  "features.asleep": "Kapalı",
+  "features.asleep.description": "Bu karo, kapatılmış bir beehavior'ın yerinde duruyor — notu hâlâ orada. Işığının bulunduğu Beehaviors panelini açar.",
   "features.selected.one": "1 seçili",
   "features.selected.other": "{count} seçili",
   "features.selection.clear": "seçimi temizle",

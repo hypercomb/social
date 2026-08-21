@@ -567,6 +567,8 @@
   "features.enable.hint": "Actívalo para esta capa — el beehavior espera lo que hay debajo y le da significado cuando se encuentran.",
   "features.open": "abrir",
   "features.open.hint": "Abre esta función ahora — entra en su vista (reproduce las diapositivas, muestra la página). El interruptor sigue siendo el control de encendido/apagado.",
+  "features.asleep": "Apagado",
+  "features.asleep.description": "Esta tesela está en lugar de un beehavior apagado; su nota sigue ahí. Abre Beehaviors, donde está su luz.",
   "features.selected.one": "1 seleccionado",
   "features.selected.other": "{count} seleccionados",
   "features.selection.clear": "limpiar selección",

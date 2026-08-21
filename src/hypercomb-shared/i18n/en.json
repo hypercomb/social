@@ -693,6 +693,8 @@
   "features.enable.hint": "Turn on for this layer — the beehavior waits on what's beneath and gives it meaning when they meet.",
   "features.open": "open",
   "features.open.hint": "Open this beehavior now — enter its view (play the slides, show the page). The switch stays the on/off control.",
+  "features.asleep": "Switched off",
+  "features.asleep.description": "This tile is standing in for a beehavior that is switched off — its note is still here. Opens Beehaviors, where its light is.",
   "features.selected.one": "1 selected",
   "features.selected.other": "{count} selected",
   "features.selection.clear": "clear selection",

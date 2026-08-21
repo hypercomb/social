@@ -567,6 +567,8 @@
   "features.enable.hint": "شغّله لهذه الطبقة — ينتظر السلوك ما تحته ويمنحه معناه عند اللقاء.",
   "features.open": "فتح",
   "features.open.hint": "فتح هذه الميزة الآن — الدخول إلى عرضها (تشغيل الشرائح، إظهار الصفحة). يبقى المفتاح أداة التشغيل/الإيقاف.",
+  "features.asleep": "مُطفأ",
+  "features.asleep.description": "هذه البلاطة تنوب عن ميزة مُطفأة — ملاحظتها ما زالت هنا. يفتح لوحة الميزات حيث يوجد مفتاحها.",
   "features.selected.one": "1 محدّد",
   "features.selected.other": "{count} محدّد",
   "features.selection.clear": "مسح التحديد",

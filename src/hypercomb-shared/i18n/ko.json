@@ -567,6 +567,8 @@
   "features.enable.hint": "이 레이어에서 켭니다 — 비헤이비어는 아래에 있는 것을 기다렸다가 만나는 순간 의미를 부여합니다.",
   "features.open": "열기",
   "features.open.hint": "이 벌 기능 지금 열기 — 해당 보기로 들어갑니다 (슬라이드 재생, 페이지 표시). 스위치는 켜기/끄기 컨트롤로 유지됩니다.",
+  "features.asleep": "꺼져 있음",
+  "features.asleep.description": "이 타일은 꺼져 있는 벌 기능을 대신해 표시되고 있습니다 — 메모는 그대로 남아 있습니다. 불빛이 있는 벌 기능 패널을 엽니다.",
   "features.selected.one": "1개 선택됨",
   "features.selected.other": "{count}개 선택됨",
   "features.selection.clear": "선택 해제",

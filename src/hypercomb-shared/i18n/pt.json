@@ -567,6 +567,8 @@
   "features.enable.hint": "Ligue-o para esta camada — o beehavior espera o que está por baixo e dá-lhe significado quando se encontram.",
   "features.open": "abrir",
   "features.open.hint": "Abre esta funcionalidade agora — entra na sua visualização (reproduz os slides, mostra a página). O interruptor continua sendo o controle liga/desliga.",
+  "features.asleep": "Desligado",
+  "features.asleep.description": "Este tile está no lugar de um beehavior desligado — a nota continua ali. Abre os Beehaviors, onde fica a sua luz.",
   "features.selected.one": "1 selecionado",
   "features.selected.other": "{count} selecionados",
   "features.selection.clear": "limpar seleção",

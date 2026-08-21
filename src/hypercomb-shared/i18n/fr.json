@@ -567,6 +567,8 @@
   "features.enable.hint": "Activez-le pour cette couche — le beehavior attend ce qui se trouve en dessous et lui donne sens à la rencontre.",
   "features.open": "ouvrir",
   "features.open.hint": "Ouvre cette fonctionnalité maintenant — entre dans sa vue (lire les diapositives, afficher la page). L'interrupteur reste la commande marche/arrêt.",
+  "features.asleep": "Éteint",
+  "features.asleep.description": "Cette tuile remplace un beehavior éteint — sa note est toujours là. Ouvre Beehaviors, où se trouve son interrupteur.",
   "features.selected.one": "1 sélectionné",
   "features.selected.other": "{count} sélectionnés",
   "features.selection.clear": "effacer la sélection",

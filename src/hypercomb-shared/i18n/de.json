@@ -567,6 +567,8 @@
   "features.enable.hint": "Für diese Ebene einschalten — das Beehavior wartet auf das, was darunter liegt, und gibt ihm Bedeutung, sobald sie sich begegnen.",
   "features.open": "öffnen",
   "features.open.hint": "Dieses Feature jetzt öffnen — seine Ansicht betreten (Folien abspielen, Seite anzeigen). Der Schalter bleibt die Ein/Aus-Steuerung.",
+  "features.asleep": "Ausgeschaltet",
+  "features.asleep.description": "Diese Kachel steht stellvertretend für ein ausgeschaltetes Beehavior — die Notiz ist weiterhin da. Öffnet Beehaviors, wo sein Licht sitzt.",
   "features.selected.one": "1 ausgewählt",
   "features.selected.other": "{count} ausgewählt",
   "features.selection.clear": "Auswahl aufheben",

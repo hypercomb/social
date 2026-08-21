@@ -567,6 +567,8 @@
   "features.enable.hint": "Nyalakan untuk lapisan ini — beehavior menunggu apa yang ada di bawahnya dan memberinya makna saat bertemu.",
   "features.open": "buka",
   "features.open.hint": "Buka fitur ini sekarang — masuk ke tampilannya (putar slide, tampilkan halaman). Sakelar tetap menjadi kontrol hidup/mati.",
+  "features.asleep": "Dimatikan",
+  "features.asleep.description": "Ubin ini menggantikan beehavior yang dimatikan — catatannya masih ada. Membuka Beehaviors, tempat lampunya berada.",
   "features.selected.one": "1 dipilih",
   "features.selected.other": "{count} dipilih",
   "features.selection.clear": "hapus pilihan",

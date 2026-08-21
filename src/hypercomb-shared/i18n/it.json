@@ -567,6 +567,8 @@
   "features.enable.hint": "Accendilo per questo livello — il beehavior attende ciò che sta sotto e gli dà significato quando si incontrano.",
   "features.open": "apri",
   "features.open.hint": "Apri questa funzionalità ora — entra nella sua vista (riproduci le slide, mostra la pagina). L'interruttore resta il controllo on/off.",
+  "features.asleep": "Spento",
+  "features.asleep.description": "Questa tessera sta al posto di un beehavior spento — la sua nota è ancora lì. Apre Beehaviors, dove si trova la sua luce.",
   "features.selected.one": "1 selezionato",
   "features.selected.other": "{count} selezionati",
   "features.selection.clear": "cancella selezione",

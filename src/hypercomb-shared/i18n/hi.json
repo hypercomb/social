@@ -567,6 +567,8 @@
   "features.enable.hint": "इस परत के लिए चालू करें — बीहेवियर नीचे मौजूद चीज़ों की प्रतीक्षा करता है और मिलते ही उन्हें अर्थ देता है।",
   "features.open": "खोलें",
   "features.open.hint": "इस फ़ीचर को अभी खोलें — इसके दृश्य में जाएँ (स्लाइड चलाएँ, पेज दिखाएँ)। चालू/बंद नियंत्रण स्विच ही रहता है।",
+  "features.asleep": "बंद है",
+  "features.asleep.description": "यह टाइल एक बंद beehavior की जगह खड़ी है — उसका नोट अब भी यहीं है। Beehaviors खोलता है, जहाँ उसका स्विच है।",
   "features.selected.one": "1 चयनित",
   "features.selected.other": "{count} चयनित",
   "features.selection.clear": "चयन साफ़ करें",

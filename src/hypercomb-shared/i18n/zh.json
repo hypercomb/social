@@ -567,6 +567,8 @@
   "features.enable.hint": "为此层开启 — 行为会等待下方的内容，相遇时赋予其意义。",
   "features.open": "打开",
   "features.open.hint": "立即打开此功能 — 进入它的视图（播放幻灯片、显示页面）。开关仍是启用/关闭的控制。",
+  "features.asleep": "已关闭",
+  "features.asleep.description": "此瓦片代替一个已关闭的功能显示 — 它的便筺仍在。打开功能面板，开关就在那里。",
   "features.selected.one": "已选择 1 项",
   "features.selected.other": "已选择 {count} 项",
   "features.selection.clear": "清除选择",
