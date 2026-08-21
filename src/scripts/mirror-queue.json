@@ -1127,6 +1127,15 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "back-gesture",
+      "title": "Back gesture — right-click comes back out on every surface",
+      "run": null,
+      "note": "Shipped b1a040bff, no pass run (a live session held the bridge renderer). Owes: a collection under behaviors/navigation (extend, do not mint a second navigation collection) with one part tile per source resource — back-gesture.service.ts (the ladder + the two menus the browser keeps), back-gesture.spec.ts, scripts/drive-back-gesture.cjs, documentation/back-gesture.md — plus notes on the four surfaces that gained a registration (welcome wall, revolucion room, post-it, document library) and on site-view's changed root exit. Mark the parts with the declared 'part' pheromone; the gesture tile itself belongs with the canvas back-nav tile if one exists under behaviors/navigation. Behaviors-theme card owed too: node scripts/behaviors-theme/sweep.cjs after the pass.",
+      "commit": "b1a040bff",
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }
