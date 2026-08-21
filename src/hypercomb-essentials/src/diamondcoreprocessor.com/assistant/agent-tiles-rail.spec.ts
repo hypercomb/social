@@ -55,9 +55,26 @@ const draftDoc = new TextEncoder().encode(JSON.stringify({
   '/pheromone-workflow': { kind: 'chat-draft', path: '/pheromone-workflow', text: 'half a thought', at: 7 },
 })).buffer
 
+/** A threads pool holding ONE tile conversation: two turns on /diagrams, the
+ *  newest of them never seen on this device. */
+const turn = (at: number, role: string, text: string) => ({
+  async getFile() {
+    return { async text() { return JSON.stringify({ kind: 'chat-turn', convoId: 'chat:tile:/diagrams', role, at, text }) } }
+  },
+  kind: 'file',
+})
+const threadBucket = {
+  kind: 'directory',
+  async *entries() {
+    yield ['a', turn(10, 'user', 'what is this')]
+    yield ['b', turn(20, 'assistant', 'a diagram')]
+  },
+}
+const threadsPool = { kind: 'directory', async *entries() { yield ['bucket', threadBucket] } }
+
 services['@hypercomb.social/Store'] = {
   getResource: async () => null,
-  getPool: async () => ({}),
+  getPool: async (meaning: string) => (meaning === 'threads' ? threadsPool : {}),
   getPoolDoc: async () => draftDoc,
   putPoolDoc: async () => 'ok',
 }
@@ -131,7 +148,7 @@ describe('tiles rail search', () => {
   it('going inside a tile drops the filter', async () => {
     type('pher')
     const row = host.querySelector('.hc-rail-main') as HTMLButtonElement
-    row.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
     await settle()
 
     expect(find.value).toBe('')
@@ -211,7 +228,7 @@ describe('tiles rail gestures — every row is a conversation', () => {
   })
 
   it('right-click comes back out', async () => {
-    rows()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    rows()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
     await settle()
     expect(names(host)).toEqual(['inside'])
 
@@ -264,10 +281,86 @@ describe('tiles rail gestures — every row is a conversation', () => {
   })
 
   it('a tile holding unsent thinking wears a mark', () => {
-    const marked = [...host.querySelectorAll('.hc-rail-row')]
-      .filter(row => !row.querySelector<HTMLElement>('.hc-rail-draft')?.hidden)
+    const marked = [...host.querySelectorAll('.hc-rail-row.draft')]
       .map(row => row.querySelector('.hc-rail-name')?.textContent)
 
     expect(marked).toEqual(['pheromone-workflow'])
+  })
+
+  it('a tile that has been spoken to says so, and how deep it goes', () => {
+    const spoken = [...host.querySelectorAll('.hc-rail-row.spoken')]
+      .map(row => row.querySelector('.hc-rail-name')?.textContent)
+    expect(spoken).toEqual(['diagrams'])
+
+    const row = [...host.querySelectorAll<HTMLElement>('.hc-rail-row')]
+      .find(r => r.querySelector('.hc-rail-name')?.textContent === 'diagrams')
+    // two turns of a twelve-turn ladder
+    expect(row?.style.getPropertyValue('--hc-rail-depth')).toBe(String(2 / 12))
+  })
+
+  it('an answer nobody has read wears the sealed cell, and says so out loud', () => {
+    const unread = [...host.querySelectorAll('.hc-rail-row.unread')]
+      .map(row => row.querySelector('.hc-rail-name')?.textContent)
+    expect(unread).toEqual(['diagrams'])
+
+    const label = [...host.querySelectorAll<HTMLElement>('.hc-rail-main')]
+      .find(m => m.textContent?.includes('diagrams'))
+      ?.getAttribute('aria-label')
+    expect(label).toContain('2 turns')
+    expect(label).toContain('unread reply')
+  })
+
+  it('a dormant tile draws nothing at all', () => {
+    const quiet = [...host.querySelectorAll<HTMLElement>('.hc-rail-row')]
+      .find(r => r.querySelector('.hc-rail-name')?.textContent === 'ai-videos')
+
+    expect(quiet?.className).toBe('hc-rail-row')
+    expect(quiet?.querySelector<HTMLElement>('.hc-rail-bees')?.hidden).toBe(true)
+  })
+
+  it('ctrl-click gathers tiles as context and never moves the list', async () => {
+    const chosen: string[][] = []
+    rail.onSelectionChanged = sel => chosen.push(sel.map(s => s.name))
+
+    rows()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    rows()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    await settle()
+
+    expect(rail.selection.map(s => s.name)).toEqual(['pheromone-workflow', 'ai-videos'])
+    expect(chosen[chosen.length - 1]).toEqual(['pheromone-workflow', 'ai-videos'])
+    // the level did not move, and no conversation was entered
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+    expect(rail.subject).toBe(null)
+    expect(rows()[0].getAttribute('aria-pressed')).toBe('true')
+    expect(rows()[1].getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('the choice is a list of SIGNATURES, deduped, and survives going inside', async () => {
+    rows()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    await settle()
+    const sigs = rail.selectionSigs
+    expect(sigs).toEqual([sig(2)])
+
+    // walk into the tile and back out — the gathering is the whole point
+    rows()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+    await settle()
+    expect(rail.selectionSigs).toEqual(sigs)
+
+    host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(rail.selectionSigs).toEqual(sigs)
+    // and the row is still lit when we come back to it
+    expect(rows()[0].getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('ctrl-clicking a chosen tile lets it go', async () => {
+    rows()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    await settle()
+    expect(rail.selection.length).toBe(1)
+
+    rows()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    await settle()
+    expect(rail.selection).toEqual([])
+    expect(rows()[1].getAttribute('aria-pressed')).toBe('false')
   })
 })

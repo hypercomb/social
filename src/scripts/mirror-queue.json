@@ -1190,6 +1190,15 @@
       "created": "2026-08-21",
       "status": "pending",
       "unattended": false
+    },
+    {
+      "id": "rail-status-and-context",
+      "title": "Mirror: the list says what each tile holds, and ctrl-click gathers context signatures",
+      "run": null,
+      "note": "BUILT: rail rows now carry a status vocabulary ('The Quiet Column', chosen by a 3-way design panel + judge): dormant draws NOTHING; a steel gutter tick whose HEIGHT is conversation depth; an amber sealed-comb-cell hexagon for an unread reply; a white rule on the picture's bottom edge for your unsent draft; an amber breathing digit for work in flight; a steel ring + corner tick for CHOSEN. Data: chat-thread.listTileConversations() + markConversationSeen (per-device, localStorage). Waits are now per-conversation (chat-window #outstanding) so stepping to another tile no longer disarms Stop/Withdraw, and the same record announces 'chat:tile-busy' for the row mark. CTRL-CLICK = choose a tile as CONTEXT: the rail collects RailPick.sig (layer signatures), survives walking levels, and llm.queen.submitChat takes them as  — leading the union so the 64-sig cap can never drop a hand-picked tile, giving deterministic payloads. Owes: notes on the copilot-rail tile for the five states and the four gestures (click/ctrl-click/hold/right-click); a part tile for chat-thread's tile conversations + drafts pool; a pheromone marking chat:drafts as a pool of meaning (now seeded in pool-registry.ts); the behaviors-deck card corrected. i18n: 14 keys x 14 catalogs added this pass. Manual — note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }

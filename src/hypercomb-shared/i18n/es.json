@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "Hablar con este mosaico",
   "agent.rail-inside": "mantén pulsado para entrar",
   "agent.rail-draft": "Aquí hay ideas sin enviar",
+  "agent.rail-turns": "{count} turnos",
+  "agent.rail-unread": "respuesta sin leer",
+  "agent.rail-working": "{count} trabajando",
   "slash.menu": "Menú rápido — siete hexágonos junto al puntero; lanza en una dirección para elegir",
   "quickmenu.root": "Colmena",
   "quickmenu.workflow": "Flujo de trabajo",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "Pregunta lo que quieras…",
   "chat.send": "Enviar",
   "chat.rail": "Tus mosaicos, una conversación en cada uno",
+  "chat.context.chosen": "{count} como contexto",
+  "chat.context.chosen.title": "Viaja con esta pregunta: {names}",
+  "chat.context.chosen.clear": "Soltar los {count} mosaicos reunidos",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
   "mesh-modal.needs-secret": "se necesita un secreto para unirse"
 }

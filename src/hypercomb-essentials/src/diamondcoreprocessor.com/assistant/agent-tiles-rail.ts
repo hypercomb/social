@@ -27,9 +27,13 @@
 // gestures, and nothing else:
 //
 //   click        enter this tile's conversation (what you type goes here)
+//   ctrl-click   CHOOSE it — add the tile to the context the next request
+//                carries. Any number, gathered across any number of levels
+//                (the choice survives walking in and out), because what is
+//                being built is a LIST OF SIGNATURES: content-addressed, so
+//                the same choice composes the same payload every time.
 //   hold         go INSIDE it — the same hold-to-enter the hive itself uses,
 //                so the list is walked with the gesture already in the hands
-//                (ctrl-click does it too, for a fast mouse)
 //   right-click  come back out
 //
 // All three are pointer gestures, and a list that can only be walked with a
@@ -51,7 +55,7 @@
 // mint the thumbnail for next time.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { listTileDrafts, tilePath } from './chat-thread.js'
+import { listTileConversations, listTileDrafts, tilePath, type TileConversation } from './chat-thread.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
@@ -63,13 +67,23 @@ const ioc = <T,>(key: string): T | undefined =>
 /** One tile named by the rail: the level it sits on, its label there, and the
  *  rail's own key for it — so a row is recognised again without re-deriving
  *  the join. What the surface calls its SUBJECT. */
-export type RailPick = { readonly key: string; readonly path: readonly string[]; readonly name: string }
+export type RailPick = {
+  readonly key: string
+  readonly path: readonly string[]
+  readonly name: string
+  /** The tile's layer signature, when the walk could resolve one. */
+  readonly sig?: string
+}
 
 type RailRow = {
   readonly name: string
   readonly segments: readonly string[]
   readonly childCount: number
   readonly propsSig?: string
+  /** The tile's own LAYER signature — what a chosen row contributes to a
+   *  request's context. A signature, not a name, is what makes the payload
+   *  deterministic: the same choice composes the same bytes forever. */
+  readonly sig?: string
 }
 
 type RailStore = WalkStore & ThumbnailStore
@@ -94,6 +108,9 @@ const keySegments = (key: string): string[] => key.split('\u0000').filter(Boolea
 
 const STYLE_ID = 'hc-tiles-rail-styles'
 const STEEL = '126, 182, 214'
+/** Amber says THE HIVE: work in flight, or something waiting for you. It is
+ *  never used for your own unsent words — those wear the name's white. */
+const AMBER = '226, 196, 140'
 
 /** The rail's own stylesheet — installed on first mount so the rail reads
  *  identically inside the agent panel and the chat window. Host geometry
@@ -158,6 +175,98 @@ const ensureRailStyles = (): void => {
   animation:hcRailPulse 1.1s ease-in-out infinite;}
 @keyframes hcRailPulse{0%,100%{opacity:0.5;}50%{opacity:1;}}
 .hc-rail-empty{padding:0.9rem 0.45rem;font-size:0.78rem;color:rgba(216,230,238,0.45);}
+
+/* ── WHAT A ROW HAS TO SAY ─────────────────────────────────────────────
+   Three places, each meaning exactly one thing, so states co-occur without
+   negotiating a slot:
+
+     LEFT GUTTER  steel, vertical    the conversation — its depth, then unread
+     ICON EDGE    white, horizontal  YOUR unsent sentence
+     RIGHT DIGIT  amber, a numeral   work in flight; nothing to do but wait
+
+   A dormant tile draws NOTHING. Forty quiet rows in fifty cost no ink, which
+   is what makes the marks that are there worth looking at. Every mark is
+   absolutely positioned or metric-neutral, so a state arriving can never
+   re-ellipsize a name — the old inline draft dot did exactly that. */
+
+.hc-rail-row{position:relative;}
+.hc-rail-main{padding-left:0.85rem;}
+
+/* THE GUTTER. One slot, centred whatever the mark's size, so growing the
+   mark never moves it. */
+.hc-rail-row::before{content:'';position:absolute;left:0.4rem;top:50%;
+  transform:translate(-50%,-50%);width:2px;height:0;border-radius:1px;
+  background:rgba(${STEEL},0.62);pointer-events:none;}
+
+/* HISTORY — the tick is as tall as the conversation is deep: 6px at one
+   turn, 14px from a dozen on. Height is pre-attentive, so a level reads as a
+   ragged margin you scan for the deep ones without reading a word. */
+.hc-rail-row.spoken::before{height:calc(6px + var(--hc-rail-depth, 0) * 8px);}
+
+/* UNREAD — the tick becomes a SEALED COMB CELL: the house pointy-top
+   hexagon, the only one in the list, the only amber in the gutter. Shape
+   carries it and colour only agrees. Must stay after .spoken — equal
+   specificity, source order decides. */
+.hc-rail-row.unread::before{width:0.58rem;height:0.66rem;border-radius:0;
+  background:rgba(${AMBER},0.95);
+  clip-path:polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);}
+
+/* The name is the cheapest mark of all: dormant sits back, anything spoken
+   to steps forward, unread thickens with text-stroke — which has no glyph
+   advance, so the ellipsis point never moves. */
+.hc-rail-name{color:rgba(238,244,250,0.62);}
+.hc-rail-row.spoken .hc-rail-name,
+.hc-rail-row.draft .hc-rail-name{color:rgba(238,244,250,0.92);}
+.hc-rail-row.unread .hc-rail-name{color:rgba(246,250,255,0.99);
+  -webkit-text-stroke:0.35px currentColor;}
+
+/* DRAFT — your unsent thinking, laid under the thing it is about: a white
+   rule inside the picture's bottom edge over a dark hairline, so it holds on
+   a bright photograph. ::after, never an inset shadow — the <img> paints
+   over those. */
+.hc-rail-icon{position:relative;}
+.hc-rail-row.draft .hc-rail-icon::after{content:'';position:absolute;
+  left:0;right:0;bottom:0;height:3px;pointer-events:none;
+  background:linear-gradient(rgba(8,12,18,0.85) 0 1px,rgba(238,244,250,0.85) 1px 3px);}
+
+/* CHOSEN — gathered as context for the next request. A ring on the picture
+   and a tick in its corner: it belongs to the tile as an OBJECT, which is
+   what a signature in a payload is, and it stays clear of all three state
+   places so a chosen row can still be deep, unread and drafting at once. */
+.hc-rail-row.chosen .hc-rail-icon{box-shadow:0 0 0 2px rgba(${STEEL},0.95);}
+.hc-rail-row.chosen .hc-rail-icon::before{content:'';position:absolute;z-index:1;
+  left:2px;top:2px;width:0.62rem;height:0.62rem;border-radius:50%;
+  background:rgba(${STEEL},0.95);
+  clip-path:polygon(50% 0,100% 0,100% 100%,0 100%,0 0);
+  box-shadow:inset 0 0 0 2px #0c1118;}
+.hc-rail-row.chosen{background:rgba(${STEEL},0.07);}
+
+/* LIVE — the count, no ring. A digit is information a colour cannot be, and
+   it is its own reduced-motion fallback: the breath is affect, the numeral
+   is the fact. The slot is held open always, so a bee arriving never
+   reflows the name. */
+.hc-rail-bees{flex:0 0 auto;width:1.05rem;min-width:0;overflow:hidden;
+  padding:0;border:0;border-radius:0;background:none;text-align:center;
+  font-family:var(--hc-mono,monospace);font-size:0.68rem;font-weight:600;
+  line-height:1;font-variant-numeric:tabular-nums;color:rgba(${AMBER},0.95);}
+.hc-rail-bees[hidden]{display:block;visibility:hidden;}
+@keyframes hcRailBreath{0%,100%{opacity:0.5;}50%{opacity:1;}}
+.hc-rail-bees:not([hidden]){animation:hcRailBreath 2.6s ease-in-out infinite;}
+
+/* Structure, not state — and it had to stop failing contrast: 0.35 was
+   2.76:1 on this ground, 0.44 is 3.69:1. The slot stays whether or not the
+   chevron is in it. */
+.hc-rail-chev{flex:0 0 auto;width:0.6rem;text-align:center;padding-right:0.1rem;
+  color:rgba(216,230,238,0.44);font-size:1.05rem;line-height:1;}
+.hc-rail-chev[hidden]{display:block;visibility:hidden;}
+
+/* Same defect, same pass: placeholder text needs 4.5:1, not 2.76:1. */
+.hc-rail-find input::placeholder{color:rgba(216,230,238,0.6);}
+
+@media (prefers-reduced-motion:reduce){
+  .hc-rail-bees:not([hidden]){animation:none;opacity:1;}
+  .hc-rail-list{animation:none !important;}
+}
 `
   document.head.appendChild(style)
 }
@@ -181,8 +290,18 @@ export class AgentTilesRail {
   readonly #waiters = new Map<string, Set<HTMLElement>>()
   /** The row you are IN — the conversation everything typed belongs to. */
   #subject: RailPick | null = null
-  /** Tile paths holding unsent thinking, for the mark on the row. */
+  /** Rows CHOSEN as context, by row key. Survives walking levels on purpose:
+   *  gathering is the whole point, and a set that emptied every time you went
+   *  inside a tile could never span a hive. */
+  readonly #chosen = new Map<string, RailPick>()
+  /** WHAT A ROW HAS TO SAY, gathered from three places that do not know about
+   *  each other: the drafts pool (yours, unsent), the threads pool (a
+   *  conversation exists, and whether its newest turn has been read), and the
+   *  chat window's own announcement that a question is out right now. The
+   *  rail owns none of these facts — it hears them and paints them. */
   #drafts = new Set<string>()
+  #chats = new Map<string, TileConversation>()
+  #busy = new Set<string>()
   /** A hold already acted — eat the click that ends the same press. */
   #swallowClick = false
   /** The level changed from the keyboard: put focus on the level that
@@ -199,11 +318,37 @@ export class AgentTilesRail {
   /** The surface listens here to follow the participant into a conversation. */
   onSubjectChanged: (subject: RailPick | null) => void = () => {}
 
-  readonly #onRegistryChange = (): void => this.#paintBadges()
+  readonly #onRegistryChange = (): void => this.#paintStatus()
   #dropDraftWatch: (() => void) | null = null
+  #dropChatWatch: (() => void) | null = null
+  #dropBusyWatch: (() => void) | null = null
 
   /** The tile whose conversation is open, or null before anything is chosen. */
   get subject(): RailPick | null { return this.#subject }
+
+  /** The tiles chosen as context, in the order they were chosen. */
+  get selection(): RailPick[] { return [...this.#chosen.values()] }
+
+  /** The signatures those tiles resolve to — the deterministic payload a
+   *  request carries. Order-preserving and duplicate-free; a row whose sig the
+   *  walk could not resolve contributes nothing rather than a guess. */
+  get selectionSigs(): string[] {
+    return [...new Set(this.selection.map(pick => pick.sig).filter((sig): sig is string => !!sig))]
+  }
+
+  /** The surface listens here to show what the next request will carry. */
+  onSelectionChanged: (selection: RailPick[]) => void = () => {}
+
+  /** Let go of every chosen tile — Escape's first stop, before the subject. */
+  clearSelection(): void {
+    if (!this.#chosen.size) return
+    this.#chosen.clear()
+    for (const row of this.#list?.querySelectorAll('.hc-rail-row.chosen') ?? []) {
+      row.classList.remove('chosen')
+      row.querySelector('.hc-rail-main')?.setAttribute('aria-pressed', 'false')
+    }
+    this.onSelectionChanged([])
+  }
 
   /** What an ask sent from this surface works on. One tile: the one you are
    *  talking to. Kept as a list because that is the shape every caller and
@@ -290,7 +435,18 @@ export class AgentTilesRail {
     // composer, from another window, or by a sweep shows up here the same way.
     this.#dropDraftWatch?.()
     this.#dropDraftWatch = EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() })
+    this.#dropChatWatch?.()
+    this.#dropChatWatch = EffectBus.on('chat:threads-changed', () => { void this.#refreshChats() })
+    this.#dropBusyWatch?.()
+    this.#dropBusyWatch = EffectBus.on<{ path?: string; busy?: boolean }>('chat:tile-busy', payload => {
+      const path = String(payload?.path ?? '')
+      if (!path) return
+      if (payload?.busy) this.#busy.add(path)
+      else this.#busy.delete(path)
+      this.#paintStatus()
+    })
     void this.#refreshDrafts()
+    void this.#refreshChats()
 
     void this.#load(0)
   }
@@ -307,6 +463,10 @@ export class AgentTilesRail {
     this.#disposed = true
     this.#dropDraftWatch?.()
     this.#dropDraftWatch = null
+    this.#dropChatWatch?.()
+    this.#dropChatWatch = null
+    this.#dropBusyWatch?.()
+    this.#dropBusyWatch = null
     this.#registry?.removeEventListener('change', this.#onRegistryChange)
     for (const url of this.#icons.values()) {
       if (url) { try { URL.revokeObjectURL(url) } catch { /* already gone */ } }
@@ -315,6 +475,7 @@ export class AgentTilesRail {
     this.#waiters.clear()
     this.#levels.clear()
     this.#subject = null
+    this.#chosen.clear()
     this.#host = null
     this.#list = null
     this.#find = null
@@ -379,6 +540,7 @@ export class AgentTilesRail {
         segments: node.segments ?? [...path, node.name],
         childCount: node.childCount,
         propsSig: node.propsSig,
+        sig: node.sig,
       }))
     this.#levels.set(key, rows)
     // The cached shape was already on screen; repainting an identical level
@@ -451,6 +613,7 @@ export class AgentTilesRail {
       wrap.dataset['key'] = key
       wrap.setAttribute('role', 'listitem')
       wrap.classList.toggle('current', current)
+      wrap.classList.toggle('chosen', this.#chosen.has(key))
 
       const main = document.createElement('button')
       main.type = 'button'
@@ -459,6 +622,9 @@ export class AgentTilesRail {
       // The conversation you are in, said to a screen reader as well as to
       // the eye — `current` is only a background colour.
       if (current) main.setAttribute('aria-current', 'true')
+      // Chosen is a TOGGLE, and a toggle says so: aria-pressed is the whole
+      // difference between "this row is lit" and "this row is switched on".
+      main.setAttribute('aria-pressed', this.#chosen.has(key) ? 'true' : 'false')
 
       const icon = document.createElement('span')
       icon.className = 'hc-rail-icon'
@@ -475,29 +641,25 @@ export class AgentTilesRail {
       bees.textContent = String(busy)
       bees.hidden = busy === 0
 
-      const draft = document.createElement('span')
-      draft.className = 'hc-rail-draft'
-      draft.hidden = !this.#drafts.has(tilePath(row.segments))
-      draft.title = this.#t('agent.rail-draft', 'Unsent thinking waiting here')
-
       const chevron = document.createElement('span')
       chevron.className = 'hc-rail-chev'
       chevron.textContent = '›'
       chevron.hidden = row.childCount === 0
 
-      main.append(icon, name, draft, bees, chevron)
+      main.append(icon, name, bees, chevron)
 
-      // CLICK TALKS, HOLD GOES IN. A plain click can never navigate — it is
-      // the gesture you make while mid-thought, so it only ever changes who
-      // you are talking to. Going deeper is the deliberate one, and it is the
-      // hive's own hold-to-enter, so the list is walked with the gesture the
-      // hands already know. (Ctrl-click does it too, for a fast mouse.)
+      // CLICK TALKS, CTRL-CLICK CHOOSES, HOLD GOES IN. A plain click can never
+      // navigate — it is the gesture you make while mid-thought, so it only
+      // ever changes who you are talking to. Ctrl-click gathers context and
+      // never moves the list either. Going deeper is the deliberate one, and
+      // it is the hive's own hold-to-enter, so the list is walked with the
+      // gesture the hands already know.
       if (row.childCount > 0) this.#armHold(main, wrap, row)
       main.addEventListener('click', event => {
         // The hold already went in; the click that ends it must not also
         // drag the conversation to the row we just left.
         if (this.#swallowClick) { this.#swallowClick = false; return }
-        if ((event.ctrlKey || event.metaKey) && row.childCount > 0) this.#drill(row.segments)
+        if (event.ctrlKey || event.metaKey) this.#toggleChosen(wrap, key, row)
         else this.#enter(wrap, key, row)
       })
 
@@ -518,6 +680,10 @@ export class AgentTilesRail {
           event.preventDefault()
           this.#focusFirstRow = true
           this.#up()
+        } else if (event.key === ' ' || event.key === 'Spacebar') {
+          // The keyboard's ctrl-click. Enter still opens the conversation.
+          event.preventDefault()
+          this.#toggleChosen(wrap, key, row)
         } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           event.preventDefault()
           this.#step(wrap, event.key === 'ArrowDown' ? 1 : -1)
@@ -527,6 +693,9 @@ export class AgentTilesRail {
       wrap.append(main)
       list.appendChild(wrap)
     }
+
+    // The rows exist; now say what each one holds.
+    this.#paintStatus()
 
     // After a level change the focus that was on a now-removed row would be
     // lost to the body, stranding a keyboard mid-list. Put it on the first
@@ -581,6 +750,22 @@ export class AgentTilesRail {
     }
   }
 
+  /** Choose or release a row as CONTEXT. Independent of the conversation you
+   *  are in: you can gather five tiles and then ask about them from any of
+   *  them, or from none. */
+  #toggleChosen(wrap: HTMLElement, key: string, row: RailRow): void {
+    const main = wrap.querySelector('.hc-rail-main')
+    if (this.#chosen.delete(key)) {
+      wrap.classList.remove('chosen')
+      main?.setAttribute('aria-pressed', 'false')
+    } else {
+      this.#chosen.set(key, { key, path: row.segments.slice(0, -1), name: row.name, sig: row.sig })
+      wrap.classList.add('chosen')
+      main?.setAttribute('aria-pressed', 'true')
+    }
+    this.onSelectionChanged(this.selection)
+  }
+
   /** Enter a row's conversation. One at a time: the previous row lets go, so
    *  what you type after this belongs to the tile you just clicked. */
   #enter(wrap: HTMLElement, key: string, row: RailRow): void {
@@ -608,17 +793,60 @@ export class AgentTilesRail {
     try { held = (await listTileDrafts()).map(d => d.path) } catch { return }
     if (this.#disposed) return
     this.#drafts = new Set(held)
-    this.#paintDrafts()
+    this.#paintStatus()
   }
 
-  #paintDrafts(): void {
+  /** Which tiles hold a conversation at all, and whether it has been read. */
+  async #refreshChats(): Promise<void> {
+    let chats: TileConversation[] = []
+    try { chats = await listTileConversations() } catch { return }
+    if (this.#disposed) return
+    this.#chats = new Map(chats.map(c => [c.path, c]))
+    this.#paintStatus()
+  }
+
+  /** Paint every row's state from the three sources at once. One pass, so a
+   *  row can never show half an answer, and cheap enough to run whenever any
+   *  source moves — it touches classes and one custom property, never the
+   *  DOM's shape. */
+  #paintStatus(): void {
     const list = this.#list
     if (!list) return
+    const counts = this.#agentCounts()
     for (const row of list.querySelectorAll<HTMLElement>('.hc-rail-row')) {
-      const mark = row.querySelector<HTMLElement>('.hc-rail-draft')
-      if (!mark) continue
-      const segments = keySegments(row.dataset['key'] ?? '')
-      mark.hidden = !this.#drafts.has(tilePath(segments))
+      const key = row.dataset['key'] ?? ''
+      const path = tilePath(keySegments(key))
+      const chat = this.#chats.get(path)
+      const turns = chat?.turns ?? 0
+      const draft = this.#drafts.has(path)
+      const unread = !!chat?.unread
+
+      row.classList.toggle('spoken', turns > 0)
+      row.classList.toggle('unread', unread)
+      row.classList.toggle('draft', draft)
+      row.style.setProperty('--hc-rail-depth', String(Math.min(turns, 12) / 12))
+
+      // LIVE is agents on the tile plus a question of your own still out —
+      // one number, because from the row's side they are the same fact.
+      const busy = (counts.get(key) ?? 0) + (this.#busy.has(path) ? 1 : 0)
+      const badge = row.querySelector<HTMLElement>('.hc-rail-bees')
+      if (badge) {
+        badge.textContent = String(busy)
+        badge.hidden = busy === 0
+      }
+
+      // EVERY MARK HERE IS CSS, therefore silent. The row's accessible name
+      // has to carry the same sentence, or the vocabulary is sighted-only.
+      const main = row.querySelector<HTMLElement>('.hc-rail-main')
+      const label = row.querySelector<HTMLElement>('.hc-rail-name')?.textContent ?? ''
+      if (main && label) {
+        const said: string[] = [label]
+        if (turns > 0) said.push(this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(turns)))
+        if (unread) said.push(this.#t('agent.rail-unread', 'unread reply'))
+        if (draft) said.push(this.#t('agent.rail-draft', 'draft waiting'))
+        if (busy > 0) said.push(this.#t('agent.rail-working', '{count} working').replace('{count}', String(busy)))
+        main.setAttribute('aria-label', said.join(' · '))
+      }
     }
   }
 
@@ -639,19 +867,7 @@ export class AgentTilesRail {
     return counts
   }
 
-  /** Registry moved — patch the badges in place, nothing else re-renders. */
-  #paintBadges(): void {
-    const list = this.#list
-    if (!list) return
-    const counts = this.#agentCounts()
-    for (const row of list.querySelectorAll<HTMLElement>('.hc-rail-row')) {
-      const badge = row.querySelector<HTMLElement>('.hc-rail-bees')
-      if (!badge) continue
-      const busy = counts.get(row.dataset['key'] ?? '') ?? 0
-      badge.textContent = String(busy)
-      badge.hidden = busy === 0
-    }
-  }
+
 
   // ── icons ───────────────────────────────────────────────────────────
 

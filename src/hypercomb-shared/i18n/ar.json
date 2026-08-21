@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "تحدّث إلى هذه البلاطة",
   "agent.rail-inside": "اضغط مطوّلاً للدخول",
   "agent.rail-draft": "أفكار غير مُرسَلة تنتظر هنا",
+  "agent.rail-turns": "{count} تبادلات",
+  "agent.rail-unread": "رد غير مقروء",
+  "agent.rail-working": "{count} قيد العمل",
   "slash.menu": "قائمة سريعة — سبع سداسيات عند المؤشر؛ انفض باتجاه للاختيار",
   "quickmenu.root": "الخلية",
   "quickmenu.workflow": "سير العمل",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "اسأل عن أي شيء…",
   "chat.send": "إرسال",
   "chat.rail": "بلاطاتك، لكل واحدة محادثة",
+  "chat.context.chosen": "{count} كسياق",
+  "chat.context.chosen.title": "يرافق هذا السؤال: {names}",
+  "chat.context.chosen.clear": "ترك البلاطات المجمّعة ({count})",
   "mesh-modal.needs-location": "يلزم موقع للانضمام",
   "mesh-modal.needs-secret": "يلزم مفتاح سري للانضمام"
 }

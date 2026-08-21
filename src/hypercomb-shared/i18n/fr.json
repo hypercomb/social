@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "Parler à cette tuile",
   "agent.rail-inside": "maintenez pour entrer",
   "agent.rail-draft": "Des réflexions non envoyées attendent ici",
+  "agent.rail-turns": "{count} échanges",
+  "agent.rail-unread": "réponse non lue",
+  "agent.rail-working": "{count} en cours",
   "slash.menu": "Menu rapide — sept hexagones au pointeur ; donnez une direction d'un geste pour choisir",
   "quickmenu.root": "Ruche",
   "quickmenu.workflow": "Flux de travail",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "Posez n'importe quelle question…",
   "chat.send": "Envoyer",
   "chat.rail": "Vos tuiles, une conversation chacune",
+  "chat.context.chosen": "{count} en contexte",
+  "chat.context.chosen.title": "Accompagne cette question : {names}",
+  "chat.context.chosen.clear": "Relâcher les {count} tuiles rassemblées",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
 }

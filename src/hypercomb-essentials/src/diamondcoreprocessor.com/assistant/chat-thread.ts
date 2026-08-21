@@ -369,6 +369,68 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
 export const listConversations = async (): Promise<ConversationSummary[]> =>
   (await listConversationsWithLatest()).conversations
 
+// ── what a tile's conversation looks like from outside ───
+//
+// The list of tiles IS the list of chats, so the list has to be able to SAY
+// which tiles are chats. Three facts do it, and the rail paints all three:
+// whether a conversation exists at all, whether its newest turn has been
+// read, and (from the surface, not from here) whether something is in
+// flight right now. Without them every row looks identical and choosing one
+// is a guess — a dormant tile and a tile holding forty turns read the same.
+//
+// SEEN IS PER DEVICE, on purpose. "I have read this" is not a fact about the
+// hive — the same thread genuinely is unread on your phone after you read it
+// on your desktop — so it lives in localStorage beside the per-conversation
+// model choice, never in a pool. Losing it costs one bold row, not data.
+
+const SEEN_KEY = 'hc:chat-seen'
+
+/** What the rail needs to know about one tile's conversation. */
+export interface TileConversation {
+  readonly path: string
+  readonly turns: number
+  readonly lastAt: number
+  /** The newest turn landed after the last time this thread was opened. */
+  readonly unread: boolean
+}
+
+const seenMap = (): Record<string, number> => {
+  try { return JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, number> }
+  catch { return {} }
+}
+
+/** Remember that this conversation has been read up to `at`. Called when a
+ *  thread is opened and when a turn lands while you are looking at it. */
+export const markConversationSeen = (convoId: string, at: number = Date.now()): void => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return
+  try {
+    const map = seenMap()
+    if ((map[id] ?? 0) >= at) return
+    map[id] = at
+    localStorage.setItem(SEEN_KEY, JSON.stringify(map))
+  } catch { /* participant-local convenience — never worth failing a read */ }
+}
+
+/** Every TILE that holds a conversation, keyed by tile path. One walk of the
+ *  threads pool; free-floating chats are skipped because no row can show
+ *  them. */
+export const listTileConversations = async (): Promise<TileConversation[]> => {
+  const seen = seenMap()
+  const out: TileConversation[] = []
+  for (const convo of await listConversations()) {
+    const path = tilePathOf(convo.convoId)
+    if (!path) continue
+    out.push({
+      path,
+      turns: convo.turnCount,
+      lastAt: convo.lastAt,
+      unread: convo.lastAt > (seen[convo.convoId] ?? 0),
+    })
+  }
+  return out
+}
+
 /** Drop a conversation and every turn in it. The one destructive act this
  *  module has, and it is scoped to a single bucket inside the threads pool —
  *  it never reaches the root, a lineage bag, or another pool. The turn
@@ -497,6 +559,8 @@ export const saveTileDraft = async (path: string, text: string): Promise<boolean
 
 export class ChatThreads {
   readonly appendTurn = appendTurn
+  readonly listTileConversations = listTileConversations
+  readonly markConversationSeen = markConversationSeen
   readonly tileConvoId = tileConvoId
   readonly tilePath = tilePath
   readonly tilePathOf = tilePathOf

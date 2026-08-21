@@ -130,6 +130,8 @@ type ChatThreadsLike = {
   /** Unsent thinking, stored the moment it is typed and activating nothing. */
   readTileDraft?(path: string): Promise<string>
   saveTileDraft?(path: string, text: string): Promise<boolean>
+  /** Read-marker for the list's unread mark. Per DEVICE, not per hive. */
+  markConversationSeen?(convoId: string, at?: number): void
 }
 
 type QueenLike = {
@@ -143,6 +145,9 @@ type QueenLike = {
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
+    /** Signatures of the tiles chosen in the sidebar. An older essentials
+     *  build ignores the argument and the ask simply carries less. */
+    chosen?: readonly string[],
   ): Promise<string | boolean | null>
 }
 
@@ -156,9 +161,14 @@ type SelectionLike = { selected: ReadonlySet<string> }
 type RailPickLike = { readonly key: string; readonly path: readonly string[]; readonly name: string }
 type TilesRailLike = {
   onSubjectChanged: (subject: RailPickLike | null) => void
+  onSelectionChanged: (selection: RailPickLike[]) => void
   readonly subject: RailPickLike | null
+  /** Tiles ctrl-clicked as context, and the signatures they resolve to. */
+  readonly selection: RailPickLike[]
+  readonly selectionSigs: string[]
   mount(host: HTMLElement): void
   clearSubject(): void
+  clearSelection(): void
   dispose(): void
 }
 type TilesRailFactoryLike = { create?: () => TilesRailLike }
@@ -379,10 +389,26 @@ export class ChatWindowComponent implements OnDestroy {
    *  free-floating chat, about nothing in particular. */
   readonly railSubject = signal<RailPickLike | null>(null)
 
+  /** The tiles gathered as CONTEXT for the next question — ctrl-clicked in
+   *  the sidebar, kept across levels, and carried as signatures so the
+   *  request is the same bytes every time it is composed. */
+  readonly railContext = signal<readonly RailPickLike[]>([])
+
   /** What the next question is about, counted for the status row — the SAME
    *  deduped union `send()` will carry, so a tile both canvas-selected and
    *  sidebar-picked counts once. */
   readonly chosen = computed(() => this.#chosenTargets().length)
+
+  /** The gathered tiles, named, for the chip's tooltip. */
+  readonly contextNames = computed(() => this.railContext().map(pick => pick.name).join(', '))
+
+  /** Let the whole gathering go. The tiles are untouched — only the list of
+   *  signatures the next question would have carried. */
+  clearContext(): void {
+    this.#rail?.clearSelection()
+    this.railContext.set([])
+    this.#focus()
+  }
 
   /** How many context branches are ATTACHED to this tile (the portal-drop
    *  records) — they ride with every question, and a rider the participant
@@ -466,6 +492,8 @@ export class ChatWindowComponent implements OnDestroy {
    *  so an unchanged box is never re-written. */
   #heldDraft = ''
   #draftTimer: ReturnType<typeof setTimeout> | null = null
+  /** Questions that are out, by conversation — see #startWait. */
+  readonly #outstanding = new Map<string, { sig: string; askedAt: number }>()
 
   /** The active thread's name — its first message. Read from the list when it
    *  is there, else from the turns in hand, so a brand-new conversation is
@@ -595,6 +623,7 @@ export class ChatWindowComponent implements OnDestroy {
         if (this.#rail || !factory?.create) return
         this.#rail = factory.create()
         this.#rail.onSubjectChanged = subject => { void this.#enterSubject(subject) }
+        this.#rail.onSelectionChanged = selection => { this.railContext.set([...selection]) }
         // The host captured here may have been replaced by the time a late
         // factory lands — mount into whatever full screen is showing NOW.
         const live = this.chatRail()?.nativeElement
@@ -698,24 +727,60 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** Begin waiting: the clock starts, and every state that describes a
    *  previous wait is cleared so nothing from it can be read as current. */
-  #startWait(): void {
-    this.waiting.set(true)
-    this.askedAt.set(Date.now())
-    this.elapsed.set(0)
-    this.pendingSig.set('')
+  // A WAIT BELONGS TO ITS CONVERSATION, not to the window.
+  //
+  // It used to be one flag: opening another thread cleared it, so a question
+  // still out on the thread you left lost its clock, its Stop button and its
+  // withdraw handle — permanently, since nothing put them back when you
+  // returned. With a chat per tile that is the ordinary move, not an edge
+  // case: you ask on one tile and step to the next while it thinks.
+  //
+  // So outstanding asks are held per convoId and the window merely SHOWS the
+  // active one. It is also what lets the list mark a tile as thinking: the
+  // same record is announced on the bus, keyed by the tile's path.
+
+  #startWait(convoId: string): void {
+    this.#outstanding.set(convoId, { sig: '', askedAt: Date.now() })
+    this.#announceBusy(convoId, true)
+    this.#syncWait(convoId)
+  }
+
+  /** Stop waiting, whatever ended it — an answer, a failure, a withdrawal.
+   *  Defaults to the conversation on screen; an answer landing on a thread
+   *  you have since left ends THAT one. */
+  #endWait(convoId: string = this.activeId()): void {
+    if (this.#outstanding.delete(convoId)) this.#announceBusy(convoId, false)
+    if (convoId === this.activeId()) this.#syncWait(convoId)
+  }
+
+  /** Paint the wait state of one conversation — called on every arrival at a
+   *  thread, so a question still out is found exactly as it was left. */
+  #syncWait(convoId: string): void {
+    const out = this.#outstanding.get(convoId)
     this.#stopClock()
+    if (!out) {
+      this.waiting.set(false)
+      this.hostStreaming.set(false)
+      this.pendingSig.set('')
+      this.elapsed.set(0)
+      return
+    }
+    this.waiting.set(true)
+    this.askedAt.set(out.askedAt)
+    this.pendingSig.set(out.sig)
+    this.elapsed.set(Math.max(0, Math.round((Date.now() - out.askedAt) / 1000)))
     this.#elapsedTimer = setInterval(() => {
       if (!this.waiting()) { this.#stopClock(); return }
       this.elapsed.set(Math.max(0, Math.round((Date.now() - this.askedAt()) / 1000)))
     }, ELAPSED_TICK_MS)
   }
 
-  /** Stop waiting, whatever ended it — an answer, a failure, a withdrawal. */
-  #endWait(): void {
-    this.waiting.set(false)
-    this.hostStreaming.set(false)
-    this.pendingSig.set('')
-    this.#stopClock()
+  /** Tell the list which tile is thinking. The rail cannot see this window's
+   *  state and must not try — it hears the fact and paints it. */
+  #announceBusy(convoId: string, busy: boolean): void {
+    const path = this.#threads()?.tilePathOf?.(convoId)
+    if (!path) return
+    EffectBus.emit('chat:tile-busy', { path, busy })
   }
 
   #stopClock(): void {
@@ -907,7 +972,7 @@ export class ChatWindowComponent implements OnDestroy {
         this.model.set(this.#rememberedModel(recent.convoId))
         this.streaming.set('')
         this.turns.set(latestTurns)
-        this.#endWait()
+        this.#syncWait(recent.convoId)
         this.#scrollDown(true)
       } else if (!this.activeId()) {
         this.newChat(false)
@@ -938,6 +1003,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#rail?.dispose()
     this.#rail = null
     this.railSubject.set(null)
+    this.railContext.set([])
     EffectBus.emit('chat:window-state', { open: false })
   }
 
@@ -952,6 +1018,7 @@ export class ChatWindowComponent implements OnDestroy {
     // The cascade unwinds the smallest commitment first: the tile you are
     // talking to, then full screen, then the window — matching the
     // escape-cascade's outermost-first rule.
+    if (this.focused() && this.railContext().length) { this.#rail?.clearSelection(); return }
     if (this.focused() && this.railSubject()) { this.#rail?.clearSubject(); return }
     if (this.focused()) { this.focused.set(false); return }
     this.close()
@@ -1006,7 +1073,11 @@ export class ChatWindowComponent implements OnDestroy {
     // (it used to sit after the set, guarding only the scroll).
     if (this.activeId() !== convoId) return
     this.turns.set(turns)
-    this.#endWait()
+    this.#syncWait(convoId)
+    // Arriving IS reading: the newest turn here is no longer unread, which is
+    // what takes the bold off this tile's row in the list.
+    threads.markConversationSeen?.(convoId, turns[turns.length - 1]?.at ?? Date.now())
+    EffectBus.emit('chat:threads-changed', { convoId })
     // Switching threads re-pins: you are arriving at a conversation, and its
     // newest turn is where arriving means.
     this.#scrollDown(true)
@@ -1247,7 +1318,7 @@ export class ChatWindowComponent implements OnDestroy {
 
     const turn: ChatTurn = { kind: 'chat-turn', convoId, role: 'user', text: message, at: Date.now() }
     this.turns.update(list => [...list, turn])
-    this.#startWait()
+    this.#startWait(convoId)
     // Sending is the one arrival the participant caused, so it re-pins the
     // transcript even if they had scrolled up to read something.
     this.#scrollDown(true)
@@ -1297,15 +1368,19 @@ export class ChatWindowComponent implements OnDestroy {
       .map(t => ({ role: t.role, text: t.text }))
 
     queen.activeModel = this.model()
-    const queued = await queen.submitChat(convoId, message, this.#chosenTargets(), transcript)
+    const queued = await queen.submitChat(
+      convoId, message, this.#chosenTargets(), transcript, this.#rail?.selectionSigs ?? [])
     if (!queued) {
       this.#endWait()
       EffectBus.emit('toast:show', { type: 'warning', message: 'Could not send — try again.' })
     } else if (typeof queued === 'string') {
       // The ask's record signature: the handle Withdraw pulls on. An older
       // essentials build answers `true` instead, and then the question is
-      // queued but not recallable from here.
-      this.pendingSig.set(queued)
+      // queued but not recallable from here. It is stored ON the conversation
+      // so stepping away and back finds Withdraw still armed.
+      const out = this.#outstanding.get(convoId)
+      if (out) this.#outstanding.set(convoId, { ...out, sig: queued })
+      if (convoId === this.activeId()) this.pendingSig.set(queued)
     }
     if (!this.#bumpList(convoId)) void this.#refreshList()
   }
@@ -1405,18 +1480,26 @@ export class ChatWindowComponent implements OnDestroy {
 
     // A reply for another thread: it is on disk, so all that is owed here is a
     // list that shows it moved to the top — a bump when the thread is listed,
-    // the real walk only when it is not.
+    // the real walk only when it is not. Its wait ends all the same (the
+    // question really was answered), and its tile is left UNREAD, which is
+    // the mark that brings you back to it.
     if (convoId !== this.activeId()) {
+      this.#endWait(convoId)
       if (!this.#bumpList(convoId)) void this.#refreshList()
+      EffectBus.emit('chat:threads-changed', { convoId })
       return
     }
 
+    const at = Date.now()
     this.turns.update(list => [...list, {
-      kind: 'chat-turn', convoId, role: 'assistant', text, at: Date.now(),
+      kind: 'chat-turn', convoId, role: 'assistant', text, at,
     }])
-    this.#endWait()
+    this.#endWait(convoId)
+    // Read as it lands: you are looking straight at it.
+    this.#threads()?.markConversationSeen?.(convoId, at)
     this.#scrollDown()
     if (!this.#bumpList(convoId)) void this.#refreshList()
+    EffectBus.emit('chat:threads-changed', { convoId })
   }
 
   // ── input ───────────────────────────────────────────────────────────────

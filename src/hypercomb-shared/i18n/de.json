@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "Mit dieser Kachel sprechen",
   "agent.rail-inside": "gedrückt halten, um hineinzugehen",
   "agent.rail-draft": "Unabgeschickte Gedanken warten hier",
+  "agent.rail-turns": "{count} Beiträge",
+  "agent.rail-unread": "ungelesene Antwort",
+  "agent.rail-working": "{count} arbeiten",
   "slash.menu": "Schnellmenü — sieben Hexagone am Zeiger; in eine Richtung schnippen wählt aus",
   "quickmenu.root": "Bienenstock",
   "quickmenu.workflow": "Arbeitsablauf",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "Frag irgendwas…",
   "chat.send": "Senden",
   "chat.rail": "Deine Kacheln — je eine Unterhaltung",
+  "chat.context.chosen": "{count} als Kontext",
+  "chat.context.chosen.title": "Reist mit dieser Frage: {names}",
+  "chat.context.chosen.clear": "Die {count} gesammelten Kacheln loslassen",
   "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
   "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt"
 }

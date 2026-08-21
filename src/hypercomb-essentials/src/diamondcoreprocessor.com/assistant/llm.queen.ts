@@ -29,7 +29,7 @@
 // tile names as context). The ask record IS the request; the Claude bridge loop
 // IS the response — a live service the user triggers from the hive.
 
-import { QueenBee, EffectBus, isLocalClaudeBridgeConfigured } from '@hypercomb/core'
+import { QueenBee, EffectBus, isLocalClaudeBridgeConfigured, isSignature } from '@hypercomb/core'
 import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
 import { resolveTileContext } from './tile-context.js'
 
@@ -128,6 +128,12 @@ export class LlmQueenBee extends QueenBee {
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
+    /** Tiles CHOSEN in the list, as signatures. Explicit context: the
+     *  participant ctrl-clicked these, so they lead the union and the cap can
+     *  never drop them in favour of something merely attached. A signature
+     *  list is what makes the payload deterministic — the same choice
+     *  composes the same request bytes, today and on a rebuild. */
+    chosen: readonly string[] = [],
   ): Promise<string | null> {
     // This method is specifically the durable LOCAL-BRIDGE queue seam. The
     // chat window's participant-host path calls HostAi directly and never
@@ -146,7 +152,19 @@ export class LlmQueenBee extends QueenBee {
     // dragged onto this tile, resolved to content sigs. This is the wire the
     // whole context system was built toward: the responder no longer has to
     // guess that a tile has curated material behind it.
-    const context = await composeContext(segments)
+    const attached = await composeContext(segments)
+
+    // CHOSEN FIRST, then whatever is attached to the tile. Both are sigs, so
+    // the union is a set and the order is the only editorial decision: what
+    // was picked by hand outranks what was inherited from the page.
+    const picked = [...new Set(chosen.map(String).filter(isSignature))]
+    const union = [...new Set([...picked, ...(attached.context ?? [])])]
+    const context = union.length
+      ? {
+          context: union.slice(0, CONTEXT_SIG_CAP),
+          ...(attached.contextTruncated || union.length > CONTEXT_SIG_CAP ? { contextTruncated: true } : {}),
+        }
+      : attached
 
     const record = {
       kind: ASK_KIND,
@@ -159,6 +177,7 @@ export class LlmQueenBee extends QueenBee {
         model: this.activeModel,
         targets,
         segments,
+        ...(picked.length ? { chosen: picked } : {}),
         ...context,
         status: 'pending',
         askedAt: Date.now(),

@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "이 타일과 대화하기",
   "agent.rail-inside": "길게 눌러 안으로 들어가기",
   "agent.rail-draft": "보내지 않은 생각이 남아 있습니다",
+  "agent.rail-turns": "{count}회 대화",
+  "agent.rail-unread": "읽지 않은 답장",
+  "agent.rail-working": "{count}개 작업 중",
   "slash.menu": "빠른 메뉴 — 포인터에 육각형 일곱 개; 방향으로 튕겨 선택",
   "quickmenu.root": "하이브",
   "quickmenu.workflow": "워크플로",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "무엇이든 물어보세요…",
   "chat.send": "보내기",
   "chat.rail": "내 타일, 각각 하나의 대화",
+  "chat.context.chosen": "컨텍스트 {count}개",
+  "chat.context.chosen.title": "이 질문과 함께: {names}",
+  "chat.context.chosen.clear": "모은 타일 {count}개 놓기",
   "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
   "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다"
 }

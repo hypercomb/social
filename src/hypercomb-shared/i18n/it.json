@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "Parla con questa tessera",
   "agent.rail-inside": "tieni premuto per entrare",
   "agent.rail-draft": "Qui ci sono pensieri non inviati",
+  "agent.rail-turns": "{count} scambi",
+  "agent.rail-unread": "risposta non letta",
+  "agent.rail-working": "{count} al lavoro",
   "slash.menu": "Menu rapido — sette esagoni al puntatore; scatta in una direzione per scegliere",
   "quickmenu.root": "Alveare",
   "quickmenu.workflow": "Workflow",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "Chiedi qualsiasi cosa…",
   "chat.send": "Invia",
   "chat.rail": "Le tue tessere, una conversazione ciascuna",
+  "chat.context.chosen": "{count} come contesto",
+  "chat.context.chosen.title": "Viaggia con questa domanda: {names}",
+  "chat.context.chosen.clear": "Lascia le {count} tessere raccolte",
   "mesh-modal.needs-location": "serve un luogo per unirsi",
   "mesh-modal.needs-secret": "serve un segreto per unirsi"
 }

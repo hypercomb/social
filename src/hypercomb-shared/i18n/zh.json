@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "与这个磁贴对话",
   "agent.rail-inside": "长按进入",
   "agent.rail-draft": "这里有未发送的想法",
+  "agent.rail-turns": "{count} 轮对话",
+  "agent.rail-unread": "未读回复",
+  "agent.rail-working": "{count} 个在忙",
   "slash.menu": "快捷菜单 — 指针处的七个六边形；朝一个方向轻拨即可选择",
   "quickmenu.root": "蜂巢",
   "quickmenu.workflow": "工作流",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "随便问点什么…",
   "chat.send": "发送",
   "chat.rail": "你的磁贴，每个都有一段对话",
+  "chat.context.chosen": "{count} 个作为上下文",
+  "chat.context.chosen.title": "随这个问题一起发出：{names}",
+  "chat.context.chosen.clear": "放下已收集的 {count} 个磁贴",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥"
 }

@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "इस टाइल से बात करें",
   "agent.rail-inside": "अंदर जाने के लिए दबाए रखें",
   "agent.rail-draft": "यहाँ बिना भेजे विचार रखे हैं",
+  "agent.rail-turns": "{count} बातें",
+  "agent.rail-unread": "बिना पढ़ा उत्तर",
+  "agent.rail-working": "{count} काम पर",
   "slash.menu": "क्विक मेन्यू — पॉइंटर पर सात षट्कोण; चुनने के लिए किसी दिशा में झटका दें",
   "quickmenu.root": "हाइव",
   "quickmenu.workflow": "वर्कफ़्लो",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "कुछ भी पूछें…",
   "chat.send": "भेजें",
   "chat.rail": "आपकी टाइलें, हर एक की अपनी बातचीत",
+  "chat.context.chosen": "संदर्भ में {count}",
+  "chat.context.chosen.title": "इस सवाल के साथ: {names}",
+  "chat.context.chosen.clear": "इकट्ठा की गई {count} टाइलें छोड़ें",
   "mesh-modal.needs-location": "शामिल होने के लिए एक स्थान चाहिए",
   "mesh-modal.needs-secret": "शामिल होने के लिए एक गुप्त कुंजी चाहिए"
 }

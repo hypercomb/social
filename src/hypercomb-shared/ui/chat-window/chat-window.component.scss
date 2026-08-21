@@ -674,6 +674,35 @@ $accent: #7eb6d6;
   color: rgba($accent, 0.85);
 }
 
+// GATHERED CONTEXT — the ctrl-clicked tiles riding the next question. Steel
+// like the sidebar it was gathered in, so the eye connects the chip to the
+// rows that made it, and pressable because letting go is one press.
+.chat-context-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.05em 0.4em;
+  border: 1px solid rgba($accent, 0.45);
+  border-radius: var(--hc-radius-control, 2px);
+  background: rgba($accent, 0.1);
+  color: rgba($accent, 0.95);
+  font: inherit;
+  font-size: 0.92em;
+  cursor: pointer;
+
+  &:hover { background: rgba($accent, 0.18); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+
+  .mat-sym { font-size: 1.05em; }
+}
+
+.chat-context-off {
+  opacity: 0.7;
+  font-size: 1.05em;
+  line-height: 1;
+}
+
 // Attached-context count — the branches dragged onto this tile, which ride
 // with every question. Honey-warm so it reads as cargo, not chrome.
 .chat-context {

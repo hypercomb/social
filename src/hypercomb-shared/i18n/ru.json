@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "Поговорить с этой плиткой",
   "agent.rail-inside": "удерживайте, чтобы войти",
   "agent.rail-draft": "Здесь ждут неотправленные мысли",
+  "agent.rail-turns": "реплик: {count}",
+  "agent.rail-unread": "непрочитанный ответ",
+  "agent.rail-working": "в работе: {count}",
   "slash.menu": "Быстрое меню — семь шестиугольников у курсора; смахните в сторону, чтобы выбрать",
   "quickmenu.root": "Улей",
   "quickmenu.workflow": "Процесс",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "Спросите о чём угодно…",
   "chat.send": "Отправить",
   "chat.rail": "Ваши плитки — у каждой свой разговор",
+  "chat.context.chosen": "в контексте: {count}",
+  "chat.context.chosen.title": "Поедет с этим вопросом: {names}",
+  "chat.context.chosen.clear": "Отпустить собранные плитки ({count})",
   "mesh-modal.needs-location": "для присоединения нужно место",
   "mesh-modal.needs-secret": "для присоединения нужен секрет"
 }

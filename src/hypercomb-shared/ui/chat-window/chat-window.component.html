@@ -297,6 +297,20 @@
         @if (chosen()) {
           <span class="chat-targets">{{ 'chat.selected' | t: { count: chosen() } }}</span>
         }
+        <!-- GATHERED CONTEXT — the tiles ctrl-clicked in the sidebar. They
+             ride the next question as a list of SIGNATURES, so the payload is
+             the same bytes every time it is composed. A rider the participant
+             cannot see is a surprise, so it is named and countable here, and
+             the × lets the whole gathering go in one press. -->
+        @if (railContext().length) {
+          <button class="chat-context-chip" type="button" (click)="clearContext()"
+            [title]="'chat.context.chosen.title' | t: { names: contextNames() }"
+            [attr.aria-label]="'chat.context.chosen.clear' | t: { count: railContext().length }">
+            <span class="mat-sym" aria-hidden="true">check_box</span>
+            <span>{{ 'chat.context.chosen' | t: { count: railContext().length } }}</span>
+            <span class="chat-context-off" aria-hidden="true">×</span>
+          </button>
+        }
         <!-- Attached context (portal-drop branches) rides with every question —
              a rider the participant can't see is a surprise, so it is counted
              here beside the path it belongs to. -->

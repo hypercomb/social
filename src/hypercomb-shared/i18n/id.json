@@ -1931,6 +1931,9 @@
   "agent.rail-talk": "Bicara dengan ubin ini",
   "agent.rail-inside": "tahan untuk masuk",
   "agent.rail-draft": "Ada catatan yang belum dikirim di sini",
+  "agent.rail-turns": "{count} giliran",
+  "agent.rail-unread": "balasan belum dibaca",
+  "agent.rail-working": "{count} sedang bekerja",
   "slash.menu": "Menu cepat — tujuh heksagon di penunjuk; sentak ke satu arah untuk memilih",
   "quickmenu.root": "Sarang",
   "quickmenu.workflow": "Alur kerja",
@@ -2138,6 +2141,9 @@
   "chat.placeholder": "Tanya apa saja…",
   "chat.send": "Kirim",
   "chat.rail": "Ubin Anda, masing-masing satu percakapan",
+  "chat.context.chosen": "{count} sebagai konteks",
+  "chat.context.chosen.title": "Ikut dengan pertanyaan ini: {names}",
+  "chat.context.chosen.clear": "Lepaskan {count} ubin yang dikumpulkan",
   "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
   "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung"
 }
