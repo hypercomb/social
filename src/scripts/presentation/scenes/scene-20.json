@@ -8,10 +8,10 @@
   "sub": "",
   "visual": "road",
   "visualData": [
+    "AI, deeper — model registry · your own keys · an orchestrator dispatching work across sessions",
     "Workflow pulses — scheduled audits that walk your tree and file reports as tiles",
-    "Installer versioning & checkpoints — version chains surfaced, page-subtree checkpoints, file export",
     "Contract fulfillment — remote participants ask your hive for work — and receive signed results",
-    "Native Windows client — held to the same protocol by conformance vectors — one contract, many shells"
+    "Native Windows client — already running, held to the protocol by conformance vectors — one contract, many shells"
   ],
-  "say": "Next: workflow pulses — scheduled audits that walk your tree and file their reports as tiles. Versioning and checkpoints for the desktop installer. Contract fulfillment — a protocol where remote participants can ask your hive for work and receive signed results. And the native Windows client, held to the same protocol by conformance vectors generated from the reference implementation. One contract, many shells."
+  "say": "Next: A.I., deeper — a model registry, your own keys, and an orchestrator that dispatches work across live sessions. Workflow pulses — scheduled audits that walk your tree and file their reports as tiles. Contract fulfillment — a protocol where remote participants can ask your hive for work and receive signed results. And the native Windows client — already running, and held to the same protocol by conformance vectors generated from the reference implementation. One contract, many shells."
 }

@@ -1154,6 +1154,15 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "presentation-truth-pass",
+      "title": "Presentation scene instructions refreshed (truth pass 2026-08-20) — push updated notes to the presentation tiles",
+      "run": "cd scripts/presentation && node instructions.cjs --push",
+      "note": "Scenes 1,17,19,20,21 edited: false 'every piece of footage was recorded live' claim corrected (drawn concept clips back scenes 8/13/14); scene 17 now says visiting-is-adopting; roadmap re-tiered — 19 = landed (example hives+tutorials, build revisions, mobile usable-first, participant stack straight off the old vision slide), 20 adds AI-deeper and native client 'already running' (installer-versioning row dropped), 21 swaps participant stack for the uniform decoration model. Run instructions.cjs --push with the bridge live so tile notes match scenes/*.json. Manual — note writes are additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }
