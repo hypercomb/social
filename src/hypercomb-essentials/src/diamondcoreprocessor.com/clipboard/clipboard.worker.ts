@@ -137,6 +137,26 @@ export class ClipboardWorker extends Worker {
       if (labels.length > 0) void this.#capture(payload?.copy === true ? 'copy' : 'cut', { labels, append: true })
     })
 
+    // References gathered from another surface — a tile dragged off the
+    // sidebar rail, a viewer's share — arrive EXPLICIT: label + source path
+    // + (usually) the layer sig the dragging surface already resolved.
+    // A reference gather never cuts: this is always a COPY-append, and an
+    // entry that arrived without a sig gets sealed here so the clipboard
+    // stays sig-native. The clipboard is the ONE gathered set: the chat's
+    // context strip, the panel rows, and the hive's swap takes all read it.
+    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[]; sig?: string }[] }>('clipboard:take-entries', (payload) => {
+      const raw = Array.isArray(payload?.entries) ? payload!.entries! : []
+      const entries: ClipboardEntry[] = raw
+        .filter((e): e is { label: string; sourceSegments?: string[]; sig?: string } =>
+          !!e && typeof e.label === 'string' && e.label.length > 0)
+        .map(e => ({
+          label: e.label,
+          sourceSegments: Array.isArray(e.sourceSegments) ? [...e.sourceSegments] : [],
+          sig: (typeof e.sig === 'string' && /^[0-9a-f]{64}$/.test(e.sig)) ? e.sig : undefined,
+        }))
+      if (entries.length > 0) void this.#takeEntries(entries)
+    })
+
     // Place explicit (label + sourceSegments) entries at the current location —
     // the side panel's per-item place from a DRILLED level, where each row is a
     // child of a clipboard tile (a live source-tree pointer), not a top-level
@@ -443,6 +463,27 @@ export class ClipboardWorker extends Worker {
     if (!svc) return
     if (append) svc.appendEntries(entries)
     else svc.captureEntries(entries)
+  }
+
+  /** COPY-append explicit entries (`clipboard:take-entries`): seal a
+   *  collection sig for any entry that arrived without one, append without
+   *  disturbing what is held, persist. Never cuts, never navigates — the
+   *  source tile is untouched, which is what makes this the reference-gather
+   *  path rather than a move. */
+  async #takeEntries(entries: ClipboardEntry[]): Promise<void> {
+    const history = this.#history
+    if (history) {
+      for (const entry of entries) {
+        if (entry.sig) continue
+        try {
+          entry.sig = await captureCollectionSig(
+            history, [...entry.sourceSegments, entry.label]) ?? undefined
+        } catch { /* path fallback at paste */ }
+      }
+    }
+    this.#stage(entries, true)
+    EffectBus.emit('clipboard:captured', { labels: entries.map(e => e.label), op: 'copy' })
+    void this.#persistMeta()
   }
 
   /** Persist the clipboard record AS IT STANDS — the service is the truth, so
