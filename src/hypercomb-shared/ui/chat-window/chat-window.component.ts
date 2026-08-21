@@ -121,6 +121,15 @@ type ChatThreadsLike = {
   listConversationsWithLatest?(): Promise<{ conversations: ConversationSummary[]; latestTurns: ChatTurn[] }>
   deleteConversation(convoId: string): Promise<boolean>
   newConvoId(): string
+  /** A tile's conversation id, derived from its path — every tile has one,
+   *  dormant until something lands in it. Absent on an older essentials
+   *  build, and then the sidebar simply opens free-floating chats. */
+  tileConvoId?(segments: readonly string[]): string
+  tilePath?(segments: readonly string[]): string
+  tilePathOf?(convoId: string): string
+  /** Unsent thinking, stored the moment it is typed and activating nothing. */
+  readTileDraft?(path: string): Promise<string>
+  saveTileDraft?(path: string, text: string): Promise<boolean>
 }
 
 type QueenLike = {
@@ -146,10 +155,10 @@ type SelectionLike = { selected: ReadonlySet<string> }
  *  it registers in IoC. */
 type RailPickLike = { readonly key: string; readonly path: readonly string[]; readonly name: string }
 type TilesRailLike = {
-  onPicksChanged: () => void
-  readonly picks: RailPickLike[]
+  onSubjectChanged: (subject: RailPickLike | null) => void
+  readonly subject: RailPickLike | null
   mount(host: HTMLElement): void
-  clearPicks(): void
+  clearSubject(): void
   dispose(): void
 }
 type TilesRailFactoryLike = { create?: () => TilesRailLike }
@@ -221,6 +230,11 @@ const DEFAULT_MODEL = 'opus'
 /** Turns carried to a stateless responder. The stored thread can be any
  *  length; this is the window into it the ask record can afford. */
 const TRANSCRIPT_TURNS = 12
+
+/** How long the composer waits after the last keystroke before the thinking
+ *  is written down. Long enough that a sentence is one write, short enough
+ *  that a hand leaving the keyboard has already been saved. */
+const DRAFT_HOLD_MS = 500
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 const CHAT_VISIBLE_STORAGE_KEY = 'hc:chat-visible'
 
@@ -359,10 +373,11 @@ export class ChatWindowComponent implements OnDestroy {
   readonly here = signal<readonly string[]>([])
   readonly targets = signal<readonly string[]>([])
 
-  /** Tiles chosen in the full-screen view's left sidebar. They ride the next
-   *  question alongside the canvas selection, and they are STICKY across
-   *  turns — the sidebar shows them lit, so nothing rides invisibly. */
-  readonly railPicks = signal<readonly RailPickLike[]>([])
+  /** The tile whose conversation is open — clicked in the sidebar, which is
+   *  a list of tiles AND therefore a list of chats. Every tile has one; it is
+   *  dormant until something is said or written there. Null means a
+   *  free-floating chat, about nothing in particular. */
+  readonly railSubject = signal<RailPickLike | null>(null)
 
   /** What the next question is about, counted for the status row — the SAME
    *  deduped union `send()` will carry, so a tile both canvas-selected and
@@ -447,6 +462,10 @@ export class ChatWindowComponent implements OnDestroy {
    *  in the DOM — so the trail you drilled and the tiles you chose survive
    *  leaving and re-entering full screen. */
   #rail: TilesRailLike | null = null
+  /** The text last written to the drafts pool for the open conversation —
+   *  so an unchanged box is never re-written. */
+  #heldDraft = ''
+  #draftTimer: ReturnType<typeof setTimeout> | null = null
 
   /** The active thread's name — its first message. Read from the list when it
    *  is there, else from the turns in hand, so a brand-new conversation is
@@ -561,7 +580,7 @@ export class ChatWindowComponent implements OnDestroy {
 
     // The full-screen sidebar. Its host `<div>` exists only while focused, so
     // this effect re-fires as full screen comes and goes; the rail itself is
-    // created once and re-mounted, keeping its trail and picks. Essentials
+    // created once and re-mounted, keeping its trail and subject. Essentials
     // may register the factory AFTER this window is up (web loads its bees
     // from OPFS), so a miss WAITS on the key instead of leaving the sidebar
     // empty until the next refocus. Without any factory ever arriving the
@@ -575,7 +594,7 @@ export class ChatWindowComponent implements OnDestroy {
       const bring = (factory: TilesRailFactoryLike | undefined): void => {
         if (this.#rail || !factory?.create) return
         this.#rail = factory.create()
-        this.#rail.onPicksChanged = () => { this.railPicks.set([...(this.#rail?.picks ?? [])]) }
+        this.#rail.onSubjectChanged = subject => { void this.#enterSubject(subject) }
         // The host captured here may have been replaced by the time a late
         // factory lands — mount into whatever full screen is showing NOW.
         const live = this.chatRail()?.nativeElement
@@ -862,6 +881,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (payload?.model) this.setModel(payload.model)
 
     if (prefill) { await this.send(prefill); return }
+    await this.#restoreDraft()
     this.#focus()
   }
 
@@ -910,11 +930,14 @@ export class ChatWindowComponent implements OnDestroy {
     this.focused.set(false)
     this.listOpen.set(false)
     this.armed.set('')
-    // Closing the window is a real close: the sidebar's trail and picks go
+    // Closing the window is a real close: the sidebar's trail and subject go
     // down with it (a swap of focus mode alone keeps them — see the effect).
+    // The half-written thought does NOT: it is flushed first, so closing the
+    // window is never how you lose it.
+    void this.#flushDraft()
     this.#rail?.dispose()
     this.#rail = null
-    this.railPicks.set([])
+    this.railSubject.set(null)
     EffectBus.emit('chat:window-state', { open: false })
   }
 
@@ -926,10 +949,10 @@ export class ChatWindowComponent implements OnDestroy {
   onKey(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return
     event.preventDefault()
-    // The cascade unwinds the smallest commitment first: chosen tiles, then
-    // full screen, then the window — matching the escape-cascade's
-    // outermost-first rule.
-    if (this.focused() && this.railPicks().length) { this.#rail?.clearPicks(); return }
+    // The cascade unwinds the smallest commitment first: the tile you are
+    // talking to, then full screen, then the window — matching the
+    // escape-cascade's outermost-first rule.
+    if (this.focused() && this.railSubject()) { this.#rail?.clearSubject(); return }
     if (this.focused()) { this.focused.set(false); return }
     this.close()
   }
@@ -989,13 +1012,88 @@ export class ChatWindowComponent implements OnDestroy {
     this.#scrollDown(true)
   }
 
+  // ── a conversation per tile ─────────────────────────────────────────────
+  //
+  // Clicking a row in the sidebar IS entering that tile's chat, so two things
+  // move together: the transcript becomes that tile's thread, and the composer
+  // becomes that tile's unsent thinking. Neither ACTIVATES anything — arriving
+  // at a tile starts nothing, and the words you left there start nothing until
+  // you send them.
+  //
+  // What you type is held as you type it. That is the whole point: you can
+  // think tactically across the hive — a line here, a line three tiles over —
+  // and come back to finish, delete, or send any of them. An orchestrator
+  // coming through later reads the same pool and can decide what is worth
+  // doing; until then the thinking just sits where you left it.
+
+  /** Where the composer's text is held: the tile, when the open conversation
+   *  belongs to one, else the conversation itself (a free-floating chat keeps
+   *  its draft too — it is a conversation like any other, it just has no row). */
+  #draftKey(): string {
+    const id = this.activeId()
+    return this.#threads()?.tilePathOf?.(id) || id
+  }
+
+  /** Hold what is in the composer. Debounced: typing must not be a write per
+   *  keystroke, and the flushes on the way out of anything (switching tiles,
+   *  sending, closing) mean the debounce can never be the last word. */
+  #holdDraft(): void {
+    if (this.#draftTimer !== null) clearTimeout(this.#draftTimer)
+    this.#draftTimer = setTimeout(() => { this.#draftTimer = null; void this.#flushDraft() }, DRAFT_HOLD_MS)
+  }
+
+  /** Write the composer's text where it belongs, now. */
+  async #flushDraft(key?: string): Promise<void> {
+    if (this.#draftTimer !== null) { clearTimeout(this.#draftTimer); this.#draftTimer = null }
+    const threads = this.#threads()
+    const target = key ?? this.#draftKey()
+    if (!threads?.saveTileDraft || !target) return
+    const text = this.input()?.nativeElement?.value ?? ''
+    if (text === this.#heldDraft) return
+    this.#heldDraft = text
+    await threads.saveTileDraft(target, text)
+  }
+
+  /** Put a conversation's unsent thinking back in the composer. */
+  async #restoreDraft(): Promise<void> {
+    const threads = this.#threads()
+    const key = this.#draftKey()
+    const text = key && threads?.readTileDraft ? await threads.readTileDraft(key) : ''
+    // A slow read must not overwrite a box the participant has since moved on
+    // from — the key it was read for has to still be the open one.
+    if (key !== this.#draftKey()) return
+    this.#heldDraft = text
+    const element = this.input()?.nativeElement
+    if (!element) return
+    element.value = text
+    this.autosize(element)
+  }
+
+  /** The sidebar clicked a row: leave the current thinking where it is, then
+   *  arrive in that tile's conversation. A tile nobody has spoken to reads as
+   *  an empty thread — dormant, not missing. */
+  async #enterSubject(subject: RailPickLike | null): Promise<void> {
+    await this.#flushDraft()
+    this.railSubject.set(subject)
+    if (!subject) return
+    const convoId = this.#threads()?.tileConvoId?.([...subject.path, subject.name])
+    if (convoId) await this.#load(convoId)
+    await this.#restoreDraft()
+    this.listOpen.set(false)
+    this.#focus()
+  }
+
   /** Start a fresh thread. It does not appear in the list until it holds a
    *  turn — an empty conversation is not yet a conversation. `focus` is false
    *  only on the boot path: the default view opens beside the command line and
    *  must not steal its cursor. */
   newChat(focus = true): void {
     const threads = this.#threads()
+    void this.#flushDraft()
     this.activeId.set(threads?.newConvoId() ?? '')
+    this.#heldDraft = ''
+    const box = this.input()?.nativeElement
+    if (box) { box.value = ''; this.autosize(box) }
     this.turns.set([])
     this.streaming.set('')
     this.#endWait()
@@ -1008,7 +1106,13 @@ export class ChatWindowComponent implements OnDestroy {
   async pick(convoId: string): Promise<void> {
     this.listOpen.set(false)
     this.armed.set('')
+    await this.#flushDraft()
+    this.railSubject.set(null)
+    this.#rail?.clearSubject()
     await this.#load(convoId)
+    // Every conversation holds its own unsent thinking, whether or not it
+    // belongs to a tile — arriving anywhere puts it back.
+    await this.#restoreDraft()
     this.#focus()
   }
 
@@ -1082,16 +1186,18 @@ export class ChatWindowComponent implements OnDestroy {
     } catch { this.contextCount.set(0) }
   }
 
-  /** What the question is about: the canvas selection, plus the tiles chosen
-   *  in the full-screen sidebar. A sidebar pick on the CURRENT page rides as
-   *  a bare name — exactly the shape a selection target has always had — and
-   *  a pick from a drilled level rides as its full `/path/name`, which is
-   *  self-describing to the responder without any protocol change. */
+  /** What the question is about: the canvas selection, plus the tile whose
+   *  conversation is open. A subject on the CURRENT page rides as a bare name
+   *  — exactly the shape a selection target has always had — and one from a
+   *  drilled level rides as its full `/path/name`, which is self-describing
+   *  to the responder without any protocol change. */
   #chosenTargets(): string[] {
     const hereJson = JSON.stringify(this.here())
-    const picked = this.railPicks().map(pick =>
-      JSON.stringify(pick.path) === hereJson ? pick.name : '/' + [...pick.path, pick.name].join('/'))
-    return [...new Set([...this.targets(), ...picked])]
+    const subject = this.railSubject()
+    const named = subject
+      ? [JSON.stringify(subject.path) === hereJson ? subject.name : '/' + [...subject.path, subject.name].join('/')]
+      : []
+    return [...new Set([...this.targets(), ...named])]
   }
 
   /** The tile's attached context, resolved to content sigs for the SHALLOW
@@ -1135,6 +1241,9 @@ export class ChatWindowComponent implements OnDestroy {
     if (!convoId) { convoId = threads.newConvoId(); this.activeId.set(convoId) }
 
     if (element && text === undefined) { element.value = ''; this.autosize(element) }
+    // SENT IS NOT HELD. The thinking became a turn; leaving a copy in the
+    // drafts pool would show the tile as still having something unsaid.
+    void this.#flushDraft()
 
     const turn: ChatTurn = { kind: 'chat-turn', convoId, role: 'user', text: message, at: Date.now() }
     this.turns.update(list => [...list, turn])
@@ -1342,6 +1451,7 @@ export class ChatWindowComponent implements OnDestroy {
 
   onInput(event: Event): void {
     this.autosize(event.target as HTMLTextAreaElement)
+    this.#holdDraft()
   }
 
   #focus(): void {

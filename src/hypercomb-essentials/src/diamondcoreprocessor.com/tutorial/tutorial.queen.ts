@@ -11,8 +11,8 @@ import { tutorialLessons, TUTORIAL_LEVELS, type TutorialLevel } from './tutorial
  * Syntax:
  *   /tutorial                  — the starter course: move, make, get home
  *   /tutorial beginner         — the everyday verbs
- *   /tutorial intermediate     — pheromones, titles, references, history
- *   /tutorial expert           — paths, hives, views, the assistant, the swarm
+ *   /tutorial intermediate     — pheromones, filters, titles, references, filing, history
+ *   /tutorial expert           — THE WINDOWS: one lesson per primary window
  *   /tutorial <lesson>         — one lesson on its own (e.g. /tutorial go-in)
  *   /tutorial list             — what is on offer
  *   /tutorial stop             — end a running tour
@@ -27,7 +27,7 @@ export class TutorialQueenBee extends QueenBee {
   override options = [...TUTORIAL_LEVELS, 'list', 'stop', '<lesson>']
   override examples = [
     { input: '/tutorial', result: 'A beeing flies in and walks you through the basics' },
-    { input: '/tutorial intermediate', result: 'The intermediate course: marks, titles, references, history' },
+    { input: '/tutorial intermediate', result: 'The intermediate course: marks, filters, titles, references, filing, history' },
     { input: '/tutorial go-in', result: 'Just that one lesson' },
     { input: '/tutorial list', result: 'Lists every course and its lessons' },
     { input: '/tutorial stop', result: 'Ends the running tour' },

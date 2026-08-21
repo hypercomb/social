@@ -10,7 +10,7 @@
 // (`requires`), so a build without a behaviour simply has one lesson fewer.
 
 import { tutorialLessons, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
-import { hasBehaviour, subject, subjects } from './lesson-kit.js'
+import { hasBehaviour, showFilter, subject, subjects } from './lesson-kit.js'
 
 const L = 'intermediate' as const
 
@@ -64,7 +64,9 @@ tutorialLessons.register({
       'Type >? in the command line and the page filters as you type — by name, by mark, live. It never moves anything; it just narrows what you see.')
     stage.highlight(null)
 
-    await stage.typeAndSubmit(`>?${PRACTICE_MARK}`, true)
+    // A filter line is never SUBMITTED — see showFilter. Submitting it used to
+    // create a stray tile named "practice" instead of narrowing anything.
+    await showFilter(stage, PRACTICE_MARK)
     await stage.wait(1400)
 
     await stage.say('filter-done', 'Narrowed',
@@ -116,8 +118,19 @@ tutorialLessons.register({
       'One thing often belongs in several places. A reference tile is a live pointer: click it and you land on the real thing, which stays where it lives.')
     stage.highlight(null)
 
-    await stage.typeAndSubmit(`/reference ${target}`, true)
-    await stage.wait(1400)
+    // `/reference <path>` names the new tile after the target's LAST SEGMENT
+    // and refuses when that name already lives here — which, for a sibling on
+    // this very page, is always. So name the doorway explicitly, and give the
+    // FULL path: the target is resolved from the hive root, not from where we
+    // are standing, so a bare sibling name pointed outside the practice page.
+    const doorway = stage.t('tutorial.name.doorway', 'Doorway')
+    const path = [...stage.practice.base, stage.practice.name, target].join('/')
+    const before = stage.labels().length
+    await stage.typeAndSubmit(`/reference ${doorway} = ${path}`, true)
+    // Assert it landed, so a future refusal fails loudly instead of leaving the
+    // next bubble narrating over a page where nothing happened.
+    await stage.waitForCells(labels => labels.length > before, 6000)
+    await stage.wait(600)
 
     await stage.say('reference-done', 'Pointed',
       'That new tile is a doorway, not a copy. Change the original and the doorway shows the change — one truth, many ways in.')
@@ -162,7 +175,11 @@ tutorialLessons.register({
     // The same act at hive scale. Shown, not performed: pressing Move needs a
     // real collection to land in, and making one would reach outside the
     // practice page.
-    const pools = stage.chrome('pools.title')
+    // The button's aria-label is `collections-landing.title` ("Portals"). It
+    // was `pools.title` until the Organizer → Places → Portals renames, after
+    // which `chrome('pools.title')` matched nothing and this whole beat — the
+    // hive-scale half of the lesson — was silently skipped.
+    const pools = stage.chrome('collections-landing.title')
     if (pools) {
       await stage.flyToRect(pools)
       await stage.ghostClick(pools.left + pools.width / 2, pools.top + pools.height / 2)
@@ -186,13 +203,22 @@ tutorialLessons.register({
     const c = stage.center()
     await stage.flyTo(c.x, c.y - 100)
     await stage.say('palette', 'The palette',
-      'Every action in the hive is in one list. Open the palette, start typing what you want, and it finds it — you never have to remember a shortcut.')
+      'Every action you could reach for a key to do is in one list. Open the palette, start typing what you want, and it finds it — you never have to remember a shortcut.')
 
     stage.invoke('ui.commandPalette')
     await stage.wait(1100)
-    await stage.say('palette-done', 'Everything, searchable',
-      'That is the whole surface — commands, views, behaviours. Escape closes it. /help lays the same ground out as tiles you can study.')
-    stage.invoke('global.escape')
+    // The palette is built from BOUND actions — the keymap, nothing else. It
+    // reads neither the slash behaviours nor the views, so "commands, views,
+    // behaviours" was a promise it does not keep. And /help opens the reference
+    // SHEET (three searchable lists), not tiles.
+    await stage.say('palette-done', 'Search, don’t remember',
+      'Everything the keyboard can do, searchable by what it MEANS rather than by its keystroke. Escape closes it. /help opens the other half — the reference sheet, with every slash behaviour and every shortcut in one searchable list.')
+    // The escape cascade has no palette rung: the palette only answers Escape
+    // when its own input holds DOM focus, which a ghost cursor never gives it.
+    // `global.escape` was therefore a silent no-op that left the palette up —
+    // holding the InputGate and its keybinding suppression — for the rest of
+    // the course. `command-palette:close` is the drone's own close channel.
+    stage.emit('command-palette:close', {})
     await stage.wait(400)
   },
 })

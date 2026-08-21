@@ -184,12 +184,16 @@ export async function expandNodes(
     }
 
     let complete = true
+    // One name per parent — same rule, same reason as the ring walk below.
+    const seenNames = new Set<string>()
     for (const sig of childSigs) {
       if (nodes.length >= options.maxNodes) { complete = false; break }
       const childLayer = inlined.get(sig) ?? await history.getLayerBySig(sig)
       if (!childLayer) continue
       const name = typeof childLayer.name === 'string' && childLayer.name.length > 0
         ? childLayer.name : sig.slice(0, 8)
+      if (seenNames.has(name)) continue
+      seenNames.add(name)
       const grandChildren = await resolveChildSigs(childLayer, store)
       nodes.push({
         id: nodes.length,
@@ -283,11 +287,22 @@ export async function walkTree(
       }
 
       let complete = true
+      // ONE NAME PER PARENT. The name IS the path segment, so two children
+      // called `x` are not two tiles — they are two sigs (an older revision
+      // left beside its replacement, an adopt that landed next to its own
+      // copy) pointing at ONE location. The renderer has always collapsed
+      // them, which is why the canvas shows one hexagon while a list built
+      // straight off `children` showed the same cell three times. First sig
+      // wins, order preserved — the same rule layer-placement's firstByName
+      // applies to every other list read off a parent.
+      const seenNames = new Set<string>()
       for (const sig of parent.sigs) {
         if (nodes.length >= options.maxNodes) { truncated = true; complete = false; break }
         const layer = inlined.get(sig) ?? await history.getLayerBySig(sig)
         if (!layer) continue
         const name = typeof layer.name === 'string' && layer.name.length > 0 ? layer.name : sig.slice(0, 8)
+        if (seenNames.has(name)) continue
+        seenNames.add(name)
         const childSigs = await resolveChildSigs(layer, store)
         const segments = parent.segments ? [...parent.segments, name] : null
         const id = nodes.length

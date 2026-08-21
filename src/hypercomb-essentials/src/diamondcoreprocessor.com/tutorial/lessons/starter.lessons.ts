@@ -86,7 +86,10 @@ tutorialLessons.register({
     stage.highlight(null)
 
     if (back) await stage.ghostClick(back.left + back.width / 2, back.top + back.height / 2)
-    await stage.leave()
+    // Back, not Shift+click. `leave()` performs its OWN ghost-click carrying a
+    // "⇧ Shift" keycap, so using it here made the bee demonstrate the gesture
+    // the bubble had just said it was not going to use.
+    await stage.leaveTo(Math.max(0, stage.depth() - 1))
 
     const c = stage.center()
     await stage.flyTo(c.x - 80, c.y - 40)
@@ -191,8 +194,12 @@ tutorialLessons.register({
   title: 'Glide across the field',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
+    // Two fingers is PINCH (or the sensitivity swipe), never a pan — the
+    // coordinator classifies one finger as the pan and never translates the
+    // viewport for two. The `.touch` variant of this key says one finger; the
+    // desktop wording used to say two and contradict it.
     await stage.say('pan', 'Pan',
-      'Hold the Space bar and drag to glide across the honeycomb. On touch screens, drag with two fingers.')
+      'Hold the Space bar and drag to glide across the honeycomb. On a touch screen, one finger drags.')
   },
 })
 
@@ -203,8 +210,15 @@ tutorialLessons.register({
   title: 'Home',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
-    const home = stage.chrome('controls.home')
-    await stage.flyToRect(home)
+    // The aria-label is not a stable handle for this one: it becomes
+    // `controls.home.portal` ("home — {portal}") as soon as a home portal is
+    // marked, so `chrome('controls.home')` silently returned null and the bee
+    // was dropped at screen centre with nothing ringed. Ask for the element.
+    // There is also NO home button on a phone (the bar's centre slot is the
+    // camera) or when the bar is docked right — then point at the address bar,
+    // which is the way back to the root on every surface.
+    const home = stage.element('hc-controls-bar .rail-home') ?? stage.chrome('controls.home')
+    await stage.flyToRect(home ?? stage.breadcrumb())
     await stage.say('home', 'Home',
       'And whenever you’re done exploring, the Home button brings you straight back to your front door.')
     stage.highlight(null)

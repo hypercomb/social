@@ -104,10 +104,41 @@ export const isHumanConversation = (convoId: string): boolean =>
 export const newConvoId = (): string =>
   `chat:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
+// ── a conversation per tile ──────────────────────────────
+//
+// EVERY TILE HAS A CHAT, and nothing mints it. The id is DERIVED from the
+// tile's path, so the tile and its conversation are the same address said two
+// ways: arriving at a tile resolves to the same thread every time, on any
+// device, with no index and no registry to keep in step. A tile nobody has
+// spoken to is DORMANT — the derivation exists, the bucket does not, and a
+// dormant chat costs a directory that was never created.
+//
+// The path rides in the id in the clear (`chat:tile:/dolphin/site`) rather
+// than as a location sig, because the bucket name is already a one-way hash:
+// an id that says which tile it belongs to is what lets the list label a
+// thread, and what will let the orchestrator sweep them later.
+
+export const TILE_CONVO_PREFIX = 'chat:tile:'
+
+/** The path a tile chat is keyed by — the same `/path/name` shape a target
+ *  rides as, so a thread, a draft and an ask all name the tile identically. */
+export const tilePath = (segments: readonly string[]): string =>
+  '/' + segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+
+/** The conversation id for a tile. Pure derivation: no store, no await. */
+export const tileConvoId = (segments: readonly string[]): string =>
+  `${TILE_CONVO_PREFIX}${tilePath(segments)}`
+
+/** The tile a conversation belongs to, or '' for a free-floating chat. */
+export const tilePathOf = (convoId: string): string =>
+  convoId.startsWith(TILE_CONVO_PREFIX) ? convoId.slice(TILE_CONVO_PREFIX.length) : ''
+
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   putResource?: (blob: Blob) => Promise<string>
   getResource?: (sig: string) => Promise<Blob | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
 const hex = (buf: ArrayBuffer): string =>
@@ -376,6 +407,87 @@ export const deliverTurn = async (
   return true
 }
 
+// ── sticky drafts ────────────────────────────────────────
+//
+// TYPED IS NOT SENT. You are standing on a tile, you start writing what you
+// want done there, and then you go and look at something else — the thinking
+// must survive the trip without ACTIVATING anything. So a draft is stored the
+// moment it is typed and it starts nothing: no ask, no agent, no turn in the
+// thread. Come back and it is where you left it, to finish or to throw away.
+//
+// One pool doc holds them all, keyed by tile path. A map rather than a doc
+// per tile because the two readers both want the WHOLE set: the rail marks
+// every tile that holds thinking, and the orchestrator that comes through
+// later to decide what is worth doing has to see them together. Each record
+// still names its own tile, so the map is a convenience, never the only
+// place the fact lives.
+//
+// Distinct from the ask screen's single held question (context-basket.ts):
+// that one is one question mid-flight, this is a tile's standing intent.
+
+/** Pool holding unsent drafts. Colon-scoped: a bare `chat` would collide with
+ *  any tile slugged "chat", and the root is an untagged union of lineage bags
+ *  and pools. */
+export const DRAFTS_POOL = 'chat:drafts'
+
+export interface ChatDraft {
+  readonly kind: 'chat-draft'
+  /** The tile this thinking belongs to — `/dolphin/site`, or `/` for the root. */
+  readonly path: string
+  readonly text: string
+  readonly at: number
+}
+
+const draftsDoc = async (): Promise<Record<string, ChatDraft>> => {
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(DRAFTS_POOL)
+  if (!pool || !store?.getPoolDoc) return {}
+  try {
+    const bytes = await store.getPoolDoc(pool)
+    if (!bytes) return {}
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: Record<string, ChatDraft> = {}
+    for (const [path, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const rec = value as Partial<ChatDraft>
+      if (typeof rec?.text !== 'string' || !rec.text) continue
+      out[path] = { kind: 'chat-draft', path, text: rec.text, at: Number(rec.at) || 0 }
+    }
+    return out
+  } catch { return {} }
+}
+
+/** Every tile currently holding unsent thinking, newest first. What the rail
+ *  marks and what a sweep over standing intent reads. */
+export const listTileDrafts = async (): Promise<ChatDraft[]> =>
+  Object.values(await draftsDoc()).sort((a, b) => b.at - a.at)
+
+/** One tile's draft, or '' when it holds none. */
+export const readTileDraft = async (path: string): Promise<string> =>
+  (await draftsDoc())[String(path ?? '')]?.text ?? ''
+
+/** Store (or, with empty text, forget) one tile's draft. Returns false when
+ *  there is no store to write to — the caller keeps the text on screen, which
+ *  is the only copy left, rather than believing it was kept. */
+export const saveTileDraft = async (path: string, text: string): Promise<boolean> => {
+  const key = String(path ?? '')
+  if (!key) return false
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(DRAFTS_POOL)
+  if (!pool || !store?.putPoolDoc) return false
+
+  const body = String(text ?? '')
+  const map = await draftsDoc()
+  if (body.trim()) map[key] = { kind: 'chat-draft', path: key, text: body, at: Date.now() }
+  else if (key in map) delete map[key]
+  else return true   // nothing held, nothing asked for — already true
+
+  const bytes = new TextEncoder().encode(JSON.stringify(map)).buffer as ArrayBuffer
+  const ok = await store.putPoolDoc(pool, bytes)
+  if (ok) EffectBus.emit('chat:drafts-changed', { path: key, held: !!body.trim() })
+  return !!ok
+}
+
 // ── IoC surface ─────────────────────────────────────────
 //
 // The chat window is shell UI (hypercomb-shared), which may never import a
@@ -385,6 +497,12 @@ export const deliverTurn = async (
 
 export class ChatThreads {
   readonly appendTurn = appendTurn
+  readonly tileConvoId = tileConvoId
+  readonly tilePath = tilePath
+  readonly tilePathOf = tilePathOf
+  readonly listTileDrafts = listTileDrafts
+  readonly readTileDraft = readTileDraft
+  readonly saveTileDraft = saveTileDraft
   readonly readTurns = readTurns
   readonly deliverTurn = deliverTurn
   readonly listConversations = listConversations

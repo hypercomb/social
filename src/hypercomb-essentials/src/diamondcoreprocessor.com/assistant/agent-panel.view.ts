@@ -85,9 +85,9 @@ export class AgentPanelView extends EventTarget {
   #onKey = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || !this.#panel) return
     event.stopPropagation()
-    // A handful of picked tiles is the smaller commitment — let Escape put
-    // that down first, and only a second press closes the panel.
-    if (this.#rail?.picks.length) { this.#rail.clearPicks(); return }
+    // Leaving a tile's conversation is the smaller commitment — let Escape
+    // put that down first, and only a second press closes the panel.
+    if (this.#rail?.subject) { this.#rail.clearSubject(); return }
     this.close()
   }
 
@@ -263,8 +263,9 @@ export class AgentPanelView extends EventTarget {
     body.className = 'hc-agent-body'
     this.#body = body
 
-    // Picked tiles land here, as chips over the composer — the visible sign
-    // that Enter now APPLIES agents instead of adding context.
+    // The tile you are talking to lands here, as a chip over the composer —
+    // the visible sign that Enter now APPLIES agents instead of adding
+    // context.
     const chips = document.createElement('div')
     chips.className = 'hc-agent-chips'
     chips.hidden = true
@@ -282,7 +283,7 @@ export class AgentPanelView extends EventTarget {
     send.textContent = this.#t('agent.context-send', 'Add')
     this.#send = send
     const submit = (): void => {
-      if (this.#rail?.picks.length) void this.#applyToTiles(send)
+      if (this.#rail?.applied.length) void this.#applyToTiles(send)
       else void this.#addContext(send)
     }
     send.addEventListener('click', submit)
@@ -314,29 +315,29 @@ export class AgentPanelView extends EventTarget {
 
   /** Bring the rail up. One rail per panel LIFETIME, not per subject: a swap
    *  rebuilds the panel's DOM, so the same rail re-mounts into the new host
-   *  with its trail, picks and icon cache intact — stepping into an agent's
-   *  log must not drop the tiles you were halfway through choosing. */
+   *  with its trail, subject and icon cache intact — stepping into an agent's
+   *  log must not drop the conversation you were halfway through. */
   #mountRail(): void {
     if (!this.#railHost) return
     if (!this.#rail) {
       this.#rail = new AgentTilesRail()
-      this.#rail.onPicksChanged = () => this.#renderChips()
+      this.#rail.onSubjectChanged = () => this.#renderChips()
     }
     this.#rail.mount(this.#railHost)
     this.#renderChips()
   }
 
-  /** The chips row mirrors the rail's picks: one chip per tile, and the
-   *  model the asks will ride out on. The composer's words follow suit. */
+  /** The chips row mirrors the rail's subject: the tile the asks will ride
+   *  out against, and the model answering. The composer's words follow suit. */
   #renderChips(): void {
     const chips = this.#chips
     if (!chips) return
-    const picks = this.#rail?.picks ?? []
+    const picks = this.#rail?.applied ?? []
     chips.textContent = ''
     chips.hidden = picks.length === 0
     if (this.#input) {
       this.#input.placeholder = picks.length
-        ? this.#t('agent.apply-placeholder', 'What should they do on these tiles?')
+        ? this.#t('agent.apply-placeholder', 'What should they do on this tile?')
         : this.#t('agent.context-placeholder', 'Add context while it works…')
     }
     if (this.#send) {
@@ -357,7 +358,7 @@ export class AgentPanelView extends EventTarget {
       off.className = 'hc-agent-chip-off'
       off.textContent = '×'
       off.setAttribute('aria-label', this.#t('agent.chip-remove', 'Remove'))
-      off.addEventListener('click', () => this.#rail?.unpick(pick.key))
+      off.addEventListener('click', () => this.#rail?.clearSubject())
       chip.append(name, off)
       chips.appendChild(chip)
     }
@@ -377,16 +378,16 @@ export class AgentPanelView extends EventTarget {
     chips.appendChild(model)
   }
 
-  /** APPLY — mint real asks for the picked tiles. Picks are grouped by the
-   *  level they live on (an ask names tiles on ONE page), so a selection
-   *  gathered across levels goes out as one agent per level, each carrying
-   *  that level's tile names. Any number of applications, one after another,
-   *  is exactly what the registry and the bees are built for. */
+  /** APPLY — mint a real ask for the tile the conversation is with. Targets
+   *  are grouped by the level they live on (an ask names tiles on ONE page),
+   *  which is what lets this stay unchanged if a future gesture hands it more
+   *  than one. Any number of applications, one after another, is exactly what
+   *  the registry and the bees are built for. */
   async #applyToTiles(button: HTMLButtonElement): Promise<void> {
     const rail = this.#rail
     const input = this.#input
     const prompt = input?.value.trim() ?? ''
-    const picks = rail?.picks ?? []
+    const picks = rail?.applied ?? []
     if (!rail || !prompt || !picks.length) return
 
     const queen = ioc<{ activeModel: string; submitAsk?: (prompt: string, targets: string[], at?: readonly string[]) => Promise<boolean> }>(
@@ -418,7 +419,7 @@ export class AgentPanelView extends EventTarget {
     }
     if (ok) {
       if (input) input.value = ''
-      rail.clearPicks()
+      rail.clearSubject()
     }
   }
 

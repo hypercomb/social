@@ -1163,6 +1163,15 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "tutorial-roster-refresh",
+      "title": "the tutorials mirror is re-censused: retire window-views, add six lesson tiles, retext seven notes",
+      "run": "npx tsx scripts/mirror-tutorials.ts",
+      "note": "The expert course was audited against the shipped shell and rewritten. The hive mirror (tutorials root) is now behind in three ways. (1) RETIRED: the window-views lesson tile must be REMOVED from tutorials/expert with its notes, marks and group decoration - the Views toolwindow is gone and /views is a lens on the beehaviors window, so its teaching folded into window-features. (2) NEW: six lesson tiles are owed - window-format (45), window-reader (55), window-workflow (115), window-context (165, owed since 2026-08-13), window-feedback (168), window-publish (175). (3) RETEXT: the notes on window-command-line, window-editor, window-notes, window-tags, window-collections, window-clipboard, window-sequence, window-features, window-assistant, and intermediate/into are all rewritten in scripts/mirror-tutorials.ts and must REPLACE the notes already on those tiles. MANUAL because note-add is additive - a blind re-run doubles every note; the stale ones have to come off first.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }

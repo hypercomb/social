@@ -119,6 +119,18 @@ const groupSignature = (meaning: string): string =>
 // hypercomb-essentials/src/diamondcoreprocessor.com/tutorial/lessons/*.
 // `marks` are the lesson's declared topic pheromones (beyond tutorial/lesson/
 // level, which every tile gets).
+//
+// ⚠ THIS ROSTER IS HAND-TRANSCRIBED. The script is a bridge CLI: it never
+// imports the tutorial sources, so nothing here is checked against
+// TutorialLessonRegistry or TUTORIAL_PHEROMONES at build time. Every lesson
+// added, removed, retitled, re-marked or re-narrated needs a hand edit HERE, in
+// the same pass — which is exactly how six lessons went unmirrored and five
+// notes went stale between 2026-08-02 and 2026-08-20. Read `lessons/*.lessons.ts`
+// beside this array whenever you touch either.
+//
+// (The lasting fix is to stop transcribing: have the renderer hand back
+// `tutorialLessons.all()` over the bridge and drive structure, notes and marks
+// from that, so the mirror can only ever be one bridge run behind the code.)
 
 const T = 'hypercomb-essentials/src/diamondcoreprocessor.com/tutorial'
 
@@ -136,7 +148,7 @@ const COURSES: Course[] = [
       ['children', 'Tiles hold tiles — seven children in one bracket line.', ['creation', 'structure']],
       ['travel', 'In, out and across: you can wander anywhere and never get lost.', ['navigation']],
       ['zoom', 'Wheel or pinch to zoom the honeycomb.', ['navigation']],
-      ['pan', 'Space + drag (or two fingers) to glide across the field.', ['navigation']],
+      ['pan', 'Space + drag (or one finger on a touch screen) to glide across the field.', ['navigation']],
       ['home', 'The Home button returns you to your front door.', ['navigation']],
     ],
   },
@@ -145,9 +157,9 @@ const COURSES: Course[] = [
     note: 'The everyday verbs, once you can move and make: select, edit, note, copy, remove, undo, fit, arrange. Each runs through the participant\'s own binding, so the demonstration IS the keystroke.',
     lessons: [
       ['select', 'Ctrl+click picks tiles without entering them; selection is what commands act on.', ['editing']],
-      ['edit', 'E (or the pencil) opens the tile editor — words, pictures, links.', ['editing']],
+      ['edit', 'E (or the pencil) opens the tile editor — the name, the cover picture, one link, the colours.', ['editing']],
       ['note', 'Notes live on the tile and travel with it wherever it goes.', ['editing', 'meaning']],
-      ['copy-paste', 'Ctrl+C carries a tile and its whole branch; Ctrl+V drops it where you stand.', ['editing']],
+      ['copy-paste', 'Ctrl+C carries a tile and its whole branch; Enter drops it where you stand.', ['editing']],
       ['remove', 'Delete removes selected tiles — a nested branch asks first.', ['editing']],
       ['undo-redo', 'Every change is one revision, so undo and redo always know what to take back.', ['history']],
       ['fit', 'Fit brings the whole page back into view in one move.', ['navigation']],
@@ -162,7 +174,7 @@ const COURSES: Course[] = [
       ['filter', '? filters the page live as you type, by name or by mark; /clear puts it back.', ['meaning']],
       ['title', 'The name is the address, so /title changes the words a tile draws under, not where it lives.', ['structure']],
       ['reference', 'A reference tile is a live doorway to the real thing, not a copy.', ['structure']],
-      ['into', '/into files a tile away: it MOVES inside another tile and leaves the page it was on. The Organizer offers the same verb across the whole hive — Add lends a doorway, Move takes custody.', ['structure']],
+      ['into', '/into files a tile away: it MOVES inside another tile and leaves the page it was on. Portals offer the same verb across the whole hive — Add lends a doorway, Move takes custody — and ctrl+dragging one tile onto another is the same act on one page.', ['structure']],
       ['palette', 'Every action in one searchable list — you never have to remember a shortcut.', ['guidance']],
       ['history', 'The history panel walks every revision you have ever made.', ['history']],
       ['snapshot', 'Named checkpoints of the WHOLE hive — narrated, never fired: it reaches past the practice page.', ['history']],
@@ -172,23 +184,28 @@ const COURSES: Course[] = [
     level: 'expert', color: '#8a63c9',
     note: 'THE WINDOWS: one lesson per primary window, each carrying every behaviour that lives in it. The interface is the curriculum — adding a window to the shell means adding a lesson here, in the same pass. Nothing outside the practice page is touched, and nothing is ever published.',
     lessons: [
-      ['window-command-line', 'One box, three languages: a NAME makes, a ? filters, a / runs a behaviour. Brackets commit many tiles at once and a slash inside one builds depth.', ['input', 'creation', 'structure']],
+      ['window-command-line', 'One box, four languages: a NAME makes, a ? filters, a / runs a behaviour, and tile@behaviour speaks to a tile from here. Brackets commit many tiles at once and a slash inside one builds depth.', ['input', 'creation', 'structure']],
       ['window-palette', 'Every action in one searchable list — type what you MEAN, not a shortcut you have to remember.', ['guidance', 'input']],
       ['window-help', '/help is the whole surface as a searchable reference; /docs opens the reader for the long form.', ['guidance']],
-      ['window-editor', 'What a tile CARRIES — words, cover, links, files. Content only: never where it lives or what it means.', ['editing', 'appearance']],
-      ['window-notes', 'The explanation, kept on the thing. Notes nest, take marks, reorder, and travel with the tile everywhere it goes.', ['editing', 'meaning']],
+      ['window-editor', 'A tile’s own FACE: its name, its cover picture, one link, the two colours it draws in, and the answer box. Never where it lives or what it means.', ['editing', 'appearance']],
+      ['window-format', 'The only copy-appearance verb there is: read one tile’s look, tick the parts you meant, apply it to others. Touches appearance and nothing else.', ['appearance', 'editing']],
+      ['window-notes', 'The annotations window — two tabs over one tree: NOTES is the prose kept on the thing, LISTS is the always-open line that keeps its order. Notes nest, take marks, and travel with the tile.', ['editing', 'meaning']],
+      ['window-reader', 'Where notes are READ: one at a time, big, its hierarchy around it. Side tabs are the tile’s root notes, and a mark can be dropped onto a NOTE rather than the tile.', ['editing', 'meaning']],
       ['window-files', 'The real documents underneath a tile — this tile, this page, or the whole branch below you.', ['editing', 'structure']],
-      ['window-tags', 'Your whole vocabulary of marks: arm them, paint them onto a selection, drag one out as a collection, group them into a bouquet.', ['meaning']],
-      ['window-collections', 'The index of everything gathered by meaning rather than by place — plus /hive, which names a branch so commands can take it by name.', ['meaning', 'structure', 'navigation']],
+      ['window-tags', 'Your whole vocabulary of marks: gather them, walk the hive and ctrl+click tiles into the grouping, Done commits the lot. Marks group into a bouquet; a mark is meaning, never a location.', ['meaning']],
+      ['window-collections', 'The index of everything gathered by meaning rather than by place. Typing a name LINKS before it makes; a doorway can demand pheromones (/requires) while the folder stays whole; /hive names a branch so commands can take it by name.', ['meaning', 'structure', 'navigation']],
       ['window-filters', 'Where a filter stops being a keystroke and becomes something you keep, name, and reopen. Still a lens; still changes nothing.', ['meaning', 'view']],
-      ['window-clipboard', 'Everything you are carrying, not one slot — placed where you choose, never leaving your machine.', ['editing']],
-      ['window-sequence', 'The sequence a page fills along, and the target a dropped or pasted thing lands on.', ['appearance', 'structure']],
+      ['window-clipboard', 'A swap in two directions: click a tile on the hive and it moves in, click a row and it comes back out where you stand. Ctrl+click walks on both sides. Nothing ever leaves your machine.', ['editing']],
+      ['window-sequence', 'The sequence a page fills along — a compact block, clusters of seven — and the target a dropped or pasted thing lands on.', ['appearance', 'structure']],
+      ['window-workflow', 'THE CANVAS IS THE WORKFLOW: a workflow is a tile, its steps are its child tiles, and they run in the order you can see. Drag a step from the palette, walk the run one step at a time, name it and it becomes a skill.', ['structure', 'input']],
       ['window-history', 'The whole road of revisions, in order, markable. History never branches — taking something back is a new step forward.', ['history']],
       ['window-rewind', 'Undo you can SEE: recent moments drawn as they looked, so you pick the one you meant instead of counting.', ['history', 'view']],
-      ['window-views', 'The library of ways to draw the same tiles — tree, website, slides, study games. Attached, never converted.', ['view', 'appearance']],
-      ['window-features', 'What is actually acting on a tile, and where each behaviour came from — direct mark or inherited from an ancestor.', ['structure', 'appearance']],
-      ['window-assistant', 'The ask screen and the bee that flies it: question first, tiles as context, answers landing as notes. /break-apart and /organize hand back plans the hive checks before it moves anything.', ['assistant']],
+      ['window-features', 'The beehaviors window. One row per behaviour, one bulb: lit in the pool it is on for the hive, lit on a layer it is deposited here, and an inherited row says where it flows from. VIEWS are the same rows under a lens — /tree, /website, /present, /postit, /tutor draw the same tiles, attached, never converted.', ['view', 'structure', 'appearance']],
+      ['window-assistant', 'The chat window and the bee that flies it: a conversation docked beside your tiles, or the whole screen with the hive as a rail. Where you stand and what you selected is this question’s context; an attached branch rides with every question. Answers stay in the thread, and a button puts one on the tile. /break-apart goes deeper, /expand wider, /organize hands back a plan the hive checks.', ['assistant']],
+      ['window-context', 'What a question gets to READ: one row per attached branch, its reach and signature count recomputed live, honest when a branch is too big to walk. Click the row to visit; the broken-link icon takes one off.', ['assistant', 'structure']],
+      ['window-feedback', 'The inbox for everything arriving from someone else — shared feedback and open questions in one list, scoped by reach, answered in the row.', ['swarm', 'assistant']],
       ['window-observe', 'The window onto the swarm — who is here and what they share. Watching is free; publishing is always your own deliberate act.', ['swarm']],
+      ['window-publish', 'The state to /host’s gesture: what the world is serving right now, next to what has changed here since. One row per branch, re-checkable and reversible.', ['swarm']],
     ],
   },
 ]

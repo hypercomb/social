@@ -84,24 +84,37 @@ primary window**, each carrying every behaviour that lives in that window:
 
 | Lesson | Window | Behaviours it carries |
 |---|---|---|
-| `window-command-line` | the command line | create, `[brackets]`, paths, `?` filter, every `/` behaviour |
+| `window-command-line` | the command line | create, `[brackets]`, paths, `?` filter, `tile@behaviour` calls, every `/` behaviour |
 | `window-palette` | command palette | `ui.commandPalette` |
 | `window-help` | reference / docs reader | `/help`, `/docs` |
-| `window-editor` | tile editor | edit, cover, links, files-on-a-tile |
-| `window-notes` | notes strip + reading window | note capture, nesting, marks, reorder |
+| `window-editor` | tile editor | name, cover, link, colours, the answer box |
+| `window-format` | format painter | `/format` — the only copy-appearance verb |
+| `window-notes` | annotations window | notes and lists tabs, nesting, marks, reorder, the reading pane |
+| `window-reader` | notes reader | hierarchy tabs, prev/next, mark-onto-a-note |
 | `window-files` | files viewer | `/files`, scope and reach |
-| `window-tags` | tags viewer | `/tags`, `/keyword`, arming, bouquets, drag-out collections |
-| `window-collections` | aggregate index | `/collections`, Add vs Move, `/hive` |
+| `window-tags` | tags viewer | `/tags`, `/keyword`, gathering, the collecting walk, bouquets |
+| `window-collections` | aggregate index | `/collections`, Add vs Move, `/requires`, `/hive` |
 | `window-filters` | filter configurations | `?` filter mode, saved filters, `/clear` |
-| `window-clipboard` | clipboard panel | copy, cut, place |
+| `window-clipboard` | clipboard panel | copy, cut, the swap in both directions |
 | `window-sequence` | sequence viewer | `/sequence`, cycle, drop/paste targets |
+| `window-workflow` | workflow designer | `/workflow new\|run\|step\|stop\|list` |
 | `window-history` | history viewer | `/history`, `/revise`, marks |
 | `window-rewind` | rewind window | `/rewind` |
-| `window-views` | views viewer | `/views`, `/tree`, `/website`, `/present`, `/tutor` |
-| `window-features` | features viewer | enable, remove, download, cascade origin |
-| `window-assistant` | chat window + bee | `/opus`, `/sonnet`, `/haiku`, `/ask`, `/break-apart`, `/organize` |
+| `window-features` | beehaviors window | the bulb, the lens, `/views`, `/tree`, `/website`, `/present`, `/postit`, `/tutor` |
+| `window-assistant` | chat window + bee | `/opus`, `/sonnet`, `/haiku`, `/fable`, `/ask`, `/break-apart`, `/expand`, `/organize` |
 | `window-context` | context window | `/context`, attached-context (portal-drop) narrated |
+| `window-feedback` | feedback window | arrivals and open questions, reach, answering in the row |
 | `window-observe` | observe viewer | `/observe`, and `/host` / `/invite` narrated |
+| `window-publish` | publish panel | `/publish` — read-only, never fired |
+
+**One window, one lesson — and it rots in both directions.** `window-views` used
+to be a row of its own. The Views toolwindow was then retired and `/views`
+became a LENS on the beehaviors window, so for a while two lessons opened one
+surface and told the participant they were two different things; meanwhile the
+format painter, the notes reader, the workflow designer, the feedback window and
+the publish panel had all shipped with no lesson at all. Retiring a window means
+retiring its lesson in the same pass, exactly as adding one means adding a
+lesson.
 
 Two gates, not one. `requires()` asks `hasBehaviour(name)` **and**
 `hasWindow('hc-…')` — the shell-surface registry (`shell-surfaces.md`) is the
@@ -157,4 +170,15 @@ npx tsx scripts/mirror-tutorials.ts
 ```
 
 **When a lesson ships, extend the mirror in the same pass** — add its tile under
-the right course, paint its marks, note what it teaches.
+the right course, paint its marks, note what it teaches. And when a lesson is
+RETIRED, take its tile out in the same pass; the roster rots in both directions.
+
+⚠ The script's roster is **hand-transcribed**. It is a bridge CLI and never
+imports the tutorial sources, so nothing in it is checked against
+`TutorialLessonRegistry` or the declared pheromone vocabulary at build time —
+which is precisely how six lessons went unmirrored and five notes went stale in
+under three weeks. Read `lessons/*.lessons.ts` beside the `COURSES` array
+whenever you touch either. The lasting fix is to stop transcribing: have the
+renderer hand back `tutorialLessons.all()` over the bridge and drive structure,
+notes and marks from that, so the mirror can only ever be one bridge run behind
+the code instead of one hand edit behind it.

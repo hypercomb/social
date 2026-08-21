@@ -48,6 +48,13 @@ export class FilterConfigurationsComponent implements OnDestroy {
   constructor() {
     this.#cleanups.push(
       EffectBus.on('swarm:filter-view-open', () => this.openNew()),
+      // The close counterpart. Every sibling tool window has one
+      // (`tags:view-close`, `files:viewer-close`, `sequence:view-close`,
+      // `aggregate:view-close`, `features:viewer-close`, `rewind:close`,
+      // `context:window-close`); this one was the only window openable by
+      // effect and closable only by its own button — so nothing that opened it
+      // could put it away again.
+      EffectBus.on('swarm:filter-view-close', () => { if (this.visible()) this.close() }),
       EffectBus.on<{ item?: AggregateItem }>('filter-config:place-drop', ({ item }) => {
         if (!this.visible() || !item) return
         if (this.draft().some(p => p.key === item.key)) return

@@ -122,8 +122,11 @@ tutorialLessons.register({
     await stage.wait(500)
 
     await stage.enterCell(into)
+    // Enter, not Ctrl+V. `clipboard.paste` is bound to a bare Enter and there
+    // is no `v` chord anywhere in the keymap — the only document-level paste
+    // listener routes OS-clipboard IMAGES into the editor, never hive tiles.
     await stage.say('paste', 'Paste',
-      'Now Ctrl+V drops it wherever you are standing. Watch — inside “{cell}”.',
+      'Now press Enter and it drops wherever you are standing. Watch — inside “{cell}”.',
       { params: { cell: into } })
     stage.invoke('clipboard.paste')
     await stage.wait(1200)
@@ -181,8 +184,11 @@ tutorialLessons.register({
     await stage.waitForCells(labels => labels.includes(doomed), 6000)
     await stage.wait(500)
 
+    // Ctrl+Y, not Ctrl+Shift+Z. `history.redo` is `{ key: 'y', primary: true }`;
+    // nothing binds Shift+Z, and because the UNDO chord declares no `shift`,
+    // Ctrl+Shift+Z matches undo — the narrated gesture stepped BACKWARD twice.
     await stage.say('redo', 'Redo',
-      'Back it comes. Ctrl+Shift+Z steps forward again — you can walk your work in both directions.')
+      'Back it comes. Ctrl+Y steps forward again — you can walk your work in both directions.')
     stage.invoke('history.redo')
     await stage.wait(900)
     // Leave the page as we found it.
