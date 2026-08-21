@@ -1334,9 +1334,12 @@ export class ContentBrokerDrone extends Drone {
     // would otherwise occupy a thousand queue slots before any of it is
     // recognised as already seen.
     const queued = new Set<string>(queue.map(q => q.sig))
-    const enqueue = (sig: string, depth: number, from?: string): void => {
+    /** Key path a signature sat under, for anything reached below depth 0. */
+    const atBy = new Map<string, string>()
+    const enqueue = (sig: string, depth: number, from?: string, at?: string): void => {
       if (visited.has(sig) || queued.has(sig)) return
       if (from && !namedBy.has(sig)) namedBy.set(sig, from)
+      if (at && !atBy.has(sig)) atBy.set(sig, at)
       if (queued.size >= limit || depth > DEEP_DEPTH_LIMIT) {
         // Never silently truncate — a dropped reference is content the
         // backup does not hold, and the caller must be able to report the
@@ -1402,7 +1405,9 @@ export class ContentBrokerDrone extends Drone {
             // were found inside a record, where the path is the record's own
             // shape rather than the layer's — saying so is more honest than
             // inventing a key.
-            depth === 0 ? (origin?.where.get(sig) ?? '') : 'inside a record',
+            depth === 0
+              ? (origin?.where.get(sig) ?? '')
+              : (atBy.get(sig) ?? 'inside a record'),
           )
           continue
         }
@@ -1428,7 +1433,11 @@ export class ContentBrokerDrone extends Drone {
       }
 
       if (opts.deepResources) {
-        for (const s of this.#recordSigs(got)) enqueue(s, depth + 1, sig)
+        // Carry the key path out of the record too: a thread manifest reaching
+        // its message body through `turns.[0].contentSig` is exactly the case
+        // where knowing the key separates lost content from an identifier.
+        const nested = new Map<string, string>()
+        for (const s of this.#recordSigs(got, nested)) enqueue(s, depth + 1, sig, nested.get(s))
       }
     }
   }
@@ -1438,7 +1447,7 @@ export class ContentBrokerDrone extends Drone {
    * parsing as a JSON object so image and binary leaves are never scanned —
    * this must not blind-harvest 64-hex runs out of arbitrary content.
    */
-  #recordSigs = (bytes: Uint8Array): string[] => {
+  #recordSigs = (bytes: Uint8Array, where?: Map<string, string>): string[] => {
     if (bytes.byteLength > DEEP_RECORD_MAX_BYTES) return []
     let text: string
     try { text = new TextDecoder().decode(bytes).trim() } catch { return [] }
@@ -1447,7 +1456,7 @@ export class ContentBrokerDrone extends Drone {
     try { parsed = JSON.parse(text) } catch { return [] }
     if (!parsed || typeof parsed !== 'object') return []
     const out = new Set<string>()
-    this.#collectSigs(parsed, out)
+    this.#collectSigs(parsed, out, where)
     return [...out]
   }
 
