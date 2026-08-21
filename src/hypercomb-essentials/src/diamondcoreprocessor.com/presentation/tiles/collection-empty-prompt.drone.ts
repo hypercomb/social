@@ -23,6 +23,7 @@
 
 import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
+import { isClaimedByTakeoverAt } from '../../commands/decoration-kind-index.js'
 
 const SETS = 'sets'
 
@@ -164,6 +165,19 @@ class CollectionEmptyPromptDrone {
       return
     }
 
+    // A TAKEOVER IS NOT AN ABSENCE. `render:cell-count` counts hexagons, and a
+    // cell claimed by a takeover view has none (`replacesTileRender` — its
+    // sticky IS its presence), so a layer holding nothing but post-its reported
+    // itself EMPTY: "Your hive is empty · Add a tile" over a hive with content,
+    // and the beehaviors panel raised on top of the notes. Ask the layer, not
+    // the glass. Registry-driven: no view is named here or in the index helper.
+    if (await this.#claimedTilesHere(segments)) {
+      if (seq !== this.#checkSeq) return
+      this.#hide()
+      return
+    }
+    if (seq !== this.#checkSeq) return
+
     // Three variants: the empty hive ROOT (first run — welcome + the tour), a
     // collection's own root, and any other empty layer.
     if (segments.length === 0) {
@@ -190,6 +204,26 @@ class CollectionEmptyPromptDrone {
     this.#behaviorsOfferedFor = key
     if (this.#behaviorsPanelOpen) return
     EffectBus.emit('features:context-open', {})
+  }
+
+  /** Does this layer hold at least one cell a takeover view has claimed? Such
+   *  a cell is on screen — as paper, not as a hexagon — so the layer has
+   *  something in it however many hexagons the render counted. Cheap: the
+   *  children come from the layer we already resolve, and the claim lookup is
+   *  the hot in-memory decoration index. */
+  async #claimedTilesHere(segments: readonly string[]): Promise<boolean> {
+    const history = ioc()?.get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history?.sign || !history.currentLayerAt) return false
+    try {
+      const sig = await history.sign({ explorerSegments: () => [...segments] })
+      const layer = await history.currentLayerAt(sig)
+      if (!layer) return false
+      const names = await childNamesOf(history, layer as Parameters<typeof childNamesOf>[1])
+      return names.some(name => isClaimedByTakeoverAt([...segments, name]))
+    } catch {
+      // No layer here (a genuinely empty location) — nothing claims anything.
+      return false
+    }
   }
 
   async #isCollectionRoot(name: string): Promise<boolean> {

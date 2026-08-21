@@ -64,6 +64,24 @@ const VIEW_ACTION_PREFIX = 'view:'
  *  opt-in shown when the content is absent). */
 const ENTER_ACTION_PREFIX = 'view-enter:'
 
+/** Action-name prefix for ASLEEP icons — the mark a tile wears while it is
+ *  standing in for a TAKEOVER view whose behaviour is switched off.
+ *
+ *  Every other dormancy is silent by design: off means gone, and a tile that
+ *  merely COULD have carried a lightbox loses nothing by not saying so. A
+ *  takeover is the exception, because the hexagon on screen is not the cell's
+ *  own presence — it is a stand-in for a view that has been put out
+ *  (`replacesTileRender`, and show-cell's filter hands the hexagon back when
+ *  the kind is dormant there). Without a mark that tile is a lie: the note is
+ *  still on it, and nothing on the glass says so. Clicking opens Beehaviors
+ *  on the tile, where the light is. */
+const ASLEEP_ACTION_PREFIX = 'view-asleep:'
+
+/** The asleep icon's colour. "A view is told by the colour of its icon, not by
+ *  a badge" — so a put-out view is told the same way: the same glyph, in the
+ *  grey of something switched off. */
+const ASLEEP_TINT = 0x6b7681
+
 /** Profile under which visual-bee icons register. `public-external`
  *  matches the "peer-supplied" semantics: these are features adopted
  *  from someone else's tile, surfaced in the pool of available icons
@@ -123,6 +141,11 @@ function iconNameForBee(bee: VisualBeeDescriptor): string {
 /** Compose the IconProviderRegistry name for a bee's ENTER icon. */
 function enterIconNameForBee(bee: VisualBeeDescriptor): string {
   return `${ENTER_ACTION_PREFIX}${bee.view}`
+}
+
+/** Compose the IconProviderRegistry name for a bee's ASLEEP icon. */
+function asleepIconNameForBee(bee: VisualBeeDescriptor): string {
+  return `${ASLEEP_ACTION_PREFIX}${bee.view}`
 }
 
 /** Enablement lens for the sync `visibleWhen` predicates: is this bee's
@@ -244,6 +267,36 @@ function syncIcons(): void {
     REGISTERED_ICONS.add(name)
   }
 
+  // ASLEEP icons — the exact inverse of the enter icon, for TAKEOVER views
+  // only: this tile carries the mark, and the behaviour is dormant here, so
+  // the hexagon you are looking at is a stand-in. See ASLEEP_ACTION_PREFIX for
+  // why no other dormancy earns a mark.
+  for (const bee of visualBees.all()) {
+    if (bee.behavior === 'navigation' || bee.replacesTileRender !== true) continue
+    const name = asleepIconNameForBee(bee)
+    want.add(name)
+    if (REGISTERED_ICONS.has(name)) continue
+    iconRegistry.add({
+      name,
+      owner: '@diamondcoreprocessor.com/visual-bee-icons',
+      svgMarkup: visualBeeIconSvg(bee.toggleIcon, bee.view),
+      profiles: ['private', 'public-own', 'public-external'],
+      defaultActive: true,
+      featureRow: false,
+      hoverTint: 0xa8d8ff,
+      tintWhen: () => ASLEEP_TINT,
+      labelKey: 'features.asleep',
+      descriptionKey: 'features.asleep.description',
+      visibleWhen: (ctx) => {
+        const label = (ctx as { label?: string })?.label
+        return typeof label === 'string'
+          && hasDecorationKind(label, bee.decorationKind)
+          && dormantHere(ctx, bee.decorationKind)
+      },
+    })
+    REGISTERED_ICONS.add(name)
+  }
+
   // Remove icons whose bee was unregistered.
   for (const name of REGISTERED_ICONS) {
     if (want.has(name)) continue
@@ -334,6 +387,22 @@ function dispatchEnterAction(action: string, label: string | undefined): void {
   })
 }
 
+/** Dispatch a click on an ASLEEP icon. Entering the view is exactly what it
+ *  cannot do — a dormant takeover renders nothing, so the mode would flip and
+ *  bounce straight back to the hexagons. Take the participant to where the
+ *  answer is instead: the Beehaviors panel, on THIS tile, which is the one
+ *  surface that both explains the dormancy and offers the wake. The same
+ *  `tile:action` payload the panel's other doors send (ShowFeaturesDrone). */
+function dispatchAsleepAction(label: string | undefined): void {
+  const cell = String(label ?? '').trim()
+  if (!cell) return
+  // Out of the `tile:action` dispatch we are standing in: re-emitting the same
+  // effect inside its own handler loop re-enters the subscriber set (and
+  // rewrites its last value) mid-iteration. A microtask makes it an ordinary
+  // second event.
+  queueMicrotask(() => EffectBus.emit('tile:action', { action: 'features', label: cell }))
+}
+
 // ── Wire up: listen to registry changes + tile:action events ──────────
 
 ;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
@@ -351,6 +420,10 @@ function dispatchEnterAction(action: string, label: string | undefined): void {
 // emitEffect), not a window CustomEvent — a window listener never fires.
 EffectBus.on<{ action?: string; label?: string }>('tile:action', (detail) => {
   if (!detail?.action) return
+  if (detail.action.startsWith(ASLEEP_ACTION_PREFIX)) {
+    dispatchAsleepAction(detail.label)
+    return
+  }
   if (detail.action.startsWith(ENTER_ACTION_PREFIX)) {
     dispatchEnterAction(detail.action, detail.label)
     return

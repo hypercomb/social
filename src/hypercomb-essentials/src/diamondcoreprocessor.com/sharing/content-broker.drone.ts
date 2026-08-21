@@ -166,11 +166,38 @@ export interface MirrorSink {
   write: (sig: string, bytes: Uint8Array) => Promise<void>
 }
 
+/**
+ * A signature the walk could not resolve, and enough context to judge it.
+ *
+ * A COUNT of unresolved items is unactionable — "3 missing" reads as three
+ * lost pictures. Naming them, with the record that referenced them and the key
+ * it sat under, is what lets you see in seconds that `payload.targetSig` is a
+ * LOCATION and was never content, while `visual.cover` is a picture that is
+ * genuinely gone.
+ *
+ * This matters more than it sounds: `missing > 0` blocks both `passSucceeded`
+ * and `complete`, so a single location signature in a payload means a hard copy
+ * can NEVER report itself portable. Without the name, that is an unexplainable
+ * permanent "incomplete".
+ */
+export interface UnresolvedRef {
+  readonly sig: string
+  /** The record that named it. */
+  readonly from: string
+  /** Key path within that record — `payload.targetSig`, `visual.cover`. */
+  readonly at: string
+}
+
+/** How many to name before only counting. A hive with thousands genuinely
+ *  missing has a different problem than a report can help with. */
+const UNRESOLVED_NAMED_LIMIT = 50
+
 /** Counters a mirrored walk reports back. */
 interface MirrorStats {
   mirrored?: number
   alreadyMirrored?: number
   mirrorFailed?: number
+  unresolved?: UnresolvedRef[]
 }
 
 /**
@@ -1178,9 +1205,9 @@ export class ContentBrokerDrone extends Drone {
    * `quiet` keeps that interactive event lane untouched for background
    * materialization jobs that report their own aggregate progress.
    */
-  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; deepResources?: boolean; maxResources?: number; silent?: boolean; quiet?: boolean; mirror?: MirrorSink } = {}): Promise<{ layers: number; leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number }> => {
+  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; deepResources?: boolean; maxResources?: number; silent?: boolean; quiet?: boolean; mirror?: MirrorSink } = {}): Promise<{ layers: number; leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number; unresolved: UnresolvedRef[] }> => {
     const root = String(rootSig ?? '').toLowerCase().trim()
-    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 }
+    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0, unresolved: [] as UnresolvedRef[] }
     if (!SIG_RE.test(root)) return stats
     const visited = new Set<string>()
 
@@ -1237,8 +1264,9 @@ export class ContentBrokerDrone extends Drone {
         // Every sig the layer references, recursively (covers resources
         // nested in cell properties), minus child layers and bees.
         const referenced = new Set<string>()
-        this.#collectSigs(parsed, referenced)
-        await this.#walkResources([...referenced], stats, visited, opts, childSet, bees)
+        const where = new Map<string, string>()
+        this.#collectSigs(parsed, referenced, where)
+        await this.#walkResources([...referenced], stats, visited, opts, childSet, bees, { from: sig, where })
       }
 
       for (const c of children) await walkLayer(c)
@@ -1277,7 +1305,19 @@ export class ContentBrokerDrone extends Drone {
     opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number; mirror?: MirrorSink },
     skipChildren: ReadonlySet<string> = new Set(),
     skipBees: ReadonlySet<string> = new Set(),
+    origin?: { from: string; where: Map<string, string> },
   ): Promise<void> => {
+    /** Which record named which signature. Seeds are named by the layer that
+     *  referenced them; anything enqueued deeper is named by the record it was
+     *  found inside. */
+    const namedBy = new Map<string, string>()
+    /** Name a failure while there is still room to. */
+    const noteUnresolved = (sig: string, from: string, at: string): void => {
+      const list = (stats.unresolved ??= [])
+      if (list.length >= UNRESOLVED_NAMED_LIMIT) return
+      if (list.some(u => u.sig === sig)) return
+      list.push({ sig, from, at })
+    }
     // depth 0 = named by the layer; depth 1+ = reached through a record. The
     // default path expands depth 0 only, which is the established
     // single-level decoration hop, symmetric with the renderer.
@@ -1294,8 +1334,9 @@ export class ContentBrokerDrone extends Drone {
     // would otherwise occupy a thousand queue slots before any of it is
     // recognised as already seen.
     const queued = new Set<string>(queue.map(q => q.sig))
-    const enqueue = (sig: string, depth: number): void => {
+    const enqueue = (sig: string, depth: number, from?: string): void => {
       if (visited.has(sig) || queued.has(sig)) return
+      if (from && !namedBy.has(sig)) namedBy.set(sig, from)
       if (queued.size >= limit || depth > DEEP_DEPTH_LIMIT) {
         // Never silently truncate — a dropped reference is content the
         // backup does not hold, and the caller must be able to report the
@@ -1352,7 +1393,19 @@ export class ContentBrokerDrone extends Drone {
 
       if (!got) {
         got = await this.fetchBySig(sig, 'resource')
-        if (!got) { stats.failed++; continue }
+        if (!got) {
+          stats.failed++
+          noteUnresolved(
+            sig,
+            namedBy.get(sig) ?? origin?.from ?? '',
+            // Depth 0 carries the real key path from the layer. Deeper items
+            // were found inside a record, where the path is the record's own
+            // shape rather than the layer's — saying so is more honest than
+            // inventing a key.
+            depth === 0 ? (origin?.where.get(sig) ?? '') : 'inside a record',
+          )
+          continue
+        }
         stats.leaves++
         // Write-through: saved the moment it verifies, not after the walk. An
         // interrupted pass therefore keeps everything it reached.
@@ -1371,11 +1424,11 @@ export class ContentBrokerDrone extends Drone {
       // the adopted site is self-contained, not a record that 404s its
       // assets. No-op for ordinary resources (decorationClosureSigs → []).
       for (const n of await decorationClosureSigs(got, s => this.fetchBySig(s, 'resource'))) {
-        enqueue(n, depth + 1)
+        enqueue(n, depth + 1, sig)
       }
 
       if (opts.deepResources) {
-        for (const s of this.#recordSigs(got)) enqueue(s, depth + 1)
+        for (const s of this.#recordSigs(got)) enqueue(s, depth + 1, sig)
       }
     }
   }
@@ -1405,11 +1458,11 @@ export class ContentBrokerDrone extends Drone {
   public adoptResources = async (
     sigs: readonly string[],
     opts: { deepResources?: boolean; quiet?: boolean; maxResources?: number; mirror?: MirrorSink } = {},
-  ): Promise<{ leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number }> => {
-    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 }
+  ): Promise<{ leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number; unresolved: UnresolvedRef[] }> => {
+    const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0, unresolved: [] as UnresolvedRef[] }
     const seeds = sigs.map(s => String(s ?? '').toLowerCase().trim()).filter(s => SIG_RE.test(s))
     if (seeds.length === 0) {
-      return { leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0 }
+      return { leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0, unresolved: [] }
     }
     await this.#walkResources(seeds, stats, new Set<string>(), opts)
     return {
@@ -1419,6 +1472,7 @@ export class ContentBrokerDrone extends Drone {
       mirrored: stats.mirrored ?? 0,
       alreadyMirrored: stats.alreadyMirrored ?? 0,
       mirrorFailed: stats.mirrorFailed ?? 0,
+      unresolved: stats.unresolved ?? [],
     }
   }
 
@@ -1426,15 +1480,34 @@ export class ContentBrokerDrone extends Drone {
    *  (strings, arrays, object values). Used by adopt() to find a layer's
    *  referenced resources wherever they sit, including nested in cell
    *  properties — not just top-level slots. */
-  #collectSigs = (value: unknown, out: Set<string>): void => {
+  #collectSigs = (
+    value: unknown,
+    out: Set<string>,
+    where?: Map<string, string>,
+    path: readonly string[] = [],
+  ): void => {
     if (typeof value === 'string') {
       const s = value.toLowerCase()
-      if (SIG_RE.test(s)) out.add(s)
+      if (SIG_RE.test(s)) {
+        out.add(s)
+        // First mention wins. The KEY is what tells a human whether an
+        // unresolvable signature is lost content or was never content at all:
+        // `visual.cover` is a picture, `payload.targetSig` is a LOCATION and
+        // will never resolve no matter how many hosts are asked.
+        if (where && !where.has(s)) where.set(s, path.join('.') || '(root)')
+      }
       return
     }
-    if (Array.isArray(value)) { for (const v of value) this.#collectSigs(v, out); return }
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        this.#collectSigs(value[i], out, where, where ? [...path, `[${i}]`] : path)
+      }
+      return
+    }
     if (value && typeof value === 'object') {
-      for (const v of Object.values(value as Record<string, unknown>)) this.#collectSigs(v, out)
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        this.#collectSigs(v, out, where, where ? [...path, k] : path)
+      }
     }
   }
 

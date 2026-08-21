@@ -24,7 +24,7 @@ import { EffectBus, SignatureService, poolMeanings } from '@hypercomb/core'
 import { extractLayerSigFromMarker } from '../history/history.service.js'
 // TYPE ONLY — erased at compile time, so this stays an IoC relationship at
 // runtime and no bundle edge is created between the two drones.
-import type { MirrorSink } from './content-broker.drone.js'
+import type { MirrorSink, UnresolvedRef } from './content-broker.drone.js'
 
 export const FOLDER_SYNC_KEY = '@diamondcoreprocessor.com/FolderSyncService'
 
@@ -157,6 +157,10 @@ interface HardCopyResult {
   alreadyMirrored: number
   /** Items that resolved but could not be written to the backup. */
   mirrorFailed: number
+  /** Signatures nothing could resolve, NAMED. `missing: 3` reads as three lost
+   *  pictures; naming them is what shows that `payload.targetSig` was a
+   *  location and never content at all. */
+  unresolved: UnresolvedRef[]
 }
 
 const emptyClosure = (): HardCopyResult => ({
@@ -172,6 +176,7 @@ const emptyClosure = (): HardCopyResult => ({
   mirrored: 0,
   alreadyMirrored: 0,
   mirrorFailed: 0,
+  unresolved: [],
 })
 
 interface CompletionSeal {
@@ -221,6 +226,7 @@ interface ContentBrokerLike {
     mirrored?: number
     alreadyMirrored?: number
     mirrorFailed?: number
+    unresolved?: UnresolvedRef[]
   }>
   adoptResources?: (
     sigs: readonly string[],
@@ -232,6 +238,7 @@ interface ContentBrokerLike {
     mirrored?: number
     alreadyMirrored?: number
     mirrorFailed?: number
+    unresolved?: UnresolvedRef[]
   }>
 }
 
@@ -1399,6 +1406,9 @@ export class FolderSyncService {
         result.mirrored += stats.mirrored ?? 0
         result.alreadyMirrored += stats.alreadyMirrored ?? 0
         result.mirrorFailed += stats.mirrorFailed ?? 0
+        for (const ref of stats.unresolved ?? []) {
+          if (!result.unresolved.some(u => u.sig === ref.sig)) result.unresolved.push(ref)
+        }
         result.layers += stats.layers
         result.resources += stats.leaves
         // A walk that hit its safety bound left content unfetched. That is
@@ -1435,6 +1445,9 @@ export class FolderSyncService {
         result.mirrored += stats.mirrored ?? 0
         result.alreadyMirrored += stats.alreadyMirrored ?? 0
         result.mirrorFailed += stats.mirrorFailed ?? 0
+        for (const ref of stats.unresolved ?? []) {
+          if (!result.unresolved.some(u => u.sig === ref.sig)) result.unresolved.push(ref)
+        }
         result.poolReferences = poolReferenced.size
         result.resources += stats.leaves
         result.missing += stats.failed + (stats.truncated ?? 0)
@@ -1708,6 +1721,21 @@ export class FolderSyncService {
       `Referenced layers made local: ${hardCopy.layers}`,
       `Referenced resources made local: ${hardCopy.resources}`,
       `Missing referenced items: ${hardCopy.missing}`,
+      // NAMED, not just counted. `missing: 3` reads as three lost pictures;
+      // the key path is what shows that `payload.targetSig` is a LOCATION and
+      // was never content, so it can never resolve however many hosts answer.
+      // That distinction matters twice over, because `missing > 0` blocks both
+      // the portable verdict and the seal — an unexplained permanent
+      // "incomplete" is exactly what this list prevents.
+      ...(hardCopy.unresolved.length
+        ? [
+            'Signatures nothing could resolve:',
+            ...hardCopy.unresolved.map(u =>
+              `  ${u.sig}  named by ${u.from || '(unknown)'} at ${u.at || '(unknown key)'}`),
+            'A key like `payload.targetSig` or `payload.id` is a LOCATION or an',
+            'identifier, not content — it is not missing and never will resolve.',
+          ]
+        : []),
       // Named, not just counted: "3 files could not be written" is unusable,
       // and the whole point of a report is that the next person can act on it.
       ...(manifest.vanishedCount

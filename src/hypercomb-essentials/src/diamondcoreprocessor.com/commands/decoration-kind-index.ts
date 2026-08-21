@@ -667,6 +667,26 @@ function takeoverKinds(): ReadonlySet<string> {
   return registry?.kindsReplacingTileRender?.() ?? EMPTY_KINDS
 }
 
+/** Is this location CLAIMED by a takeover view — a cell whose whole presence
+ *  is the view, so show-cell drops its hexagon (`replacesTileRender`)?
+ *
+ *  A layer made only of such cells paints ZERO hexagons, which is why an
+ *  emptiness question must be asked here rather than of the render: "no tiles
+ *  on the glass" and "nothing here" stopped being the same sentence the day
+ *  the first post-it took a cell over.
+ *
+ *  Dormancy is deliberately NOT consulted: a dormant claim hands the hexagon
+ *  back, and then the cell is on screen and counts itself. Registry-driven —
+ *  no view is named here. */
+export function isClaimedByTakeoverAt(segments: readonly string[]): boolean {
+  const kinds = takeoverKinds()
+  if (kinds.size === 0) return false
+  for (const kind of kinds) {
+    if (hasDecorationKindAt(segments, kind)) return true
+  }
+  return false
+}
+
 type DecorationShape = { kind?: string; payload?: unknown }
 
 async function fetchDecorationRecord(sig: string): Promise<DecorationShape | null> {
