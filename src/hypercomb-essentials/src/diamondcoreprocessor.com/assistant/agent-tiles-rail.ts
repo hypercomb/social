@@ -32,6 +32,12 @@
 //                (ctrl-click does it too, for a fast mouse)
 //   right-click  come back out
 //
+// All three are pointer gestures, and a list that can only be walked with a
+// mouse is a list some people cannot walk at all — so the same three moves
+// answer to the keyboard: Enter opens the conversation, → goes inside, ←
+// comes back out, ↑↓ walk the rows, and the level that arrives takes the
+// focus so a keyboard is never stranded on a row that no longer exists.
+//
 // A tile nobody has spoken to is DORMANT: the conversation is derived, not
 // minted, so it costs nothing until a draft or a turn lands in it. A row
 // holding unsent thinking wears a quiet mark, which is how you find your way
@@ -100,14 +106,14 @@ const ensureRailStyles = (): void => {
 .hc-rail-head{display:flex;align-items:center;gap:0.35rem;flex:0 0 auto;
   padding:0.8rem 0.85rem 0.5rem;}
 .hc-rail-back{width:1.7rem;height:1.9rem;flex:0 0 auto;border:none;background:none;
-  color:rgba(${STEEL},0.75);font-size:1.4rem;line-height:1;cursor:pointer;border-radius:6px;}
+  color:rgba(${STEEL},0.75);font-size:1.4rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
 .hc-rail-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
 .hc-rail-back[hidden]{display:none;}
 .hc-rail-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-family:var(--hc-mono,monospace);font-size:0.72rem;font-weight:600;letter-spacing:0.12em;
   text-transform:uppercase;color:rgba(${STEEL},0.85);}
 .hc-rail-find{flex:0 0 auto;padding:0 0.85rem 0.5rem;}
-.hc-rail-find input{width:100%;box-sizing:border-box;padding:0.33rem 0.55rem;border-radius:7px;
+.hc-rail-find input{width:100%;box-sizing:border-box;padding:0.33rem 0.55rem;border-radius:var(--hc-radius-control, 2px);
   border:1px solid rgba(${STEEL},0.22);background:rgba(255,255,255,0.04);
   color:rgba(238,244,250,0.92);font:inherit;font-size:0.8rem;}
 .hc-rail-find input::placeholder{color:rgba(216,230,238,0.35);}
@@ -123,15 +129,15 @@ const ensureRailStyles = (): void => {
   scrollbar-color:rgba(${STEEL},0.3) transparent;}
 @keyframes hcRailIn{from{opacity:0;transform:translateX(0.6rem);}to{opacity:1;transform:none;}}
 @keyframes hcRailOut{from{opacity:0;transform:translateX(-0.6rem);}to{opacity:1;transform:none;}}
-.hc-rail-row{display:flex;align-items:center;border-radius:9px;}
+.hc-rail-row{display:flex;align-items:center;border-radius:var(--hc-radius-control, 2px);}
 .hc-rail-row:hover{background:rgba(255,255,255,0.05);}
 .hc-rail-row.holding{background:rgba(${STEEL},0.16);transition:background 0.12s ease;}
 .hc-rail-row.current{background:rgba(${STEEL},0.1);box-shadow:inset 0 0 0 1px rgba(${STEEL},0.4);}
 .hc-rail-main{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:0.6rem;
   padding:0.35rem 0.2rem 0.35rem 0.45rem;border:0;background:none;text-align:left;font:inherit;
-  cursor:pointer;border-radius:9px;color:inherit;}
+  cursor:pointer;border-radius:var(--hc-radius-control, 2px);color:inherit;}
 .hc-rail-main:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
-.hc-rail-icon{width:2.15rem;height:2.15rem;flex:0 0 auto;border-radius:8px;overflow:hidden;
+.hc-rail-icon{width:2.15rem;height:2.15rem;flex:0 0 auto;border-radius:var(--hc-radius-card, 3px);overflow:hidden;
   display:grid;place-items:center;background:rgba(${STEEL},0.08);
   border:1px solid rgba(${STEEL},0.14);color:rgba(${STEEL},0.55);
   font-size:0.95rem;font-weight:600;}
@@ -148,7 +154,7 @@ const ensureRailStyles = (): void => {
 .hc-rail-draft{flex:0 0 auto;width:0.42rem;height:0.42rem;margin-right:0.55rem;
   border-radius:999px;background:rgba(226,196,140,0.9);}
 .hc-rail-draft[hidden]{display:none;}
-.hc-rail-skel{height:2.5rem;border-radius:9px;background:rgba(255,255,255,0.045);
+.hc-rail-skel{height:2.5rem;border-radius:var(--hc-radius-control, 2px);background:rgba(255,255,255,0.045);
   animation:hcRailPulse 1.1s ease-in-out infinite;}
 @keyframes hcRailPulse{0%,100%{opacity:0.5;}50%{opacity:1;}}
 .hc-rail-empty{padding:0.9rem 0.45rem;font-size:0.78rem;color:rgba(216,230,238,0.45);}
@@ -179,6 +185,9 @@ export class AgentTilesRail {
   #drafts = new Set<string>()
   /** A hold already acted — eat the click that ends the same press. */
   #swallowClick = false
+  /** The level changed from the keyboard: put focus on the level that
+   *  arrives, or the keyboard is stranded on a row that no longer exists. */
+  #focusFirstRow = false
   #registry: AgentRegistry | undefined
   /** Guards stale walks: only the newest load may touch the list. */
   #epoch = 0
@@ -250,6 +259,7 @@ export class AgentTilesRail {
 
     const list = document.createElement('div')
     list.className = 'hc-rail-list'
+    list.setAttribute('role', 'list')
     this.#list = list
 
     host.append(head, find, list)
@@ -289,7 +299,7 @@ export class AgentTilesRail {
   clearSubject(): void {
     if (!this.#subject) return
     this.#subject = null
-    for (const row of this.#list?.querySelectorAll('.hc-rail-row.current') ?? []) row.classList.remove('current')
+    this.#markCurrent(null)
     this.onSubjectChanged(null)
   }
 
@@ -429,18 +439,26 @@ export class AgentTilesRail {
 
     const counts = this.#agentCounts()
     const talkHint = this.#t('agent.rail-talk', 'Talk to this tile')
-    const insideHint = this.#t('agent.rail-inside', 'Ctrl-click to go inside · right-click to come back')
+    // Short on purpose: a tooltip on every row is furniture, and the one
+    // gesture worth teaching there is the hold. The keyboard moves answer to
+    // the arrow keys a list is already expected to honour.
+    const insideHint = this.#t('agent.rail-inside', 'hold to go inside')
     for (const row of visible) {
       const key = pathKey(row.segments)
+      const current = this.#subject?.key === key
       const wrap = document.createElement('div')
       wrap.className = 'hc-rail-row'
       wrap.dataset['key'] = key
-      wrap.classList.toggle('current', this.#subject?.key === key)
+      wrap.setAttribute('role', 'listitem')
+      wrap.classList.toggle('current', current)
 
       const main = document.createElement('button')
       main.type = 'button'
       main.className = 'hc-rail-main'
       main.title = row.childCount ? `${talkHint} · ${insideHint}` : talkHint
+      // The conversation you are in, said to a screen reader as well as to
+      // the eye — `current` is only a background colour.
+      if (current) main.setAttribute('aria-current', 'true')
 
       const icon = document.createElement('span')
       icon.className = 'hc-rail-icon'
@@ -483,9 +501,49 @@ export class AgentTilesRail {
         else this.#enter(wrap, key, row)
       })
 
+      // THE SAME THREE MOVES, FROM THE KEYBOARD. Hold and right-click are
+      // pointer gestures, and a list you can only walk with a mouse is a
+      // list some people cannot walk at all: → goes inside, ← comes back
+      // out, ↑↓ move between rows, and Enter (the button's own default) is
+      // the click that opens the conversation.
+      main.addEventListener('keydown', event => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return
+        if (event.key === 'ArrowRight') {
+          if (row.childCount === 0) return
+          event.preventDefault()
+          this.#focusFirstRow = true
+          this.#drill(row.segments)
+        } else if (event.key === 'ArrowLeft') {
+          if (this.#trail.length <= 1) return
+          event.preventDefault()
+          this.#focusFirstRow = true
+          this.#up()
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          this.#step(wrap, event.key === 'ArrowDown' ? 1 : -1)
+        }
+      })
+
       wrap.append(main)
       list.appendChild(wrap)
     }
+
+    // After a level change the focus that was on a now-removed row would be
+    // lost to the body, stranding a keyboard mid-list. Put it on the first
+    // row of the level that just arrived — but only when the rail is where
+    // the participant already was.
+    if (this.#focusFirstRow) {
+      this.#focusFirstRow = false
+      list.querySelector<HTMLElement>('.hc-rail-main')?.focus()
+    }
+  }
+
+  /** Move focus one row up or down, staying inside the level. */
+  #step(from: HTMLElement, delta: 1 | -1): void {
+    const rows = [...(this.#list?.querySelectorAll<HTMLElement>('.hc-rail-row') ?? [])]
+    const index = rows.indexOf(from)
+    if (index < 0) return
+    rows[Math.min(rows.length - 1, Math.max(0, index + delta))]?.querySelector<HTMLElement>('.hc-rail-main')?.focus()
   }
 
   /** Hold a row to go inside it. Cancelled by a pointer that wanders (that
@@ -526,10 +584,21 @@ export class AgentTilesRail {
   /** Enter a row's conversation. One at a time: the previous row lets go, so
    *  what you type after this belongs to the tile you just clicked. */
   #enter(wrap: HTMLElement, key: string, row: RailRow): void {
-    for (const other of this.#list?.querySelectorAll('.hc-rail-row.current') ?? []) other.classList.remove('current')
-    wrap.classList.add('current')
+    this.#markCurrent(wrap)
     this.#subject = { key, path: row.segments.slice(0, -1), name: row.name }
     this.onSubjectChanged(this.#subject)
+  }
+
+  /** Light exactly one row as the conversation in hand — in colour AND in the
+   *  accessibility tree, which is the half a class toggle silently skips. */
+  #markCurrent(wrap: HTMLElement | null): void {
+    for (const other of this.#list?.querySelectorAll('.hc-rail-row.current') ?? []) {
+      other.classList.remove('current')
+      other.querySelector('.hc-rail-main')?.removeAttribute('aria-current')
+    }
+    if (!wrap) return
+    wrap.classList.add('current')
+    wrap.querySelector('.hc-rail-main')?.setAttribute('aria-current', 'true')
   }
 
   /** Which tiles hold unsent thinking. Read on mount and whenever a draft is

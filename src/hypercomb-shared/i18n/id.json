@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "Hentikan pekerjaan ini dan bersihkan dari sarang",
   "agent.stopped": "Dihentikan — permintaan sudah keluar dari sarang.",
   "agent.stop-error": "Tidak bisa menghentikannya — coba lagi.",
+  "agent.rail-root": "sarang",
+  "agent.rail-back": "Kembali ke {name}",
+  "agent.rail-empty": "Belum ada apa pun di dalam ubin ini.",
+  "agent.rail-find": "Cari di tingkat ini",
+  "agent.rail-no-match": "Tidak ada ubin di sini yang cocok dengan “{query}”.",
+  "agent.rail-talk": "Bicara dengan ubin ini",
+  "agent.rail-inside": "tahan untuk masuk",
+  "agent.rail-draft": "Ada catatan yang belum dikirim di sini",
   "slash.menu": "Menu cepat — tujuh heksagon di penunjuk; sentak ke satu arah untuk memilih",
   "quickmenu.root": "Sarang",
   "quickmenu.workflow": "Alur kerja",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Tidak ada sesi Claude — jalankan bridge untuk akses sarang",
   "chat.placeholder": "Tanya apa saja…",
   "chat.send": "Kirim",
+  "chat.rail": "Ubin Anda, masing-masing satu percakapan",
   "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
   "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung"
 }

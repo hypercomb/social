@@ -30,7 +30,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 0.9rem;
+  border-radius: var(--hc-radius-floating);
   background: rgba(14, 16, 20, 0.82);
   backdrop-filter: blur(14px) saturate(1.15);
   box-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.45);
@@ -62,7 +62,7 @@
     font-size: 0.85rem;
     cursor: pointer;
     padding: 0.25rem 0.4rem;
-    border-radius: 0.35rem;
+    border-radius: var(--hc-radius-floating);
     &:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
   }
 }
@@ -86,7 +86,7 @@
   gap: 0.3rem;
   padding: 0.6rem 0.7rem 0.5rem;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 0.7rem;
+  border-radius: var(--hc-radius-card);
   background: rgba(255, 255, 255, 0.03);
   cursor: pointer;
   transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
@@ -171,7 +171,7 @@
   .step {
     background: none;
     border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 0.4rem;
+    border-radius: var(--hc-radius-control);
     color: rgba(255, 255, 255, 0.75);
     width: 1.6rem;
     height: 1.6rem;

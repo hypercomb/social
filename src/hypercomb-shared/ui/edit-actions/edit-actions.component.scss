@@ -64,7 +64,7 @@ $steel: rgb(126, 182, 214);
 
   &:hover:not(:disabled) { color: #eaf5fb; }
   &:active:not(:disabled) { transform: scale(0.9); }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; border-radius: 6px; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; border-radius: var(--hc-radius-control); }
   &:disabled { opacity: 0.25; cursor: default; }
 
   // Lit while the window a button opens is showing (the feedback toggle).
@@ -95,7 +95,7 @@ $steel: rgb(126, 182, 214);
 
   background: rgba($steel, 0.16);
   border: 1px solid rgba($steel, 0.55);
-  border-radius: 1.2rem;
+  border-radius: var(--hc-radius-control);
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 120ms ease;
 

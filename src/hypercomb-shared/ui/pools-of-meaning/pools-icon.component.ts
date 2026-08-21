@@ -41,7 +41,7 @@ type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
       padding: 0;
       background: none;
       border: none;
-      border-radius: 8px;
+      border-radius: var(--hc-radius-control, 2px);
       color: rgba(206, 224, 240, 0.6);
       cursor: pointer;
       transition: color 150ms ease, background 150ms ease;

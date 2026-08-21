@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 430" role="img" aria-label="three documents pass through sign(): two identical ones converge to the same name, one changed byte gets a different name">
+  <defs>
+    <pattern id="sg-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20,0 L0,0 L0,20" fill="none" stroke="#a9c0d2" stroke-width="0.7" opacity="0.45"/>
+    </pattern>
+    <pattern id="sg-gridMajor" width="100" height="100" patternUnits="userSpaceOnUse">
+      <path d="M100,0 L0,0 L0,100" fill="none" stroke="#8fabc2" stroke-width="1" opacity="0.5"/>
+    </pattern>
+    <filter id="sg-soft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+    <linearGradient id="sg-lens" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf6e2"/><stop offset="1" stop-color="#f6e7c4"/>
+    </linearGradient>
+    <radialGradient id="sg-lensGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#e0a520" stop-opacity="0.28"/><stop offset="1" stop-color="#e0a520" stop-opacity="0"/>
+    </radialGradient>
+    <marker id="sg-ahH" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#b87e10"/>
+    </marker>
+    <marker id="sg-ahS" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#7f93a4"/>
+    </marker>
+    <!-- one document card, reused: the fold, the rule lines, the byte grid -->
+    <g id="sg-card">
+      <path d="M0,6 Q0,0 6,0 L128,0 L150,22 L150,86 Q150,92 144,92 L6,92 Q0,92 0,86 Z" fill="#fffdf8" stroke="#d9d4c5" stroke-width="1.4"/>
+      <path d="M128,0 L128,22 L150,22" fill="#f1ece0" stroke="#d9d4c5" stroke-width="1.4"/>
+      <text x="12" y="26" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9.5" fill="#8a9099">89 50 4e 47 0d 0a 1a 0a</text>
+      <text x="12" y="42" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9.5" fill="#8a9099">00 00 00 0d 49 48 44 52</text>
+      <text x="12" y="58" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9.5" fill="#8a9099">00 00 04 b0 00 00 02 76</text>
+    </g>
+  </defs>
+
+  <rect width="920" height="430" fill="#f7f2e6"/>
+  <rect width="920" height="430" fill="url(#sg-grid)"/>
+  <rect width="920" height="430" fill="url(#sg-gridMajor)"/>
+
+  <style>
+    @media (prefers-reduced-motion: no-preference){
+      .sg-flow{stroke-dasharray:7 6;animation:sg-march 1.6s linear infinite}
+      @keyframes sg-march{to{stroke-dashoffset:-13}}
+    }
+  </style>
+
+  <!-- ── the three documents ─────────────────────────────────── -->
+  <g>
+    <use href="#sg-card" x="48" y="44"/>
+    <text x="48" y="152" font-family="Segoe UI, system-ui, sans-serif" font-size="11.5" fill="#585f68">photo.png</text>
+  </g>
+  <use href="#sg-card" x="48" y="176"/>
+  <text x="48" y="284" font-family="Segoe UI, system-ui, sans-serif" font-size="11.5" fill="#585f68">the same photo, again</text>
+
+  <g>
+    <use href="#sg-card" x="48" y="308"/>
+    <!-- the one changed byte: 04 became 05 -->
+    <rect x="93" y="357" width="15" height="14" rx="3" fill="#fbe9e7" stroke="#b3423c" stroke-width="1.2"/>
+    <text x="95" y="368" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9.5" fill="#b3423c" font-weight="bold">05</text>
+    <text x="48" y="416" font-family="Segoe UI, system-ui, sans-serif" font-size="11.5" fill="#b3423c">one byte flipped</text>
+  </g>
+
+  <!-- ── the paths in: identical content converges before the lens ── -->
+  <g fill="none" stroke="#b87e10" stroke-width="1.9">
+    <path class="sg-flow" d="M198,90 C258,90 278,140 300,158"/>
+    <path class="sg-flow" d="M198,222 C246,222 276,190 300,166"/>
+    <circle cx="306" cy="162" r="4.5" fill="#b87e10" stroke="none"/>
+    <path class="sg-flow" d="M310,162 C330,166 336,178 348,188" marker-end="url(#sg-ahH)"/>
+  </g>
+  <text x="252" y="132" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#9a6408">same bytes</text>
+  <g fill="none" stroke="#7f93a4" stroke-width="1.9">
+    <path class="sg-flow" d="M198,354 C260,354 300,290 344,252" marker-end="url(#sg-ahS)"/>
+  </g>
+
+  <!-- ── the lens: sign() ────────────────────────────────────── -->
+  <circle cx="404" cy="212" r="86" fill="url(#sg-lensGlow)"/>
+  <path d="M404,148 L459.4,180 L459.4,244 L404,276 L348.6,244 L348.6,180 Z"
+        fill="url(#sg-lens)" stroke="#b87e10" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M404,156 L452.5,184 L452.5,240 L404,268 L355.5,240 L355.5,184 Z"
+        fill="none" stroke="#e0a520" stroke-width="1" opacity="0.6"/>
+  <text x="404" y="209" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="19" font-weight="600" fill="#7d5107">sign()</text>
+  <text x="404" y="230" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9.5" fill="#9a6408" letter-spacing="1">SHA-256</text>
+  <text x="404" y="300" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#8a9099">computed from the bytes themselves</text>
+
+  <!-- ── the paths out ───────────────────────────────────────── -->
+  <g fill="none" stroke="#b87e10" stroke-width="2.2">
+    <path class="sg-flow" d="M459,190 C500,175 520,152 548,138" marker-end="url(#sg-ahH)"/>
+  </g>
+  <g fill="none" stroke="#7f93a4" stroke-width="1.9">
+    <path class="sg-flow" d="M456,240 C500,262 516,296 548,318" marker-end="url(#sg-ahS)"/>
+  </g>
+
+  <!-- ── the names ───────────────────────────────────────────── -->
+  <g>
+    <rect x="560" y="96" width="320" height="70" rx="9" fill="#fffdf8" stroke="#b87e10" stroke-width="1.8"/>
+    <rect x="560" y="96" width="320" height="70" rx="9" fill="none" stroke="#e0a520" stroke-width="5" opacity="0.14"/>
+    <text x="720" y="126" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="12.5" fill="#9a6408" letter-spacing="0.4">e3b0c44298fc1c149afbf4c8996fb924</text>
+    <text x="720" y="146" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="12.5" fill="#9a6408" letter-spacing="0.4">27ae41e4649b934ca495991b7852b855</text>
+    <text x="720" y="86" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="11.5" fill="#585f68">same content → the <tspan fill="#9a6408" font-weight="600">same name</tspan>, on every machine</text>
+  </g>
+
+  <text x="720" y="248" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="24" fill="#b3423c" opacity="0.8">≠</text>
+
+  <g opacity="0.92">
+    <rect x="560" y="286" width="320" height="70" rx="9" fill="#fdfcf8" stroke="#a9b2bc" stroke-width="1.6"/>
+    <text x="720" y="316" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="12.5" fill="#6b7684" letter-spacing="0.4">9f86d081884c7d659a2feaa0c55ad015</text>
+    <text x="720" y="336" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="12.5" fill="#6b7684" letter-spacing="0.4">a3bf4f1b2b0b822cd15d6c15b0f00a08</text>
+    <text x="720" y="378" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="11.5" fill="#585f68">a different thing — a different name</text>
+  </g>
+
+  <text x="260" y="416" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="10" fill="#8a9099" letter-spacing="0.8">verify · deduplicate · cache forever</text>
+</svg>

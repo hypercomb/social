@@ -123,6 +123,14 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // group of tiles (see assistant/changes.ts). Colon-scoped so it can never
   // collide with a tile slugged 'changes'.
   'changes:log',
+  // Unsent chat drafts, one per tile — what was typed into a tile's
+  // conversation and NOT sent (see assistant/chat-thread.ts). TRUTH POOL:
+  // a half-written thought is not derivable from anything, so a cold client
+  // could never rebuild it (optimize-phase.md litmus) and it must never be
+  // minted from the optimize phase. Seeded here for the reason every pool is:
+  // a root walker meeting the directory in a session that has not yet
+  // addressed the pool would otherwise take it for a lineage bag.
+  'chat:drafts',
   // The context basket — signatures gathered while browsing, handed to an ask
   // as its closure root list (see assistant/context-basket.ts). Colon-scoped
   // so neither can collide with a tile slugged 'context' or 'changes'.

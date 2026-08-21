@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "أوقف هذا العمل وأزله من الخلية",
   "agent.stopped": "تم الإيقاف — خرج الطلب من الخلية.",
   "agent.stop-error": "تعذّر إيقافه — حاول مرة أخرى.",
+  "agent.rail-root": "الخلية",
+  "agent.rail-back": "العودة إلى {name}",
+  "agent.rail-empty": "لا شيء داخل هذه البلاطة بعد.",
+  "agent.rail-find": "ابحث في هذا المستوى",
+  "agent.rail-no-match": "لا توجد بلاطة هنا تطابق «{query}».",
+  "agent.rail-talk": "تحدّث إلى هذه البلاطة",
+  "agent.rail-inside": "اضغط مطوّلاً للدخول",
+  "agent.rail-draft": "أفكار غير مُرسَلة تنتظر هنا",
   "slash.menu": "قائمة سريعة — سبع سداسيات عند المؤشر؛ انفض باتجاه للاختيار",
   "quickmenu.root": "الخلية",
   "quickmenu.workflow": "سير العمل",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "لا توجد جلسة Claude — شغّل الجسر للوصول إلى الخلية",
   "chat.placeholder": "اسأل عن أي شيء…",
   "chat.send": "إرسال",
+  "chat.rail": "بلاطاتك، لكل واحدة محادثة",
   "mesh-modal.needs-location": "يلزم موقع للانضمام",
   "mesh-modal.needs-secret": "يلزم مفتاح سري للانضمام"
 }

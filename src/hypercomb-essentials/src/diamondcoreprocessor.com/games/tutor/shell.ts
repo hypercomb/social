@@ -374,7 +374,7 @@ export class TutorShell {
 .hc-tutor-chip.on{border-color:#7ee0ff;color:#eaf6ff;background:rgba(126,224,255,0.16)}
 .hc-tutor-chip.off{opacity:.35;cursor:default}
 .hc-tutor-exit{appearance:none;border:1px solid rgba(126,182,214,0.3);background:transparent;color:#bfe9ff;
-  width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:14px;line-height:1}
+  width:30px;height:30px;border-radius:var(--hc-radius-control, 2px);cursor:pointer;font-size:14px;line-height:1}
 .hc-tutor-exit:hover{background:rgba(255,93,143,0.18);border-color:#ff5d8f;color:#fff}
 .hc-tutor-canvas{position:absolute;top:46px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 46px);display:block;touch-action:none}
 .hc-tutor-complete{position:absolute;inset:46px 0 0 0;z-index:3;display:flex;flex-direction:column;align-items:center;
@@ -383,7 +383,7 @@ export class TutorShell {
 .hc-tutor-complete-stat{font:500 18px system-ui,sans-serif;color:#bfe9ff}
 .hc-tutor-complete-row{display:flex;gap:12px;margin-top:6px}
 .hc-tutor-btn{appearance:none;border:1px solid rgba(126,182,214,0.35);background:rgba(255,255,255,0.04);
-  color:#cfe6f5;border-radius:10px;padding:10px 18px;font:600 15px system-ui,sans-serif;cursor:pointer}
+  color:#cfe6f5;border-radius:var(--hc-radius-control, 2px);padding:10px 18px;font:600 15px system-ui,sans-serif;cursor:pointer}
 .hc-tutor-btn:hover{background:rgba(126,224,255,0.14)}
 .hc-tutor-btn.primary{border-color:#7ee0ff;color:#eaf6ff;background:rgba(126,224,255,0.18)}
 `

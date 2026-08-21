@@ -6,9 +6,7 @@
   "eyebrow": "the horizon",
   "headline": "The hive is a *computer*",
   "sub": "Junctions become processors. The geometry of your hive becomes the program.",
-  "visual": "sig",
-  "visualData": [
-    "sign( sign(script) ++ sign(input) ) → *result* — computed once, *anywhere*, cached for everyone, forever"
-  ],
+  "visual": "plate:hive-computer",
+  "visualData": ["junctions compute"],
   "say": "And the horizon we're building toward: the hive as a computer. Every computation is content-addressed — script plus input equals a signed result. Compute something once, and the whole network never computes it again: a global memoization mesh. Junctions in the tree become processors; the geometry of your hive becomes the program. That's not a slogan — the primitives, signatures, layers, deterministic modules, are already in your hands. The roadmap is the staircase from here to there."
 }

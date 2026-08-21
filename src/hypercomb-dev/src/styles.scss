@@ -1,7 +1,17 @@
 @use '../../hypercomb-shared/fonts/fonts';
+// The app-wide shape ladder (:root custom properties). Loaded beside the
+// typography tokens because it is the same kind of thing: a vocabulary every
+// surface reads, including the framework-free drone views, which reach it
+// through the shadow boundary as custom properties.
+@use '../../hypercomb-shared/ui/shape' as shape;
 @use '../../hypercomb-shared/styles/material-tokens';
 @use '../../hypercomb-shared/styles/canvas-suppress' as *;
 @use '../../hypercomb-shared/styles/header-size';
+
+// The shape ladder's :root block, emitted ONCE per shell. It is a mixin so it
+// never lands inside the 22 component sheets that reach the same file for its
+// SCSS variables through the toolwindow partial.
+@include shape.ladder-root;
 
 html,
 body {

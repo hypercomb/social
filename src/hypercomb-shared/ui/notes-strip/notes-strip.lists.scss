@@ -37,7 +37,7 @@
   align-items: center;
   gap: 0.35rem;
   padding: 1px 2px;
-  border-radius: 6px;
+  border-radius: var(--hc-radius-control);
   margin-left: calc(min(var(--depth, 0), 6) * 14px);
 
   &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
@@ -227,7 +227,7 @@
   gap: 0.3rem;
   padding: 2px 7px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--hc-radius-control);
   background: transparent;
   color: color-mix(in srgb, var(--md-on-surface) 52%, transparent);
   font-family: inherit;

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 430" role="img" aria-label="script and input cells feed a junction that computes a signed result; the result is cached for the whole network">
+  <defs>
+    <pattern id="cp-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20,0 L0,0 L0,20" fill="none" stroke="#a9c0d2" stroke-width="0.7" opacity="0.45"/>
+    </pattern>
+    <pattern id="cp-gridMajor" width="100" height="100" patternUnits="userSpaceOnUse">
+      <path d="M100,0 L0,0 L0,100" fill="none" stroke="#8fabc2" stroke-width="1" opacity="0.5"/>
+    </pattern>
+    <radialGradient id="cp-glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#e0a520" stop-opacity="0.35"/><stop offset="1" stop-color="#e0a520" stop-opacity="0"/>
+    </radialGradient>
+    <marker id="cp-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#b87e10"/>
+    </marker>
+    <!-- big pointy-top cell, r=78 -->
+    <path id="cp-hex" d="M0,-78 L67.5,-39 L67.5,39 L0,78 L-67.5,39 L-67.5,-39 Z"/>
+    <!-- small cached-copy chip -->
+    <g id="cp-cache">
+      <path d="M0,-16 L13.9,-8 L13.9,8 L0,16 L-13.9,8 L-13.9,-8 Z" fill="#fdf6e2" stroke="#b87e10" stroke-width="1.4" stroke-linejoin="round"/>
+      <path d="M-5,0 L-1.5,4 L6,-4.5" fill="none" stroke="#7d5107" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </defs>
+
+  <rect width="920" height="430" fill="#f7f2e6"/>
+  <rect width="920" height="430" fill="url(#cp-grid)"/>
+  <rect width="920" height="430" fill="url(#cp-gridMajor)"/>
+
+  <style>
+    @media (prefers-reduced-motion: no-preference){
+      .cp-flow{stroke-dasharray:7 6;animation:cp-march 1.7s linear infinite}
+      @keyframes cp-march{to{stroke-dashoffset:-13}}
+      .cp-halo{animation:cp-breathe 4.4s ease-in-out infinite}
+      @keyframes cp-breathe{0%,100%{opacity:0.55}50%{opacity:1}}
+    }
+  </style>
+
+  <!-- ── ghost lattice: the rest of the hive, waiting ────────── -->
+  <g fill="none" stroke="#d8cfb8" stroke-width="1.1">
+    <path d="M180,-26 L247.5,13 L247.5,91 L180,130 L112.5,91 L112.5,13 Z"/>
+    <path d="M180,208 L247.5,247 L247.5,325 L180,364 L112.5,325 L112.5,247 Z"/>
+    <path d="M45,91 L112.5,130 L112.5,208 L45,247 L-22.5,208 L-22.5,130 Z"/>
+    <path d="M652,-46 L719.5,-7 L719.5,71 L652,110 L584.5,71 L584.5,-7 Z"/>
+    <path d="M787,247 L854.5,286 L854.5,364 L787,403 L719.5,364 L719.5,286 Z"/>
+  </g>
+
+  <!-- ── the three cells at one junction ─────────────────────── -->
+  <g stroke-linejoin="round">
+    <use href="#cp-hex" transform="translate(400,110)" fill="#fdfcf8" stroke="#b8a76b" stroke-width="1.8"/>
+    <use href="#cp-hex" transform="translate(332.5,227)" fill="#fdfcf8" stroke="#b8a76b" stroke-width="1.8"/>
+    <circle class="cp-halo" cx="467.5" cy="227" r="104" fill="url(#cp-glow)"/>
+    <use href="#cp-hex" transform="translate(467.5,227)" fill="#fdf6e2" stroke="#b87e10" stroke-width="2.2"/>
+  </g>
+
+  <g text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace">
+    <text x="400" y="86" font-size="13" fill="#585f68" font-weight="600">script</text>
+    <text x="400" y="104" font-size="10" fill="#8a9099">3f2a…</text>
+    <text x="318" y="242" font-size="13" fill="#585f68" font-weight="600">input</text>
+    <text x="318" y="260" font-size="10" fill="#8a9099">c9d0…</text>
+    <text x="488" y="252" font-size="13.5" fill="#7d5107" font-weight="600">result</text>
+    <text x="488" y="270" font-size="10" fill="#9a6408">7be1…</text>
+  </g>
+
+  <!-- ── the junction: a processor where three walls meet ────── -->
+  <g class="cp-flow" fill="none" stroke="#b87e10" stroke-width="2">
+    <path d="M400,138 C400,152 402,158 406,166" marker-end="url(#cp-ah)"/>
+    <path d="M360,214 C372,206 380,198 388,190" marker-end="url(#cp-ah)"/>
+  </g>
+  <path d="M418,184 C434,192 444,200 452,208" fill="none" stroke="#b87e10" stroke-width="2.4" marker-end="url(#cp-ah)"/>
+
+  <g transform="translate(400,176)">
+    <rect x="-15" y="-15" width="30" height="30" rx="6" fill="#3a3d44" stroke="#17191d" stroke-width="1.4"/>
+    <path d="M-15,-6 L-22,-6 M-15,6 L-22,6 M15,-6 L22,-6 M15,6 L22,6 M-6,-15 L-6,-22 M6,-15 L6,-22 M-6,15 L-6,22 M6,15 L6,22" stroke="#6b7078" stroke-width="1.6"/>
+    <circle r="4" fill="#e0a520"/>
+  </g>
+
+  <path d="M400,176 C300,150 240,146 186,152" fill="none" stroke="#9aa2ac" stroke-width="1" opacity="0.7"/>
+  <text x="178" y="146" text-anchor="end" font-family="Segoe UI, system-ui, sans-serif" font-size="11" fill="#585f68">a junction in the tree —</text>
+  <text x="178" y="162" text-anchor="end" font-family="Segoe UI, system-ui, sans-serif" font-size="11" fill="#9a6408" font-weight="600">a processor</text>
+  <text x="178" y="184" text-anchor="end" font-family="Segoe UI, system-ui, sans-serif" font-size="10" fill="#8a9099">the geometry is the program</text>
+
+  <!-- ── the cache, network-wide ─────────────────────────────── -->
+  <g fill="none" stroke="#c9b98a" stroke-width="1.1" stroke-dasharray="3 6">
+    <path d="M535,215 C620,180 680,150 742,132"/>
+    <path d="M535,232 C640,240 700,242 780,238"/>
+    <path d="M528,252 C610,290 670,318 736,340"/>
+  </g>
+  <use href="#cp-cache" transform="translate(762,126)"/>
+  <use href="#cp-cache" transform="translate(800,236)"/>
+  <use href="#cp-cache" transform="translate(756,346)"/>
+  <text x="800" y="182" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#585f68">computed <tspan fill="#9a6408" font-weight="600">once</tspan> —</text>
+  <text x="800" y="198" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#585f68">a cache hit for everyone,</text>
+  <text x="800" y="214" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#585f68">forever</text>
+
+  <!-- ── the algebra under it all ────────────────────────────── -->
+  <text x="420" y="382" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="13" fill="#9a6408">sign( sign(script) ++ sign(input) ) → result</text>
+  <text x="420" y="404" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#8a9099">the network never computes the same thing twice</text>
+</svg>

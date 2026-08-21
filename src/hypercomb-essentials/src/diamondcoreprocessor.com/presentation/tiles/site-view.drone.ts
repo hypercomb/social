@@ -896,7 +896,7 @@ export class SiteViewDrone extends Drone {
       review.type = 'button'
       review.className = 'hc-review-btn'
       review.textContent = i18n?.t('review-gate.action') ?? 'Review & enable'
-      review.style.cssText = 'margin-top:.5rem;padding:.6rem 1.2rem;border:1px solid rgba(126,182,214,.6);border-radius:.4rem;background:rgba(126,182,214,.16);color:#eaf3f9;cursor:pointer;font-size:.95rem'
+      review.style.cssText = 'margin-top:.5rem;padding:.6rem 1.2rem;border:1px solid rgba(126,182,214,.6);border-radius:var(--hc-radius-control, 2px);background:rgba(126,182,214,.16);color:#eaf3f9;cursor:pointer;font-size:.95rem'
       card.append(title, body, review)
       document.body.appendChild(card)
       this.#reviewOverlay = card

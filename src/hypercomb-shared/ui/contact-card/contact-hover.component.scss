@@ -22,7 +22,7 @@ $accent: #a8ffd8;
   flex-direction: column;
   background: rgba(14, 14, 22, 0.96);
   border: 1px solid rgba($accent, 0.45);
-  border-radius: 9px;
+  border-radius: var(--hc-radius-floating);
   box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($accent, 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   color: #f3f3f3;
@@ -101,7 +101,7 @@ $accent: #a8ffd8;
 
 .contact-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
+  border-radius: var(--hc-radius-card);
   padding: 0.6rem 0.7rem;
   background: rgba(255, 255, 255, 0.02);
 }

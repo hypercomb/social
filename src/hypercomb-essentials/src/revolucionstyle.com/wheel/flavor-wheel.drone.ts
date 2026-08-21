@@ -155,7 +155,7 @@ export class FlavorWheelDrone extends Drone {
       transform: 'translateX(-50%)',
       padding: '8px 24px',
       border: '1px solid #c8975a',
-      borderRadius: '6px',
+      borderRadius: 'var(--hc-radius-control, 2px)',
       backgroundColor: '#2a231c',
       color: '#e0d5c8',
       fontSize: '14px',

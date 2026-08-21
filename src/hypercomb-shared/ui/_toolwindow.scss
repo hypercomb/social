@@ -20,12 +20,18 @@
 //   @use '../toolwindow' as tw;
 //   .files-header { @include tw.header; border-bottom: 1px solid …; }
 
-/// Shape vocabulary for Hyper windows. Rounded geometry is reserved for
-/// genuinely round things (status pills, toggles, avatars).
-$radius-control: 2px;
-$radius-card: 4px;
-$radius-floating: 5px;
-$radius-pill: 999px;
+/// Shape vocabulary. It used to be declared HERE, which is why it only ever
+/// governed tool windows while the rest of the app drifted to 8px, 12px, 14px
+/// and 2rem. It now lives in `_shape.scss` — the whole app's ladder, in SCSS
+/// and as `:root` custom properties so drone views can reach it too — and is
+/// re-exported from here so every `tw.$radius-…` call site keeps working.
+@use './shape' as shape;
+
+$radius-control: shape.$radius-control;
+$radius-card: shape.$radius-card;
+$radius-floating: shape.$radius-floating;
+$radius-pill: shape.$radius-pill;
+$radius-round: shape.$radius-round;
 
 /// Compact text actions use the platform's tighter 80% padding rhythm.
 /// Fixed-size icon buttons keep their explicit dimensions below.

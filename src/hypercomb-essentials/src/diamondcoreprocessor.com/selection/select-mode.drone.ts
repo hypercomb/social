@@ -283,7 +283,7 @@ export class SelectModeDrone extends Drone {
       // so the two never stack on the same band of screen.
       'bottom:calc(6.2rem + var(--hc-mobile-row-lift, 0px) + env(safe-area-inset-bottom,0px));' +
       'display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;' +
-      'border-radius:2rem;background:rgba(12,17,24,0.92);backdrop-filter:blur(10px);' +
+      'border-radius:var(--hc-radius-floating, 4px);background:rgba(12,17,24,0.92);backdrop-filter:blur(10px);' +
       'border:1px solid rgba(126,182,214,0.35);box-shadow:0 10px 30px rgba(0,0,0,0.45);' +
       'font-family:inherit;pointer-events:auto;max-width:94vw;'
 
@@ -389,7 +389,7 @@ export class SelectModeDrone extends Drone {
   /** Set a button's text, glyph and emphasis. */
   #face(btn: HTMLButtonElement, text: string, glyph: string, accent: boolean, inert: boolean): void {
     btn.style.cssText =
-      `min-height:${TAP};padding:0 0.95rem;border-radius:2rem;cursor:pointer;` +
+      `min-height:${TAP};padding:0 0.95rem;border-radius:var(--hc-radius-control, 2px);cursor:pointer;` +
       // Without nowrap the longest label ("Tap the tiles you want") wraps at
       // phone width and the pill grows to nearly double height — a fat slab
       // over the canvas instead of a thin bar above the controls.

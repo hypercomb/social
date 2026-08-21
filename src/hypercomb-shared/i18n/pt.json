@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "Parar este trabalho e limpá-lo da colmeia",
   "agent.stopped": "Parado — o pedido saiu da colmeia.",
   "agent.stop-error": "Não foi possível parar — tente de novo.",
+  "agent.rail-root": "colmeia",
+  "agent.rail-back": "Voltar para {name}",
+  "agent.rail-empty": "Ainda não há nada dentro deste bloco.",
+  "agent.rail-find": "Buscar neste nível",
+  "agent.rail-no-match": "Nenhum bloco aqui corresponde a “{query}”.",
+  "agent.rail-talk": "Conversar com este bloco",
+  "agent.rail-inside": "mantenha pressionado para entrar",
+  "agent.rail-draft": "Há ideias não enviadas aqui",
   "slash.menu": "Menu rápido — sete hexágonos no ponteiro; lance numa direção para escolher",
   "quickmenu.root": "Colmeia",
   "quickmenu.workflow": "Fluxo",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Nenhuma sessão do Claude — inicie a ponte para dar acesso à colmeia",
   "chat.placeholder": "Pergunte qualquer coisa…",
   "chat.send": "Enviar",
+  "chat.rail": "Seus blocos, uma conversa em cada",
   "mesh-modal.needs-location": "é necessário um local para entrar",
   "mesh-modal.needs-secret": "é necessário um segredo para entrar"
 }

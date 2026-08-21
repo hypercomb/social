@@ -253,7 +253,7 @@ class CollectionEmptyPromptDrone {
     const notice = document.createElement('div')
     notice.style.cssText =
       'pointer-events:auto;display:flex;align-items:center;gap:14px;max-width:calc(100vw - 32px);' +
-      'padding:10px 11px 10px 16px;border-radius:14px;background:rgba(12,17,24,0.9);' +
+      'padding:10px 11px 10px 16px;border-radius:var(--hc-radius-floating, 4px);background:rgba(12,17,24,0.9);' +
       'border:1px solid rgba(216,230,238,0.13);box-shadow:0 12px 32px rgba(0,0,0,0.24);' +
       'backdrop-filter:blur(14px);white-space:nowrap;'
 
@@ -271,7 +271,7 @@ class CollectionEmptyPromptDrone {
     const button = document.createElement('button')
     button.type = 'button'
     button.style.cssText =
-      'flex:none;border:1px solid rgba(126,182,214,0.35);border-radius:9px;padding:7px 11px;' +
+      'flex:none;border:1px solid rgba(126,182,214,0.35);border-radius:var(--hc-radius-control, 2px);padding:7px 11px;' +
       'font:inherit;font-size:12px;font-weight:650;color:#a8d0e7;background:rgba(126,182,214,0.09);cursor:pointer;'
     button.textContent = this.#t('hive.empty.action', 'Add a tile')
     const requestFocus = (event: Event): void => this.#focusCommandLine(event)
@@ -327,7 +327,7 @@ class CollectionEmptyPromptDrone {
     const panel = document.createElement('div')
     panel.dataset['role'] = 'panel'
     panel.style.cssText =
-      'pointer-events:auto;width:min(300px,calc(100vw - 40px));text-align:left;border-radius:14px;padding:18px;' +
+      'pointer-events:auto;width:min(300px,calc(100vw - 40px));text-align:left;border-radius:var(--hc-radius-floating, 4px);padding:18px;' +
       'background:rgba(12,17,24,0.88);border:1px solid rgba(216,230,238,0.12);' +
       'box-shadow:0 14px 36px rgba(0,0,0,0.22);backdrop-filter:blur(12px);cursor:pointer;'
 
@@ -345,7 +345,7 @@ class CollectionEmptyPromptDrone {
     button.type = 'button'
     button.dataset['role'] = 'action'
     button.style.cssText =
-      'border:1px solid rgba(126,182,214,0.38);border-radius:8px;padding:8px 12px;font:inherit;font-size:13px;font-weight:650;' +
+      'border:1px solid rgba(126,182,214,0.38);border-radius:var(--hc-radius-control, 2px);padding:8px 12px;font:inherit;font-size:13px;font-weight:650;' +
       'color:#a8d0e7;background:rgba(126,182,214,0.08);cursor:pointer;'
     button.textContent = actionText
     const requestFocus = (event: Event): void => this.#focusCommandLine(event)

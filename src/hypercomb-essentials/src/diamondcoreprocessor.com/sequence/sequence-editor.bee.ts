@@ -471,7 +471,7 @@ export class SequenceEditorBee extends Worker {
       background: '#1c1c20',
       color: '#eaeaea',
       border: '1px solid rgba(255,255,255,0.12)',
-      borderRadius: '10px',
+      borderRadius: 'var(--hc-radius-floating, 4px)',
       boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
       font: '13px/1.4 Inter, system-ui, sans-serif',
     } as CSSStyleDeclaration)
@@ -491,7 +491,7 @@ export class SequenceEditorBee extends Worker {
       background: 'rgba(0,0,0,0.25)',
       color: 'inherit',
       border: '1px solid rgba(255,255,255,0.12)',
-      borderRadius: '6px',
+      borderRadius: 'var(--hc-radius-control, 2px)',
       font: 'inherit',
       boxSizing: 'border-box',
     } as CSSStyleDeclaration)
@@ -514,7 +514,7 @@ export class SequenceEditorBee extends Worker {
       padding: '0.4rem 0.9rem',
       background: 'transparent',
       border: '1px solid rgba(255,255,255,0.18)',
-      borderRadius: '6px',
+      borderRadius: 'var(--hc-radius-control, 2px)',
       color: '#cfcfcf',
       cursor: 'pointer',
     } as CSSStyleDeclaration)
@@ -528,7 +528,7 @@ export class SequenceEditorBee extends Worker {
       padding: '0.4rem 1.2rem',
       background: 'rgba(110, 180, 255, 0.22)',
       border: '1px solid rgba(110, 180, 255, 0.55)',
-      borderRadius: '6px',
+      borderRadius: 'var(--hc-radius-control, 2px)',
       color: '#d4e6ff',
       fontWeight: '600',
       cursor: 'pointer',

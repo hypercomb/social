@@ -195,7 +195,7 @@ export class HistorySliderDrone {
       padding: 6px 12px;
       background: rgba(10, 12, 18, 0.92);
       border: 1px solid rgba(255, 170, 60, 0.35);
-      border-radius: 6px;
+      border-radius: var(--hc-radius-floating, 4px);
       backdrop-filter: blur(8px);
       font-family: var(--hc-mono);
       font-size: 11px;

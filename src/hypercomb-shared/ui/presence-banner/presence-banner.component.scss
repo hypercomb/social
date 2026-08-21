@@ -160,7 +160,7 @@
   background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 92%, transparent);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(245, 245, 245, 0.1);
-  border-radius: 14px;
+  border-radius: var(--hc-radius-floating);
   padding: 0.35rem 0.25rem;
   pointer-events: auto;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
@@ -181,7 +181,7 @@
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.3rem 0.55rem;
-  border-radius: 8px;
+  border-radius: var(--hc-radius-control);
   transition: background 120ms ease;
 
   &:hover {

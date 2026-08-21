@@ -58,7 +58,7 @@
     background-color: #1a1a1a;
     color: #e6e6e6;
     border: 1px solid #2b2b2b;
-    border-radius: 6px;
+    border-radius: var(--hc-radius-control);
     outline: none;
     transition: border-color 120ms ease, box-shadow 120ms ease;
 
@@ -77,7 +77,7 @@
     max-width: 100%;
     background: #151515;
     border: 1px solid #232323;
-    border-radius: 10px;
+    border-radius: var(--hc-radius-card);
     overflow: hidden;
   }
 
@@ -170,7 +170,7 @@
   .btn,
   .btn-small,
   .icon-button {
-    border-radius: 6px;
+    border-radius: var(--hc-radius-control);
     border: 1px solid #2b2b2b;
     background: #1a1a1a;
     color: #e6e6e6;

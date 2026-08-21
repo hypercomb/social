@@ -46,7 +46,7 @@
   background: var(--md-surface-c-low);
   color: var(--md-on-surface);
   border: 1px solid var(--md-outline);
-  border-radius: var(--md-shape-l);
+  border-radius: var(--hc-radius-floating);
   box-shadow: var(--md-elev-4);
   font-family: var(--hc-font);
 }
@@ -152,7 +152,7 @@
   max-width: 100%;
   background: #d0d0d4;
   border: 1px solid #2a2a2e;
-  border-radius: 6px;
+  border-radius: var(--hc-radius-card);
   overflow: hidden;
 
   canvas {
@@ -236,7 +236,7 @@
   gap: 0.4em;
   background: #252528;
   border: 1px solid #3a3a3e;
-  border-radius: 5px;
+  border-radius: var(--hc-radius-floating);
   color: #ccc;
   cursor: pointer;
   font-size: 0.64em;
@@ -469,7 +469,7 @@
 .field-input {
   background: #1e1e22;
   border: 1px solid #333;
-  border-radius: 5px;
+  border-radius: var(--hc-radius-floating);
   color: #e0e0e0;
   padding: 0.35em 0.5em;
   font-size: 0.8em;
@@ -523,7 +523,7 @@
   height: 2em;
   padding: 0;
   border: 1px solid #333;
-  border-radius: 5px;
+  border-radius: var(--hc-radius-floating);
   background: none;
   cursor: pointer;
 
@@ -548,7 +548,7 @@
 
   button {
     padding: 0.4em 1.2em;
-    border-radius: 5px;
+    border-radius: var(--hc-radius-floating);
     border: 1px solid #3a3a3e;
     background: #252528;
     color: #ccc;
@@ -586,7 +586,7 @@
   width: 2em;
   height: 2em;
   padding: 0 !important;
-  border-radius: 5px;
+  border-radius: var(--hc-radius-floating);
   border: 1px solid #3a3a3e;
   background: #252528;
   color: #888;
@@ -754,7 +754,7 @@
   padding: 0.75rem 0.9rem 0.9rem;
   background: rgba(255, 225, 74, 0.04);
   border: 1px solid rgba(255, 225, 74, 0.18);
-  border-radius: 8px;
+  border-radius: var(--hc-radius-card);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -810,7 +810,7 @@
   background: rgba(255, 225, 74, 0.13);
   border: 1px solid rgba(255, 225, 74, 0.32);
   border-left-width: 3px;
-  border-radius: 4px 6px 6px 4px;
+  border-radius: 4px var(--hc-radius-card) var(--hc-radius-card) 4px;
 }
 
 // Posted answer — cool / neutral, clearly NOT the question. Same
@@ -825,7 +825,7 @@
   background: rgba(110, 180, 255, 0.08);
   border: 1px solid rgba(110, 180, 255, 0.22);
   border-left-width: 3px;
-  border-radius: 4px 6px 6px 4px;
+  border-radius: 4px var(--hc-radius-card) var(--hc-radius-card) 4px;
 }
 
 // Answer composer — multi-line textarea + Done button. Cooler tint
@@ -839,7 +839,7 @@
   background: rgba(110, 180, 255, 0.05);
   border: 1px solid rgba(110, 180, 255, 0.20);
   border-left-width: 3px;
-  border-radius: 4px 6px 6px 4px;
+  border-radius: 4px var(--hc-radius-card) var(--hc-radius-card) 4px;
 }
 
 .qa-answer-input {
@@ -859,7 +859,7 @@
   padding: 0.35rem 0.95rem;
   background: rgba(110, 180, 255, 0.18);
   border: 1px solid rgba(110, 180, 255, 0.45);
-  border-radius: 6px;
+  border-radius: var(--hc-radius-control);
   color: #b6d4ff;
   font-size: 0.84rem;
   font-weight: 600;

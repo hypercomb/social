@@ -516,4 +516,100 @@ describe('doctrine ratchets', () => {
       'scripts/local-relay.ts',
     ], 'default-wide listener bind')
   })
+
+  it('border-radius stays on the shape ladder (rounded is reserved for round things)', () => {
+    // THE SHAPE LADDER — hypercomb-shared/ui/_shape.scss.
+    //
+    // Hypercomb is drawn out of hexagons, so the chrome around them is square
+    // by default and rounds only where roundness MEANS something. The ladder
+    // tops out at 4px on a rectangle (control 2 / card 3 / floating 4); above
+    // that a corner stops reading as "lifted" and starts disagreeing with the
+    // canvas underneath it.
+    //
+    // The vocabulary existed before this ratchet, but only inside
+    // `_toolwindow.scss` — so it governed the tool windows while everything
+    // else drifted to 8px, 12px, 14px and 2rem, one component at a time. That
+    // is precisely the failure mode a ratchet exists for.
+    //
+    // EXEMPT: `50%`, `999px`, `99px`, and elliptical percentage forms. Those
+    // are genuinely round things — avatars, dots, knobs, status pills, toggle
+    // tracks — which the ladder never claimed. Only px/rem lengths on
+    // rectangles are drift.
+    const STYLE_DIRS = [
+      'hypercomb-shared',
+      'hypercomb-essentials/src',
+      'hypercomb-web/src',
+      'hypercomb-dev/src',
+    ]
+    const isStyleSource = (name: string): boolean =>
+      /\.(scss|css|html|ts)$/.test(name) && !name.endsWith('.d.ts') && !name.endsWith('.spec.ts')
+    const walkStyles = (dir: string, out: string[] = []): string[] => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walkStyles(join(dir, entry.name), out)
+        } else if (isStyleSource(entry.name)) out.push(join(dir, entry.name))
+      }
+      return out
+    }
+
+    // Parse the VALUES rather than pattern-matching them: a regex that tries
+    // to say "a number 6 or over" also says 999px, and squaring every pill in
+    // the app is the one way this ratchet could do harm. So: pull each
+    // border-radius value, read its px/rem lengths as numbers, and let the
+    // exemptions be exemptions.
+    //
+    // The value ends at a quote as well as at `;`/`{`/`}`: a drone view writes
+    // its styles as an ARRAY of fragments — `'border-radius:…', 'font-size:…'`
+    // — with no semicolons until `.join(';')`, so a value that stopped only at
+    // `;` swallowed every fragment after it and read their lengths as this
+    // declaration's. That accused three already-swept files of drift they do
+    // not have, which is the one way a ratchet loses its authority.
+    // TWO SPELLINGS, because both are used and only one used to be checked.
+    // The CSS form stops at a quote or a newline as well as `;{}`: a drone view
+    // writes its styles as an ARRAY of fragments joined later, so a value with
+    // no trailing semicolon would otherwise run past the closing quote and read
+    // the NEXT fragment's lengths as its own.
+    // The JS form — `borderRadius: '10px'` inside an Object.assign(el.style, …)
+    // — is where every miss in the first sweep hid, because a CSS-shaped scan
+    // cannot see it at all. It gets its own pattern rather than a footnote.
+    const RADIUS_DECL = /border-radius:([^;{}'"`\n]+)/g
+    const RADIUS_PROP = /borderRadius\s*[:=]\s*(['"`][^'"`\n]*['"`])/g
+    const LENGTH = /(-?[0-9]*\.?[0-9]+)(px|rem)/g
+    const overLadder = (code: string): boolean => {
+      for (const decl of [...code.matchAll(RADIUS_DECL), ...code.matchAll(RADIUS_PROP)]) {
+        const value = decl[1]
+        for (const len of value.matchAll(LENGTH)) {
+          const n = Number(len[1])
+          const px = len[2] === 'rem' ? n * 16 : n
+          // 999px / 99px are the pill: a length so large it can only mean
+          // "round this end off entirely", which is the exemption, not drift.
+          if (px >= 48) continue
+          if (px > 4) return true
+        }
+      }
+      return false
+    }
+
+    const offenders: string[] = []
+    for (const dir of STYLE_DIRS) {
+      let files: string[]
+      try { files = walkStyles(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        if (overLadder(code)) {
+          offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
+        }
+      }
+    }
+    assertRatchet(offenders.sort(), [
+      // THE ARCADE IS ITS OWN ROOM. The game overlays are not app chrome —
+      // they are a cabinet screen laid over it, with their own vector-juice
+      // rules (chunky HUD panels, fat score plates). The ladder governs the
+      // hive's interface; it does not govern a game's.
+      'hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/overlay.ts',
+      'hypercomb-essentials/src/diamondcoreprocessor.com/games/bubble/overlay.ts',
+      'hypercomb-essentials/src/diamondcoreprocessor.com/games/roper/overlay.ts',
+      'hypercomb-essentials/src/diamondcoreprocessor.com/games/solomon/overlay.ts',
+    ], 'border-radius above the shape ladder')
+  })
 })

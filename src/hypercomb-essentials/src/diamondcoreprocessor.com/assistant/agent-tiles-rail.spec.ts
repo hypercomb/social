@@ -221,6 +221,48 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
   })
 
+  it('the keyboard walks the same three moves', async () => {
+    const key = (el: Element, k: string): void => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
+    }
+
+    // → goes inside, and the level that arrives takes the focus.
+    key(rows()[0], 'ArrowRight')
+    await settle()
+    expect(names(host)).toEqual(['inside'])
+    expect(document.activeElement).toBe(rows()[0])
+
+    // ← comes back out.
+    key(rows()[0], 'ArrowLeft')
+    await settle()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+
+    // ↓↑ walk the rows without leaving the level.
+    rows()[0].focus()
+    key(rows()[0], 'ArrowDown')
+    expect(document.activeElement).toBe(rows()[1])
+    key(rows()[1], 'ArrowUp')
+    expect(document.activeElement).toBe(rows()[0])
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+  })
+
+  it('→ on a leaf does nothing — there is nothing inside it', async () => {
+    key: {
+      rows()[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+    }
+    await settle()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+  })
+
+  it('says which row you are in to a screen reader, not only in colour', async () => {
+    rows()[1].click()
+    await settle()
+
+    const marked = rows().filter(r => r.getAttribute('aria-current') === 'true')
+    expect(marked.length).toBe(1)
+    expect(marked[0].querySelector('.hc-rail-name')?.textContent).toBe('diagrams')
+  })
+
   it('a tile holding unsent thinking wears a mark', () => {
     const marked = [...host.querySelectorAll('.hc-rail-row')]
       .filter(row => !row.querySelector<HTMLElement>('.hc-rail-draft')?.hidden)

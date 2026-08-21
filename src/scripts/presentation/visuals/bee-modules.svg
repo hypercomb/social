@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 430" role="img" aria-label="the shell is an empty loader; every feature is a bee in a comb cell, and a new signed bee arrives from the community">
+  <defs>
+    <pattern id="be-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20,0 L0,0 L0,20" fill="none" stroke="#a9c0d2" stroke-width="0.7" opacity="0.45"/>
+    </pattern>
+    <pattern id="be-gridMajor" width="100" height="100" patternUnits="userSpaceOnUse">
+      <path d="M100,0 L0,0 L0,100" fill="none" stroke="#8fabc2" stroke-width="1" opacity="0.5"/>
+    </pattern>
+    <linearGradient id="be-cell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffdf8"/><stop offset="1" stop-color="#f6ead0"/>
+    </linearGradient>
+    <marker id="be-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#b87e10"/>
+    </marker>
+    <!-- a comb cell, r=52 pointy-top -->
+    <path id="be-hexP" d="M0,-52 L45,-26 L45,26 L0,52 L-45,26 L-45,-26 Z"/>
+    <!-- a small bee: body, stripes, wings -->
+    <g id="be-bee">
+      <ellipse cx="0" cy="0" rx="9" ry="6" fill="#e0a520" stroke="#7d5107" stroke-width="1.1"/>
+      <path d="M-3,-5.4 L-3,5.4 M2,-5.6 L2,5.6" stroke="#7d5107" stroke-width="1.6" stroke-linecap="round"/>
+      <ellipse class="be-wing" cx="-2" cy="-8" rx="6" ry="3.4" fill="#ffffff" fill-opacity="0.75" stroke="#b9b3a4" stroke-width="0.9" transform="rotate(-18 -2 -8)"/>
+      <ellipse class="be-wing2" cx="4" cy="-7.4" rx="5" ry="3" fill="#ffffff" fill-opacity="0.75" stroke="#b9b3a4" stroke-width="0.9" transform="rotate(14 4 -7.4)"/>
+    </g>
+  </defs>
+
+  <rect width="920" height="430" fill="#f7f2e6"/>
+  <rect width="920" height="430" fill="url(#be-grid)"/>
+  <rect width="920" height="430" fill="url(#be-gridMajor)"/>
+
+  <style>
+    @media (prefers-reduced-motion: no-preference){
+      .be-flow{stroke-dasharray:7 6;animation:be-march 1.8s linear infinite}
+      @keyframes be-march{to{stroke-dashoffset:-13}}
+    }
+  </style>
+
+  <!-- ── the shell — an outline with nothing of its own ──────── -->
+  <rect x="52" y="42" width="646" height="346" rx="14" fill="#fdfcf8" fill-opacity="0.55" stroke="#b9b3a4" stroke-width="1.6"/>
+  <text x="72" y="70" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="10" fill="#8a9099" letter-spacing="2">THE SHELL — JUST A LOADER</text>
+
+  <!-- ── the comb of bees ────────────────────────────────────── -->
+  <!-- row 1 -->
+  <g stroke-linejoin="round">
+    <use href="#be-hexP" transform="translate(196,150)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#be-hexP" transform="translate(287,150)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#be-hexP" transform="translate(378,150)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#be-hexP" transform="translate(469,150)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#be-hexP" transform="translate(560,150)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <!-- row 2 -->
+    <use href="#be-hexP" transform="translate(241.5,228)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#be-hexP" transform="translate(332.5,228)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#be-hexP" transform="translate(423.5,228)" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7"/>
+    <!-- the open cell the new bee is landing in -->
+    <use href="#be-hexP" transform="translate(514.5,228)" fill="#fffdf8" stroke="#b87e10" stroke-width="1.7" stroke-dasharray="7 6"/>
+    <!-- and one that stays open -->
+    <use href="#be-hexP" transform="translate(605.5,228)" fill="none" stroke="#b9b3a4" stroke-width="1.5" stroke-dasharray="7 6"/>
+  </g>
+
+  <g font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="10.5" fill="#6b5a1f" text-anchor="middle">
+    <g><use href="#be-bee" transform="translate(196,134)"/><text x="196" y="168">navigate</text></g>
+    <g><use href="#be-bee" transform="translate(287,134)"/><text x="287" y="168">edit</text></g>
+    <g><use href="#be-bee" transform="translate(378,134)"/><text x="378" y="168">history</text></g>
+    <g><use href="#be-bee" transform="translate(469,134)"/><text x="469" y="168">/present</text></g>
+    <g><use href="#be-bee" transform="translate(560,134)"/><text x="560" y="168">/website</text></g>
+    <g><use href="#be-bee" transform="translate(241.5,212)"/><text x="241.5" y="246">the palette</text></g>
+    <g><use href="#be-bee" transform="translate(332.5,212)"/><text x="332.5" y="246">games</text></g>
+    <g><use href="#be-bee" transform="translate(423.5,212)"/><text x="423.5" y="246">sharing</text></g>
+    <text x="605.5" y="232" fill="#8a9099" font-size="9.5">yours next</text>
+  </g>
+
+  <!-- ── the arriving bee, signed ────────────────────────────── -->
+  <path class="be-flow" d="M806,120 C760,140 640,160 548,206" fill="none" stroke="#b87e10" stroke-width="1.9" marker-end="url(#be-ah)"/>
+  <g>
+    <path d="M806,88 L830.3,102 L830.3,130 L806,144 L781.7,130 L781.7,102 Z" fill="url(#be-cell)" stroke="#b87e10" stroke-width="1.7" stroke-linejoin="round"/>
+    <use href="#be-bee" transform="translate(806,112) scale(1.15)"/>
+    <rect x="752" y="154" width="108" height="20" rx="5" fill="#fffdf8" stroke="#d9d4c5" stroke-width="1.2"/>
+    <text x="806" y="168" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9.5" fill="#9a6408">sign(bee) ✓</text>
+    <text x="806" y="70" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#585f68">from the community</text>
+  </g>
+
+  <!-- ── the contract every bee lives by ─────────────────────── -->
+  <text x="375" y="330" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="12" fill="#9a6408">sense(grammar) → heartbeat(grammar) → emit effects</text>
+  <text x="375" y="352" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#8a9099">bees never call each other — effects meet on the bus</text>
+
+  <text x="52" y="416" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="10" fill="#8a9099" letter-spacing="0.8">want something new? don't wait for a vendor — add a bee</text>
+</svg>

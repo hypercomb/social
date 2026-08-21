@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "이 작업을 중지하고 하이브에서 지우기",
   "agent.stopped": "중지됨 — 요청이 하이브에서 빠졌습니다.",
   "agent.stop-error": "중지하지 못했습니다 — 다시 시도하세요.",
+  "agent.rail-root": "하이브",
+  "agent.rail-back": "{name}(으)로 돌아가기",
+  "agent.rail-empty": "이 타일 안에는 아직 아무것도 없습니다.",
+  "agent.rail-find": "이 단계에서 검색",
+  "agent.rail-no-match": "여기에는 “{query}”와(과) 일치하는 타일이 없습니다.",
+  "agent.rail-talk": "이 타일과 대화하기",
+  "agent.rail-inside": "길게 눌러 안으로 들어가기",
+  "agent.rail-draft": "보내지 않은 생각이 남아 있습니다",
   "slash.menu": "빠른 메뉴 — 포인터에 육각형 일곱 개; 방향으로 튕겨 선택",
   "quickmenu.root": "하이브",
   "quickmenu.workflow": "워크플로",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Claude 세션 없음 — 하이브에 접근하려면 브리지를 시작하세요",
   "chat.placeholder": "무엇이든 물어보세요…",
   "chat.send": "보내기",
+  "chat.rail": "내 타일, 각각 하나의 대화",
   "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
   "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다"
 }

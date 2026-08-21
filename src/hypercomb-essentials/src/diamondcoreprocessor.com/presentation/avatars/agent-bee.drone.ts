@@ -739,7 +739,7 @@ export class AgentBeeDrone extends Drone {
     tip.className = 'hc-agent-tip'
     tip.style.cssText =
       'position:fixed;z-index:99998;pointer-events:none;display:none;max-width:22rem;' +
-      'padding:0.3rem 0.55rem;border-radius:6px;font-size:0.74rem;line-height:1.35;' +
+      'padding:0.3rem 0.55rem;border-radius:var(--hc-radius-floating, 4px);font-size:0.74rem;line-height:1.35;' +
       'color:rgba(238,244,250,0.92);background:rgba(6,9,14,0.92);' +
       'border:1px solid rgba(126,182,214,0.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
     document.body.appendChild(tip)

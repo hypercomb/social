@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "Diese Arbeit stoppen und aus dem Bienenstock entfernen",
   "agent.stopped": "Gestoppt — die Anfrage ist aus dem Bienenstock.",
   "agent.stop-error": "Konnte nicht gestoppt werden — versuche es erneut.",
+  "agent.rail-root": "Bienenstock",
+  "agent.rail-back": "Zurück zu {name}",
+  "agent.rail-empty": "In dieser Kachel ist noch nichts.",
+  "agent.rail-find": "Diese Ebene durchsuchen",
+  "agent.rail-no-match": "Hier passt keine Kachel zu „{query}“.",
+  "agent.rail-talk": "Mit dieser Kachel sprechen",
+  "agent.rail-inside": "gedrückt halten, um hineinzugehen",
+  "agent.rail-draft": "Unabgeschickte Gedanken warten hier",
   "slash.menu": "Schnellmenü — sieben Hexagone am Zeiger; in eine Richtung schnippen wählt aus",
   "quickmenu.root": "Bienenstock",
   "quickmenu.workflow": "Arbeitsablauf",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Keine Claude-Session — starte die Brücke für den Zugriff auf den Bienenstock",
   "chat.placeholder": "Frag irgendwas…",
   "chat.send": "Senden",
+  "chat.rail": "Deine Kacheln — je eine Unterhaltung",
   "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
   "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt"
 }

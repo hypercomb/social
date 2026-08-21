@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "Bu çalışmayı durdur ve kovandan temizle",
   "agent.stopped": "Durduruldu — istek kovandan çıktı.",
   "agent.stop-error": "Durdurulamadı — tekrar dene.",
+  "agent.rail-root": "kovan",
+  "agent.rail-back": "Geri: {name}",
+  "agent.rail-empty": "Bu döşemenin içinde henüz bir şey yok.",
+  "agent.rail-find": "Bu düzeyde ara",
+  "agent.rail-no-match": "Burada “{query}” ile eşleşen döşeme yok.",
+  "agent.rail-talk": "Bu döşemeyle konuş",
+  "agent.rail-inside": "içine girmek için basılı tut",
+  "agent.rail-draft": "Burada gönderilmemiş düşünceler var",
   "slash.menu": "Hızlı menü — imlecin yanında yedi altıgen; seçmek için bir yöne fiske at",
   "quickmenu.root": "Kovan",
   "quickmenu.workflow": "İş akışı",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Claude oturumu yok — kovan erişimi için köprüyü başlatın",
   "chat.placeholder": "Ne isterseniz sorun…",
   "chat.send": "Gönder",
+  "chat.rail": "Döşemeleriniz, her birinde bir sohbet",
   "mesh-modal.needs-location": "katılmak için bir konum gerekli",
   "mesh-modal.needs-secret": "katılmak için bir parola gerekli"
 }

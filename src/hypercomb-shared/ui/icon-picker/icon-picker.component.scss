@@ -30,7 +30,7 @@ $steel: rgb(126, 182, 214);
   background: color-mix(in srgb, var(--md-surface-c-low, #0e1118) 96%, transparent);
   backdrop-filter: blur(18px);
   border: 1px solid rgba($steel, 0.4);
-  border-radius: 14px;
+  border-radius: var(--hc-radius-floating);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($steel, 0.06) inset;
   color: #eef3f8;
   font-family: var(--hc-mono, system-ui);
@@ -77,7 +77,7 @@ $steel: rgb(126, 182, 214);
   margin-bottom: 0.85rem;
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba($steel, 0.2);
-  border-radius: 9px;
+  border-radius: var(--hc-radius-control);
   transition: border-color 130ms ease, background 130ms ease;
 
   &:focus-within {

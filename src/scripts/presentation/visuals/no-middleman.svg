@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 430" role="img" aria-label="two hives exchange signed layers directly over open relays; the platform in the middle is crossed out">
+  <defs>
+    <pattern id="nm-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20,0 L0,0 L0,20" fill="none" stroke="#a9c0d2" stroke-width="0.7" opacity="0.45"/>
+    </pattern>
+    <pattern id="nm-gridMajor" width="100" height="100" patternUnits="userSpaceOnUse">
+      <path d="M100,0 L0,0 L0,100" fill="none" stroke="#8fabc2" stroke-width="1" opacity="0.5"/>
+    </pattern>
+    <marker id="nm-ahH" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#b87e10"/>
+    </marker>
+    <marker id="nm-ahS" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#7f93a4"/>
+    </marker>
+    <!-- r=30 pointy-top cell -->
+    <path id="nm-hex" d="M0,-30 L26,-15 L26,15 L0,30 L-26,15 L-26,-15 Z"/>
+    <!-- a travelling signed layer: a small cell with its tag -->
+    <g id="nm-chip">
+      <path d="M0,-12 L10.4,-6 L10.4,6 L0,12 L-10.4,6 L-10.4,-6 Z" fill="#e0a520" stroke="#7d5107" stroke-width="1.2" stroke-linejoin="round"/>
+    </g>
+  </defs>
+
+  <rect width="920" height="430" fill="#f7f2e6"/>
+  <rect width="920" height="430" fill="url(#nm-grid)"/>
+  <rect width="920" height="430" fill="url(#nm-gridMajor)"/>
+
+  <style>
+    @media (prefers-reduced-motion: no-preference){
+      .nm-flow{stroke-dasharray:8 7;animation:nm-march 1.9s linear infinite}
+      @keyframes nm-march{to{stroke-dashoffset:-15}}
+      .nm-relay{animation:nm-pulse 3.6s ease-in-out infinite}
+      @keyframes nm-pulse{0%,100%{opacity:0.55}50%{opacity:1}}
+    }
+  </style>
+
+  <!-- ── your hive ───────────────────────────────────────────── -->
+  <g stroke-linejoin="round">
+    <use href="#nm-hex" transform="translate(170,225)" fill="#e0a520" fill-opacity="0.32" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#nm-hex" transform="translate(170,165)" fill="#fffdf8" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#nm-hex" transform="translate(222,195)" fill="#fffdf8" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#nm-hex" transform="translate(222,255)" fill="#fffdf8" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#nm-hex" transform="translate(170,285)" fill="#fffdf8" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#nm-hex" transform="translate(118,255)" fill="#fffdf8" stroke="#b87e10" stroke-width="1.7"/>
+    <use href="#nm-hex" transform="translate(118,195)" fill="#fffdf8" stroke="#b87e10" stroke-width="1.7"/>
+  </g>
+  <text x="170" y="340" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="11.5" fill="#9a6408" letter-spacing="1">your hive</text>
+
+  <!-- ── their hive ──────────────────────────────────────────── -->
+  <g stroke-linejoin="round">
+    <use href="#nm-hex" transform="translate(750,225)" fill="#eaf0f5" stroke="#4a7396" stroke-width="1.6"/>
+    <use href="#nm-hex" transform="translate(750,165)" fill="#ffffff" stroke="#4a7396" stroke-width="1.6"/>
+    <use href="#nm-hex" transform="translate(802,195)" fill="#ffffff" stroke="#4a7396" stroke-width="1.6"/>
+    <use href="#nm-hex" transform="translate(802,255)" fill="#ffffff" stroke="#4a7396" stroke-width="1.6"/>
+    <use href="#nm-hex" transform="translate(750,285)" fill="#ffffff" stroke="#4a7396" stroke-width="1.6"/>
+    <!-- the tile that just landed: adopted, honey, on its own revision line -->
+    <use href="#nm-hex" transform="translate(698,255)" fill="#e0a520" fill-opacity="0.5" stroke="#7d5107" stroke-width="2"/>
+    <use href="#nm-hex" transform="translate(698,195)" fill="#ffffff" stroke="#4a7396" stroke-width="1.6"/>
+  </g>
+  <text x="750" y="340" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="11.5" fill="#3d6280" letter-spacing="1">their hive</text>
+
+  <!-- visiting is adopting -->
+  <path d="M698,290 C698,314 720,330 748,352" fill="none" stroke="#9aa2ac" stroke-width="1" opacity="0.8"/>
+  <text x="756" y="362" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#585f68">visiting is <tspan fill="#9a6408" font-weight="600">adopting</tspan> — theirs now,</text>
+  <text x="756" y="378" font-family="Segoe UI, system-ui, sans-serif" font-size="10.5" fill="#585f68">on its own revision line <tspan font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9.5" fill="#8a9099">0000·0001</tspan></text>
+
+  <!-- ── the middleman that isn't there ──────────────────────── -->
+  <g opacity="0.45">
+    <path d="M398,64 L460,40 L522,64 Z" fill="#e7e9ec" stroke="#9aa2ac" stroke-width="1.2"/>
+    <rect x="404" y="64" width="112" height="56" fill="#e7e9ec" stroke="#9aa2ac" stroke-width="1.2"/>
+    <path d="M420,72 L420,112 M446,72 L446,112 M472,72 L472,112 M498,72 L498,112" stroke="#9aa2ac" stroke-width="3"/>
+  </g>
+  <path d="M388,34 L532,128" stroke="#b3423c" stroke-width="2.8" opacity="0.75" stroke-linecap="round"/>
+  <text x="460" y="146" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="10" fill="#8a9099" letter-spacing="1">PLATFORM · ACCOUNT · DATABASE</text>
+
+  <!-- the old routes, severed -->
+  <g stroke="#b0b6bd" stroke-width="1.3" stroke-dasharray="5 6" fill="none" opacity="0.7">
+    <path d="M212,170 C280,130 340,105 396,92"/>
+    <path d="M708,170 C640,130 580,105 524,92"/>
+  </g>
+  <g font-family="Segoe UI, system-ui, sans-serif" font-size="13" fill="#b3423c" text-anchor="middle" opacity="0.85">
+    <text x="300" y="128">✕</text><text x="620" y="128">✕</text>
+  </g>
+
+  <!-- ── the direct road ─────────────────────────────────────── -->
+  <path class="nm-flow" d="M215,268 Q460,368 703,270" fill="none" stroke="#b87e10" stroke-width="2.2" marker-end="url(#nm-ahH)"/>
+  <path d="M690,296 Q460,392 228,294" fill="none" stroke="#7f93a4" stroke-width="1.3" stroke-dasharray="4 6" opacity="0.6" marker-end="url(#nm-ahS)"/>
+
+  <!-- relays on the road -->
+  <g stroke="#4a7396" stroke-width="1.7" fill="#ffffff">
+    <circle class="nm-relay" cx="362" cy="305" r="12"/>
+    <circle class="nm-relay" cx="460" cy="317" r="12"/>
+    <circle class="nm-relay" cx="558" cy="305" r="12"/>
+  </g>
+  <g fill="#4a7396">
+    <circle cx="362" cy="305" r="2.8"/><circle cx="460" cy="317" r="2.8"/><circle cx="558" cy="305" r="2.8"/>
+  </g>
+
+  <!-- signed layers travelling -->
+  <use href="#nm-chip" transform="translate(295,286)"/>
+  <text x="295" y="268" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9" fill="#9a6408">3f2a…</text>
+  <use href="#nm-chip" transform="translate(625,286)"/>
+  <text x="625" y="268" text-anchor="middle" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="9" fill="#9a6408">c9d0…</text>
+
+  <text x="460" y="356" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="11" fill="#9a6408">signed layers · peer to peer · <tspan fill="#585f68">no account in between</tspan></text>
+
+  <text x="56" y="416" font-family="Cascadia Code, Consolas, ui-monospace, monospace" font-size="10" fill="#8a9099" letter-spacing="0.8">cryptography instead of bureaucracy</text>
+</svg>

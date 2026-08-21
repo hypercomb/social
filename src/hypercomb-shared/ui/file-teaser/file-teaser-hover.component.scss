@@ -17,7 +17,7 @@
   backdrop-filter: blur(14px) saturate(120%);
   -webkit-backdrop-filter: blur(14px) saturate(120%);
   border: 1px solid rgba(126, 182, 214, 0.22);
-  border-radius: 10px;
+  border-radius: var(--hc-radius-floating);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
   color: #e8edf2;
   font-size: 12px;
@@ -74,7 +74,7 @@
   display: grid;
   place-items: center;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--hc-radius-floating);
   background: transparent;
   color: #8aa3b4;
   font-size: 15px;

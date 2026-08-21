@@ -64,6 +64,29 @@ const CURSOR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
         fill="#f2f6fa" stroke="#1a2129" stroke-width="1.4" stroke-linejoin="round"/>
 </svg>`
 
+// THE TOUR IS CHROME, AND IT SHOULD LOOK LIKE THE REST OF IT.
+//
+// This overlay was drawn before the tool windows settled on a material, so it
+// had grown its own: a 12px-cornered card in system-ui, on flat opaque navy,
+// floating over a honeycomb it shared nothing with. Every surface it points at
+// is dark glass with a 1px accent edge, near-square corners and the app's own
+// faces — so the one surface TEACHING those windows was the only one that did
+// not look like them.
+//
+// It now takes the shell's vocabulary, through custom properties that inherit
+// across the shadow boundary (`--hc-radius-*` from ui/_shape.scss, `--hc-read`
+// and `--hc-mono` from fonts/_fonts.scss), with local fallbacks so the element
+// still renders standalone in a bare host that never loaded the tokens.
+//
+// Three deliberate choices beyond matching:
+//   - THE ACCENT EDGE IS A LEFT RULE, not a border all the way round. It reads
+//     as "this is the bee talking" and it is the same device the tool windows
+//     use to say which window you are in.
+//   - THE CHIP IS MONO AND THE PROSE IS NOT. A lesson bubble is one chrome
+//     label over one sentence of reading, which is exactly the split the
+//     windows already make.
+//   - NOTHING IS SOFT. The ring, the keycap, the buttons and the bubble all sit
+//     on the shape ladder, so the tour and the honeycomb agree about corners.
 const STYLE = `
 :host {
   position: fixed;
@@ -71,7 +94,17 @@ const STYLE = `
   z-index: 100000;
   pointer-events: none;
   display: none;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --tut-accent: #d9a441;
+  --tut-ink: #eef2f5;
+  --tut-ink-dim: #93a4b6;
+  --tut-panel: rgba(13, 15, 21, 0.965);
+  --tut-edge: rgba(255, 255, 255, 0.10);
+  --tut-r-control: var(--hc-radius-control, 2px);
+  --tut-r-card: var(--hc-radius-card, 3px);
+  --tut-r-floating: var(--hc-radius-floating, 4px);
+
+  font-family: var(--hc-read, var(--hc-font, system-ui)), system-ui, sans-serif;
 }
 :host(.active) { display: block; }
 
@@ -86,67 +119,84 @@ const STYLE = `
 
 .bubble {
   position: absolute;
-  max-width: 320px;
-  min-width: 200px;
-  background: rgba(14, 18, 24, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 12px;
-  padding: 13px 16px 12px;
-  color: #e8edf3;
+  max-width: 21rem;
+  min-width: 13rem;
+  background: var(--tut-panel);
+  backdrop-filter: blur(14px) saturate(1.04);
+  -webkit-backdrop-filter: blur(14px) saturate(1.04);
+  border: 1px solid var(--tut-edge);
+  /* The accent edge — the same device that says which tool window you are in. */
+  border-left: 2px solid var(--tut-accent);
+  border-radius: var(--tut-r-floating);
+  padding: 0.7rem 0.95rem 0.75rem;
+  color: var(--tut-ink);
   font-size: 13.5px;
-  line-height: 1.55;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  line-height: 1.58;
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.03);
   pointer-events: auto;
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(3px);
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 .bubble.show { opacity: 1; transform: none; }
 .bubble .chip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
+  gap: 0.4rem;
+  font-family: var(--hc-mono, ui-monospace, monospace);
+  font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #8fa1b3;
-  margin-bottom: 6px;
+  color: var(--tut-ink-dim);
+  margin-bottom: 0.4rem;
 }
+/* Genuinely round — the one dot on the ladder's exemption list. */
 .bubble .chip::before {
   content: '';
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: #d9a441;
+  width: 5px; height: 5px;
+  border-radius: var(--hc-radius-round, 50%);
+  background: var(--tut-accent);
+  flex: none;
 }
 .bubble .btns {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 .bubble .btns:empty { display: none; }
 .bubble button {
-  font-family: inherit;
+  font-family: var(--hc-mono, ui-monospace, monospace);
   cursor: pointer;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--tut-r-control);
+  letter-spacing: 0.02em;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.bubble button:focus-visible {
+  outline: 1px solid var(--tut-accent);
+  outline-offset: 1px;
 }
 .bubble button.primary {
-  background: #d9a441;
-  color: #181208;
-  padding: 7px 14px;
+  background: var(--tut-accent);
+  color: #17120a;
+  padding: 0.35rem 0.85rem;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 11.5px;
 }
-.bubble button.primary:hover { background: #e4b455; }
+.bubble button.primary:hover { background: #e8bb56; }
 .bubble button.ghost {
   background: transparent;
-  color: #8fa1b3;
-  padding: 7px 6px;
-  font-size: 12px;
+  color: var(--tut-ink-dim);
+  padding: 0.35rem 0.5rem;
+  font-size: 11.5px;
 }
-.bubble button.ghost:hover { color: #c7d2dc; }
+.bubble button.ghost:hover {
+  color: var(--tut-ink);
+  background: rgba(255, 255, 255, 0.055);
+  border-color: var(--tut-edge);
+}
 
 .cursor {
   position: absolute;
@@ -160,21 +210,22 @@ const STYLE = `
   position: absolute;
   left: 20px; top: 20px;
   padding: 2px 7px;
+  font-family: var(--hc-mono, ui-monospace, monospace);
   font-size: 10px;
   font-weight: 600;
-  color: #e8edf3;
-  background: rgba(14, 18, 24, 0.92);
+  color: var(--tut-ink);
+  background: var(--tut-panel);
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-bottom-width: 2.5px;
-  border-radius: 5px;
+  border-radius: var(--tut-r-control);
   white-space: nowrap;
 }
 
 .ring {
   position: absolute;
   box-sizing: border-box;
-  border: 1.5px solid rgba(217, 164, 65, 0.6);
-  box-shadow: 0 0 0 4px rgba(217, 164, 65, 0.12);
+  border: 1.5px solid rgba(217, 164, 65, 0.62);
+  box-shadow: 0 0 0 3px rgba(217, 164, 65, 0.11);
   opacity: 0;
   transition: opacity 0.25s ease, left 0.25s ease, top 0.25s ease,
     width 0.25s ease, height 0.25s ease, border-radius 0.25s ease;
@@ -592,7 +643,11 @@ export class BeeTutorialOverlayElement extends HTMLElement {
       ring.style.top = `${target.top - pad}px`
       ring.style.width = `${target.width + pad * 2}px`
       ring.style.height = `${target.height + pad * 2}px`
-      ring.style.borderRadius = '12px'
+      // A box drawn round a piece of chrome, so it takes the chrome's corner —
+      // not a 12px pill that fits nothing it is ever put around. (A ring round
+      // a CELL is the branch above and stays a true circle: a hexagon's ring is
+      // genuinely round, which is the ladder's exemption, not a violation.)
+      ring.style.borderRadius = 'var(--tut-r-card)'
     }
     ring.classList.add('show')
   }

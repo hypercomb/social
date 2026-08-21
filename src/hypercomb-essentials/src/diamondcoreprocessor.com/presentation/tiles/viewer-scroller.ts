@@ -114,7 +114,7 @@ export function mountViewerScroller(opts: {
     card.type = 'button'
     card.style.cssText =
       'display:flex;flex-direction:column;align-items:center;gap:14px;' +
-      `border:1px solid rgba(126,182,214,0.35);border-radius:14px;` +
+      `border:1px solid rgba(126,182,214,0.35);border-radius:var(--hc-radius-card, 3px);` +
       'background:rgba(255,255,255,0.04);color:#eaf3f9;cursor:pointer;' +
       'padding:2.2rem 2.6rem;max-width:82vw;font-family:inherit;'
     const glyph = document.createElement('div')

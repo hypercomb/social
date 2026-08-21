@@ -101,7 +101,7 @@ export class JournalEntryDrone {
 
     const container = this.#el('div', {
       width: '480px', maxHeight: '90vh', overflowY: 'auto',
-      backgroundColor: BG_DARK, borderRadius: '12px', padding: '24px',
+      backgroundColor: BG_DARK, borderRadius: 'var(--hc-radius-floating, 4px)', padding: '24px',
       border: `1px solid ${BORDER}`,
     })
 
@@ -217,7 +217,7 @@ export class JournalEntryDrone {
     })
 
     const btn = this.#el('button', {
-      padding: '8px 16px', border: `1px solid ${ACCENT}`, borderRadius: '6px',
+      padding: '8px 16px', border: `1px solid ${ACCENT}`, borderRadius: 'var(--hc-radius-control, 2px)',
       backgroundColor: BG_INPUT, color: ACCENT, fontSize: '13px',
       cursor: 'pointer', fontFamily: 'var(--hc-font)',
     })
@@ -255,8 +255,12 @@ export class JournalEntryDrone {
       const info = FLAVOR_INDEX.get(id)
       if (!info) continue
 
+      // GENUINELY ROUND — an 11px chip with 3px block padding is ~17px tall,
+      // so the old 12px was already clamped to a stadium. Said as the pill
+      // token it renders identically and reads as the exemption it is.
       const chip = this.#el('span', {
-        display: 'inline-block', padding: '3px 10px', borderRadius: '12px',
+        display: 'inline-block', padding: '3px 10px',
+        borderRadius: 'var(--hc-radius-pill, 999px)',
         fontSize: '11px', color: TEXT,
         backgroundColor: `#${info.category.color.toString(16).padStart(6, '0')}`,
         opacity: '0.85',
@@ -286,7 +290,7 @@ export class JournalEntryDrone {
     Object.assign(textarea.style, {
       width: '100%', minHeight: '80px', padding: '10px', boxSizing: 'border-box',
       backgroundColor: BG_INPUT, color: TEXT, border: `1px solid ${BORDER}`,
-      borderRadius: '6px', fontSize: '13px', fontFamily: 'var(--hc-font)',
+      borderRadius: 'var(--hc-radius-control, 2px)', fontSize: '13px', fontFamily: 'var(--hc-font)',
       resize: 'vertical',
     })
     textarea.value = service.entry.notes
@@ -384,7 +388,7 @@ export class JournalEntryDrone {
     })
 
     const cancelBtn = this.#el('button', {
-      padding: '10px 20px', border: `1px solid ${BORDER}`, borderRadius: '6px',
+      padding: '10px 20px', border: `1px solid ${BORDER}`, borderRadius: 'var(--hc-radius-control, 2px)',
       backgroundColor: 'transparent', color: TEXT_DIM, fontSize: '14px',
       cursor: 'pointer', fontFamily: 'var(--hc-font)',
     })
@@ -392,7 +396,7 @@ export class JournalEntryDrone {
     cancelBtn.addEventListener('click', this.#cancel)
 
     const saveBtn = this.#el('button', {
-      padding: '10px 24px', border: 'none', borderRadius: '6px',
+      padding: '10px 24px', border: 'none', borderRadius: 'var(--hc-radius-control, 2px)',
       backgroundColor: ACCENT, color: BG_DARK, fontSize: '14px',
       fontWeight: '600', cursor: 'pointer',
       fontFamily: 'var(--hc-font)',

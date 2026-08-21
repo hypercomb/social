@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "यह काम रोकें और इसे हाइव से हटाएँ",
   "agent.stopped": "रोक दिया — अनुरोध हाइव से बाहर है।",
   "agent.stop-error": "इसे रोका नहीं जा सका — फिर कोशिश करें।",
+  "agent.rail-root": "हाइव",
+  "agent.rail-back": "{name} पर वापस",
+  "agent.rail-empty": "इस टाइल के अंदर अभी कुछ नहीं है।",
+  "agent.rail-find": "इस स्तर में खोजें",
+  "agent.rail-no-match": "यहाँ कोई टाइल “{query}” से मेल नहीं खाती।",
+  "agent.rail-talk": "इस टाइल से बात करें",
+  "agent.rail-inside": "अंदर जाने के लिए दबाए रखें",
+  "agent.rail-draft": "यहाँ बिना भेजे विचार रखे हैं",
   "slash.menu": "क्विक मेन्यू — पॉइंटर पर सात षट्कोण; चुनने के लिए किसी दिशा में झटका दें",
   "quickmenu.root": "हाइव",
   "quickmenu.workflow": "वर्कफ़्लो",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "कोई Claude सत्र नहीं — हाइव तक पहुँच के लिए ब्रिज शुरू करें",
   "chat.placeholder": "कुछ भी पूछें…",
   "chat.send": "भेजें",
+  "chat.rail": "आपकी टाइलें, हर एक की अपनी बातचीत",
   "mesh-modal.needs-location": "शामिल होने के लिए एक स्थान चाहिए",
   "mesh-modal.needs-secret": "शामिल होने के लिए एक गुप्त कुंजी चाहिए"
 }

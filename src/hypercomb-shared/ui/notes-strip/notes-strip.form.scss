@@ -40,7 +40,7 @@
   padding: 9px 10px;
   background: var(--md-surface-c);
   border: 1px solid var(--md-outline-variant);
-  border-radius: 8px;
+  border-radius: var(--hc-radius-control);
   color: var(--md-on-surface);
   // Written in the same face it will be read in — the composer and the note
   // are one surface, so they must not be set in two different types.
@@ -65,7 +65,7 @@
   padding: 0 16px;
   background: var(--md-secondary);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--hc-radius-control);
   color: var(--md-on-secondary, #15151c);
   font-family: var(--md-font-ui, Inter, system-ui);
   font-size: scaled(13px);
@@ -92,7 +92,7 @@
   padding: 0 8px;
   background: transparent;
   border: 1px solid var(--md-outline-variant);
-  border-radius: 5px;
+  border-radius: var(--hc-radius-floating);
   color: var(--md-on-surface-faint);
   font-family: var(--md-font-ui);
   font-size: scaled(12px);

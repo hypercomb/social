@@ -42,6 +42,17 @@
   .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:2.2vh;padding:4vh 6vw 25vh;opacity:0;visibility:hidden;transition:opacity .9s ease;text-align:center}
   .scene.on{opacity:1;visibility:visible}
+  /* each line of a scene arrives on its own beat — the eyebrow first, then the
+     headline, the figure, the sub. Outgoing scenes leave as one (no delays):
+     the delays live on .on children only. */
+  @media (prefers-reduced-motion: no-preference){
+    .scene>*{opacity:0;transform:translateY(16px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.6,.2,1)}
+    .scene.on>*{opacity:1;transform:none}
+    .scene.on>*:nth-child(2){transition-delay:.12s}
+    .scene.on>*:nth-child(3){transition-delay:.26s}
+    .scene.on>*:nth-child(4){transition-delay:.4s}
+    .scene.on>*:nth-child(5){transition-delay:.54s}
+  }
   .eyebrow{font-family:var(--mono);font-size:clamp(10px,1.2vw,13px);letter-spacing:.42em;text-transform:uppercase;color:var(--honey);opacity:.9}
   .scene h1{font-weight:200;font-size:clamp(34px,6.2vw,88px);line-height:1.04;margin:0;letter-spacing:-.01em;text-wrap:balance}
   .scene h1 b{font-weight:600;color:var(--honey)}
@@ -306,11 +317,38 @@ function goto(i,manual){
   s.tick.classList.add('now');
   actlbl.innerHTML=`act <em>${ACT[s.act]}</em> · ${i+1}/${SCENES.length}`;
   cap.classList.add('on'); cap.textContent=s.say;
+  fitScene(s,myToken);
   s.el.querySelectorAll('video').forEach(v=>{try{v.currentTime=0;v.play().catch(()=>{});}catch(e){}});
   setTimeout(()=>{ if(myToken===token) s.el.querySelectorAll('video').forEach(v=>{ if(v.paused) v.play().catch(()=>{}); }); },500);
   if(manual&&!playing){/* stay paused, just show */}
   if(playing)narrate(s,myToken);
 }
+
+/* The caption is the floor of the stage. Its height follows the narration, so
+   a fixed scene padding either wastes space under short captions or drowns the
+   sub line under long ones. Measure the real caption, keep the scene above it,
+   and when a plate or film still runs past the line, hand the difference back
+   out of the figure — it keeps its aspect and everything stays readable. */
+function fitScene(s,myToken){
+  requestAnimationFrame(()=>{
+    if(myToken!==token)return;
+    const zone=cap.offsetHeight+innerHeight*0.065+26;
+    s.el.style.paddingBottom=zone+'px';
+    const wrap=s.el.querySelector('.platewrap,.filmwrap');
+    if(!wrap)return;
+    if(wrap.dataset.mh0===undefined)wrap.dataset.mh0=wrap.style.maxHeight||'';
+    wrap.style.maxHeight=wrap.dataset.mh0;
+    requestAnimationFrame(()=>{
+      if(myToken!==token)return;
+      const kids=[...s.el.children];
+      const last=kids[kids.length-1];
+      const floor=innerHeight-zone+6;
+      const over=last.getBoundingClientRect().bottom+16-floor; /* +16: entrance rise */
+      if(over>0)wrap.style.maxHeight=Math.max(120,wrap.offsetHeight-over)+'px';
+    });
+  });
+}
+addEventListener('resize',()=>{ if(idx>=0)fitScene(SCENES[idx],token); });
 
 function setPlaying(p){
   playing=p; ppBtn.textContent=p?'pause':'play';

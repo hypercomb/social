@@ -262,7 +262,7 @@ const CSS = `
   font-family:'Segoe UI',system-ui,sans-serif;animation:wl-in .14s ease both}
 @keyframes wl-in{from{opacity:0}to{opacity:1}}
 .wl-panel{width:min(560px,92vw);max-height:74vh;display:flex;flex-direction:column;
-  background:rgba(14,18,26,.92);border:1px solid rgba(126,182,214,.32);border-radius:12px;
+  background:rgba(14,18,26,.92);border:1px solid rgba(126,182,214,.32);border-radius:var(--hc-radius-floating, 4px);
   box-shadow:0 18px 60px rgba(0,0,0,.55);overflow:hidden}
 .wl-header{display:flex;align-items:center;gap:.6rem;padding:.7rem .9rem;
   border-bottom:1px solid rgba(126,182,214,.22)}
@@ -272,17 +272,17 @@ const CSS = `
 .wl-close:hover{background:rgba(126,182,214,.16);color:#fff}
 .wl-list{overflow:auto;padding:.4rem;display:flex;flex-direction:column;gap:.2rem}
 .wl-empty{padding:1.4rem .8rem;text-align:center;color:#8b93b4;font-size:.85rem}
-.wl-row{display:flex;align-items:center;gap:.4rem;padding:.1rem;border-radius:7px;
+.wl-row{display:flex;align-items:center;gap:.4rem;padding:.1rem;border-radius:var(--hc-radius-control, 2px);
   transition:background .12s ease,opacity .12s ease}
 .wl-row:hover{background:rgba(126,182,214,.08)}
 .wl-row.wl-removing{opacity:.4}
 .wl-path{flex:1;display:flex;align-items:center;gap:.45rem;min-width:0;text-align:left;
   background:transparent;border:none;cursor:pointer;color:#cdd6f4;font-size:.85rem;
-  padding:.45rem .5rem;border-radius:6px;font-family:ui-monospace,'Cascadia Code',monospace}
+  padding:.45rem .5rem;border-radius:var(--hc-radius-control, 2px);font-family:ui-monospace,'Cascadia Code',monospace}
 .wl-path:hover{color:#fff}
 .wl-path span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wl-glyph{color:rgba(126,182,214,.65);font-size:.7rem;flex-shrink:0}
-.wl-x{flex-shrink:0;width:1.9rem;height:1.9rem;border-radius:6px;border:none;cursor:pointer;
+.wl-x{flex-shrink:0;width:1.9rem;height:1.9rem;border-radius:var(--hc-radius-control, 2px);border:none;cursor:pointer;
   background:transparent;color:rgba(255,120,120,.65);font-size:.85rem;
   transition:background .12s ease,color .12s ease}
 .wl-x:hover{background:rgba(255,80,80,.18);color:#ff9a9a}

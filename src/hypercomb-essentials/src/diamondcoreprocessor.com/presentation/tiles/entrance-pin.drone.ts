@@ -227,7 +227,7 @@ export class EntrancePinDrone extends Drone {
       'position:fixed', 'z-index:2147483600', 'pointer-events:none',
       'width:1.9rem', 'height:1.9rem', 'margin-left:-0.95rem', 'margin-top:-0.95rem',
       'display:flex', 'align-items:center', 'justify-content:center',
-      'border-radius:8px',
+      'border-radius:var(--hc-radius-floating, 4px)',
       'background:rgba(12,28,46,.85)', 'border:1px solid rgba(126,182,214,.55)',
       'color:#eaf5fb', "font-family:'Material Symbols Outlined'", 'font-size:1.3rem', 'line-height:1',
     ].join(';')

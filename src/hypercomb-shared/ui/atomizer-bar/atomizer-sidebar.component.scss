@@ -242,7 +242,9 @@
   .toggle-track {
     position: absolute;
     inset: 0;
-    border-radius: 7px;
+    // GENUINELY ROUND, and now says so: the track is 28x14, so 7px was
+    // already a stadium. Through the token the exemption is legible.
+    border-radius: var(--hc-radius-pill);
     background: rgba(255, 255, 255, 0.1);
     transition: background 0.2s ease;
 

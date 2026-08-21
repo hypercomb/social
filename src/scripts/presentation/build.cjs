@@ -149,8 +149,18 @@ function visualHtml(s) {
     case 'plate': {
       const name = (s.visual.split(':')[1] || '').trim()
       const svg = fs.readFileSync(path.join(ROOT, 'visuals', name + '.svg'), 'utf8').trim()
+      // the plate's own viewBox decides the frame: tall plates stay portrait,
+      // wide ones get the film's cinematic width — one CSS rule can't know
+      const vb = svg.match(/viewBox="([-\d.\s]+)"/)
+      const [, , w, h] = (vb ? vb[1].trim().split(/\s+/) : [0, 0, 580, 596]).map(Number)
+      // an inline svg with no width/height has a 300x150 intrinsic size, and the
+      // centred flex column shrinks the frame to it — stamp the real one on
+      const sized = svg.replace(/^<svg /, `<svg width="${w}" height="${h}" `)
+      // wide plates cap at 36vh so the sub line always clears the caption box
+      const wide = w / h > 1.4
+      const style = `aspect-ratio:${w}/${h};max-width:min(${wide ? 1040 : 520}px,${wide ? 88 : 70}vw)${wide ? ';max-height:36vh' : ''}`
       const cap = rows.length ? `<span class="platecap">${esc(rows[0])}</span>` : ''
-      return `\n  <div class="platewrap">${svg}${cap}</div>`
+      return `\n  <div class="platewrap" style="${style}">${sized}${cap}</div>`
     }
     default: return ''
   }

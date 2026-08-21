@@ -254,7 +254,7 @@ export class PortalCarryDrone extends Drone {
       'position:fixed', 'z-index:2147483600', 'pointer-events:none',
       'max-width:14rem', 'padding:0.3rem 0.6rem', 'margin-left:0.8rem', 'margin-top:-0.9rem',
       'display:flex', 'align-items:center', 'gap:0.4rem',
-      'border-radius:8px', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis',
+      'border-radius:var(--hc-radius-floating, 4px)', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis',
       'background:rgba(12,28,46,.85)', 'border:1px solid rgba(126,182,214,.55)',
       'color:#eaf5fb', 'font-size:0.8rem', 'line-height:1.2',
     ].join(';')

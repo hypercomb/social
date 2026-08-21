@@ -226,23 +226,23 @@ export class FolderSyncView extends EventTarget {
     style.textContent = `
 .hc-backup-window{position:fixed;z-index:100000;inset:clamp(1rem,8vh,5rem) clamp(1rem,8vw,7rem);
   margin:auto;max-width:54rem;max-height:44rem;display:flex;flex-direction:column;color:#eef4fa;
-  background:rgba(7,10,15,.98);border:1px solid rgba(126,182,214,.38);border-radius:12px;
+  background:rgba(7,10,15,.98);border:1px solid rgba(126,182,214,.38);border-radius:var(--hc-radius-floating, 4px);
   box-shadow:0 1.5rem 5rem rgba(0,0,0,.55);font-family:var(--hc-sans,system-ui,sans-serif);}
 .hc-backup-window header{display:flex;align-items:center;padding:1rem 1.15rem;border-bottom:1px solid rgba(255,255,255,.09);}
 .hc-backup-window header>div{display:flex;flex:1;flex-direction:column;gap:.15rem;}
 .hc-backup-window header strong{font-size:1rem;letter-spacing:.04em}.hc-backup-window header span{font-size:.75rem;color:#91a2ae}
 .hc-backup-icon{border:0!important;background:none!important;font-size:1.5rem!important;padding:.25rem .55rem!important}
 .hc-backup-content{overflow:auto;padding:1rem 1.15rem;display:flex;flex-direction:column;gap:1rem}
-.hc-backup-content section{padding:1rem;border:1px solid rgba(255,255,255,.09);border-radius:9px}
+.hc-backup-content section{padding:1rem;border:1px solid rgba(255,255,255,.09);border-radius:var(--hc-radius-card, 3px)}
 .hc-backup-summary{display:flex;flex-direction:column;gap:.3rem}.hc-backup-summary span,.hc-backup-note{font-size:.8rem;color:#9babb6}
 .hc-backup-summary.backed-up{border-color:rgba(126,196,142,.5)}
 .hc-backup-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
-.hc-backup-window button{min-height:2.35rem;padding:.45rem .75rem;border-radius:7px;border:1px solid rgba(255,255,255,.16);
+.hc-backup-window button{min-height:2.35rem;padding:.45rem .75rem;border-radius:var(--hc-radius-control, 2px);border:1px solid rgba(255,255,255,.16);
   background:rgba(255,255,255,.05);color:#edf3f8;cursor:pointer}.hc-backup-window button:hover{background:rgba(255,255,255,.1)}
 .hc-backup-window button.primary{background:rgb(126,182,214);border-color:rgb(126,182,214);color:#081017;font-weight:700}
 .hc-backup-window button:disabled{opacity:.45;cursor:default}.hc-backup-window h3{margin:0 0 .75rem;font-size:.9rem}
 .hc-backup-check{display:block;font-size:.85rem;margin-bottom:.75rem}.hc-backup-modes{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.8rem}
-.hc-backup-mode{display:flex;gap:.55rem;padding:.7rem;border:1px solid rgba(255,255,255,.1);border-radius:7px;cursor:pointer}
+.hc-backup-mode{display:flex;gap:.55rem;padding:.7rem;border:1px solid rgba(255,255,255,.1);border-radius:var(--hc-radius-control, 2px);cursor:pointer}
 .hc-backup-mode span{display:flex;flex-direction:column;gap:.25rem}.hc-backup-mode small{color:#98a7b2;line-height:1.35}
 .hc-backup-note{margin:0 .2rem}@media(max-width:600px){.hc-backup-window{inset:.5rem}.hc-backup-actions,.hc-backup-modes{grid-template-columns:1fr}}
 `

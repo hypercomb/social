@@ -316,7 +316,7 @@ export class SkillsWindowView extends EventTarget {
 .hc-skills{position:fixed;z-index:99999;display:flex;flex-direction:column;gap:0.55rem;
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(34rem,75vh);padding:0.75rem 0.85rem;box-sizing:border-box;
-  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:10px;}
+  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:var(--hc-radius-floating, 4px);}
 .hc-skills-resize{position:absolute;z-index:1;inset:0 auto 0 -0.35rem;width:0.7rem;cursor:ew-resize;}
 .hc-skills-resize::after{content:"";position:absolute;top:42%;bottom:42%;left:0.25rem;
   border-left:1px solid rgba(${STEEL},0.42);}
@@ -324,11 +324,11 @@ export class SkillsWindowView extends EventTarget {
 .hc-skills-title{flex:1 1 auto;font-family:var(--hc-mono,monospace);font-size:0.76rem;font-weight:600;
   letter-spacing:0.1em;text-transform:uppercase;color:rgba(${STEEL},0.95);}
 .hc-skills-close{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
-  font-size:1.3rem;line-height:1;cursor:pointer;border-radius:6px;}
+  font-size:1.3rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
 .hc-skills-close:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
 .hc-skills-search{flex:0 0 auto;box-sizing:border-box;padding:0.45rem 0.6rem;font:inherit;font-size:16px;
   color:whitesmoke;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);
-  border-radius:8px;outline:none;}
+  border-radius:var(--hc-radius-control, 2px);outline:none;}
 .hc-skills-search:focus{border-color:rgba(${STEEL},0.55);}
 .hc-skills-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem;
   font-size:0.85rem;color:rgba(238,244,250,0.9);}

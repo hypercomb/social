@@ -59,7 +59,8 @@
   gap: 0.6rem;
   min-height: 3rem;
   border: none;
-  border-radius: 1.5rem;
+  // GENUINELY ROUND: min-height 3rem, so 1.5rem was already a stadium.
+  border-radius: var(--hc-radius-pill);
   padding: 0 0.75rem 0 1.1rem;
   background: rgba(126, 182, 214, 0.92);
   color: #0c1118;
@@ -93,7 +94,8 @@
   gap: 0.6rem;
   min-height: 3rem;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 1.5rem;
+  // GENUINELY ROUND: min-height 3rem, so 1.5rem was already a stadium.
+  border-radius: var(--hc-radius-pill);
   padding: 0 1.1rem 0 0.75rem;
   background: rgba(18, 24, 32, 0.82);
   color: #dfe8f0;

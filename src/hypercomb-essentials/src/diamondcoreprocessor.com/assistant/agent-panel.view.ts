@@ -984,7 +984,7 @@ export class AgentPanelView extends EventTarget {
 .hc-agent{position:fixed;z-index:99999;display:flex;flex-direction:row;align-items:stretch;
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(30rem,70vh);box-sizing:border-box;
-  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:10px;}
+  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:var(--hc-radius-floating, 4px);}
 .hc-agent.fullscreen{inset:0;width:auto!important;max-width:none;height:auto;max-height:none;
   border-radius:0;border:none;}
 .hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:0.55rem;
@@ -1017,10 +1017,10 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;
   color:rgba(216,230,238,0.45);}
 .hc-agent-back{width:1.7rem;height:2rem;flex:0 0 auto;border:none;background:none;
-  color:rgba(${STEEL},0.75);font-size:1.5rem;line-height:1;cursor:pointer;border-radius:6px;}
+  color:rgba(${STEEL},0.75);font-size:1.5rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
 .hc-agent-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
 .hc-agent-carry{display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.6rem;
-  padding:0.55rem 0.6rem;border:1px solid rgba(214,178,110,0.45);border-radius:8px;
+  padding:0.55rem 0.6rem;border:1px solid rgba(214,178,110,0.45);border-radius:var(--hc-radius-card, 3px);
   background:rgba(214,178,110,0.08);}
 .hc-agent-carry .hc-agent-label{color:rgba(226,196,140,0.85);margin:0;}
 .hc-agent-carry-actions{display:flex;gap:0.4rem;margin-top:0.15rem;}
@@ -1028,14 +1028,14 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-run{display:flex;align-items:stretch;gap:0.25rem;}
 .hc-agent-runmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:0.1rem;
   padding:0.28rem 0.35rem;border:0;background:none;text-align:left;font:inherit;cursor:pointer;
-  border-radius:5px;}
+  border-radius:var(--hc-radius-floating, 4px);}
 .hc-agent-runmain:hover,.hc-agent-runmain:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
 .hc-agent-runtop{display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;}
 .hc-agent-runwho{font-size:0.8rem;color:rgba(238,244,250,0.92);font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-agent-runlatest{font-size:0.73rem;color:rgba(216,230,238,0.55);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-runbee{flex:0 0 auto;width:2rem;border:1px solid rgba(${STEEL},0.22);border-radius:5px;
+.hc-agent-runbee{flex:0 0 auto;width:2rem;border:1px solid rgba(${STEEL},0.22);border-radius:var(--hc-radius-floating, 4px);
   background:none;color:rgba(${STEEL},0.8);font-size:0.9rem;line-height:1;cursor:pointer;}
 .hc-agent-runbee:hover{border-color:rgba(${STEEL},0.7);background:rgba(${STEEL},0.12);color:whitesmoke;}
 .hc-agent-go{flex:0 0 auto;align-self:flex-start;margin-left:auto;padding:0.1rem 0.55rem;
@@ -1044,7 +1044,7 @@ export class AgentPanelView extends EventTarget {
   text-transform:uppercase;cursor:pointer;}
 .hc-agent-go:hover{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.14);color:whitesmoke;}
 .hc-agent-close,.hc-agent-window{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
-  font-size:1.3rem;line-height:1;cursor:pointer;border-radius:6px;}
+  font-size:1.3rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
 .hc-agent-window{font-size:1rem;}
 .hc-agent-close:hover,.hc-agent-window:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
 .hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.6rem;}
@@ -1087,9 +1087,9 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-row{display:flex;gap:0.5rem;align-items:flex-end;flex:0 0 auto;}
 .hc-agent-input{flex:1 1 auto;box-sizing:border-box;resize:none;padding:0.5rem 0.6rem;font:inherit;
   font-size:16px;line-height:1.4;color:whitesmoke;background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,0.12);border-radius:8px;outline:none;}
+  border:1px solid rgba(255,255,255,0.12);border-radius:var(--hc-radius-control, 2px);outline:none;}
 .hc-agent-input:focus{border-color:rgba(${STEEL},0.55);}
-.hc-agent-btn{min-height:2.4rem;padding:0 0.9rem;border-radius:8px;border:1px solid rgba(255,255,255,0.14);
+.hc-agent-btn{min-height:2.4rem;padding:0 0.9rem;border-radius:var(--hc-radius-control, 2px);border:1px solid rgba(255,255,255,0.14);
   background:none;color:rgba(235,242,248,0.85);font:inherit;font-size:0.86rem;cursor:pointer;}
 .hc-agent-ok{background:rgba(${STEEL},0.9);border-color:rgba(${STEEL},0.9);color:#0c1118;font-weight:700;}
 .hc-agent-ok:disabled{opacity:0.55;cursor:default;}

@@ -173,7 +173,7 @@ export class WidgetZoomDrone {
       padding: 6px 10px;
       background: rgba(14, 18, 24, 0.94);
       border: 1px solid rgba(126, 182, 214, 0.28);
-      border-radius: 8px;
+      border-radius: var(--hc-radius-floating, 4px);
       backdrop-filter: blur(12px);
       box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
       font-family: var(--hc-mono); font-size: 11px;

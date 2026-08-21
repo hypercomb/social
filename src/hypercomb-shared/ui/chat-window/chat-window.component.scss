@@ -191,7 +191,7 @@ $accent: #7eb6d6;
     margin: 0;
     padding: 0.75em 0.85em;
     border: 1px solid rgba($accent, 0.2);
-    border-radius: var(--md-shape-sm, 8px);
+    border-radius: var(--hc-radius-card);
     background: rgba($accent, 0.07);
     font-size: 0.75em;
     line-height: 1.45;
@@ -233,7 +233,7 @@ $accent: #7eb6d6;
   box-sizing: border-box;
   padding: 0.55em 0.7em;
   border: 1px solid rgba($accent, 0.16);
-  border-radius: var(--md-shape-sm, 8px);
+  border-radius: var(--hc-radius-card);
   background: rgba(255, 255, 255, 0.025);
   opacity: 0.55;
 

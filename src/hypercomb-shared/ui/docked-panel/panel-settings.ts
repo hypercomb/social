@@ -89,7 +89,7 @@ const SETTINGS_CSS = `
   padding: 0;
   background: rgba(11, 16, 21, 0.985);
   border: 1px solid rgba(${STEEL}, 0.3);
-  border-radius: 6px;
+  border-radius: var(--hc-radius-floating, 4px);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
   font: 400 11.5px/1.45 system-ui, sans-serif;
   color: #c8d6de;

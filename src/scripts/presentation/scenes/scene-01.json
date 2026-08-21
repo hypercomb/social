@@ -6,7 +6,7 @@
   "eyebrow": "hypercomb",
   "headline": "A new way to *bee*.",
   "sub": "Not a new place to keep your work — a different way of being present with it.",
-  "visual": "none",
-  "visualData": [],
+  "visual": "plate:where-your-work-lives",
+  "visualData": ["where your work lives"],
   "say": "This is Hypercomb. [pause:1300] A new way to bee. Not a new place to keep your work; a different way of being present with it. Because before anything else, there is a question worth asking: where does your work actually live? For most software, the honest answer is: on someone else's computer, behind someone else's login, in someone else's format. Hypercomb starts somewhere else — your work lives with you, and it is here because you are. Everything you're about to see is a real, working application: whenever the hive is on screen, the footage was recorded live from a real hive. By the end, you'll know what Hypercomb is, why it exists, and where it's going."
 }

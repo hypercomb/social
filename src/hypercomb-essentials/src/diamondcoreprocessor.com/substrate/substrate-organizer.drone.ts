@@ -98,7 +98,7 @@ export class SubstrateOrganizerDrone {
       flex-direction: column;
       background: rgba(12, 16, 24, 0.96);
       border: 1px solid rgba(140, 170, 220, 0.28);
-      border-radius: 10px;
+      border-radius: var(--hc-radius-floating, 4px);
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
       overflow: hidden;
     `
@@ -399,7 +399,7 @@ export class SubstrateOrganizerDrone {
       flex-direction: column;
       background: rgba(140, 170, 220, 0.05);
       border: 1px solid ${isActive ? 'rgba(160, 200, 255, 0.65)' : 'rgba(140, 170, 220, 0.18)'};
-      border-radius: 8px;
+      border-radius: var(--hc-radius-card, 3px);
       overflow: hidden;
       cursor: pointer;
       transition: border-color 0.15s, transform 0.15s;
@@ -631,7 +631,7 @@ export class SubstrateOrganizerDrone {
       border: 1px solid rgba(140, 170, 220, 0.25);
       color: rgba(220, 230, 240, 0.88);
       padding: 6px 12px;
-      border-radius: 5px;
+      border-radius: var(--hc-radius-floating, 4px);
       font-family: inherit;
       font-size: 11px;
       cursor: pointer;

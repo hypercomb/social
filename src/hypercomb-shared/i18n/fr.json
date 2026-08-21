@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "Arrêter ce travail et l'effacer de la ruche",
   "agent.stopped": "Arrêté — la demande est sortie de la ruche.",
   "agent.stop-error": "Impossible de l'arrêter — réessayez.",
+  "agent.rail-root": "ruche",
+  "agent.rail-back": "Retour à {name}",
+  "agent.rail-empty": "Il n'y a encore rien dans cette tuile.",
+  "agent.rail-find": "Rechercher dans ce niveau",
+  "agent.rail-no-match": "Aucune tuile ici ne correspond à « {query} ».",
+  "agent.rail-talk": "Parler à cette tuile",
+  "agent.rail-inside": "maintenez pour entrer",
+  "agent.rail-draft": "Des réflexions non envoyées attendent ici",
   "slash.menu": "Menu rapide — sept hexagones au pointeur ; donnez une direction d'un geste pour choisir",
   "quickmenu.root": "Ruche",
   "quickmenu.workflow": "Flux de travail",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Aucune session Claude — démarrez le pont pour accéder à la ruche",
   "chat.placeholder": "Posez n'importe quelle question…",
   "chat.send": "Envoyer",
+  "chat.rail": "Vos tuiles, une conversation chacune",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
 }

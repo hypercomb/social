@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "Detener este trabajo y quitarlo de la colmena",
   "agent.stopped": "Detenido — la petición está fuera de la colmena.",
   "agent.stop-error": "No se pudo detener — inténtalo de nuevo.",
+  "agent.rail-root": "colmena",
+  "agent.rail-back": "Volver a {name}",
+  "agent.rail-empty": "Todavía no hay nada dentro de este mosaico.",
+  "agent.rail-find": "Buscar en este nivel",
+  "agent.rail-no-match": "Aquí no hay ningún mosaico que coincida con «{query}».",
+  "agent.rail-talk": "Hablar con este mosaico",
+  "agent.rail-inside": "mantén pulsado para entrar",
+  "agent.rail-draft": "Aquí hay ideas sin enviar",
   "slash.menu": "Menú rápido — siete hexágonos junto al puntero; lanza en una dirección para elegir",
   "quickmenu.root": "Colmena",
   "quickmenu.workflow": "Flujo de trabajo",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Sin sesión de Claude — inicia el puente para dar acceso a la colmena",
   "chat.placeholder": "Pregunta lo que quieras…",
   "chat.send": "Enviar",
+  "chat.rail": "Tus mosaicos, una conversación en cada uno",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
   "mesh-modal.needs-secret": "se necesita un secreto para unirse"
 }

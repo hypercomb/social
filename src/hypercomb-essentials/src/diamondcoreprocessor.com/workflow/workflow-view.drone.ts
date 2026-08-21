@@ -236,7 +236,7 @@ export class WorkflowViewDrone extends Drone {
     const empty = div(
       'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;' +
       `color:${DIM};font-size:14px;line-height:1.7;max-width:420px;padding:24px 28px;` +
-      `background:${PANEL};border:1px solid ${BORDER};border-radius:12px;display:none;`,
+      `background:${PANEL};border:1px solid ${BORDER};border-radius:var(--hc-radius-floating, 4px);display:none;`,
     )
     host.appendChild(empty)
 
@@ -293,7 +293,7 @@ export class WorkflowViewDrone extends Drone {
     b.type = 'button'
     b.textContent = label
     b.style.cssText =
-      `all:unset;box-sizing:border-box;flex:none;padding:5px 11px;border-radius:6px;font-size:12px;` +
+      `all:unset;box-sizing:border-box;flex:none;padding:5px 11px;border-radius:var(--hc-radius-control, 2px);font-size:12px;` +
       `color:${TEXT};background:${PANEL};border:1px solid ${BORDER};cursor:pointer;`
     b.addEventListener('click', onClick)
     return b

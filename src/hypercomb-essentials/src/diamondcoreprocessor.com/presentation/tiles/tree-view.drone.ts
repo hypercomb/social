@@ -652,14 +652,14 @@ export class TreeViewDrone extends Drone {
     const status = div(
       'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;' +
       `color:${DIM};font-size:14px;line-height:1.7;max-width:460px;padding:24px 28px;` +
-      `background:${PANEL};border:1px solid ${BORDER};border-radius:12px;display:none;`,
+      `background:${PANEL};border:1px solid ${BORDER};border-radius:var(--hc-radius-floating, 4px);display:none;`,
     )
     host.appendChild(status)
 
     const notice = div(
       `position:fixed;top:${TOOLBAR_H + 10}px;left:50%;transform:translateX(-50%);z-index:5;` +
       `display:none;align-items:center;gap:14px;max-width:min(680px,92vw);box-sizing:border-box;` +
-      `padding:12px 14px;border-radius:9px;background:rgba(11,15,20,0.96);` +
+      `padding:12px 14px;border-radius:var(--hc-radius-floating, 4px);background:rgba(11,15,20,0.96);` +
       `border:1px solid ${BORDER_LIT};box-shadow:0 8px 28px rgba(0,0,0,0.5);`,
     )
     host.appendChild(notice)
@@ -697,7 +697,7 @@ export class TreeViewDrone extends Drone {
     filterInput.type = 'search'
     filterInput.placeholder = this.#t('tree.filter.placeholder', 'find in branch…')
     filterInput.style.cssText =
-      `all:unset;box-sizing:border-box;width:180px;padding:6px 10px;border-radius:6px;font-size:12px;` +
+      `all:unset;box-sizing:border-box;width:180px;padding:6px 10px;border-radius:var(--hc-radius-control, 2px);font-size:12px;` +
       `color:${TEXT};background:${PANEL};border:1px solid ${BORDER};flex:none;`
     filterInput.addEventListener('input', () => this.#setFilter(filterInput.value))
 
@@ -722,12 +722,12 @@ export class TreeViewDrone extends Drone {
     // The insight chip: the name of the fragment being cut, and the way to
     // start one. Sits ahead of the view controls because naming comes first.
     const insightChip = div(
-      'display:flex;align-items:center;gap:8px;flex:none;padding:5px 10px;border-radius:7px;' +
+      'display:flex;align-items:center;gap:8px;flex:none;padding:5px 10px;border-radius:var(--hc-radius-control, 2px);' +
       `border:1px solid ${BORDER};background:${PANEL};cursor:pointer;max-width:260px;`,
     )
     const insightMenu = div(
       `position:fixed;top:${TOOLBAR_H + 4}px;z-index:6;display:none;min-width:220px;max-height:60vh;` +
-      `overflow:auto;padding:6px;border-radius:9px;background:rgba(11,15,20,0.97);` +
+      `overflow:auto;padding:6px;border-radius:var(--hc-radius-floating, 4px);background:rgba(11,15,20,0.97);` +
       `border:1px solid ${BORDER_LIT};box-shadow:0 10px 30px rgba(0,0,0,0.55);`,
     )
 
@@ -760,7 +760,7 @@ export class TreeViewDrone extends Drone {
 
   #group(children: HTMLElement[]): HTMLDivElement {
     const wrap = div(
-      `display:flex;align-items:center;gap:2px;flex:none;padding:2px;border-radius:7px;` +
+      `display:flex;align-items:center;gap:2px;flex:none;padding:2px;border-radius:var(--hc-radius-control, 2px);` +
       `border:1px solid ${BORDER};background:${PANEL};`,
     )
     wrap.append(...children)
@@ -774,7 +774,7 @@ export class TreeViewDrone extends Drone {
     button.textContent = label
     button.style.cssText =
       `all:unset;cursor:pointer;flex:none;font-size:12px;line-height:1;color:${DIM};` +
-      `padding:7px 10px;border-radius:6px;text-align:center;` +
+      `padding:7px 10px;border-radius:var(--hc-radius-control, 2px);text-align:center;` +
       (outlined ? `border:1px solid ${BORDER};` : '')
     button.addEventListener('click', onClick)
     button.addEventListener('mouseenter', () => {
@@ -936,7 +936,7 @@ export class TreeViewDrone extends Drone {
       const cell = div(
         `position:absolute;top:6px;left:${(ring.x * z) - cellWidth / 2}px;width:${cellWidth}px;text-align:center;` +
         `font-size:11px;letter-spacing:0.08em;pointer-events:auto;cursor:pointer;` +
-        `padding:3px 0;border-radius:5px;user-select:none;` +
+        `padding:3px 0;border-radius:var(--hc-radius-floating, 4px);user-select:none;` +
         (focused
           ? `color:${TEXT};background:rgba(126,182,214,0.16);border:1px solid ${BORDER_LIT};`
           : `color:${FAINT};border:1px solid transparent;`),
@@ -1455,11 +1455,11 @@ export class TreeViewDrone extends Drone {
     ))
 
     const list = div(
-      `max-height:44vh;overflow:auto;border:1px solid ${BORDER};border-radius:8px;padding:8px;background:${PANEL};`,
+      `max-height:44vh;overflow:auto;border:1px solid ${BORDER};border-radius:var(--hc-radius-card, 3px);padding:8px;background:${PANEL};`,
     )
     for (const node of ring.slice(0, 200)) {
       const row = div(
-        `display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;` +
+        `display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:var(--hc-radius-floating, 4px);cursor:pointer;` +
         `font-size:12px;color:${DIM};`,
       )
       const dot = div(`width:7px;height:7px;border-radius:50%;flex:none;background:${limbColor(node.hue, node.depth)};`)
@@ -1507,7 +1507,7 @@ export class TreeViewDrone extends Drone {
     button.textContent = label
     button.style.cssText =
       'all:unset;cursor:pointer;box-sizing:border-box;text-align:center;padding:9px 12px;' +
-      'border-radius:6px;font-size:12px;font-weight:600;' +
+      'border-radius:var(--hc-radius-control, 2px);font-size:12px;font-weight:600;' +
       (primary
         ? `color:${INK};background:${STEEL};`
         : `color:${DIM};border:1px solid ${BORDER};`)
@@ -1617,7 +1617,7 @@ export class TreeViewDrone extends Drone {
       const insight = this.#insights[name]
       const active = this.#insight?.name === name
       const row = div(
-        `display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:5px;cursor:pointer;` +
+        `display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--hc-radius-floating, 4px);cursor:pointer;` +
         `font-size:12px;color:${active ? TEXT : DIM};` + (active ? 'background:rgba(126,182,214,0.12);' : ''),
       )
       const label = div('flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', name)
@@ -1707,7 +1707,7 @@ export class TreeViewDrone extends Drone {
     dismiss.textContent = this.#t('tree.notice.dismiss', 'got it')
     dismiss.style.cssText =
       `all:unset;cursor:pointer;flex:none;font-size:12px;font-weight:600;color:${INK};` +
-      `background:${STEEL};padding:6px 12px;border-radius:5px;`
+      `background:${STEEL};padding:6px 12px;border-radius:var(--hc-radius-floating, 4px);`
     dismiss.addEventListener('click', () => {
       this.#noticeDismissed = true
       this.#paintNotice()

@@ -1,0 +1,59 @@
+// hypercomb-shared/ui/_shape.scss
+//
+// THE SHAPE VOCABULARY — one ladder, five rungs, one rule.
+//
+// Hypercomb is drawn out of hexagons. A hexagon is all corners, and the chrome
+// around it should agree: the interface is SQUARE by default and rounds only
+// where roundness means something. A 12px corner on a panel is not a style
+// choice here — it is the chrome disagreeing with the canvas, and at the seam
+// where a bubble sits over the honeycomb you can see it.
+//
+// THE RULE: rounded geometry is reserved for genuinely round things — status
+// pills, toggle tracks, avatars, dots, knobs. Everything rectangular takes a
+// rung, and the rungs are deliberately small. A radius literal above
+// `$radius-floating` on a rectangle is drift, and `doctrine.spec.ts` holds the
+// line so it cannot creep back one component at a time (which is exactly how
+// it got to 12px, 14px and 2rem in the first place).
+//
+// WHY BOTH FORMS. The SCSS variables are for Angular component styles, which
+// compile against this file. The `:root` custom properties are for everything
+// that CANNOT — the framework-free custom elements essentials contributes as
+// shell surfaces and drone views, whose styles are a string inside a shadow
+// root. Custom properties inherit through the shadow boundary, so a drone gets
+// the same ladder as a component without importing anything. ONE definition,
+// two ways to reach it: change a rung here and the whole app follows.
+
+/// Anything you click: buttons, inputs, chips, rows, tabs, header actions.
+$radius-control: 2px;
+
+/// Chrome inside chrome: a panel within a panel, a thumbnail, a study card.
+$radius-card: 3px;
+
+/// A free object over the canvas — modal, popover, speech bubble, hover card.
+/// Just enough to say "this is lifted", never enough to look soft.
+$radius-floating: 4px;
+
+/// GENUINELY ROUND. Not a rung on the ladder — an exemption from it.
+$radius-pill: 999px;
+$radius-round: 50%;
+
+/// The runtime half of the vocabulary, as a MIXIN rather than a bare `:root`
+/// block — included exactly once per shell, from `styles.scss`.
+///
+/// It matters that this is a mixin: `_toolwindow.scss` `@use`s this file for
+/// the SCSS variables, and 22 component stylesheets `@use` the toolwindow
+/// partial. A bare `:root` rule here would be emitted into all 22 of their
+/// compiled sheets — dead CSS under Angular's emulated encapsulation (the
+/// scoped selector matches nothing), duplicated 22 times, pushing each sheet
+/// closer to its per-component style budget. A mixin emits nothing until
+/// somebody asks for it, so the variables land once, globally, where they are
+/// actually read.
+@mixin ladder-root {
+  :root {
+    --hc-radius-control: #{$radius-control};
+    --hc-radius-card: #{$radius-card};
+    --hc-radius-floating: #{$radius-floating};
+    --hc-radius-pill: #{$radius-pill};
+    --hc-radius-round: #{$radius-round};
+  }
+}

@@ -26,7 +26,7 @@
   display: flex;
   background: rgba(14, 18, 24, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--hc-radius-floating);
   box-shadow: 0 16px 64px rgba(0, 0, 0, 0.7);
   overflow: hidden;
   animation: docs-scale-in 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -94,7 +94,7 @@
     padding: 6px 10px;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
+    border-radius: var(--hc-radius-control);
     color: rgba(245, 245, 245, 0.85);
     font-size: 12px;
     font-family: inherit;
@@ -304,7 +304,7 @@
     padding: 16px;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
+    border-radius: var(--hc-radius-card);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 

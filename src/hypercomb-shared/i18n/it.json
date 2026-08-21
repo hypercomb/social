@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "Ferma questo lavoro e toglilo dall'alveare",
   "agent.stopped": "Fermato — la richiesta è fuori dall'alveare.",
   "agent.stop-error": "Impossibile fermarlo — riprova.",
+  "agent.rail-root": "alveare",
+  "agent.rail-back": "Torna a {name}",
+  "agent.rail-empty": "Non c'è ancora niente dentro questa tessera.",
+  "agent.rail-find": "Cerca in questo livello",
+  "agent.rail-no-match": "Nessuna tessera qui corrisponde a “{query}”.",
+  "agent.rail-talk": "Parla con questa tessera",
+  "agent.rail-inside": "tieni premuto per entrare",
+  "agent.rail-draft": "Qui ci sono pensieri non inviati",
   "slash.menu": "Menu rapido — sette esagoni al puntatore; scatta in una direzione per scegliere",
   "quickmenu.root": "Alveare",
   "quickmenu.workflow": "Workflow",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "Nessuna sessione Claude — avvia il ponte per l'accesso all'alveare",
   "chat.placeholder": "Chiedi qualsiasi cosa…",
   "chat.send": "Invia",
+  "chat.rail": "Le tue tessere, una conversazione ciascuna",
   "mesh-modal.needs-location": "serve un luogo per unirsi",
   "mesh-modal.needs-secret": "serve un segreto per unirsi"
 }

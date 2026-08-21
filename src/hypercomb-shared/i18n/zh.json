@@ -1923,6 +1923,14 @@
   "agent.stop-hint": "停止这项工作并把它从蜂巢中清除",
   "agent.stopped": "已停止 — 该请求已离开蜂巢。",
   "agent.stop-error": "无法停止 — 请再试一次。",
+  "agent.rail-root": "蜂巢",
+  "agent.rail-back": "返回 {name}",
+  "agent.rail-empty": "这个磁贴里还没有东西。",
+  "agent.rail-find": "搜索本层",
+  "agent.rail-no-match": "这一层没有与“{query}”匹配的磁贴。",
+  "agent.rail-talk": "与这个磁贴对话",
+  "agent.rail-inside": "长按进入",
+  "agent.rail-draft": "这里有未发送的想法",
   "slash.menu": "快捷菜单 — 指针处的七个六边形；朝一个方向轻拨即可选择",
   "quickmenu.root": "蜂巢",
   "quickmenu.workflow": "工作流",
@@ -2129,6 +2137,7 @@
   "chat.link.down": "没有 Claude 会话 — 启动桥接以访问蜂巢",
   "chat.placeholder": "随便问点什么…",
   "chat.send": "发送",
+  "chat.rail": "你的磁贴，每个都有一段对话",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥"
 }
