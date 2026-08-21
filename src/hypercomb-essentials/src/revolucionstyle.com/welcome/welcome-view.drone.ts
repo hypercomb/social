@@ -24,6 +24,7 @@ import { tilePictureCandidates } from '../../diamondcoreprocessor.com/editor/til
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../diamondcoreprocessor.com/history/layer-placement.js'
 import { WELCOME_KIND, WELCOME_VIEW, type WelcomePayload } from './welcome.queen.js'
 import { ROOM_VIEW } from './room-view.drone.js'
+import type { BackGesture } from '../../diamondcoreprocessor.com/navigation/back-gesture.service.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -55,6 +56,8 @@ export class WelcomeViewDrone extends Drone {
   #bound = false
   #active = false
   #gen = 0
+  /** Unregisters the right-click way out (back-gesture.service.ts). */
+  #backOff: (() => void) | null = null
   /** Object URLs handed to the plates — process-wide until revoked. */
   #objectUrls: string[] = []
 
@@ -71,6 +74,11 @@ export class WelcomeViewDrone extends Drone {
         this.#vm()?.setMode(WELCOME_VIEW)
         void this.#reconcile()
       })
+      // Right-click is the way out of the atelier, the same as Escape — the
+      // entry is keyed by this view's `view:active` owner, so it only answers
+      // while the wall is actually up.
+      this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
+        ?.register({ owner: 'welcome-view', back: () => this.#vm()?.setMode('hexagons') }) ?? null
       this.#bound = true
     }
     await this.#reconcile()
@@ -79,6 +87,8 @@ export class WelcomeViewDrone extends Drone {
   protected override dispose(): void {
     this.#vm()?.removeEventListener('change', this.#change)
     window.removeEventListener('keydown', this.#key, true)
+    this.#backOff?.()
+    this.#backOff = null
     this.#teardown()
   }
 

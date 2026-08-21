@@ -20,6 +20,7 @@ import {
   readDocumentViewItems,
   type DocumentViewItem,
 } from './document-view-source.js'
+import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import { openDocumentViewCurator } from './document-view-curator.js'
 import { bindDocumentLinks, jumpEntry } from './document-view-links.js'
 import {
@@ -49,6 +50,8 @@ export class ViewLibraryDrone extends Drone {
   #active = false
   #token = 0
   #targetSegments: string[] | null = null
+  /** Unregisters the right-click way out (back-gesture.service.ts). */
+  #backOff: (() => void) | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -65,6 +68,10 @@ export class ViewLibraryDrone extends Drone {
         this.#vm()?.setMode(view)
         void this.#render()
       })
+      // Right-click unwinds one step, exactly as Escape does: the curator
+      // popover first, then the view itself.
+      this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
+        ?.register({ owner: 'view-library', back: () => this.#backOut() }) ?? null
       this.#bound = true
     }
     await this.#render()
@@ -73,6 +80,8 @@ export class ViewLibraryDrone extends Drone {
   protected override dispose(): void {
     this.#vm()?.removeEventListener('change', this.#refresh)
     window.removeEventListener('keydown', this.#key, true)
+    this.#backOff?.()
+    this.#backOff = null
     this.#close()
   }
 
@@ -80,6 +89,11 @@ export class ViewLibraryDrone extends Drone {
   readonly #key = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || !this.#surface()) return
     e.preventDefault(); e.stopImmediatePropagation()
+    this.#backOut()
+  }
+
+  /** One step out — the curator popover if it is up, otherwise the view. */
+  #backOut(): void {
     if (this.#curator) {
       this.#curator.remove()
       this.#curator = null

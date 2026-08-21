@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/input/escape-cascade.ts
 import { EffectBus } from '@hypercomb/core'
+import type { BackGesture } from '../navigation/back-gesture.service.js'
 
 // ── reactive state (tracked via effects already emitted by services) ──
 
@@ -137,10 +138,23 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
 })
 
 // ── right-click exits clipboard mode ──────────────────────────────────
-// Same parity as the X button: contextmenu anywhere closes the clipboard view.
+// Same parity as the X button: right-click anywhere closes the clipboard view.
+//
+// Registered as an entry in the ONE thing that decides what the right button
+// means (navigation/back-gesture.service.ts) instead of a listener of its own.
+// Two window listeners for the same gesture is how you get a right-click that
+// both closes the clipboard AND navigates the hive out from under it; the
+// registry orders them instead. Clipboard mode covers the page without being a
+// view, which is exactly what `active` is for.
 
-window.addEventListener('contextmenu', (event) => {
-  if (!clipboardActive) return
-  event.preventDefault()
-  EffectBus.emit('clipboard:close', undefined)
+const whenReady = (window as unknown as {
+  ioc?: { whenReady?<T>(key: string, callback: (value: T) => void): void }
+}).ioc?.whenReady
+
+whenReady?.<BackGesture>('@diamondcoreprocessor.com/BackGesture', gesture => {
+  gesture.register({
+    owner: 'clipboard-mode',
+    active: () => clipboardActive,
+    back: () => EffectBus.emit('clipboard:close', undefined),
+  })
 })

@@ -26,6 +26,7 @@ import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
 import { tilePictureCandidates } from '../../editor/tile-properties.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY, type PostitPayload } from '../../commands/postit.queen.js'
+import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -82,6 +83,8 @@ export class PostitViewDrone extends Drone {
   /** The pointer gesture that just ended MOVED — the click that follows it
    *  must not open the post. Cleared on the next pointerdown. */
   #justDragged = false
+  /** Unregisters the right-click way out (back-gesture.service.ts). */
+  #backOff: (() => void) | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -106,6 +109,9 @@ export class PostitViewDrone extends Drone {
         this.#vm()?.setMode(POSTIT_VIEW)
         void this.#reconcile()
       })
+      // Right-click closes the post the same way its × does.
+      this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
+        ?.register({ owner: 'postit-view', back: () => this.#vm()?.setMode('hexagons') }) ?? null
       this.#bound = true
     }
     await this.#reconcile()
@@ -115,6 +121,8 @@ export class PostitViewDrone extends Drone {
     this.#vm()?.removeEventListener('change', this.#change)
     window.removeEventListener('keydown', this.#key, true)
     window.removeEventListener('synchronize', this.#change)
+    this.#backOff?.()
+    this.#backOff = null
     this.#stickies?.remove()
     this.#stickies = null
     this.#teardownPost()

@@ -20,6 +20,7 @@ import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-
 import { rewritePageRefs } from '../../diamondcoreprocessor.com/sharing/decoration-closure.js'
 import { scopeCellPageCss } from '../../diamondcoreprocessor.com/presentation/tiles/cell-page-css-scope.js'
 import { WELCOME_VIEW } from './welcome.queen.js'
+import type { BackGesture } from '../../diamondcoreprocessor.com/navigation/back-gesture.service.js'
 
 export const ROOM_VIEW = 'revolucion-room'
 /** The room shows the cell's existing page — the website behaviour's kind. */
@@ -43,6 +44,8 @@ export class RoomViewDrone extends Drone {
   #bound = false
   #active = false
   #gen = 0
+  /** Unregisters the right-click way out (back-gesture.service.ts). */
+  #backOff: (() => void) | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -54,6 +57,10 @@ export class RoomViewDrone extends Drone {
         this.#vm()?.setMode(ROOM_VIEW)
         void this.#reconcile()
       })
+      // Right-click leaves the room the way the ‹ chip does — back onto the
+      // wall, not out of the welcome entirely.
+      this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
+        ?.register({ owner: ROOM_VIEW, back: () => this.#backToWall() }) ?? null
       this.#bound = true
     }
     await this.#reconcile()
@@ -62,6 +69,8 @@ export class RoomViewDrone extends Drone {
   protected override dispose(): void {
     this.#vm()?.removeEventListener('change', this.#change)
     window.removeEventListener('keydown', this.#key, true)
+    this.#backOff?.()
+    this.#backOff = null
     this.#teardown()
   }
 

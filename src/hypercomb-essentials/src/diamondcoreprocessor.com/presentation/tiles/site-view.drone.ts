@@ -279,17 +279,19 @@ export class SiteViewDrone extends Drone {
    *  the site entry:
    *
    *   • Inside the site (descendant of entry) → walk up one level.
-   *   • At the site root (segments equal entry) → no-op. We stay
-   *     rather than walking up into `/`, which usually has no
-   *     content. The way out is the `/website` toggle, not right-
-   *     click.
+   *   • At the site root (segments equal entry) → LEAVE THE SITE.
+   *     One gesture, one meaning: right-click always comes back out
+   *     of where you are, and at the root of a site the thing you are
+   *     inside IS the site. (It used to be a no-op here, on the
+   *     reasoning that the way out was the `/website` toggle — which
+   *     left the reader pressing a gesture that visibly did nothing
+   *     on the one page they most wanted to leave from.) The exit
+   *     runs through ViewMode, so `#onViewModeChange` lands them on
+   *     the entrance exactly as the exit hexagon does.
    *   • Outside the site (sibling or unrelated cell, e.g. an
    *     `<a href="/elsewhere">` link navigated to a route not under
    *     the site root) → jump back to the entry. Without this the
-   *     user gets stranded on a blank route with no page mounted.
-   *
-   *  We do NOT exit website mode in any case: the gesture is a
-   *  back-to-the-site, not a back-to-hexagons. */
+   *     user gets stranded on a blank route with no page mounted. */
   readonly #onGlobalContextMenu = (e: MouseEvent): void => {
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
     if (!vm || vm.mode !== 'website') return
@@ -300,7 +302,12 @@ export class SiteViewDrone extends Drone {
     const insideSite = segments.length >= entry.length
       && entry.every((seg, i) => segments[i] === seg)
     if (insideSite) {
-      if (segments.length <= entry.length) return
+      if (segments.length <= entry.length) {
+        const mode = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+          ?.get<{ setMode(next: string): void }>('@hypercomb.social/ViewMode')
+        mode?.setMode('hexagons')
+        return
+      }
       this.#navigate(segments.slice(0, -1))
       return
     }
