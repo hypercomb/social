@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count} 轮对话",
   "agent.rail-unread": "未读回复",
   "agent.rail-working": "{count} 个在忙",
+  "agent.rail-chats": "这个磁贴的对话",
+  "agent.rail-chat-new": "+ 新对话",
+  "agent.rail-chat-untitled": "无标题",
   "slash.menu": "快捷菜单 — 指针处的七个六边形；朝一个方向轻拨即可选择",
   "quickmenu.root": "蜂巢",
   "quickmenu.workflow": "工作流",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "正在与 {tile} 对话 — 打开你的对话列表",
   "chat.subject.none": "不针对任何磁贴 — 打开你的对话列表",
   "chat.list.draft": "草稿",
+  "chat.payload": "这个请求带上的东西",
+  "chat.work.empty": "把需要修改的分支拖到这里",
+  "chat.work.filled": "正在修改 {tile} — 点击放开",
+  "chat.work.drop": "需要修改",
+  "chat.context.drop": "拖入一个分支作为上下文",
+  "chat.context.one": "{tile} — 支撑上下文，点击移除",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥"
 }

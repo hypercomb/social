@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count} scambi",
   "agent.rail-unread": "risposta non letta",
   "agent.rail-working": "{count} al lavoro",
+  "agent.rail-chats": "Conversazioni su questa tessera",
+  "agent.rail-chat-new": "+ Nuova conversazione",
+  "agent.rail-chat-untitled": "Senza titolo",
   "slash.menu": "Menu rapido — sette esagoni al puntatore; scatta in una direzione per scegliere",
   "quickmenu.root": "Alveare",
   "quickmenu.workflow": "Workflow",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "In conversazione con {tile} — apri le tue conversazioni",
   "chat.subject.none": "Non riguarda nessuna tessera — apri le tue conversazioni",
   "chat.list.draft": "bozza",
+  "chat.payload": "Che cosa porta questa richiesta",
+  "chat.work.empty": "Trascina qui il ramo da modificare",
+  "chat.work.filled": "Sta cambiando {tile} — clicca per lasciarlo",
+  "chat.work.drop": "da modificare",
+  "chat.context.drop": "Trascina un ramo per aggiungerlo come contesto",
+  "chat.context.one": "{tile} — contesto di supporto, clicca per rimuovere",
   "mesh-modal.needs-location": "serve un luogo per unirsi",
   "mesh-modal.needs-secret": "serve un segreto per unirsi"
 }

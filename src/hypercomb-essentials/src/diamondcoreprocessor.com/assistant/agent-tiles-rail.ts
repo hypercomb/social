@@ -27,6 +27,10 @@
 // gestures, and nothing else:
 //
 //   click        enter this tile's conversation (what you type goes here)
+//   the ›        open the tile's CHATS — a tile is a subject, not a single
+//                thread, so the arrow unfolds the conversations it holds and
+//                lets you pick one (or start another). The pick is sticky:
+//                coming back to the tile reopens the chat you were in.
 //   ctrl-click   CHOOSE it — add the tile to the context the next request
 //                carries. Any number, gathered across any number of levels
 //                (the choice survives walking in and out), because what is
@@ -55,7 +59,10 @@
 // mint the thumbnail for next time.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { listTileConversations, listTileDrafts, tilePath, type TileConversation } from './chat-thread.js'
+import {
+  foldTileConversations, listTileConversations, listTileDrafts, newTileConvoId, tileConvoId, tilePath,
+  type TileConversation,
+} from './chat-thread.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
@@ -73,6 +80,8 @@ export type RailPick = {
   readonly name: string
   /** The tile's layer signature, when the walk could resolve one. */
   readonly sig?: string
+  /** WHICH conversation on that tile — a tile can hold several. */
+  readonly convoId?: string
 }
 
 type RailRow = {
@@ -105,6 +114,14 @@ const pathKey = (segments: readonly string[]): string => segments.join('\u0000')
 /** The inverse of {@link pathKey} — a row's own key back to its segments, so
  *  the separator is written down exactly once. */
 const keySegments = (key: string): string[] => key.split('\u0000').filter(Boolean)
+
+/** Which chat you were last in, per tile. */
+const STICKY_KEY = 'hc:rail-chat'
+
+/** What a dragged row carries. Shared with the chat window's header boxes —
+ *  the shell may not import this module, so the CONTRACT is the mime type and
+ *  the JSON shape, not a type. */
+export const TILE_DRAG_TYPE = 'application/x-hypercomb-tile'
 
 const STYLE_ID = 'hc-tiles-rail-styles'
 const STEEL = '126, 182, 214'
@@ -229,6 +246,17 @@ const ensureRailStyles = (): void => {
   left:0;right:0;bottom:0;height:3px;pointer-events:none;
   background:linear-gradient(rgba(8,12,18,0.85) 0 1px,rgba(238,244,250,0.85) 1px 3px);}
 
+/* A SET ACTIVE TOGETHER. The bracket is one line down the right edge of the
+   run, capped where the run starts and ends — the typographic brace, which is
+   the oldest way of saying "these, together". It sits opposite the gutter so
+   it can never be read as a conversation state. */
+.hc-rail-row.grouped{box-shadow:inset -2px 0 0 rgba(${STEEL},0.55);}
+.hc-rail-row.grouped::after{content:'';position:absolute;right:0;width:0.5rem;
+  height:2px;background:rgba(${STEEL},0.55);pointer-events:none;opacity:0;}
+.hc-rail-row.grouped-first::after{opacity:1;top:2px;}
+.hc-rail-row.grouped-last::after{opacity:1;bottom:2px;top:auto;}
+.hc-rail-row.grouped-first.grouped-last::after{opacity:1;top:50%;}
+
 /* CHOSEN — gathered as context for the next request. A ring on the picture
    and a tick in its corner: it belongs to the tile as an OBJECT, which is
    what a signature in a payload is, and it stays clear of all three state
@@ -253,12 +281,42 @@ const ensureRailStyles = (): void => {
 @keyframes hcRailBreath{0%,100%{opacity:0.5;}50%{opacity:1;}}
 .hc-rail-bees:not([hidden]){animation:hcRailBreath 2.6s ease-in-out infinite;}
 
-/* Structure, not state — and it had to stop failing contrast: 0.35 was
-   2.76:1 on this ground, 0.44 is 3.69:1. The slot stays whether or not the
-   chevron is in it. */
-.hc-rail-chev{flex:0 0 auto;width:0.6rem;text-align:center;padding-right:0.1rem;
-  color:rgba(216,230,238,0.44);font-size:1.05rem;line-height:1;}
-.hc-rail-chev[hidden]{display:block;visibility:hidden;}
+/* THE ARROW IS A CONTROL. It opens the tile's conversations, so it needs a
+   real hit area and a real focus ring — and it must stop failing contrast:
+   0.35 was 2.76:1 on this ground, 0.44 is 3.69:1. */
+.hc-rail-chev{flex:0 0 auto;width:1.4rem;height:1.7rem;margin-right:0.15rem;
+  border:0;background:none;cursor:pointer;
+  color:rgba(216,230,238,0.44);font-size:1.05rem;line-height:1;
+  border-radius:var(--hc-radius-control, 2px);
+  transition:transform 0.14s ease,color 0.14s ease;}
+.hc-rail-chev:hover{color:rgba(238,244,250,0.9);background:rgba(255,255,255,0.06);}
+.hc-rail-chev:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
+.hc-rail-chev[aria-expanded="true"]{transform:rotate(90deg);color:rgba(${STEEL},0.95);}
+
+/* THE TILE'S CONVERSATIONS, unfolded under its row. Indented to the width of
+   the picture so they read as belonging to it, and quiet enough that an open
+   panel never competes with the list it sits inside. */
+.hc-rail-chats{display:flex;flex-direction:column;gap:1px;
+  margin:1px 0 4px 3.4rem;padding-left:0.5rem;
+  border-left:1px solid rgba(${STEEL},0.25);}
+.hc-rail-chat{display:flex;align-items:baseline;gap:0.5rem;width:100%;
+  padding:0.28rem 0.45rem;border:0;background:none;cursor:pointer;
+  text-align:left;font:inherit;font-size:0.8rem;
+  color:rgba(238,244,250,0.72);border-radius:var(--hc-radius-control, 2px);}
+.hc-rail-chat:hover{background:rgba(255,255,255,0.05);color:rgba(238,244,250,0.95);}
+.hc-rail-chat:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
+.hc-rail-chat.current{background:rgba(${STEEL},0.12);color:rgba(238,244,250,0.98);
+  box-shadow:inset 2px 0 0 rgba(${STEEL},0.9);}
+.hc-rail-chat.unread{color:rgba(246,250,255,0.99);}
+.hc-rail-chat.unread .hc-rail-chat-name::after{content:'';display:inline-block;
+  width:0.42rem;height:0.48rem;margin-left:0.35rem;vertical-align:baseline;
+  background:rgba(${AMBER},0.95);
+  clip-path:polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);}
+.hc-rail-chat-name{flex:1 1 auto;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;}
+.hc-rail-chat-meta{flex:0 0 auto;font-family:var(--hc-mono,monospace);
+  font-size:0.68rem;color:rgba(216,230,238,0.5);}
+.hc-rail-chat-new{color:rgba(${STEEL},0.9);}
 
 /* Same defect, same pass: placeholder text needs 4.5:1, not 2.76:1. */
 .hc-rail-find input::placeholder{color:rgba(216,230,238,0.6);}
@@ -300,8 +358,18 @@ export class AgentTilesRail {
    *  chat window's own announcement that a question is out right now. The
    *  rail owns none of these facts — it hears them and paints them. */
   #drafts = new Set<string>()
-  #chats = new Map<string, TileConversation>()
+  /** Every tile conversation, and the per-tile fold the row marks read. */
+  #chatList: TileConversation[] = []
+  #chats = new Map<string, { turns: number; unread: boolean; chats: number; lastAt: number }>()
   #busy = new Set<string>()
+  /** Row keys whose chat list is unfolded. */
+  readonly #expanded = new Set<string>()
+  /** Tile paths in the context set that is ACTIVE RIGHT NOW. Rows in it are
+   *  drawn as one thing — a set asked about together should look like a set,
+   *  not like several tiles that happen to be lit. Membership says nothing
+   *  about a tile's own conversations: it can be in three sets and still have
+   *  a solo chat about nothing but itself. */
+  #grouped = new Set<string>()
   /** A hold already acted — eat the click that ends the same press. */
   #swallowClick = false
   /** The level changed from the keyboard: put focus on the level that
@@ -322,6 +390,7 @@ export class AgentTilesRail {
   #dropDraftWatch: (() => void) | null = null
   #dropChatWatch: (() => void) | null = null
   #dropBusyWatch: (() => void) | null = null
+  #dropGroupWatch: (() => void) | null = null
 
   /** The tile whose conversation is open, or null before anything is chosen. */
   get subject(): RailPick | null { return this.#subject }
@@ -437,6 +506,11 @@ export class AgentTilesRail {
     this.#dropDraftWatch = EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() })
     this.#dropChatWatch?.()
     this.#dropChatWatch = EffectBus.on('chat:threads-changed', () => { void this.#refreshChats() })
+    this.#dropGroupWatch?.()
+    this.#dropGroupWatch = EffectBus.on<{ paths?: readonly string[] }>('context:active-set', payload => {
+      this.#grouped = new Set((payload?.paths ?? []).map(String))
+      this.#paintStatus()
+    })
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = EffectBus.on<{ path?: string; busy?: boolean }>('chat:tile-busy', payload => {
       const path = String(payload?.path ?? '')
@@ -467,6 +541,8 @@ export class AgentTilesRail {
     this.#dropChatWatch = null
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = null
+    this.#dropGroupWatch?.()
+    this.#dropGroupWatch = null
     this.#registry?.removeEventListener('change', this.#onRegistryChange)
     for (const url of this.#icons.values()) {
       if (url) { try { URL.revokeObjectURL(url) } catch { /* already gone */ } }
@@ -641,12 +717,7 @@ export class AgentTilesRail {
       bees.textContent = String(busy)
       bees.hidden = busy === 0
 
-      const chevron = document.createElement('span')
-      chevron.className = 'hc-rail-chev'
-      chevron.textContent = '›'
-      chevron.hidden = row.childCount === 0
-
-      main.append(icon, name, bees, chevron)
+      main.append(icon, name, bees)
 
       // CLICK TALKS, CTRL-CLICK CHOOSES, HOLD GOES IN. A plain click can never
       // navigate — it is the gesture you make while mid-thought, so it only
@@ -690,8 +761,37 @@ export class AgentTilesRail {
         }
       })
 
-      wrap.append(main)
+      // A ROW IS DRAGGABLE, because the header's boxes are where a request is
+      // composed and dragging is how you fill them. What travels is the tile's
+      // SIGNATURE plus enough to name it on screen — never a live object, so
+      // the drop is the same whether it lands now or after a reload.
+      main.draggable = true
+      main.addEventListener('dragstart', event => {
+        const payload = JSON.stringify({ name: row.name, path: tilePath(row.segments), sig: row.sig ?? '' })
+        event.dataTransfer?.setData(TILE_DRAG_TYPE, payload)
+        event.dataTransfer?.setData('text/plain', tilePath(row.segments))
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+      })
+
+      // THE ARROW OPENS THE TILE'S CHATS. It is its own control, not part of
+      // the row: pressing it must never change who you are talking to, only
+      // show you what there is to talk in.
+      const chevron = document.createElement('button')
+      chevron.type = 'button'
+      chevron.className = 'hc-rail-chev'
+      chevron.textContent = '›'
+      const chatsLabel = this.#t('agent.rail-chats', 'Conversations on this tile')
+      chevron.title = chatsLabel
+      chevron.setAttribute('aria-label', chatsLabel)
+      chevron.setAttribute('aria-expanded', this.#expanded.has(key) ? 'true' : 'false')
+      chevron.addEventListener('click', event => {
+        event.stopPropagation()
+        this.#toggleChats(key, row)
+      })
+
+      wrap.append(main, chevron)
       list.appendChild(wrap)
+      if (this.#expanded.has(key)) list.appendChild(this.#chatsPanel(key, row))
     }
 
     // The rows exist; now say what each one holds.
@@ -750,6 +850,89 @@ export class AgentTilesRail {
     }
   }
 
+  /** Fold a tile's conversations open or shut. */
+  #toggleChats(key: string, row: RailRow): void {
+    if (this.#expanded.has(key)) this.#expanded.delete(key)
+    else this.#expanded.add(key)
+    this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
+  }
+
+  /** Repaint open panels in place when the thread pool moves under them. */
+  #repaintExpanded(): void {
+    const list = this.#list
+    if (!list) return
+    for (const panel of list.querySelectorAll<HTMLElement>('.hc-rail-chats')) {
+      const key = panel.dataset['key'] ?? ''
+      const rows = this.#levels.get(pathKey(this.#here())) ?? []
+      const row = rows.find(candidate => pathKey(candidate.segments) === key)
+      if (row) panel.replaceWith(this.#chatsPanel(key, row))
+    }
+  }
+
+  /** THE TILE'S CONVERSATIONS. Every thread that names this tile, newest
+   *  first, plus the way to start another — because a tile is a subject and
+   *  two subjects' worth of thinking should not share one transcript. */
+  #chatsPanel(key: string, row: RailRow): HTMLElement {
+    const path = tilePath(row.segments)
+    const panel = document.createElement('div')
+    panel.className = 'hc-rail-chats'
+    panel.dataset['key'] = key
+    panel.setAttribute('role', 'list')
+
+    const chats = this.#chatsFor(path)
+    const open = this.#subject?.convoId ?? this.#stickyChat(path)
+
+    for (const chat of chats) {
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = 'hc-rail-chat'
+      item.setAttribute('role', 'listitem')
+      item.classList.toggle('current', chat.convoId === open)
+      if (chat.unread) item.classList.add('unread')
+
+      const title = document.createElement('span')
+      title.className = 'hc-rail-chat-name'
+      title.textContent = chat.title || this.#t('agent.rail-chat-untitled', 'Untitled')
+
+      const meta = document.createElement('span')
+      meta.className = 'hc-rail-chat-meta'
+      meta.textContent = this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(chat.turns))
+
+      item.append(title, meta)
+      item.addEventListener('click', event => {
+        event.stopPropagation()
+        this.#enterChat(row, key, chat.convoId)
+      })
+      panel.appendChild(item)
+    }
+
+    const fresh = document.createElement('button')
+    fresh.type = 'button'
+    fresh.className = 'hc-rail-chat hc-rail-chat-new'
+    fresh.textContent = this.#t('agent.rail-chat-new', '+ New conversation')
+    fresh.addEventListener('click', event => {
+      event.stopPropagation()
+      // The FIRST chat on a tile is the derived id — no suffix, no
+      // bookkeeping. Only a second one needs minting.
+      const id = chats.length ? newTileConvoId(row.segments) : tileConvoId(row.segments)
+      this.#enterChat(row, key, id)
+    })
+    panel.appendChild(fresh)
+    return panel
+  }
+
+  /** Enter one named conversation on a tile, and remember it as this tile's
+   *  chat so coming back resumes it. */
+  #enterChat(row: RailRow, key: string, convoId: string): void {
+    const path = tilePath(row.segments)
+    this.#rememberChat(path, convoId)
+    const wrap = this.#list?.querySelector<HTMLElement>(`.hc-rail-row[data-key="${CSS.escape(key)}"]`)
+    if (wrap) this.#markCurrent(wrap)
+    this.#subject = { key, path: row.segments.slice(0, -1), name: row.name, sig: row.sig, convoId }
+    this.onSubjectChanged(this.#subject)
+    this.#repaintExpanded()
+  }
+
   /** Choose or release a row as CONTEXT. Independent of the conversation you
    *  are in: you can gather five tiles and then ask about them from any of
    *  them, or from none. */
@@ -770,8 +953,14 @@ export class AgentTilesRail {
    *  what you type after this belongs to the tile you just clicked. */
   #enter(wrap: HTMLElement, key: string, row: RailRow): void {
     this.#markCurrent(wrap)
-    this.#subject = { key, path: row.segments.slice(0, -1), name: row.name }
+    // Clicking the row resumes the chat you were last in on this tile, or its
+    // first one. Which conversation you land in is never a surprise.
+    const path = tilePath(row.segments)
+    const convoId = this.#stickyChat(path) || tileConvoId(row.segments)
+    this.#rememberChat(path, convoId)
+    this.#subject = { key, path: row.segments.slice(0, -1), name: row.name, sig: row.sig, convoId }
     this.onSubjectChanged(this.#subject)
+    this.#repaintExpanded()
   }
 
   /** Light exactly one row as the conversation in hand — in colour AND in the
@@ -801,8 +990,31 @@ export class AgentTilesRail {
     let chats: TileConversation[] = []
     try { chats = await listTileConversations() } catch { return }
     if (this.#disposed) return
-    this.#chats = new Map(chats.map(c => [c.path, c]))
+    this.#chatList = chats
+    this.#chats = foldTileConversations(chats)
     this.#paintStatus()
+    // An unfolded list showing yesterday's threads is worse than none.
+    if (this.#expanded.size) this.#repaintExpanded()
+  }
+
+  /** The conversations on one tile, newest first. */
+  #chatsFor(path: string): TileConversation[] {
+    return this.#chatList.filter(chat => chat.path === path)
+  }
+
+  /** THE CHAT YOU WERE LAST IN on this tile — sticky, so coming back to a
+   *  tile resumes where you were rather than dropping you in its first
+   *  thread. Per device, like every other read-position in the product. */
+  #stickyChat(path: string): string {
+    try { return JSON.parse(localStorage.getItem(STICKY_KEY) ?? '{}')[path] ?? '' } catch { return '' }
+  }
+
+  #rememberChat(path: string, convoId: string): void {
+    try {
+      const map = JSON.parse(localStorage.getItem(STICKY_KEY) ?? '{}') as Record<string, string>
+      map[path] = convoId
+      localStorage.setItem(STICKY_KEY, JSON.stringify(map))
+    } catch { /* participant-local convenience */ }
   }
 
   /** Paint every row's state from the three sources at once. One pass, so a
@@ -820,6 +1032,24 @@ export class AgentTilesRail {
       const turns = chat?.turns ?? 0
       const draft = this.#drafts.has(path)
       const unread = !!chat?.unread
+
+      // A SET, DRAWN AS ONE. Rows in the active set carry a bracket down
+      // their edge, closed at the top and bottom of each contiguous run, so
+      // three tiles chosen together read as one handful rather than three
+      // coincidences. A run that is broken by a tile you did not choose is
+      // drawn as two brackets, which is the truth.
+      const inSet = this.#grouped.has(path)
+      row.classList.toggle('grouped', inSet)
+      if (inSet) {
+        const rows = [...list.querySelectorAll<HTMLElement>('.hc-rail-row')]
+        const at = rows.indexOf(row)
+        const pathOf = (element?: HTMLElement): string =>
+          element ? tilePath(keySegments(element.dataset['key'] ?? '')) : ''
+        row.classList.toggle('grouped-first', !this.#grouped.has(pathOf(rows[at - 1])))
+        row.classList.toggle('grouped-last', !this.#grouped.has(pathOf(rows[at + 1])))
+      } else {
+        row.classList.remove('grouped-first', 'grouped-last')
+      }
 
       row.classList.toggle('spoken', turns > 0)
       row.classList.toggle('unread', unread)

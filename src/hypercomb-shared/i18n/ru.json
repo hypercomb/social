@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "реплик: {count}",
   "agent.rail-unread": "непрочитанный ответ",
   "agent.rail-working": "в работе: {count}",
+  "agent.rail-chats": "Разговоры об этой плитке",
+  "agent.rail-chat-new": "+ Новый разговор",
+  "agent.rail-chat-untitled": "Без названия",
   "slash.menu": "Быстрое меню — семь шестиугольников у курсора; смахните в сторону, чтобы выбрать",
   "quickmenu.root": "Улей",
   "quickmenu.workflow": "Процесс",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "Разговор с {tile} — открыть ваши разговоры",
   "chat.subject.none": "Ни о какой плитке — открыть ваши разговоры",
   "chat.list.draft": "черновик",
+  "chat.payload": "Что несёт этот запрос",
+  "chat.work.empty": "Перетащите сюда ветку, которую нужно изменить",
+  "chat.work.filled": "Меняем {tile} — нажмите, чтобы отпустить",
+  "chat.work.drop": "нужны изменения",
+  "chat.context.drop": "Перетащите ветку, чтобы добавить её в контекст",
+  "chat.context.one": "{tile} — вспомогательный контекст, нажмите, чтобы убрать",
   "mesh-modal.needs-location": "для присоединения нужно место",
   "mesh-modal.needs-secret": "для присоединения нужен секрет"
 }

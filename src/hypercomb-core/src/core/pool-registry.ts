@@ -136,6 +136,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // so neither can collide with a tile slugged 'context' or 'changes'.
   'context:basket',
   'context:draft',
+  // Named handfuls of tiles asked about together (assistant/context-groups.ts).
+  // A group is IDENTITY over a set of signatures — two groups may hold the
+  // same tiles and stay two groups — and it is participant-local working
+  // state, so it is a pool and never a layer.
+  'context:groups',
   // The feedback inbox's summary log — one append-only record per bridge
   // start, saying who was waiting on whom at that moment (see
   // assistant/feedback-summaries.ts). TRUTH POOL, never minted from the

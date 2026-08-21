@@ -132,6 +132,8 @@ type ChatThreadsLike = {
   saveTileDraft?(path: string, text: string): Promise<boolean>
   /** Read-marker for the list's unread mark. Per DEVICE, not per hive. */
   markConversationSeen?(convoId: string, at?: number): void
+  /** Every held draft, so the roster can list what has no turns yet. */
+  listTileDrafts?(): Promise<ReadonlyArray<{ path: string; text: string }>>
 }
 
 type QueenLike = {
@@ -158,7 +160,19 @@ type SelectionLike = { selected: ReadonlySet<string> }
  *  It lives in essentials (assistant/agent-tiles-rail.ts) and shared must
  *  never import essentials, so it arrives structurally through the factory
  *  it registers in IoC. */
-type RailPickLike = { readonly key: string; readonly path: readonly string[]; readonly name: string }
+type RailPickLike = {
+  readonly key: string
+  readonly path: readonly string[]
+  readonly name: string
+  readonly sig?: string
+  readonly convoId?: string
+}
+
+/** A tile dragged out of the sidebar. The CONTRACT with essentials is this
+ *  mime type and this shape — the shell may never import the module that
+ *  sends it, so the wire is a string, not a type. */
+export const TILE_DRAG_TYPE = 'application/x-hypercomb-tile'
+export type DroppedTile = { readonly name: string; readonly path: string; readonly sig: string }
 type TilesRailLike = {
   onSubjectChanged: (subject: RailPickLike | null) => void
   onSelectionChanged: (selection: RailPickLike[]) => void
@@ -402,11 +416,136 @@ export class ChatWindowComponent implements OnDestroy {
   /** The gathered tiles, named, for the chip's tooltip. */
   readonly contextNames = computed(() => this.railContext().map(pick => pick.name).join(', '))
 
+  // ── TWO KINDS OF DATA IN ONE REQUEST ──────────────────────────────────
+  //
+  // They are not the same thing and conflating them is why an answer can be
+  // well-informed and still edit the wrong tile:
+  //
+  //   THE WORK BRANCH   the branch that needs CHANGES. One. It is what the
+  //                     ask applies to, and what an answer is written onto.
+  //   THE CONTEXT       supporting branches and resources the responder
+  //                     should READ. Any number, in the order you added
+  //                     them, carried as signatures so the payload is the
+  //                     same bytes every time it is composed.
+  //
+  // Both are filled by dropping a tile from the sidebar, and both are
+  // signatures the moment they land — a name would make the request depend
+  // on where the hive stood when it was sent.
+
+  /** The branch that needs changes, or null to mean "this conversation's own
+   *  tile" — which is the honest default and needs no furniture. */
+  readonly workBranch = signal<DroppedTile | null>(null)
+
+  /** Fill the work box from a drop, or clear it. */
+  setWorkBranch(tile: DroppedTile | null): void {
+    this.workBranch.set(tile)
+  }
+
+  /** Add a supporting branch. Duplicates collapse — a set of signatures is a
+   *  set — and the order you added them in is kept, because it is the only
+   *  editorial signal the list carries. */
+  addContext(tile: DroppedTile): void {
+    if (!tile.sig && !tile.path) return
+    const held = this.railContext()
+    if (held.some(pick => pick.sig === tile.sig && pick.name === tile.name)) return
+    this.railContext.set([...held, {
+      key: tile.path,
+      path: tile.path.split('/').filter(Boolean).slice(0, -1),
+      name: tile.name,
+      sig: tile.sig,
+    }])
+    this.#announceSet()
+  }
+
+  /** Tell the sidebar which tiles are in the set being asked about, so it can
+   *  draw them as one handful. The window owns the set; the rail only shows
+   *  it — it must never have to guess from its own selection state, which is
+   *  a different thing that happens to overlap. */
+  #announceSet(): void {
+    const paths = this.railContext().map(pick =>
+      pick.key.startsWith('/') ? pick.key : '/' + [...pick.path, pick.name].join('/'))
+    EffectBus.emit('context:active-set', { paths })
+  }
+
+  /** Drop one supporting branch. */
+  removeContext(index: number): void {
+    this.railContext.set(this.railContext().filter((_, at) => at !== index))
+    this.#announceSet()
+  }
+
+  /** Read a dragged tile, whatever surface dropped it. Returns null for a
+   *  drag that is not one of ours, so an accidental file drop does nothing. */
+  readDrop(event: DragEvent): DroppedTile | null {
+    const raw = event.dataTransfer?.getData(TILE_DRAG_TYPE)
+    if (!raw) return null
+    try {
+      const parsed = JSON.parse(raw) as Partial<DroppedTile>
+      const name = String(parsed?.name ?? '').trim()
+      const path = String(parsed?.path ?? '').trim()
+      if (!name && !path) return null
+      return { name: name || path, path, sig: String(parsed?.sig ?? '') }
+    } catch { return null }
+  }
+
+  onDropWork(event: DragEvent): void {
+    event.preventDefault()
+    this.dragOverWork.set(false)
+    const tile = this.readDrop(event)
+    if (tile) this.setWorkBranch(tile)
+  }
+
+  onDropContext(event: DragEvent): void {
+    event.preventDefault()
+    this.dragOverContext.set(false)
+    const tile = this.readDrop(event)
+    if (tile) this.addContext(tile)
+  }
+
+  /** A drop target has to LOOK like one while something is over it. */
+  readonly dragOverWork = signal(false)
+  readonly dragOverContext = signal(false)
+
+  onDragOver(event: DragEvent, which: 'work' | 'context'): void {
+    if (!event.dataTransfer?.types?.includes(TILE_DRAG_TYPE)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (which === 'work') this.dragOverWork.set(true)
+    else this.dragOverContext.set(true)
+  }
+
+  onDragLeave(which: 'work' | 'context'): void {
+    if (which === 'work') this.dragOverWork.set(false)
+    else this.dragOverContext.set(false)
+  }
+
+  // WHOSE CONVERSATION IS THIS? Read off the CONVERSATION, never off the
+  // sidebar — the sidebar exists only in full screen, and a thread resumed
+  // from the roster has no sidebar state at all. The id knows: a tile chat is
+  // `chat:tile:/dolphin/site`, and everything else is about nothing in
+  // particular. Without this the window opened on a thread and said only
+  // "Chat", which is the one thing it could say that is never wrong and never
+  // useful.
+
+  /** The tile path this conversation belongs to, or '' for a free chat. */
+  readonly subjectPath = computed(() => {
+    void this.turns()   // recomputed as the thread moves, so it can never lag
+    return this.#threads()?.tilePathOf?.(this.activeId()) ?? ''
+  })
+
+  /** What the header says: the tile's own name, or nothing to name. */
+  readonly subjectName = computed(() => {
+    const path = this.subjectPath()
+    if (!path || path === '/') return ''
+    const segments = path.split('/').filter(Boolean)
+    return segments[segments.length - 1] ?? ''
+  })
+
   /** Let the whole gathering go. The tiles are untouched — only the list of
    *  signatures the next question would have carried. */
   clearContext(): void {
     this.#rail?.clearSelection()
     this.railContext.set([])
+    this.#announceSet()
     this.#focus()
   }
 
@@ -414,6 +553,55 @@ export class ChatWindowComponent implements OnDestroy {
    *  records) — they ride with every question, and a rider the participant
    *  cannot see is a surprise, so the count is shown beside the path. */
   readonly contextCount = signal(0)
+
+  /** Unsent drafts, by their own key — a tile path, or a free chat's id.
+   *  Held here so the roster can list a conversation that has NOTHING in it
+   *  yet but your words. */
+  readonly drafts = signal<readonly { key: string; text: string }[]>([])
+
+  /** THE ROSTER — every conversation you could return to, which is not the
+   *  same as every conversation that holds a turn.
+   *
+   *  A chat you typed into and left without sending has no turns, so the
+   *  thread walk cannot see it, so it never appeared here — and the words
+   *  were unreachable from the moment you clicked away. They were never
+   *  lost (the drafts pool had them all along), but a thing you cannot get
+   *  back to may as well be gone. Draft-only conversations are folded in,
+   *  and tile chats are named by their TILE rather than by their first
+   *  sentence, because that is what you would look for. */
+  readonly roster = computed(() => {
+    const threads = this.#threads()
+    const tileOf = (id: string): string => threads?.tilePathOf?.(id) ?? ''
+    const rows = this.conversations().map(convo => ({
+      convoId: convo.convoId,
+      tile: tileOf(convo.convoId),
+      title: convo.title,
+      turnCount: convo.turnCount,
+      lastAt: convo.lastAt,
+      draft: '',
+    }))
+
+    const known = new Set(rows.map(row => row.convoId))
+    for (const held of this.drafts()) {
+      // A tile's draft is keyed by its path; a free chat's by its own id.
+      const convoId = held.key.startsWith('/')
+        ? (threads?.tileConvoId?.(held.key.split('/').filter(Boolean)) ?? '')
+        : held.key
+      if (!convoId) continue
+      const existing = rows.find(row => row.convoId === convoId)
+      if (existing) { existing.draft = held.text; continue }
+      if (known.has(convoId)) continue
+      rows.push({
+        convoId,
+        tile: tileOf(convoId),
+        title: held.text,
+        turnCount: 0,
+        lastAt: 0,
+        draft: held.text,
+      })
+    }
+    return rows.sort((a, b) => b.lastAt - a.lastAt)
+  })
 
   /** Deleting a thread destroys turns that cannot be dragged back, so the
    *  button ARMS on the first press and deletes on the second. A confirm
@@ -623,7 +811,10 @@ export class ChatWindowComponent implements OnDestroy {
         if (this.#rail || !factory?.create) return
         this.#rail = factory.create()
         this.#rail.onSubjectChanged = subject => { void this.#enterSubject(subject) }
-        this.#rail.onSelectionChanged = selection => { this.railContext.set([...selection]) }
+        this.#rail.onSelectionChanged = selection => {
+          this.railContext.set([...selection])
+          this.#announceSet()
+        }
         // The host captured here may have been replaced by the time a late
         // factory lands — mount into whatever full screen is showing NOW.
         const live = this.chatRail()?.nativeElement
@@ -643,6 +834,11 @@ export class ChatWindowComponent implements OnDestroy {
     }))
 
     this.#cleanups.push(EffectBus.on('chat:close', () => { if (this.visible()) this.close() }))
+
+    // A draft landing anywhere — this composer, another window, a sweep — is
+    // a change to the roster, because a conversation that holds only unsent
+    // words is still a conversation you must be able to get back to.
+    this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
 
     // The retired ask screen's channel. Kept because other surfaces open a
     // conversation through it — the skills window's "use" action and the
@@ -1030,6 +1226,18 @@ export class ChatWindowComponent implements OnDestroy {
     const threads = this.#threads()
     if (!threads) return
     this.conversations.set(await threads.listConversations())
+    await this.#refreshDrafts()
+  }
+
+  /** Read every held draft, so the roster can show the conversations that
+   *  exist only as something you were part-way through saying. */
+  async #refreshDrafts(): Promise<void> {
+    const threads = this.#threads()
+    if (!threads?.listTileDrafts) return
+    try {
+      const held = await threads.listTileDrafts()
+      this.drafts.set(held.map(entry => ({ key: entry.path, text: entry.text })))
+    } catch { /* the roster degrades to turns-only, never to an error */ }
   }
 
   /** Move a conversation to the top of the IN-MEMORY list after a turn lands —
@@ -1194,11 +1402,33 @@ export class ChatWindowComponent implements OnDestroy {
     this.armed.set('')
     const threads = this.#threads()
     if (!threads) return
+
+    // A DRAFT-ONLY ROW IS THE DRAFT. Deleting the (empty) bucket would leave
+    // the words in the pool and the row would come straight back on the next
+    // refresh. A conversation that HOLDS TURNS is different: its tile's
+    // unsent thinking is standing intent about the tile, not part of the
+    // thread being thrown away, and it stays.
+    const row = this.roster().find(entry => entry.convoId === convoId)
+    if (row && row.turnCount === 0 && row.draft) {
+      const key = threads.tilePathOf?.(convoId) || convoId
+      await threads.saveTileDraft?.(key, '')
+    }
+
+    // Leaving the conversation being deleted must not carry its words into
+    // the next one: the box is emptied and the pending debounce cancelled
+    // BEFORE anything else is loaded.
+    if (this.activeId() === convoId) {
+      if (this.#draftTimer !== null) { clearTimeout(this.#draftTimer); this.#draftTimer = null }
+      this.#heldDraft = ''
+      const box = this.input()?.nativeElement
+      if (box) { box.value = ''; this.autosize(box) }
+    }
+
     await threads.deleteConversation(convoId)
     await this.#refreshList()
     if (this.activeId() === convoId) {
       const next = this.conversations()[0]
-      if (next) await this.#load(next.convoId)
+      if (next) { await this.#load(next.convoId); await this.#restoreDraft() }
       else this.newChat()
     }
   }
@@ -1263,12 +1493,29 @@ export class ChatWindowComponent implements OnDestroy {
    *  drilled level rides as its full `/path/name`, which is self-describing
    *  to the responder without any protocol change. */
   #chosenTargets(): string[] {
+    // THE WORK BRANCH WINS. Dropping a branch into the work box is the
+    // participant saying "change THIS", and it outranks whichever tile's
+    // conversation happens to be open.
+    const work = this.workBranch()
+    if (work?.path) {
+      const segments = work.path.split('/').filter(Boolean)
+      const parent = segments.slice(0, -1)
+      const named = JSON.stringify(parent) === JSON.stringify(this.here())
+        ? segments[segments.length - 1]
+        : work.path
+      return [...new Set([...this.targets(), named])]
+    }
+
+    // Otherwise the tile comes from the CONVERSATION. Reading it off the
+    // sidebar meant a tile chat opened from the roster — or in the docked
+    // window, which has no sidebar — asked its question about nothing.
+    const path = this.subjectPath()
+    if (!path || path === '/') return [...new Set(this.targets())]
+    const segments = path.split('/').filter(Boolean)
     const hereJson = JSON.stringify(this.here())
-    const subject = this.railSubject()
-    const named = subject
-      ? [JSON.stringify(subject.path) === hereJson ? subject.name : '/' + [...subject.path, subject.name].join('/')]
-      : []
-    return [...new Set([...this.targets(), ...named])]
+    const parent = segments.slice(0, -1)
+    const named = JSON.stringify(parent) === hereJson ? segments[segments.length - 1] : path
+    return [...new Set([...this.targets(), named])]
   }
 
   /** The tile's attached context, resolved to content sigs for the SHALLOW

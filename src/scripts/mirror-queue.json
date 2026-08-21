@@ -1208,6 +1208,24 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "chat-context-strip-clipboard",
+      "title": "Chat context strip = the clipboard - drop targets gather references as sig entries",
+      "run": null,
+      "note": "DECIDED with Jaime 2026-08-21: the chat window's context drop targets (square tile thumbnails in a linear left-to-right strip, wider rect drop zone) are a VIEW OF THE CLIPBOARD, not a separate tray - one gathered set that the strip, the clipboard panel rows, and the hive's swap takes all share. Primitive shipped (d823ff140): clipboard:take-entries copy-appends explicit {label, sourceSegments, sig?} entries (rail drag payload), sealing missing sigs. Chat-window integration DEFERRED (another session holds uncommitted workBranch/railContext drop-box work there); merge step converts railContext to clipboard-backed and sends attach the strip's sigs as context. Mirror owed once the strip lands: tiles for the strip + take-entries part under the clipboard/assistant behaviors, notes carrying the strip=clipboard decision and the never-cuts rule, marked with the declared clipboard/assistant pheromones.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
+    },
+    {
+      "id": "context-groups",
+      "title": "Mirror: the set is content, the group is identity — context groups, bracketed in the sidebar",
+      "run": null,
+      "note": "BUILT: assistant/context-groups.ts + pool context:groups (seeded in pool-registry). A context SET is content (setSignature = sha256 of sorted deduped member sigs, so two groups over the same tiles compose byte-identical payloads and dedupe); a GROUP is identity (id + label + members), never derived from contents, so two groups may hold the same tiles and stay two with two labels. Two distinct acts: startGroup = NEW IDENTITY over the same members; addToGroup = same identity, NEW CONTENT (setSig changes, id and label do not). A tile can be in several groups and still hold a solo chat — no group owns a tile. Sidebar: rows in the active set carry a typographic brace down the right edge, capped at each contiguous run (grouped/grouped-first/grouped-last), opposite the conversation gutter so it can never be read as a chat state; the window announces the set on context:active-set. Header: work box (the branch that needs CHANGES, amber) + context boxes (supporting signatures, steel), both drag-and-drop from draggable rail rows over application/x-hypercomb-tile. 7 specs pin the identity/content split. OWED: notes on the copilot-rail tile for grouping + the two acts; a part tile for context-groups.ts; the UI affordance to NAME and persist a working set as a group (module exists, affordance does not); draft-only chats missing from the tile chat panel. Manual — note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }

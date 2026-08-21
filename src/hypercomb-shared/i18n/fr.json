@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count} échanges",
   "agent.rail-unread": "réponse non lue",
   "agent.rail-working": "{count} en cours",
+  "agent.rail-chats": "Conversations sur cette tuile",
+  "agent.rail-chat-new": "+ Nouvelle conversation",
+  "agent.rail-chat-untitled": "Sans titre",
   "slash.menu": "Menu rapide — sept hexagones au pointeur ; donnez une direction d'un geste pour choisir",
   "quickmenu.root": "Ruche",
   "quickmenu.workflow": "Flux de travail",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "En conversation avec {tile} — ouvrez vos conversations",
   "chat.subject.none": "Ne concerne aucune tuile — ouvrez vos conversations",
   "chat.list.draft": "brouillon",
+  "chat.payload": "Ce que cette demande emporte",
+  "chat.work.empty": "Déposez la branche à modifier",
+  "chat.work.filled": "Modifie {tile} — cliquez pour la relâcher",
+  "chat.work.drop": "à modifier",
+  "chat.context.drop": "Déposez une branche pour l’ajouter au contexte",
+  "chat.context.one": "{tile} — contexte de soutien, cliquez pour retirer",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
 }

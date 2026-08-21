@@ -125,13 +125,35 @@ export const TILE_CONVO_PREFIX = 'chat:tile:'
 export const tilePath = (segments: readonly string[]): string =>
   '/' + segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
 
-/** The conversation id for a tile. Pure derivation: no store, no await. */
+/** A tile's FIRST conversation. Pure derivation: no store, no await, so
+ *  arriving at a tile always resolves to the same thread and a tile nobody
+ *  has spoken to costs nothing. */
 export const tileConvoId = (segments: readonly string[]): string =>
   `${TILE_CONVO_PREFIX}${tilePath(segments)}`
 
+/** Separates a tile's path from the chat's own id. A path segment can never
+ *  contain it — `lineageKey` folds every non-letter/number to `-` — so the
+ *  split is unambiguous forever. */
+const CHAT_SEP = '::'
+
+/** ANOTHER conversation about the same tile.
+ *
+ *  A tile is not one conversation, it is a SUBJECT: you can have the
+ *  architecture thread and the copy-edit thread about the same tile and want
+ *  neither to pollute the other. The first is the derived id above (so the
+ *  common case still needs no bookkeeping); every one after it hangs off the
+ *  same path with its own suffix, which keeps `tilePathOf` — and therefore
+ *  every row mark, draft key and ask target — working unchanged. */
+export const newTileConvoId = (segments: readonly string[], seed?: string): string =>
+  `${tileConvoId(segments)}${CHAT_SEP}${seed ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`
+
 /** The tile a conversation belongs to, or '' for a free-floating chat. */
-export const tilePathOf = (convoId: string): string =>
-  convoId.startsWith(TILE_CONVO_PREFIX) ? convoId.slice(TILE_CONVO_PREFIX.length) : ''
+export const tilePathOf = (convoId: string): string => {
+  if (!convoId.startsWith(TILE_CONVO_PREFIX)) return ''
+  const rest = convoId.slice(TILE_CONVO_PREFIX.length)
+  const cut = rest.indexOf(CHAT_SEP)
+  return cut < 0 ? rest : rest.slice(0, cut)
+}
 
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
@@ -387,7 +409,11 @@ const SEEN_KEY = 'hc:chat-seen'
 
 /** What the rail needs to know about one tile's conversation. */
 export interface TileConversation {
+  /** The tile it is about — several conversations can share one path. */
   readonly path: string
+  readonly convoId: string
+  /** Its first message, which is what names it in the list. */
+  readonly title: string
   readonly turns: number
   readonly lastAt: number
   /** The newest turn landed after the last time this thread was opened. */
@@ -412,9 +438,9 @@ export const markConversationSeen = (convoId: string, at: number = Date.now()): 
   } catch { /* participant-local convenience — never worth failing a read */ }
 }
 
-/** Every TILE that holds a conversation, keyed by tile path. One walk of the
- *  threads pool; free-floating chats are skipped because no row can show
- *  them. */
+/** Every conversation that belongs to a TILE — several per tile is normal.
+ *  One walk of the threads pool; free-floating chats are skipped because no
+ *  row can show them. */
 export const listTileConversations = async (): Promise<TileConversation[]> => {
   const seen = seenMap()
   const out: TileConversation[] = []
@@ -423,12 +449,33 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
     if (!path) continue
     out.push({
       path,
+      convoId: convo.convoId,
+      title: convo.title,
       turns: convo.turnCount,
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
     })
   }
-  return out
+  return out.sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/** What a row has to say about a TILE, folded from all of its conversations:
+ *  the deepest thread's turn count is not the point — whether ANY of them is
+ *  unread, and how much has been said here in total, is. */
+export const foldTileConversations = (
+  chats: readonly TileConversation[],
+): Map<string, { turns: number; unread: boolean; chats: number; lastAt: number }> => {
+  const byPath = new Map<string, { turns: number; unread: boolean; chats: number; lastAt: number }>()
+  for (const chat of chats) {
+    const held = byPath.get(chat.path) ?? { turns: 0, unread: false, chats: 0, lastAt: 0 }
+    byPath.set(chat.path, {
+      turns: held.turns + chat.turns,
+      unread: held.unread || chat.unread,
+      chats: held.chats + 1,
+      lastAt: Math.max(held.lastAt, chat.lastAt),
+    })
+  }
+  return byPath
 }
 
 /** Drop a conversation and every turn in it. The one destructive act this
@@ -560,6 +607,8 @@ export const saveTileDraft = async (path: string, text: string): Promise<boolean
 export class ChatThreads {
   readonly appendTurn = appendTurn
   readonly listTileConversations = listTileConversations
+  readonly foldTileConversations = foldTileConversations
+  readonly newTileConvoId = newTileConvoId
   readonly markConversationSeen = markConversationSeen
   readonly tileConvoId = tileConvoId
   readonly tilePath = tilePath

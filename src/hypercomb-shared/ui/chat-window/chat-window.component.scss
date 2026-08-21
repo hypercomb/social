@@ -99,10 +99,111 @@ $accent: #7eb6d6;
   color: rgba($accent, 0.8);
 }
 
-.chat-title {
+// THE HEADER IS THE REQUEST. The tile it is about, then the branch that needs
+// changing, then everything the responder should read — left to right, in the
+// order a sentence would say it.
+.chat-subject {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 40%;
   font-size: 0.9em;
   letter-spacing: 0.05em;
+}
+
+.chat-payload {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  margin-left: 0.5rem;
+  overflow: hidden;
+}
+
+// A BOX. Empty it is an outline waiting for something; filled it names what
+// it holds and offers to let go. Dashed while empty because a dashed
+// rectangle is the one shape that reads as "put something here".
+.chat-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  max-width: 10rem;
+  min-width: 2rem;
+  padding: 0.1em 0.4em;
+  border: 1px dashed rgba($accent, 0.4);
+  border-radius: var(--hc-radius-control, 2px);
+  background: none;
+  color: rgba($accent, 0.75);
+  font: inherit;
+  font-size: 0.82em;
+  line-height: 1.6;
+  cursor: pointer;
+
+  &.filled {
+    border-style: solid;
+    background: rgba($accent, 0.12);
+    color: rgba($accent, 0.98);
+  }
+
+  // While a tile is over it, the box says so — a drop target that does not
+  // react is a drop target nobody trusts.
+  &.over {
+    border-color: rgba($accent, 0.95);
+    background: rgba($accent, 0.22);
+    color: rgba(238, 244, 250, 0.98);
+  }
+
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+
+  .mat-sym { font-size: 1.05em; opacity: 0.85; }
+}
+
+// The work box is the one that CHANGES things, so it wears the warmer colour
+// the rest of the product uses for "the hive is acting".
+.chat-box-work {
+  border-color: rgba(226, 196, 140, 0.45);
+  color: rgba(226, 196, 140, 0.85);
+
+  &.filled { background: rgba(226, 196, 140, 0.14); border-color: rgba(226, 196, 140, 0.75); color: rgba(226, 196, 140, 0.98); }
+  &.over { border-color: rgba(226, 196, 140, 0.95); background: rgba(226, 196, 140, 0.26); }
+}
+
+.chat-box-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--hc-mono, monospace);
+}
+
+.chat-box-hint { opacity: 0.75; }
+.chat-box-off { opacity: 0.7; }
+
+.chat-box-add {
+  justify-content: center;
+  min-width: 1.5rem;
+  color: rgba($accent, 0.6);
+}
+
+// THE TITLE IS A CONTROL. It names the conversation and opens the roster, so
+// "which tile am I in" and "how do I get back" are answered by the same word.
+.chat-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  min-width: 0;
+  padding: 0.1em 0.35em;
+  border: 0;
+  border-radius: var(--hc-radius-control, 2px);
+  background: none;
+  font-size: 0.9em;
+  letter-spacing: 0.05em;
+  font-family: inherit;
   color: rgba($accent, 0.95);
+  cursor: pointer;
+
+  &:hover, &.on { background: rgba($accent, 0.14); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
 }
 
 // Pushes the focus/close cluster hard right without space-between, so the
@@ -667,6 +768,47 @@ $accent: #7eb6d6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+// The tile's own name, in the mono the hive uses for addresses.
+.chat-subject-tile {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--hc-mono, monospace);
+  color: rgba($accent, 0.95);
+}
+
+.chat-subject-free { color: rgba(238, 244, 250, 0.82); }
+
+.chat-title-caret {
+  flex: 0 0 auto;
+  font-size: 1em;
+  opacity: 0.6;
+}
+
+// In the roster, the tile is the headline and the first sentence is the
+// subtitle — the reverse of a free chat, which has only the sentence.
+.chat-list-tile {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--hc-mono, monospace);
+  font-size: 0.82em;
+  color: rgba($accent, 0.95);
+}
+
+// A conversation that holds nothing but unsent words still has to be
+// findable, and has to say that is what it is.
+.chat-list-draft {
+  margin-right: 0.4em;
+  padding: 0 0.3em;
+  border: 1px solid rgba(238, 244, 250, 0.45);
+  border-radius: var(--hc-radius-control, 2px);
+  color: rgba(238, 244, 250, 0.85);
+  font-size: 0.92em;
 }
 
 .chat-targets {

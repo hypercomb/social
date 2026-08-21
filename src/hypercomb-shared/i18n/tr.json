@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count} tur",
   "agent.rail-unread": "okunmamış yanıt",
   "agent.rail-working": "{count} çalışıyor",
+  "agent.rail-chats": "Bu döşemedeki sohbetler",
+  "agent.rail-chat-new": "+ Yeni sohbet",
+  "agent.rail-chat-untitled": "Başlıksız",
   "slash.menu": "Hızlı menü — imlecin yanında yedi altıgen; seçmek için bir yöne fiske at",
   "quickmenu.root": "Kovan",
   "quickmenu.workflow": "İş akışı",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "{tile} ile konuşuyorsunuz — sohbetlerinizi açın",
   "chat.subject.none": "Hiçbir döşeme hakkında değil — sohbetlerinizi açın",
   "chat.list.draft": "taslak",
+  "chat.payload": "Bu isteğin taşıdıkları",
+  "chat.work.empty": "Değişmesi gereken dalı buraya bırakın",
+  "chat.work.filled": "{tile} değiştiriliyor — bırakmak için tıklayın",
+  "chat.work.drop": "değişmeli",
+  "chat.context.drop": "Bağlam olarak eklemek için bir dal bırakın",
+  "chat.context.one": "{tile} — destekleyici bağlam, kaldırmak için tıklayın",
   "mesh-modal.needs-location": "katılmak için bir konum gerekli",
   "mesh-modal.needs-secret": "katılmak için bir parola gerekli"
 }

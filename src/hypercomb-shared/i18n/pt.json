@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count} trocas",
   "agent.rail-unread": "resposta não lida",
   "agent.rail-working": "{count} trabalhando",
+  "agent.rail-chats": "Conversas sobre este bloco",
+  "agent.rail-chat-new": "+ Nova conversa",
+  "agent.rail-chat-untitled": "Sem título",
   "slash.menu": "Menu rápido — sete hexágonos no ponteiro; lance numa direção para escolher",
   "quickmenu.root": "Colmeia",
   "quickmenu.workflow": "Fluxo",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "Conversando com {tile} — abra suas conversas",
   "chat.subject.none": "Não é sobre nenhum bloco — abra suas conversas",
   "chat.list.draft": "rascunho",
+  "chat.payload": "O que este pedido leva",
+  "chat.work.empty": "Solte aqui o ramo que precisa de mudanças",
+  "chat.work.filled": "Alterando {tile} — clique para soltar",
+  "chat.work.drop": "precisa de mudanças",
+  "chat.context.drop": "Solte um ramo para adicioná-lo como contexto",
+  "chat.context.one": "{tile} — contexto de apoio, clique para remover",
   "mesh-modal.needs-location": "é necessário um local para entrar",
   "mesh-modal.needs-secret": "é necessário um segredo para entrar"
 }

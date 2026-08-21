@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count}회 대화",
   "agent.rail-unread": "읽지 않은 답장",
   "agent.rail-working": "{count}개 작업 중",
+  "agent.rail-chats": "이 타일의 대화",
+  "agent.rail-chat-new": "+ 새 대화",
+  "agent.rail-chat-untitled": "제목 없음",
   "slash.menu": "빠른 메뉴 — 포인터에 육각형 일곱 개; 방향으로 튕겨 선택",
   "quickmenu.root": "하이브",
   "quickmenu.workflow": "워크플로",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "{tile}와(과) 대화 중 — 대화 목록 열기",
   "chat.subject.none": "특정 타일에 대한 대화가 아닙니다 — 대화 목록 열기",
   "chat.list.draft": "초안",
+  "chat.payload": "이 요청이 가져가는 것",
+  "chat.work.empty": "변경할 브랜치를 여기에 놓으세요",
+  "chat.work.filled": "{tile} 변경 중 — 클릭하면 놓습니다",
+  "chat.work.drop": "변경 대상",
+  "chat.context.drop": "브랜치를 놓아 컨텍스트로 추가하세요",
+  "chat.context.one": "{tile} — 보조 컨텍스트, 클릭하면 제거",
   "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
   "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다"
 }

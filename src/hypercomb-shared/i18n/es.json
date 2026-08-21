@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count} turnos",
   "agent.rail-unread": "respuesta sin leer",
   "agent.rail-working": "{count} trabajando",
+  "agent.rail-chats": "Conversaciones sobre este mosaico",
+  "agent.rail-chat-new": "+ Nueva conversación",
+  "agent.rail-chat-untitled": "Sin título",
   "slash.menu": "Menú rápido — siete hexágonos junto al puntero; lanza en una dirección para elegir",
   "quickmenu.root": "Colmena",
   "quickmenu.workflow": "Flujo de trabajo",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "Hablando con {tile} — abre tus conversaciones",
   "chat.subject.none": "No trata de ningún mosaico — abre tus conversaciones",
   "chat.list.draft": "borrador",
+  "chat.payload": "Lo que lleva esta petición",
+  "chat.work.empty": "Suelta aquí la rama que necesita cambios",
+  "chat.work.filled": "Cambiando {tile} — haz clic para soltarla",
+  "chat.work.drop": "necesita cambios",
+  "chat.context.drop": "Suelta una rama para añadirla como contexto",
+  "chat.context.one": "{tile} — contexto de apoyo, haz clic para quitarlo",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
   "mesh-modal.needs-secret": "se necesita un secreto para unirse"
 }

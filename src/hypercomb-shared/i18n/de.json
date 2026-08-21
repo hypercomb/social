@@ -1934,6 +1934,9 @@
   "agent.rail-turns": "{count} Beiträge",
   "agent.rail-unread": "ungelesene Antwort",
   "agent.rail-working": "{count} arbeiten",
+  "agent.rail-chats": "Unterhaltungen zu dieser Kachel",
+  "agent.rail-chat-new": "+ Neue Unterhaltung",
+  "agent.rail-chat-untitled": "Ohne Titel",
   "slash.menu": "Schnellmenü — sieben Hexagone am Zeiger; in eine Richtung schnippen wählt aus",
   "quickmenu.root": "Bienenstock",
   "quickmenu.workflow": "Arbeitsablauf",
@@ -2147,6 +2150,12 @@
   "chat.subject.title": "Im Gespräch mit {tile} — deine Unterhaltungen öffnen",
   "chat.subject.none": "Zu keiner Kachel — deine Unterhaltungen öffnen",
   "chat.list.draft": "Entwurf",
+  "chat.payload": "Was diese Anfrage mitnimmt",
+  "chat.work.empty": "Zweig hierher ziehen, der geändert werden soll",
+  "chat.work.filled": "Ändert {tile} — klicken zum Loslassen",
+  "chat.work.drop": "braucht Änderungen",
+  "chat.context.drop": "Zweig hierher ziehen, um ihn als Kontext hinzuzufügen",
+  "chat.context.one": "{tile} — unterstützender Kontext, klicken zum Entfernen",
   "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
   "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt"
 }
