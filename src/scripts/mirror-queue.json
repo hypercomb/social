@@ -943,7 +943,7 @@
       "id": "youtube-embed-escape-hatch",
       "title": "Mirror the video viewer's escape hatch: tile for the watch-out fallback + the origin term, marked as parts of the youtube viewer, note explaining error 153",
       "run": "note-add on the youtube-viewer tile + a 'watch on youtube' part tile under it",
-      "note": "Fix: origin= param on both embed builders, always-present 'Watch on YouTube' pill, youtube added to native frame-src. note-add is additive so this is manual.",
+      "note": "Fix: always-present 'Watch on YouTube' pill, youtube added to native frame-src, origin= param on both embed builders. CORRECTION (2026-08-21, f51a5c013 superseded on this point): the origin= term was NOT the cause of error 153 and did not fix it — see the youtube-embed-referrer-153 entry. The mirror note must NOT tell the hive that origin= cures 153. note-add is additive so this is manual.",
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
@@ -1096,6 +1096,15 @@
       "title": "Behaviours mirror: the on-grid behaviour badge is gone; views are told apart by icon COLOUR on the tile",
       "run": null,
       "note": "Removed BehaviorMarkDrone (the corner glyph plates a bound behaviour painted on a child hexagon) — Jaime did not ask for a view badge on tiles. Replacement cue: view icons now wear their own colour inside the tile (family blue 0x7fb6e6, the layer's DEFAULT view in accent 0xc8b8ff, an offered-but-absent view muted 0x5f8199) in commands/visual-bee-icons.ts. Mirror pass owed: note-add on the behaviour-binding / views cards in the behaviors mirror recording that the binding's on-grid half is retired and colour is the only on-tile cue; drop any card minted for the mark drone. Manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
+    },
+    {
+      "id": "youtube-embed-referrer-153",
+      "title": "Video embeds: error 153 is a stripped REFERRER, not a missing origin term — the frame's referrerpolicy is load-bearing",
+      "run": "note-add on the youtube-viewer tile + a part tile for the referrer harness",
+      "note": "Real cause, proved 2026-08-21: hypercomb.io serves 'Referrer-Policy: same-origin', which sends NO referrer cross-origin; YouTube's player validates the embedding page from the HTTP Referer header, so a frame that inherits the document policy is refused with 'error 153 - video player configuration error' on every browser, every time. An element-level referrerpolicy overrides the document's - that attribute IS the fix. The origin= query term is a different mechanism (postMessage addressing) and does not satisfy the check, which is why f51a5c013 left 153 in place. The slides player already carried the attribute (slides-view.drone.ts #mediaElement), which is why decks played while the tile tap did not. Mirror owed: note on the youtube-viewer card recording referrer-vs-origin as two separate mechanisms and marking the referrerpolicy attribute load-bearing; correct/replace any note minted from the escape-hatch entry that credits origin= with curing 153; part tile for scripts/drive-youtube-embed-referrer.cjs (5 checks: source presence at both embed sites + a live control that must still 153). note-add is additive - needs a human.",
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
