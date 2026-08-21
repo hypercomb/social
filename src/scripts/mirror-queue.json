@@ -18,15 +18,6 @@
       "status": "pending"
     },
     {
-      "id": "nature-scene-roster",
-      "title": "Nature scene roster — moon and conifers replaced",
-      "run": "npx tsx scripts/mirror-nature-default.ts default",
-      "note": "Scenes 6/7/16 changed from night sky, pine forest and winter pines to drifting clouds, mossy river stones and snowfall over drifts (hard silhouettes and a near-black field do not work behind tile content). The behaviors/appearance/background 'default' note still lists the old three by name. Note-add is ADDITIVE, so the stale note must be removed on the tile before re-sending, or the roster lands twice.",
-      "created": "2026-08-05",
-      "status": "pending",
-      "unattended": false
-    },
-    {
       "id": "presentation-scene-24",
       "title": "Presentation scene 24 (how to bee) — tile and instruction note never landed",
       "run": "node scripts/presentation/instructions.cjs --push",
@@ -1169,6 +1160,15 @@
       "title": "the tutorials mirror is re-censused: retire window-views, add six lesson tiles, retext seven notes",
       "run": "npx tsx scripts/mirror-tutorials.ts",
       "note": "The expert course was audited against the shipped shell and rewritten. The hive mirror (tutorials root) is now behind in three ways. (1) RETIRED: the window-views lesson tile must be REMOVED from tutorials/expert with its notes, marks and group decoration - the Views toolwindow is gone and /views is a lens on the beehaviors window, so its teaching folded into window-features. (2) NEW: six lesson tiles are owed - window-format (45), window-reader (55), window-workflow (115), window-context (165, owed since 2026-08-13), window-feedback (168), window-publish (175). (3) RETEXT: the notes on window-command-line, window-editor, window-notes, window-tags, window-collections, window-clipboard, window-sequence, window-features, window-assistant, and intermediate/into are all rewritten in scripts/mirror-tutorials.ts and must REPLACE the notes already on those tiles. MANUAL because note-add is additive - a blind re-run doubles every note; the stale ones have to come off first.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
+    },
+    {
+      "id": "background-theme-quality-pass",
+      "title": "Background themes quality pass — 7 illustrated tile sets, 3 new themes",
+      "run": null,
+      "note": "All generated tile art rewritten (scripts/backgrounds/gen-tile-themes.mjs): film grain + blur atmospherics + layered silhouettes, seeded randomness, calm centre band for the label pill. Nature's 20 scenes are ALL NEW (dawn ridges, alpine lake, ocean, sunset cloudbank, desert night, forest light shafts, terraces, storm light, aurora, misty pines, lavender, moon over water, autumn fog, cherry bokeh, canyon beam, alpenglow, firefly meadow, waterfall mist, prairie thunderhead, winter birches) — the behaviors/appearance/background 'default' note that lists scenes by name is STALE and must be removed on the tile before re-sending (note-add is additive; this replaces the dropped nature-scene-roster entry). Minimal/Geometric/Abstract regenerated at 10 plates each. THREE NEW THEMES need tiles + notes under behaviors/appearance/background: cosmos (10 deep-space plates), ink (8 sumi-e washes on paper, red seal), botanical (8 foliage plates, leaves at edges only). Registered in BUILTIN_SETS (substrate.service.ts) and BACKGROUND_THEMES (background-theme.service.ts); docs updated in documentation/background-themes.md.",
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"

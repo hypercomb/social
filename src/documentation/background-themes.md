@@ -126,17 +126,27 @@ the Ember screen.
 
 | Theme | Dresses |
 |---|---|
-| `nature` (**default**) `photos` `minimal` `geometric` `abstract` | tiles |
+| `nature` (**default**) `photos` `minimal` `geometric` `abstract` `cosmos` `ink` `botanical` | tiles |
 | `steel` `daylight` `indigo` `teal` `ember` | screen + tiles |
 | `off` | clears the screen |
 
-**Nature is the ship default** — twenty scenes (hills, waves, sunset, mountains,
-dunes, clouds, river stones, birch woods, autumn maples, waterfall, lake,
-meadow, aurora, beach, canyon, snowfall, bamboo, misty valley, wheat,
-cherry blossom), the largest group by a distance, so a wall of tiles goes a long
+The generated sets share one art direction (2026-08-20 quality pass): film
+grain over every plate, gaussian-blur atmospherics and glow, layered
+silhouettes with real atmospheric perspective, seeded randomness so a re-run
+reproduces the exact pictures — and a calm, mid-to-dark centre band, because
+the white tile label lives there. `cosmos` (ten deep-space plates), `ink`
+(eight sumi-e washes on paper), and `botanical` (eight foliage plates, leaves
+at the edges only) joined in the same pass.
+
+**Nature is the ship default** — twenty scenes (dawn ridges, alpine lake,
+ocean, sunset cloudbank, desert night, forest light shafts, terraces, storm
+light, aurora, misty pines, lavender, moon over water, autumn fog, cherry
+bokeh, canyon beam, alpenglow, firefly meadow, waterfall mist, prairie
+thunderhead, winter birches), the largest group by a distance, so a wall of tiles goes a long
 way before a picture repeats. A scene has to sit *behind* a tile's own content,
-so the set carries no hard silhouettes and no near-black field: the moon and the
-two conifer walls were replaced for exactly that reason. It leads the list, an unchosen `active` reads as
+so every plate keeps its centre band low-frequency and its values controlled —
+detail lives toward the edges, and the label pill always has a calm field to
+sit on. It leads the list, an unchosen `active` reads as
 `nature`, and its picture set is the substrate's default tile fill. Anyone who
 had never chosen a set — the earlier Steel and Photos ship defaults — is moved
 onto it once, by the `hc:substrate-sets-v` marker; a deliberate choice is left
@@ -217,7 +227,7 @@ participant's own module) to ship a look without editing this list.
 
 Where the shipped assets come from: `scripts/backgrounds/gen-sets.mjs` generates
 the five palette sets (tile rasters, screen rasters and SVG sources), and
-`scripts/backgrounds/gen-tile-themes.mjs` generates the four image themes.
+`scripts/backgrounds/gen-tile-themes.mjs` generates the seven image themes.
 
 ## Not to be confused with `/theme`
 

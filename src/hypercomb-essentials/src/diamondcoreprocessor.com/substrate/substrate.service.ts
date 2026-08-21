@@ -173,6 +173,9 @@ const BUILTIN_SETS: SubstrateSource[] = [
   { type: 'url', id: 'builtin:theme-minimal',   baseUrl: '/substrate/theme-minimal/',    label: 'Minimal',   builtin: true },
   { type: 'url', id: 'builtin:theme-geometric', baseUrl: '/substrate/theme-geometric/',  label: 'Geometric', builtin: true },
   { type: 'url', id: 'builtin:theme-abstract',  baseUrl: '/substrate/theme-abstract/',   label: 'Abstract',  builtin: true },
+  { type: 'url', id: 'builtin:theme-cosmos',    baseUrl: '/substrate/theme-cosmos/',     label: 'Cosmos',    builtin: true },
+  { type: 'url', id: 'builtin:theme-ink',       baseUrl: '/substrate/theme-ink/',        label: 'Ink',       builtin: true },
+  { type: 'url', id: 'builtin:theme-botanical', baseUrl: '/substrate/theme-botanical/',  label: 'Botanical', builtin: true },
   // The five palette sets. Their tile rasters shipped in `public/substrate/`
   // but the sources had been dropped from this list, which orphaned them —
   // nothing could select the images. A background theme names one of these as

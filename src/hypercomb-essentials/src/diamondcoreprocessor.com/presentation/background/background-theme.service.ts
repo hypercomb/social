@@ -69,7 +69,7 @@ export type BackgroundTheme = {
 
 // The shipped themes. Five dress BOTH halves — a drawn backdrop plus the tile
 // rasters generated in the same palette, so the screen and the tiles agree.
-// Four dress tiles only, and are meant to be laid over whichever backdrop is
+// Seven dress tiles only, and are meant to be laid over whichever backdrop is
 // already showing. `photos` is the original mixed collection.
 //
 // The archetype on each palette theme is that palette's signature pattern; it
@@ -88,6 +88,9 @@ export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
   { id: 'minimal',   label: 'Minimal',   tiles: 'builtin:theme-minimal',   preview: '/substrate/theme-minimal/1.png' },
   { id: 'geometric', label: 'Geometric', tiles: 'builtin:theme-geometric', preview: '/substrate/theme-geometric/1.png' },
   { id: 'abstract',  label: 'Abstract',  tiles: 'builtin:theme-abstract',  preview: '/substrate/theme-abstract/1.png' },
+  { id: 'cosmos',    label: 'Cosmos',    tiles: 'builtin:theme-cosmos',    preview: '/substrate/theme-cosmos/1.png' },
+  { id: 'ink',       label: 'Ink',       tiles: 'builtin:theme-ink',       preview: '/substrate/theme-ink/1.png' },
+  { id: 'botanical', label: 'Botanical', tiles: 'builtin:theme-botanical', preview: '/substrate/theme-botanical/1.png' },
 ]
 
 /** What `active` reads as before anyone has chosen — the ship default. */
