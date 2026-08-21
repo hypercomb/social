@@ -403,9 +403,14 @@ export class ChatWindowComponent implements OnDestroy {
    *  free-floating chat, about nothing in particular. */
   readonly railSubject = signal<RailPickLike | null>(null)
 
-  /** The tiles gathered as CONTEXT for the next question — ctrl-clicked in
-   *  the sidebar, kept across levels, and carried as signatures so the
-   *  request is the same bytes every time it is composed. */
+  /** The tiles gathered as CONTEXT for the next question — a VIEW OF THE
+   *  CLIPBOARD. The clipboard is the ONE gathered set: hive tiles clicked
+   *  while the clipboard window is open, rows dragged off the sidebar, and
+   *  ctrl-clicked rail picks all land in it as sig entries, and the panel's
+   *  place/discard verbs operate on the same entries. This signal only
+   *  mirrors `clipboard:changed` (last-value replayed); nothing writes it
+   *  directly — every gather and every removal goes THROUGH the clipboard,
+   *  so the boxes here and the panel's rows can never disagree. */
   readonly railContext = signal<readonly RailPickLike[]>([])
 
   /** What the next question is about, counted for the status row — the SAME
@@ -431,6 +436,14 @@ export class ChatWindowComponent implements OnDestroy {
   // Both are filled by dropping a tile from the sidebar, and both are
   // signatures the moment they land — a name would make the request depend
   // on where the hive stood when it was sent.
+  //
+  // THE CONTEXT LIVES ON THE CLIPBOARD. Not a private list: the same
+  // op-less sig entries the clipboard window shows, the hive's swap takes
+  // fill, and the panel's place/discard act on. Pin the chat, open the
+  // clipboard window, walk the hive clicking tiles — they appear here as
+  // they land, and dragging rows out of the sidebar lands in the same set.
+  // The work branch stays chat-local: it is an ADDRESS for the answer, not
+  // a gathered reference.
 
   /** The branch that needs changes, or null to mean "this conversation's own
    *  tile" — which is the honest default and needs no furniture. */
@@ -441,20 +454,21 @@ export class ChatWindowComponent implements OnDestroy {
     this.workBranch.set(tile)
   }
 
-  /** Add a supporting branch. Duplicates collapse — a set of signatures is a
-   *  set — and the order you added them in is kept, because it is the only
-   *  editorial signal the list carries. */
+  /** Add a supporting branch — a COPY-append onto the clipboard (the tile
+   *  stays where it is; that is what makes this a reference gather, not a
+   *  move). Duplicates collapse in the service's upsert, an entry arriving
+   *  without a sig gets one sealed by the worker, and `clipboard:changed`
+   *  brings the result back into the boxes. */
   addContext(tile: DroppedTile): void {
     if (!tile.sig && !tile.path) return
-    const held = this.railContext()
-    if (held.some(pick => pick.sig === tile.sig && pick.name === tile.name)) return
-    this.railContext.set([...held, {
-      key: tile.path,
-      path: tile.path.split('/').filter(Boolean).slice(0, -1),
-      name: tile.name,
-      sig: tile.sig,
-    }])
-    this.#announceSet()
+    const segments = tile.path.split('/').filter(Boolean)
+    EffectBus.emit('clipboard:take-entries', {
+      entries: [{
+        label: tile.name || segments[segments.length - 1] || '',
+        sourceSegments: segments.slice(0, -1),
+        sig: tile.sig || undefined,
+      }],
+    })
   }
 
   /** Tell the sidebar which tiles are in the set being asked about, so it can
@@ -467,10 +481,13 @@ export class ChatWindowComponent implements OnDestroy {
     EffectBus.emit('context:active-set', { paths })
   }
 
-  /** Drop one supporting branch. */
+  /** Drop one supporting branch — discarded from the clipboard (label-keyed,
+   *  the same verb the panel's rows use), and the changed event updates the
+   *  boxes. The tile itself is untouched. */
   removeContext(index: number): void {
-    this.railContext.set(this.railContext().filter((_, at) => at !== index))
-    this.#announceSet()
+    const held = this.railContext()[index]
+    if (!held) return
+    EffectBus.emit('clipboard:discard-items', { labels: [held.name] })
   }
 
   /** Read a dragged tile, whatever surface dropped it. Returns null for a
@@ -540,12 +557,12 @@ export class ChatWindowComponent implements OnDestroy {
     return segments[segments.length - 1] ?? ''
   })
 
-  /** Let the whole gathering go. The tiles are untouched — only the list of
-   *  signatures the next question would have carried. */
+  /** Let the whole gathering go — the clipboard empties (tiles untouched,
+   *  only the held references), and the rail's own picks unmark. */
   clearContext(): void {
     this.#rail?.clearSelection()
-    this.railContext.set([])
-    this.#announceSet()
+    const labels = this.railContext().map(pick => pick.name)
+    if (labels.length) EffectBus.emit('clipboard:discard-items', { labels })
     this.#focus()
   }
 
@@ -676,6 +693,11 @@ export class ChatWindowComponent implements OnDestroy {
    *  in the DOM — so the trail you drilled and the tiles you chose survive
    *  leaving and re-entering full screen. */
   #rail: TilesRailLike | null = null
+
+  /** The rail picks last reported, keyed by row key — what lets a selection
+   *  change flow into the clipboard as ADDS and REMOVES rather than a
+   *  wholesale replace that would clobber entries gathered elsewhere. */
+  #railSeen = new Map<string, RailPickLike>()
   /** The text last written to the drafts pool for the open conversation —
    *  so an unchanged box is never re-written. */
   #heldDraft = ''
@@ -811,9 +833,28 @@ export class ChatWindowComponent implements OnDestroy {
         if (this.#rail || !factory?.create) return
         this.#rail = factory.create()
         this.#rail.onSubjectChanged = subject => { void this.#enterSubject(subject) }
+        // Rail picks flow INTO the clipboard as deltas — never a wholesale
+        // replace, because the clipboard also holds what the hive's takes
+        // and the header's drops gathered, and a ctrl-click in the sidebar
+        // must not blow those away.
         this.#rail.onSelectionChanged = selection => {
-          this.railContext.set([...selection])
-          this.#announceSet()
+          const before = this.#railSeen
+          const now = new Map(selection.map(pick => [pick.key, pick]))
+          this.#railSeen = now
+          const added = selection.filter(pick => !before.has(pick.key))
+          const removed = [...before.values()].filter(pick => !now.has(pick.key))
+          if (added.length) {
+            EffectBus.emit('clipboard:take-entries', {
+              entries: added.map(pick => ({
+                label: pick.name,
+                sourceSegments: [...pick.path],
+                sig: pick.sig || undefined,
+              })),
+            })
+          }
+          if (removed.length) {
+            EffectBus.emit('clipboard:discard-items', { labels: removed.map(pick => pick.name) })
+          }
         }
         // The host captured here may have been replaced by the time a late
         // factory lands — mount into whatever full screen is showing NOW.
@@ -839,6 +880,24 @@ export class ChatWindowComponent implements OnDestroy {
     // a change to the roster, because a conversation that holds only unsent
     // words is still a conversation you must be able to get back to.
     this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
+
+    // ── ONE GATHERED SET ─────────────────────────────────────────────
+    // The context boxes are a view of the CLIPBOARD. Last-value replay
+    // means a window opened mid-session shows what was gathered before it
+    // existed; every add and remove above goes through the clipboard and
+    // arrives back here, so this subscription is the ONLY writer of
+    // railContext and the boxes can never disagree with the panel.
+    this.#cleanups.push(EffectBus.on<{ items?: readonly { label: string; sourceSegments: readonly string[]; sig?: string }[] }>(
+      'clipboard:changed', (payload) => {
+        const items = Array.isArray(payload?.items) ? payload!.items! : []
+        this.railContext.set(items.map(item => ({
+          key: '/' + [...item.sourceSegments, item.label].join('/'),
+          path: [...item.sourceSegments],
+          name: item.label,
+          sig: item.sig,
+        })))
+        this.#announceSet()
+      }))
 
     // The retired ask screen's channel. Kept because other surfaces open a
     // conversation through it — the skills window's "use" action and the
@@ -1199,7 +1258,10 @@ export class ChatWindowComponent implements OnDestroy {
     this.#rail?.dispose()
     this.#rail = null
     this.railSubject.set(null)
-    this.railContext.set([])
+    // railContext is NOT reset: it mirrors the clipboard, which outlives the
+    // window — that persistence is the point of gathering there. The rail's
+    // own pick bookkeeping does die with the rail.
+    this.#railSeen = new Map()
     EffectBus.emit('chat:window-state', { open: false })
   }
 
@@ -1214,7 +1276,9 @@ export class ChatWindowComponent implements OnDestroy {
     // The cascade unwinds the smallest commitment first: the tile you are
     // talking to, then full screen, then the window — matching the
     // escape-cascade's outermost-first rule.
-    if (this.focused() && this.railContext().length) { this.#rail?.clearSelection(); return }
+    // Escape unwinds the RAIL'S OWN picks (their removal flows through the
+    // clipboard); references gathered elsewhere are the chip's × to let go.
+    if (this.focused() && this.#railSeen.size) { this.#rail?.clearSelection(); return }
     if (this.focused() && this.railSubject()) { this.#rail?.clearSubject(); return }
     if (this.focused()) { this.focused.set(false); return }
     this.close()
