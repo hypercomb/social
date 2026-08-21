@@ -1172,6 +1172,15 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "first-click-adopts-second-enters",
+      "title": "Two-click swarm adoption: first click adopts (or takes a held tile's update), second click enters — retext the click-adopts-each-layer story and mark the update-shade",
+      "run": null,
+      "note": "Supersedes the click-adopts-each-layer pass (still queued): the click that used to add AND enter now splits into two beats — the first click on a shaded tile ACQUIRES it (swarm tile = wand take; held tile with a peer update = sync) while the participant stays put to watch it light up, and the second click walks in like any other tile. The shade now has ONE meaning: dim = the next click acquires (not adopted, or needs an update via peer-divergence), bright = the next click enters. Mirror work owed on the behaviors tree (sharing/swarm area): retext the adoption-story notes to the two-beat gesture, add a tile for the update-shade (held+diverged tiles recede and first-click syncs), and mark both with the sharing pheromones already in the vocabulary. MANUAL because note-add is additive and stale one-click notes must come off the tiles first. Code: tile-overlay.drone.ts #firstClickTakes (entry choke point), show-cell.drone.ts #cellIsShaded divergence clause + swarmTakeLabels payload, swarm-adopt.drone.ts comments.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }

@@ -654,11 +654,12 @@ async function main() {
     check('a programmatic walk keeps nothing — only a gesture takes', !keptSomething && genomeLeak.length === 0,
       keptSomething || (genomeLeak.length ? `genome recorded ${JSON.stringify(genomeLeak)}` : `${walked.length} levels walked, none kept`))
 
-    // ── THE SHADE IS STANDING, AND A CLICK ADDS THE TILE ──────────────
+    // ── THE SHADE IS STANDING; FIRST CLICK ADOPTS, SECOND ENTERS ──────
     // Back at the root with NO modifier held: every tile A doesn't own must
     // already be dim — that is what says "these are somebody else's, and
     // this is what you can add". Then a REAL plain click on `charlie`: it
-    // becomes A's AND A walks into it, in one gesture.
+    // becomes A's while A STAYS PUT to watch it light up; a SECOND click
+    // walks in like any other tile's.
     await navTo(A.page, []); await sleep(1500)
     const clickOffered = await waitFor(() => peerTilesNow(A.page),
       tiles => tiles.includes('charlie'), 30000)
@@ -697,13 +698,23 @@ async function main() {
           visit: window.ioc?.get?.('@diamondcoreprocessor.com/SwarmAdoptDrone')?.visitDebug?.() ?? null,
         }
       }, clickAt.ok ? { x: clickAt.x, y: clickAt.y } : null)).catch(() => null)
-      check('a click on a shaded tile ADDS it', added.ok,
+      check('the FIRST click on a shaded tile ADDS it', added.ok,
         added.ok ? `${added.waitedMs}ms at ${JSON.stringify(clickAt)}`
           : `point=${JSON.stringify(clickAt)} stages=${JSON.stringify(clickStages)}`)
 
+      // THE FIRST CLICK STAYS PUT — the adopt is the whole gesture, and the
+      // lit tile is the page's own confirmation. Navigating here is the old
+      // one-click model resurfacing.
+      await sleep(1500)
+      const stayed = await locationNow(A.page)
+      check('the first click stays put — adopt, not navigate',
+        Array.isArray(stayed) && stayed.length === 0, JSON.stringify(stayed))
+
+      // THE SECOND CLICK WALKS IN, like any other tile's.
+      await clickTile(A.page, 'charlie')
       const where = await waitFor(() => locationNow(A.page),
         segs => Array.isArray(segs) && segs.join('/') === 'charlie', 15000)
-      check('the same click walks into the child', where.ok, JSON.stringify(where.value))
+      check('the second click walks into the child', where.ok, JSON.stringify(where.value))
 
       // PERMANENT AND FULLY VISIBLE: back at the root the tile A added is
       // its own — no longer external, so nothing shades it any more.
@@ -715,8 +726,9 @@ async function main() {
         JSON.stringify(afterShade))
     } else {
       check('a peer\'s tiles are shaded on arrival, no modifier held', false, 'skipped — charlie not offered at root')
-      check('a click on a shaded tile ADDS it', false, 'skipped')
-      check('the same click walks into the child', false, 'skipped')
+      check('the FIRST click on a shaded tile ADDS it', false, 'skipped')
+      check('the first click stays put — adopt, not navigate', false, 'skipped')
+      check('the second click walks into the child', false, 'skipped')
       check('an added tile stops being shaded — it is yours now', false, 'skipped')
     }
 

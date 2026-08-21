@@ -9,10 +9,11 @@ import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
 import { cellLocationSig } from '../../editor/tile-properties.js'
+import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
 // Backstop timeout (ms) for the navigation-transition guard. This is NOT the
 // normal release — the guard lifts on render:cell-count (the renderer has
@@ -358,6 +359,13 @@ export class TileOverlayDrone extends Drone {
    *  would land on an empty filtered mesh, so the click is refused with a toast. */
   #filterBlocked = new Set<string>()
   #externalLabels = new Set<string>()
+  /** External tiles whose next click is a TAKE, not a walk (hover-free
+   *  swarm-shade set from the render — see #firstClickTakes). */
+  #swarmTakeLabels = new Set<string>()
+  /** Labels a first click already took at #wandTakenLocation — the second
+   *  click walks in even before the fold's repaint lands. */
+  #wandTakenLabels = new Set<string>()
+  #wandTakenLocation = ''
   #currentTileExternal = false
   #activeProfileKey: OverlayProfileKey | null = null
   #noImageLabels = new Set<string>()
@@ -747,6 +755,7 @@ export class TileOverlayDrone extends Drone {
         this.#branchLabels = new Set(payload.branchLabels ?? [])
         this.#shadedLabels = new Set(payload.shadedLabels ?? [])
         this.#externalLabels = new Set(payload.externalLabels ?? [])
+        this.#swarmTakeLabels = new Set(payload.swarmTakeLabels ?? [])
         this.#noImageLabels = new Set(payload.noImageLabels ?? [])
         this.#substrateLabels = new Set(payload.substrateLabels ?? [])
         this.#linkLabels = new Set(payload.linkLabels ?? [])
@@ -3101,11 +3110,12 @@ export class TileOverlayDrone extends Drone {
       // A branch (enter its children) OR a reference tile (portal to its
       // target). #navigateInto routes references to their pointer.
       //
-      // A PEER TILE ALWAYS ENTERS, branch dot or not. Structure travels only
-      // by walking (MAX_PUBLISH_DEPTH=0), so what is inside somebody else's
-      // tile is not on the wire until you step in and the drill serves that
-      // level — "no children" here means "not asked yet", never "empty". The
-      // entry is also the take (#takeFromSwarm), so refusing it would be
+      // A PEER TILE ALWAYS ROUTES HERE, branch dot or not. Structure travels
+      // only by walking (MAX_PUBLISH_DEPTH=0), so what is inside somebody
+      // else's tile is not on the wire until you step in and the drill serves
+      // that level — "no children" here means "not asked yet", never "empty".
+      // Inside, the first click on a shaded tile is the take and the second
+      // is the walk in (#firstClickTakes) — refusing the route would be
       // refusing the one gesture that adds the tile.
       this.#navigateInto(entry.label)
     } else {
@@ -3360,19 +3370,25 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // ── EACH LAYER IS ADOPTED ON THE CLICK THAT ENTERS IT ───────────────
-    // (Jaime, 2026-08-20.) In a swarm the tiles you don't own render SHADED
-    // — a standing state, not a modifier preview. Click one and it is ADDED:
-    // yours from that moment, permanently, painted at full strength while
-    // you walk into it. Walking a peer's hive is COLLECTING it, one layer at
-    // a time, and the click is the only take a finger can perform (a phone
-    // has no modifier). The ctrl sweep survives beside it for taking several
-    // tiles without going in.
+    // ── FIRST CLICK ADOPTS, SECOND CLICK ENTERS ─────────────────────────
+    // (Jaime, 2026-08-20: "the first click adopts and a second click
+    // navigates. This way [you] turn on tiles easily and it's really
+    // clear.") A shaded tile's click ACQUIRES — a swarm tile you don't own
+    // is taken (the wand), a held tile a peer has an update for is synced —
+    // and you STAY where you stand to watch it light up. The tile at full
+    // strength is the page's own confirmation, and the next click walks in
+    // like any other. Placed at the entry choke point so every entering
+    // gesture (click, hold-to-enter, tap) obeys the same two-step; the ctrl
+    // sweep survives beside it for taking several tiles at once.
     //
-    // Placed at the entry choke point, so every gesture that walks in (click,
-    // hold-to-enter, tap) takes — and BEFORE the lineage moves, because the
-    // fold resolves the parent from where we still stand.
-    this.#takeFromSwarm(label)
+    // The guard opened at #beginNavigationTransition releases immediately —
+    // nothing moved, and the take must not dead-lock the page.
+    if (this.#firstClickTakes(label)) {
+      // The likely next click is the walk in — warm the inside now.
+      this.#divertPreloadTo(label)
+      this.#releaseGuardIfNoMove(before)
+      return
+    }
 
     this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-in', { label })
@@ -3409,22 +3425,51 @@ export class TileOverlayDrone extends Drone {
     this.#releaseGuardIfNoMove(before)
   }
 
-  /** Add a peer's tile to the hive as we walk into it (see the call site).
-   *  The take rides the wand's own effect: TRANSIENT (a gesture is a moment,
-   *  and a replayed last-value would re-take a tile given back), tombstone-
-   *  clearing, and one ITEM only — what is inside becomes yours by clicking
-   *  in there too. Eligibility is SwarmAdoptDrone's to answer: `wandEligible`
-   *  is the same synchronous oracle the ctrl sweep asks on pointerdown (in a
-   *  zone, and a live peer offers this name right here). A bundle without the
-   *  sharing drones resolves nothing and takes nothing; a tile already held
-   *  is a silent no-op inside the fold. */
-  #takeFromSwarm(label: string): void {
-    if (!this.#externalLabels.has(label)) return
-    const adopt = window.ioc?.get?.<{ wandEligible?: (l: string) => boolean }>(
-      '@diamondcoreprocessor.com/SwarmAdoptDrone',
-    )
-    if (!adopt?.wandEligible?.(label)) return
-    EffectBus.emitTransient('swarm:wand', { label })
+  /** THE FIRST CLICK'S QUESTION: does this click acquire instead of enter?
+   *  True = it acquired (and the caller stays put); false = walk in.
+   *
+   *  Two acquisitions, both riding gestures that already exist:
+   *  • An external tile still receding (#swarmTakeLabels — the hover-free
+   *    swarm-shade set from the render; the live shade lifts under the
+   *    pointer and the click always arrives hovering) fires the wand:
+   *    TRANSIENT (a replayed last-value would re-take a tile given back),
+   *    tombstone-clearing, one ITEM only. `wandEligible` is the same
+   *    synchronous oracle the ctrl sweep asks on pointerdown. A bundle
+   *    without the sharing drones resolves nothing and takes nothing.
+   *  • A HELD tile a peer has an update for (peerDivergesAt — sync-readable,
+   *    fresher than any payload) fires the `sync` action: the publisher's
+   *    current visuals fold in, in place. The wand emit alongside it is for
+   *    the RENDERER — the lift-and-taking-rim flash — and is a held-tile
+   *    no-op inside SwarmAdoptDrone's fold.
+   *
+   *  #wandTakenLabels bridges the gap between the take and its repaint: a
+   *  second click during that window must walk in, not re-take. Location-
+   *  scoped — names mean nothing across pages. Readiness shade (yours,
+   *  still loading) matches neither branch and never refuses: entering a
+   *  loading tile stays allowed, exactly as before. */
+  #firstClickTakes(label: string): boolean {
+    const here = this.#currentLocationKey()
+    if (this.#wandTakenLocation !== here) {
+      this.#wandTakenLabels.clear()
+      this.#wandTakenLocation = here
+    }
+    if (this.#wandTakenLabels.has(label)) return false
+    if (this.#swarmTakeLabels.has(label) && this.#externalLabels.has(label)) {
+      const adopt = window.ioc?.get?.<{ wandEligible?: (l: string) => boolean }>(
+        '@diamondcoreprocessor.com/SwarmAdoptDrone',
+      )
+      if (!adopt?.wandEligible?.(label)) return false
+      this.#wandTakenLabels.add(label)
+      EffectBus.emitTransient('swarm:wand', { label })
+      return true
+    }
+    if (!this.#externalLabels.has(label) && peerDivergesAt(label)) {
+      this.#wandTakenLabels.add(label)
+      EffectBus.emitTransient('swarm:wand', { label })
+      this.emitEffect('tile:action', { action: 'sync', label })
+      return true
+    }
+    return false
   }
 
   /** Redirect the preloader at the tile we are entering. The destination is

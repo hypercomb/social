@@ -300,24 +300,28 @@ export class SwarmAdoptDrone extends Drone {
     // genome means "I took this", and the record is minted by the fold.
     this.onEffect<VisitPayload>('swarm:tile-visited', (p) => { void this.#onTileVisited(p) })
 
-    // ── EACH LAYER IS ADOPTED ON CLICK ─────────────────────────────────
-    // (Jaime's ruling, 2026-08-20.) In a swarm the tiles you don't own
+    // ── FIRST CLICK ADOPTS, SECOND CLICK ENTERS ────────────────────────
+    // (Jaime's rulings, 2026-08-20.) In a swarm the tiles you don't own
     // render SHADED — a standing state the moment you arrive, not a
     // modifier preview. CLICK ONE AND IT IS ADDED: that tile is yours,
-    // permanently, painted at full strength, and you walk into it in the
-    // same gesture. Its children arrive shaded in their turn, and each one
-    // is added by the click that enters it. Walking a peer's hive is
-    // COLLECTING it, one layer at a time.
+    // permanently, painted at full strength — and you STAY where you
+    // stand to watch it light up ("the first click adopts and a second
+    // click navigates"). The next click walks in like any other tile's,
+    // its children arrive shaded in their turn, and each one is added by
+    // its own first click. Walking a peer's hive is COLLECTING it, one
+    // layer at a time, two beats per layer.
     //
     // Two gestures reach this handler, both taking exactly ONE ITEM and
     // never its children (what is inside becomes yours by clicking in
     // there too):
-    //   • TileOverlayDrone's entry choke point — the click, the
-    //     hold-to-enter, the tap. The only take a finger can perform.
+    //   • TileOverlayDrone's entry choke point (#firstClickTakes) — the
+    //     first click, hold-to-enter, or tap on a shaded tile. The only
+    //     take a finger can perform.
     //   • SelectionInputDrone's ctrl (⌘) sweep — press, or drag across
-    //     several, to take without going in. SELECT IS SUPPRESSED FOR THE
-    //     WHOLE GESTURE there: in a swarm ctrl+press already MEANS
-    //     take-this, so the ordinary add-to-selection must not fire too.
+    //     several, to take without a second thought of entering. SELECT IS
+    //     SUPPRESSED FOR THE WHOLE GESTURE there: in a swarm ctrl+press
+    //     already MEANS take-this, so the ordinary add-to-selection must
+    //     not fire too.
     //
     // A take is explicit, so — unlike a bare visit — it CLEARS a
     // tombstone: clicking a tile you gave back adds it again. Native tiles
@@ -750,13 +754,14 @@ export class SwarmAdoptDrone extends Drone {
     if (!label) { this.#visitStage('wand-no-label'); return }
     if (!this.wandEligible(label)) { this.#visitStage('wand-ineligible', { name: label }); return }
 
-    // RESOLVE WHERE AND WHAT SYNCHRONOUSLY, before the first await. The
-    // click that takes a tile also WALKS INTO IT — the entry commits in the
-    // same turn, right behind this emit — so anything read after an await
-    // describes the page we just entered instead of the one we took from.
-    // (Live trap: the offer lookup used to sit after the held-here read and
-    // resolved null every time, so a clicked tile navigated but never
-    // landed.) The location and the offer are both gesture-time facts.
+    // RESOLVE WHERE AND WHAT SYNCHRONOUSLY, before the first await. A
+    // navigation can commit in the same turn right behind this emit — the
+    // participant's SECOND click racing the fold, or any gesture that moves
+    // the lineage — so anything read after an await describes the page just
+    // entered instead of the one we took from. (Live trap: the offer lookup
+    // used to sit after the held-here read and resolved null every time, so
+    // a clicked tile navigated but never landed.) The location and the
+    // offer are both gesture-time facts.
     const at = this.#currentSegments()
     const entry = this.#peerEntryFor(label)
     if (!entry) { this.#visitStage('wand-no-entry', { name: label }); return }

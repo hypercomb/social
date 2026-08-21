@@ -10,6 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
+import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import { visitRecordAt } from '../../sharing/visit-genome.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
 import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel } from '../../commands/decoration-kind-index.js'
@@ -5690,6 +5691,16 @@ export class ShowCellDrone extends Drone {
       if (l) this.#flashWandTake(l)
     })
 
+    // The peer-divergence scan re-answered "which held tiles have an update
+    // to take". That answer is part of the shade now (#cellIsShaded), so
+    // rewrite every rendered cell's shade attribute in place — the scan is a
+    // debounced, page-scoped event, and an attribute sweep is exactly what a
+    // hover already does per cell. Never a render:cell-count emit (that
+    // payload doubles as the navigation-guard release).
+    this.onEffect('swarm:divergence-changed', () => {
+      for (const label of this.renderedCells.keys()) this.#writeShadeFor(label)
+    })
+
     // tags:preview — a pheromone is under the cursor in the chrome (a panel
     // row, a bouquet, a bottom crumb). A hovered mark asks ONE question —
     // which tiles carry this? — and the hive is the only surface that can
@@ -6998,6 +7009,7 @@ export class ShowCellDrone extends Drone {
     coords: { q: number; r: number }[]
     branchLabels: string[]
     externalLabels: string[]
+    swarmTakeLabels: string[]
     noImageLabels: string[]
     substrateLabels: string[]
     linkLabels: string[]
@@ -7045,6 +7057,18 @@ export class ShowCellDrone extends Drone {
         ? cells.map(c => c.label)
         : cells.filter(c => c.hasBranch || this.#peerCellSet.has(c.label)).map(c => c.label),
       externalLabels: cells.filter(c => c.external).map(c => c.label),
+      // FIRST CLICK ADOPTS, SECOND CLICK ENTERS (Jaime, 2026-08-20): the
+      // tiles whose next click is a TAKE rather than a walk — external and
+      // still receding. Computed hover-free by construction, because the
+      // click always arrives hovering and the live #cellIsShaded lifts the
+      // hovered tile, which would deny the take exactly when it matters. A
+      // stack variant is YOUR tile seen through a peer's layer, and a
+      // wand-touched tile is already being added — both enter on click.
+      swarmTakeLabels: cells
+        .filter(c => c.external
+          && !this.#stackVariantLabels.has(c.label)
+          && !this.#wandTakingLabels.has(c.label))
+        .map(c => c.label),
       // Peer / external tiles are NEVER substrate-fillable blanks: their
       // image is the PUBLISHER's (it just may not have streamed locally yet),
       // and painting the receiver's random pool pick on a tile they don't own
@@ -7790,6 +7814,15 @@ export class ShowCellDrone extends Drone {
     if (c.external
       && !this.#stackVariantLabels.has(c.label)
       && !this.#wandTakingLabels.has(c.label)) return true
+    // A HELD tile a peer is offering something for — "this needs an update" —
+    // recedes exactly like a tile you haven't adopted (Jaime, 2026-08-20:
+    // "things are grayed out when they're not adopted or they need updates").
+    // One shade, one meaning: dim = a click will ACQUIRE here, bright = a
+    // click will enter. The wand's touch lifts it the moment the update is
+    // taken, same as a take.
+    if (!c.external
+      && !this.#wandTakingLabels.has(c.label)
+      && peerDivergesAt(c.label)) return true
     return this.#cellIsPreloading(c)
   }
 
@@ -7804,11 +7837,12 @@ export class ShowCellDrone extends Drone {
    *  loading). Reads the live predicates the geometry write consults, so a
    *  "the shade isn't showing" report names its half instead of guessing.
    *  Nothing in the app reads this; the swarm harness does. */
-  public shadeDebug = (): { swarm: string[]; readiness: string[] } => {
+  public shadeDebug = (): { swarm: string[]; diverged: string[]; readiness: string[] } => {
     const cells = [...this.renderedCells.values()]
     return {
       swarm: cells.filter(c => c.external && this.#cellIsShaded(c)).map(c => c.label),
-      readiness: cells.filter(c => !c.external && this.#cellIsShaded(c)).map(c => c.label),
+      diverged: cells.filter(c => !c.external && this.#cellIsShaded(c) && peerDivergesAt(c.label)).map(c => c.label),
+      readiness: cells.filter(c => !c.external && this.#cellIsShaded(c) && !peerDivergesAt(c.label)).map(c => c.label),
     }
   }
 

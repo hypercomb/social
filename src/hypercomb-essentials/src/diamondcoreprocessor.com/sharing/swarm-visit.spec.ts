@@ -1,10 +1,11 @@
-// swarm-visit.spec.ts — EACH LAYER IS ADOPTED ON CLICK.
+// swarm-visit.spec.ts — FIRST CLICK ADOPTS, SECOND CLICK ENTERS.
 //
-// Jaime's ruling (2026-08-20): in a swarm the tiles you don't own render
-// shaded, and CLICKING one adds it — permanently — while walking you into
-// it. Taking is always a GESTURE (the click, or the ctrl sweep that takes
-// without going in), never a side effect of where the URL points, and it
-// takes THAT ITEM, never its children.
+// Jaime's rulings (2026-08-20): in a swarm the tiles you don't own render
+// shaded, and CLICKING one adds it — permanently — while you stay put to
+// watch it light up; the SECOND click walks in ("the first click adopts
+// and a second click navigates"). Taking is always a GESTURE (the first
+// click, or the ctrl sweep), never a side effect of where the URL points,
+// and it takes THAT ITEM, never its children.
 //
 // The rules this file guards:
 //   1. A BARE VISIT KEEPS NOTHING: the visit signal alone commits nothing
@@ -20,11 +21,12 @@
 //   3. A take is EXPLICIT, so it CLEARS a tombstone — the way back in
 //      after a delete: click a tile you gave back and you add it again.
 //      (A bare visit, keeping nothing, can't resurrect one.)
-//   3b. THE GESTURE'S OWN MOMENT: the click that takes also navigates, so
-//      the parent path AND the peer's offer are resolved synchronously,
-//      before the first await — read them afterwards and they describe the
-//      page just entered (the live bug: clicked tiles walked in but never
-//      landed).
+//   3b. THE GESTURE'S OWN MOMENT: the parent path AND the peer's offer are
+//      resolved synchronously, before the first await — a navigation can
+//      commit in the same turn right behind the take (the SECOND click, or
+//      any gesture racing the fold), and anything read after an await
+//      describes the page entered instead of the page taken from (the live
+//      bug: clicked tiles walked in but never landed).
 //   4. Outside a zone, or over a tile nobody offers here, the wand does
 //      nothing at all.
 //   5. LANDED-OR-NOTHING: a take the committer refused mints no records.
@@ -280,14 +282,15 @@ describe('the wand is the keep', () => {
     expect(Object.keys(withheld).length).toBeGreaterThan(0)
   })
 
-  it('a CLICK takes from where the gesture happened, then walks in', async () => {
+  it('a take survives a navigation committing right behind it', async () => {
     freshWorld()
     inZone()
 
-    // What the click does, in the order the shell does it: emit the take,
-    // then commit the entry — synchronously, in the same turn. Everything
-    // after this line is the CHILD page: a different location, and the
-    // offers of a level we have not taken anything from.
+    // The worst-case ordering the shell can produce: the take's emit, then
+    // a navigation committing in the same turn (a second click racing the
+    // fold, or any gesture that moves the lineage). Everything after this
+    // line is the CHILD page: a different location, and the offers of a
+    // level we have not taken anything from.
     wandGarden()
     hereSegments = ['garden']
     peerTiles = []

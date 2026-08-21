@@ -78,7 +78,10 @@ async function checkLive() {
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.end(probePage())
   })
-  await new Promise(r => server.listen(PORT, r))
+  // Loopback only — this probe serves one page to a local headless browser;
+  // nothing off this machine ever needs to reach it (doctrine: no
+  // default-wide listeners).
+  await new Promise(r => server.listen(PORT, '127.0.0.1', r))
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 340 } })
