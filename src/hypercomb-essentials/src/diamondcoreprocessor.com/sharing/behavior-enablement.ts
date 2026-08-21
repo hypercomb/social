@@ -29,10 +29,12 @@
 // A FIFTH dormancy source is BINDING — the authorial one. Some behaviours
 // have exactly ONE meaning in a hive: the post-it that IS the /revolucion/
 // meetup page means nothing on any other tile. Binding a kind to a tile's
-// LOCATION SIGNATURE says so: the behaviour is awake at that signature (and
-// its subtree) and dormant everywhere else, so the panel stops offering it
-// on tiles it can never belong to, and the row it does show there is marked
-// as belonging to that tile.
+// LOCATION SIGNATURE says so: the behaviour is awake at that signature (its
+// subtree, and the layer the bound tile SITS ON — the tile renders there, so
+// that layer's Beehaviors list names the behaviour rather than hiding it) and
+// dormant everywhere else, so the panel stops offering it on tiles it can
+// never belong to, and the row it does show is marked as belonging to that
+// tile.
 //
 // The signature is `sha256(lineageKey(segments))` — HistoryService.sign, the
 // LOCATION sig, not a content sig. That distinction is the whole reason this
@@ -232,15 +234,26 @@ export function isBoundKind(kind: string): boolean {
   return bindingsFor(kind).length > 0
 }
 
-/** The binding covering `segments` — the tile itself or any ancestor, so a
- *  binding covers its subtree exactly as a wake does. `undefined` when the
- *  kind is unbound, or bound only elsewhere. */
+/** The layer a bound tile SITS ON — its parent path (`/a/b` → `/a`,
+ *  `/x` → `/`, the hive root). */
+function layerOf(path: string): string {
+  const cut = path.lastIndexOf('/')
+  return cut <= 0 ? '/' : path.slice(0, cut)
+}
+
+/** The binding covering `segments` — the bound tile itself or any ancestor
+ *  (a binding covers its subtree exactly as a wake does), and the LAYER the
+ *  bound tile sits on: the tile renders there, so that is where its row must
+ *  show — asked last, so a binding you are standing inside always wins over
+ *  one merely sitting beside you. `undefined` when the kind is unbound, or
+ *  bound only elsewhere. */
 export function bindingAt(kind: string, segments: readonly string[]): BehaviorBinding | undefined {
   const bindings = bindingsFor(kind)
   if (bindings.length === 0) return undefined
   const p = behaviorPath(segments)
   return bindings.find(b =>
     p === b.path || p.startsWith(b.path === '/' ? '/' : b.path + '/'))
+    ?? bindings.find(b => b.path !== '/' && p === layerOf(b.path))
 }
 
 /** True when the kind belongs to some OTHER tile than this one — bound, but

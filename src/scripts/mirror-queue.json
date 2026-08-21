@@ -1136,6 +1136,24 @@
       "commit": "b1a040bff",
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "chat-per-tile",
+      "title": "Mirror: every tile is a conversation — click talks, hold goes in, right-click comes out, drafts stick",
+      "run": null,
+      "note": "BUILT (uncommitted at time of queueing): assistant/chat-thread.ts gained tile-derived conversation ids (chat:tile:/path, dormant until a turn lands) + a chat:drafts pool holding unsent thinking per tile; assistant/agent-tiles-rail.ts dropped the circle-pick entirely — a plain click enters that tile's chat, a 450ms hold goes inside (matching the hive's own hold-to-enter), right-click comes back out, a row holding a draft wears a mark, and a search box filters the level; chat-window + agent-panel follow the rail's SUBJECT instead of a pick set. Owes: notes on the copilot-rail tile for the three gestures and the dormancy rule; a part tile for chat-thread's tile ids + drafts pool under the rail's collection; a pheromone marking chat:drafts as a pool of meaning; the behaviors-deck card for the copilot rail wants its gesture list corrected (no more circle). Manual — note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
+    },
+    {
+      "id": "binding-covers-its-layer",
+      "title": "Behaviour binding now covers the layer the bound tile sits on",
+      "run": null,
+      "note": "behavior-enablement.ts bindingAt: a binding reaches the bound tile, its subtree, AND the tile's parent layer — the sticky/tile renders there, so that layer's Beehaviors list names the behaviour (bound to <tile>) instead of withdrawing it as bound-elsewhere; everywhere else stays withdrawn (Jaime: it must not show on all pages when there is a relationship). Guarded by sharing/behavior-binding-coverage.spec.ts. Owes: note-add on the behaviour-binding card in the behaviors mirror recording the third leg of coverage (tile, subtree, host layer) and the why. Manual - note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }
