@@ -167,8 +167,6 @@
   "clipboard.empty": "El portapapeles está vacío",
   "clipboard.selection": "{count} mosaicos seleccionados",
   "clipboard.selection.one": "1 mosaico seleccionado",
-  "clipboard.op.copy": "copiar",
-  "clipboard.op.cut": "cortar",
   "clipboard.swap": "Colocar en esta página",
   "clipboard.swapOrWalk": "Colocar en esta página · Ctrl+clic para entrar",
   "clipboard.placeAll": "Colocar todo aquí",
@@ -179,7 +177,7 @@
   "clipboard.back": "Atrás",
   "clipboard.walkIn": "Entrar en este mosaico",
   "clipboard.noChildren": "Sin hijos aquí",
-  "clipboard.hint": "Clic para colocar · Ctrl+clic para entrar. En la colmena: el clic toma un mosaico, Ctrl+clic entra.",
+  "clipboard.hint": "Clic para colocar · Ctrl+clic para entrar. En la colmena: el clic toma un mosaico, Ctrl+clic lo copia, mantener pulsado entra.",
   "clipboard.close": "Cerrar portapapeles",
   "clipboard.resize": "Arrastrar para redimensionar",
   "controls.room-placeholder": "espacio",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} como contexto",
   "chat.context.chosen.title": "Viaja con esta pregunta: {names}",
   "chat.context.chosen.clear": "Soltar los {count} mosaicos reunidos",
+  "chat.subject.title": "Hablando con {tile} — abre tus conversaciones",
+  "chat.subject.none": "No trata de ningún mosaico — abre tus conversaciones",
+  "chat.list.draft": "borrador",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
   "mesh-modal.needs-secret": "se necesita un secreto para unirse"
 }

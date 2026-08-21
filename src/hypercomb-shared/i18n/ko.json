@@ -167,8 +167,6 @@
   "clipboard.empty": "클립보드가 비어 있습니다",
   "clipboard.selection": "타일 {count}개 선택됨",
   "clipboard.selection.one": "타일 1개 선택됨",
-  "clipboard.op.copy": "복사",
-  "clipboard.op.cut": "잘라내기",
   "clipboard.swap": "이 페이지에 배치",
   "clipboard.swapOrWalk": "이 페이지에 배치 · Ctrl+클릭으로 들어가기",
   "clipboard.placeAll": "모두 여기에 배치",
@@ -179,7 +177,7 @@
   "clipboard.back": "뒤로",
   "clipboard.walkIn": "이 타일 안으로 들어가기",
   "clipboard.noChildren": "여기에 하위 항목 없음",
-  "clipboard.hint": "클릭하면 배치 · Ctrl+클릭하면 들어갑니다. 하이브에서는 클릭이 타일을 가져오고 Ctrl+클릭이 들어갑니다.",
+  "clipboard.hint": "클릭하면 배치 · Ctrl+클릭하면 들어갑니다. 하이브에서는 클릭이 타일을 가져오고 Ctrl+클릭이 복사하며 길게 누르면 들어갑니다.",
   "clipboard.close": "클립보드 닫기",
   "clipboard.resize": "드래그하여 크기 조절",
   "controls.room-placeholder": "공간",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "컨텍스트 {count}개",
   "chat.context.chosen.title": "이 질문과 함께: {names}",
   "chat.context.chosen.clear": "모은 타일 {count}개 놓기",
+  "chat.subject.title": "{tile}와(과) 대화 중 — 대화 목록 열기",
+  "chat.subject.none": "특정 타일에 대한 대화가 아닙니다 — 대화 목록 열기",
+  "chat.list.draft": "초안",
   "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
   "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다"
 }

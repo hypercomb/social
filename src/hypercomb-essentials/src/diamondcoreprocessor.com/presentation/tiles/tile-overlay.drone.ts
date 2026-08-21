@@ -400,8 +400,10 @@ export class TileOverlayDrone extends Drone {
   #pressCapture: { generation: number; axial: Axial; label: string } | null = null
   /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
   #consumedPointerId: number | null = null
-  /** An armed HOLD-TO-ENTER press on a childless tile: it opens that tile's
-   *  empty layer if the pointer stays down and still for TILE_ENTER_HOLD_MS.
+  /** An armed HOLD-TO-ENTER press on a childless tile — or on ANY tile while
+   *  the clipboard window is open, where the long press IS the walk-in: it
+   *  opens that tile's layer if the pointer stays down and still for
+   *  TILE_ENTER_HOLD_MS.
    *  `generation` pins the axial map the press was taken against — a render
    *  underneath the pointer invalidates the hold rather than entering a tile
    *  the user is no longer pressing. */
@@ -2783,15 +2785,18 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    // ── SWAP MODE: the press decides nothing ────────────────────────────
+    // ── SWAP MODE: the press decides nothing — except arming the hold ───
     // A mouse press on a branch tile normally walks straight in, right here,
     // before any click is dispatched. While the clipboard window is open the
     // decision belongs to the CLICK instead (plain = take it into the window,
-    // ctrl = walk in), so the press has to let go — of the walk, of the
-    // launcher open, and of the hold-to-enter below. Placed AFTER the overlay
-    // action-button branch so Edit / Note / the feature row keep working with
-    // the window open. Touch is untouched (see #clipboardSwap).
-    if (this.#clipboardSwap) { this.#cancelEnterHold(); return }
+    // ctrl = copy it in), so the press lets go of the instant walk and the
+    // launcher open. Walking in is the LONG PRESS — the same hold-to-enter
+    // gesture as everywhere else on the hive, armed here for branch and leaf
+    // alike (a short release cancels it and falls through to the take).
+    // Placed AFTER the overlay action-button branch so Edit / Note / the
+    // feature row keep working with the window open. Touch is untouched
+    // (see #clipboardSwap).
+    if (this.#clipboardSwap) { this.#beginEnterHold(e, entry.label); return }
 
     // On a launch-group aggregator page EVERY tile is a launcher: a body press
     // OPENS its target directly (no arming, nothing to block). Gate on the
@@ -2861,7 +2866,6 @@ export class TileOverlayDrone extends Drone {
       if (this.#editing || this.#editCooldown) return
       if (this.#hasSelection || this.#touchDragging) return
       if (this.#tagRemovalArmed) return
-      if (this.#clipboardSwap) return
       this.#consumedPointerId = pointerId
       consumePointerGesture(pointerId)
       this.#pressCapture = null
@@ -2937,12 +2941,15 @@ export class TileOverlayDrone extends Drone {
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       if (!entry?.label) return
-      // Swap mode: ctrl is the WALK. It outranks the selection toggle for as
-      // long as the clipboard window is open — with plain click spoken for by
-      // the take, ctrl is the only way left to get where you want to paste.
+      // Swap mode: ctrl is the COPY. Same take gesture as the plain click,
+      // but the tile STAYS on the page — it lands in the window as a sig
+      // reference without the cut commit (ctrl+drag-copies-in-Explorer
+      // convention). It outranks the selection toggle for as long as the
+      // clipboard window is open. Walking in is the long press, the same
+      // hold-to-enter as everywhere else (armed in #onPointerDown).
       if (this.#clipboardSwap) {
         this.#pressCapture = null
-        this.#navigateInto(entry.label)
+        this.emitEffect('clipboard:take-items', { labels: [entry.label], copy: true })
         return
       }
       this.emitEffect('tile:click', {
@@ -3095,8 +3102,9 @@ export class TileOverlayDrone extends Drone {
     // The window is open, the overlay's action buttons have had their chance
     // above, and no modifier is held: this tile leaves the page and lands in
     // the clipboard window. ClipboardWorker cuts it and APPENDS, so clicking
-    // one tile after another fills the window. (Ctrl already walked, higher
-    // up.) Branch or leaf makes no difference — a take carries the subtree.
+    // one tile after another fills the window. (Ctrl already copied, higher
+    // up; the long press walks in.) Branch or leaf makes no difference — a
+    // take carries the subtree.
     if (this.#clipboardSwap) {
       this.emitEffect('clipboard:take-items', { labels: [entry.label] })
       return

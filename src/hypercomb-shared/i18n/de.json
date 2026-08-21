@@ -167,8 +167,6 @@
   "clipboard.empty": "Zwischenablage ist leer",
   "clipboard.selection": "{count} Kacheln ausgewählt",
   "clipboard.selection.one": "1 Kachel ausgewählt",
-  "clipboard.op.copy": "kopieren",
-  "clipboard.op.cut": "ausschneiden",
   "clipboard.swap": "Auf dieser Seite platzieren",
   "clipboard.swapOrWalk": "Auf dieser Seite platzieren · Strg+Klick zum Hineingehen",
   "clipboard.placeAll": "Alle hier platzieren",
@@ -179,7 +177,7 @@
   "clipboard.back": "Zurück",
   "clipboard.walkIn": "In diese Kachel hineingehen",
   "clipboard.noChildren": "Keine Unterelemente vorhanden",
-  "clipboard.hint": "Klicken zum Platzieren · Strg+Klick zum Hineingehen. Im Stock: Klick nimmt eine Kachel, Strg+Klick geht hinein.",
+  "clipboard.hint": "Klicken zum Platzieren · Strg+Klick zum Hineingehen. Im Stock: Klick nimmt eine Kachel, Strg+Klick kopiert sie, langes Drücken geht hinein.",
   "clipboard.close": "Zwischenablage schließen",
   "clipboard.resize": "Zum Vergrößern ziehen",
   "controls.room-placeholder": "Raum",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} als Kontext",
   "chat.context.chosen.title": "Reist mit dieser Frage: {names}",
   "chat.context.chosen.clear": "Die {count} gesammelten Kacheln loslassen",
+  "chat.subject.title": "Im Gespräch mit {tile} — deine Unterhaltungen öffnen",
+  "chat.subject.none": "Zu keiner Kachel — deine Unterhaltungen öffnen",
+  "chat.list.draft": "Entwurf",
   "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
   "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt"
 }

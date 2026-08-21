@@ -67,7 +67,7 @@ export class ActivityLogComponent implements OnDestroy {
         if (this.#reverting) { this.#addEntry('\u2212', msg); return }
         this.#addEntry('\u2212', msg, () => this.#revertRemove(p.cell))
       }),
-      EffectBus.on<{ count: number; op: string; failed?: string[] }>('clipboard:paste-done', p => {
+      EffectBus.on<{ count: number; failed?: string[] }>('clipboard:paste-done', p => {
         if (!this.#ready || !p || HIDDEN.has('clipboard:paste-done')) return
         const msg = this.#i18n?.t('activity.pasted', { count: p.count }) ?? `pasted ${p.count} tile${p.count === 1 ? '' : 's'}`
         this.#addEntry('\u2398', msg)

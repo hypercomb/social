@@ -9,7 +9,7 @@
 //
 // Shell UI, so it must NOT import essentials. It is driven entirely by
 // EffectBus and reaches essentials services only at runtime via window.ioc:
-//   • reads   `clipboard:changed` ({ items, op, count }) — last-value
+//   • reads   `clipboard:changed` ({ items, count }) — last-value
 //             replayed on subscribe, so the panel reflects current state
 //             the instant it mounts.
 //   • opens   on `clipboard:captured` (a fresh copy/cut) and on
@@ -74,7 +74,6 @@ function rowKey(item: ClipboardItem): string {
 
 interface ClipboardChangedPayload {
   items?: ClipboardItem[]
-  op?: 'copy' | 'cut'
   count?: number
 }
 
@@ -132,7 +131,6 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   }
 
   readonly items = signal<ClipboardItem[]>([])
-  readonly op = signal<'copy' | 'cut'>('copy')
   /** Live canvas selection size — this window's selection response
    *  (documentation/selection-tool-windows.md): while tiles are selected, the
    *  panel offers capturing THEM, right where the captured result lands. */
@@ -211,7 +209,6 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
       const items = Array.isArray(p?.items) ? p!.items! : []
       const next = items.map(i => ({ label: i.label, sourceSegments: [...(i.sourceSegments ?? [])] }))
       this.items.set(next)
-      if (p?.op === 'copy' || p?.op === 'cut') this.op.set(p.op)
       // An emptied clipboard USED to close the panel ("nothing left to show").
       // It stays open now: with the swap grammar an empty window is still
       // live — click a tile on the hive and it lands here. Closing is the

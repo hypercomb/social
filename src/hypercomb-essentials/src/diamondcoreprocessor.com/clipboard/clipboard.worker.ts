@@ -125,14 +125,16 @@ export class ClipboardWorker extends Worker {
     })
 
     // The SWAP gesture's other half: a tile clicked on the hive while the
-    // clipboard window is open. It is a cut of that ONE tile — it leaves the
-    // page and lands in the window — but it ADDS to what the window already
-    // holds rather than replacing it, so you can click tile after tile and
-    // watch the window fill. (A capture from the selection still replaces:
-    // "copy these" means these.)
-    EffectBus.on<{ labels?: string[] }>('clipboard:take-items', (payload) => {
+    // clipboard window is open. A plain click is a cut of that ONE tile — it
+    // leaves the page and lands in the window — and ctrl+click sends the same
+    // take with `copy: true`, so the tile lands in the window AND stays on the
+    // page. Either way it ADDS to what the window already holds rather than
+    // replacing it, so you can click tile after tile and watch the window
+    // fill. (A capture from the selection still replaces: "copy these" means
+    // these.)
+    EffectBus.on<{ labels?: string[]; copy?: boolean }>('clipboard:take-items', (payload) => {
       const labels = Array.isArray(payload?.labels) ? payload!.labels! : []
-      if (labels.length > 0) void this.#capture('cut', { labels, append: true })
+      if (labels.length > 0) void this.#capture(payload?.copy === true ? 'copy' : 'cut', { labels, append: true })
     })
 
     // Place explicit (label + sourceSegments) entries at the current location —
@@ -330,7 +332,7 @@ export class ClipboardWorker extends Worker {
       }
       if (moved.length === 0) return
 
-      this.#stage(moved, 'cut', append)
+      this.#stage(moved, append)
 
       EffectBus.emit('fs:changed', { segments: [...baseSegments] })
 
@@ -379,7 +381,7 @@ export class ClipboardWorker extends Worker {
       // commit, for immediate UI) copied entries before enrichment. On an
       // append this UPSERTS the same rows (keyed by label + source path), so
       // the eager pass and this one are one row, not two.
-      this.#stage(moved, 'cut', append)
+      this.#stage(moved, append)
 
       // Only a capture that took the SELECTION as its subject clears it. A
       // click-take never touched the selection, so it must not spend it.
@@ -430,17 +432,17 @@ export class ClipboardWorker extends Worker {
         } catch { /* path fallback at paste */ }
       }
     }
-    this.#stage(copyEntries, 'copy', append)
+    this.#stage(copyEntries, append)
     EffectBus.emit('clipboard:captured', { labels: copyEntries.map(e => e.label), op: 'copy' })
     void this.#persistMeta()
   }
 
   /** Replace-or-add, the one place the two capture shapes diverge. */
-  #stage(entries: readonly ClipboardEntry[], op: ClipboardOp, append: boolean): void {
+  #stage(entries: readonly ClipboardEntry[], append: boolean): void {
     const svc = this.#clipboardSvc
     if (!svc) return
-    if (append) svc.appendEntries(entries, op)
-    else svc.captureEntries(entries, op)
+    if (append) svc.appendEntries(entries)
+    else svc.captureEntries(entries)
   }
 
   /** Persist the clipboard record AS IT STANDS — the service is the truth, so
@@ -454,7 +456,6 @@ export class ClipboardWorker extends Worker {
     if (!svc || !store) return
     if (svc.isEmpty) { await clearDirectory(store.clipboard); return }
     await writeMeta(store, {
-      op: svc.operation,
       items: svc.items.map(i => ({
         label: i.label,
         sourceSegments: [...i.sourceSegments],
@@ -492,9 +493,9 @@ export class ClipboardWorker extends Worker {
     if (this.#blockedByRewound('paste')) return
 
     const targetSegments = boundTarget ? [...boundTarget] : [...lineage.explorerSegments()]
-    EffectBus.emit('clipboard:paste-start', { count: entries.length, op: 'copy' })
+    EffectBus.emit('clipboard:paste-start', { count: entries.length })
     const { placed, failed } = await this.#placeItems(history, lineage, committer, entries, targetSegments, targets)
-    EffectBus.emit('clipboard:paste-done', { count: placed.length, op: 'copy', failed })
+    EffectBus.emit('clipboard:paste-done', { count: placed.length, failed })
   }
 
   // Place the named clipboard tiles at the current location. Shared by
@@ -512,13 +513,12 @@ export class ClipboardWorker extends Worker {
     // Commits at the target; refused while rewound. Feedback, don't half-run.
     if (this.#blockedByRewound('paste')) return
 
-    const op = clipboardSvc.operation
     const wanted = new Set(labels)
     const items = clipboardSvc.items.filter(i => wanted.has(i.label))
     if (items.length === 0) return
     const targetSegments = boundTarget ? [...boundTarget] : [...lineage.explorerSegments()]
 
-    EffectBus.emit('clipboard:paste-start', { count: items.length, op })
+    EffectBus.emit('clipboard:paste-start', { count: items.length })
 
     // Hover-number paste targets are applied INSIDE #placeItems — folded into
     // the re-home cascade so the index lands in the same commit (a post-place
@@ -536,7 +536,7 @@ export class ClipboardWorker extends Worker {
       await this.#persistMeta()
     }
 
-    EffectBus.emit('clipboard:paste-done', { count: placedLabels.length, op, failed })
+    EffectBus.emit('clipboard:paste-done', { count: placedLabels.length, failed })
   }
 
   // ── shared placement (paste + place) ──────────────────
@@ -869,7 +869,6 @@ export class ClipboardWorker extends Worker {
       await clearDirectory(store.clipboard)
     } else {
       await writeMeta(store, {
-        op: svc.operation,
         items: svc.items.map(i => ({
           label: i.label,
           sourceSegments: [...i.sourceSegments],
@@ -958,7 +957,8 @@ export class ClipboardWorker extends Worker {
 
   // ── restore from OPFS on startup ──────────────────────
   // Cut folders that were moved into store.clipboard before refresh
-  // are still there; the meta file tells us which labels and op.
+  // are still there; the meta file tells us which labels (old records may
+  // still carry an `op` field — ignored, op is a gesture not clipboard state).
 
   async #restoreFromOpfs(): Promise<void> {
     const store = this.#store
@@ -971,7 +971,7 @@ export class ClipboardWorker extends Worker {
 
     // Per-entry restore — keeps each item's own sourceSegments AND its
     // captured source sig, so a restored cut still pastes anywhere.
-    clipboardSvc.captureEntries(meta.items, meta.op)
+    clipboardSvc.captureEntries(meta.items)
 
     await this.validate()
   }
@@ -989,7 +989,6 @@ export class ClipboardWorker extends Worker {
 // drains, removed after the first pool-doc write.
 
 interface ClipboardMeta {
-  op: ClipboardOp
   items: { label: string; sourceSegments: string[]; sig?: string }[]
 }
 

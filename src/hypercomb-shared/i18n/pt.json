@@ -167,8 +167,6 @@
   "clipboard.empty": "A área de transferência está vazia",
   "clipboard.selection": "{count} blocos selecionados",
   "clipboard.selection.one": "1 bloco selecionado",
-  "clipboard.op.copy": "copiar",
-  "clipboard.op.cut": "recortar",
   "clipboard.swap": "Colocar nesta página",
   "clipboard.swapOrWalk": "Colocar nesta página · Ctrl+clique para entrar",
   "clipboard.placeAll": "Colocar tudo aqui",
@@ -179,7 +177,7 @@
   "clipboard.back": "Voltar",
   "clipboard.walkIn": "Entrar neste bloco",
   "clipboard.noChildren": "Nenhum filho aqui",
-  "clipboard.hint": "Clique para colocar · Ctrl+clique para entrar. Na colmeia: o clique pega um bloco, Ctrl+clique entra.",
+  "clipboard.hint": "Clique para colocar · Ctrl+clique para entrar. Na colmeia: o clique pega um bloco, Ctrl+clique o copia, pressionar e segurar entra.",
   "clipboard.close": "Fechar área de transferência",
   "clipboard.resize": "Arraste para redimensionar",
   "controls.room-placeholder": "espaço",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} como contexto",
   "chat.context.chosen.title": "Vai junto com esta pergunta: {names}",
   "chat.context.chosen.clear": "Soltar os {count} blocos reunidos",
+  "chat.subject.title": "Conversando com {tile} — abra suas conversas",
+  "chat.subject.none": "Não é sobre nenhum bloco — abra suas conversas",
+  "chat.list.draft": "rascunho",
   "mesh-modal.needs-location": "é necessário um local para entrar",
   "mesh-modal.needs-secret": "é necessário um segredo para entrar"
 }

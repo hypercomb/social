@@ -1199,6 +1199,15 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "clipboard-copy-take",
+      "title": "Clipboard grammar: ctrl+click copies, hold walks - op leaves the clipboard",
+      "run": null,
+      "note": "The swap grammar changed (same pass removed op from clipboard state): on the hive with the window open, plain click still CUTS the tile into the window, ctrl+click now COPIES it in (tile stays on the page; was: ctrl = walk), and walking in is the LONG PRESS - the same hold-to-enter as everywhere else (tile-overlay.drone.ts arms #beginEnterHold in swap mode; clipboard:take-items carries copy:true; worker routes to #capture('copy')). The clipboard itself is op-less now: entries are pure sig references ({label, sourceSegments, sealed collection sig}) identical for cut and copy - ClipboardService lost #op/operation/consume(), the meta record and clipboard:changed/paste events lost op, the panel lost its cut/copy chip (clipboard.op.* keys removed from 14 catalogs; clipboard.hint retexted in all). Mirror work owed on the behaviors tree clipboard tile(s): retext the swap-grammar notes (stale ones say ctrl walks - remove first, note-add is additive), and note that cut-vs-copy is a gesture property, not clipboard state.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }

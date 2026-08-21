@@ -167,8 +167,6 @@
   "clipboard.empty": "Gli appunti sono vuoti",
   "clipboard.selection": "{count} tessere selezionate",
   "clipboard.selection.one": "1 tessera selezionata",
-  "clipboard.op.copy": "copia",
-  "clipboard.op.cut": "taglia",
   "clipboard.swap": "Posiziona in questa pagina",
   "clipboard.swapOrWalk": "Posiziona in questa pagina · Ctrl+clic per entrare",
   "clipboard.placeAll": "Posiziona tutto qui",
@@ -179,7 +177,7 @@
   "clipboard.back": "Indietro",
   "clipboard.walkIn": "Entra in questa tessera",
   "clipboard.noChildren": "Nessun figlio qui",
-  "clipboard.hint": "Clic per posizionare · Ctrl+clic per entrare. Nell'alveare: il clic prende una tessera, Ctrl+clic entra.",
+  "clipboard.hint": "Clic per posizionare · Ctrl+clic per entrare. Nell'alveare: il clic prende una tessera, Ctrl+clic la copia, la pressione prolungata entra.",
   "clipboard.close": "Chiudi appunti",
   "clipboard.resize": "Trascina per ridimensionare",
   "controls.room-placeholder": "spazio",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} come contesto",
   "chat.context.chosen.title": "Viaggia con questa domanda: {names}",
   "chat.context.chosen.clear": "Lascia le {count} tessere raccolte",
+  "chat.subject.title": "In conversazione con {tile} — apri le tue conversazioni",
+  "chat.subject.none": "Non riguarda nessuna tessera — apri le tue conversazioni",
+  "chat.list.draft": "bozza",
   "mesh-modal.needs-location": "serve un luogo per unirsi",
   "mesh-modal.needs-secret": "serve un segreto per unirsi"
 }

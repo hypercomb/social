@@ -34,9 +34,6 @@
         <span class="clipboard-crumb" [title]="drillCrumb()">{{ drillCrumb() }}</span>
       } @else {
         <span class="clipboard-title">{{ 'clipboard.title' | t }}</span>
-        <span class="clipboard-op" [class.cut]="op() === 'cut'">
-          {{ (op() === 'cut' ? 'clipboard.op.cut' : 'clipboard.op.copy') | t }}
-        </span>
       }
       <button
         class="clipboard-close"

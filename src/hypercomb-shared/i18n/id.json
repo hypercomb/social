@@ -167,8 +167,6 @@
   "clipboard.empty": "Papan klip kosong",
   "clipboard.selection": "{count} ubin dipilih",
   "clipboard.selection.one": "1 ubin dipilih",
-  "clipboard.op.copy": "salin",
-  "clipboard.op.cut": "potong",
   "clipboard.swap": "Tempatkan di halaman ini",
   "clipboard.swapOrWalk": "Tempatkan di halaman ini · Ctrl+klik untuk masuk",
   "clipboard.placeAll": "Tempatkan semua di sini",
@@ -179,7 +177,7 @@
   "clipboard.back": "Kembali",
   "clipboard.walkIn": "Masuk ke ubin ini",
   "clipboard.noChildren": "Tidak ada anak di sini",
-  "clipboard.hint": "Klik untuk menempatkan · Ctrl+klik untuk masuk. Di sarang: klik mengambil ubin, Ctrl+klik masuk.",
+  "clipboard.hint": "Klik untuk menempatkan · Ctrl+klik untuk masuk. Di sarang: klik mengambil ubin, Ctrl+klik menyalinnya, tekan lama untuk masuk.",
   "clipboard.close": "Tutup papan klip",
   "clipboard.resize": "Seret untuk mengubah ukuran",
   "controls.room-placeholder": "ruang",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} sebagai konteks",
   "chat.context.chosen.title": "Ikut dengan pertanyaan ini: {names}",
   "chat.context.chosen.clear": "Lepaskan {count} ubin yang dikumpulkan",
+  "chat.subject.title": "Berbicara dengan {tile} — buka percakapan Anda",
+  "chat.subject.none": "Bukan tentang ubin mana pun — buka percakapan Anda",
+  "chat.list.draft": "draf",
   "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
   "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung"
 }

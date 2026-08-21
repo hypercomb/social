@@ -167,8 +167,6 @@
   "clipboard.empty": "Le presse-papiers est vide",
   "clipboard.selection": "{count} tuiles sélectionnées",
   "clipboard.selection.one": "1 tuile sélectionnée",
-  "clipboard.op.copy": "copier",
-  "clipboard.op.cut": "couper",
   "clipboard.swap": "Placer sur cette page",
   "clipboard.swapOrWalk": "Placer sur cette page · Ctrl+clic pour entrer",
   "clipboard.placeAll": "Tout placer ici",
@@ -179,7 +177,7 @@
   "clipboard.back": "Retour",
   "clipboard.walkIn": "Entrer dans cette tuile",
   "clipboard.noChildren": "Aucun enfant ici",
-  "clipboard.hint": "Clic pour placer · Ctrl+clic pour entrer. Dans la ruche : le clic prend une tuile, Ctrl+clic entre.",
+  "clipboard.hint": "Clic pour placer · Ctrl+clic pour entrer. Dans la ruche : le clic prend une tuile, Ctrl+clic la copie, un appui long entre.",
   "clipboard.close": "Fermer le presse-papiers",
   "clipboard.resize": "Glisser pour redimensionner",
   "controls.room-placeholder": "espace",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} en contexte",
   "chat.context.chosen.title": "Accompagne cette question : {names}",
   "chat.context.chosen.clear": "Relâcher les {count} tuiles rassemblées",
+  "chat.subject.title": "En conversation avec {tile} — ouvrez vos conversations",
+  "chat.subject.none": "Ne concerne aucune tuile — ouvrez vos conversations",
+  "chat.list.draft": "brouillon",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
 }

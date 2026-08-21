@@ -167,8 +167,6 @@
   "clipboard.empty": "剪贴板为空",
   "clipboard.selection": "已选中 {count} 个磁贴",
   "clipboard.selection.one": "已选中 1 个磁贴",
-  "clipboard.op.copy": "复制",
-  "clipboard.op.cut": "剪切",
   "clipboard.swap": "放置到本页",
   "clipboard.swapOrWalk": "放置到本页 · Ctrl+单击进入",
   "clipboard.placeAll": "全部放置到此处",
@@ -179,7 +177,7 @@
   "clipboard.back": "返回",
   "clipboard.walkIn": "进入此磁贴",
   "clipboard.noChildren": "此处无子项",
-  "clipboard.hint": "单击放置 · Ctrl+单击进入。在蜂巢中：单击取走磁贴，Ctrl+单击进入。",
+  "clipboard.hint": "单击放置 · Ctrl+单击进入。在蜂巢中：单击取走磁贴，Ctrl+单击复制磁贴，长按进入。",
   "clipboard.close": "关闭剪贴板",
   "clipboard.resize": "拖动调整大小",
   "controls.room-placeholder": "空间",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} 个作为上下文",
   "chat.context.chosen.title": "随这个问题一起发出：{names}",
   "chat.context.chosen.clear": "放下已收集的 {count} 个磁贴",
+  "chat.subject.title": "正在与 {tile} 对话 — 打开你的对话列表",
+  "chat.subject.none": "不针对任何磁贴 — 打开你的对话列表",
+  "chat.list.draft": "草稿",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥"
 }

@@ -103,21 +103,6 @@ $steel: rgb(126, 182, 214);
   color: rgba($steel, 0.95);
 }
 
-.clipboard-op {
-  font-size: 0.62em;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 0.1em 0.45em;
-  border-radius: 999px;
-  border: 1px solid rgba($steel, 0.4);
-  color: rgba($steel, 0.85);
-
-  &.cut {
-    border-color: rgba(255, 176, 92, 0.5);
-    color: rgba(255, 196, 128, 0.95);
-  }
-}
-
 .clipboard-close {
   background: transparent;
   border: none;

@@ -167,8 +167,6 @@
   "clipboard.empty": "الحافظة فارغة",
   "clipboard.selection": "{count} بلاطات محددة",
   "clipboard.selection.one": "بلاطة واحدة محددة",
-  "clipboard.op.copy": "نسخ",
-  "clipboard.op.cut": "قص",
   "clipboard.swap": "ضع في هذه الصفحة",
   "clipboard.swapOrWalk": "ضع في هذه الصفحة · Ctrl+نقر للدخول",
   "clipboard.placeAll": "وضع الكل هنا",
@@ -179,7 +177,7 @@
   "clipboard.back": "رجوع",
   "clipboard.walkIn": "ادخل إلى هذه البلاطة",
   "clipboard.noChildren": "لا توجد عناصر فرعية هنا",
-  "clipboard.hint": "انقر للوضع · Ctrl+نقر للدخول. في الخلية: النقر يأخذ بلاطة، وCtrl+نقر يدخل إليها.",
+  "clipboard.hint": "انقر للوضع · Ctrl+نقر للدخول. في الخلية: النقر يأخذ بلاطة، وCtrl+نقر ينسخها، والضغط المطوّل يدخل إليها.",
   "clipboard.close": "إغلاق الحافظة",
   "clipboard.resize": "اسحب لتغيير الحجم",
   "controls.room-placeholder": "مساحة",
@@ -2144,6 +2142,9 @@
   "chat.context.chosen": "{count} كسياق",
   "chat.context.chosen.title": "يرافق هذا السؤال: {names}",
   "chat.context.chosen.clear": "ترك البلاطات المجمّعة ({count})",
+  "chat.subject.title": "محادثة مع {tile} — افتح محادثاتك",
+  "chat.subject.none": "ليست عن بلاطة — افتح محادثاتك",
+  "chat.list.draft": "مسودة",
   "mesh-modal.needs-location": "يلزم موقع للانضمام",
   "mesh-modal.needs-secret": "يلزم مفتاح سري للانضمام"
 }
