@@ -1090,6 +1090,15 @@
       "unattended": false,
       "created": "2026-08-20",
       "status": "pending"
+    },
+    {
+      "id": "view-colour-not-badge",
+      "title": "Behaviours mirror: the on-grid behaviour badge is gone; views are told apart by icon COLOUR on the tile",
+      "run": null,
+      "note": "Removed BehaviorMarkDrone (the corner glyph plates a bound behaviour painted on a child hexagon) — Jaime did not ask for a view badge on tiles. Replacement cue: view icons now wear their own colour inside the tile (family blue 0x7fb6e6, the layer's DEFAULT view in accent 0xc8b8ff, an offered-but-absent view muted 0x5f8199) in commands/visual-bee-icons.ts. Mirror pass owed: note-add on the behaviour-binding / views cards in the behaviors mirror recording that the binding's on-grid half is retired and colour is the only on-tile cue; drop any card minted for the mark drone. Manual because note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-21",
+      "status": "pending"
     }
   ]
 }

@@ -70,6 +70,25 @@ const ENTER_ACTION_PREFIX = 'view-enter:'
  *  rather than the always-on row. */
 const ICON_PROFILE = 'public-external'
 
+/** ── VIEWS WEAR THEIR OWN COLOUR ──────────────────────────────────────
+ *  A view icon on a tile is not one more action: it is a way the tile can
+ *  OPEN. So the view icons read as a FAMILY — cool blue among the white
+ *  action glyphs — and the layer's DEFAULT wears the accent inside that
+ *  family, because it is a promise about what walking in will show you.
+ *
+ *  The colour IS the whole cue. A tile never carries a separate badge for
+ *  what it can open: the icon that opens the view is the same icon that
+ *  says the view is there, and a second ornament in the corner would only
+ *  repeat it. (Jaime, 2026-08-20 — "I didn't ask for any view badge on the
+ *  tiles … you can give them different colors within the tile for the view
+ *  items".) */
+const VIEW_TINT = 0x7fb6e6
+const VIEW_DEFAULT_TINT = 0xc8b8ff
+const VIEW_HOVER_TINT = 0xdcefff
+/** The offer to ADD a view — the same family spoken quieter, because the
+ *  content is not on the tile yet. */
+const VIEW_OFFER_TINT = 0x5f8199
+
 type TileIconProvider = {
   name: string
   owner?: string
@@ -153,6 +172,9 @@ function syncIcons(): void {
       owner: '@diamondcoreprocessor.com/visual-bee-icons',
       svgMarkup: visualBeeIconSvg(bee.toggleIcon, bee.view),
       profile: ICON_PROFILE,
+      hoverTint: VIEW_HOVER_TINT,
+      // Same family, quieter: this view is on OFFER here, not present.
+      tintWhen: () => VIEW_OFFER_TINT,
       labelKey: bee.labelKey,
       descriptionKey: bee.descriptionKey,
       // Per-tile visibility: surface the icon on tiles that DON'T
@@ -203,12 +225,13 @@ function syncIcons(): void {
       // views, each icon remains visible instead of hiding behind the feature
       // expander.
       featureRow: false,
-      hoverTint: 0xa8d8ff,
+      hoverTint: VIEW_HOVER_TINT,
       // THE DEFAULT wears the accent. Tile bodies still always navigate —
       // but walking in now lands on this view (view.bee's arrival surface),
       // so the accent is a promise about what you are about to see, not just
-      // a bookmark.
-      tintWhen: (ctx) => isPreferredView(ctx, bee.view) ? 0xc8b8ff : 0xd8e1e8,
+      // a bookmark. Every other view keeps the family blue, which is what
+      // separates a view from an action on the same row.
+      tintWhen: (ctx) => isPreferredView(ctx, bee.view) ? VIEW_DEFAULT_TINT : VIEW_TINT,
       labelKey: bee.labelKey,
       descriptionKey: bee.descriptionKey,
       visibleWhen: (ctx) => {
