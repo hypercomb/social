@@ -767,7 +767,15 @@ export class AgentTilesRail {
       // the drop is the same whether it lands now or after a reload.
       main.draggable = true
       main.addEventListener('dragstart', event => {
-        const payload = JSON.stringify({ name: row.name, path: tilePath(row.segments), sig: row.sig ?? '' })
+        // The PICTURE's address rides too: a reference is drawn as the tile's
+        // own square, and the surface that draws it cannot walk the hive to
+        // find one.
+        const payload = JSON.stringify({
+          name: row.name,
+          path: tilePath(row.segments),
+          sig: row.sig ?? '',
+          propsSig: row.propsSig ?? '',
+        })
         event.dataTransfer?.setData(TILE_DRAG_TYPE, payload)
         event.dataTransfer?.setData('text/plain', tilePath(row.segments))
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'

@@ -2156,6 +2156,11 @@
   "chat.work.drop": "necesita cambios",
   "chat.context.drop": "Suelta una rama para añadirla como contexto",
   "chat.context.one": "{tile} — contexto de apoyo, haz clic para quitarlo",
+  "chat.anchor.hint": "El primer rango — de qué trata esta petición y todo lo que puede cambiar",
+  "chat.anchor.drop": "necesita cambios",
+  "chat.anchor.one": "{tile} — en el primer rango, haz clic para quitarlo",
+  "chat.reference.drop": "Suelta una rama para añadirla como referencia",
+  "chat.reference.one": "{tile} — referencia, haz clic para quitarla",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
   "mesh-modal.needs-secret": "se necesita un secreto para unirse"
 }

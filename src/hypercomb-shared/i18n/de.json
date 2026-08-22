@@ -2156,6 +2156,11 @@
   "chat.work.drop": "braucht Änderungen",
   "chat.context.drop": "Zweig hierher ziehen, um ihn als Kontext hinzuzufügen",
   "chat.context.one": "{tile} — unterstützender Kontext, klicken zum Entfernen",
+  "chat.anchor.hint": "Der erste Rang — worum es hier geht und alles, was geändert werden darf",
+  "chat.anchor.drop": "braucht Änderungen",
+  "chat.anchor.one": "{tile} — im ersten Rang, klicken zum Entfernen",
+  "chat.reference.drop": "Zweig hierher ziehen, um ihn als Referenz hinzuzufügen",
+  "chat.reference.one": "{tile} — Referenz, klicken zum Entfernen",
   "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
   "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt"
 }

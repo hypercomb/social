@@ -2156,6 +2156,11 @@
   "chat.work.drop": "à modifier",
   "chat.context.drop": "Déposez une branche pour l’ajouter au contexte",
   "chat.context.one": "{tile} — contexte de soutien, cliquez pour retirer",
+  "chat.anchor.hint": "Le premier rang — ce dont il s’agit, et tout ce qui peut changer",
+  "chat.anchor.drop": "à modifier",
+  "chat.anchor.one": "{tile} — au premier rang, cliquez pour l’enlever",
+  "chat.reference.drop": "Déposez une branche pour l’ajouter en référence",
+  "chat.reference.one": "{tile} — référence, cliquez pour retirer",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
 }

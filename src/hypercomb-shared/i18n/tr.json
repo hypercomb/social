@@ -2156,6 +2156,11 @@
   "chat.work.drop": "değişmeli",
   "chat.context.drop": "Bağlam olarak eklemek için bir dal bırakın",
   "chat.context.one": "{tile} — destekleyici bağlam, kaldırmak için tıklayın",
+  "chat.anchor.hint": "İlk sıra — bu isteğin konusu ve değiştirebileceği her şey",
+  "chat.anchor.drop": "değişmeli",
+  "chat.anchor.one": "{tile} — ilk sırada, çıkarmak için tıklayın",
+  "chat.reference.drop": "Referans olarak eklemek için bir dal bırakın",
+  "chat.reference.one": "{tile} — referans, kaldırmak için tıklayın",
   "mesh-modal.needs-location": "katılmak için bir konum gerekli",
   "mesh-modal.needs-secret": "katılmak için bir parola gerekli"
 }

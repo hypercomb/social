@@ -2156,6 +2156,11 @@
   "chat.work.drop": "需要修改",
   "chat.context.drop": "拖入一个分支作为上下文",
   "chat.context.one": "{tile} — 支撑上下文，点击移除",
+  "chat.anchor.hint": "第一排 — 这个请求的对象，也是它可以改动的全部",
+  "chat.anchor.drop": "需要修改",
+  "chat.anchor.one": "{tile} — 在第一排，点击移除",
+  "chat.reference.drop": "拖入一个分支作为参考",
+  "chat.reference.one": "{tile} — 参考，点击移除",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥"
 }

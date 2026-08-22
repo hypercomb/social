@@ -2156,6 +2156,11 @@
   "chat.work.drop": "변경 대상",
   "chat.context.drop": "브랜치를 놓아 컨텍스트로 추가하세요",
   "chat.context.one": "{tile} — 보조 컨텍스트, 클릭하면 제거",
+  "chat.anchor.hint": "첫 번째 단 — 이 요청의 대상이자 변경이 허용되는 범위",
+  "chat.anchor.drop": "변경 대상",
+  "chat.anchor.one": "{tile} — 첫 번째 단에 있음, 클릭하면 뺍니다",
+  "chat.reference.drop": "브랜치를 놓아 참조로 추가하세요",
+  "chat.reference.one": "{tile} — 참조, 클릭하면 제거",
   "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
   "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다"
 }

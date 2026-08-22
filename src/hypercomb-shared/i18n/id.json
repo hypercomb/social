@@ -2156,6 +2156,11 @@
   "chat.work.drop": "perlu diubah",
   "chat.context.drop": "Jatuhkan cabang untuk menambahkannya sebagai konteks",
   "chat.context.one": "{tile} — konteks pendukung, klik untuk menghapus",
+  "chat.anchor.hint": "Peringkat pertama — tentang apa permintaan ini, dan semua yang boleh diubah",
+  "chat.anchor.drop": "perlu diubah",
+  "chat.anchor.one": "{tile} — di peringkat pertama, klik untuk melepas",
+  "chat.reference.drop": "Jatuhkan cabang untuk menambahkannya sebagai rujukan",
+  "chat.reference.one": "{tile} — rujukan, klik untuk menghapus",
   "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
   "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung"
 }

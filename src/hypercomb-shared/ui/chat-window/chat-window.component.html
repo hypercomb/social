@@ -48,28 +48,35 @@
       </span>
 
       <div class="chat-payload" role="group" [attr.aria-label]="'chat.payload' | t">
-        <!-- THE WORK BRANCH — what the answer is allowed to change. -->
-        <button class="chat-box chat-box-work" type="button"
-          [class.over]="dragOverWork()"
-          [class.filled]="workBranch()"
-          (dragover)="onDragOver($event, 'work')"
-          (dragleave)="onDragLeave('work')"
-          (drop)="onDropWork($event)"
-          (click)="setWorkBranch(null)"
-          [title]="(workBranch() ? 'chat.work.filled' : 'chat.work.empty') | t: { tile: workBranch()?.path || '' }">
+        <!-- THE FIRST RANK — the anchor. What the request is about, and the
+             only thing an answer may change. A SET, not one tile: stack them
+             on the same rank and they are one piece of work. NAMED, because
+             these are the things being changed and a name is what you check
+             before you send. -->
+        <div class="chat-rank"
+          [class.over]="dragOverAnchor()"
+          [class.filled]="anchorContext().length"
+          (dragover)="onDragOver($event, 'anchor')"
+          (dragleave)="onDragLeave('anchor')"
+          (drop)="onDropAnchor($event)"
+          [title]="'chat.anchor.hint' | t">
           <span class="mat-sym" aria-hidden="true">edit_note</span>
-          @if (workBranch(); as work) {
-            <span class="chat-box-name">{{ work.name }}</span>
-            <span class="chat-box-off" aria-hidden="true">×</span>
-          } @else {
-            <span class="chat-box-hint">{{ 'chat.work.drop' | t }}</span>
+          @for (tile of anchorContext(); track tile.path; let i = $index) {
+            <button class="chat-anchor-item" type="button" (click)="removeAnchor(i)"
+              [title]="'chat.anchor.one' | t: { tile: tile.path }">
+              <span class="chat-box-name">{{ tile.name }}</span>
+              <span class="chat-box-off" aria-hidden="true">×</span>
+            </button>
+          } @empty {
+            <span class="chat-box-hint">{{ 'chat.anchor.drop' | t }}</span>
           }
-        </button>
+        </div>
 
-        <!-- SUPPORTING CONTEXT — signatures the responder may read. A tile
-             with a picture shows AS its picture, a square in the row; the
-             name lives in the title. No picture yet → the name chip. -->
-        @for (pick of railContext(); track pick.key; let i = $index) {
+        <!-- THE REFERENCES — supporting layers and meta contexts, there to
+             be READ, never changed. Each is drawn as the tile's own square:
+             at this size a picture is recognised faster than a name is read,
+             and the name is one hover away when recognition is not enough. -->
+        @for (pick of references(); track pick.key; let i = $index) {
           <button class="chat-box chat-box-context filled" type="button"
             [class.pictured]="contextThumbs()[pick.key]"
             (click)="removeContext(i)"
@@ -85,11 +92,11 @@
 
         <!-- The always-present next box: drop here to add one more. -->
         <span class="chat-box chat-box-add"
-          [class.over]="dragOverContext()"
-          (dragover)="onDragOver($event, 'context')"
-          (dragleave)="onDragLeave('context')"
-          (drop)="onDropContext($event)"
-          [title]="'chat.context.drop' | t">+</span>
+          [class.over]="dragOverReference()"
+          (dragover)="onDragOver($event, 'reference')"
+          (dragleave)="onDragLeave('reference')"
+          (drop)="onDropReference($event)"
+          [title]="'chat.reference.drop' | t">+</span>
       </div>
       <span class="chat-header-space"></span>
       <button class="chat-focusbtn" type="button" (click)="toggleFocus()"

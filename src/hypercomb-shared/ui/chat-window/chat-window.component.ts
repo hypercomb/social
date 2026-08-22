@@ -148,9 +148,10 @@ type QueenLike = {
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
-    /** Signatures of the tiles chosen in the sidebar. An older essentials
-     *  build ignores the argument and the ask simply carries less. */
-    chosen?: readonly string[],
+    /** The references this request carries, and the anchor it is about. An
+     *  older essentials build ignores both and the ask simply carries less. */
+    references?: readonly { kind: string; sig: string; label: string }[],
+    anchor?: readonly { path: string; sig: string }[],
   ): Promise<string | boolean | null>
 }
 
@@ -167,6 +168,8 @@ type RailPickLike = {
   readonly name: string
   readonly sig?: string
   readonly convoId?: string
+  /** What the signature points at: one layer, or a whole context group. */
+  readonly kind?: string
 }
 
 /** A tile dragged out of the sidebar. The CONTRACT with essentials is this
@@ -412,7 +415,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  mirrors `clipboard:changed` (last-value replayed); nothing writes it
    *  directly — every gather and every removal goes THROUGH the clipboard,
    *  so the boxes here and the panel's rows can never disagree. */
-  readonly railContext = signal<readonly RailPickLike[]>([])
+  readonly references = signal<readonly RailPickLike[]>([])
 
   /** What the next question is about, counted for the status row — the SAME
    *  deduped union `send()` will carry, so a tile both canvas-selected and
@@ -420,7 +423,7 @@ export class ChatWindowComponent implements OnDestroy {
   readonly chosen = computed(() => this.#chosenTargets().length)
 
   /** The gathered tiles, named, for the chip's tooltip. */
-  readonly contextNames = computed(() => this.railContext().map(pick => pick.name).join(', '))
+  readonly contextNames = computed(() => this.references().map(pick => pick.name).join(', '))
 
   /** pick.key → blob: URL of the tile's PICTURE ('large' — a square must
    *  never wear the hex capture when the tile has a real picture). Absent →
@@ -480,13 +483,27 @@ export class ChatWindowComponent implements OnDestroy {
   // The work branch stays chat-local: it is an ADDRESS for the answer, not
   // a gathered reference.
 
-  /** The branch that needs changes, or null to mean "this conversation's own
-   *  tile" — which is the honest default and needs no furniture. */
-  readonly workBranch = signal<DroppedTile | null>(null)
+  /** THE ANCHOR — the first rank. What this request is anchored to, and the
+   *  only thing an answer is allowed to change.
+   *
+   *  It is a SET, not a single tile: several tiles are often one piece of
+   *  work, and stacking them on the first rank is how you say so. Empty means
+   *  "this conversation's own tile", which is the honest default and needs no
+   *  furniture. */
+  readonly anchorContext = signal<readonly DroppedTile[]>([])
 
-  /** Fill the work box from a drop, or clear it. */
-  setWorkBranch(tile: DroppedTile | null): void {
-    this.workBranch.set(tile)
+  /** Stack another tile onto the first rank. Duplicates collapse — the anchor
+   *  is a set of signatures like any other. */
+  addAnchor(tile: DroppedTile): void {
+    if (!tile.sig && !tile.path) return
+    const held = this.anchorContext()
+    if (held.some(held => held.path === tile.path && held.sig === tile.sig)) return
+    this.anchorContext.set([...held, tile])
+  }
+
+  /** Take one tile off the first rank. */
+  removeAnchor(index: number): void {
+    this.anchorContext.set(this.anchorContext().filter((_, at) => at !== index))
   }
 
   /** Add a supporting branch — a COPY-append onto the clipboard (the tile
@@ -506,12 +523,33 @@ export class ChatWindowComponent implements OnDestroy {
     })
   }
 
+  /** WHAT THE REQUEST CARRIES, structured. A reference is a pointer plus what
+   *  KIND of thing it points at, because "one layer" and "a whole context"
+   *  are read differently by whoever answers:
+   *
+   *    layer  a single tile's own content
+   *    group  a named set of tiles — a META CONTEXT, one reference standing
+   *           for many, carried by the set's own signature
+   *
+   *  The anchor is not in here: it is what is being worked ON, not something
+   *  being read, and it rides separately for exactly that reason. */
+  referencePayload(): { kind: string; sig: string; label: string }[] {
+    return this.references()
+      .filter(pick => !!pick.sig)
+      .map(pick => ({ kind: pick.kind ?? 'layer', sig: pick.sig ?? '', label: pick.name }))
+  }
+
+  /** The first rank, as the request will carry it. */
+  anchorPayload(): { path: string; sig: string }[] {
+    return this.anchorContext().map(tile => ({ path: tile.path, sig: tile.sig }))
+  }
+
   /** Tell the sidebar which tiles are in the set being asked about, so it can
    *  draw them as one handful. The window owns the set; the rail only shows
    *  it — it must never have to guess from its own selection state, which is
    *  a different thing that happens to overlap. */
   #announceSet(): void {
-    const paths = this.railContext().map(pick =>
+    const paths = this.references().map(pick =>
       pick.key.startsWith('/') ? pick.key : '/' + [...pick.path, pick.name].join('/'))
     EffectBus.emit('context:active-set', { paths })
   }
@@ -520,7 +558,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  the same verb the panel's rows use), and the changed event updates the
    *  boxes. The tile itself is untouched. */
   removeContext(index: number): void {
-    const held = this.railContext()[index]
+    const held = this.references()[index]
     if (!held) return
     EffectBus.emit('clipboard:discard-items', { labels: [held.name] })
   }
@@ -539,35 +577,35 @@ export class ChatWindowComponent implements OnDestroy {
     } catch { return null }
   }
 
-  onDropWork(event: DragEvent): void {
+  onDropAnchor(event: DragEvent): void {
     event.preventDefault()
-    this.dragOverWork.set(false)
+    this.dragOverAnchor.set(false)
     const tile = this.readDrop(event)
-    if (tile) this.setWorkBranch(tile)
+    if (tile) this.addAnchor(tile)
   }
 
-  onDropContext(event: DragEvent): void {
+  onDropReference(event: DragEvent): void {
     event.preventDefault()
-    this.dragOverContext.set(false)
+    this.dragOverReference.set(false)
     const tile = this.readDrop(event)
     if (tile) this.addContext(tile)
   }
 
   /** A drop target has to LOOK like one while something is over it. */
-  readonly dragOverWork = signal(false)
-  readonly dragOverContext = signal(false)
+  readonly dragOverAnchor = signal(false)
+  readonly dragOverReference = signal(false)
 
-  onDragOver(event: DragEvent, which: 'work' | 'context'): void {
+  onDragOver(event: DragEvent, which: 'anchor' | 'reference'): void {
     if (!event.dataTransfer?.types?.includes(TILE_DRAG_TYPE)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
-    if (which === 'work') this.dragOverWork.set(true)
-    else this.dragOverContext.set(true)
+    if (which === 'anchor') this.dragOverAnchor.set(true)
+    else this.dragOverReference.set(true)
   }
 
-  onDragLeave(which: 'work' | 'context'): void {
-    if (which === 'work') this.dragOverWork.set(false)
-    else this.dragOverContext.set(false)
+  onDragLeave(which: 'anchor' | 'reference'): void {
+    if (which === 'anchor') this.dragOverAnchor.set(false)
+    else this.dragOverReference.set(false)
   }
 
   // WHOSE CONVERSATION IS THIS? Read off the CONVERSATION, never off the
@@ -596,7 +634,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  only the held references), and the rail's own picks unmark. */
   clearContext(): void {
     this.#rail?.clearSelection()
-    const labels = this.railContext().map(pick => pick.name)
+    const labels = this.references().map(pick => pick.name)
     if (labels.length) EffectBus.emit('clipboard:discard-items', { labels })
     this.#focus()
   }
@@ -921,7 +959,7 @@ export class ChatWindowComponent implements OnDestroy {
     // means a window opened mid-session shows what was gathered before it
     // existed; every add and remove above goes through the clipboard and
     // arrives back here, so this subscription is the ONLY writer of
-    // railContext and the boxes can never disagree with the panel.
+    // references and the boxes can never disagree with the panel.
     this.#cleanups.push(EffectBus.on<{ items?: readonly { label: string; sourceSegments: readonly string[]; sig?: string }[] }>(
       'clipboard:changed', (payload) => {
         const items = Array.isArray(payload?.items) ? payload!.items! : []
@@ -931,7 +969,7 @@ export class ChatWindowComponent implements OnDestroy {
           name: item.label,
           sig: item.sig,
         }))
-        this.railContext.set(picks)
+        this.references.set(picks)
         this.#announceSet()
         void this.#refreshContextThumbs(picks)
       }))
@@ -1298,7 +1336,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#rail?.dispose()
     this.#rail = null
     this.railSubject.set(null)
-    // railContext is NOT reset: it mirrors the clipboard, which outlives the
+    // references is NOT reset: it mirrors the clipboard, which outlives the
     // window — that persistence is the point of gathering there. The rail's
     // own pick bookkeeping does die with the rail.
     this.#railSeen = new Map()
@@ -1597,17 +1635,19 @@ export class ChatWindowComponent implements OnDestroy {
    *  drilled level rides as its full `/path/name`, which is self-describing
    *  to the responder without any protocol change. */
   #chosenTargets(): string[] {
-    // THE WORK BRANCH WINS. Dropping a branch into the work box is the
-    // participant saying "change THIS", and it outranks whichever tile's
-    // conversation happens to be open.
-    const work = this.workBranch()
-    if (work?.path) {
-      const segments = work.path.split('/').filter(Boolean)
-      const parent = segments.slice(0, -1)
-      const named = JSON.stringify(parent) === JSON.stringify(this.here())
-        ? segments[segments.length - 1]
-        : work.path
-      return [...new Set([...this.targets(), named])]
+    // THE ANCHOR WINS. Putting tiles on the first rank is the participant
+    // saying "this is what the request is about", and it outranks whichever
+    // tile's conversation happens to be open. Every tile on the rank is a
+    // target: they are one piece of work.
+    const anchored = this.anchorContext()
+    if (anchored.length) {
+      const hereJson = JSON.stringify(this.here())
+      const named = anchored.map(tile => {
+        const segments = tile.path.split('/').filter(Boolean)
+        const parent = segments.slice(0, -1)
+        return JSON.stringify(parent) === hereJson ? segments[segments.length - 1] : tile.path
+      })
+      return [...new Set([...this.targets(), ...named])]
     }
 
     // Otherwise the tile comes from the CONVERSATION. Reading it off the
@@ -1720,7 +1760,8 @@ export class ChatWindowComponent implements OnDestroy {
 
     queen.activeModel = this.model()
     const queued = await queen.submitChat(
-      convoId, message, this.#chosenTargets(), transcript, this.#rail?.selectionSigs ?? [])
+      convoId, message, this.#chosenTargets(), transcript,
+      this.referencePayload(), this.anchorPayload())
     if (!queued) {
       this.#endWait()
       EffectBus.emit('toast:show', { type: 'warning', message: 'Could not send — try again.' })

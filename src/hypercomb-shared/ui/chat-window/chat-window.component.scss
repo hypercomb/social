@@ -158,6 +158,49 @@ $accent: #7eb6d6;
   .mat-sym { font-size: 1.05em; opacity: 0.85; }
 }
 
+// THE FIRST RANK — the anchor. One box holding however many tiles are the
+// same piece of work, named, and wearing the warmer colour the rest of the
+// product uses for "the hive is acting", because this is the rank an answer
+// is allowed to change.
+.chat-rank {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 4rem;
+  max-width: 22rem;
+  padding: 0.1em 0.35em;
+  border: 1px dashed rgba(226, 196, 140, 0.45);
+  border-radius: var(--hc-radius-control, 2px);
+  color: rgba(226, 196, 140, 0.85);
+  font-size: 0.82em;
+  overflow: hidden;
+
+  &.filled { border-style: solid; border-color: rgba(226, 196, 140, 0.7); background: rgba(226, 196, 140, 0.1); }
+  &.over { border-color: rgba(226, 196, 140, 0.95); background: rgba(226, 196, 140, 0.26); }
+
+  .mat-sym { flex: 0 0 auto; font-size: 1.05em; opacity: 0.85; }
+}
+
+// One tile on the rank. Named — you check a name before you let something
+// change it — and its × takes only that one off.
+.chat-anchor-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  max-width: 9rem;
+  padding: 0 0.3em;
+  border: 0;
+  border-radius: var(--hc-radius-control, 2px);
+  background: rgba(226, 196, 140, 0.14);
+  color: rgba(226, 196, 140, 0.98);
+  font: inherit;
+  font-size: 1em;
+  cursor: pointer;
+
+  &:hover { background: rgba(226, 196, 140, 0.24); }
+  &:focus-visible { outline: 1px solid rgba(226, 196, 140, 0.8); outline-offset: 1px; }
+}
+
 // The work box is the one that CHANGES things, so it wears the warmer colour
 // the rest of the product uses for "the hive is acting".
 .chat-box-work {

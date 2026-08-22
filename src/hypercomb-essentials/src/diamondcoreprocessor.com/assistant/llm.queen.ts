@@ -32,6 +32,7 @@
 import { QueenBee, EffectBus, isLocalClaudeBridgeConfigured, isSignature } from '@hypercomb/core'
 import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
 import { resolveTileContext } from './tile-context.js'
+import { setSignature } from './context-groups.js'
 
 type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
 type SelectionLike = { selected: ReadonlySet<string> }
@@ -128,12 +129,19 @@ export class LlmQueenBee extends QueenBee {
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
-    /** Tiles CHOSEN in the list, as signatures. Explicit context: the
-     *  participant ctrl-clicked these, so they lead the union and the cap can
-     *  never drop them in favour of something merely attached. A signature
-     *  list is what makes the payload deterministic — the same choice
-     *  composes the same request bytes, today and on a rebuild. */
-    chosen: readonly string[] = [],
+    /** THE REFERENCES this request carries — supporting layers, resources, or
+     *  whole context groups (a META CONTEXT: a reference whose target is a set
+     *  rather than a single layer). Each contributes a signature, and they
+     *  lead the union so the cap can never drop something named by hand in
+     *  favour of something merely attached. A signature list is what makes the
+     *  payload deterministic: the same references compose the same request
+     *  bytes, today and on a rebuild. */
+    references: readonly { kind?: string; sig?: string; label?: string }[] = [],
+    /** THE ANCHOR — the first rank. One tile usually, several when they are
+     *  the same piece of work, and it is the only thing an answer may change.
+     *  Carried with its own set signature so a request over the same anchor
+     *  is recognisably the same request. */
+    anchor: readonly { path?: string; sig?: string }[] = [],
   ): Promise<string | null> {
     // This method is specifically the durable LOCAL-BRIDGE queue seam. The
     // chat window's participant-host path calls HostAi directly and never
@@ -154,10 +162,26 @@ export class LlmQueenBee extends QueenBee {
     // guess that a tile has curated material behind it.
     const attached = await composeContext(segments)
 
-    // CHOSEN FIRST, then whatever is attached to the tile. Both are sigs, so
-    // the union is a set and the order is the only editorial decision: what
-    // was picked by hand outranks what was inherited from the page.
-    const picked = [...new Set(chosen.map(String).filter(isSignature))]
+    // REFERENCES FIRST, then whatever is attached to the tile. Both are sigs,
+    // so the union is a set and the order is the only editorial decision:
+    // what was named by hand outranks what was inherited from the page.
+    const named = references
+      .map(reference => ({
+        kind: String(reference?.kind ?? 'layer'),
+        sig: String(reference?.sig ?? ''),
+        label: String(reference?.label ?? ''),
+      }))
+      .filter(reference => isSignature(reference.sig))
+    const picked = [...new Set(named.map(reference => reference.sig))]
+
+    // THE ANCHOR IS A SET. Usually of one — but several tiles can be the same
+    // piece of work, and stacking them on the first rank says so. Its set
+    // signature is what makes two requests over the same anchor recognisably
+    // the same request.
+    const anchored = anchor
+      .map(tile => ({ path: String(tile?.path ?? ''), sig: String(tile?.sig ?? '') }))
+      .filter(tile => tile.path || isSignature(tile.sig))
+    const anchorSig = await setSignature(anchored.map(tile => ({ path: tile.path, name: '', sig: tile.sig })))
     const union = [...new Set([...picked, ...(attached.context ?? [])])]
     const context = union.length
       ? {
@@ -177,7 +201,13 @@ export class LlmQueenBee extends QueenBee {
         model: this.activeModel,
         targets,
         segments,
-        ...(picked.length ? { chosen: picked } : {}),
+        // THE ANCHOR — what the request is anchored to, and the only thing an
+        // answer may change. Everything else it carries is there to be READ.
+        ...(anchored.length ? { anchor: anchored, anchorSig } : {}),
+        // Structured references ride BESIDE the flat sig list: the list is
+        // what a responder expands, the structure is what tells it whether a
+        // signature is one layer or a whole context.
+        ...(named.length ? { references: named } : {}),
         ...context,
         status: 'pending',
         askedAt: Date.now(),

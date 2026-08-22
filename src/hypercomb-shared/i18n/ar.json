@@ -2156,6 +2156,11 @@
   "chat.work.drop": "يحتاج إلى تغييرات",
   "chat.context.drop": "أفلت فرعًا لإضافته كسياق",
   "chat.context.one": "{tile} — سياق داعم، انقر للإزالة",
+  "chat.anchor.hint": "الرتبة الأولى — موضوع هذا الطلب وكل ما يمكنه تغييره",
+  "chat.anchor.drop": "يحتاج إلى تغييرات",
+  "chat.anchor.one": "{tile} — في الرتبة الأولى، انقر لإزالته",
+  "chat.reference.drop": "أفلت فرعًا لإضافته كمرجع",
+  "chat.reference.one": "{tile} — مرجع، انقر للإزالة",
   "mesh-modal.needs-location": "يلزم موقع للانضمام",
   "mesh-modal.needs-secret": "يلزم مفتاح سري للانضمام"
 }

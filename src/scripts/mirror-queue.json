@@ -1226,6 +1226,15 @@
       "unattended": false,
       "created": "2026-08-21",
       "status": "pending"
+    },
+    {
+      "id": "anchor-and-references",
+      "title": "Mirror: anchor rank + references — two kinds of data in one request",
+      "run": null,
+      "note": "BUILT: the request header is now [anchor rank][reference squares][+]. THE ANCHOR is the first rank and a SET (stack tiles on it — several tiles are often one piece of work); it is what the request is about and the only thing an answer may change, carried with its own set signature (anchorSig, via context-groups.setSignature) so two requests over the same anchor are recognisably the same request. Anchor items show NAMES because a name is what you check before letting something change. THE REFERENCES are supporting layers and META CONTEXTS (a reference whose target is a whole context group rather than one layer) — there to be READ, drawn as the tile's own picture square with the name on hover, each carrying {kind, sig, label}. assistant/tile-pictures.ts publishes the rail's picture walk over IoC so the shell can draw a square without importing essentials; the drag payload carries propsSig. NOTE: a concurrent session shipped overlapping work (commits d636a581b, 0981bfd2a, 1949f2cf1) — its contextThumbs picture resolver was KEPT and this pass reconciled the template to it rather than replacing it. OWED: notes for anchor-vs-reference on the copilot-rail tile; a part tile for tile-pictures.ts; dedupe the two picture resolvers (contextThumbs vs TilePictures) into one. Manual — note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-22",
+      "status": "pending"
     }
   ]
 }
