@@ -83,7 +83,7 @@ async function cueTexts(page) {
     const found = []
     const walk = (node, depth) => {
       if (!node || depth > 8) return
-      if (typeof node.text === 'string' && /[✂⊕]/.test(node.text)) {
+      if (typeof node.text === 'string' && /[✂⊕＋−✓↺]/.test(node.text)) {
         found.push({ text: node.text })
       }
       for (const child of node.children ?? []) walk(child, depth + 1)
@@ -92,6 +92,8 @@ async function cueTexts(page) {
     return { found, cursor: host?.canvas?.style?.cursor ?? '' }
   })
 }
+
+const cueSays = (cue, glyph) => cue.found.some(t => t.text.includes(glyph))
 
 /** A dev-server error overlay swallows every pointer event (full-viewport
  *  backdrop), so hover-driven checks silently see nothing. The typecheck
@@ -120,9 +122,25 @@ async function main() {
   page.on('pageerror', e => console.log('  [pageerror]', String(e).slice(0, 200)))
   await page.goto(url, { waitUntil: 'domcontentloaded' })
 
-  await page.waitForFunction(() => !!window.__hypercombEffectBus?.lastValue?.get('render:host-ready'), null, { timeout: 90000 })
-  await sleep(1500)
-  await dismissBuildOverlay(page)
+  // A live-reload mid-boot (another session saving a file, the dev server
+  // rebuilding) destroys the execution context under any evaluate in flight.
+  // Ride it out rather than reporting it as a failure of the thing under test.
+  const settle = async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await page.waitForFunction(() => !!window.__hypercombEffectBus?.lastValue?.get('render:host-ready'), null, { timeout: 90000 })
+        await sleep(1500)
+        await dismissBuildOverlay(page)
+        return
+      } catch (err) {
+        if (!/context was destroyed|Execution context/i.test(String(err))) throw err
+        console.log('  [reload] the page reloaded under us — waiting for it to come back')
+        await sleep(2000)
+      }
+    }
+    throw new Error('page never settled — the dev server keeps reloading')
+  }
+  await settle()
 
   // A tile to hover.
   await addTile(page, 'cue-probe')
@@ -140,22 +158,39 @@ async function main() {
   // then PROVE the hover landed before asserting anything about the cue.
   await sleep(900)
 
-  let at = null
-  for (let attempt = 0; attempt < 3; attempt++) {
-    at = await tileClientPoint(page, 'cue-probe', { x: 0, y: -14 })
-    if (!at.ok) break
-    await page.mouse.move(at.x, at.y, { steps: 8 })
-    await sleep(400)
-    const hover = await page.evaluate(() =>
-      window.__hypercombEffectBus?.lastValue?.get('tile:hover')?.label ?? null)
-    if (hover === 'cue-probe') break
-    await sleep(500)
+  // EVERY hover re-derives the point. Opening or closing a docked panel
+  // re-runs the global fit, which SLIDES the mesh — a point cached from
+  // before the panel moved puts the mouse on empty felt, and the cue
+  // (correctly) says nothing. Ask where the tile is now, move, and PROVE
+  // the hover landed before asserting anything about the pill.
+  const hoverTile = async () => {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const point = await tileClientPoint(page, 'cue-probe', { x: 0, y: -14 })
+      if (!point.ok) return { ok: false, point }
+      // Leave and re-enter so a hover that was already there still re-fires.
+      await page.mouse.move(point.x + 40, point.y + 40, { steps: 3 })
+      await sleep(120)
+      await page.mouse.move(point.x, point.y, { steps: 8 })
+      await sleep(400)
+      const hover = await page.evaluate(() =>
+        window.__hypercombEffectBus?.lastValue?.get('tile:hover')?.label ?? null)
+      if (hover === 'cue-probe') return { ok: true, point }
+      await sleep(500)
+    }
+    return { ok: false }
   }
-  check('tile located on screen', at?.ok, JSON.stringify(at))
-  if (!at?.ok) { await browser.close(); process.exit(1) }
-  const hovered = await page.evaluate(() =>
-    window.__hypercombEffectBus?.lastValue?.get('tile:hover')?.label ?? null)
-  check('the pointer is ON the tile', hovered === 'cue-probe', `hover='${hovered}'`)
+
+  /** Re-hover and read the pill — every cue assertion goes through this so
+   *  none of them can be reading a pointer that has drifted off the tile. */
+  const rehover = async () => {
+    await hoverTile()
+    return cueTexts(page)
+  }
+
+  let at = await hoverTile()
+  check('tile located on screen', at.ok, JSON.stringify(at))
+  if (!at.ok) { await browser.close(); process.exit(1) }
+  check('the pointer is ON the tile', true, 'hover=cue-probe')
 
   let cue = await cueTexts(page)
   check('bare hover floats the TAKE pill',
@@ -182,11 +217,50 @@ async function main() {
 
   // Window closed → no cue.
   await page.evaluate(() => window.__hypercombEffectBus.emit('clipboard:panel', { visible: false }))
-  await sleep(300)
-  await page.mouse.move(at.x + 4, at.y, { steps: 2 })
-  await sleep(300)
-  cue = await cueTexts(page)
+  await sleep(600)
+  cue = await rehover()
   check('closing the window drops the cue', cue.found.length === 0, JSON.stringify(cue))
+
+  // ── A BOUQUET IN HAND — the verb is a COMPARISON ────────────────────
+  // The marks held against the marks the tile already wears. Same pill,
+  // same place; three answers.
+
+  await page.evaluate(() => window.__hypercombEffectBus.emit('tags:apply-pending',
+    { active: true, tags: ['urgent'], cells: [] }))
+  cue = await rehover()
+  check('a bouquet the tile lacks says MARK', cueSays(cue, '＋'), JSON.stringify(cue))
+  await page.screenshot({ path: path.join(out, 'cue-mark.png') })
+
+  // Collected into the grouping → the click would let it go.
+  await page.evaluate(() => window.__hypercombEffectBus.emit('tags:apply-pending',
+    { active: true, tags: ['urgent'], cells: ['cue-probe'] }))
+  cue = await rehover()
+  check('a tile already collected says RELEASE',
+    cueSays(cue, '−') && !cueSays(cue, '＋'), JSON.stringify(cue))
+
+  // THE COMPARISON ITSELF: give the tile the mark, and the answer changes
+  // from "mark" to "already marked" without the bouquet changing at all.
+  const applied = await page.evaluate(async () => {
+    const decorations = window.ioc?.get?.('@diamondcoreprocessor.com/DecorationService')
+    if (!decorations?.addTag) return 'no decoration service'
+    try { await decorations.addTag(['cue-probe'], 'urgent'); return 'ok' } catch (e) { return String(e).slice(0, 80) }
+  })
+  if (applied !== 'ok') {
+    console.log('  [skip] could not apply a real mark:', applied)
+  } else {
+    await sleep(900)
+    await page.evaluate(() => window.__hypercombEffectBus.emit('tags:apply-pending',
+      { active: true, tags: ['urgent'], cells: [] }))
+    cue = await rehover()
+    check('a tile that already wears the mark says MARKED',
+      cueSays(cue, '✓'), JSON.stringify(cue))
+    await page.screenshot({ path: path.join(out, 'cue-marked.png') })
+  }
+
+  // Bouquet put down → the hive goes quiet again.
+  await page.evaluate(() => window.__hypercombEffectBus.emit('tags:apply-pending', { active: false, tags: [], cells: [] }))
+  cue = await rehover()
+  check('putting the bouquet down drops the cue', cue.found.length === 0, JSON.stringify(cue))
 
   await browser.close()
   const failed = results.filter(r => !r.ok)

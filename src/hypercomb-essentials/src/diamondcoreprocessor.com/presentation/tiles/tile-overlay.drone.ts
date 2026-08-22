@@ -7,7 +7,7 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
-import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKind, referenceTargetForLabel, tagsForLabel } from '../../commands/decoration-kind-index.js'
 import { cellLocationSig } from '../../editor/tile-properties.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
@@ -279,16 +279,17 @@ const HINT_PILL_RADIUS = 2
 // (rasterise at 4× viewBox — see hex-icon-button.ts).
 const HINT_TEXT_RESOLUTION = Math.max(6, (typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1) * 4)
 
-// ── Swap-mode verb cue ────────────────────────────────────────────────
-// While the clipboard window is open, the hovered tile says what a click
-// will DO to it: "✂ take" (plain click cuts it into the window) or
-// "⊕ copy" (ctrl held — it lands in the window AND stays on the page).
-// The pill floats ABOVE the hex so it never collides with the name band,
-// the icon rows, or the action hint below — and it lives in its own
-// container because the ctrl hover path hides #overlay entirely.
+// ── The verb cue ──────────────────────────────────────────────────────
+// While a mode owns the tile click — the clipboard window, a bouquet in
+// hand, a staged removal — the hovered tile says what the click will DO to
+// it (see #cueVerbFor for the three vocabularies). The pill floats ABOVE
+// the hex so it never collides with the name band, the icon rows, or the
+// action hint below — and it lives in its own container because the ctrl
+// hover path hides #overlay entirely.
 const SWAP_CUE_FONT_SIZE = 4.5
-const SWAP_CUE_TAKE_COLOR = 0xffc480   // the retired cut chip's amber
-const SWAP_CUE_COPY_COLOR = 0xeaf0ff   // hint near-white
+const SWAP_CUE_TAKE_COLOR = 0xffc480   // amber: something LEAVES the tile
+const SWAP_CUE_COPY_COLOR = 0xeaf0ff   // near-white: something is GAINED
+const CUE_SETTLED_COLOR = 0x9fb4c8     // steel: nothing to do, already so
 const SWAP_CUE_MARGIN = 4              // gap between hex top edge and pill
 
 // ── Pool icon wrapper (tracks identity for drag) ──────────────────
@@ -472,11 +473,12 @@ export class TileOverlayDrone extends Drone {
 
   /** Pointer kind of the most recent press, set before every guard. */
   #lastPressWasTouch = false
-  // NOTE: there is deliberately NO apply-brush takeover here any more. A
-  // bouquet in hand does not hijack the hive — you keep walking (click,
-  // enter, hold) exactly as always, and ctrl+click COLLECTS the tile into
-  // the grouping. That gesture belongs to SelectionInputDrone, the canonical
-  // owner of ctrl-as-add-to-set; the paint brush it replaced lived here.
+  // A BOUQUET IN HAND takes the click only where it will ACT. Show-cell
+  // shades every tile still missing part of the set; a plain click on a
+  // shaded tile scents it (`tags:apply-click` → PheromoneTilesDrone writes
+  // at once) and the bouquet stays in hand. Tiles already wearing the whole
+  // set stay lit and stay ORDINARY GROUND — pressing one walks in as always,
+  // so the hive is never wholly hijacked. Ctrl keeps meaning selection.
   /** The cursor is on chrome above the canvas, so the hive is standing down.
    *  Latched so the "nothing hovered" broadcast fires once per entry. */
   #hoverSuppressed = false
@@ -523,10 +525,21 @@ export class TileOverlayDrone extends Drone {
   #hintTimer: ReturnType<typeof setTimeout> | null = null
   #hintActionName: string | null = null
   #hintExpanded = false
-  /** The swap-mode verb pill over the hovered tile (see SWAP_CUE_* consts). */
+  /** The verb pill over the hovered tile (see SWAP_CUE_* consts). */
   #swapCue: Container | null = null
-  /** Last rendered cue verb: null = hidden, false = take, true = copy. */
-  #swapCueCopy: boolean | null = null
+  /** The rendered pill's verb key — the same-state guard (see #cueVerbFor). */
+  #swapCueKey: string | null = null
+  /** The bouquet in hand and the tiles already collected into it, mirrored
+   *  from `tags:apply-pending` — the two halves of the cue's COMPARISON. */
+  #bouquetTags: string[] = []
+  #bouquetStaged = new Set<string>()
+  /** The keyword whose removal is staged, and the tiles staged to lose it
+   *  (`tags:removal-pending`). */
+  #removalTag: string | null = null
+  #removalStaged = new Set<string>()
+  /** Last known ctrl/meta state, so a cue asked for by a bus event (rather
+   *  than by a pointer or key event) reads the right modifier. */
+  #cueCopyHeld = false
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
@@ -548,7 +561,7 @@ export class TileOverlayDrone extends Drone {
     'behavior:enablement-changed',
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
-    'tags:view-state', 'tags:removal-pending',
+    'tags:view-state', 'tags:removal-pending', 'tags:apply-pending', 'tags:changed',
     'clipboard:open',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
@@ -1087,11 +1100,35 @@ export class TileOverlayDrone extends Drone {
       // Same shape as the selection takeover — presses stop navigating and the
       // click becomes a toggle — so the gesture is one the participant already
       // knows. (The overlay is already down — the window is open.)
-      this.onEffect<{ active?: boolean }>('tags:removal-pending', (payload) => {
+      this.onEffect<{ active?: boolean; tag?: string | null; cells?: string[] }>('tags:removal-pending', (payload) => {
         this.#tagRemovalArmed = payload?.active === true
+        // The cue's comparison needs both halves: WHICH keyword is going, and
+        // which tiles are already staged to lose it.
+        this.#removalTag = this.#tagRemovalArmed ? (payload?.tag ?? null) : null
+        this.#removalStaged = new Set(Array.isArray(payload?.cells) ? payload!.cells! : [])
         this.#updateVisibility()
         this.#updatePerTileVisibility()
+        this.#refreshSwapCue(false)
       })
+
+      // A BOUQUET IN HAND. The overlay does not take the click over for it —
+      // collecting rides ctrl+press in SelectionInputDrone — but the hovered
+      // tile still has to say what it would GET, and that answer is the marks
+      // held compared against the marks it already wears (see #cueVerbFor).
+      this.onEffect<{ active?: boolean; tags?: string[]; tag?: string | null; cells?: string[] }>(
+        'tags:apply-pending', (payload) => {
+          const armed = payload?.active === true
+          const raw = Array.isArray(payload?.tags) && payload!.tags!.length
+            ? payload!.tags!
+            : (payload?.tag ? [payload.tag] : [])
+          this.#bouquetTags = armed ? [...new Set(raw.map(tag => String(tag ?? '').trim()).filter(Boolean))] : []
+          this.#bouquetStaged = new Set(armed && Array.isArray(payload?.cells) ? payload!.cells! : [])
+          this.#refreshSwapCue(false)
+        })
+
+      // A tile's marks changed under the pointer (a commit landed, an × took
+      // one off): the comparison is stale, so re-ask.
+      this.onEffect('tags:changed', () => { this.#refreshSwapCue(false) })
 
       // ── THE SWAP ────────────────────────────────────────────────────
       // While the clipboard window is open the hive is in swap mode: a click
@@ -1122,7 +1159,9 @@ export class TileOverlayDrone extends Drone {
         // the map, clearing #currentAxial; #recoverHover re-derives so the menu
         // isn't stranded hidden. (No-ops while editing — the editor:mode close
         // handler runs the recovery once the panel dismisses.)
-        if (active) { this.#updatePerTileVisibility(); this.#updateVisibility() }
+        // A dragged pheromone already says what it is with the chip under the
+        // cursor, so the verb pill stands down for the length of the drag.
+        if (active) { this.#hideSwapCue(); this.#updatePerTileVisibility(); this.#updateVisibility() }
         // The drag is over, so there is no landing place any more. Said
         // explicitly rather than left to the last move: `drop:target` replays
         // its last value to late subscribers, so a stale ring would otherwise
@@ -2757,8 +2796,6 @@ export class TileOverlayDrone extends Drone {
     // Armed removal: the press must not navigate — the trailing click stages
     // the tile instead (see #onClick).
     if (this.#tagRemovalArmed) return
-    // A bouquet in hand is NOT a takeover: the press navigates as always.
-    // Collecting is ctrl+click, owned by SelectionInputDrone.
     if (this.#touchDragging) return
     if (e.ctrlKey || e.metaKey) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
@@ -3811,17 +3848,40 @@ export class TileOverlayDrone extends Drone {
     this.emitEffect('tile:hover', { label: null, bandRows: 1 })
   }
 
-  // ── Swap-mode verb cue ─────────────────────────────────────────────
-  // Show/refresh the "what will this click do" pill over the hovered tile.
-  // Pointer-only, window open, a real tile under the cursor — else hide.
+  // ── THE VERB CUE ───────────────────────────────────────────────────
+  // The hovered tile says what the click will DO to it, whichever mode has
+  // taken the click over. One pill, one place, three vocabularies:
+  //
+  //   the clipboard  ✂ take · ⊕ copy      (told apart by ctrl)
+  //   a bouquet      ＋ mark · − release · ✓ marked
+  //   a removal      − unmark · ↺ keep
+  //
+  // The bouquet's verb is a COMPARISON, not a fixed word: the marks in hand
+  // against the marks the tile already carries. A tile already wearing every
+  // mark in the bouquet says so (✓ marked) rather than offering to add what
+  // it has — that is the whole reason the cue is worth drawing.
+  //
+  // Pointer-only, a real tile under the cursor, and never during a drag: a
+  // dragged pheromone already says what it is with the chip under the
+  // cursor, and a second answer beside it is noise.
+  //
   // Called from pointermove (both ctrl branches) and from the Control/Meta
   // keydown/keyup listener, so the verb flips live while the pointer sits
   // still. The cheap same-state guard makes per-move calls free.
-  #refreshSwapCue(copy: boolean, pointerType?: string): void {
-    if (!this.#clipboardArmed || this.#mobileMode() || pointerType === 'touch'
+  #refreshSwapCue(copy?: boolean, pointerType?: string): void {
+    // Callers that know the modifier state (pointermove, the key listener)
+    // pass it and it is REMEMBERED; a mode change arriving on the bus asks
+    // without one and gets the last known answer, so a bouquet picked up
+    // with ctrl already down does not momentarily lie.
+    const held = copy ?? this.#cueCopyHeld
+    this.#cueCopyHeld = held
+    if (this.#mobileMode() || pointerType === 'touch' || this.#dropDragging
       || !this.#renderContainer || !this.#currentAxial) { this.#hideSwapCue(); return }
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
     if (!entry?.label) { this.#hideSwapCue(); return }
+
+    const verb = this.#cueVerbFor(entry.label, held)
+    if (!verb) { this.#hideSwapCue(); return }
 
     // The native copy cursor rides along (the Explorer ctrl-drag convention).
     // THROUGH Pixi, not canvas.style: the EventSystem re-applies its own
@@ -3829,26 +3889,23 @@ export class TileOverlayDrone extends Drone {
     // is stomped before the participant can see it. Overriding the DEFAULT
     // style covers subsequent moves; setCursor applies it NOW, for the
     // ctrl-pressed-while-still case where no move follows.
-    this.#setSwapCursor(copy)
+    // The copy cursor belongs to the clipboard's copy alone.
+    this.#setSwapCursor(verb.cursorCopy === true)
 
-    if (this.#swapCue && this.#swapCueCopy === copy) {
+    if (this.#swapCue && this.#swapCueKey === verb.key) {
       this.#positionSwapCue()
       return
     }
     this.#clearSwapCuePill()
 
-    const i18n = this.#resolveI18n()
-    const word = copy
-      ? (i18n?.t('clipboard.cue.copy') ?? 'copy')
-      : (i18n?.t('clipboard.cue.take') ?? 'take')
     const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
     const text = new Text({
-      text: `${copy ? '⊕' : '✂'} ${word}`,
+      text: `${verb.glyph} ${verb.word}`,
       style: new TextStyle({
         fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
         fontSize: SWAP_CUE_FONT_SIZE,
         fontWeight: '600',
-        fill: copy ? SWAP_CUE_COPY_COLOR : SWAP_CUE_TAKE_COLOR,
+        fill: verb.color,
         align: 'center',
       }),
       resolution: HINT_TEXT_RESOLUTION,
@@ -3865,8 +3922,66 @@ export class TileOverlayDrone extends Drone {
     cue.addChild(text)
     this.#renderContainer.addChild(cue)
     this.#swapCue = cue
-    this.#swapCueCopy = copy
+    this.#swapCueKey = verb.key
     this.#positionSwapCue()
+  }
+
+  /** WHAT WILL THIS CLICK DO — resolved from whichever mode owns the click,
+   *  in the order the modes take it over. Null means "nothing is armed":
+   *  a plain hive walk needs no pill.
+   *
+   *  `key` is the same-state guard — while it is unchanged the pill is left
+   *  exactly as it is, so per-move calls cost one string compare. */
+  #cueVerbFor(label: string, copy: boolean): {
+    key: string; glyph: string; word: string; color: number; cursorCopy?: boolean
+  } | null {
+    const i18n = this.#resolveI18n()
+    const t = (k: string, fallback: string): string => i18n?.t(k) ?? fallback
+
+    // A REMOVAL IN HAND. The tile either carries the keyword being removed
+    // (so the click stages it to lose it) or it does not — and a tile with
+    // nothing to lose is told nothing, rather than offered a no-op.
+    if (this.#tagRemovalArmed && this.#removalTag) {
+      if (this.#removalStaged.has(label)) {
+        return { key: `keep:${label}`, glyph: '↺', word: t('pheromone.cue.keep', 'keep'), color: SWAP_CUE_COPY_COLOR }
+      }
+      if (!tagsForLabel(label).includes(this.#removalTag)) return null
+      return { key: `unmark:${label}`, glyph: '−', word: t('pheromone.cue.unmark', 'unmark'), color: SWAP_CUE_TAKE_COLOR }
+    }
+
+    // A BOUQUET IN HAND. THE COMPARISON: the marks held against the marks
+    // the tile already wears. Collecting rides ctrl+press (SelectionInput
+    // owns the gesture) — the verb is the same either way, so the pill
+    // answers "what would this tile get" whether or not ctrl is down yet.
+    if (this.#bouquetTags.length > 0) {
+      if (this.#bouquetStaged.has(label)) {
+        return { key: `release:${label}`, glyph: '−', word: t('pheromone.cue.release', 'release'), color: SWAP_CUE_TAKE_COLOR }
+      }
+      const worn = new Set(tagsForLabel(label))
+      const missing = this.#bouquetTags.filter(tag => !worn.has(tag))
+      if (missing.length === 0) {
+        return { key: `marked:${label}`, glyph: '✓', word: t('pheromone.cue.marked', 'marked'), color: CUE_SETTLED_COLOR }
+      }
+      // Name what it would GAIN, not the whole bouquet: with several marks
+      // in hand, the tile's answer is the ones it is missing.
+      const named = missing.length === 1 ? missing[0] : `${missing.length}`
+      return {
+        key: `mark:${label}:${named}`,
+        glyph: '＋',
+        word: `${t('pheromone.cue.mark', 'mark')} ${named}`,
+        color: SWAP_CUE_COPY_COLOR,
+      }
+    }
+
+    // THE CLIPBOARD. Plain click cuts the tile into the window; ctrl copies
+    // it in and leaves it where it is.
+    if (this.#clipboardArmed) {
+      return copy
+        ? { key: 'copy', glyph: '⊕', word: t('clipboard.cue.copy', 'copy'), color: SWAP_CUE_COPY_COLOR, cursorCopy: true }
+        : { key: 'take', glyph: '✂', word: t('clipboard.cue.take', 'take'), color: SWAP_CUE_TAKE_COLOR }
+    }
+
+    return null
   }
 
   #positionSwapCue(): void {
@@ -3881,7 +3996,7 @@ export class TileOverlayDrone extends Drone {
     this.#swapCue.parent?.removeChild(this.#swapCue)
     this.#swapCue.destroy({ children: true })
     this.#swapCue = null
-    this.#swapCueCopy = null
+    this.#swapCueKey = null
   }
 
   #hideSwapCue(): void {
@@ -3908,7 +4023,6 @@ export class TileOverlayDrone extends Drone {
 
   /** Control/Meta pressed or released — flip the cue verb in place. */
   #onSwapModifier = (e: KeyboardEvent): void => {
-    if (!this.#clipboardArmed) return
     if (e.key !== 'Control' && e.key !== 'Meta') return
     this.#refreshSwapCue(e.type === 'keydown' ? true : (e.ctrlKey || e.metaKey))
   }
