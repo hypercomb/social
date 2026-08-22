@@ -47,57 +47,88 @@
         }
       </span>
 
-      <div class="chat-payload" role="group" [attr.aria-label]="'chat.payload' | t">
-        <!-- THE FIRST RANK — the anchor. What the request is about, and the
-             only thing an answer may change. A SET, not one tile: stack them
-             on the same rank and they are one piece of work. NAMED, because
-             these are the things being changed and a name is what you check
-             before you send. -->
-        <div class="chat-rank"
-          [class.over]="dragOverAnchor()"
-          [class.filled]="anchorContext().length"
-          (dragover)="onDragOver($event, 'anchor')"
-          (dragleave)="onDragLeave('anchor')"
-          (drop)="onDropAnchor($event)"
-          [title]="'chat.anchor.hint' | t">
-          <span class="mat-sym" aria-hidden="true">edit_note</span>
-          @for (tile of anchorContext(); track tile.path; let i = $index) {
-            <button class="chat-anchor-item" type="button" (click)="removeAnchor(i)"
-              [title]="'chat.anchor.one' | t: { tile: tile.path }">
-              <span class="chat-box-name">{{ tile.name }}</span>
-              <span class="chat-box-off" aria-hidden="true">×</span>
-            </button>
-          } @empty {
-            <span class="chat-box-hint">{{ 'chat.anchor.drop' | t }}</span>
+      <!-- ONE DROP AREA, always open. A long rectangle holding a single list
+           of signature-related tiles: everything the request should READ.
+           What it may CHANGE is not in here and never was a choice — it is
+           the tile whose conversation this is.
+
+           The rectangle is present whether or not it holds anything, because
+           a drop target that only appears once you are already dragging is a
+           target nobody discovers. -->
+      <div class="chat-payload" role="group" [attr.aria-label]="'chat.payload' | t"
+        [class.over]="dragOverReference()"
+        (dragover)="onDragOver($event)"
+        (dragleave)="onDragLeave()"
+        (drop)="onDropReference($event)">
+        <!-- THE WAY IN. The clipboard is where things are gathered from
+             anywhere in the hive; this icon is how you reach it without
+             crossing the screen to its panel. One click on an item in the
+             flyout pastes it onto the shelf. -->
+        <button class="chat-clip" type="button"
+          [class.on]="clipboardOpen()"
+          [class.holding]="clipboardHeld().length"
+          (click)="toggleClipboardShelf()"
+          [title]="'chat.clipboard.show' | t: { count: clipboardHeld().length }"
+          [attr.aria-expanded]="clipboardOpen()"
+          [attr.aria-label]="'chat.clipboard.show' | t: { count: clipboardHeld().length }">
+          <span class="mat-sym" aria-hidden="true">content_paste</span>
+          @if (clipboardHeld().length) {
+            <span class="chat-clip-count">{{ clipboardHeld().length }}</span>
           }
-        </div>
+        </button>
 
         <!-- THE REFERENCES — supporting layers and meta contexts, there to
              be READ, never changed. Each is drawn as the tile's own square:
              at this size a picture is recognised faster than a name is read,
-             and the name is one hover away when recognition is not enough. -->
+             and the name is one hover away when recognition is not enough.
+             Draggable: pulling one off the shelf sends it back to the
+             clipboard, and the × drops it from the request outright. -->
         @for (pick of references(); track pick.key; let i = $index) {
-          <button class="chat-box chat-box-context filled" type="button"
+          <span class="chat-box chat-box-context filled"
             [class.pictured]="contextThumbs()[pick.key]"
-            (click)="removeContext(i)"
+            draggable="true"
+            (dragstart)="onReferenceDragStart($event, i)"
+            (dragend)="onReferenceDragEnd()"
             [title]="'chat.context.one' | t: { tile: pick.name }">
             @if (contextThumbs()[pick.key]; as url) {
               <img class="chat-box-img" [src]="url" alt="">
             } @else {
               <span class="chat-box-name">{{ pick.name }}</span>
             }
-            <span class="chat-box-off" aria-hidden="true">×</span>
-          </button>
+            <button class="chat-box-off" type="button"
+              (click)="removeContext(i)"
+              [title]="'chat.reference.off' | t: { tile: pick.name }"
+              [attr.aria-label]="'chat.reference.off' | t: { tile: pick.name }">×</button>
+          </span>
         }
 
-        <!-- The always-present next box: drop here to add one more. -->
-        <span class="chat-box chat-box-add"
-          [class.over]="dragOverReference()"
-          (dragover)="onDragOver($event, 'reference')"
-          (dragleave)="onDragLeave('reference')"
-          (drop)="onDropReference($event)"
-          [title]="'chat.reference.drop' | t">+</span>
+        @if (!references().length) {
+          <span class="chat-payload-hint">{{ 'chat.reference.empty' | t }}</span>
+        }
       </div>
+
+      <!-- THE CLIPBOARD, WHERE THE COMPOSER IS. Not a second clipboard: the
+           same entries the panel lists, shown here so a reference is one
+           click away. Clicking one moves it onto the shelf. -->
+      @if (clipboardOpen()) {
+        <div class="chat-clip-shelf" role="listbox" [attr.aria-label]="'chat.clipboard.title' | t">
+          @for (pick of clipboardHeld(); track pick.key) {
+            <button class="chat-clip-item" type="button" role="option"
+              [attr.aria-selected]="false"
+              (click)="pasteReference(pick)"
+              [title]="'chat.clipboard.paste' | t: { tile: pick.name }">
+              @if (contextThumbs()[pick.key]; as url) {
+                <img class="chat-clip-img" [src]="url" alt="">
+              } @else {
+                <span class="mat-sym chat-clip-glyph" aria-hidden="true">hexagon</span>
+              }
+              <span class="chat-clip-name">{{ pick.name }}</span>
+            </button>
+          } @empty {
+            <span class="chat-clip-empty">{{ 'chat.clipboard.empty' | t }}</span>
+          }
+        </div>
+      }
       <span class="chat-header-space"></span>
       <button class="chat-focusbtn" type="button" (click)="toggleFocus()"
         [class.on]="focused()"

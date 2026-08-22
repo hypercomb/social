@@ -148,10 +148,9 @@ type QueenLike = {
     message: string,
     targets: string[],
     transcript: ReadonlyArray<{ role: string; text: string }>,
-    /** The references this request carries, and the anchor it is about. An
-     *  older essentials build ignores both and the ask simply carries less. */
+    /** The references this request carries. An older essentials build ignores
+     *  the argument and the ask simply carries less. */
     references?: readonly { kind: string; sig: string; label: string }[],
-    anchor?: readonly { path: string; sig: string }[],
   ): Promise<string | boolean | null>
 }
 
@@ -407,15 +406,64 @@ export class ChatWindowComponent implements OnDestroy {
    *  free-floating chat, about nothing in particular. */
   readonly railSubject = signal<RailPickLike | null>(null)
 
-  /** The tiles gathered as CONTEXT for the next question — a VIEW OF THE
-   *  CLIPBOARD. The clipboard is the ONE gathered set: hive tiles clicked
-   *  while the clipboard window is open, rows dragged off the sidebar, and
-   *  ctrl-clicked rail picks all land in it as sig entries, and the panel's
-   *  place/discard verbs operate on the same entries. This signal only
-   *  mirrors `clipboard:changed` (last-value replayed); nothing writes it
-   *  directly — every gather and every removal goes THROUGH the clipboard,
-   *  so the boxes here and the panel's rows can never disagree. */
+  // ── THE CLIPBOARD IS THE WAY IN ────────────────────────────────────
+  //
+  // One kind of thing — an op-less sig reference — and WHERE IT SITS is
+  // what it means:
+  //
+  //   on the clipboard   gathered, not committed to anything. Filled from
+  //                      anywhere in the hive (click a tile with the
+  //                      clipboard window open, drag a row off the rail).
+  //   on the SHELF       part of THIS request — what the responder reads.
+  //
+  // Moving between them is the whole interface: click a clipboard item to
+  // PASTE it onto the shelf (it leaves the clipboard — one home per item,
+  // and the clipboard empties as you use it), drag it back off the shelf
+  // to RESTORE it, or × to drop it from the request outright.
+  //
+  // There is no references tab and no second pool: a set worth keeping
+  // past this conversation is a named context group, not a compartment.
+
+  /** THE SHELF — the references this request carries, in the order they
+   *  were pasted. Chat-local: the clipboard is where things are gathered,
+   *  this is where they are committed to the question. */
   readonly references = signal<readonly RailPickLike[]>([])
+
+  /** What the clipboard is holding right now — the shelf's source, mirrored
+   *  from `clipboard:changed` (last-value replayed, so the flyout is current
+   *  the moment it opens). Read-only here; the clipboard owns it. */
+  readonly clipboardHeld = signal<readonly RailPickLike[]>([])
+
+  /** The clipboard flyout is showing. A small icon in the header, because
+   *  what you are pasting FROM should be one press away from the composer
+   *  rather than a docked panel across the screen. */
+  readonly clipboardOpen = signal(false)
+
+  toggleClipboardShelf(): void { this.clipboardOpen.update(open => !open) }
+
+  /** PASTE AS REFERENCE — one click on a clipboard item puts it on the
+   *  shelf and takes it off the clipboard. Same entry, new place. */
+  pasteReference(pick: RailPickLike): void {
+    if (!this.references().some(held => held.key === pick.key)) {
+      this.references.set([...this.references(), pick])
+      this.#announceSet()
+      void this.#refreshContextThumbs()
+    }
+    EffectBus.emit('clipboard:discard-items', { labels: [pick.name] })
+    if (this.clipboardHeld().length <= 1) this.clipboardOpen.set(false)
+  }
+
+  /** RESTORE — a reference dragged off the shelf goes back to the clipboard.
+   *  The drag is the gesture; this is what it lands as. */
+  restoreToClipboard(index: number): void {
+    const held = this.references()[index]
+    if (!held) return
+    this.references.set(this.references().filter((_, at) => at !== index))
+    this.#announceSet()
+    EffectBus.emit('clipboard:take-entries', {
+      entries: [{ label: held.name, sourceSegments: [...held.path], sig: held.sig || undefined }],
+    })
+  }
 
   /** What the next question is about, counted for the status row — the SAME
    *  deduped union `send()` will carry, so a tile both canvas-selected and
@@ -434,8 +482,14 @@ export class ChatWindowComponent implements OnDestroy {
   #thumbToken = 0
 
   /** Same bounded-cache discipline as the panel: revoke what left the set,
-   *  resolve only what is new, and let a superseding change win the race. */
-  async #refreshContextThumbs(entries: readonly { key: string; name: string; path: readonly string[] }[]): Promise<void> {
+   *  resolve only what is new, and let a superseding change win the race.
+   *
+   *  Resolve pictures for BOTH faces at once — the shelf and the flyout draw
+   *  from one cache, so pasting an item never has to re-fetch the picture the
+   *  flyout was already showing, and neither list can revoke the other's
+   *  object-URLs by being refreshed on its own. */
+  async #refreshContextThumbs(): Promise<void> {
+    const entries = [...this.references(), ...this.clipboardHeld()]
     const token = ++this.#thumbToken
     const wanted = new Set(entries.map(entry => entry.key))
     for (const key of [...this.#thumbUrls.keys()]) {
@@ -483,44 +537,31 @@ export class ChatWindowComponent implements OnDestroy {
   // The work branch stays chat-local: it is an ADDRESS for the answer, not
   // a gathered reference.
 
-  /** THE ANCHOR — the first rank. What this request is anchored to, and the
-   *  only thing an answer is allowed to change.
-   *
-   *  It is a SET, not a single tile: several tiles are often one piece of
-   *  work, and stacking them on the first rank is how you say so. Empty means
-   *  "this conversation's own tile", which is the honest default and needs no
-   *  furniture. */
-  readonly anchorContext = signal<readonly DroppedTile[]>([])
+  // THE TARGET IS THE TILE YOU ARE IN. There is no box for it, because there
+  // is nothing to choose: the conversation is about a tile, so that tile is
+  // what an answer may change. An anchor rank used to sit here saying the
+  // same thing a second time, and a second way of saying it is a second thing
+  // to keep in step. What remains is one list of references — everything the
+  // request should READ — and the target it is already standing on.
 
-  /** Stack another tile onto the first rank. Duplicates collapse — the anchor
-   *  is a set of signatures like any other. */
-  addAnchor(tile: DroppedTile): void {
-    if (!tile.sig && !tile.path) return
-    const held = this.anchorContext()
-    if (held.some(held => held.path === tile.path && held.sig === tile.sig)) return
-    this.anchorContext.set([...held, tile])
-  }
-
-  /** Take one tile off the first rank. */
-  removeAnchor(index: number): void {
-    this.anchorContext.set(this.anchorContext().filter((_, at) => at !== index))
-  }
-
-  /** Add a supporting branch — a COPY-append onto the clipboard (the tile
-   *  stays where it is; that is what makes this a reference gather, not a
-   *  move). Duplicates collapse in the service's upsert, an entry arriving
-   *  without a sig gets one sealed by the worker, and `clipboard:changed`
-   *  brings the result back into the boxes. */
+  /** A tile dropped straight onto the shelf — dragged off the sidebar rail,
+   *  never through the clipboard. It lands as a reference directly, because
+   *  a drag that has already crossed the window should not need a second
+   *  gesture to finish. */
   addContext(tile: DroppedTile): void {
     if (!tile.sig && !tile.path) return
     const segments = tile.path.split('/').filter(Boolean)
-    EffectBus.emit('clipboard:take-entries', {
-      entries: [{
-        label: tile.name || segments[segments.length - 1] || '',
-        sourceSegments: segments.slice(0, -1),
-        sig: tile.sig || undefined,
-      }],
-    })
+    const name = tile.name || segments[segments.length - 1] || ''
+    const key = tile.path.startsWith('/') ? tile.path : '/' + segments.join('/')
+    if (this.references().some(held => held.key === key)) return
+    this.references.set([...this.references(), {
+      key,
+      path: segments.slice(0, -1),
+      name,
+      sig: tile.sig || undefined,
+    }])
+    this.#announceSet()
+    void this.#refreshContextThumbs()
   }
 
   /** WHAT THE REQUEST CARRIES, structured. A reference is a pointer plus what
@@ -531,17 +572,13 @@ export class ChatWindowComponent implements OnDestroy {
    *    group  a named set of tiles — a META CONTEXT, one reference standing
    *           for many, carried by the set's own signature
    *
-   *  The anchor is not in here: it is what is being worked ON, not something
-   *  being read, and it rides separately for exactly that reason. */
+   *  The TARGET is not in here: the tile whose conversation this is rides as
+   *  the ask's target, because it is what may be changed rather than
+   *  something to be read. */
   referencePayload(): { kind: string; sig: string; label: string }[] {
     return this.references()
       .filter(pick => !!pick.sig)
       .map(pick => ({ kind: pick.kind ?? 'layer', sig: pick.sig ?? '', label: pick.name }))
-  }
-
-  /** The first rank, as the request will carry it. */
-  anchorPayload(): { path: string; sig: string }[] {
-    return this.anchorContext().map(tile => ({ path: tile.path, sig: tile.sig }))
   }
 
   /** Tell the sidebar which tiles are in the set being asked about, so it can
@@ -554,13 +591,15 @@ export class ChatWindowComponent implements OnDestroy {
     EffectBus.emit('context:active-set', { paths })
   }
 
-  /** Drop one supporting branch — discarded from the clipboard (label-keyed,
-   *  the same verb the panel's rows use), and the changed event updates the
-   *  boxes. The tile itself is untouched. */
+  /** The × — take it off the shelf and out of the request. Deliberately NOT
+   *  a restore: dragging it back is how you say "not now, but keep it".
+   *  The tile itself is untouched either way. */
   removeContext(index: number): void {
     const held = this.references()[index]
     if (!held) return
-    EffectBus.emit('clipboard:discard-items', { labels: [held.name] })
+    this.references.set(this.references().filter((_, at) => at !== index))
+    this.#announceSet()
+    void this.#refreshContextThumbs()
   }
 
   /** Read a dragged tile, whatever surface dropped it. Returns null for a
@@ -577,13 +616,6 @@ export class ChatWindowComponent implements OnDestroy {
     } catch { return null }
   }
 
-  onDropAnchor(event: DragEvent): void {
-    event.preventDefault()
-    this.dragOverAnchor.set(false)
-    const tile = this.readDrop(event)
-    if (tile) this.addAnchor(tile)
-  }
-
   onDropReference(event: DragEvent): void {
     event.preventDefault()
     this.dragOverReference.set(false)
@@ -591,21 +623,53 @@ export class ChatWindowComponent implements OnDestroy {
     if (tile) this.addContext(tile)
   }
 
+  // ── DRAG IT BACK OFF THE SHELF ─────────────────────────────────────
+  // A reference dragged out of the shelf and released anywhere off it goes
+  // back to the clipboard. The drop is not caught by a target — the shelf
+  // is the only thing that would accept it, so LEAVING the shelf IS the
+  // gesture, and dragend is where "it left" is known.
+
+  /** Which reference is in the air, by index. */
+  #draggingRef: number | null = null
+
+  onReferenceDragStart(event: DragEvent, index: number): void {
+    const held = this.references()[index]
+    if (!held) return
+    this.#draggingRef = index
+    // It travels in the same shape the rail sends, so anything that accepts
+    // a hive tile accepts this one too.
+    const payload = JSON.stringify({
+      name: held.name,
+      path: held.key,
+      sig: held.sig ?? '',
+    })
+    event.dataTransfer?.setData(TILE_DRAG_TYPE, payload)
+    event.dataTransfer?.setData('text/plain', held.key)
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  }
+
+  /** The drag ended. Dropped back on the shelf → nothing happened (the shelf's
+   *  own drop handler already cleared the mark). Dropped anywhere else → it
+   *  left the request and goes home to the clipboard. */
+  onReferenceDragEnd(): void {
+    const index = this.#draggingRef
+    this.#draggingRef = null
+    if (index === null || this.dragOverReference()) { this.dragOverReference.set(false); return }
+    this.restoreToClipboard(index)
+  }
+
   /** A drop target has to LOOK like one while something is over it. */
-  readonly dragOverAnchor = signal(false)
   readonly dragOverReference = signal(false)
 
-  onDragOver(event: DragEvent, which: 'anchor' | 'reference'): void {
+  onDragOver(event: DragEvent): void {
     if (!event.dataTransfer?.types?.includes(TILE_DRAG_TYPE)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
-    if (which === 'anchor') this.dragOverAnchor.set(true)
-    else this.dragOverReference.set(true)
+    this.dragOverReference.set(true)
   }
 
-  onDragLeave(which: 'anchor' | 'reference'): void {
-    if (which === 'anchor') this.dragOverAnchor.set(false)
-    else this.dragOverReference.set(false)
+  onDragLeave(): void {
+    this.dragOverReference.set(false)
   }
 
   // WHOSE CONVERSATION IS THIS? Read off the CONVERSATION, never off the
@@ -630,12 +694,14 @@ export class ChatWindowComponent implements OnDestroy {
     return segments[segments.length - 1] ?? ''
   })
 
-  /** Let the whole gathering go — the clipboard empties (tiles untouched,
-   *  only the held references), and the rail's own picks unmark. */
+  /** Clear the shelf — the request carries nothing extra again. The tiles
+   *  are untouched and the clipboard is left alone: this empties what THIS
+   *  question would have carried, nothing more. */
   clearContext(): void {
     this.#rail?.clearSelection()
-    const labels = this.references().map(pick => pick.name)
-    if (labels.length) EffectBus.emit('clipboard:discard-items', { labels })
+    this.references.set([])
+    this.#announceSet()
+    void this.#refreshContextThumbs()
     this.#focus()
   }
 
@@ -954,12 +1020,12 @@ export class ChatWindowComponent implements OnDestroy {
     // words is still a conversation you must be able to get back to.
     this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
 
-    // ── ONE GATHERED SET ─────────────────────────────────────────────
-    // The context boxes are a view of the CLIPBOARD. Last-value replay
-    // means a window opened mid-session shows what was gathered before it
-    // existed; every add and remove above goes through the clipboard and
-    // arrives back here, so this subscription is the ONLY writer of
-    // references and the boxes can never disagree with the panel.
+    // ── WHAT THERE IS TO PASTE ───────────────────────────────────────
+    // The clipboard's own contents, for the header's flyout. Last-value
+    // replay means the shelf's source is current the moment the window
+    // opens — including everything gathered before it existed. This is
+    // the ONLY writer of `clipboardHeld`; the clipboard owns the truth,
+    // and the shelf is filled by pasting FROM it, never by mirroring it.
     this.#cleanups.push(EffectBus.on<{ items?: readonly { label: string; sourceSegments: readonly string[]; sig?: string }[] }>(
       'clipboard:changed', (payload) => {
         const items = Array.isArray(payload?.items) ? payload!.items! : []
@@ -969,9 +1035,11 @@ export class ChatWindowComponent implements OnDestroy {
           name: item.label,
           sig: item.sig,
         }))
-        this.references.set(picks)
-        this.#announceSet()
-        void this.#refreshContextThumbs(picks)
+        this.clipboardHeld.set(picks)
+        if (!picks.length) this.clipboardOpen.set(false)
+        // Both faces draw from one thumbnail cache: an item pasted onto the
+        // shelf must not have to re-resolve a picture the flyout just had.
+        void this.#refreshContextThumbs()
       }))
 
     // The retired ask screen's channel. Kept because other surfaces open a
@@ -1336,9 +1404,10 @@ export class ChatWindowComponent implements OnDestroy {
     this.#rail?.dispose()
     this.#rail = null
     this.railSubject.set(null)
-    // references is NOT reset: it mirrors the clipboard, which outlives the
-    // window — that persistence is the point of gathering there. The rail's
-    // own pick bookkeeping does die with the rail.
+    // The shelf is NOT reset: coming back to a conversation you were part-way
+    // through composing must find the references you had put on it. What
+    // dies with the window is the flyout and the rail's pick bookkeeping.
+    this.clipboardOpen.set(false)
     this.#railSeen = new Map()
     EffectBus.emit('chat:window-state', { open: false })
   }
@@ -1354,8 +1423,10 @@ export class ChatWindowComponent implements OnDestroy {
     // The cascade unwinds the smallest commitment first: the tile you are
     // talking to, then full screen, then the window — matching the
     // escape-cascade's outermost-first rule.
-    // Escape unwinds the RAIL'S OWN picks (their removal flows through the
-    // clipboard); references gathered elsewhere are the chip's × to let go.
+    // The flyout is the smallest thing open, so it unwinds first.
+    if (this.clipboardOpen()) { this.clipboardOpen.set(false); return }
+    // Then the RAIL'S OWN picks; a reference on the shelf is let go with its
+    // × or by dragging it back, never by a keystroke that means "go up".
     if (this.focused() && this.#railSeen.size) { this.#rail?.clearSelection(); return }
     if (this.focused() && this.railSubject()) { this.#rail?.clearSubject(); return }
     if (this.focused()) { this.focused.set(false); return }
@@ -1635,24 +1706,11 @@ export class ChatWindowComponent implements OnDestroy {
    *  drilled level rides as its full `/path/name`, which is self-describing
    *  to the responder without any protocol change. */
   #chosenTargets(): string[] {
-    // THE ANCHOR WINS. Putting tiles on the first rank is the participant
-    // saying "this is what the request is about", and it outranks whichever
-    // tile's conversation happens to be open. Every tile on the rank is a
-    // target: they are one piece of work.
-    const anchored = this.anchorContext()
-    if (anchored.length) {
-      const hereJson = JSON.stringify(this.here())
-      const named = anchored.map(tile => {
-        const segments = tile.path.split('/').filter(Boolean)
-        const parent = segments.slice(0, -1)
-        return JSON.stringify(parent) === hereJson ? segments[segments.length - 1] : tile.path
-      })
-      return [...new Set([...this.targets(), ...named])]
-    }
-
-    // Otherwise the tile comes from the CONVERSATION. Reading it off the
-    // sidebar meant a tile chat opened from the roster — or in the docked
-    // window, which has no sidebar — asked its question about nothing.
+    // THE TARGET IS THE CONVERSATION'S OWN TILE. Nothing to choose and
+    // nothing to keep in step: you are talking to a tile, so that tile is
+    // what the answer may change. (Reading it off the sidebar instead meant a
+    // chat opened from the roster — or in the docked window, which has no
+    // sidebar — asked its question about nothing.)
     const path = this.subjectPath()
     if (!path || path === '/') return [...new Set(this.targets())]
     const segments = path.split('/').filter(Boolean)
@@ -1760,8 +1818,7 @@ export class ChatWindowComponent implements OnDestroy {
 
     queen.activeModel = this.model()
     const queued = await queen.submitChat(
-      convoId, message, this.#chosenTargets(), transcript,
-      this.referencePayload(), this.anchorPayload())
+      convoId, message, this.#chosenTargets(), transcript, this.referencePayload())
     if (!queued) {
       this.#endWait()
       EffectBus.emit('toast:show', { type: 'warning', message: 'Could not send — try again.' })

@@ -92,6 +92,8 @@ $accent: #7eb6d6;
   @include tw.header;
   gap: 0.4em;
   border-bottom: 1px solid rgba($accent, 0.25);
+  // The clipboard shelf hangs from the header's bottom edge.
+  position: relative;
 }
 
 .chat-glyph {
@@ -111,13 +113,43 @@ $accent: #7eb6d6;
   letter-spacing: 0.05em;
 }
 
+// THE DROP AREA — one long rectangle, always there. It takes the width the
+// header has to spare, so it reads as a place things go rather than as a
+// control you press, and it never has to be conjured by starting a drag.
 .chat-payload {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.3rem;
   min-width: 0;
-  margin-left: 0.5rem;
+  min-height: 1.8rem;
+  margin: 0 0.5rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px dashed rgba($accent, 0.28);
+  border-radius: var(--hc-radius-control, 2px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba($accent, 0.3) transparent;
+
+  // While a tile is over it the whole rectangle answers, not one square in it.
+  &.over {
+    border-style: solid;
+    border-color: rgba($accent, 0.9);
+    background: rgba($accent, 0.14);
+  }
+}
+
+// What the empty rectangle says. It names the gesture that fills it from
+// ANYWHERE in the hive, not just from the list beside it: copying a tile is
+// what puts it here, because this list and the clipboard are one thing.
+.chat-payload-hint {
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba($accent, 0.45);
+  font-size: 0.78em;
 }
 
 // A BOX. Empty it is an outline waiting for something; filled it names what
@@ -158,59 +190,6 @@ $accent: #7eb6d6;
   .mat-sym { font-size: 1.05em; opacity: 0.85; }
 }
 
-// THE FIRST RANK — the anchor. One box holding however many tiles are the
-// same piece of work, named, and wearing the warmer colour the rest of the
-// product uses for "the hive is acting", because this is the rank an answer
-// is allowed to change.
-.chat-rank {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  min-width: 4rem;
-  max-width: 22rem;
-  padding: 0.1em 0.35em;
-  border: 1px dashed rgba(226, 196, 140, 0.45);
-  border-radius: var(--hc-radius-control, 2px);
-  color: rgba(226, 196, 140, 0.85);
-  font-size: 0.82em;
-  overflow: hidden;
-
-  &.filled { border-style: solid; border-color: rgba(226, 196, 140, 0.7); background: rgba(226, 196, 140, 0.1); }
-  &.over { border-color: rgba(226, 196, 140, 0.95); background: rgba(226, 196, 140, 0.26); }
-
-  .mat-sym { flex: 0 0 auto; font-size: 1.05em; opacity: 0.85; }
-}
-
-// One tile on the rank. Named — you check a name before you let something
-// change it — and its × takes only that one off.
-.chat-anchor-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2em;
-  max-width: 9rem;
-  padding: 0 0.3em;
-  border: 0;
-  border-radius: var(--hc-radius-control, 2px);
-  background: rgba(226, 196, 140, 0.14);
-  color: rgba(226, 196, 140, 0.98);
-  font: inherit;
-  font-size: 1em;
-  cursor: pointer;
-
-  &:hover { background: rgba(226, 196, 140, 0.24); }
-  &:focus-visible { outline: 1px solid rgba(226, 196, 140, 0.8); outline-offset: 1px; }
-}
-
-// The work box is the one that CHANGES things, so it wears the warmer colour
-// the rest of the product uses for "the hive is acting".
-.chat-box-work {
-  border-color: rgba(226, 196, 140, 0.45);
-  color: rgba(226, 196, 140, 0.85);
-
-  &.filled { background: rgba(226, 196, 140, 0.14); border-color: rgba(226, 196, 140, 0.75); color: rgba(226, 196, 140, 0.98); }
-  &.over { border-color: rgba(226, 196, 140, 0.95); background: rgba(226, 196, 140, 0.26); }
-}
-
 .chat-box-name {
   min-width: 0;
   overflow: hidden;
@@ -220,12 +199,125 @@ $accent: #7eb6d6;
 }
 
 .chat-box-hint { opacity: 0.75; }
-.chat-box-off { opacity: 0.7; }
+
+// The × is a real button now — it drops the reference from the request while
+// the square it sits on is a drag handle for sending it back to the
+// clipboard. Two gestures, two meanings, one square.
+.chat-box-off {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  opacity: 0.7;
+  cursor: pointer;
+
+  &:hover { opacity: 1; }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.8); outline-offset: 1px; opacity: 1; }
+}
 
 .chat-box-add {
   justify-content: center;
   min-width: 1.5rem;
   color: rgba($accent, 0.6);
+}
+
+// THE WAY IN — the clipboard, one press from the composer. Quiet until it
+// is holding something, lit while its shelf is open.
+.chat-clip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  padding: 0.1em 0.25em;
+  border: 0;
+  border-radius: var(--hc-radius-control, 2px);
+  background: none;
+  color: rgba($accent, 0.45);
+  font: inherit;
+  font-size: 0.82em;
+  cursor: pointer;
+
+  &.holding { color: rgba($accent, 0.85); }
+  &.on { background: rgba($accent, 0.18); color: rgba(238, 244, 250, 0.98); }
+  &:hover { color: rgba(238, 244, 250, 0.95); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+
+  .mat-sym { font-size: 1.1em; }
+}
+
+.chat-clip-count {
+  font-family: var(--hc-mono, monospace);
+  font-size: 0.85em;
+  line-height: 1;
+}
+
+// The shelf's source, hanging under the header where the icon is. Absolute
+// so it never re-flows the header row it drops out of.
+.chat-clip-shelf {
+  position: absolute;
+  top: 100%;
+  left: 2.2rem;
+  right: 0.5rem;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  max-height: 40vh;
+  padding: 0.4rem;
+  overflow-y: auto;
+  border: 1px solid rgba($accent, 0.35);
+  border-radius: var(--hc-radius-floating, 4px);
+  background: rgba(6, 10, 16, 0.97);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+// One thing there is to paste. The picture leads — a square is recognised
+// faster than a name is read — with the name under it for when it is not.
+.chat-clip-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: 3.4rem;
+  padding: 0.2rem;
+  border: 1px solid transparent;
+  border-radius: var(--hc-radius-control, 2px);
+  background: none;
+  color: rgba($accent, 0.9);
+  font: inherit;
+  font-size: 0.72em;
+  cursor: pointer;
+
+  &:hover { border-color: rgba($accent, 0.6); background: rgba($accent, 0.14); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.75); outline-offset: 1px; }
+}
+
+.chat-clip-img {
+  width: 2.6rem;
+  height: 2.6rem;
+  object-fit: cover;
+  border-radius: var(--hc-radius-control, 2px);
+}
+
+.chat-clip-glyph {
+  font-size: 2.2em;
+  opacity: 0.5;
+}
+
+.chat-clip-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--hc-mono, monospace);
+}
+
+.chat-clip-empty {
+  padding: 0.2rem 0.3rem;
+  color: rgba($accent, 0.5);
+  font-size: 0.78em;
 }
 
 // THE SQUARES. A gathered reference wears its PICTURE — resolved 'large'
