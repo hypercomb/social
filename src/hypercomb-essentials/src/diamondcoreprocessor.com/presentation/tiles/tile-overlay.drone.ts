@@ -3824,10 +3824,12 @@ export class TileOverlayDrone extends Drone {
     if (!entry?.label) { this.#hideSwapCue(); return }
 
     // The native copy cursor rides along (the Explorer ctrl-drag convention).
-    if (this.#canvas) {
-      if (copy) this.#canvas.style.cursor = 'copy'
-      else if (this.#canvas.style.cursor === 'copy') this.#canvas.style.cursor = ''
-    }
+    // THROUGH Pixi, not canvas.style: the EventSystem re-applies its own
+    // cursor on every pointer move (default 'inherit'), so a raw style write
+    // is stomped before the participant can see it. Overriding the DEFAULT
+    // style covers subsequent moves; setCursor applies it NOW, for the
+    // ctrl-pressed-while-still case where no move follows.
+    this.#setSwapCursor(copy)
 
     if (this.#swapCue && this.#swapCueCopy === copy) {
       this.#positionSwapCue()
@@ -3884,7 +3886,24 @@ export class TileOverlayDrone extends Drone {
 
   #hideSwapCue(): void {
     this.#clearSwapCuePill()
-    if (this.#canvas && this.#canvas.style.cursor === 'copy') this.#canvas.style.cursor = ''
+    this.#setSwapCursor(false)
+  }
+
+  /** Pixi's EventSystem owns the canvas cursor — route the copy cursor
+   *  through its default style rather than fighting it per-move. */
+  #setSwapCursor(copy: boolean): void {
+    const events = (this.#app?.renderer as unknown as {
+      events?: { cursorStyles?: Record<string, string>; setCursor?: (mode: string) => void }
+    } | undefined)?.events
+    if (!events?.cursorStyles) return
+    const current = events.cursorStyles['default']
+    if (copy && current !== 'copy') {
+      events.cursorStyles['default'] = 'copy'
+      events.setCursor?.('copy')
+    } else if (!copy && current === 'copy') {
+      events.cursorStyles['default'] = 'inherit'
+      events.setCursor?.('inherit')
+    }
   }
 
   /** Control/Meta pressed or released — flip the cue verb in place. */
