@@ -62,10 +62,13 @@ const UNSAFE_CELL_NAME = /[\\/\x00-\x1f]/
 
 /** Canonical child-layer slot names, in resolution precedence. A layer's child
  *  sigs live under ONE of these: built modules emit `cells`, some trees use
- *  `layers`, hive-authored content uses `children`. Mirrors the ContentBroker's
- *  own walk (content-broker.drone.ts) + host-sync / website-archive, kept here
- *  so placement (adopt/paste) and code-detection can't drift from it. */
-export const CHILD_SLOTS = ['cells', 'layers', 'children'] as const
+ *  `layers`, hive-authored content uses `children`. Defined once in core
+ *  (level-roster.ts) — the shell reads levels too and may never import a
+ *  module — and re-exported here so placement (adopt/paste), code-detection,
+ *  the ContentBroker's own walk and host-sync / website-archive can't drift
+ *  from it. */
+import { CHILD_SLOTS } from '@hypercomb/core'
+export { CHILD_SLOTS }
 
 /** The child-layer sigs of a layer, from whichever canonical child slot it uses
  *  (see CHILD_SLOTS). Empty when the layer has no children in any slot. */

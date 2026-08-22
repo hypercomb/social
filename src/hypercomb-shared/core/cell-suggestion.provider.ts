@@ -1,42 +1,56 @@
 // hypercomb-shared/core/cell-suggestion.provider.ts
 //
-// Lists cell names at the current explorer level as autocomplete suggestions.
-// Source of truth: the layer at the current cursor position in the lineage
-// sigbag (`<sign(lineage)>/` at the OPFS root; HistoryService still unions
-// the legacy `__history__` bags while they drain). Resolution is purely
-// signature-based —
-// we read each child sig in the head layer's `children` array and resolve
-// it to a display name via the LayerContent's `name` field. NO OPFS
-// directory enumeration; the on-disk cell folders are not the source of
-// truth, the layer is.
+// THE LEVEL, for the shell. Which tiles are at the current explorer level —
+// read once here and handed to everything in the shell that needs the list:
+// the command line's cell autocomplete, and the notes panel's tile list.
+//
+// The resolution itself is core's (`levelRoster`, hypercomb-core/src/core/
+// level-roster.ts) — the SAME function the chat window's tiles rail walks —
+// so the three surfaces can no longer disagree. Two ways they used to:
+//
+//   • DUPLICATES. This provider walked the parent's `children` array straight,
+//     one name per sig, so a cell whose superseded revision still sits beside
+//     its replacement appeared two or three times. The name is the path
+//     segment: those are one tile. Core collapses them, first sig wins.
+//   • STALENESS. The old read went through `latestMarkerSigFor` on the level's
+//     OWN bag, which is EMPTY for a level never navigated into — so the list
+//     lagged the canvas or emptied entirely. Core resolves down the parent
+//     chain, exactly as the renderer does.
+//
+// Resolution is purely signature-based. NO OPFS directory enumeration; the
+// on-disk cell folders are not the source of truth, the layer is.
 //
 // Supports sub-path queries: when the user types "abc/" the command line
 // calls query(['abc']) and we resolve from the layer for `parentSegments
 // + ['abc']` instead of the current level.
 
+import { levelRoster, type RosterHistory, type RosterRow, type RosterStore } from '@hypercomb/core'
 import type { Lineage } from './lineage'
 import type { SuggestionProvider } from './suggestion-provider'
-
-type LayerContent = { name: string; children?: string[] }
-type HistoryLike = {
-  sign: (lineage: { explorerSegments: () => string[] }) => Promise<string>
-  latestMarkerSigFor: (lineageSig: string, name: string) => Promise<string>
-  getLayerBySig: (sig: string) => Promise<LayerContent | null>
-}
 
 export class CellSuggestionProvider extends EventTarget implements SuggestionProvider {
 
   readonly providerName = 'cells'
 
   private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
-  private get history(): HistoryLike | undefined {
-    return get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+  private get history(): RosterHistory | undefined {
+    return get('@diamondcoreprocessor.com/HistoryService') as RosterHistory | undefined
+  }
+  private get store(): RosterStore | undefined {
+    return get('@hypercomb.social/Store') as RosterStore | undefined
   }
 
+  #rows: readonly RosterRow[] = []
   #names: readonly string[] = []
   #subPath: readonly string[] = []
 
+  /** Names only, sorted — what an autocomplete wants. */
   public suggestions(): readonly string[] { return this.#names }
+
+  /** The level as the rail reads it: one row per tile, IN THE PARENT'S OWN
+   *  ORDER, carrying the tile's sig, its picture's props sig and how many
+   *  children it holds. The tile list in the notes panel is this list. */
+  public roster(): readonly RosterRow[] { return this.#rows }
 
   public constructor() {
     super()
@@ -74,49 +88,48 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
 
   #doRefresh = async (): Promise<void> => {
     const history = this.history
-    if (!history) {
-      if (this.#names.length) {
-        this.#names = []
-        this.dispatchEvent(new CustomEvent('change'))
-      }
+    const store = this.store
+    if (!history || !store) {
+      this.#publish([])
       return
     }
 
-    // The lineage we're suggesting under = current explorer segments + subPath.
+    // The level we're listing = current explorer segments + subPath.
     const parentSegmentsRaw = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
-    const parentSegments = [
+    const segments = [
       ...parentSegmentsRaw.map(s => String(s ?? '').trim()).filter(Boolean),
       ...this.#subPath.map(s => String(s ?? '').trim()).filter(Boolean),
     ]
-    const parentName = parentSegments.length === 0 ? '/' : parentSegments[parentSegments.length - 1]
 
-    // Resolve the parent's head layer purely by signature.
-    let parentLayer: LayerContent | null = null
+    let rows: readonly RosterRow[] = []
     try {
-      const parentLineageSig = await history.sign({ explorerSegments: () => parentSegments })
-      const headSig = await history.latestMarkerSigFor(parentLineageSig, parentName)
-      parentLayer = await history.getLayerBySig(headSig)
+      rows = await levelRoster(segments, history, store)
     } catch {
-      // parent has no resolvable layer (yet) — empty suggestions
+      // nothing resolves at that address (yet) — empty level
     }
+    this.#publish(rows)
+  }
 
-    const names: string[] = []
-    if (parentLayer?.children?.length) {
-      // For each child sig in the parent's layer, fetch its LayerContent
-      // and read the `name` field. Pure signature lookup.
-      for (const childSig of parentLayer.children) {
-        const child = await history.getLayerBySig(childSig)
-        if (child?.name) names.push(child.name)
-      }
-    }
-
-    names.sort((a, b) => a.localeCompare(b))
-
-    // only notify if changed
-    if (this.#sameAs(names)) return
-
-    this.#names = names
+  /** Store the level and announce it, but only when it actually changed —
+   *  every `synchronize` re-reads, and a repaint per pulse is a flicker. */
+  #publish = (rows: readonly RosterRow[]): void => {
+    const names = rows.map(row => row.name)
+    // Autocomplete reads alphabetically; the roster keeps the layer's order,
+    // which is the order the canvas and the rail lay the tiles out in.
+    const sorted = [...names].sort((a, b) => a.localeCompare(b))
+    if (this.#sameAs(sorted) && this.#sameSigs(rows)) return
+    this.#rows = rows
+    this.#names = sorted
     this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  #sameSigs = (next: readonly RosterRow[]): boolean => {
+    const prev = this.#rows
+    if (prev.length !== next.length) return false
+    for (let i = 0; i < prev.length; i++) {
+      if (prev[i].sig !== next[i].sig || prev[i].name !== next[i].name) return false
+    }
+    return true
   }
 
   #sameAs = (next: string[]): boolean => {

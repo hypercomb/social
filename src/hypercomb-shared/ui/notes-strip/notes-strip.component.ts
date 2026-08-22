@@ -1435,10 +1435,12 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     queueMicrotask(() => this.#measurePanel())
   }
 
-  // Every tile in the current layer, sourced from CellSuggestionProvider (the
-  // same list the command-line autocomplete uses). Drives the always-on tile
-  // navigator — maintained continuously (boot + lineage change + synchronize),
-  // no longer gated behind a see-all toggle.
+  // Every tile in the current layer, sourced from CellSuggestionProvider's
+  // ROSTER — core's `levelRoster`, the same read the chat window's tiles rail
+  // and the command-line autocomplete make, in the parent's own order. One row
+  // per NAME: a superseded revision sitting beside its replacement is one tile,
+  // not two, and this list used to show it twice. Maintained continuously
+  // (boot + lineage change + synchronize), not gated behind a see-all toggle.
   readonly #layerCellLabels = signal<readonly string[]>([])
 
   /** The labels the canvas actually painted on the last pass (`render:cell-count`).
@@ -1473,10 +1475,14 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  change, and on `synchronize` so the navigator always reflects the tiles
    *  actually present in this layer (added / removed / renamed). */
   #refreshLayerCellLabels(): void {
-    const provider = get<{ suggestions(): readonly string[] }>(
+    const provider = get<{ roster?(): readonly { name: string }[]; suggestions(): readonly string[] }>(
       '@hypercomb.social/CellSuggestionProvider'
     )
-    this.#layerCellLabels.set(provider ? [...provider.suggestions()] : [])
+    if (!provider) { this.#layerCellLabels.set([]); return }
+    // The roster is the rail's list. `suggestions()` is the same tiles sorted
+    // for autocomplete — the fallback while an older provider is registered.
+    const roster = provider.roster?.()
+    this.#layerCellLabels.set(roster ? roster.map(row => row.name) : [...provider.suggestions()])
   }
 
   /** Click a row's body. Wherever the pane exists — docked and on the desk
@@ -2180,7 +2186,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // clicking it on the canvas.
 
   /** Always-on tile navigator: every tile in the current layer, filtered by
-   *  the find box, in layer order (CellSuggestionProvider order). Clicking a
+   *  the find box, in the parent layer's own order (the roster's order — the
+   *  same order the canvas lays the hexagons out and the chat window's rail
+   *  lists them). Clicking a
    *  row makes that tile active and its notes fill the column on the left.
    *  A plain list — the count rides in a badge and every row is one size;
    *  the weighted tag cloud this used to be made a wall of jumbled type. */

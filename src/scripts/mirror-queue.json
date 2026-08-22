@@ -1235,6 +1235,15 @@
       "unattended": false,
       "created": "2026-08-22",
       "status": "pending"
+    },
+    {
+      "id": "level-roster",
+      "title": "Mirror the LEVEL ROSTER: one shared read behind the notes tile list, the chat window's tiles rail and cell autocomplete",
+      "run": null,
+      "note": "New core primitive hypercomb-core/src/core/level-roster.ts (levelRoster/childLayersOf/resolveLevelLayer/CHILD_SLOTS). Mirror as a tile under the behaviors/architecture deck with parts: level-roster.ts (core), tree-walk.ts (essentials consumer), cell-suggestion.provider.ts (shared consumer), notes-strip tile list, agent-tiles-rail. Note to write: the name IS the path segment, so same-name children collapse first-sig-wins; level resolution falls back down the parent chain because a never-entered level has an empty bag. Fixes the notes panel showing pheromone-workflow three times and lagging the canvas.",
+      "unattended": false,
+      "created": "2026-08-22",
+      "status": "pending"
     }
   ]
 }

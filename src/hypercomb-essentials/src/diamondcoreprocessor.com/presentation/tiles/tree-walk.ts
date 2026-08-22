@@ -14,10 +14,19 @@
 //
 // The walk never writes. It is a reader over layers the hive already holds.
 
-import { CHILD_SLOTS, type PlacementLayer } from '../../history/layer-placement.js'
+import {
+  childLayersOf, childSigsOfLayer, propsSigOf, resolveLevelLayer,
+} from '@hypercomb/core'
+import { type PlacementLayer } from '../../history/layer-placement.js'
 import type { TreeNode } from './tree-layout.js'
 
 const SIG = /^[0-9a-f]{64}$/
+
+// The child resolution itself — slots, sig-pointer arrays, manifest-first
+// inlining, and the collapse of a parent's children BY NAME — lives in core
+// (level-roster.ts) so the shell's own level readers give the same answer as
+// this walk. Re-exported under their long-standing names for existing callers.
+export { childSigsOfLayer as resolveChildSigs, propsSigOf }
 
 export type WalkHistory = {
   sign(lineage: { domain?: unknown; explorerSegments: () => readonly string[] }): Promise<string>
@@ -56,28 +65,6 @@ export type WalkResult = {
   readonly error?: string
 }
 
-/** A layer's declared child sigs, across every canonical child slot. The
- *  slot may hold the array inline OR a signature pointing at a JSON array
- *  resource — both shapes are live in the wild, so both are resolved. */
-export async function resolveChildSigs(layer: PlacementLayer, store: WalkStore): Promise<string[]> {
-  for (const slot of CHILD_SLOTS) {
-    const value = (layer as Record<string, unknown>)[slot]
-    if (Array.isArray(value) && value.length > 0) {
-      return value.map(s => String(s)).filter(s => SIG.test(s))
-    }
-    if (typeof value === 'string' && SIG.test(value)) {
-      try {
-        const blob = await store.getResource(value)
-        if (!blob) return []
-        const parsed = JSON.parse(await blob.text()) as unknown
-        if (Array.isArray(parsed)) return parsed.map(s => String(s)).filter(s => SIG.test(s))
-      } catch { /* malformed pointer — treat as childless */ }
-      return []
-    }
-  }
-  return []
-}
-
 /** Resolve the trunk layer. A path-rooted trunk resolves through the parent
  *  chain: a cell never navigated into has an EMPTY own bag, so the direct
  *  own-bag read returns null for a cell that plainly exists and renders. */
@@ -93,41 +80,10 @@ async function resolveRoot(
     return { layer: atLocation, sig: root.sig, isLocation: atLocation !== null }
   }
 
-  const segments = [...(root.segments ?? [])]
-  const locationSig = await history.sign({ explorerSegments: () => segments })
-  const direct = await history.currentLayerAt(locationSig)
-  if (direct) return { layer: direct, sig: locationSig, isLocation: true }
-
-  // Walk down the parent chain, pulling each next segment out of its
-  // parent's children — the path the renderer itself uses.
-  let layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => [] }))
-  for (const segment of segments) {
-    if (!layer) break
-    let found: PlacementLayer | null = null
-    for (const sig of childSigsInline(layer)) {
-      const child = await history.getLayerBySig(sig)
-      if (child?.name === segment) { found = child; break }
-    }
-    layer = found
-  }
-  return { layer, sig: locationSig, isLocation: true }
-}
-
-/** The tile-properties resource sig from a layer's `properties` slot. The
- *  slot is an array holding at most one sig (see editor/tile-properties). */
-export function propsSigOf(layer: PlacementLayer): string | undefined {
-  const slot = (layer as Record<string, unknown>)['properties']
-  if (!Array.isArray(slot) || slot.length === 0) return undefined
-  const sig = String(slot[0])
-  return SIG.test(sig) ? sig : undefined
-}
-
-function childSigsInline(layer: PlacementLayer): string[] {
-  for (const slot of CHILD_SLOTS) {
-    const value = (layer as Record<string, unknown>)[slot]
-    if (Array.isArray(value) && value.length > 0) return value.map(s => String(s)).filter(s => SIG.test(s))
-  }
-  return []
+  // Own bag first, then down the parent chain — core owns that resolution so
+  // the rail, the notes list and the canvas all land on the same layer.
+  const resolved = await resolveLevelLayer([...(root.segments ?? [])], history)
+  return { layer: resolved.layer as PlacementLayer | null, sig: resolved.locationSig, isLocation: true }
 }
 
 /** The layer behind a placed node. A child node holds a LAYER sig; a
@@ -174,36 +130,22 @@ export async function expandNodes(
       continue
     }
 
-    const childSigs = await resolveChildSigs(layer, store)
-    const inlined = new Map<string, PlacementLayer>()
-    if (typeof history.childrenManifestFor === 'function') {
-      const manifest = await history.childrenManifestFor(layer).catch(() => null)
-      if (manifest && manifest.length === childSigs.length) {
-        for (const entry of manifest) inlined.set(String(entry.sig), entry.layer as PlacementLayer)
-      }
-    }
+    // Manifest-first, one row per NAME — core's rule, same as the ring walk.
+    const children = await childLayersOf(layer, history, store)
 
     let complete = true
-    // One name per parent — same rule, same reason as the ring walk below.
-    const seenNames = new Set<string>()
-    for (const sig of childSigs) {
+    for (const child of children) {
       if (nodes.length >= options.maxNodes) { complete = false; break }
-      const childLayer = inlined.get(sig) ?? await history.getLayerBySig(sig)
-      if (!childLayer) continue
-      const name = typeof childLayer.name === 'string' && childLayer.name.length > 0
-        ? childLayer.name : sig.slice(0, 8)
-      if (seenNames.has(name)) continue
-      seenNames.add(name)
-      const grandChildren = await resolveChildSigs(childLayer, store)
+      const grandChildren = await childSigsOfLayer(child.layer, store)
       nodes.push({
         id: nodes.length,
         parent: id,
-        sig,
-        name,
+        sig: child.sig,
+        name: child.name,
         depth: node.depth + 1,
-        segments: node.segments ? [...node.segments, name] : null,
+        segments: node.segments ? [...node.segments, child.name] : null,
         childCount: grandChildren.length,
-        propsSig: propsSigOf(childLayer),
+        propsSig: propsSigOf(child.layer),
         // A child with children of its own is the next frontier — it resolves
         // when the viewport reaches it.
         walked: grandChildren.length === 0,
@@ -246,7 +188,7 @@ export async function walkTree(
   }
 
   const rootSegments = root.sig ? null : [...(root.segments ?? [])]
-  const rootChildren = await resolveChildSigs(resolved.layer, store)
+  const rootChildren = await childSigsOfLayer(resolved.layer, store)
   const rootName = root.label
     ?? (typeof resolved.layer.name === 'string' && resolved.layer.name.length > 0 ? resolved.layer.name : null)
     ?? (rootSegments?.length ? rootSegments[rootSegments.length - 1] : 'hive')
@@ -276,48 +218,30 @@ export async function walkTree(
     for (const parent of frontier) {
       if (parent.sigs.length === 0) continue
 
-      // Manifest first — one read for the whole ring segment, and it is only
-      // truth when it covers every declared child.
-      const inlined = new Map<string, PlacementLayer>()
-      if (typeof history.childrenManifestFor === 'function') {
-        const manifest = await history.childrenManifestFor(parent.layer).catch(() => null)
-        if (manifest && manifest.length === parent.sigs.length) {
-          for (const entry of manifest) inlined.set(String(entry.sig), entry.layer as PlacementLayer)
-        }
-      }
+      // Manifest-first and ONE NAME PER PARENT — core's rule (level-roster),
+      // the same one the canvas has always applied: the name IS the path
+      // segment, so two children called `x` are two sigs pointing at ONE
+      // location, not two tiles. First sig wins, order preserved.
+      const children = await childLayersOf(parent.layer, history, store, parent.sigs)
 
       let complete = true
-      // ONE NAME PER PARENT. The name IS the path segment, so two children
-      // called `x` are not two tiles — they are two sigs (an older revision
-      // left beside its replacement, an adopt that landed next to its own
-      // copy) pointing at ONE location. The renderer has always collapsed
-      // them, which is why the canvas shows one hexagon while a list built
-      // straight off `children` showed the same cell three times. First sig
-      // wins, order preserved — the same rule layer-placement's firstByName
-      // applies to every other list read off a parent.
-      const seenNames = new Set<string>()
-      for (const sig of parent.sigs) {
+      for (const child of children) {
         if (nodes.length >= options.maxNodes) { truncated = true; complete = false; break }
-        const layer = inlined.get(sig) ?? await history.getLayerBySig(sig)
-        if (!layer) continue
-        const name = typeof layer.name === 'string' && layer.name.length > 0 ? layer.name : sig.slice(0, 8)
-        if (seenNames.has(name)) continue
-        seenNames.add(name)
-        const childSigs = await resolveChildSigs(layer, store)
-        const segments = parent.segments ? [...parent.segments, name] : null
+        const childSigs = await childSigsOfLayer(child.layer, store)
+        const segments = parent.segments ? [...parent.segments, child.name] : null
         const id = nodes.length
 
         nodes.push({
-          id, parent: parent.id, sig, name, depth, segments,
+          id, parent: parent.id, sig: child.sig, name: child.name, depth, segments,
           childCount: childSigs.length,
-          propsSig: propsSigOf(layer),
+          propsSig: propsSigOf(child.layer),
           walked: childSigs.length === 0,
         })
         // Queue for the next ring only while there IS a next ring. Past the
         // depth budget the node simply stays unwalked — that is the frontier
         // the viewport resolves later, not a loss.
         if (depth < options.maxDepth && childSigs.length > 0) {
-          next.push({ id, layer, sigs: childSigs, segments })
+          next.push({ id, layer: child.layer as PlacementLayer, sigs: childSigs, segments })
         }
       }
       // Only now is the parent's child list actually resolved.
