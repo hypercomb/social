@@ -40,26 +40,13 @@ import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-regist
 import { WEBSITE_SLOT } from './website-slot.js'
 import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
-import { DEFAULT_VIEW_DECORATION_KIND, defaultViewForSegments } from './decoration-kind-index.js'
-import { defaultViewAt } from './view-default.js'
+import { DEFAULT_VIEW_DECORATION_KIND } from './decoration-kind-index.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
 const FALLBACK_TOGGLE_ICON = 'visibility'
 /** The render surface websites toggle against. */
 const DEFAULT_SURFACE = 'hexagons'
-
-/** How long the ARRIVAL GATE may hold the hexagons back before giving up and
- *  revealing them. The gate is a promise that something else is about to own
- *  the screen; if the view never opens (a cold layer that never resolves, a
- *  renderer that failed to register) the participant must still land on their
- *  hive rather than on an empty ink field. */
-const ARRIVAL_GATE_MS = 2500
-
-/** Retry beats while the gate is held. The decision needs the layer read to
- *  land, and a gated location paints nothing — so none of the paint-driven
- *  triggers (`render:cell-count`) will arrive to re-ask the question. */
-const ARRIVAL_RETRY_MS = [120, 350, 800, 1600] as const
 
 /** Joins a path into one latch key. A separator no tile name can contain, so
  *  `['a','b']` and `['a/b']` are never the same address. */
@@ -114,15 +101,12 @@ export class ViewBee extends Worker {
   public override description =
     'ViewBee — surfaces available view behaviors (e.g. website) as command-line toggles and flips the global render surface.'
 
-  protected override emits: string[] = ['view-toggles:changed']
+  protected override emits: string[] = ['view-toggles:changed', 'view:arrival']
 
   /** Microtask coalescing — a single navigation fires several triggers
    *  (lineage change + render:cell-count + decorations:changed); collapse
    *  them into one async recompute per tick. */
   #pending = false
-
-  /** True once the hive has painted at least once this session. */
-  #painted = false
 
   /** The location whose ARRIVAL SURFACE has already been decided, so a
    *  recompute at the same address never re-opens a view the participant
@@ -143,13 +127,7 @@ export class ViewBee extends Worker {
     // views are available — recompute on both. (When the build skill writes
     // pages, `decorations:changed` populates the kind index, and this makes
     // the toggle appear without a navigation.)
-    EffectBus.on('render:cell-count', () => {
-      // First real paint. The arrival surface waits for it — mounting a
-      // canvas-hiding view during boot is the white-screen strand
-      // TRANSIENT_MODES exists to prevent.
-      this.#painted = true
-      this.#schedule()
-    })
+    EffectBus.on('render:cell-count', () => this.#schedule())
     EffectBus.on('decorations:changed', () => this.#schedule())
 
     // The layer's DEFAULT VIEW mark landed (or was cleared) — re-arm the
@@ -408,7 +386,23 @@ export class ViewBee extends Worker {
    *  view in the toggle strip we just built? Dormant, hidden, not present
    *  here, outside its branch scope, a navigation behaviour with no
    *  controller: all of them already removed it, and none of them has to be
-   *  re-checked (or re-forgotten) here. */
+   *  re-checked (or re-forgotten) here.
+   *
+   *  The decision runs PRE-PAINT — it deliberately does not wait for the
+   *  first hexagon paint. A layer that opens as a view should never show
+   *  hexagons at all, so show-cell holds its paint while this arbitration is
+   *  pending and skips it entirely when the view opens (its ARRIVAL GATE).
+   *  Waiting for paint here would deadlock that hold. The old white-screen
+   *  fear (mounting a canvas-hiding view during boot) does not apply: the
+   *  toggle gate proves the view has content to mount at this very node,
+   *  which is exactly what a stale persisted transient mode lacked.
+   *
+   *  Whatever is decided, the VERDICT is announced as `view:arrival` —
+   *  `{ segments, view }` with `view: ''` meaning "this layer opens as
+   *  hexagons". show-cell's gate and the boot splash both key on it: the
+   *  gate releases (paint or skip), and the splash treats a non-empty view
+   *  as its ready signal, since the hexagon paint it normally waits for
+   *  (`render:cell-count`) is the very thing being skipped. */
   #openDefaultView(
     segments: readonly string[],
     toggles: readonly ViewToggle[],
@@ -419,7 +413,6 @@ export class ViewBee extends Worker {
     // A cold layer read is indistinguishable from "no default" — don't latch
     // on it, let the next trigger answer properly.
     if (layer === null) return
-    if (!this.#painted) return
     const key = segments.join(SEGMENT_SEPARATOR)
     if (this.#autoOpenedKey === key) return
     // Latch BEFORE deciding, and latch even when the answer is "nothing to
@@ -429,12 +422,14 @@ export class ViewBee extends Worker {
     this.#autoOpenedKey = key
     const mark = records.find(r => r.kind === DEFAULT_VIEW_DECORATION_KIND)
     const want = String(mark?.payload?.['view'] ?? '').trim()
-    if (!want) return
-    if (!toggles.some(t => t.view === want)) return
-    // Something is already up — never yank the participant out of the view
-    // they chose into the one the layer suggests.
-    if (vm.mode !== DEFAULT_SURFACE) return
-    vm.setMode(want)
+    const available = !!want && toggles.some(t => t.view === want)
+    // Something already up — never yank the participant out of the view they
+    // chose into the one the layer suggests. Opening only claims a FREE
+    // surface; an already-active matching view still counts as the arrival.
+    let opened = ''
+    if (available && vm.mode === DEFAULT_SURFACE) { vm.setMode(want); opened = want }
+    else if (available && vm.mode === want) opened = want
+    EffectBus.emit('view:arrival', { segments: [...segments], view: opened })
   }
 
   /** The toggle's human label — its tooltip and aria-label. The view's

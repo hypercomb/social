@@ -429,6 +429,13 @@
       // clearMesh's early "not ready" bails) and is IGNORED, so a populated hive
       // never flashes an empty canvas before its tiles paint.
       bus.on('render:cell-count', function (pl) { if (pl && (pl.count > 0 || pl.settled)) requestExit(); });
+      // A location that OPENS AS a view (its layer carries a view:default
+      // mark): the hexagons are deliberately never painted, so the
+      // cell-count signal above will not fire — the arrival verdict IS the
+      // ready signal. An empty view means "opens as hexagons after all";
+      // only a real view name reveals. (EffectBus replays the last value,
+      // so a verdict emitted before this subscription still lands.)
+      bus.on('view:arrival', function (p) { if (p && p.view) requestExit(); });
       bus.on('render:unsupported', function () { dismiss(); });                                 // GPU blocked → tiles never paint
       // install-needed → the welcome card's "Start" button is behind the splash.
       // Reveal it NOW so the user can click Start to load the libraries. Holding
