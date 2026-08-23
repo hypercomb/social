@@ -231,12 +231,9 @@ async function main() {
   check('a bouquet the tile lacks says MARK', cueSays(cue, '＋'), JSON.stringify(cue))
   await page.screenshot({ path: path.join(out, 'cue-mark.png') })
 
-  // Collected into the grouping → the click would let it go.
-  await page.evaluate(() => window.__hypercombEffectBus.emit('tags:apply-pending',
-    { active: true, tags: ['urgent'], cells: ['cue-probe'] }))
-  cue = await rehover()
-  check('a tile already collected says RELEASE',
-    cueSays(cue, '−') && !cueSays(cue, '＋'), JSON.stringify(cue))
+  // (There is no staged/RELEASE verb any more: the collecting walk retired in
+  // favour of click-scents-the-shaded-tile, so `cells` no longer changes the
+  // hovered tile's answer.)
 
   // THE COMPARISON ITSELF: give the tile the mark, and the answer changes
   // from "mark" to "already marked" without the bouquet changing at all.

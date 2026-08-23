@@ -367,11 +367,14 @@ $gutter-phone: 0.7rem;
 }
 
 // ── selectable rows ───────────────────────────────────────────────
-// Rows are MULTI-selectable: click toggles membership in the set the bulk
-// bar (allow / download) acts on. The ring marks membership.
+// Rows are MULTI-selectable: Ctrl/Shift-click toggles membership in the set
+// the bulk bar (allow / download) acts on. SELECTED MEANS ON (Jaime,
+// 2026-08-22): the lit/accent vocabulary belongs to the bulb alone, so
+// membership may NEVER borrow it — a warm or violet wash on a dim row read
+// as "this behaviour is enabled". Membership marks itself in neutral grey,
+// which no row state ever uses.
 .features-row.selected {
-  background: rgba($accent, 0.14);
-  box-shadow: inset 2px 0 0 rgba($accent, 0.8);
+  box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.55);
 }
 
 // Dim: a row a LEGACY hidden record still suppresses (click restores) —
@@ -1053,10 +1056,11 @@ $path-fail: #e08a8a;     // failed terminal
     box-shadow: 0 0 0 3px rgba($accent, 0.1);
   }
 
+  // Neutral, and NO ground change — see the note above
+  // `.features-row.selected`. Lightness is reserved for on/off.
   &.selected {
-    border-color: rgba($accent, 0.52);
-    background: rgba($accent, 0.1);
-    box-shadow: 0 0 0 2px rgba($accent, 0.07);
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.05);
   }
 }
 
@@ -1260,22 +1264,21 @@ $path-fail: #e08a8a;     // failed terminal
 
 // ── VIEWS, MIXED IN ───────────────────────────────────────────────
 // A view is not a section, a tab or a window — it is a row like any
-// other. The ONLY difference is the ground it stands on: a cool blue
-// wash instead of the neutral one, so a glance sorts the list without
-// reading it. $view-ground matches the tile overlay's hover tint
-// (0xa8d8ff), so a view wears the same colour everywhere it appears.
+// other. It differs only in HUE — a cool blue in its border, and in the
+// ground once it is lit — never in how light it sits. $view-ground
+// matches the tile overlay's hover tint (0xa8d8ff), so a view wears the
+// same colour everywhere it appears.
 $view-ground: #a8d8ff;
 
+// TWO STATES ONLY (Jaime, 2026-08-22): the bulb says on, and the GROUND
+// says the same thing — lighter is on, dark is off. A view is not a third
+// state, so its cool wash may only ride a row that is already lit; an off
+// view sits on the same dark ground as every other off row. Hover is a
+// pointer echo, not a state, and stays below the lit ground.
 .features-row.view {
   border-color: rgba($view-ground, 0.22);
-  background:
-    linear-gradient(120deg, rgba($view-ground, 0.115), rgba($view-ground, 0.03));
 
-  &:hover {
-    border-color: rgba($view-ground, 0.32);
-    background:
-      linear-gradient(120deg, rgba($view-ground, 0.13), rgba($accent, 0.05));
-  }
+  &:hover { border-color: rgba($view-ground, 0.32); }
 }
 
 // Lit AND a view: the warm filament over the cool ground, both true.

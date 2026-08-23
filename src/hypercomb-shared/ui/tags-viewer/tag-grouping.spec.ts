@@ -6,7 +6,10 @@
 // list until it is unreadable again. Both are asserted here.
 
 import { describe, it, expect } from 'vitest'
-import { namespaceOf, looseMarks, namespaceGroupsOf } from './tag-grouping'
+import {
+  namespaceOf, looseMarks, namespaceGroupsOf,
+  matchesQuery, filterRowsByQuery, bouquetMatchesQuery, filterNamespaceGroups,
+} from './tag-grouping'
 
 const rows = (...names: string[]) => names.map(name => ({ name }))
 
@@ -78,5 +81,69 @@ describe('every mark stays reachable', () => {
       ...gathered,   // shown inside their bouquet
     ])
     expect([...shown].sort()).toEqual(all.map(r => r.name).sort())
+  })
+})
+
+// ── the search ──────────────────────────────────────────────────────────────
+
+describe('matchesQuery', () => {
+  it('is a case-insensitive substring match', () => {
+    expect(matchesQuery('Family', 'fam')).toBe(true)
+    expect(matchesQuery('family', 'FAM')).toBe(true)
+    expect(matchesQuery('family', 'friend')).toBe(false)
+  })
+
+  it('matches everything on a blank or whitespace query', () => {
+    expect(matchesQuery('anything', '')).toBe(true)
+    expect(matchesQuery('anything', '   ')).toBe(true)
+  })
+})
+
+describe('filterRowsByQuery', () => {
+  it('keeps only the rows whose name matches', () => {
+    const out = filterRowsByQuery(rows('family', 'friend', 'draft'), 'fr')
+    expect(out.map(r => r.name)).toEqual(['friend'])
+  })
+
+  it('is the identity on a blank query', () => {
+    const all = rows('family', 'friend')
+    expect(filterRowsByQuery(all, '')).toEqual(all)
+  })
+})
+
+describe('bouquetMatchesQuery', () => {
+  it('matches on the bouquet name', () => {
+    expect(bouquetMatchesQuery('field-notes', ['draft', 'idea'], 'field')).toBe(true)
+  })
+
+  it('matches on any mark it holds — searching a keyword must surface the bouquets that would land it', () => {
+    expect(bouquetMatchesQuery('field-notes', ['draft', 'idea'], 'idea')).toBe(true)
+    expect(bouquetMatchesQuery('field-notes', ['draft', 'idea'], 'family')).toBe(false)
+  })
+})
+
+describe('filterNamespaceGroups', () => {
+  const groups = namespaceGroupsOf(rows(
+    'visual:website:page', 'visual:slide:deck', 'usage:dwell'))
+
+  it('a matching GROUP NAME keeps the whole group', () => {
+    const out = filterNamespaceGroups(groups, 'visual')
+    expect(out).toHaveLength(1)
+    expect(out[0].rows.map(r => r.name)).toEqual(['visual:website:page', 'visual:slide:deck'])
+  })
+
+  it('otherwise a group survives with just its matching rows', () => {
+    const out = filterNamespaceGroups(groups, 'slide')
+    expect(out).toHaveLength(1)
+    expect(out[0].name).toBe('visual')
+    expect(out[0].rows.map(r => r.name)).toEqual(['visual:slide:deck'])
+  })
+
+  it('drops groups left with nothing', () => {
+    expect(filterNamespaceGroups(groups, 'dwell').map(g => g.name)).toEqual(['usage'])
+  })
+
+  it('is the identity on a blank query', () => {
+    expect(filterNamespaceGroups(groups, ' ')).toEqual(groups)
   })
 })

@@ -994,12 +994,12 @@
       "status": "pending"
     },
     {
-      "id": "pheromone-collecting-walk",
-      "title": "Pheromone grouping — the collecting walk replaced the paint brush",
+      "id": "pheromone-shaded-scent",
+      "title": "Pheromones — the shaded hive replaces the painter and the collecting walk",
       "run": null,
-      "note": "The apply brush takeover is GONE: a bouquet in hand no longer hijacks the hive (no paint cursor, no press hijack — TileOverlayDrone), and ctrl+click became the collecting gesture (SelectionInputDrone reroutes the canonical add-to-set press to tags:apply-paint while tags:apply-pending is armed; ctrl+drag sweeps, select stands down like the wand). The panel lists the grouping sectioned at the top (tags-viewer). Mirror owed: update the behaviors/assistant-era pheromones/scenting cells — the scenting card's note still describes hold-and-drag painting; retitle to the collecting walk, note the ctrl+click grammar, and add a part tile for selection-input.drone.ts if the scenting collection carries parts. note-add is additive, hence --manual.",
+      "note": "SUPERSEDES pheromone-collecting-walk (that walk retired before it was ever mirrored). New grammar this pass: gathering (＋ on a row, or clicking a bouquet) arms tags:apply-pending {tags, color}; show-cell shades every tile missing part of the set (the mark-preview buffer path, ALL-match, lit in the bouquet colour) while tiles wearing it all stay lit; a PLAIN CLICK on a shaded tile scents it at once (tile-overlay emits tags:apply-click, pheromone-tiles writes immediately, the bouquet stays in hand; lit tiles walk in as always); ctrl+click means plain selection again (selection-input reroute deleted). Panel: the scent-tiles section is gone, replaced by the in-hand strip (chips, derived sig, name-to-save, Put down, PLACE button — the only selection path; the row-tap-applies-to-selection shortcut was removed with the messaging); a search field over the whole vocabulary (the ONE lens — species chips were tried and removed same day: just the search, no tag cloud); bouquet rows flow INLINE (name: mark mark, wrapping); bouquets DRAG like single pheromones (pheromone:drop {tags[]} lands the whole set). Mirror owed on the behaviors tree: the scenting card note still describes hold-and-drag painting — rewrite it to the shaded-click grammar; note the search + species chips on the tags panel card; refresh part tiles for tags-viewer.component.ts, tag-grouping.ts, pheromone-tiles.drone.ts, tile-overlay.drone.ts (the takeover), show-cell.drone.ts (the armed shade); proof harness scripts/drive-bouquet-scent.cjs (19 checks green). note-add is additive, hence --manual. SAME-DAY ADDENDA: NO MESSAGING — intro/bouquet/in-hand descriptions live on hover titles only, the footer hint is gone; DRAGGING shades too (drop:dragging carries {marks, color}, show-cell ALL-match shade for the length of the drag, drop lands the whole set). Harness now 24 checks green.",
       "unattended": false,
-      "created": "2026-08-20",
+      "created": "2026-08-22",
       "status": "pending"
     },
     {
@@ -1241,6 +1241,33 @@
       "title": "Mirror the LEVEL ROSTER: one shared read behind the notes tile list, the chat window's tiles rail and cell autocomplete",
       "run": null,
       "note": "New core primitive hypercomb-core/src/core/level-roster.ts (levelRoster/childLayersOf/resolveLevelLayer/CHILD_SLOTS). Mirror as a tile under the behaviors/architecture deck with parts: level-roster.ts (core), tree-walk.ts (essentials consumer), cell-suggestion.provider.ts (shared consumer), notes-strip tile list, agent-tiles-rail. Note to write: the name IS the path segment, so same-name children collapse first-sig-wins; level resolution falls back down the parent chain because a never-entered level has an empty bag. Fixes the notes panel showing pheromone-workflow three times and lagging the canvas.",
+      "unattended": false,
+      "created": "2026-08-22",
+      "status": "pending"
+    },
+    {
+      "id": "verb-cue-comparison",
+      "title": "The verb cue - the hovered tile says what the click will do, and the bouquet's verb is a COMPARISON",
+      "run": null,
+      "note": "BUILT 226a131f6 (clipboard half 48f4d557e + cursor fix 2fd3f28c1). One pill above the hovered hex, verb resolved from whichever mode owns the click: clipboard = take/copy (ctrl), bouquet = mark <missing>/release/marked, removal = unmark/keep. The bouquet verb compares the marks IN HAND against tagsForLabel(tile) - already-marked says so instead of offering a no-op. Colour grammar: amber = something leaves, near-white = something is gained, steel = already so. Stands down during a drag (the chip already says it). Verified scripts/drive-swap-cue.cjs, 12 checks green. Mirror owed: a tile for the verb cue under the clipboard + pheromones behaviors with a note carrying the three vocabularies and the comparison rule, marked with the declared clipboard/pheromone pheromones. UPDATE (2026-08-22, shaded-scent pass): the release verb is retired with the collecting walk — the bouquet vocabulary is now mark <missing>/marked only, and a plain click on a shaded (missing) tile scents it directly.",
+      "unattended": false,
+      "created": "2026-08-22",
+      "status": "pending"
+    },
+    {
+      "id": "website-exit-to-entrance",
+      "title": "Leaving a website backs out to the entrance — the websites window is /websites only",
+      "run": null,
+      "note": "Escape and the exit hexagon now flip ViewMode to hexagons only; SiteViewDrone#leaveToEntrance lands the reader on the entrance/layer they entered from. Removed the launcher show('websites') from website-nav.component.ts. Mirror: note on the website behaviour tile in the behaviors deck describing the one way out and the one way to open the directory.",
+      "unattended": false,
+      "created": "2026-08-22",
+      "status": "pending"
+    },
+    {
+      "id": "chat-clipboard-shelf",
+      "title": "The clipboard is the way in - paste a reference with one click, drag it back to restore",
+      "run": null,
+      "note": "BUILT 4a7072a37. Chat header carries a small clipboard icon (with count); pressing it drops a flyout of the clipboard's entries, and ONE CLICK pastes one onto the shelf and takes it off the clipboard (MOVE, one home per item). Where a ref SITS is what it means: clipboard = gathered, committed to nothing; shelf = part of THIS request. Drag a square off the shelf = restore to the clipboard (real native drag); x = drop from the request outright, deliberately NOT a restore. Decided with Jaime: NO references tab and no second pool - a set worth keeping past the conversation is a named context group (context:groups, module built, naming affordance still owed). Verified scripts/drive-context-strip-clipboard.cjs, 8 checks green. Mirror owed: tiles for the shelf + flyout under the clipboard/assistant behaviors, notes carrying the where-it-sits rule and the move-not-copy decision.",
       "unattended": false,
       "created": "2026-08-22",
       "status": "pending"

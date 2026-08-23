@@ -24,24 +24,24 @@
 // tile's location and splices the decoration on commit. `tags:removal-pending`
 // is the shared truth between the two, and the renderer marks the same set.
 //
-// ── The collecting walk, and the bouquet ──────────────────────────────────
-// Putting pheromones ON tiles is deliberately explicit: open the surface,
-// gather the pheromones you want (any number — ＋ on each row), then WALK the
-// hive as usual — nothing is hijacked, plain clicks still navigate. Ctrl+click
-// collects a tile into the grouping (the canonical add-to-set gesture,
-// rerouted by SelectionInputDrone while the bouquet is in hand); ctrl+click a
-// collected tile to release it. Collected tiles mark on the hive as they land
-// (show-cell reads the same `tags:apply-pending`) and list here as THE
-// GROUPING, sectioned at the top. Done commits in one transaction. This
-// replaced the paint brush: painting took over every click, so you could not
-// walk while marking — collecting is the easier verb.
+// ── The bouquet in hand, and the shaded hive ──────────────────────────────
+// Putting pheromones ON tiles is one gesture now: gather the pheromones you
+// want (＋ on each row, or click a saved bouquet), and the hive itself becomes
+// the review surface — every tile already wearing the WHOLE set stays lit,
+// every tile missing any of it shades out, and clicking a shaded tile scents
+// it at once (an immediate write, like a drop — the shade already showed
+// exactly what the click would do). Lit tiles stay ordinary ground: clicking
+// one walks in as always, so you can keep moving while marking. This replaced
+// the painter/collecting-walk (a staged ctrl+click grouping with a Done
+// commit): the shade IS the staging review, so the ceremony went.
 //
 // WHAT IS IN HAND IS ALWAYS A BOUQUET — a bee never emits one compound, and
 // neither do you. One mark or six, the gathered set has an identity from the
 // first mark (bouquet-registry.ts derives it), before anyone decides to name
 // it. Naming is a separate, later act — it commits the bytes and makes the
-// bouquet easy to pick up again. Saved bouquets list below the pheromones, and
-// clicking one takes it in hand.
+// bouquet easy to pick up again. Saved bouquets list below the pheromones;
+// clicking one takes it in hand, and a bouquet is just another pheromone to
+// the drag — pull it onto a tile and the whole set lands there.
 //
 // Shell UI, so it must NOT import essentials — it reads the TagRegistry and
 // emits tag effects over IoC / EffectBus, exactly like the controls bar. Tag
@@ -59,7 +59,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { type WindowSession } from '../window-session'
 import { PHONE_QUERY, isPhoneViewport } from '../breakpoints'
-import { looseMarks, namespaceGroupsOf } from './tag-grouping'
+import { bouquetMatchesQuery, filterNamespaceGroups, filterRowsByQuery, looseMarks, namespaceGroupsOf } from './tag-grouping'
 
 interface TagRow {
   name: string
@@ -179,24 +179,24 @@ export class TagsViewerComponent implements OnDestroy {
   readonly #removalTag = signal<string | null>(null)
   /** Tiles staged to lose that keyword — the list that grows as you click. */
   readonly #removalCells = signal<string[]>([])
-  /** The painter tray is open — the surface where pheromones are picked and the
-   *  brush is loaded. Local to the panel: nothing is armed until Paint. */
-  readonly #painterOpen = signal(false)
-  /** The pheromones picked for the brush. Purely the participant's choice until
-   *  Paint hands it to the drone. */
+  /** The pheromones gathered into the bouquet in hand. Gathering IS arming —
+   *  the moment anything is picked, the hive shades what is missing it. */
   readonly #selected = signal<Set<string>>(new Set())
-  /** The keywords currently armed as a brush. Mirrors `tags:apply-pending`
-   *  (PheromoneTilesDrone). Painting and removal are the two takeovers of the
+  /** The keywords currently armed. Mirrors `tags:apply-pending`
+   *  (PheromoneTilesDrone). Scenting and removal are the two takeovers of the
    *  tile click, mutually exclusive so they never fight over the same tap. */
   readonly #applyTags = signal<string[]>([])
-  /** Tiles painted so far this session — the drone's running list, echoed here
-   *  so the panel shows the pheromones landing, not just a toast that fades. */
-  readonly #paintedCells = signal<string[]>([])
 
-  /** The pheromone being dragged onto the hive, or null. Drives the ghost chip
-   *  that follows the cursor — the drag IS the gesture, so it has to be visible
-   *  the whole way from the list to the tile. */
-  readonly #dragging = signal<{ name: string; color: string } | null>(null)
+  /** The search over the vocabulary — ONE field, filtering bouquets, loose
+   *  keywords and namespace groups alike. The whole lens: no type chips, no
+   *  tag cloud — the search is good enough. View state, never truth. */
+  readonly query = signal('')
+
+  /** What is being dragged onto the hive, or null — one pheromone or a whole
+   *  bouquet (`count` says which). Drives the ghost chip that follows the
+   *  cursor — the drag IS the gesture, so it has to be visible the whole way
+   *  from the list to the tile. */
+  readonly #dragging = signal<{ name: string; color: string; count: number } | null>(null)
   readonly #dragPos = signal<{ x: number; y: number }>({ x: 0, y: 0 })
 
   /** Saved bouquets, mirrored from `bouquets:registry`. */
@@ -210,7 +210,6 @@ export class TagsViewerComponent implements OnDestroy {
 
   readonly scope = this.#scope.asReadonly()
   readonly removalTag = this.#removalTag.asReadonly()
-  readonly painterOpen = this.#painterOpen.asReadonly()
   readonly painting = computed(() => this.#applyTags().length > 0)
   readonly selectedNames = computed(() => [...this.#selected()].sort((a, b) => a.localeCompare(b)))
   /** The picked set as swatch+name pairs — a pheromone reads the same here as
@@ -221,8 +220,6 @@ export class TagsViewerComponent implements OnDestroy {
     return this.selectedNames().map(name => ({ name, color: this.#colorOf(name, registry) }))
   })
   readonly selectedCount = computed(() => this.#selected().size)
-  readonly paintedCells = this.#paintedCells.asReadonly()
-  readonly paintedCount = computed(() => this.#paintedCells().length)
   readonly dragging = this.#dragging.asReadonly()
   readonly dragPos = this.#dragPos.asReadonly()
   readonly removalCells = this.#removalCells.asReadonly()
@@ -306,6 +303,34 @@ export class TagsViewerComponent implements OnDestroy {
    *  namespaced mark appears here whether or not it is also in a bouquet. */
   readonly namespaceGroups = computed<NamespaceGroup[]>(() => namespaceGroupsOf(this.rows()))
 
+  // ── the search ──────────────────────────────────────────────────────────────
+  //
+  // One field over the whole vocabulary — bouquets, loose keywords, namespace
+  // groups alike. Pure view state: nothing here writes, arms or filters the
+  // hive. The matching rules live in tag-grouping.ts beside the grouping
+  // doctrine, tested there.
+
+  readonly searching = computed(() => this.query().trim().length > 0)
+
+  /** A bouquet matches on its own name OR any mark it holds — searching for a
+   *  keyword must surface the bouquets that would land it. */
+  readonly visibleBouquets = computed<BouquetRow[]>(() =>
+    this.bouquets().filter(b => bouquetMatchesQuery(b.name, b.marks, this.query())))
+
+  readonly visibleLooseRows = computed<TagRow[]>(() =>
+    filterRowsByQuery(this.looseRows(), this.query()))
+
+  readonly visibleNamespaceGroups = computed<NamespaceGroup[]>(() =>
+    filterNamespaceGroups(this.namespaceGroups(), this.query()))
+
+  /** The search left nothing — the state that needs its own line, or the
+   *  panel reads as having lost the data. */
+  readonly nothingVisible = computed(() =>
+    this.rows().length > 0
+    && this.visibleBouquets().length === 0
+    && this.visibleLooseRows().length === 0
+    && this.visibleNamespaceGroups().length === 0)
+
   /** Which bouquets are opened to show their marks, and which namespace groups
    *  are unfolded. Both view state, both closed by default — the panel opens as
    *  a short list of names, and you unfold what you came for. */
@@ -313,7 +338,10 @@ export class TagsViewerComponent implements OnDestroy {
   readonly #openNamespaces = signal<Set<string>>(new Set())
 
   isBouquetOpen(name: string): boolean { return this.#openBouquets().has(name) }
-  isNamespaceOpen(name: string): boolean { return this.#openNamespaces().has(name) }
+  /** A search reaches INSIDE the folded groups, so while one is running every
+   *  surviving group stands open — its matches are the whole reason it is
+   *  still listed. Clearing the search folds them back as they were. */
+  isNamespaceOpen(name: string): boolean { return this.searching() || this.#openNamespaces().has(name) }
 
   toggleBouquetOpen(name: string, event?: Event): void {
     event?.stopPropagation()
@@ -411,8 +439,11 @@ export class TagsViewerComponent implements OnDestroy {
       this.#hoverLabel = p?.label ?? null
     }))
 
-    // Apply-brush state (sticky): PheromoneTilesDrone owns it, this panel
-    // reflects which keywords are armed and which tiles they have landed on.
+    // Armed state (sticky): PheromoneTilesDrone owns it, this panel reflects
+    // which keywords are in hand. When the drone puts the bouquet down (a
+    // selection commit finished, an Escape out on the hive, a close), the
+    // gathered set here follows the truth — a picked-but-disarmed panel would
+    // show marks the hive is no longer shading for.
     this.#cleanups.push(EffectBus.on<{ tag?: string | null; tags?: string[]; cells?: string[]; active: boolean }>(
       'tags:apply-pending', (p) => {
         const armed = p?.active === true
@@ -420,7 +451,11 @@ export class TagsViewerComponent implements OnDestroy {
           ? (Array.isArray(p?.tags) && p.tags.length ? p.tags : (p?.tag ? [p.tag] : []))
           : []
         this.#applyTags.set([...tags])
-        this.#paintedCells.set(armed && Array.isArray(p?.cells) ? [...p.cells] : [])
+        if (!armed && this.#selected().size > 0) {
+          this.#selected.set(new Set())
+          this.#bouquetSig.set(null)
+          this.#naming.set(false)
+        }
         this.#flush()
       },
     ))
@@ -452,19 +487,22 @@ export class TagsViewerComponent implements OnDestroy {
     return '#7eb6d6'
   }
 
-  // ── drag a pheromone onto a tile ───────────────────────────────────
+  // ── drag a pheromone (or a bouquet) onto a tile ────────────────────
   //
   // The direct-manipulation path: pick the pheromone up out of the list and
-  // drop it on the tile you mean. Pointer events (not HTML5 drag-and-drop),
-  // because the drop target is a WebGL canvas with no DOM nodes to land on —
-  // the tile under the cursor is whatever `tile:hover` last reported, and a
-  // drop onto a tile's own pheromone card resolves via `data-pheromone-tile`.
+  // drop it on the tile you mean. A bouquet is just another pheromone to this
+  // gesture — dragging its row carries every mark it holds, and the drop lands
+  // the whole set. Pointer events (not HTML5 drag-and-drop), because the drop
+  // target is a WebGL canvas with no DOM nodes to land on — the tile under the
+  // cursor is whatever `tile:hover` last reported, and a drop onto a tile's
+  // own pheromone card resolves via `data-pheromone-tile`.
   //
   // A press only becomes a drag past DRAG_THRESHOLD px, so clicking the name
-  // still filters; the trailing click is swallowed when a drag did happen.
+  // still filters (or loads the bouquet); the trailing click is swallowed when
+  // a drag did happen.
 
   /** Candidate press, promoted to a real drag once the pointer moves far enough. */
-  #pending: { name: string; color: string; x: number; y: number } | null = null
+  #pending: { marks: string[]; name: string; color: string; x: number; y: number } | null = null
   /** A drag just ended — swallow the click it would otherwise fire. */
   #swallowClick = false
   /** Tile currently under the cursor, mirrored from `tile:hover`. */
@@ -487,14 +525,25 @@ export class TagsViewerComponent implements OnDestroy {
   readonly #phoneHandler = (e: MediaQueryListEvent): void => { this.isPhone.set(e.matches) }
 
   onRowPointerDown(event: PointerEvent, row: TagRow): void {
+    this.#beginDragCandidate(event, [row.name], row.name, row.color)
+  }
+
+  /** A bouquet drags exactly like a single pheromone — the whole set rides the
+   *  ghost and the drop lands all of it. */
+  onBouquetPointerDown(event: PointerEvent, bouquet: BouquetRow): void {
+    this.#beginDragCandidate(event, bouquet.marks, bouquet.name, this.bouquetColor(bouquet))
+  }
+
+  #beginDragCandidate(event: PointerEvent, marks: readonly string[], name: string, color: string): void {
     if (event.button !== 0) return
-    // Drag-to-paint is a POINTER affordance and is switched off on phones,
-    // where the painter isn't offered at all (see the phone block in the SCSS).
+    // Drag-to-scent is a POINTER affordance and is switched off on phones.
     // Leaving it armed here would be actively harmful: on touch, dragging a row
     // IS the scroll gesture, so scrolling this list past the drag threshold
     // would drop a pheromone onto whatever tile sits underneath.
     if (this.#isPhone()) return
-    this.#pending = { name: row.name, color: row.color, x: event.clientX, y: event.clientY }
+    const clean = marks.filter(Boolean)
+    if (clean.length === 0) return
+    this.#pending = { marks: [...clean], name, color, x: event.clientX, y: event.clientY }
     document.addEventListener('pointermove', this.#onDragMove)
     document.addEventListener('pointerup', this.#onDragUp)
     // If the browser takes the gesture (a native drag, a touch pan), we get a
@@ -526,9 +575,13 @@ export class TagsViewerComponent implements OnDestroy {
       if (Math.hypot(event.clientX - p.x, event.clientY - p.y) < DRAG_THRESHOLD) return
       // Promote to a drag. `drop:dragging` puts the tile overlay into its bare
       // drop-target mode (icons hidden) — the same mode file drops use — so the
-      // hive reads as a surface to land on rather than a menu.
-      this.#dragging.set({ name: p.name, color: p.color })
-      EffectBus.emit('drop:dragging', { active: true })
+      // hive reads as a surface to land on rather than a menu. The MARKS ride
+      // along: show-cell shades every tile that doesn't already wear the whole
+      // dragged set for as long as the drag lasts, so where the drop would DO
+      // something is visible before anything is released — the same shade the
+      // armed bouquet wears, with no messaging anywhere.
+      this.#dragging.set({ name: p.name, color: p.color, count: p.marks.length })
+      EffectBus.emit('drop:dragging', { active: true, marks: [...p.marks], color: p.color })
     }
     this.#dragPos.set({ x: event.clientX, y: event.clientY })
     this.#flush()
@@ -559,19 +612,22 @@ export class TagsViewerComponent implements OnDestroy {
     // floats over the hive: falling through to the hex map would put the
     // keyword on whatever tile happens to sit behind the card. Notes carry
     // their own `tags` slot, so this is a different write, not a tile one.
+    // A bouquet lands mark by mark — the note write is per-keyword.
     const noteRow = el?.closest?.('[data-pheromone-note]') as HTMLElement | null
     if (noteRow) {
       const noteId = noteRow.getAttribute('data-pheromone-note') ?? ''
       const cellLabel = noteRow.getAttribute('data-pheromone-note-cell') ?? ''
       if (noteId && cellLabel) {
-        EffectBus.emit('note:tag', { cellLabel, noteId, tag: p.name, add: true })
+        for (const tag of p.marks) EffectBus.emit('note:tag', { cellLabel, noteId, tag, add: true })
         return
       }
     }
 
     const card = el?.closest?.('[data-pheromone-tile]') as HTMLElement | null
     const label = card?.getAttribute('data-pheromone-tile') || this.#hoverLabel || undefined
-    EffectBus.emit('pheromone:drop', { label, tag: p.name, x: event.clientX, y: event.clientY })
+    // `tag` stays in the payload for readers that only ever knew one keyword;
+    // `tags` is the truth and carries the whole bouquet.
+    EffectBus.emit('pheromone:drop', { label, tag: p.marks[0], tags: [...p.marks], x: event.clientX, y: event.clientY })
   }
 
   isFiltered(name: string): boolean {
@@ -623,42 +679,14 @@ export class TagsViewerComponent implements OnDestroy {
     return bouquet.rows[0]?.color ?? '#7eb6d6'
   }
 
-  /** A pheromone row was CLICKED (not dragged). What that means depends on the
-   *  painter, which is itself the mode switch — no separate filter/apply toggle
-   *  for the participant to manage:
-   *    • painter OPEN  → pick the pheromone into the brush.
-   *    • painter CLOSED → toggle the hive filter.
-   *  Filtering while the painter is open is exactly the trap Jaime hit: it
-   *  flattens the hive to one keyword, hiding the very tiles you are trying to
-   *  paint. So in painter mode the click never filters — it picks. (Dragging a
-   *  row still applies directly, in either mode; that is a separate gesture.) */
+  /** A pheromone row was CLICKED (not dragged). The click is the FILTER verb,
+   *  always — gathering is the ＋, dragging is the drop, and a selection is
+   *  served by the strip's place button, never by overloading this tap. One
+   *  gesture, one meaning. */
   onRowClick(name: string): void {
     // The click that ends a drag must not also act on the row.
     if (this.#swallowClick) { this.#swallowClick = false; return }
-    if (this.#painterOpen()) { this.togglePheromone(name); return }
-    // SELECTION IS THE TARGET. With tiles picked on the canvas, tapping a
-    // pheromone puts it on all of them — the touch answer to "pick a brush,
-    // then drag across the hive", which a finger cannot perform because on
-    // touch a drag IS the scroll gesture. Filtering by the mark would be the
-    // wrong read of the tap here: you picked tiles in order to DO something
-    // to them. Unpicked, the tap still filters exactly as before.
-    if (this.canvasSelectionCount() > 0) { this.applyToSelection(name); return }
     this.#toggleFilter(name)
-  }
-
-  /** Put one pheromone on every canvas-selected tile, in one transaction. One
-   *  mark is still a bouquet — it is minted like any other, so the tap that
-   *  looks simplest is not a special case underneath.
-   *  Fires the drone's arm → stage → commit triple synchronously (EffectBus
-   *  dispatches inline), so the hive is never left sitting in paint-takeover
-   *  mode waiting for a Done that a phone has no way to press. */
-  applyToSelection(name: string): void {
-    const labels = [...this.#canvasSelection()]
-    if (labels.length === 0) return
-    EffectBus.emit('tags:apply-begin', { tags: [name] })
-    for (const label of labels) EffectBus.emit('tags:apply-paint', { label, add: true })
-    EffectBus.emit('tags:apply-commit', {})
-    void this.#identify([name])
   }
 
   /** Toggle a tag in the active filter set and broadcast it — same effect the
@@ -722,13 +750,13 @@ export class TagsViewerComponent implements OnDestroy {
     return this.#selected().has(name)
   }
 
-  // ── the collecting walk ────────────────────────────────────────────
+  // ── the bouquet in hand ────────────────────────────────────────────
   //
-  // Open it, pick pheromones (which IS arming — no separate step), then walk
-  // the hive and ctrl+click the tiles to collect them into the grouping.
-  // Collecting only STAGES: the tiles mark on the hive as you go, and `Done`
-  // persists them in one layer transaction. Close / Escape / closing the
-  // window all discard.
+  // Pick pheromones (which IS arming — no separate step) and the hive answers
+  // at once: tiles missing any of the set shade out, tiles wearing it all stay
+  // lit. Clicking a shaded tile scents it immediately — a real write, no
+  // staging, no Done — and the bouquet stays in hand for the next tile. Put it
+  // down by emptying the set, pressing Put down, or Escape.
   //
   // WHAT IS IN HAND IS ALWAYS A BOUQUET — one mark or six, named or not. So
   // arming goes through one place, which works out the bouquet's signature and
@@ -748,20 +776,25 @@ export class TagsViewerComponent implements OnDestroy {
 
   /** Take a bouquet in hand: arm at once, then work out its signature.
    *
-   *  Arming first is deliberate — the hive must become a scenting surface on
-   *  the same tick as the click, and hashing is async. The identity
-   *  is re-announced when it arrives, but ONLY if the same bouquet is still in
-   *  hand: a one-shot arm→paint→commit (the selection path) has already put it
-   *  down by then, and re-announcing would silently re-arm the hive. */
+   *  Arming first is deliberate — the hive must shade for the set on the same
+   *  tick as the click, and hashing is async. The identity is re-announced
+   *  when it arrives, but ONLY if the same bouquet is still in hand: a
+   *  one-shot arm→paint→commit (the selection path) has already put it down by
+   *  then, and re-announcing would silently re-arm the hive.
+   *
+   *  `color` rides along so the shade can light the matching tiles in the
+   *  bouquet's own colour — the first mark's, the same face the bouquet row
+   *  and the hover preview wear. */
   #armBouquet(marks: readonly string[]): void {
     const tags = [...marks]
     if (tags.length === 0) { this.#standDown(); return }
-    EffectBus.emit('tags:apply-begin', { tags })
+    const color = this.#colorOf(tags[0], this.#registry())
+    EffectBus.emit('tags:apply-begin', { tags, color })
     const held = tags.join('\u0000')
     void this.#identify(tags).then(sig => {
       if (!sig || !this.painting()) return
       if (this.#applyTags().join('\u0000') !== held) return
-      EffectBus.emit('tags:apply-begin', { tags, bouquet: sig })
+      EffectBus.emit('tags:apply-begin', { tags, bouquet: sig, color })
     })
   }
 
@@ -771,53 +804,36 @@ export class TagsViewerComponent implements OnDestroy {
     EffectBus.emit('tags:apply-cancel', {})
   }
 
-  openPainter(): void {
-    if (this.#removalTag()) this.cancelRemoval()
-    this.#painterOpen.set(true)
-  }
-
-  /** Persist the painted tiles — one commit — and finish. This is the ONLY
-   *  path that writes; the drone stages everything until now. */
-  donePaint(): void {
-    EffectBus.emit('tags:apply-commit', {})
-    this.#painterOpen.set(false)
+  /** Put the bouquet down: empty the gathered set and disarm the hive. The
+   *  ONE way out of the armed state — nothing was staged, so there is nothing
+   *  to discard or commit; every scent already landed as it was clicked. */
+  putDown(): void {
     this.#selected.set(new Set())
     this.#naming.set(false)
-    this.#bouquetSig.set(null)
+    this.#standDown()
   }
 
-  /** Stage every canvas-selected tile under the armed brush in one press —
-   *  the selection response: instead of clicking each selected tile, the
-   *  selection IS the target set. Emits the same `tags:apply-paint` the
-   *  overlay's paint stroke emits per tile, so the drone stages + the hive
-   *  marks identically; Done still commits in one transaction. */
-  stageSelection(): void {
-    if (!this.painting()) return
+  /** THE PLACE BUTTON: put the bouquet in hand on every canvas-selected tile,
+   *  in one transaction — instead of clicking each shaded tile, the selection
+   *  IS the target set. The commit disarms drone-side; the pending-inactive
+   *  echo clears the gathered set here, so the whole gesture reads as one
+   *  act. This is the ONLY selection path — no row tap is overloaded for it. */
+  applyBouquetToSelection(): void {
+    if (!this.painting() || this.canvasSelectionCount() === 0) return
     for (const label of this.#canvasSelection()) {
       EffectBus.emit('tags:apply-paint', { label, add: true })
     }
+    EffectBus.emit('tags:apply-commit', {})
   }
 
-  /** Leave the painter WITHOUT persisting — the staged tiles are thrown away.
-   *  (Done is the only save; Close is the discard.) */
-  closePainter(): void {
-    this.#standDown()
-    this.#painterOpen.set(false)
-    this.#selected.set(new Set())
-    this.#naming.set(false)
-  }
-
-  /** Pick / unpick a pheromone for the bouquet. Opens the tray if it was shut,
-   *  so the ＋ on any row is a valid way in. Picking IS arming — a non-empty
-   *  bouquet makes ctrl+click out on the hive collect at once; emptying it
-   *  stands the walk down. The drone keeps the collected tiles across a re-arm,
-   *  so "actually, this one too" costs one click, not a restart. */
+  /** Gather / release a pheromone. Gathering IS arming — from the first mark
+   *  the hive shades every tile missing the set and a click scents it;
+   *  emptying the set puts the bouquet down. */
   togglePheromone(name: string): void {
     if (this.#removalTag()) this.cancelRemoval()
     const next = new Set(this.#selected())
     if (next.has(name)) next.delete(name); else next.add(name)
     this.#selected.set(next)
-    this.#painterOpen.set(true)
     this.#armBouquet([...next])
   }
 
@@ -863,35 +879,24 @@ export class TagsViewerComponent implements OnDestroy {
     this.#flush()
   }
 
-  /** Put a bouquet in hand: the picked set BECOMES its marks, which arms the
-   *  brush exactly as picking them one at a time would. Clicking the loaded
-   *  bouquet again puts it down.
-   *
-   *  SELECTION IS THE TARGET here too — with tiles picked on the canvas, a
-   *  bouquet lands on all of them in one transaction rather than arming a
-   *  brush, the same read the pheromone rows already take. That is what makes
-   *  bouquets usable on a phone, where the painter is withheld: pick tiles,
-   *  tap a bouquet, done. */
+  /** Put a bouquet in hand: the picked set BECOMES its marks, which arms it
+   *  exactly as picking them one at a time would. Clicking the loaded bouquet
+   *  again puts it down. With tiles selected, taking it in hand is still all
+   *  this does — the strip's place button is the verb that lands it. */
   loadBouquet(row: BouquetRow): void {
+    // The click that ends a bouquet drag must not also load the bouquet.
+    if (this.#swallowClick) { this.#swallowClick = false; return }
     if (this.#removalTag()) this.cancelRemoval()
     const marks = row.marks.filter(Boolean)
-    if (this.canvasSelectionCount() > 0 && marks.length > 0) {
-      EffectBus.emit('tags:apply-begin', { tags: marks })
-      for (const label of this.#canvasSelection()) EffectBus.emit('tags:apply-paint', { label, add: true })
-      EffectBus.emit('tags:apply-commit', {})
-      return
-    }
     if (this.loadedBouquet() === row.name) {
-      this.#selected.set(new Set())
-      this.#standDown()
+      this.putDown()
       return
     }
     if (marks.length === 0) return
     this.#selected.set(new Set(marks))
-    this.#painterOpen.set(true)
     // Already minted — its sig IS the row's identity, so arm with it directly.
     this.#bouquetSig.set(row.sig)
-    EffectBus.emit('tags:apply-begin', { tags: marks, bouquet: row.sig })
+    EffectBus.emit('tags:apply-begin', { tags: marks, bouquet: row.sig, color: this.bouquetColor(row) })
   }
 
   /** Forget the name. The marks themselves are untouched — they are keywords in
@@ -907,7 +912,7 @@ export class TagsViewerComponent implements OnDestroy {
    *  Nothing is written; clicking tiles builds the list, Remove commits it. */
   beginRemoval(name: string): void {
     if (this.#removalTag() === name) { this.commitRemoval(); return }
-    if (this.#painterOpen()) this.closePainter()
+    if (this.selectedCount() > 0 || this.painting()) this.putDown()
     const only = new Set([name])
     this.#active.set(only)
     this.#emitFilter(only)
@@ -946,25 +951,25 @@ export class TagsViewerComponent implements OnDestroy {
     }
   }
 
-  /** Closing the panel disarms any takeover — a staged removal or the apply
-   *  brush — since the panel is the review surface and leaving tile clicks
+  /** Closing the panel disarms any takeover — a staged removal or the bouquet
+   *  in hand — since the panel is the review surface and leaving tile clicks
    *  hijacked would strand the participant. */
   close(): void {
     if (this.#removalTag()) this.cancelRemoval()
-    if (this.#painterOpen()) this.closePainter()
+    if (this.selectedCount() > 0 || this.painting()) this.putDown()
     this.endPreview()
     this.visible.set(false)
     EffectBus.emit('tags:view-state', { open: false })
   }
 
-  /** One level back per press: shut the naming field, then the painter
-   *  (discarding its staging — Done is the only save), then drop an armed
-   *  removal. False means nothing of ours was open, and the shell cascade
-   *  carries on past us — clearing a selection before it ever closes this
-   *  window. Reached from the session; there is no listener here. */
+  /** One level back per press: shut the naming field, then put the bouquet
+   *  down, then drop an armed removal. False means nothing of ours was open,
+   *  and the shell cascade carries on past us — clearing a selection before it
+   *  ever closes this window. Reached from the session; there is no listener
+   *  here. */
   dismiss(): boolean {
     if (this.#naming()) { this.cancelNaming(); return true }
-    if (this.#painterOpen()) { this.closePainter(); return true }
+    if (this.selectedCount() > 0 || this.painting()) { this.putDown(); return true }
     if (this.#removalTag()) { this.cancelRemoval(); return true }
     return false
   }

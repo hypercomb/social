@@ -138,10 +138,11 @@ export class SiteViewDrone extends Drone {
    * <body> at a near-max z-index, and shown for the entire duration of website
    * mode — even on a page-less dead-end. No component, no signal binding, no
    * load-order failure mode: if a site can show, this button is there. Clicking
-   * it steps back to the WEBSITES DIRECTORY the site was launched from (the
-   * `/websites` menu) — a second back there returns to the hive tiles. When no
-   * sites are discovered it falls back to a plain flip to the hive, so the
-   * button is never dead.
+   * it backs the reader OUT to the ENTRANCE — the site's root website tile, in
+   * the layer the session was entered from (`#siteEntrySegments`). It never
+   * opens the websites directory on the way out: `/websites` is the one way to
+   * show that window, so leaving a site returns you to where you came in
+   * rather than into a menu.
    */
   #exitOverlay: HTMLButtonElement | null = null
   #exitTogglesBound = false

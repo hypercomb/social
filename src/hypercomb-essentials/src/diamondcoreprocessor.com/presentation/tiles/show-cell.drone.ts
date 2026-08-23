@@ -619,7 +619,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1286,6 +1286,23 @@ export class ShowCellDrone extends Drone {
   #markPreviewMarks: string[] = []
   #markPreviewLabels = new Set<string>()
   #markPreviewColor: [number, number, number] = [0.55, 0.85, 1.0]
+  /** THE BOUQUET IN HAND (`tags:apply-pending`) — the STANDING sibling of the
+   *  hover preview above, riding the same buffer flag and the same u_markPreview
+   *  ramp. Opposite matching rule, deliberately: a hover asks "who carries ANY
+   *  of these?" and lights them; the armed bouquet asks "who already wears ALL
+   *  of it?" — those stay lit as settled ground, and every tile still missing
+   *  part of the set recedes, which is exactly the set a click will scent
+   *  (TileOverlayDrone's takeover asks the same question). A live hover
+   *  outranks it while it lasts; ending the hover falls back to this. */
+  #armedApplyMarks: string[] = []
+  #armedApplyColor: [number, number, number] | null = null
+  /** A pheromone (or a whole bouquet) is being DRAGGED out of the panel
+   *  (`drop:dragging {marks, color}`). Same treatment and same ALL-match rule
+   *  as the armed bouquet, for the length of the drag: where the drop would DO
+   *  something is shaded before anything is released. Outranks both the hover
+   *  preview and the armed set while it lasts. */
+  #dragShadeMarks: string[] = []
+  #dragShadeColor: [number, number, number] | null = null
   /** 0..1 ramp — the whole treatment fades in and out (see u_markPreview). */
   #markPreviewK = 0
   #markPreviewTarget = 0
@@ -5221,6 +5238,13 @@ export class ShowCellDrone extends Drone {
         this.renderedCellsKey = ''
         this.requestRender()
       }
+      // With the bouquet in hand, a landed scent changes the answer to "who
+      // wears the whole set?" — the tile it just landed on must LIGHT. Re-ask
+      // now (the tick loop re-asks again after any buffer rebuild, so a lagging
+      // index only ever costs a beat, never a stale shade).
+      if (this.#armedApplyMarks.length > 0 || this.#markPreviewMarks.length > 0) {
+        this.#refreshMarkPreview()
+      }
     })
 
     // tags:indexed — the decoration index finished hydrating tags for cells
@@ -5665,17 +5689,45 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // tags:apply-pending — the pheromone brush's painted set. Same shape and
-    // same purely-visual contract as the removal staging above, opposite sign:
-    // each tile the brush has landed on marks as a future-ADD, so the keyword
-    // is visibly arriving as you click rather than only showing in a toast.
-    this.onEffect<{ cells?: string[]; active?: boolean }>('tags:apply-pending', ({ cells, active }) => {
-      const next = new Set(active === false ? [] : (Array.isArray(cells) ? cells : []))
-      if (next.size === this.#tagApplyPainted.size
-        && [...next].every(l => this.#tagApplyPainted.has(l))) return
-      this.#tagApplyPainted = next
-      this.renderedCellsKey = ''
-      this.requestRender()
+    // tags:apply-pending — the bouquet in hand. TWO visual duties from one
+    // sticky payload:
+    //   • the ARMED SHADE (#armedApplyMarks): tiles wearing the whole set stay
+    //     lit in the bouquet's colour, every tile missing part of it recedes —
+    //     the standing "click here to scent" readout;
+    //   • the staged future-ADD marks (`cells`, the selection one-shot) — same
+    //     purely-visual contract as the removal staging above, opposite sign.
+    this.onEffect<{ cells?: string[]; active?: boolean; tags?: string[]; color?: string }>(
+      'tags:apply-pending', ({ cells, active, tags, color }) => {
+        const armed = active === false
+          ? []
+          : (Array.isArray(tags) ? tags.map(t => String(t ?? '').trim()).filter(Boolean) : [])
+        if (color) this.#armedApplyColor = hexToRgbTriple(color)
+        if (armed.length !== this.#armedApplyMarks.length
+          || armed.some((m, i) => m !== this.#armedApplyMarks[i])) {
+          this.#armedApplyMarks = armed
+          this.#refreshMarkPreview()
+        }
+        const next = new Set(active === false ? [] : (Array.isArray(cells) ? cells : []))
+        if (next.size === this.#tagApplyPainted.size
+          && [...next].every(l => this.#tagApplyPainted.has(l))) return
+        this.#tagApplyPainted = next
+        this.renderedCellsKey = ''
+        this.requestRender()
+      })
+
+    // drop:dragging — a pheromone (or bouquet) is riding the cursor out of
+    // the panel. While `marks` are aboard, shade exactly as the armed set
+    // does: the tiles the drop would change recede, the ones already wearing
+    // it all stay lit. Emitters without marks (file drops, the aggregate
+    // index) change nothing here.
+    this.onEffect<{ active?: boolean; marks?: string[]; color?: string }>('drop:dragging', ({ active, marks, color }) => {
+      const held = active === true && Array.isArray(marks)
+        ? marks.map(m => String(m ?? '').trim()).filter(Boolean)
+        : []
+      if (held.length === 0 && this.#dragShadeMarks.length === 0) return
+      if (color) this.#dragShadeColor = hexToRgbTriple(color)
+      this.#dragShadeMarks = held
+      this.#refreshMarkPreview()
     })
 
     // ── THE TAKE'S TOUCH ─────────────────────────────────────────────
@@ -6689,25 +6741,51 @@ export class ShowCellDrone extends Drone {
     }
   }
 
-  /** Resolve the hovered marks against this page and paint the answer.
+  /** Resolve the treatment's marks against this page and paint the answer.
+   *
+   *  TWO askers, one buffer, one ramp — a live hover outranks the standing
+   *  armed bouquet, and each has its own matching rule:
+   *    • hover (`tags:preview`): who carries ANY of these? — the carriers
+   *      light, the rest recede;
+   *    • armed (`tags:apply-pending`): who already wears ALL of it? — those
+   *      stay lit as settled ground, and everything still missing part of the
+   *      set recedes: exactly the tiles a click will scent.
+   *  While armed, the treatment stays ON even with zero matches — a fully
+   *  receded page IS the honest answer ("nothing wears this yet; click tiles
+   *  to scent them"), where the hover with no carriers just stays dark.
    *
    *  The carrier set goes STRAIGHT into the divergence buffer and is pushed to
    *  the GPU — a hover must never cost a render pass, and nothing here belongs
    *  in one: no geometry moves and no cell record changes. The flag value (3)
    *  is deliberately outside the divergence vocabulary (0/1/2), so a rebuild
-   *  bakes the tile's REAL divergence and the preview simply repaints itself
+   *  bakes the tile's REAL divergence and the treatment simply repaints itself
    *  over the fresh buffer (see #markPreviewGeom). */
   #refreshMarkPreview(): void {
-    const marks = new Set(this.#markPreviewMarks)
+    const dragged = this.#dragShadeMarks
+    const hovered = this.#markPreviewMarks
+    const armed = this.#armedApplyMarks
+    // The live drag outranks the hover, the hover outranks the standing armed
+    // set. Drag and armed share the ALL-match rule (what would the landing
+    // change?); the hover keeps ANY-match (who carries this?).
+    const all = dragged.length > 0 ? dragged : (hovered.length > 0 ? null : armed)
     const next = new Set<string>()
-    if (marks.size > 0) {
+    if (all === null) {
+      const marks = new Set(hovered)
       for (const label of this.renderedCells.keys()) {
         for (const t of this.#tagsFor(label)) if (marks.has(t)) { next.add(label); break }
       }
+    } else if (all.length > 0) {
+      for (const label of this.renderedCells.keys()) {
+        const worn = this.#tagsFor(label)
+        if (all.every(t => worn.includes(t))) next.add(label)
+      }
+      const tint = dragged.length > 0 ? this.#dragShadeColor : this.#armedApplyColor
+      if (tint) this.#markPreviewColor = tint
     }
     this.#markPreviewLabels = next
-    if (next.size > 0) this.#paintMarkPreviewBuffer()
-    this.#setMarkPreview(next.size > 0)
+    const active = all === null ? next.size > 0 : all.length > 0
+    if (active) this.#paintMarkPreviewBuffer()
+    this.#setMarkPreview(active)
   }
 
   /** Write the carrier flag for every cell in the current buffer. Non-carriers

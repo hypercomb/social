@@ -120,11 +120,14 @@ $accent: #7eb6d6;
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.34rem;
   min-width: 0;
-  min-height: 1.8rem;
+  min-height: 2.2rem;
   margin: 0 0.5rem;
-  padding: 0.1rem 0.4rem;
+  // The squares need air on all four sides: a picture pressed against a
+  // border reads as a mistake, and the row is the one place in the header
+  // where several objects sit side by side.
+  padding: 0.28rem 0.5rem;
   border: 1px dashed rgba($accent, 0.28);
   border-radius: var(--hc-radius-control, 2px);
   overflow-x: auto;
@@ -326,9 +329,12 @@ $accent: #7eb6d6;
 // removal stays one click without stealing room from the image.
 .chat-box-context.pictured {
   position: relative;
-  width: 1.9rem;
-  height: 1.9rem;
-  min-width: 1.9rem;
+  // 1.5rem, not 1.9: the square only has to be RECOGNISED, and the smaller
+  // it is the more of the strip is air — which is what makes several of them
+  // read as a list rather than as a wall.
+  width: 1.5rem;
+  height: 1.5rem;
+  min-width: 1.5rem;
   padding: 0;
   overflow: hidden;
 

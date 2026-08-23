@@ -65,3 +65,47 @@ export const namespaceGroupsOf = <T extends NamedMark>(
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([name, list]) => ({ name, rows: list }))
 }
+
+// ── the search ───────────────────────────────────────────────────────────────
+//
+// ONE rule everywhere: case-insensitive substring on the name. A blank query
+// matches everything, so callers never branch on "is a search running". The
+// same query filters all three parts of the panel — what differs per part is
+// only WHAT counts as the searched name:
+//
+//   • a loose or namespaced mark — its own name;
+//   • a bouquet — its name OR any mark it holds, because searching for a
+//     keyword must surface the bouquets that would land it;
+//   • a namespace group — the group name keeps the whole group, otherwise the
+//     group survives with just its matching rows.
+
+export const matchesQuery = (name: string, query: string): boolean => {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return name.toLowerCase().includes(q)
+}
+
+export const filterRowsByQuery = <T extends NamedMark>(
+  rows: readonly T[],
+  query: string,
+): T[] => rows.filter(r => matchesQuery(r.name, query))
+
+export const bouquetMatchesQuery = (
+  name: string,
+  marks: readonly string[],
+  query: string,
+): boolean => matchesQuery(name, query) || marks.some(m => matchesQuery(m, query))
+
+export const filterNamespaceGroups = <T extends NamedMark>(
+  groups: readonly { name: string; rows: T[] }[],
+  query: string,
+): { name: string; rows: T[] }[] => {
+  if (!query.trim()) return [...groups]
+  const out: { name: string; rows: T[] }[] = []
+  for (const group of groups) {
+    if (matchesQuery(group.name, query)) { out.push(group); continue }
+    const rows = filterRowsByQuery(group.rows, query)
+    if (rows.length > 0) out.push({ name: group.name, rows })
+  }
+  return out
+}

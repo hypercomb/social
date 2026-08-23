@@ -5,25 +5,28 @@
 // participant put those keywords ON tiles and take them OFF, directly on the
 // hive, while the window is open.
 //
-//   THE COLLECTING WALK — the staging path, the additive twin of bulk removal.
+//   THE BOUQUET IN HAND — the direct path, the additive twin of bulk removal.
 //     The panel gathers a bouquet of keywords; gathering arms it
-//     (`tags:apply-begin {tags}`) — there is no separate "start" step. The hive
-//     is NOT taken over: you walk it exactly as always (click, enter, hold),
-//     and ctrl+click COLLECTS the tile under the pointer into the grouping
-//     (`tags:apply-paint {label, add}` — SelectionInputDrone owns the gesture;
-//     ctrl+click a collected tile to release it, ctrl+drag to sweep). Collected
-//     tiles are pure intent — nothing is written — shown as a future-add mark
-//     on the hive (show-cell reads the same `tags:apply-pending {cells}`) and
-//     listed as the grouping at the top of the panel. `Done`
-//     (`tags:apply-commit`) writes every collected tile in one pass and pulses
-//     the processor; closing or Escape (`tags:apply-cancel` / `tags:apply-end`)
-//     throws the staging away. This mirrors TagRemovalDrone — stage, review,
-//     commit — and replaced the paint brush: painting hijacked every click, so
-//     you could not walk while marking, and collecting is the easier verb.
+//     (`tags:apply-begin {tags, color}`) — there is no separate "start" step.
+//     The hive itself is the review surface: show-cell shades every tile
+//     missing part of the set (reading the same `tags:apply-pending`), tiles
+//     wearing it all stay lit, and a plain click on a shaded tile
+//     (`tags:apply-click {label}`, TileOverlayDrone) scents it AT ONCE — a
+//     real write, like a drop, because the shade already showed exactly what
+//     the click would do. The bouquet stays in hand for the next tile; lit
+//     tiles stay ordinary ground, so you keep walking through them. Escape or
+//     emptying the set (`tags:apply-cancel` / `tags:apply-end`) puts it down.
+//     This replaced the collecting walk (a staged ctrl+click grouping with a
+//     Done commit): the shade IS the staging review, so the ceremony went. The
+//     stage-and-commit lane (`tags:apply-paint` → `tags:apply-commit`) remains
+//     for the SELECTION one-shot: with tiles picked on the canvas, the panel
+//     fires arm → paint → commit synchronously and the whole selection lands
+//     in one transaction.
 //
 //   DROP — a pheromone dragged out of the panel onto a tile lands immediately
-//     (`pheromone:drop`). Unlike the brush this is one unambiguous act, so it
-//     writes at once rather than staging; addTag is idempotent.
+//     (`pheromone:drop`). One unambiguous act, so it writes at once; addTag is
+//     idempotent. A BOUQUET drags the same way — `tags[]` in the payload — and
+//     the whole set lands on the release tile.
 //
 //   PEEK / REMOVE — hovering a pheromone-bearing tile shows the tile's keywords
 //     as a small draggable card of coloured chips, each with an ×. The card
@@ -57,12 +60,12 @@ export class PheromoneTilesDrone extends Drone {
   override genotype = 'pheromones'
 
   public override description =
-    'Puts pheromone keywords onto tiles and takes them off: the collecting walk (ctrl+click tiles into the grouping, then Done commits), the drag-drop quick apply, and the on-tile ×-to-remove card — all while the Pheromones window is open.'
+    'Puts pheromone keywords onto tiles and takes them off: the bouquet in hand (the hive shades what is missing it; clicking a shaded tile scents it at once), the one-shot selection commit, the drag-drop quick apply (single mark or whole bouquet), and the on-tile ×-to-remove card — all while the Pheromones window is open.'
 
   protected override listens = [
     'tags:view-state', 'tags:removal-pending',
     'tags:apply-begin', 'tags:apply-paint', 'tags:apply-commit',
-    'tags:apply-cancel', 'tags:apply-end', 'render:cell-count',
+    'tags:apply-cancel', 'tags:apply-end', 'tags:apply-click', 'render:cell-count',
     'tile:hover',
     'pheromone:remove-from-tile', 'pheromone:card-left', 'pheromone:drop', 'tags:changed',
   ]
@@ -77,10 +80,13 @@ export class PheromoneTilesDrone extends Drone {
   /** A bulk removal is armed (TagRemovalDrone) — suppress the hover card so the
    *  two takeovers never fight over the same tile click. */
   #removalArmed = false
-  /** The keywords loaded into the brush — empty when the brush is down. A brush
-   *  can carry SEVERAL: the painter picks a set, and every staged tile gets all
-   *  of them on commit. Non-empty === the paint takeover is armed. */
+  /** The keywords in hand — empty when the bouquet is down. It can carry
+   *  SEVERAL: the panel gathers a set, and every scented tile gets all of
+   *  them. Non-empty === the hive is shading + clicks on shaded tiles scent. */
   #brushTags: string[] = []
+  /** The bouquet's face colour (its first mark's), riding `tags:apply-begin`
+   *  from the panel so show-cell can light the matching tiles in it. */
+  #brushColor: string | null = null
   /** Tiles STAGED to receive the brush — pure intent, nothing written until the
    *  commit. Feeds the renderer's future-add mark and the panel's list, exactly
    *  as TagRemovalDrone's `#pending` feeds the future-remove mark. */
@@ -130,19 +136,28 @@ export class PheromoneTilesDrone extends Drone {
     // is already going away, so this must NOT emit hover-hide.
     this.onEffect('pheromone:card-left', () => { this.#hoverLabel = null })
 
-    // ── the painter: arm → stage → commit ────────────────────────
+    // ── the bouquet: arm → (click scents | selection commits) ────
     //
-    // Loading the brush. `tags` is the painter's picked set; `tag` is the old
-    // single-keyword shape, still accepted. Re-arming while already painting
-    // (the painter changed its selection mid-session) KEEPS the staged tiles;
-    // only picking the brush up from empty starts a fresh session.
-    this.onEffect<{ tag?: string; tags?: string[] }>('tags:apply-begin', (p) => {
+    // Taking it in hand. `tags` is the gathered set; `tag` is the old
+    // single-keyword shape, still accepted. Re-arming while already armed (the
+    // panel changed its set mid-session) KEEPS any staged tiles; only picking
+    // it up from empty starts a fresh session.
+    this.onEffect<{ tag?: string; tags?: string[]; color?: string }>('tags:apply-begin', (p) => {
       const raw = Array.isArray(p?.tags) ? p.tags : (p?.tag ? [p.tag] : [])
       const tags = [...new Set(raw.map(t => String(t ?? '').trim()).filter(Boolean))]
       if (tags.length === 0) { this.#disarm(); return }
       if (this.#brushTags.length === 0) this.#staged.clear()
       this.#brushTags = tags
+      this.#brushColor = typeof p?.color === 'string' && p.color ? p.color : this.#brushColor
       this.#emitPending(true)
+    })
+
+    // A plain click landed on a SHADED tile (TileOverlayDrone resolved it) —
+    // scent it now. Immediate like a drop, and the bouquet stays in hand.
+    this.onEffect<{ label?: string }>('tags:apply-click', (p) => {
+      const label = String(p?.label ?? '').trim()
+      if (!label || this.#brushTags.length === 0) return
+      void this.#applyDirect(label)
     })
 
     // A tile was painted (or un-painted) by the brush — pure staging, no write.
@@ -182,24 +197,26 @@ export class PheromoneTilesDrone extends Drone {
       this.#onHover(p?.label ?? null)
     })
 
-    // A pheromone was DRAGGED out of the panel and dropped on a tile (or on
-    // that tile's own card). A drop is unambiguous intent — "put this here" —
-    // so unlike the brush it does not stage; it ADDS at once (addTag is
-    // idempotent, so dropping one already there is a harmless no-op).
-    // `label` is only set when the drop landed on a tile's own card, which names
-    // itself. Everywhere else the hive is the target and we resolve the RELEASE
-    // POINT — never a remembered hover, which goes null the moment the drag
-    // crosses the panel it started in (see TileOverlayDrone.labelAtClient).
-    this.onEffect<{ label?: string; tag?: string; x?: number; y?: number }>('pheromone:drop', (p) => {
-      const tag = String(p?.tag ?? '').trim()
-      if (!tag) return
+    // A pheromone — or a whole bouquet (`tags[]`) — was DRAGGED out of the
+    // panel and dropped on a tile (or on that tile's own card). A drop is
+    // unambiguous intent — "put this here" — so it does not stage; it ADDS at
+    // once (addTag is idempotent, so dropping one already there is a harmless
+    // no-op). `label` is only set when the drop landed on a tile's own card,
+    // which names itself. Everywhere else the hive is the target and we
+    // resolve the RELEASE POINT — never a remembered hover, which goes null
+    // the moment the drag crosses the panel it started in (see
+    // TileOverlayDrone.labelAtClient).
+    this.onEffect<{ label?: string; tag?: string; tags?: string[]; x?: number; y?: number }>('pheromone:drop', (p) => {
+      const raw = Array.isArray(p?.tags) && p.tags.length ? p.tags : (p?.tag ? [p.tag] : [])
+      const tags = [...new Set(raw.map(t => String(t ?? '').trim()).filter(Boolean))]
+      if (tags.length === 0) return
       let label = String(p?.label ?? '').trim()
       if (!label && typeof p?.x === 'number' && typeof p?.y === 'number') {
         label = ioc<{ labelAtClient(x: number, y: number): string | null }>(
           '@diamondcoreprocessor.com/TileOverlayDrone',
         )?.labelAtClient(p.x, p.y) ?? ''
       }
-      if (label) void this.#drop(label, tag)
+      if (label) void this.#drop(label, tags)
     })
 
     // An × on a chip → splice that keyword off that tile, live.
@@ -222,12 +239,12 @@ export class PheromoneTilesDrone extends Drone {
     })
   }
 
-  // ── the painter: commit / disarm ───────────────────────────────
+  // ── the selection one-shot: commit / disarm ────────────────────
 
   /** Write every staged tile in one pass, then pulse the processor once. Mirror
    *  of TagRemovalDrone.#commit: nothing was written until now, so a commit with
-   *  nothing staged just means "never mind". Each tile gets every brush keyword
-   *  it is missing; addTag is idempotent, so re-painting an existing one is a
+   *  nothing staged just means "never mind". Each tile gets every held keyword
+   *  it is missing; addTag is idempotent, so re-scenting an existing one is a
    *  no-op. Disarms afterwards — the committed tiles now carry the keywords for
    *  real, and the future-add marks clear as `tags:apply-pending` goes inactive. */
   async #commit(): Promise<void> {
@@ -276,37 +293,86 @@ export class PheromoneTilesDrone extends Drone {
     })
   }
 
-  /** Land a dragged pheromone on a tile. Add-only (see the listener), immediate
-   *  (the drag is one deliberate act, not a stroke to review), and it refreshes
-   *  the tile's card if that card is the one showing so the new chip appears
-   *  where you dropped it. */
-  async #drop(label: string, tag: string): Promise<void> {
-    const segments = this.#segmentsFor(label)
-    const decorations = ioc<DecorationServiceLike>('@diamondcoreprocessor.com/DecorationService')
+  /** Land a dragged pheromone — or a whole bouquet — on a tile. Add-only (see
+   *  the listener), immediate (the drag is one deliberate act, not a stroke to
+   *  review), and it refreshes the tile's card if that card is the one showing
+   *  so the new chips appear where you dropped them. */
+  async #drop(label: string, tags: readonly string[]): Promise<void> {
     const carried = [...tagsForLabel(label)]
-    const already = carried.includes(tag)
+    const missing = tags.filter(tag => !carried.includes(tag))
     try {
-      if (!already) await decorations?.addTag(segments, tag)
-      this.emitEffect('tags:changed', { updates: [{ cell: label, tag }] })
-      await new hypercomb().act()
+      await this.#writeTags(label, missing)
       // Show the tile's card on what it now carries. Explicit set for the same
       // index-lag reason as the commit path: the kind-index rebuilds off
       // `decorations:changed` a beat behind the write we just awaited.
       this.#hoverLabel = label
-      this.#emitHover('pheromone:hover-show', label, already ? carried : [...carried, tag])
-      const i18n = ioc<I18nProvider>(I18N_IOC_KEY)
-      this.emitEffect('toast:show', {
-        type: already ? 'info' : 'success',
-        title: already
-          ? (i18n?.t('pheromone.already.title', { tag }) ?? `"${tag}" already there`)
-          : (i18n?.t('pheromone.painted.title', { tag }) ?? `Painted "${tag}"`),
-        message: already
-          ? (i18n?.t('pheromone.already.message', { tag, cell: label }) ?? `"${label}" already carries "${tag}".`)
-          : (i18n?.t('pheromone.painted.message', { tag, cell: label }) ?? `"${tag}" on "${label}".`),
-      })
+      this.#emitHover('pheromone:hover-show', label, [...carried, ...missing])
+      this.#toastLanded(label, tags, missing)
     } catch (err) {
-      console.warn('[pheromone-tiles] drop failed for', label, tag, err)
+      console.warn('[pheromone-tiles] drop failed for', label, tags, err)
     }
+  }
+
+  /** A click on a SHADED tile with the bouquet in hand: put the whole set on
+   *  it now. Immediate like a drop — the shade already showed exactly what the
+   *  click would do — and the bouquet STAYS in hand, so the walk carries on to
+   *  the next shaded tile. (Show-cell re-shades off `tags:changed`: the tile
+   *  lights as it becomes a carrier.) */
+  async #applyDirect(label: string): Promise<void> {
+    const tags = [...this.#brushTags]
+    const carried = [...tagsForLabel(label)]
+    const missing = tags.filter(tag => !carried.includes(tag))
+    if (missing.length === 0) return
+    try {
+      await this.#writeTags(label, missing)
+      this.#toastLanded(label, tags, missing)
+    } catch (err) {
+      console.warn('[pheromone-tiles] scent failed for', label, tags, err)
+    }
+  }
+
+  /** The one immediate write path: add each keyword, announce the change, and
+   *  pulse the processor once. A no-op when nothing is missing. */
+  async #writeTags(label: string, missing: readonly string[]): Promise<void> {
+    if (missing.length === 0) { await new hypercomb().act(); return }
+    const segments = this.#segmentsFor(label)
+    const decorations = ioc<DecorationServiceLike>('@diamondcoreprocessor.com/DecorationService')
+    const updates: { cell: string; tag: string }[] = []
+    for (const tag of missing) {
+      await decorations?.addTag(segments, tag)
+      updates.push({ cell: label, tag })
+    }
+    this.emitEffect('tags:changed', { updates })
+    await new hypercomb().act()
+  }
+
+  /** One toast per landing — what arrived, or that it was all already there. */
+  #toastLanded(label: string, tags: readonly string[], missing: readonly string[]): void {
+    const i18n = ioc<I18nProvider>(I18N_IOC_KEY)
+    if (missing.length === 0) {
+      const tag = tags[0] ?? ''
+      this.emitEffect('toast:show', {
+        type: 'info',
+        title: tags.length === 1
+          ? (i18n?.t('pheromone.already.title', { tag }) ?? `"${tag}" already there`)
+          : (i18n?.t('pheromone.already.many.title') ?? 'Already scented'),
+        message: tags.length === 1
+          ? (i18n?.t('pheromone.already.message', { tag, cell: label }) ?? `"${label}" already carries "${tag}".`)
+          : (i18n?.t('pheromone.already.many.message', { cell: label }) ?? `"${label}" already carries the whole bouquet.`),
+      })
+      return
+    }
+    const single = missing.length === 1 ? missing[0] : ''
+    const list = missing.map(t => `"${t}"`).join(', ')
+    this.emitEffect('toast:show', {
+      type: 'success',
+      title: missing.length === 1
+        ? (i18n?.t('pheromone.painted.title', { tag: single }) ?? `Painted "${single}"`)
+        : (i18n?.t('pheromone.painted.many.title', { count: missing.length }) ?? `Painted ${missing.length} pheromones`),
+      message: missing.length === 1
+        ? (i18n?.t('pheromone.painted.message', { tag: single, cell: label }) ?? `"${single}" on "${label}".`)
+        : (i18n?.t('pheromone.painted.many.message', { tags: list, cell: label }) ?? `${list} on "${label}".`),
+    })
   }
 
   async #removeOne(segments: readonly string[], label: string, name: string): Promise<void> {
@@ -322,24 +388,27 @@ export class PheromoneTilesDrone extends Drone {
     }
   }
 
-  /** Put the brush down and throw away any staging — the only paths that write
-   *  are #commit and #drop. */
+  /** Put the bouquet down and throw away any staging — the only paths that
+   *  write are #commit, #drop and #applyDirect. */
   #disarm(): void {
     if (this.#brushTags.length === 0 && this.#staged.size === 0) return
     this.#brushTags = []
+    this.#brushColor = null
     this.#staged.clear()
     this.#emitPending(false)
   }
 
-  /** The one place the sticky brush state is shaped. `tag` stays in the payload
-   *  for readers that only ever knew a single keyword; `tags` is the truth, and
-   *  `cells` is what is STAGED — the overlay reads it for stroke toggle-intent,
-   *  show-cell for the future-add marks, the panel for its list. */
+  /** The one place the sticky armed state is shaped. `tag` stays in the payload
+   *  for readers that only ever knew a single keyword; `tags` is the truth,
+   *  `color` is the bouquet's face for show-cell's shade, and `cells` is what
+   *  is STAGED (the selection one-shot) — show-cell reads it for the
+   *  future-add marks, the overlay for its cue. */
   #emitPending(active: boolean): void {
     this.emitEffect('tags:apply-pending', {
       active,
       tags: [...this.#brushTags],
       tag: this.#brushTags.length === 1 ? this.#brushTags[0] : (this.#brushTags[0] ?? null),
+      color: this.#brushColor,
       cells: [...this.#staged],
     })
   }

@@ -40,13 +40,26 @@ import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-regist
 import { WEBSITE_SLOT } from './website-slot.js'
 import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
-import { DEFAULT_VIEW_DECORATION_KIND } from './decoration-kind-index.js'
+import { DEFAULT_VIEW_DECORATION_KIND, defaultViewForSegments } from './decoration-kind-index.js'
+import { defaultViewAt } from './view-default.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
 const FALLBACK_TOGGLE_ICON = 'visibility'
 /** The render surface websites toggle against. */
 const DEFAULT_SURFACE = 'hexagons'
+
+/** How long the ARRIVAL GATE may hold the hexagons back before giving up and
+ *  revealing them. The gate is a promise that something else is about to own
+ *  the screen; if the view never opens (a cold layer that never resolves, a
+ *  renderer that failed to register) the participant must still land on their
+ *  hive rather than on an empty ink field. */
+const ARRIVAL_GATE_MS = 2500
+
+/** Retry beats while the gate is held. The decision needs the layer read to
+ *  land, and a gated location paints nothing — so none of the paint-driven
+ *  triggers (`render:cell-count`) will arrive to re-ask the question. */
+const ARRIVAL_RETRY_MS = [120, 350, 800, 1600] as const
 
 /** Joins a path into one latch key. A separator no tile name can contain, so
  *  `['a','b']` and `['a/b']` are never the same address. */

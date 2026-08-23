@@ -1102,11 +1102,15 @@ export class ShowFeaturesDrone extends Drone {
     await this.#stampGates(applied, segments, records)
 
     // ── 5. ENABLEMENT — the global-roster lens ──
-    // A kind held dormant HERE (globally off / publisher-withheld / bound to
-    // another tile, no wake covering this tile) keeps its row — the
-    // honest-switch rule — but the panel renders it off with the "off
-    // everywhere" chip and a "wake here" action. Available rows lose their
-    // offer entirely: dormant means gone.
+    // GLOBALLY OFF ⇒ ONLY IN GLOBAL (Jaime, 2026-08-22). A kind held dormant
+    // HERE (globally off / publisher-withheld / bound to another tile, no wake
+    // covering this tile) is marked and then DROPPED from the tile list by the
+    // panel — applied and available alike. The layer list carries two states
+    // and no more: lit (deposited here) and dim (not here yet). A dormant row
+    // sitting among them was a third, and it read as a behaviour you could
+    // switch on from this tile, which is exactly what it is not. The global
+    // lens (the store) is the only place a dormant kind appears, and the only
+    // place it comes back on. Never re-add an "off everywhere" row here.
     //
     // BINDING is the one that also has something POSITIVE to say. A kind
     // bound to a tile covering this location belongs HERE, so its row carries

@@ -529,10 +529,18 @@ export class TileOverlayDrone extends Drone {
   #swapCue: Container | null = null
   /** The rendered pill's verb key — the same-state guard (see #cueVerbFor). */
   #swapCueKey: string | null = null
-  /** The bouquet in hand and the tiles already collected into it, mirrored
-   *  from `tags:apply-pending` — the two halves of the cue's COMPARISON. */
+  /** The bouquet in hand, mirrored from `tags:apply-pending` — one half of
+   *  the COMPARISON; the other half is what the tile already wears. */
   #bouquetTags: string[] = []
-  #bouquetStaged = new Set<string>()
+
+  /** With the bouquet in hand, is this tile still MISSING part of it — i.e.
+   *  shaded, and the click's to take? The press guard, the click branch and
+   *  the cue must all answer this identically, so it is asked in one place. */
+  #bouquetMissingFor(label: string): boolean {
+    if (this.#bouquetTags.length === 0) return false
+    const worn = new Set(tagsForLabel(label))
+    return this.#bouquetTags.some(tag => !worn.has(tag))
+  }
   /** The keyword whose removal is staged, and the tiles staged to lose it
    *  (`tags:removal-pending`). */
   #removalTag: string | null = null
@@ -566,7 +574,7 @@ export class TileOverlayDrone extends Drone {
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'clipboard:take-items', 'swarm:wand']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'swarm:wand']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -1111,10 +1119,11 @@ export class TileOverlayDrone extends Drone {
         this.#refreshSwapCue(false)
       })
 
-      // A BOUQUET IN HAND. The overlay does not take the click over for it —
-      // collecting rides ctrl+press in SelectionInputDrone — but the hovered
-      // tile still has to say what it would GET, and that answer is the marks
-      // held compared against the marks it already wears (see #cueVerbFor).
+      // A BOUQUET IN HAND. Two readers of the same state: the press/click
+      // takeover (a click on a tile still MISSING part of the set scents it —
+      // see #onPointerDown / #onClick / #bouquetMissingFor), and the hovered
+      // tile's cue, which says what it would GET — the marks held compared
+      // against the marks it already wears (see #cueVerbFor).
       this.onEffect<{ active?: boolean; tags?: string[]; tag?: string | null; cells?: string[] }>(
         'tags:apply-pending', (payload) => {
           const armed = payload?.active === true
@@ -1122,7 +1131,6 @@ export class TileOverlayDrone extends Drone {
             ? payload!.tags!
             : (payload?.tag ? [payload.tag] : [])
           this.#bouquetTags = armed ? [...new Set(raw.map(tag => String(tag ?? '').trim()).filter(Boolean))] : []
-          this.#bouquetStaged = new Set(armed && Array.isArray(payload?.cells) ? payload!.cells! : [])
           this.#refreshSwapCue(false)
         })
 
@@ -2823,6 +2831,12 @@ export class TileOverlayDrone extends Drone {
     // here so the leaf branch can tell a tap from a mouse click.
     this.#pressWasTouch = e.pointerType === 'touch'
 
+    // A bouquet in hand takes the press only where it will ACT: this tile is
+    // SHADED (still missing part of the set), so the press must not navigate —
+    // the trailing click scents it (see #onClick). A tile already wearing the
+    // whole set is lit, ordinary ground, and falls through to walk in.
+    if (this.#bouquetMissingFor(entry.label)) return
+
     // If the press is over a VISIBLE overlay action button (edit, note, …), let
     // the click handler run that action — never treat it as a tile-body press.
     // This MUST run before the launcher branch below: on an aggregator page
@@ -2993,6 +3007,26 @@ export class TileOverlayDrone extends Drone {
       if (!staged?.label) { diag('removal-empty-hex'); return }
       this.emitEffect('tags:removal-toggle', { label: staged.label })
       return
+    }
+
+    // ── A bouquet in hand ────────────────────────────────────────────────
+    // The shaded tiles are the ones still missing part of the set; a plain
+    // click on one SCENTS it — PheromoneTilesDrone writes at once and the
+    // bouquet stays in hand for the next tile. A lit tile (already wearing
+    // everything) falls through and behaves as always, so walking continues
+    // through the tiles that are done. Ctrl keeps meaning selection.
+    if (this.#bouquetTags.length > 0 && !e.ctrlKey && !e.metaKey) {
+      const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+      if (detector && this.#renderContainer) {
+        const pg = this.#clientToPixiGlobal(e.clientX, e.clientY)
+        const lp = this.#renderContainer.toLocal(new Point(pg.x, pg.y))
+        const ax = detector.pixelToAxial(lp.x - this.#meshOffset.x, lp.y - this.#meshOffset.y, this.#flat)
+        const hit = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(ax.q, ax.r))
+        if (hit?.label && this.#bouquetMissingFor(hit.label)) {
+          this.emitEffect('tags:apply-click', { label: hit.label })
+          return
+        }
+      }
     }
 
     // For Ctrl/Meta clicks, resolve axial from click coordinates directly
@@ -3950,13 +3984,10 @@ export class TileOverlayDrone extends Drone {
     }
 
     // A BOUQUET IN HAND. THE COMPARISON: the marks held against the marks
-    // the tile already wears. Collecting rides ctrl+press (SelectionInput
-    // owns the gesture) — the verb is the same either way, so the pill
-    // answers "what would this tile get" whether or not ctrl is down yet.
+    // the tile already wears — the same answer #bouquetMissingFor gives the
+    // press/click takeover, spelled out. A shaded tile's pill names what the
+    // click will land; a lit one says it is already so and the click walks in.
     if (this.#bouquetTags.length > 0) {
-      if (this.#bouquetStaged.has(label)) {
-        return { key: `release:${label}`, glyph: '−', word: t('pheromone.cue.release', 'release'), color: SWAP_CUE_TAKE_COLOR }
-      }
       const worn = new Set(tagsForLabel(label))
       const missing = this.#bouquetTags.filter(tag => !worn.has(tag))
       if (missing.length === 0) {

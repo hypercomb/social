@@ -32,7 +32,6 @@
 import { QueenBee, EffectBus, isLocalClaudeBridgeConfigured, isSignature } from '@hypercomb/core'
 import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
 import { resolveTileContext } from './tile-context.js'
-import { setSignature } from './context-groups.js'
 
 type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
 type SelectionLike = { selected: ReadonlySet<string> }
@@ -137,11 +136,6 @@ export class LlmQueenBee extends QueenBee {
      *  payload deterministic: the same references compose the same request
      *  bytes, today and on a rebuild. */
     references: readonly { kind?: string; sig?: string; label?: string }[] = [],
-    /** THE ANCHOR — the first rank. One tile usually, several when they are
-     *  the same piece of work, and it is the only thing an answer may change.
-     *  Carried with its own set signature so a request over the same anchor
-     *  is recognisably the same request. */
-    anchor: readonly { path?: string; sig?: string }[] = [],
   ): Promise<string | null> {
     // This method is specifically the durable LOCAL-BRIDGE queue seam. The
     // chat window's participant-host path calls HostAi directly and never
@@ -174,14 +168,6 @@ export class LlmQueenBee extends QueenBee {
       .filter(reference => isSignature(reference.sig))
     const picked = [...new Set(named.map(reference => reference.sig))]
 
-    // THE ANCHOR IS A SET. Usually of one — but several tiles can be the same
-    // piece of work, and stacking them on the first rank says so. Its set
-    // signature is what makes two requests over the same anchor recognisably
-    // the same request.
-    const anchored = anchor
-      .map(tile => ({ path: String(tile?.path ?? ''), sig: String(tile?.sig ?? '') }))
-      .filter(tile => tile.path || isSignature(tile.sig))
-    const anchorSig = await setSignature(anchored.map(tile => ({ path: tile.path, name: '', sig: tile.sig })))
     const union = [...new Set([...picked, ...(attached.context ?? [])])]
     const context = union.length
       ? {
@@ -201,9 +187,10 @@ export class LlmQueenBee extends QueenBee {
         model: this.activeModel,
         targets,
         segments,
-        // THE ANCHOR — what the request is anchored to, and the only thing an
-        // answer may change. Everything else it carries is there to be READ.
-        ...(anchored.length ? { anchor: anchored, anchorSig } : {}),
+        // The TARGET is `appliesTo` above — the tile this conversation is
+        // about, and the only thing an answer may change. Everything the
+        // request carries below is there to be READ.
+        //
         // Structured references ride BESIDE the flat sig list: the list is
         // what a responder expands, the structure is what tells it whether a
         // signature is one layer or a whole context.
