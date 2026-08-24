@@ -20,34 +20,81 @@
         <span class="features-brand-mark" aria-hidden="true">
           <span class="mat-sym">extension</span>
         </span>
-        <!-- The title says WHAT and, when there is one to name, WHICH — the
-             pool and the hive root keep the bare app title, a named subject
-             hangs off it. -->
+        <!-- WHAT, then WHO. Two segments, never three: the app word, then
+             the SUBJECT — the layer's own name, in its own casing, because
+             that is the thing the list below is about. The POOL has no
+             subject: it is attached to no tile, so it says `global` there
+             and the word is the whole answer. The HIVE ROOT has no name to
+             give, so it gets no second segment at all rather than a
+             separator with nothing after it. -->
         <span class="features-title">
           <span class="features-title-app">{{ 'features.viewer.title' | t }}</span>
-          @if (!isStore() && subjectName(); as name) {
+          @if (isStore()) {
+            <span class="features-title-sep" aria-hidden="true">/</span>
+            <span class="features-title-scope">{{ 'features.where.global' | t }}</span>
+          } @else if (subjectName(); as name) {
             <span class="features-title-sep" aria-hidden="true">/</span>
             <span class="features-title-cell" [title]="name">{{ name }}</span>
           }
         </span>
       </div>
-      <!-- THE LENS — the panel's one filter, and its one header control.
-           Four positions on one icon: everything on this layer, just its
-           views, just its other behaviours, then the pool (every behavior
-           the app knows, one global light each). The glyph shows where you
-           are; the tooltip names it. -->
-      <button
-        class="features-mode"
-        type="button"
-        [class.active]="lens() !== 'all'"
-        (click)="cycleLens()"
-        [attr.title]="lensKey() | t"
-        [attr.aria-label]="lensKey() | t"
-      ><span class="mat-sym" aria-hidden="true">{{ lensIcon() }}</span></button>
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">
         <span class="mat-sym" aria-hidden="true">close</span>
       </button>
     </header>
+
+    <!-- KIND, then SCOPE. Two questions, two controls, never one icon
+         cycling through both — and they sit on the two gutters, not
+         huddled together: what you are LOOKING AT on the left where the
+         list it narrows begins, where you are STANDING on the right.
+         LEFT — the KIND, as a CHOICE between two and never a pair of
+         switches: a view IS a beehaviour, so Beehaviors is the whole list
+         and Views is the same list narrowed to the surfaces. Exactly one
+         is ever lit, each in its own kind's hue — the same violet and cool
+         blue the rows wear, so the filter and the thing filtered are
+         recognisably one — and clicking the lit one does nothing, because
+         a superset and its subset have no third combination worth
+         reaching. They belong to the layer scope alone, so the pool never
+         draws them: there is nothing to narrow there — and the row keeps
+         its shape, because the toggle holds the right edge whether or not
+         they are here.
+         RIGHT — the scope toggle: ONE glyph naming WHERE YOU ARE (`layers`
+         on a layer, `storefront` in the pool, the glyph the retired
+         control used), and the title spells the word out beside it so the
+         glyph never has to. -->
+    <div class="features-scope">
+      @if (!isStore()) {
+        <div class="scope-kinds">
+          <button
+            class="scope-kind behaviors"
+            type="button"
+            [class.on]="showBehaviors()"
+            [attr.aria-pressed]="showBehaviors()"
+            (click)="setLens('behaviors')"
+            [attr.title]="'features.filter.behaviors' | t"
+            [attr.aria-label]="'features.filter.behaviors' | t"
+          ><span class="mat-sym" aria-hidden="true">extension</span></button>
+          <button
+            class="scope-kind views"
+            type="button"
+            [class.on]="showViews()"
+            [attr.aria-pressed]="showViews()"
+            (click)="setLens('views')"
+            [attr.title]="'features.filter.views' | t"
+            [attr.aria-label]="'features.filter.views' | t"
+          ><span class="mat-sym" aria-hidden="true">view_quilt</span></button>
+        </div>
+      }
+      <button
+        class="scope-toggle"
+        type="button"
+        [class.pool]="isStore()"
+        [attr.aria-pressed]="isStore()"
+        (click)="toggleScope()"
+        [attr.title]="scopeHintKey() | t"
+        [attr.aria-label]="scopeKey() | t"
+      ><span class="mat-sym" aria-hidden="true">{{ scopeIcon() }}</span></button>
+    </div>
 
     <div class="features-searchbar">
       <span class="mat-sym" aria-hidden="true">search</span>

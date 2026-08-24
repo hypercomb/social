@@ -22,6 +22,21 @@
 // in the window. Writing a note is something Claude DOES — "put that on the
 // Genome tile" is a sentence, not a button — and it shows up in the hive.
 //
+// ── ONE SHAPE: full screen ──────────────────────────────────────────────────
+//
+// There used to be two shapes — a right-docked strip and a focus mode that
+// widened over the hive — and a button to swap between them. Two shapes meant
+// two layouts to keep honest, a rail that existed in one of them and not the
+// other, and an Escape cascade with a rung whose only job was to undo a
+// choice nobody wanted to make. The docked strip lost anyway: a conversation
+// about the hive needs the tiles rail beside it, and the rail needs the width.
+//
+// So the window is full screen, always. What the docked strip was for — seeing
+// the hive while you talk about it — the rail does better, because it names
+// the tiles the request will actually carry. `hcDockedPanel` stays on the
+// element for the window group's text ladder and settings gear, not for
+// geometry; the SCSS overrides its width and lane offset outright.
+//
 // ── One conversation per chat ───────────────────────────────────────────────
 //
 // Every chat is its own thread with its own id, and threads are DURABLE: they
@@ -88,7 +103,6 @@ import {
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
-import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
@@ -327,7 +341,7 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 @Component({
   selector: 'hc-chat-window',
   standalone: true,
-  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
+  imports: [TranslatePipe, HcDockedPanelDirective],
   templateUrl: './chat-window.component.html',
   // TWO SHEETS, in source order. Angular's `anyComponentStyle` budget is
   // measured per compiled stylesheet and one output is emitted per `styleUrls`
@@ -349,12 +363,6 @@ export class ChatWindowComponent implements OnDestroy {
    *  On the first visit only, a configured local bridge keeps the established
    *  companion-view default; everyone else begins with the launcher. */
   readonly visible = signal(rememberedChatVisibility(this.bridgeConfigured()))
-
-  /** FOCUS mode: the panel widens over the hive and a dim settles behind it.
-   *  The tiles stay visible — dimmed, never hidden (the fullscreen ask screen
-   *  was retired for hiding them) — and the panel stops reserving canvas
-   *  space while it lasts, so the grid does not reflow for a temporary mode. */
-  readonly focused = signal(false)
 
   /** Parked while the hive is covered and brought back intact — the thread is
    *  durable, but the scroll position and the half-typed message are not. */
@@ -955,8 +963,8 @@ export class ChatWindowComponent implements OnDestroy {
       setTimeout(() => void highlightBlocks(this.scroller()?.nativeElement), 0)
     })
 
-    // The full-screen sidebar. Its host `<div>` exists only while focused, so
-    // this effect re-fires as full screen comes and goes; the rail itself is
+    // The left sidebar. Its host `<div>` exists only while the window is open,
+    // so this effect re-fires as the window comes and goes; the rail itself is
     // created once and re-mounted, keeping its trail and subject. Essentials
     // may register the factory AFTER this window is up (web loads its bees
     // from OPFS), so a miss WAITS on the key instead of leaving the sidebar
@@ -1393,11 +1401,10 @@ export class ChatWindowComponent implements OnDestroy {
     if (!this.visible()) return
     this.visible.set(false)
     rememberChatVisibility(false)
-    this.focused.set(false)
     this.listOpen.set(false)
     this.armed.set('')
     // Closing the window is a real close: the sidebar's trail and subject go
-    // down with it (a swap of focus mode alone keeps them — see the effect).
+    // down with it.
     // The half-written thought does NOT: it is flushed first, so closing the
     // window is never how you lose it.
     void this.#flushDraft()
@@ -1412,24 +1419,18 @@ export class ChatWindowComponent implements OnDestroy {
     EffectBus.emit('chat:window-state', { open: false })
   }
 
-  toggleFocus(): void {
-    this.focused.update(on => !on)
-    if (this.focused()) this.#focus()
-  }
-
   onKey(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return
     event.preventDefault()
     // The cascade unwinds the smallest commitment first: the tile you are
-    // talking to, then full screen, then the window — matching the
-    // escape-cascade's outermost-first rule.
+    // talking to, then the window — matching the escape-cascade's
+    // outermost-first rule.
     // The flyout is the smallest thing open, so it unwinds first.
     if (this.clipboardOpen()) { this.clipboardOpen.set(false); return }
     // Then the RAIL'S OWN picks; a reference on the shelf is let go with its
     // × or by dragging it back, never by a keystroke that means "go up".
-    if (this.focused() && this.#railSeen.size) { this.#rail?.clearSelection(); return }
-    if (this.focused() && this.railSubject()) { this.#rail?.clearSubject(); return }
-    if (this.focused()) { this.focused.set(false); return }
+    if (this.#railSeen.size) { this.#rail?.clearSelection(); return }
+    if (this.railSubject()) { this.#rail?.clearSubject(); return }
     this.close()
   }
 

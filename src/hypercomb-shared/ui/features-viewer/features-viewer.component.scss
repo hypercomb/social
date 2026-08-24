@@ -14,6 +14,10 @@
 @use '../toolwindow' as tw;
 
 $accent: #c8b8ff;
+// The cool blue a VIEW wears everywhere it appears — rows here, and the tile
+// overlay's hover tint (0xa8d8ff). Declared beside $accent because the scope
+// strip's kind filters wear the two kind colours side by side.
+$view-ground: #a8d8ff;
 
 // ── ONE GUTTER ────────────────────────────────────────────────────
 // Every horizontal edge inside the panel lands on the same line: the search
@@ -326,6 +330,7 @@ $gutter-phone: 0.7rem;
   // tap the first button. Everything else stands down until it is answered.
   .features-panel.reviewing {
     .features-header,
+    .features-scope,
     .features-selection,
     .bulk-bar,
     .download-status,
@@ -758,34 +763,85 @@ $path-fail: #e08a8a;     // failed terminal
   }
 }
 
-// ── mode switch (header) ──────────────────────────────────────────
-// One control, two subjects: this tile's rows, or THE POOL — every behavior
-// the app knows. Cold chrome — a lit border when armed, no glow.
-.features-mode {
+// ── SCOPE STRIP (under the header) ────────────────────────────────
+// WHERE you read (tabs) and WHAT the local list shows (two kind glyphs).
+// Its own row, not the header: at 300px the header is already brand +
+// close, and a tab pair squeezed in there loses its labels — a tab that
+// cannot say its own name is a mystery glyph, which is what this strip
+// replaced.
+.features-scope {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.45em $gutter 0;
+}
+
+.scope-kinds {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 1.7em;
-  height: 1.7em;
+  gap: 0.3em;
+}
+
+// A kind glyph wears ITS OWN colour lit and nothing at all dim — NO BOX
+// (Jaime, 2026-08-23). A border round each one made the strip read as two
+// more switches stacked above the rows; bare glyphs read as what they are,
+// a CHOICE of two kinds, exactly one of them standing. The button keeps its
+// 2rem so the finger still has something to hit.
+//
+// COLOUR IS THE WHOLE SIGNAL now, so hover must never borrow it: an unlit
+// glyph brightens toward WHITE under the pointer, never toward its hue —
+// otherwise the one you are about to pick already looks picked.
+.scope-kind {
+  display: grid;
+  place-items: center;
+  width: 1.85em;
+  height: 1.85em;
   padding: 0;
+  border: 0;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: tw.$radius-control;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.32);
   cursor: pointer;
+  transition: color 140ms ease;
 
-  .mat-sym { font-size: 1em; line-height: 1; }
+  .mat-sym { font-size: 1.05em; line-height: 1; }
 
-  &:hover { border-color: rgba($accent, 0.5); color: $accent; }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: 2px; }
 
-  &.active {
-    background: rgba($accent, 0.18);
-    border-color: rgba($accent, 0.7);
-    color: #f3f3f3;
-  }
+  &:hover { color: rgba(255, 255, 255, 0.72); }
 
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+  &.behaviors.on { color: $accent; }
+  &.views.on { color: $view-ground; }
+}
+
+// ONE glyph on the far side from the kind filters: the scope toggle. Plain
+// chrome while you stand on a layer, lit in the pool — the pool is the state
+// you leave, so it says so. The word beside it lives in the header title.
+.scope-toggle {
+  flex: 0 0 auto;
+  // Holds the RIGHT gutter whether or not the kind filters are drawn — in
+  // the pool they are gone, and the strip must not collapse leftward with
+  // them. Last in the row, so this pushes only itself.
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 1.85em;
+  height: 1.85em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.42);
+  cursor: pointer;
+  transition: color 140ms ease;
+
+  .mat-sym { font-size: 1.05em; line-height: 1; }
+
+  &:hover { color: rgba(255, 255, 255, 0.82); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: 2px; }
+
+  // `.pool` is the class the template actually sets — this rule was written
+  // as `.on` and so the pool has never once lit itself.
+  &.pool { color: $accent; }
 }
 
 // A behaviour whose module hasn't arrived. Provenance, not an error: quiet
@@ -880,9 +936,7 @@ $path-fail: #e08a8a;     // failed terminal
   color: rgba(250, 249, 255, 0.96);
 }
 
-// The subject hangs off the app name: `Beehaviors / tile`. The name is what
-// gives way when the panel narrows — the app word is one glance, the tile is
-// the part that can run long.
+// The scope hangs off the app name: `Beehaviors / local`.
 .features-title-sep {
   flex: 0 0 auto;
   font-weight: 400;
@@ -891,31 +945,42 @@ $path-fail: #e08a8a;     // failed terminal
 
 .features-title-app { flex: 0 0 auto; }
 
+// THE SUBJECT — the layer's own name, in the casing its author gave it, so
+// it is never transformed. It TRUNCATES, because a tile name can be long
+// where the one word beside it never can.
 .features-title-cell {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 620;
-  color: rgba(233, 228, 255, 0.78);
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: rgba(233, 228, 255, 0.72);
 }
 
-.features-mode,
+// THE POOL, which has no subject — lower case and light, because the app
+// word is the name and this only says there is no tile behind the list.
+// Transformed rather than spelled lower in the catalogs so the aria-label
+// keeps its natural casing in every language. Never truncates: one word.
+.features-title-scope {
+  flex: 0 0 auto;
+  font-weight: 500;
+  text-transform: lowercase;
+  color: rgba(233, 228, 255, 0.62);
+}
+
 .features-close {
   width: 2rem;
   height: 2rem;
   border-radius: tw.$radius-control;
 }
 
-.features-mode {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.025);
-
-  &.active {
-    background: rgba($accent, 0.2);
-    box-shadow: inset 0 0 0 1px rgba($accent, 0.12);
-  }
-}
+// Desktop scale — the strip grows with the panel, like every other row.
+// The bottom is SMALL on purpose: the glyphs carry no box any more, so the
+// button's own empty half-em already reads as space. Adding a full gutter
+// under it opened a hole between the icons and the field they filter.
+.features-scope { padding: 0.6rem 1rem 0.25rem; }
+.scope-kind,
+.scope-toggle { width: 2rem; height: 2rem; }
 
 .features-close {
   display: grid;
@@ -1426,6 +1491,10 @@ $view-ground: #a8d8ff;
   .features-searchbar { margin-top: 0.25rem; }
 
   // Narrower, but still ONE line — the same set of edges moves together.
+  // The scope strip is in the set: its glyphs are the first thing under the
+  // header, so an icon standing 0.3rem inside the search field below it is
+  // the one edge the eye catches.
+  .features-scope,
   .features-scroll,
   .features-selection,
   .bulk-bar,

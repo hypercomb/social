@@ -1,0 +1,70 @@
+[
+  {
+    "name": "the rail switch raises the panel",
+    "ok": true
+  },
+  {
+    "name": "it rests on beehaviors",
+    "ok": true
+  },
+  {
+    "name": "the whole list is not empty",
+    "ok": true,
+    "detail": "rows=14"
+  },
+  {
+    "name": "and it holds views among the rest",
+    "ok": true,
+    "detail": "views=12/14"
+  },
+  {
+    "name": "views lit",
+    "ok": true
+  },
+  {
+    "name": "beehaviors dark beside it",
+    "ok": true
+  },
+  {
+    "name": "every row in the narrow list is a view",
+    "ok": true,
+    "detail": "views=12/12"
+  },
+  {
+    "name": "it dropped exactly the non-views",
+    "ok": true,
+    "detail": "12 of 14"
+  },
+  {
+    "name": "clicking the lit button changes nothing",
+    "ok": true,
+    "detail": "views=true beh=false rows=12"
+  },
+  {
+    "name": "the list can never go empty",
+    "ok": true
+  },
+  {
+    "name": "beehaviors lit",
+    "ok": true
+  },
+  {
+    "name": "views dark beside it",
+    "ok": true
+  },
+  {
+    "name": "beehaviors is the superset",
+    "ok": true,
+    "detail": "14 back from 12, whole was 14"
+  },
+  {
+    "name": "the views are still in it",
+    "ok": true,
+    "detail": "views=12, narrow was 12"
+  },
+  {
+    "name": "escape widens back to beehaviors before closing",
+    "ok": true,
+    "detail": "panel=true beh=true"
+  }
+]

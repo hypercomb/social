@@ -1,0 +1,110 @@
+[
+  {
+    "name": "a point lands on garden",
+    "ok": true
+  },
+  {
+    "name": "a prose note lands on garden",
+    "ok": true
+  },
+  {
+    "name": "the root wears the square tile view as its face",
+    "ok": true
+  },
+  {
+    "name": "the root opens as the square tile view, every plate wearing a corner",
+    "ok": true,
+    "detail": "{\"mode\":\"square-tile-view\",\"plates\":2,\"folds\":2}"
+  },
+  {
+    "name": "the corner stands on the tile that carries writing",
+    "ok": true,
+    "detail": "carrying=1"
+  },
+  {
+    "name": "the page has a corner of its own",
+    "ok": true
+  },
+  {
+    "name": "turning a corner opens the brief IN the page",
+    "ok": true
+  },
+  {
+    "name": "turning a corner does not navigate",
+    "ok": true,
+    "detail": "{\"here\":\"\",\"mode\":\"square-tile-view\"}"
+  },
+  {
+    "name": "the card opens inside the grid, in the plate's own row",
+    "ok": true
+  },
+  {
+    "name": "the brief is about the tile whose corner was turned",
+    "ok": true,
+    "detail": "garden"
+  },
+  {
+    "name": "the point is on the lists side",
+    "ok": true,
+    "detail": "[\"the beds face south\"]"
+  },
+  {
+    "name": "the prose is on the notes side",
+    "ok": true,
+    "detail": "[\"Everything here was planted in the same week.\"]"
+  },
+  {
+    "name": "the hexagon band's affordances came across to the card",
+    "ok": true,
+    "detail": "[\"annotations\",\"command\",\"edit\",\"copy link\",\"remove\"]"
+  },
+  {
+    "name": "Escape turns the corner back and leaves the sheet standing",
+    "ok": true,
+    "detail": "{\"brief\":false,\"mode\":\"square-tile-view\"}"
+  },
+  {
+    "name": "the crest's corner briefs the place you are standing in",
+    "ok": true,
+    "detail": "{\"brief\":true}"
+  },
+  {
+    "name": "the leaf inherits the face down the branch",
+    "ok": true,
+    "detail": "square-tile-view"
+  },
+  {
+    "name": "the leaf renders its brief as the whole page",
+    "ok": true,
+    "detail": "{\"scale\":\"page\"}"
+  },
+  {
+    "name": "the leaf page says it is the end of the branch",
+    "ok": true,
+    "detail": "the end of this branch"
+  },
+  {
+    "name": "the leaf page carries the row it sits on",
+    "ok": true,
+    "detail": "[\"garden\",\"stone\"]"
+  },
+  {
+    "name": "the leaf page offers a line to write on",
+    "ok": true
+  },
+  {
+    "name": "a note written on the leaf page lands on the leaf, with no navigation",
+    "ok": true,
+    "detail": "{\"prose\":[\"quarried from the ridge\"],\"here\":\"stone\"}"
+  },
+  {
+    "name": "a neighbour on the row is a way onward",
+    "ok": true,
+    "detail": "garden"
+  },
+  {
+    "name": "no page errors",
+    "ok": true,
+    "detail": ""
+  }
+]

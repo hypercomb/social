@@ -1377,6 +1377,15 @@
       "unattended": false,
       "created": "2026-08-24",
       "status": "pending"
+    },
+    {
+      "id": "square-tile-brief",
+      "title": "The dog-ear: the square tile view's per-tile brief and its leaf page",
+      "run": "npx tsx scripts/mirror-square-tile-brief.ts",
+      "note": "Extends the EXISTING square-tile-view cell under behaviors/views: 8 notes (the reverse of the card, the corner is never the click, the standing corner, open the row not the cell, a leaf is never an empty page, the page writes where it reads, the band lends its set, marks classify) plus 5 part cells (square-tile-view.drone.ts, tile-brief.ts, tile-brief-panel.ts, note-classify.ts, drive-square-tile-brief.cjs). Aborts if the view has no cell under views — it extends, it never mints a second copy.",
+      "unattended": false,
+      "created": "2026-08-24",
+      "status": "pending"
     }
   ]
 }

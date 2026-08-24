@@ -39,16 +39,31 @@ export type SettingRow =
    *  toggles is currently in effect. */
   | { kind: 'action'; key: string; label: string; on?: boolean; hint?: string; run: () => void }
   /** A choice you judge by LOOKING at it, not by reading its name — options
-   *  stack full-width, each drawn in what it does, over a line of specimen
-   *  text. A typeface forced it: its name, set in the editor's own font, tells
-   *  you nothing whatever about the face it names, and five real names do not
-   *  fit across a 272px strip anyway. `family` is the CSS font-family each
-   *  option is drawn in. */
-  | { kind: 'specimen'; key: string; label: string; value: string; options: readonly { value: string; label: string; family: string; specimen: string }[]; hint?: string; pick: (value: string) => void }
+   *  stack one per line, each DRAWN IN WHAT IT DOES. A typeface forced it: its
+   *  name, set in the editor's own font, tells you nothing whatever about the
+   *  face it names, and five real names do not fit across a 272px strip
+   *  anyway. `family` is the CSS font-family each option is drawn in.
+   *
+   *  The name and a mark for the one that is on — nothing else. Each entry
+   *  used to carry a line of specimen text under it; five stacked samples
+   *  turned a one-line question into a wall to read, and a name set in its own
+   *  face already answers it.
+   *
+   *  `sample` is what the CLOSE-UP in the row's top-right corner says — one
+   *  string for the whole ladder, because the question a ladder asks is the
+   *  same for every face in it. The close-up shows the chosen face and follows
+   *  the pointer down the list, which is how a name at reading size can stay
+   *  the whole list and still let you look at a face properly. */
+  | { kind: 'specimen'; key: string; label: string; value: string; sample?: string; options: readonly { value: string; label: string; family: string }[]; hint?: string; pick: (value: string) => void }
 
 /** A titled run of rows. The title is what the rows APPLY TO — the group's
- *  string, or this window — which is the whole navigation of this editor. */
-export interface SettingsZone { key: string; title?: string; rows: readonly SettingRow[] }
+ *  string, or this window — which is the whole navigation of this editor.
+ *
+ *  `fold` makes the title a disclosure and starts the zone SHUT: settings for
+ *  the few people who go looking for them, that everyone else should not have
+ *  to read past. Open state is remembered while the tab lives (see `unfolded`)
+ *  so a pick inside a fold does not slam it closed. */
+export interface SettingsZone { key: string; title?: string; fold?: boolean; rows: readonly SettingRow[] }
 
 /** Everything the editor draws: who it belongs to, and what it holds. */
 export interface SettingsView { eyebrow: string; title: string; zones: readonly SettingsZone[] }
@@ -127,35 +142,75 @@ const SETTINGS_CSS = `
 .hc-settings input.hc-settings-field:focus { border-color: rgba(${STEEL}, 0.6); background: rgba(255, 255, 255, 0.055); }
 .hc-settings input.hc-settings-field::placeholder { color: #5d7280; }
 
-/* Stacked options, each drawn in itself. The name is set in the face too, not
-   only the specimen — a picker where the label is neutral and only the sample
-   is styled makes you look in two places to answer one question. */
-.hc-settings-specimens { display: flex; flex-direction: column; gap: 4px; }
+/* A list of names, each set in the face it names — no boxes, no sample lines,
+   nothing standing between the names. The face is the answer and the name is
+   already drawn in it; the rest was chrome charging rent on a 272px popover. */
+.hc-settings-specimens { display: flex; flex-direction: column; }
 .hc-settings-specimens > button {
-  display: block; width: 100%; text-align: left;
-  padding: 5px 7px 6px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(${STEEL}, 0.18); border-radius: 4px;
-  color: #a9bcc9; cursor: pointer;
-  /* The specimen has to be TRUTHFUL: it inherits the same ligature setting the
-     chosen face is rendered with, so a row previewing => as one glyph means
-     the code block will too. It also makes the ligature switch demonstrate
-     itself — flip it and every specimen answers. */
+  display: flex; align-items: center; gap: 0.45rem;
+  width: 100%; text-align: left; min-height: 22px; padding: 2px 5px;
+  background: none; border: 0; border-radius: 3px;
+  font-size: 12px; line-height: 1.35; color: #93a8b6; cursor: pointer;
+  /* The name is drawn with the window's own ligature setting, so a preview can
+     never promise a shape the code block will not draw. */
   font-variant-ligatures: var(--hc-code-ligatures, none);
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
-.hc-settings-specimens > button:hover { background: rgba(255, 255, 255, 0.055); color: #dcecf5; }
-.hc-settings-specimens > button[aria-pressed='true'] {
-  background: rgba(${STEEL}, 0.16); border-color: rgba(${STEEL}, 0.5); color: #eaf5fb;
+/* The selection, and the only mark on the row: a lit dot in a gutter every
+   entry reserves, so the names stay in one column and the list reads as the
+   one-of-these choice it is. A CSS shape rather than a glyph — a tick drawn in
+   the face being previewed is at the mercy of that face's coverage. */
+.hc-settings-specimens > button::before {
+  content: ''; flex: 0 0 auto; width: 5px; height: 5px; border-radius: 999px;
+  background: transparent; transition: background 0.12s ease;
 }
-.hc-settings-specimen-name { display: block; font-size: 11.5px; line-height: 1.3; }
-/* The specimen is the point of the row, so it is not dimmed into decoration —
-   just stepped back one notch from the name it sits under. */
-.hc-settings-specimen-line {
-  display: block; margin-top: 1px; font-size: 11px; line-height: 1.35;
-  color: #7f95a3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.hc-settings-specimens > button:hover { background: rgba(255, 255, 255, 0.05); color: #dcecf5; }
+.hc-settings-specimens > button[aria-pressed='true'] { color: #eaf5fb; }
+.hc-settings-specimens > button[aria-pressed='true']::before { background: #cfe3ef; }
+.hc-settings-specimen-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The row's own head: its name on the left, its close-up on the right. The
+   only place in the editor where a control has something to say to the RIGHT
+   of its label — and the label may be absent, when a folded zone's title has
+   already asked the question. */
+.hc-settings-specimen-head {
+  display: flex; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.35rem; min-height: 20px;
 }
-.hc-settings-specimens > button[aria-pressed='true'] .hc-settings-specimen-line { color: #a9c2d1; }
+.hc-settings-specimen-head > .hc-settings-label { margin: 0; }
+/* The close-up. Set at nearly twice the list's size, in the face being pointed
+   at, over a pane of its own — a face at 12px in a 272px popover is a name you
+   can read and a shape you cannot judge. It carries the window's ligature
+   setting for the same reason the names do: a preview that promises a shape
+   the code block will not draw is worse than no preview. */
+.hc-settings-loupe {
+  margin-left: auto; flex: 0 1 auto; min-width: 0;
+  padding: 2px 7px 3px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(${STEEL}, 0.22);
+  font-size: 17px; line-height: 1.25; color: #eaf5fb;
+  font-variant-ligatures: var(--hc-code-ligatures, none);
+  white-space: nowrap; overflow: hidden; text-overflow: clip;
+}
+
+/* A folded zone. The title stays exactly the title it was — same size, same
+   letter-spacing — and gains a caret and a hit area; a fold that restyles its
+   heading reads as a different KIND of thing rather than the same thing shut. */
+.hc-settings-zone[data-hc-fold] > summary {
+  display: flex; align-items: center; gap: 0.4rem;
+  list-style: none; cursor: pointer; margin: 0; padding: 1px 0;
+  color: #6f8492; transition: color 0.12s ease;
+}
+.hc-settings-zone[data-hc-fold] > summary::-webkit-details-marker { display: none; }
+.hc-settings-zone[data-hc-fold] > summary:hover { color: #cfe3ef; }
+.hc-settings-zone[data-hc-fold] > summary:focus-visible { outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 2px; }
+.hc-settings-zone[data-hc-fold] > summary > .hc-settings-zone-title { margin: 0; color: inherit; }
+.hc-settings-zone[data-hc-fold] > summary::after {
+  content: ''; flex: 0 0 auto;
+  width: 5px; height: 5px; margin-bottom: 1px;
+  border-right: 1px solid currentColor; border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg); transition: transform 0.14s ease;
+}
+.hc-settings-zone[data-hc-fold][open] > summary::after { transform: rotate(45deg); margin-bottom: 3px; }
+.hc-settings-zone[data-hc-fold][open] > summary { margin-bottom: 0.5rem; }
 
 /* One strip, divided — a ladder reads as one control with a position on it,
    which a row of separate buttons never does. */
@@ -269,7 +324,10 @@ const renderRow = (row: SettingRow): HTMLElement => {
     return wrap
   }
 
-  wrap.appendChild(el('div', 'hc-settings-label', row.label))
+  // An empty label means the row is already named by what encloses it — a
+  // folded zone whose title IS the question. Drawing it twice is noise.
+  // A specimen row draws its own head, because its label shares that line.
+  if (row.label && row.kind !== 'specimen') wrap.appendChild(el('div', 'hc-settings-label', row.label))
 
   if (row.kind === 'text') {
     const input = document.createElement('input')
@@ -286,7 +344,27 @@ const renderRow = (row: SettingRow): HTMLElement => {
     input.addEventListener('change', () => { row.commit(input.value) })
     wrap.appendChild(input)
   } else if (row.kind === 'specimen') {
+    const head = el('div', 'hc-settings-specimen-head')
+    if (row.label) head.appendChild(el('span', 'hc-settings-label', row.label))
+    // Decorative to a screen reader: it says nothing the names do not, and a
+    // close-up that announced itself on every hover would be noise in the ear.
+    const loupe = row.sample ? el('span', 'hc-settings-loupe', row.sample) : null
+    const chosen = row.options.find(option => option.value === row.value)
+    const showFace = (family: string | undefined): void => {
+      if (loupe && family) loupe.style.fontFamily = family
+    }
+    if (loupe) {
+      loupe.setAttribute('aria-hidden', 'true')
+      showFace(chosen?.family)
+      head.appendChild(loupe)
+    }
+    if (head.childElementCount) wrap.appendChild(head)
+
     const list = el('div', 'hc-settings-specimens')
+    // Pointing at a name is asking to see it; leaving the list is the question
+    // going away, and the close-up goes back to the face you are actually in.
+    list.addEventListener('pointerleave', () => { showFace(chosen?.family) })
+    list.addEventListener('focusout', () => { showFace(chosen?.family) })
     list.setAttribute('role', 'group')
     list.setAttribute('aria-label', row.label)
     for (const option of row.options) {
@@ -294,11 +372,14 @@ const renderRow = (row: SettingRow): HTMLElement => {
       button.type = 'button'
       button.dataset['hcRow'] = `${row.key}:${option.value}`
       button.setAttribute('aria-pressed', option.value === row.value ? 'true' : 'false')
-      // The face is set on the BUTTON, so the name and the specimen under it
-      // are both drawn in the thing being chosen.
+      // The face is set on the BUTTON, so the name is drawn in the thing being
+      // chosen — which is the entire preview.
       button.style.fontFamily = option.family
       button.appendChild(el('span', 'hc-settings-specimen-name', option.label))
-      button.appendChild(el('span', 'hc-settings-specimen-line', option.specimen))
+      // Keyboard as well as pointer: tabbing the list must show the same
+      // close-up that hovering it does.
+      button.addEventListener('pointerenter', () => { showFace(option.family) })
+      button.addEventListener('focus', () => { showFace(option.family) })
       button.addEventListener('click', () => { row.pick(option.value) })
       list.appendChild(button)
     }
@@ -324,6 +405,13 @@ const renderRow = (row: SettingRow): HTMLElement => {
   return wrap
 }
 
+/** Which folded zones are open, by zone key. View state, not a setting: it
+ *  lives for the tab and is deliberately shared by every window's editor —
+ *  somebody who opened the code fonts once is somebody who cares about code
+ *  fonts. It exists at all because the editor re-renders WHOLE on every pick,
+ *  and a fold that shut under the click you just made would be unusable. */
+const unfolded = new Set<string>()
+
 /** Draw the editor's body. The caller owns the popover element (position,
  *  dismissal); this owns everything inside it, and can be re-rendered whole. */
 export const renderSettings = (view: SettingsView): HTMLElement => {
@@ -336,9 +424,26 @@ export const renderSettings = (view: SettingsView): HTMLElement => {
 
   for (const zone of view.zones) {
     if (!zone.rows.length) continue
+    const title = zone.title
+    if (zone.fold && title) {
+      const details = el('details', 'hc-settings-zone')
+      details.setAttribute('data-hc-zone', zone.key)
+      details.setAttribute('data-hc-fold', '')
+      details.open = unfolded.has(zone.key)
+      const summary = el('summary')
+      summary.appendChild(el('span', 'hc-settings-zone-title', title))
+      details.appendChild(summary)
+      details.addEventListener('toggle', () => {
+        if (details.open) unfolded.add(zone.key)
+        else unfolded.delete(zone.key)
+      })
+      for (const row of zone.rows) details.appendChild(renderRow(row))
+      body.appendChild(details)
+      continue
+    }
     const section = el('div', 'hc-settings-zone')
     section.setAttribute('data-hc-zone', zone.key)
-    if (zone.title) section.appendChild(el('div', 'hc-settings-zone-title', zone.title))
+    if (title) section.appendChild(el('div', 'hc-settings-zone-title', title))
     for (const row of zone.rows) section.appendChild(renderRow(row))
     body.appendChild(section)
   }

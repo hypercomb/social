@@ -1,16 +1,15 @@
 // hypercomb-shared/ui/chat-window/chat-window.component.scss
 //
-// Right-docked chat panel. Not a takeover: the hive stays visible and
-// interactive behind it, which is the whole reason this replaced a fullscreen
-// ask screen — you talk ABOUT what you are looking at, so you have to be able
-// to look at it.
+// FULL-SCREEN chat panel — the only shape it has. There is no docked
+// half-width to swap into: talking to Claude takes the screen, with the tiles
+// rail down the left standing in for the hive you can no longer see behind it.
 //
 // Steel accent, carried over from the retired ask screen: it was the
 // assistant's colour there and the conversation is the same conversation.
 //
-// Drag-resize + content-shrink come from the shared `hcDockedPanel` directive
-// (inline width + `--hc-panel-scale`). Content is sized in `em` so it shrinks
-// with the panel; dock GEOMETRY stays in rem so position is fixed.
+// Content-shrink still comes from the shared `hcDockedPanel` directive
+// (`--hc-panel-scale`, the window-group text ladder). Content is sized in `em`
+// so it follows that scale; geometry is the viewport.
 
 @use '../toolwindow' as tw;
 
@@ -23,51 +22,31 @@ $accent: #7eb6d6;
   pointer-events: none;
 }
 
+// The ENTIRE screen, with the tiles rail down the left. `!important` against
+// hcDockedPanel's inline width and lane offset — the directive is kept for the
+// window group's text ladder and settings gear, not for geometry. The rail is
+// absolutely positioned, so the window's column flow just moves right by the
+// rail's width.
 .chat-panel {
   pointer-events: auto;
   position: absolute;
-  // Same anchor as the other right-docked panels so they align rather than
-  // stepping down each other.
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
-  right: 0;
-  bottom: 0;
-  width: 400px;
-  min-width: 300px;
-  max-width: calc(100vw - 1.5rem);
+  inset: 0;
+  right: 0 !important;
+  width: auto !important;
+  max-width: none;
+  margin: 0;
   display: flex;
   flex-direction: column;
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   @include tw.panel($accent, right);
-
-  // Breathing room from the screen edges — the same floating-instrument
-  // treatment the command bar got, so the window never reads as squished
-  // into the corner. Margin (not inset changes) so the dock directive's
-  // inline `right:` lane placement stays authoritative; the free-standing
-  // box completes its border and takes the shared floating radius.
-  margin: 0.35rem 0.4rem 0.45rem 0;
-  border-right: 1px solid rgba($accent, 0.38);
-  border-radius: tw.$radius-floating;
-
-  // FOCUS: the ENTIRE screen, with the tiles rail down the left. `!important`
-  // against hcDockedPanel's inline width and lane offset; the drag-set width
-  // is untouched underneath and comes straight back when focus lifts. The
-  // rail is absolutely positioned, so the window's column flow just moves
-  // right by the rail's width.
-  &.focus {
-    inset: 0;
-    right: 0 !important;
-    width: auto !important;
-    max-width: none;
-    margin: 0;
-    border-radius: 0;
-    border-right: none;
-    padding-left: var(--chat-rail-width, clamp(15rem, 22vw, 20rem));
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
-  }
+  border-radius: 0;
+  border-right: none;
+  padding-left: var(--chat-rail-width, clamp(15rem, 22vw, 20rem));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
 }
 
-// The full-screen view's left sidebar — the tiles rail (essentials builds its
-// rows; this owns only where it sits). ::ng-deep-free: the host div is
+// The left sidebar — the tiles rail (essentials builds its rows; this owns
+// only where it sits). ::ng-deep-free: the host div is
 // template-owned, and everything inside carries the rail's own stylesheet.
 .chat-rail {
   position: absolute;
@@ -84,7 +63,7 @@ $accent: #7eb6d6;
 // A phone has no room for a sidebar beside a conversation — full screen there
 // is the conversation alone, and tiles are chosen by selecting on the canvas.
 @media (max-width: 700px) {
-  .chat-panel.focus { padding-left: 0; }
+  .chat-panel { padding-left: 0; }
   .chat-rail { display: none; }
 }
 
@@ -381,22 +360,10 @@ $accent: #7eb6d6;
   &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
 }
 
-// Pushes the focus/close cluster hard right without space-between, so the
-// settings gear the dock directive pins beside close stays predictable.
+// Pushes the close cluster hard right without space-between, so the settings
+// gear the dock directive pins beside close stays predictable.
 .chat-header-space {
   flex: 1 1 auto;
-}
-
-.chat-focusbtn {
-  background: none;
-  border: none;
-  padding: 0 0.15em;
-  color: rgba(255, 255, 255, 0.45);
-  cursor: pointer;
-
-  .mat-sym { font-size: 1.1em; }
-  &:hover { color: rgba($accent, 0.95); }
-  &.on { color: rgba($accent, 0.95); }
 }
 
 .chat-close {
@@ -885,9 +852,9 @@ $accent: #7eb6d6;
   }
 }
 
-// Focus mode: the wide panel earns wider cards a comfortable measure, not a
-// line that runs the full 60rem.
-.chat-panel.focus .chat-msg {
+// The wide panel earns its cards a comfortable measure, not a line that runs
+// the full 60rem.
+.chat-panel .chat-msg {
   max-width: min(92%, 44em);
 }
 

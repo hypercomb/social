@@ -72,26 +72,31 @@ export const TEXT_SIZES: readonly { key: string; label: string; scale: number | 
 /** One offered face. `stack` ends in `var(--hc-mono)` so a face that is not
  *  there degrades down the system chain rather than to bare `monospace`;
  *  `ligatures` is whether this face HAS any, which is what decides whether the
- *  switch is worth offering at all — a dead control is worse than no control. */
+ *  switch is worth offering at all — a dead control is worse than no control.
+ *
+ *  No specimen string per face: the picker draws each NAME in the face it
+ *  names, and the close-up in the picker's corner (CODE_SAMPLE) shows the
+ *  characters at size for whichever one you are pointing at. A line of sample
+ *  text under EVERY entry was the same question asked five times at once. */
 export interface CodeFont {
   key: string
   label: string
   stack: string
   ligatures: boolean
-  /** Shown under the name, drawn in the face itself. The characters a
-   *  monospace font is actually judged on: the ones that get confused with
-   *  each other, and the operators that ligate. */
-  specimen: string
 }
 
-const SPECIMEN = 'Il1| O0o {}[]() -> => !=='
+/** What the picker's close-up shows for a code face: the characters a
+ *  monospace font is actually judged on — the ones that get confused with each
+ *  other, and an operator that ligates, so the ligature switch has something to
+ *  demonstrate itself on. */
+export const CODE_SAMPLE = 'Il1 O0o =>'
 
 export const CODE_FONTS: readonly CodeFont[] = [
-  { key: 'plex', label: 'IBM Plex Mono', stack: "'IBM Plex Mono', var(--hc-mono)", ligatures: false, specimen: SPECIMEN },
-  { key: 'jetbrains', label: 'JetBrains Mono', stack: "'JetBrains Mono', var(--hc-mono)", ligatures: true, specimen: SPECIMEN },
-  { key: 'cascadia', label: 'Cascadia Mono', stack: "'Cascadia Mono', var(--hc-mono)", ligatures: false, specimen: SPECIMEN },
-  { key: 'consolas', label: 'Consolas', stack: 'Consolas, var(--hc-mono)', ligatures: false, specimen: SPECIMEN },
-  { key: 'system', label: 'System', stack: 'var(--hc-mono)', ligatures: true, specimen: SPECIMEN },
+  { key: 'plex', label: 'IBM Plex Mono', stack: "'IBM Plex Mono', var(--hc-mono)", ligatures: false },
+  { key: 'jetbrains', label: 'JetBrains Mono', stack: "'JetBrains Mono', var(--hc-mono)", ligatures: true },
+  { key: 'cascadia', label: 'Cascadia Mono', stack: "'Cascadia Mono', var(--hc-mono)", ligatures: false },
+  { key: 'consolas', label: 'Consolas', stack: 'Consolas, var(--hc-mono)', ligatures: false },
+  { key: 'system', label: 'System', stack: 'var(--hc-mono)', ligatures: true },
 ]
 
 /** What :root's --hc-code already resolves to. A window with no record renders
@@ -114,23 +119,23 @@ export const codeFont = (key: string | undefined): CodeFont | undefined =>
 // keep their designer's defaults.
 
 /** One offered reading face. `stack` always ends in a var() so a face that is
- *  not present degrades down a declared chain, never to the UA default. */
+ *  not present degrades down a declared chain, never to the UA default. Same
+ *  rule as the code ladder: the name is the sample, the corner is the close-up. */
 export interface ReadFont {
   key: string
   label: string
   stack: string
-  /** Shown under the name, drawn in the face itself — a sentence, because a
-   *  reading face is judged on sentences. */
-  specimen: string
 }
 
-const READ_SPECIMEN = 'The answer lands as a quiet note on the tile.'
+/** A reading face is judged on different things: the two cases, a descender,
+ *  and the figures. */
+export const READ_SAMPLE = 'Aa Gg 123'
 
 export const READ_FONTS: readonly ReadFont[] = [
-  { key: 'hive', label: 'Source Sans', stack: 'var(--hc-font)', specimen: READ_SPECIMEN },
-  { key: 'system', label: 'System', stack: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", specimen: READ_SPECIMEN },
-  { key: 'serif', label: 'Georgia', stack: "Georgia, 'Iowan Old Style', 'Times New Roman', serif", specimen: READ_SPECIMEN },
-  { key: 'mono', label: 'Match code', stack: 'var(--hc-code)', specimen: READ_SPECIMEN },
+  { key: 'hive', label: 'Source Sans', stack: 'var(--hc-font)' },
+  { key: 'system', label: 'System', stack: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" },
+  { key: 'serif', label: 'Georgia', stack: "Georgia, 'Iowan Old Style', 'Times New Roman', serif" },
+  { key: 'mono', label: 'Match code', stack: 'var(--hc-code)' },
 ]
 
 /** What :root's --hc-read resolves to — same contract as DEFAULT_CODE_FONT:

@@ -996,7 +996,6 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
             ? this.#t('panel.read-font.system', font.label)
             : font.key === 'mono' ? this.#t('panel.read-font.mono', font.label) : font.label,
           family: font.stack,
-          specimen: font.specimen,
         })),
         hint: this.#t('panel.read-font.hint', 'Normal text — answers and notes — reads in this face.'),
         pick: (value) => { this.#setRead(value) },
@@ -1009,10 +1008,16 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     // whose windows disagreed about their typeface would not look like one
     // group. The chosen key may be undefined — that is a window inheriting
     // :root's default, which is what the picker shows as selected.
+    //
+    // Kept BEHIND A FOLD, unlike every other setting here, because most people
+    // never read code in a tool window at all: for them this is a five-name
+    // list and a ligature switch answering a question they do not have. The
+    // zone's own title is the question, so the row inside carries no label of
+    // its own — opening the fold IS asking it.
     const face = this.#font ?? DEFAULT_CODE_FONT
-    shared.push({
+    const code: SettingRow[] = [{
       kind: 'specimen', key: 'code-font',
-      label: this.#t('panel.code-font.label', 'Code font'),
+      label: '',
       value: face,
       options: CODE_FONTS.map(font => ({
         value: font.key,
@@ -1020,15 +1025,14 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
         // faces themselves and are the same in every language.
         label: font.key === 'system' ? this.#t('panel.code-font.system', font.label) : font.label,
         family: font.stack,
-        specimen: font.specimen,
       })),
       hint: this.#t('panel.code-font.hint', 'Code blocks, paths and commands read in this face.'),
       pick: (value) => { this.#setFont(value) },
-    })
+    }]
     // Offered ONLY by a face that has them: a switch that cannot change what
     // you are looking at is a worse answer than no switch at all.
     if (codeFont(face)?.ligatures) {
-      shared.push({
+      code.push({
         kind: 'switch', key: 'ligatures',
         label: this.#t('panel.ligatures.label', 'Ligatures'),
         checked: this.#ligatures,
@@ -1090,6 +1094,10 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
         rows: shared,
       })
     }
+    // Shut, and directly under the shared zone: it is shared by the group like
+    // everything above it, and the fold is about how OFTEN it is asked, not
+    // about who it applies to.
+    zones.push({ key: 'code', title: this.#t('panel.code-font.label', 'Code font'), fold: true, rows: code })
     if (own.length) zones.push({ key: 'window', title: this.#t('panel.settings.zone.window', 'This window'), rows: own })
 
     return { eyebrow: this.#t('panel.settings.eyebrow', 'Settings'), title: this.#label(), zones }

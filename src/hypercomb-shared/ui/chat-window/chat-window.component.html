@@ -1,11 +1,9 @@
 @if (visible()) {
-  <!-- Full screen covers everything, so there is no dim and no click-out —
-       Escape and the collapse button are the ways back. -->
+  <!-- THE ONE SHAPE: full screen. The chat covers everything, so there is no
+       dim, no click-out and no docked half-size to choose between — Escape and
+       the close button are the ways back. -->
   <aside
     class="chat-panel"
-    [class.focus]="focused()"
-    hcDockInset="right"
-    [hcDockInsetActive]="!focused()"
     hcDockedPanel="chat-window"
     [hasReadingSurface]="true"
     [hcSession]="session"
@@ -20,13 +18,11 @@
     role="dialog"
     [attr.aria-label]="'chat.title' | t"
   >
-    <!-- FULL SCREEN'S LEFT SIDEBAR — the tiles rail, for choosing what the
-         conversation is about. Built by essentials (agent-tiles-rail.ts) and
-         mounted through IoC; absolutely positioned, so the column flow of the
-         window is untouched. -->
-    @if (focused()) {
-      <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
-    }
+    <!-- THE LEFT SIDEBAR — the tiles rail, for choosing what the conversation
+         is about. Built by essentials (agent-tiles-rail.ts) and mounted
+         through IoC; absolutely positioned, so the column flow of the window
+         is untouched. -->
+    <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
     <header class="chat-header">
       <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
       <!-- WHOSE CONVERSATION IS THIS, and WHAT THE NEXT REQUEST CARRIES.
@@ -130,12 +126,6 @@
         </div>
       }
       <span class="chat-header-space"></span>
-      <button class="chat-focusbtn" type="button" (click)="toggleFocus()"
-        [class.on]="focused()"
-        [title]="(focused() ? 'chat.focus.exit' : 'chat.focus') | t"
-        [attr.aria-label]="(focused() ? 'chat.focus.exit' : 'chat.focus') | t">
-        <span class="mat-sym" aria-hidden="true">{{ focused() ? 'collapse_content' : 'expand_content' }}</span>
-      </button>
       <button class="chat-close" type="button" (click)="close()"
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
