@@ -5,7 +5,7 @@ import {
   type HexOrientation,
 } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
-import { CommandLineComponent } from '@hypercomb/shared';
+import { CommandLineComponent, isTransientMode } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent, SyncIndicatorComponent, UpgradeIndicatorComponent } from '@hypercomb/shared/ui';
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
@@ -125,8 +125,18 @@ export class App implements AfterViewInit {
 
     effect(() => {
       const m = this.viewMode()
-      document.body.classList.remove('hc-view-hexagons', 'hc-view-website')
+      // Drop EVERY previous hc-view-* class (modes are open-ended; the old
+      // two-name remove left stale classes behind when switching between
+      // non-website views), then mark the current mode — plus the generic
+      // `hc-view-covered` for any full-surface view, which is what the
+      // canvas-suppression rule in styles.scss keys on. With the canvas
+      // neutralised under every takeover view, a view-to-view navigation
+      // exposes the themed body between surfaces, never a flash of tiles.
+      for (const c of [...document.body.classList]) {
+        if (c.startsWith('hc-view-')) document.body.classList.remove(c)
+      }
       document.body.classList.add(`hc-view-${m}`)
+      if (isTransientMode(m)) document.body.classList.add('hc-view-covered')
     })
 
     // ─── Return to the hive on adopt complete ──────────────────────────

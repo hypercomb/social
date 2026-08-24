@@ -71,17 +71,17 @@ const PENDING_CELL_LABEL = '\u2026'
 
 // ── THE ARRIVAL GATE ────────────────────────────────────────────────────────
 // A layer marked `view:default` opens as a VIEW, not as hexagons — so the
-// hexagons must never be its first paint. The gate holds the hex paint
-// until view.bee's arrival verdict (`view:arrival`) lands, then either
-// skips the paint entirely (the view owns the surface) or releases it
-// (the verdict was "hexagons after all" — mark vetoed by dormant/hidden/
-// scope gates). How long the gate may hold before giving up: the verdict
-// rides the same triggers as this render, so it normally lands in
-// milliseconds; the timeout only exists so a cold read that never resolves
-// strands the participant on their hive, not on an empty ink field.
+// hexagons must never be the first thing ON SCREEN. The gate ORDERS the
+// boot/arrival: it holds this drone's paint until view.bee's verdict
+// (`view:arrival`) lands and the surface has flipped, then paints anyway —
+// under the covered canvas. The paint is never skipped: the resolved cells
+// are the tile roster the deck-shaped views feed on, and the warm mesh is
+// what an escape back to hexagons reveals instantly. How long the gate may
+// hold before giving up: the verdict rides the same triggers as this
+// render, so it normally lands in milliseconds; the timeout only exists so
+// a cold read that never resolves strands the participant on their hive,
+// not on an empty ink field.
 const ARRIVAL_GATE_MS = 2500
-/** The surface hexagons render on — ViewModeService's default. */
-const HEX_SURFACE = 'hexagons'
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
@@ -948,14 +948,6 @@ export class ShowCellDrone extends Drone {
   // screen: the hive layer is hidden and synchronize-driven renders short-
   // circuit so nothing flips it back. Cleared via render:set-hive-visible.
   #hiveHidden = false
-
-  /** The ViewMode service this drone hung its exit-repaint listener on
-   *  (see the wiring beside render:set-hive-visible), kept for dispose. */
-  #viewModeWired: EventTarget | null = null
-  readonly #onViewModeChange = (): void => {
-    const vm = this.#viewModeWired as ({ mode?: string } & EventTarget) | null
-    if (vm?.mode === HEX_SURFACE) this.requestRender()
-  }
 
   /** A lightweight snapshot of the tiles currently painted at this node —
    *  axial coords, label, image signature, and whether text is suppressed.
@@ -2683,19 +2675,16 @@ export class ShowCellDrone extends Drone {
     // run finally; the implicit `return` at function end too.)
     this.#activeRenderTarget = locationKey
     try {
-      // THE ARRIVAL GATE — when this layer opens as a view, hexagons are
-      // pure waste and a visual glitch: they'd paint, flash, and be covered.
-      // Skip the paint and drop whatever mesh the PREVIOUS page left behind,
-      // so nothing hexagonal ever shows under or after the view. Leaving
-      // renderedCellsKey empty keeps later passes re-entering this gate for
-      // free, and the ViewMode listener (see the effect wiring) repaints the
-      // moment the participant escapes back to the hexagon surface.
+      // THE ARRIVAL GATE — when this layer opens as a view, the view must be
+      // the FIRST thing on screen, so the gate holds this paint until
+      // view.bee's verdict has landed (and the surface has flipped). Then it
+      // paints anyway, under the covered canvas: the paint is not waste —
+      // the resolved cells are the tile roster every deck-shaped view (and
+      // the decoration hydration walk) feeds on, and the mesh is what the
+      // escape back to hexagons reveals with no repaint. Skipping it starved
+      // the views of their own tiles (the "no tiles until toggled back" bug).
       const arrival = await this.#arrivalGate(passSegments)
       if (arrival === 'abandon') return
-      if (arrival === 'skip') {
-        if (this.hexMesh) this.clearMesh('arrival surface owns this location — hexagons skipped')
-        return
-      }
       return await this.#renderFromSynchronizeInner(lineage, locationKey, axial, passSegments)
     } finally {
       if (this.#activeRenderTarget === locationKey) this.#activeRenderTarget = null
@@ -2715,42 +2704,45 @@ export class ShowCellDrone extends Drone {
     }
   }
 
-  /** Should this pass paint hexagons at `segments`?
+  /** ORDERING, not suppression: may this pass paint yet?
    *
-   *  'paint'   — hexagons are the arrival surface here (the normal case).
-   *  'skip'    — the layer opens as a view and that view holds the surface;
-   *              painting hexagons would only flash under it.
+   *  'paint'   — go ahead (the normal case; on a default-view layer this
+   *              means the verdict has landed and the surface has already
+   *              flipped, so the paint lands under the mounted view).
    *  'abandon' — the participant navigated away while the gate waited; a
    *              newer pass owns the render, touch nothing.
    *
    *  The mark is read synchronously from the warm decoration index — every
    *  in-hive navigation warmed it when the parent page hydrated this cell.
    *  Only the very first pass of a session (boot deep-link: nothing painted,
-   *  index cold, splash still up) pays one async decoration read to ask.
+   *  index cold, splash still up) pays one async decoration read to ask —
+   *  the ROOT included: segments = [] signs the root location, the one place
+   *  the child-hydration walks can never warm the index for.
+   *
    *  The OPEN decision stays with view.bee — its verdict inherits every
-   *  gate (dormant, hidden, scope, roster) — so on a fresh arrival the gate
-   *  waits for `view:arrival` instead of guessing: a wrong guess either
-   *  flashes hexagons under the view or strands an empty ink field. */
-  async #arrivalGate(passSegments: readonly string[]): Promise<'paint' | 'skip' | 'abandon'> {
+   *  gate (dormant, hidden, scope, roster). Holding the paint for it is
+   *  what makes the arrival seamless: the splash's first ready signal is
+   *  the verdict, the view mounts, and only then do the hexagons paint —
+   *  invisibly, under the covered canvas, keeping the tile roster and the
+   *  hydration walk fed and the escape-to-hexagons instant. */
+  async #arrivalGate(passSegments: readonly string[]): Promise<'paint' | 'abandon'> {
     let want = defaultViewForSegments(passSegments)
     if (!want && this.renderedLocationKey === '') {
-      // The ROOT is included: segments = [] signs the root location, the
-      // one place the child-hydration walks can never warm the index for.
       want = await defaultViewAt(passSegments)
       if (!this.#segmentsAreCurrent(passSegments)) return 'abandon'
     }
     if (!want) return 'paint'
     const vm = get<{ mode: string; is(name: string): boolean }>('@hypercomb.social/ViewMode')
-    if (!vm) return 'paint'
-    if (vm.is(want)) return 'skip'
-    if (vm.mode !== HEX_SURFACE) return 'paint'
+    if (!vm || vm.is(want)) return 'paint'
     // The mark says a view opens here but the arbiter has not ruled for THIS
-    // address yet — hold the hexagons until the verdict lands (or the
-    // timeout releases them). Last-value replay makes an already-emitted
-    // verdict resolve synchronously.
+    // address yet — hold the paint until the verdict lands (or the timeout
+    // releases it). Whatever the verdict says, painting is then correct:
+    // opened → under the view; declined → the hexagons ARE the surface.
+    // Last-value replay makes an already-emitted verdict resolve
+    // synchronously.
     await this.#awaitArrivalVerdict(passSegments)
     if (!this.#segmentsAreCurrent(passSegments)) return 'abandon'
-    return vm.is(want) ? 'skip' : 'paint'
+    return 'paint'
   }
 
   /** Resolves when view.bee announces the arrival verdict for `segments`,
@@ -5276,24 +5268,6 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // THE WAY BACK from an arrival surface. When a location opens as a
-    // view, the arrival gate paints no hexagons at all — so the escape
-    // back to them must repaint explicitly (nothing else fires: no
-    // navigation happened, no invalidation event). ViewMode is an
-    // EventTarget in IoC, not an EffectBus effect; listen directly.
-    // requestRender is cheap when the mesh is already current (the
-    // unchanged-page fast path returns immediately), so every exit may
-    // safely ask.
-    {
-      const wireViewMode = (vm: { mode: string } & EventTarget): void => {
-        vm.addEventListener('change', this.#onViewModeChange)
-        this.#viewModeWired = vm
-      }
-      const vmNow = get<{ mode: string } & EventTarget>('@hypercomb.social/ViewMode')
-      if (vmNow) wireViewMode(vmNow)
-      else window.ioc.whenReady?.('@hypercomb.social/ViewMode', wireViewMode)
-    }
-
     // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
     // directory. Mirror it into our back-nav cache so navigating-out-and-
     // back sees the latest values WITHOUT a race against an in-flight
@@ -6692,8 +6666,6 @@ export class ShowCellDrone extends Drone {
 
   protected override dispose = (): void => {
     window.removeEventListener('synchronize', this.requestRender)
-    this.#viewModeWired?.removeEventListener('change', this.#onViewModeChange)
-    this.#viewModeWired = null
     window.removeEventListener('navigate', this.requestRender)
     window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
     window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)

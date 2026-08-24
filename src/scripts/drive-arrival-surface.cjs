@@ -14,17 +14,16 @@
 //   2. reload WITH A RECORDER injected at document-start: it subscribes to
 //      the EffectBus the moment it exists and logs every `render:cell-count`
 //      and `view:arrival` payload
-//   3. assert the seamless arrival:
+//   3. assert the seamless arrival ORDER:
 //        - the surface comes up as the view, not hexagons
-//        - NO render:cell-count with count>0 ever fired — the hexagons were
-//          never painted, not even behind the splash
-//        - a view:arrival verdict with a non-empty view was announced (the
-//          splash's ready signal, since the hex paint it normally waits for
-//          is the very thing being skipped)
-//        - the splash is gone (it dismissed off the verdict, not off a paint)
-//   4. Escape — THE WAY BACK: mode returns to hexagons and a paint pass runs
-//      (a settled render:cell-count arrives), because the gate skipped the
-//      original one.
+//        - the GATE HELD: not one paint pass completed before the verdict —
+//          the view is what the splash reveals
+//        - a view:arrival verdict with a non-empty view was announced
+//        - the splash is gone
+//        - the view is FED: a completed paint pass follows the verdict (the
+//          resolved cells are the tile roster the deck-shaped views read;
+//          the paint lands under the covered canvas)
+//   4. Escape — mode returns to hexagons, onto the already-warm mesh.
 //
 // `--engine chrome` required: headless chromium cannot initialize Pixi's
 // shaders and never leaves the splash.
@@ -135,9 +134,6 @@ async function main() {
     // ── 3. the seamless arrival ─────────────────────────────────────────
     check('the surface comes up as the view', !!boot.mode && boot.mode !== 'hexagons',
       'mode=' + boot.mode)
-    const hexPaints = boot.log.filter(e => e.kind === 'cell-count' && e.count > 0)
-    check('the hexagons were NEVER painted (no cell-count > 0)', hexPaints.length === 0,
-      hexPaints.length + ' hex paint(s)')
     const verdicts = boot.log.filter(e => e.kind === 'arrival' && e.view)
     check('the arrival verdict was announced', verdicts.length > 0,
       verdicts.map(v => v.view).join(','))
@@ -150,22 +146,24 @@ async function main() {
       e.kind === 'cell-count' && (e.count > 0 || e.settled) && e.t < firstVerdictAt)
     check('the gate held — no paint pass completed before the verdict',
       paintsBefore.length === 0, paintsBefore.length + ' pass(es) before t=' + firstVerdictAt)
+    // ...and the paint still HAPPENS, after the flip: the resolved cells are
+    // the tile roster the views feed on. Skipping it entirely was the
+    // "no tiles until toggled back" bug.
+    const paintsAfter = boot.log.filter(e =>
+      e.kind === 'cell-count' && (e.count > 0 || e.settled) && e.t >= firstVerdictAt)
+    check('the view is fed — a completed paint pass follows the verdict',
+      paintsAfter.length > 0, paintsAfter.length + ' pass(es) after t=' + firstVerdictAt)
     check('the splash dismissed off the verdict', boot.splash === false,
       boot.splash ? 'splash still up' : 'gone')
 
     // ── 4. THE WAY BACK ────────────────────────────────────────────────
-    const before = await page.evaluate(() => (window.__arrivalLog || []).length)
     await page.keyboard.press('Escape')
     await page.waitForTimeout(3500)
     await shot('03-escaped')
-    const back = await page.evaluate((n) => ({
+    const back = await page.evaluate(() => ({
       mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
-      fresh: (window.__arrivalLog || []).slice(n),
-    }), before)
+    }))
     check('escape returns to hexagons', back.mode === 'hexagons', 'mode=' + back.mode)
-    const repaint = back.fresh.filter(e => e.kind === 'cell-count' && (e.count > 0 || e.settled))
-    check('the way back repaints (a settled cell-count follows the escape)',
-      repaint.length > 0, JSON.stringify(back.fresh).slice(0, 120))
   } finally {
     const real = errors.filter(e => !/Could not initialize shader|favicon|ResizeObserver/i.test(e))
     if (real.length) console.log('\npage errors:\n  ' + real.slice(0, 8).join('\n  '))

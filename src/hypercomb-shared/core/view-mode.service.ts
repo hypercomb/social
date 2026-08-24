@@ -46,6 +46,15 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   'revolucion-welcome', 'revolucion-room',
 ])
 
+/** True when `mode` is a full-surface (canvas-covering) view. The shells
+ *  key `body.hc-view-covered` on this so the Pixi canvas is neutralised
+ *  under EVERY takeover view, the way it always was under 'website' — the
+ *  ground a view transition exposes is then the themed body, never a flash
+ *  of hex tiles. */
+export function isTransientMode(mode: ViewMode): boolean {
+  return TRANSIENT_MODES.has(mode)
+}
+
 export class ViewModeService extends EventTarget {
   #mode: ViewMode
 

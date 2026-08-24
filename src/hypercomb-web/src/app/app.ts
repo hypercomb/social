@@ -3,6 +3,7 @@ import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
+import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
 import { buildRevisionName } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
@@ -292,8 +293,18 @@ export class App implements AfterViewInit {
     // that move themselves to document.body at runtime).
     effect(() => {
       const m = this.viewMode()
-      document.body.classList.remove('hc-view-hexagons', 'hc-view-website')
+      // Drop EVERY previous hc-view-* class (modes are open-ended; the old
+      // two-name remove left stale classes behind when switching between
+      // non-website views), then mark the current mode — plus the generic
+      // `hc-view-covered` for any full-surface view, which is what the
+      // canvas-suppression rule in styles.scss keys on. With the canvas
+      // neutralised under every takeover view, a view-to-view navigation
+      // exposes the themed body between surfaces, never a flash of tiles.
+      for (const c of [...document.body.classList]) {
+        if (c.startsWith('hc-view-')) document.body.classList.remove(c)
+      }
       document.body.classList.add(`hc-view-${m}`)
+      if (isTransientMode(m)) document.body.classList.add('hc-view-covered')
     })
 
     console.log('[app] initialized')

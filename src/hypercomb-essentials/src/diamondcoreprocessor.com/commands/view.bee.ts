@@ -113,6 +113,13 @@ export class ViewBee extends Worker {
    *  escaped out of. Null = armed. */
   #autoOpenedKey: string | null = null
 
+  /** The view the most recent arrival OPENED ('' = none, or the surface was
+   *  the participant's own doing). This is what tells "a view the
+   *  participant chose" apart from "the previous layer's arrival surface
+   *  still up when we land somewhere new": the participant's choice rides
+   *  along on a walk, but a PLACE's claim ends where the place does. */
+  #autoOpenedView = ''
+
   protected override act = async (): Promise<void> => {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     lineage?.addEventListener?.('change', () => this.#schedule())
@@ -415,6 +422,7 @@ export class ViewBee extends Worker {
     if (layer === null) return
     const key = segments.join(SEGMENT_SEPARATOR)
     if (this.#autoOpenedKey === key) return
+    const prevArrival = this.#autoOpenedView
     // Latch BEFORE deciding, and latch even when the answer is "nothing to
     // open": #recompute re-runs many times at one address (cell-count,
     // decorations, ViewMode change, enablement flips), and a second pass must
@@ -423,12 +431,34 @@ export class ViewBee extends Worker {
     const mark = records.find(r => r.kind === DEFAULT_VIEW_DECORATION_KIND)
     const want = String(mark?.payload?.['view'] ?? '').trim()
     const available = !!want && toggles.some(t => t.view === want)
-    // Something already up — never yank the participant out of the view they
-    // chose into the one the layer suggests. Opening only claims a FREE
-    // surface; an already-active matching view still counts as the arrival.
+    // Whose is the surface that's up? A view the PARTICIPANT chose rides
+    // along on a walk — never yank them out of it into the one the layer
+    // suggests. But the PREVIOUS layer's arrival surface is the old place's
+    // claim, not a choice: landing somewhere new releases it, so this
+    // layer's own default may take the surface. (Without this, walking from
+    // one default-view layer into another left the old view "winning" a
+    // surface it no longer had any right to — and the latch then blocked
+    // the new default forever: the reported "loads back as hexagons".)
     let opened = ''
-    if (available && vm.mode === DEFAULT_SURFACE) { vm.setMode(want); opened = want }
-    else if (available && vm.mode === want) opened = want
+    if (available && vm.mode === want) opened = want
+    else if (available && (vm.mode === DEFAULT_SURFACE || vm.mode === prevArrival)) {
+      vm.setMode(want)
+      opened = want
+    } else if (!available && prevArrival && vm.mode === prevArrival
+               && !toggles.some(t => t.view === prevArrival)) {
+      // Walking OUT of the layer — and out of its whole scope: a
+      // branch-scoped view (a website) keeps its toggle on every descendant,
+      // so inside the scope this never fires — releases the arrival surface
+      // back to the hexagons.
+      vm.setMode(DEFAULT_SURFACE)
+    }
+    if (opened) this.#autoOpenedView = opened
+    else if (vm.mode !== prevArrival || !toggles.some(t => t.view === prevArrival)) {
+      // The old arrival's surface is gone (released above, escaped, or the
+      // participant switched views themselves) — drop the claim. Kept only
+      // while still riding the previous arrival inside its own scope.
+      this.#autoOpenedView = ''
+    }
     EffectBus.emit('view:arrival', { segments: [...segments], view: opened })
   }
 
