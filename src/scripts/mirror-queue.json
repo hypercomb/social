@@ -1342,6 +1342,32 @@
       "unattended": false,
       "created": "2026-08-24",
       "status": "pending"
+    },
+    {
+      "id": "rail-default-view-and-scroll-gutter",
+      "title": "The rail's ctrl-click default + the scroll gutter every fixed corner control now measures",
+      "run": null,
+      "note": "Two parts, one pass, no live bridge this session. (1) THE RAIL'S THIRD GESTURE: a view icon in the header rail now carries three meanings — click enters the view, ctrl/cmd-click makes it the LAYER'S DEFAULT (the face it opens as) or clears the mark, long-press turns the view off here. The marked icon wears the violet accent ring + filled glyph, and it HOLDS on the hexagons, which is the point: back on the grid every toggle is off, so the ring is the only thing that says which face the place opens as. This is also the way around the Beehaviors panel's canDefault gap (it refuses inherited rows, so many children could not be given a default at all). Owed under behaviors/views: a note on the views cell recording the three gestures, and a part tile for the mark's shell path (command-shell viewDefault output -> command-line onViewDefault -> features:default { silent } -> show-features #defaultViewAt); the view.bee toggle payload now carries isDefault. Files: hypercomb-shared/ui/command-shell/command-shell.component.{ts,html,scss}, hypercomb-shared/ui/command-line/command-line.component.{ts,html}, hypercomb-essentials/src/diamondcoreprocessor.com/commands/view.bee.ts, presentation/tiles/show-features.drone.ts. (2) THE SCROLL GUTTER: a new part, presentation/tiles/scroll-gutter.ts — a fixed corner control is laid out against the VIEWPORT, and the browser keeps the DOCUMENT's scrollbar out of that box but not an inner scroll host's, so on Windows the close button sat under the ~15px strip. trackScrollGutter(host) measures offsetWidth-clientWidth and publishes --hc-scroll-gutter on the host; every fixed corner control adds it into its right: calc(). Adopted by postit-view, welcome-view and room-view. Owed: a part tile for scroll-gutter.ts under behaviors/views marked 'part', with a note carrying the rule — a fixed corner control on a scrolling view must add var(--hc-scroll-gutter,0px) — and notes on the postit / welcome / room cells saying they measure it. Verify: node scripts/drive-rail-default-view.cjs (11 checks) + the geometry proof in the session scratchpad (headed chrome, strip=15px).",
+      "created": "2026-08-24",
+      "status": "pending"
+    },
+    {
+      "id": "darts-house-at-the-oche",
+      "title": "The house at the oche — the crowd is the multiplier, the tally is the second score, the smoke rings are the accuracy bonus",
+      "run": null,
+      "note": "Built 2026-08-23. The lounge dartboard became a GAME without leaving the lounge. New pure module scripts/lounge3d/darts-house.ts (+44-test darts-house.spec.ts): CALLS (ton/ton40/ton80/bed/shanghai/leg/madhouse/bigfish/nine/match + the Colonel's housed/houseleg/housematch), QUIRKS (15 small numeric side bets — straight trebles/doubles, evens, odds, primes, staircase, neighbours-on-the-board, fibonacci, square, palindrome, bed-and-breakfast, bag o' nuts, quack quack, treble ring, robin hood), SMOKE_CALLS + smokeCall() (three accuracy tiers through a drifting cigar-smoke ring), TALLY/tallyOf/tallyFans (THE ALTERNATE SCORE: 501 counts down by numbers, the tally counts up by RINGS — single 1, double 4, treble 9, bull 5, inner bull 16, wire -2 — and every 50 brings a regular over), crowdMultiplier (every third fan doubles, cap x4), drawSideBet (one quirk drawn per leg, pays 2x). THE LAW: darts-rules.ts never learns any of it — bonuses pay in EMBERS and in noise, never in points; a spec test asserts no CallSpec carries 'points'. In lounge-3d.ts: 12 silhouette regulars (slot-darts) who stand up/sit down with the fan count and raise glasses on a roar, the room's own attention (hemi/chandelier/roomFill dim + board picture light and halo up when you are at the oche), roar -> scene-position shake + fire flare + crowd rise, spark pops, the smoke-ring torus that drifts over the bed your checkout needs, the chalkboard rebuilt at 260x520 (fans pips + multiplier + tonight's side bet + tally + per-dart ring value + the shout banner + match record), match structure first-to-3 with rev:lounge:oche record (won/lost/best-leg/tally). store-items.ts now DERIVES its darts earning rows from EARNING_CALLS so the shop cannot quote a bonus the board does not pay, plus OCHE_NOTE; the page claims everything through one lounge3d:call event keyed call:<id>:<at> with the amount already multiplied. Verified: node scripts/drive-darts-house.cjs (20/21 then clean after rebuild) + 63 vitest. OWES on the hive: a collection for the oche under the revolucion lounge cell — part tiles for darts-house.ts, darts-house.spec.ts, the crowd/smoke/pops block of lounge-3d.ts, the derived earn rows in store-items.ts, drive-darts-house.cjs — marked part, with notes carrying (1) the separation law above, (2) the loop RINGS -> TALLY -> FANS -> MULTIPLIER -> EMBERS while SHAPES pay embers directly, (3) fans move first then the house pays at the new multiplier, (4) the ring is scored where it was when the dart arrived and is spent once threaded, (5) the turn's own name keeps the chalk and the side bets ride underneath it. note-add is additive so this pass is NOT safely re-runnable.",
+      "unattended": false,
+      "created": "2026-08-24",
+      "status": "pending"
+    },
+    {
+      "id": "square-tile-view-rename",
+      "title": "SquareTileView: rename the welcome-hive mirror + branch-cascade notes (MANUAL — note-add is additive)",
+      "run": null,
+      "note": "The welcome threshold became the first-class SquareTileView (view square-tile-view, kind visual:square-tile:view, /square-tile-view, scope branch, diamondcoreprocessor.com). Owed: retitle/extend the behaviors/appearance/welcome-hive mirror tiles for the new name (do NOT re-run the old pass), a themed card for /square-tile-view, notes explaining THE BRANCH CASCADE (view:default covers the branch, nearest mark wins, hexagons mark = opt-out) on the behaviors mirror, and a note on the view-default tile about legacy aliases (visual:revolucion:welcome / revolucion-welcome still read). MANUAL: run with a live bridge only, once — notes are additive.",
+      "commit": "cdaf87dc3",
+      "created": "2026-08-24",
+      "status": "pending"
     }
   ]
 }
