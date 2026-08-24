@@ -302,7 +302,11 @@ export class SlidesViewDrone extends Drone {
     const vm = this.#vm()
     if (!vm || !this.#surface()) return
     e.preventDefault()
-    vm.setMode('hexagons')
+    // Back gesture — arrival face navigates back, participant-opened peels.
+    const gesture = window.ioc?.get<{ backOutOfView?(peel: () => void): void }>('@diamondcoreprocessor.com/BackGesture')
+    const peel = (): void => vm.setMode('hexagons')
+    if (gesture?.backOutOfView) gesture.backOutOfView(peel)
+    else peel()
   }
 
   readonly #onKeyDown = (e: KeyboardEvent): void => {

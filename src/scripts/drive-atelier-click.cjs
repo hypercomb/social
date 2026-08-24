@@ -166,6 +166,27 @@ async function main() {
     const leak = samples.filter(s => s.canvas === 'visible' && s.mode !== 'hexagons')
     check('THE INVARIANT — no tiles peek out from under any view', leak.length === 0,
       leak.length + ' leak(s)')
+
+    // ── THE WAY BACK — a navigate is a navigate ──────────────────────────
+    // Right-click on behaviors' face: the face belongs to the place, so
+    // backing out NAVIGATES to the root — which opens as ITS face (the
+    // atelier), never as hexagons.
+    const beforeBack = await page.evaluate(() => window.__practice.log.length)
+    await page.evaluate(() => window.__practice?.mark('back'))
+    await page.mouse.click(720, 450, { button: 'right' })
+    await page.waitForTimeout(3200)
+    await shot('04-after-back')
+    const back = await page.evaluate((n) => ({
+      mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
+      segs: window.ioc?.get?.('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [],
+      hex: (window.__practice?.log ?? []).slice(n).filter(s => !s.mark && s.mode === 'hexagons').length,
+      leak: (window.__practice?.log ?? []).slice(n).filter(s => !s.mark && s.canvas === 'visible' && s.mode !== 'hexagons').length,
+    }), beforeBack)
+    check('back from the face is a NAVIGATE — lands at the root', back.segs.length === 0,
+      JSON.stringify(back.segs))
+    check('...and the root opens as ITS face, never hexagons',
+      back.mode === 'revolucion-welcome' && back.hex === 0 && back.leak === 0,
+      'mode=' + back.mode + ' hexSamples=' + back.hex + ' leaks=' + back.leak)
   } finally {
     const real = errors.filter(e => !/Could not initialize shader|favicon|ResizeObserver/i.test(e))
     if (real.length) console.log('\npage errors:\n  ' + real.slice(0, 8).join('\n  '))

@@ -132,14 +132,19 @@ export class BackGesture {
     }
     if (hovered) return hovered
 
-    // 2. Top of the open-view stack.
+    // 2. Top of the open-view stack. Backing out of a view that is the
+    //    ARRIVAL FACE of the place we stand on is a NAVIGATE, not a peel —
+    //    the face belongs to the place, so the way out is the way back,
+    //    and the destination's face opens per ITS mark (a navigate is a
+    //    navigate; the view is a default or not). A view the participant
+    //    opened themselves keeps its registered close-to-hexagons.
     const modes = ioc<{ ownersOf(mode: string): readonly string[] }>('@diamondcoreprocessor.com/ModeRegistry')
     const viewOwners = modes?.ownersOf('view:active') ?? []
     for (let i = viewOwners.length - 1; i >= 0; i--) {
       const entry = this.#entries.get(viewOwners[i])
       if (!entry || entry.within) continue
       if (entry.active && !entry.active()) continue
-      return entry
+      return { ...entry, back: () => this.backOutOfView(entry.back) }
     }
 
     // 3. A page-covering mode that is not a view (clipboard), most recent first.
@@ -148,6 +153,18 @@ export class BackGesture {
       if (entry.active()) return entry
     }
     return null
+  }
+
+  /** THE ONE RULE for backing out of a render view — every right-click
+   *  path funnels here, whether it arrived through this registry or a
+   *  view's own capture handler: an ARRIVAL FACE backs out by NAVIGATING
+   *  (lineage back; at the root there is nowhere to go and the face
+   *  holds — the × and Escape remain the way out there), a view the
+   *  participant opened peels to hexagons via its own `peel`. */
+  backOutOfView = (peel: () => void): void => {
+    const viewBee = ioc<{ isArrivalSurface?(): boolean }>('@diamondcoreprocessor.com/ViewBee')
+    if (viewBee?.isArrivalSurface?.()) this.#lineageBack()
+    else peel()
   }
 
   /** The default answer: the hive comes back one step. Identical to the canvas

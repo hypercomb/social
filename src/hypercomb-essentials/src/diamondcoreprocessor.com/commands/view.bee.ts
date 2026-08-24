@@ -244,6 +244,21 @@ export class ViewBee extends Worker {
     if (hidden && vm.mode === descriptor.view) vm.setMode(DEFAULT_SURFACE)
   }
 
+  /** Is the surface currently up the ARRIVAL FACE of the location we are
+   *  standing on? The back gesture asks: backing out of a FACE is a
+   *  NAVIGATE — a navigate is a navigate, and the destination's view is
+   *  its default or not — while backing out of a view the participant
+   *  opened themselves just closes it. */
+  isArrivalSurface = (): boolean => {
+    if (!this.#autoOpenedView) return false
+    const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
+    if (!vm || vm.mode !== this.#autoOpenedView) return false
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    const segments = (lineage?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    return this.#autoOpenedKey === segments.join(SEGMENT_SEPARATOR)
+  }
+
   #schedule(): void {
     if (this.#pending) return
     this.#pending = true

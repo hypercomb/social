@@ -104,7 +104,12 @@ export class LivingBriefViewDrone extends Drone {
   readonly #context = (event: MouseEvent): void => {
     if (this.#vm()?.mode !== LIVING_BRIEF_VIEW) return
     event.preventDefault()
-    this.#vm()?.setMode('hexagons')
+    // Right-click is the BACK gesture — one rule for every view: an
+    // arrival face navigates back, a participant-opened brief peels.
+    const gesture = window.ioc?.get<{ backOutOfView?(peel: () => void): void }>('@diamondcoreprocessor.com/BackGesture')
+    const peel = (): void => this.#vm()?.setMode('hexagons')
+    if (gesture?.backOutOfView) gesture.backOutOfView(peel)
+    else peel()
   }
 
   #vm(): ViewModeShape | undefined {

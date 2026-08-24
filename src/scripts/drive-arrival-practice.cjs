@@ -223,9 +223,12 @@ async function main() {
     check('the hexagon reveal is never blank — first visible frame already carries the grid',
       !!plainReveal && plainReveal.cells > 0, JSON.stringify(plainReveal ?? 'never revealed'))
 
-    // ── the way out: an exit gesture must reach the interface ───────────
+    // ── the way out: the PEEL (Escape / the ×) must reach the interface ──
+    // (Right-click is a NAVIGATE now — backing out of a face retraces the
+    // lineage; at the root it has nowhere to go and the face holds. The
+    // deliberate peels are Escape and the view's × — drive Escape.)
     await markBeat('exit')
-    await page.mouse.click(720, 450, { button: 'right' })
+    await page.keyboard.press('Escape')
     await page.waitForTimeout(2500)
     await shot('20-after-exit')
     const exit = await page.evaluate(() => ({
