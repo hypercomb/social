@@ -21,17 +21,54 @@
 //            still there after reload. Same content → same sig → dedupe for
 //            free; two domains shipping one spec cost one file.
 //
-// Domain discovery composes on top: adopting a domain that publishes specs
-// lands them as pool members here, and the sweep picks them up. The spec is
-// public content; the KEY the participant later pastes is device-local truth
-// (llm-keys.ts) — the two never travel together.
+// DOMAIN DISCOVERY composes on top. `sharing/published-pools.ts` probes every
+// domain this participant learns for the `llm:providers` index it may publish,
+// verifies each member against its signature, and hands it here — the same
+// import path a pasted spec takes, so a domain can offer a provider but never
+// a privileged one. The spec is public content; the KEY the participant later
+// pastes is device-local truth (llm-keys.ts) — the two never travel together.
+//
+// PROVENANCE AND THE HOLD. A spec names an endpoint a key would be sent to,
+// so where it came from matters and is recorded device-locally (never in the
+// spec — that would change its signature per domain and break dedup). When a
+// domain offers a provider pointing AT ITSELF, it is offering its own models
+// and arrives usable. When it points somewhere else, it is asking you to send
+// your key to a third party: legitimate for a gateway, and indistinguishable
+// from a hostile spec, so it arrives HELD (off, with everything visible) and
+// one click in the console turns it on.
 
 import { SignatureService, isSignature } from '@hypercomb/core'
+import { llmActivation } from '../llm-activation.js'
 import { registerLlmProvider } from '../llm-provider-registry.js'
+import { registerPublishedPool } from '../../sharing/published-pools.js'
 import { compileProviderSpec, parseProviderSpec, type LlmProviderSpec } from './provider-spec.js'
 
-/** The pool's meaning. Colon-carrying, per doctrine — never a bare word. */
+/** The pool's meaning. Colon-carrying, per doctrine — never a bare word.
+ *  The SAME string names the local OPFS pool and the index a domain
+ *  publishes at `sign(meaning)`; one address, two sides of the loop. */
 export const LLM_PROVIDERS_POOL = 'llm:providers'
+
+/** Device-local provenance: which domain offered this provider. Never part
+ *  of the spec — see the module comment. */
+const ORIGIN_KEY = (providerId: string): string => `hc:llm:${providerId}:origin`
+
+/** The domain that offered this provider, or '' for one the participant
+ *  pasted in themselves. Read by the console to say where a row came from. */
+export const providerOrigin = (providerId: string): string => {
+  try { return globalThis.localStorage?.getItem(ORIGIN_KEY(providerId)) ?? '' } catch { return '' }
+}
+
+const rememberOrigin = (providerId: string, origin: string): void => {
+  if (!origin) return
+  try { globalThis.localStorage?.setItem(ORIGIN_KEY(providerId), origin) } catch { /* session-only */ }
+}
+
+/** Does this spec point back at the domain that published it? A bridge (no
+ *  endpoint) does too: it names no third party at all. */
+const pointsAtItsOwnOrigin = (spec: LlmProviderSpec, origin: string): boolean => {
+  if (!spec.endpoint) return true
+  try { return new URL(spec.endpoint).host === origin } catch { return false }
+}
 
 type DirLike = {
   entries(): AsyncIterable<[string, { kind: string; getFile?: () => Promise<{ size: number; text(): Promise<string> }> }]>
@@ -89,9 +126,20 @@ export const sweepProviderPool = async (): Promise<string[]> => {
  * Persisting canonicalizes: the stored bytes are the parsed spec re-encoded,
  * so cosmetic JSON differences collapse to one signature.
  */
-export const importProviderSpec = async (json: unknown): Promise<LlmProviderSpec> => {
+export const importProviderSpec = async (
+  json: unknown,
+  options: { origin?: string } = {},
+): Promise<LlmProviderSpec> => {
   const spec = parseProviderSpec(json)
   registerLlmProvider(compileProviderSpec(spec))
+
+  const origin = String(options.origin ?? '').trim().toLowerCase()
+  if (origin) {
+    rememberOrigin(spec.id, origin)
+    // Held only when the domain sends your key somewhere else — see the
+    // module comment. `hold` is one-time and never overrides a participant.
+    if (!pointsAtItsOwnOrigin(spec, origin)) llmActivation.hold(spec.id)
+  }
 
   const dir = await pool()
   if (dir) {
@@ -107,6 +155,17 @@ export const importProviderSpec = async (json: unknown): Promise<LlmProviderSpec
   }
   return spec
 }
+
+// ── the domain side: claim `llm:providers` for the probe ───────────────────
+//
+// One handler, and every domain this participant learns is asked. Nothing in
+// the probe knows what a provider is; nothing here knows how a domain was
+// learned. `accept` is deliberately the same call a pasted spec makes, so
+// there is exactly one path a provider can enter by.
+registerPublishedPool({
+  meaning: LLM_PROVIDERS_POOL,
+  accept: async (record, origin) => (await importProviderSpec(record, { origin })).id,
+})
 
 // ── boot: the local pool joins the roster as soon as the store exists ──────
 //

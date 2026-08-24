@@ -25,7 +25,7 @@ import { llmActivation } from './llm-activation.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
-import { importProviderSpec } from './providers/provider-discovery.js'
+import { importProviderSpec, providerOrigin } from './providers/provider-discovery.js'
 import type { LlmProviderDescriptor } from './providers/llm-provider.types.js'
 import { LOCAL_HOST_STORAGE_KEY, localLlmHost } from './providers/local.provider.js'
 import { modelPalette } from '../presentation/avatars/agent-model.js'
@@ -219,7 +219,9 @@ export class ProvidersWindowView extends EventTarget {
     const state = document.createElement('span')
     state.className = 'hc-provider-state'
     state.textContent = !enabled
-      ? this.#t('providers.off', 'off')
+      ? (llmActivation.wasHeld(provider.id)
+          ? this.#t('providers.held', 'held')
+          : this.#t('providers.off', 'off'))
       : usable
         ? this.#t('providers.active', 'active')
         : this.#t('providers.noKey', 'no key')
@@ -248,6 +250,27 @@ export class ProvidersWindowView extends EventTarget {
     const detail = document.createElement('div')
     detail.className = 'hc-provider-detail'
     const needsKey = provider.requiresKey !== false
+
+    // WHERE THIS CAME FROM. A row the participant typed in themselves needs
+    // no explanation; one a domain offered does, and it belongs above the
+    // key field rather than below it — provenance is what the decision to
+    // paste a key is made on.
+    const origin = providerOrigin(provider.id)
+    if (origin) {
+      const from = document.createElement('div')
+      from.className = 'hc-provider-origin'
+      from.textContent = this.#t('providers.offeredBy', 'offered by {origin}').replace('{origin}', origin)
+      detail.appendChild(from)
+    }
+    if (llmActivation.wasHeld(provider.id)) {
+      const why = document.createElement('div')
+      why.className = 'hc-provider-warn'
+      why.textContent = this.#t(
+        'providers.heldWhy',
+        'This was offered by one domain but sends your key to another. Check the endpoint before switching it on.',
+      )
+      detail.appendChild(why)
+    }
 
     // endpoint — always shown BEFORE a key is entered: this is where it goes.
     const endpoint = document.createElement('div')
@@ -488,6 +511,12 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
       .hc-provider-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
       .hc-provider-status { margin-top: 8px; font-size: 12px; word-break: break-word; opacity: 0.9; }
+      .hc-provider-origin { font-size: 11px; opacity: 0.7; margin: 6px 0 2px; }
+      .hc-provider-warn {
+        font-size: 11px; line-height: 1.4; margin: 4px 0 2px; padding: 6px 8px;
+        border: 1px solid rgba(240, 180, 90, 0.45); border-radius: var(--hc-radius-control, 2px);
+        color: rgba(245, 205, 140, 0.95); background: rgba(240, 180, 90, 0.08);
+      }
       .hc-provider-mono { font-size: 11px; opacity: 0.85; word-break: break-all; }
       .hc-provider-endpoint { display: block; }
       .hc-providers-add { padding: 12px 2px; }

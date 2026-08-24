@@ -70,7 +70,7 @@
 // self-cleaning drain removes it. Layer/resource paths use the
 // canonical Store APIs.
 
-import { Drone, registerPoolMeaning } from '@hypercomb/core'
+import { Drone, EffectBus, registerPoolMeaning } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
@@ -681,6 +681,13 @@ export class ContentBrokerDrone extends Drone {
       localStorage.setItem(ContentBrokerDrone.#KNOWN_HOSTS_KEY, JSON.stringify(list))
     } catch { /* no storage — session-only, as before */ }
     this.#postDomainsToServiceWorker()
+    // A NEWLY KNOWN DOMAIN MAY OFFER CONFIGURATION. Every host this
+    // participant learns — self, community, mesh-attributed, adopt handoff —
+    // passes through here exactly once, which makes it the one honest place
+    // to say so. What that means is not this drone's business: sharing/
+    // published-pools listens, asks the domain for the meanings anything has
+    // claimed (llm:providers today), and verifies every byte it takes.
+    try { EffectBus.emit('domain:learned', { host }) } catch { /* a listener threw — not ours */ }
   }
 
   /** Hand the full host list (self + community + learned) to the service
