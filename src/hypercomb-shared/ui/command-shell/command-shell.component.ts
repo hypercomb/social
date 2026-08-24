@@ -306,6 +306,14 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    */
   readonly subject = input<{ previewUrl?: string; label: string; icon?: string } | null>(null)
 
+  /**
+   * Which sigil the prompt slot wears when nothing is armed and no subject is
+   * set: the chevron (tile mode — text lays tiles) or a slash (command stance —
+   * the line is a register of commands). The parent owns the stance machine;
+   * the shell only dresses for it, exactly as it does for armed/subject.
+   */
+  readonly promptSigil = input<'chevron' | 'slash'>('chevron')
+
   // ── outputs to parent ───────────────────────────────────
 
   /** Emitted on every input change (after leading-space strip). */

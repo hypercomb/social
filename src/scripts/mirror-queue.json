@@ -1298,6 +1298,14 @@
       "unattended": false,
       "created": "2026-08-24",
       "status": "pending"
+    },
+    {
+      "id": "command-stance-sigil",
+      "title": "Command stance — '/' walks in, '>' walks out, the prompt wears the sigil",
+      "run": null,
+      "note": "Built 2026-08-22 (Common Tongue phase 1, first slice). The command bar now has two standing meanings: tile mode (chevron) and command stance ('/' icon + tinted box). Typing '/' enters, typing '>' exits (consumed), stance persists in localStorage hc:command-line-stance, Enter on the bare seed is a no-op, lost seeds re-slash typed words. Sources: hypercomb-shared/ui/command-line/command-line.component.ts (stance machine in onShellValueChange/clear/onShellCommit/Escape), hypercomb-shared/ui/command-shell/command-shell.component.{ts,html,scss} (promptSigil input, .prompt-slash glyph, .stance-command tint), scripts/drive-stance-sigil.cjs (9-check harness). Owes: a tile under behaviors/input (extend, never re-run the behaviors mirror) named for the stance switch, notes carrying the two-mode grammar + the sigil pair, tags behavior+input; note-add is additive so this pass is NOT safely re-runnable.",
+      "created": "2026-08-24",
+      "status": "pending"
     }
   ]
 }

@@ -1,7 +1,7 @@
 <!-- hypercomb-shared/ui/command-shell/command-shell.component.html -->
 
 <div class="command-bar">
-  <div class="command-shell" (mousedown)="onShellMouseDown($event)">
+  <div class="command-shell" [class.stance-command]="promptSigil() === 'slash'" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 
       <!-- ONE slot, three states, in priority order: an armed resource (cargo
@@ -35,6 +35,8 @@
           } @else {
             <span class="prompt-thumb prompt-thumb-fallback" aria-hidden="true">{{ subjectMonogram() }}</span>
           }
+        } @else if (promptSigil() === 'slash') {
+          <span class="prompt-slash" aria-hidden="true">/</span>
         } @else {
           <span class="prompt-chevron mat-sym" aria-hidden="true">chevron_right</span>
         }

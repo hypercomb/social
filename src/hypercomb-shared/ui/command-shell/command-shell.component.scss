@@ -124,6 +124,23 @@ $bp-phone-max: 599px;
   color: var(--cmd-fg);
 }
 
+.prompt-slash {
+  // The command stance's sigil — a literal '/', not a Material ligature, so
+  // it sits in the terminal font like the register it announces. Same box,
+  // same cold family as the chevron it replaces.
+  font-family: var(--terminal-font);
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--cmd-fg);
+}
+
+// Command stance: the whole box shifts hue so the standing meaning of plain
+// text is readable before a character is typed — the mode is worn, not menu'd.
+.command-shell.stance-command {
+  background: color-mix(in srgb, var(--glow-color) 12%, transparent);
+  border-radius: 4px;
+}
+
 .prompt-thumb {
   width: 100%;
   height: 100%;
