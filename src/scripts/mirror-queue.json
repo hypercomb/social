@@ -1338,7 +1338,7 @@
       "title": "Beehaviors: one press, one light — the layer bulb is a two-state switch",
       "run": null,
       "note": "Note on the beehaviors panel mirror tile: a layer row's deposit refreshes THE LAYER IT WROTE, so off->on is one press. The old refresh described <tile>/<tile> (label resolved at the current location), so press one looked dead and press two deposited at a phantom path. Also covers the default-view icon, which refreshes through the same path. Pass: note-add on the beehaviors panel tile + the show-features part tile.",
-      "commit": "PENDING",
+      "commit": "d36869b99",
       "unattended": false,
       "created": "2026-08-24",
       "status": "pending"
