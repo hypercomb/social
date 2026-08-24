@@ -13,6 +13,8 @@
 // the hive's own history — the entries are the truth, the balance and the
 // inventory are derived.
 
+import { EARNING_CALLS, QUIRKS, SIDE_BET_FACTOR, TALLY_STEP } from './darts-house.js'
+
 /** Slot ids for the purchasable props, shared with the 3D room. */
 export const SLOT = {
   cart: 'slot-cart',
@@ -86,15 +88,61 @@ export const SALE_ITEMS: StoreItem[] = [
 
 export const STORE_ITEMS: StoreItem[] = [...HOUSE_ITEMS, ...SALE_ITEMS]
 
-/** How Embers are earned. `key` prefixes the ledger claim so a thing can only
- *  ever pay once. */
-export const EARN_RULES: Array<{ key: string; embers: number; label: string; note: string }> = [
+export type EarnRule = { key: string; embers: number; label: string; note: string }
+
+/** What the house pays for in the room, other than the darts. */
+const ROOM_RULES: EarnRule[] = [
   { key: 'welcome', embers: 120, label: 'Walking in', note: 'The house stakes you on your first visit to the lounge. Once.' },
   { key: 'moment', embers: 40, label: 'A moment, journaled', note: 'Tell the concierge about a cigar you smoked and why it mattered.' },
-  { key: 'leg', embers: 75, label: 'A leg off the Colonel', note: '501, double out, at the board on the left wall. He is beatable.' },
   { key: 'tasting', embers: 25, label: 'A tasting logged', note: 'Stack three or more flavors on the wheel plate in the room.' },
   { key: 'reserve', embers: 20, label: 'A reservation', note: 'Reserve something out of the humidor through the concierge.' },
 ]
+
+/** What the BOARD pays for, straight out of the house's own table — the store
+ *  cannot quote a bonus the oche does not hand out, because it is reading the
+ *  same object the board pays from. Every one of these is multiplied by how
+ *  full the room is when it lands. */
+const OCHE_RULES: EarnRule[] = EARNING_CALLS.map(c => ({
+  key: 'call:' + c.id,
+  embers: c.embers,
+  label: c.label ?? c.shout,
+  note: c.note ?? '',
+}))
+
+/** The dozen small numeric bets, as one line. They are meant to be found at
+ *  the board rather than studied in a shop, so the shelves list the names and
+ *  leave the arithmetic to the chalk. */
+const SIDE_BET_RULE: EarnRule = {
+  key: 'sidebets',
+  embers: Math.min(...Object.values(QUIRKS).map(q => q.embers)),
+  label: 'The side bets',
+  note: 'Small money for the SHAPE of a turn rather than the size of it — ' +
+    // derived, so a bet that exists is a bet that is quoted; the tail is
+    // counted rather than listed, because the fun of the small ones is finding
+    // them chalked up at the board
+    Object.values(QUIRKS).slice(0, 7).map(q => q.shout.toLowerCase()).join(', ') +
+    `, and ${Object.keys(QUIRKS).length - 7} more like them. One is drawn each leg and ` +
+    `chalked on the board; hit that one and it pays ${SIDE_BET_FACTOR}×.`,
+}
+
+/** What the crowd and the alternate score do, in one sentence — the store page
+ *  prints this under the table, so the multiplier is explained where the prices
+ *  are and nowhere else. */
+export const OCHE_NOTE =
+  'Everything the board pays is multiplied by how full the room is: every third ' +
+  'regular standing at the oche doubles it, up to four times over. They come across ' +
+  'for trebles, tons and legs — and for THE TALLY, the board\'s alternate score, ' +
+  'which counts UP by rings where 501 counts down by numbers (a single 1, a double 4, ' +
+  'a treble 9, the inner bull 16) and brings one more of them over every ' +
+  TALLY_STEP + '. The tally is kept between visits. The crowd is not: that is earned ' +
+  'again every evening.'
+
+/**
+ * How Embers are earned. `key` prefixes the ledger claim so a thing can only
+ * ever pay once — the darts add the moment to theirs, because a ton eighty is
+ * an occasion and there is no reason to have only one of them.
+ */
+export const EARN_RULES: EarnRule[] = [...ROOM_RULES, SIDE_BET_RULE, ...OCHE_RULES]
 
 export const EARN_OF = (key: string): number =>
   EARN_RULES.find(r => r.key === key)?.embers ?? 0

@@ -19,7 +19,7 @@
 // content returns unchanged:true. Safe to re-run after editing page copy.
 
 import WebSocket from 'ws'
-import { EARN_OF, EARN_RULES, EMBERS_JS, HOUSE_ITEMS, SALE_ITEMS, STORE_ITEMS } from './lounge3d/store-items.js'
+import { EARN_OF, EARN_RULES, EMBERS_JS, HOUSE_ITEMS, OCHE_NOTE, SALE_ITEMS, STORE_ITEMS } from './lounge3d/store-items.js'
 
 const BRIDGE_PORT = 2401
 const TIMEOUT = 60_000
@@ -3188,6 +3188,12 @@ function buildPages(
       Drag the room to look: framed art on the gallery wall, the humidor cabinet lit behind glass,
       a cigar going in the ashtray, cutter and lighter within reach. Every piece is a slot, and
       the room fills up as your journal does.</p>
+      <p class="lede">Step to the board on the left wall and the lounge comes with you: the
+      lights go down, the regulars come over from the bar, and how many of them are standing
+      at the oche is the multiplier on everything the house pays. It is still 501, still
+      double out, still the Colonel — but a ton eighty in a full room is worth four of one
+      thrown to nobody, the board keeps a second score of its own, a side bet is chalked up
+      each leg, and now and then somebody blows a smoke ring across the twenty.</p>
     </section>
     <section class="lounge">
       <div class="stagewrap">
@@ -3602,7 +3608,8 @@ function buildPages(
         var note = document.createElement('p');
         note.className = 'dnote';
         note.textContent = 'Embers are earned in this room — a moment journaled, a leg off ' +
-          'the Colonel, a tasting logged. Spend them here or in El Mercado.';
+          'the Colonel, a ton at the oche with the room watching. Spend them here ' +
+          'or in El Mercado.';
         list.appendChild(note);
       }
     }
@@ -3688,11 +3695,18 @@ function buildPages(
     sweep();
     setInterval(sweep, 2500);
 
-    // 501 — a leg taken off the Colonel pays; his legs pay nothing
-    window.addEventListener('lounge3d:leg', function(e){
+    // THE OCHE. Everything the board pays — the leg, the tons, the straights,
+    // the side bets, a dart through a smoke ring, the match — arrives as one
+    // event with the amount ALREADY multiplied by how full the room was. The
+    // claim key carries the moment, so every occasion pays and none of them is
+    // ever the same occasion twice.
+    window.addEventListener('lounge3d:call', function(e){
       var d = e.detail || {};
-      if (d.house) return;
-      if (E.claim('leg:' + d.legs, ${EARN_OF('leg')}, 'a leg off the Colonel')) flash();
+      if (!d || !(d.embers > 0)) return;
+      var why = (d.label || d.shout || d.id || 'the oche').toString().toLowerCase() +
+        (d.doubled ? ' \u00b7 tonight\u2019s bet, doubled'
+          : d.mult > 1 ? ' \u00b7 ' + d.base + ' \u00d7 ' + d.mult + ' the house' : '');
+      if (E.claim('call:' + d.id + ':' + d.at, d.embers, why)) flash();
     });
   })();
   </script>
@@ -3747,6 +3761,7 @@ function buildPages(
       </div>
       <p class="muted">Each of these pays once per occasion — a claim is written into the
       ledger the moment it happens, and a claim already in the ledger never pays twice.</p>
+      <p class="muted">${OCHE_NOTE}</p>
     </section>
 
     <section class="section" id="shelves">

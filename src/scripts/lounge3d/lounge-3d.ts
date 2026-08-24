@@ -25,9 +25,17 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { Reflector } from 'three/addons/objects/Reflector.js'
 import {
-  DART_NUMS, DART_RINGS, bedCentre, checkout, pickShot, resolveThrow, scoreDart,
-  type DartHit,
+  DART_NUMS, DART_RINGS, bedCentre, checkout, parseShot, pickShot, resolveThrow,
+  scoreDart, type DartHit,
 } from './darts-rules.js'
+import {
+  CALLS, FANS_BASE, FANS_MAX, MATCH_LEGS, QUIRKS, SIDE_BET_FACTOR,
+  // `SMOKE` is taken in here — the room's cigar has a particle count by that
+  // name — so the ring geometry comes in under the name the room uses for it.
+  SMOKE as SMOKE_RING, SMOKE_CALLS, TALLY_STEP, applyFans, crowdMultiplier,
+  dartCall, drawSideBet, legCall, quirkCalls, smokeCall, tallyFans, tallyOf,
+  turnCall, type CallSpec,
+} from './darts-house.js'
 import { SLOT } from './store-items.js'
 
 interface LoungeConfig {
@@ -43,6 +51,9 @@ declare global {
     RevLounge3D?: {
       setSlot: (id: string, on: boolean) => void
       view: (name: string) => void
+      /** The board's own state, and a dart put in without aiming — the
+       *  harness's way into the game. */
+      oche?: { state: () => Record<string, unknown>; throwAt: (x: number, y: number) => boolean }
       /** Force one frame. The animation loop is rAF-driven and rAF starves in
        *  an occluded window, so this is how a still gets taken (and how the
        *  room is verified) without a composited tab. */
@@ -673,6 +684,15 @@ export interface Room {
     moveAim: (worldPoint: THREE.Vector3) => void
     release: () => { label: string; points: number; mult: number } | null
     cancel: () => void
+    /** The camera has moved to a preset: at the oche the room dims for the
+     *  match, which is how the lounge becomes the game without leaving. */
+    view: (name: string) => void
+    /** The chalkboard, as data — the crowd, the multiplier, the tally, the
+     *  side bet, the live smoke ring. */
+    state: () => Record<string, unknown>
+    /** Put a dart in at a board-local point with no aim and no skill. The
+     *  harness's way in; the skill lives in beginAim/release. */
+    throwAt: (x: number, y: number) => boolean
   }
   dispose: () => void
 }
@@ -755,7 +775,11 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // ── lighting ───────────────────────────────────────────────────────────
   // Dusk in a lounge: enough ambient to read the leather and the woodwork,
   // with the fire, the lamp and the picture lights doing the shaping.
-  scene.add(new THREE.HemisphereLight(0x6a5878, 0x2a1c22, 1.15))
+  // These three are the room's general light, and the oche dims them: when a
+  // match is on, the lounge gives the board its attention the way a room
+  // actually does — everything else goes quiet and a little darker.
+  const hemi = new THREE.HemisphereLight(0x6a5878, 0x2a1c22, 1.15)
+  scene.add(hemi)
   const roomFill = new THREE.PointLight(0xe0b578, 13, 20, 2)
   roomFill.position.set(0, ROOM.h - 0.5, 1.2)
   scene.add(roomFill)
@@ -1006,8 +1030,8 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   dartsGroup.add(box(0.4, 0.86, 0.02, darkWood, 0.6, 0, 0.006))
   // chalk scoreboard on the left door — redrawn per throw
   const chalkCv = document.createElement('canvas')
-  chalkCv.width = 220
-  chalkCv.height = 440
+  chalkCv.width = 260
+  chalkCv.height = 520
   const chalkTex = track(new THREE.CanvasTexture(chalkCv))
   chalkTex.colorSpace = THREE.SRGBColorSpace
   /** The two seats at the oche. The Colonel is the house — he has been on that
@@ -1019,10 +1043,67 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   ]
   let turnSeat = 0
   let turnDarts: DartHit[] = []
+  /** Where this turn's darts actually landed, board-local — the Robin Hood and
+   *  the smoke rings are facts about the sisal, not about the score. */
+  let turnLandings: Array<{ x: number; y: number }> = []
   /** The score to REVERT to on a bust — darts thrown into a bust never
    *  happened, which is the rule that makes the last hundred the hard part. */
   let turnStart = 501
+  /** Every dart you have thrown this leg, busts included. Nine of them and the
+   *  house has been waiting thirty years for you. */
+  let legDarts = 0
   let chalkNote = 'hold the board · release on the tight ring'
+
+  // ── THE HOUSE: the crowd, the alternate score, and the side bet ────────
+  //
+  // None of this touches 501. You are still throwing five hundred and one down
+  // to nothing and you still need the double, and no bonus in the room will
+  // put a dart in it for you. What the house pays for is everything ELSE that
+  // happened on the way: how full the room got, how thin the rings were, and
+  // whether the shape of a turn was worth a laugh at the bar.
+  //
+  //   FANS       — the crowd at the oche. They arrive for trebles, tons and
+  //                legs, and they drift off for busts, wires and cold turns.
+  //   ×          — the crowd IS the multiplier: every third pair of eyes
+  //                doubles what the house pays, up to four.
+  //   THE TALLY  — the alternate score. 501 counts DOWN by numbers; the tally
+  //                counts UP by rings (single 1, double 4, treble 9, bull 5,
+  //                inner bull 16, off the board −2), and every fifty of it
+  //                brings another regular over. It is kept between visits,
+  //                because it is the only number here that is a career.
+  //   SIDE BET   — one of the house's small numeric bets, drawn fresh each leg
+  //                and chalked up. Hit it and it pays double.
+  let fans = FANS_BASE
+  let tally = 0
+  let tallyGiven = 0
+  let sideBet = drawSideBet()
+  /** The shout, chalked across the board for a couple of seconds. */
+  let banner: { shout: string; sub: string; t: number } | null = null
+
+  /** What the board remembers between visits: the match record, the shortest
+   *  leg, and the tally. Local, like the ledger — the house keeps its own
+   *  book and nobody audits it. */
+  type OcheRecord = { won: number; lost: number; best: number; tally: number }
+  const RECORD_KEY = 'rev:lounge:oche'
+  const loadRecord = (): OcheRecord => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(RECORD_KEY) ?? '{}') as Partial<OcheRecord>
+      return {
+        won: Number(raw.won) || 0, lost: Number(raw.lost) || 0,
+        best: Number(raw.best) || 0, tally: Number(raw.tally) || 0,
+      }
+    } catch { return { won: 0, lost: 0, best: 0, tally: 0 } }
+  }
+  const record = loadRecord()
+  const saveRecord = (): void => {
+    record.tally = tally
+    try { localStorage.setItem(RECORD_KEY, JSON.stringify(record)) } catch { /* private mode */ }
+  }
+  tally = record.tally
+  // The crowd is earned per evening; the tally is what carries over. A player
+  // walking back in gets the next fan on the next fifty, not a full house for
+  // having been here before.
+  tallyGiven = tallyFans(tally)
 
   const drawChalk = (): void => {
     const ctx = chalkCv.getContext('2d')
@@ -1036,45 +1117,82 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     ctx.fillStyle = '#d9cfae'
     ctx.textAlign = 'center'
     ctx.font = '600 30px Georgia, serif'
-    ctx.fillText('5 0 1', w / 2, 50)
-    ctx.font = 'italic 15px Georgia, serif'
+    ctx.fillText('5 0 1', w / 2, 46)
+    ctx.font = 'italic 14px Georgia, serif'
     ctx.fillStyle = 'rgba(217,207,174,.6)'
-    ctx.fillText('double out', w / 2, 70)
+    ctx.fillText(`double out · first to ${MATCH_LEGS}`, w / 2, 64)
     const rule = (y: number): void => {
       ctx.strokeStyle = 'rgba(217,207,174,.45)'
       ctx.lineWidth = 2
       ctx.beginPath(); ctx.moveTo(26, y); ctx.lineTo(w - 26, y); ctx.stroke()
     }
-    rule(84)
+    rule(78)
 
     // THE TWO SCORES — the only numbers that matter, biggest on the board.
     // The seat to throw carries the chalk mark, so whose turn it is is never
     // a question you have to hold in your head.
     seats.forEach((seat, i) => {
-      const y = 122 + i * 62
+      const y = 122 + i * 56
       const live = i === turnSeat
       ctx.textAlign = 'left'
-      ctx.font = `${live ? '600 ' : ''}19px Georgia, serif`
+      ctx.font = `${live ? '600 ' : ''}18px Georgia, serif`
       ctx.fillStyle = live ? '#e8dcc4' : 'rgba(217,207,174,.62)'
       ctx.fillText(live ? '▸ ' + seat.name : '  ' + seat.name, 26, y - 22)
       ctx.textAlign = 'right'
-      ctx.font = '600 42px Georgia, serif'
+      ctx.font = '600 40px Georgia, serif'
       ctx.fillStyle = live ? '#e8dcc4' : 'rgba(217,207,174,.62)'
       ctx.fillText(String(seat.score), w - 26, y)
-      if (seat.legs > 0) {
-        ctx.textAlign = 'left'
-        ctx.font = '15px Georgia, serif'
-        ctx.fillStyle = 'rgba(200,151,90,.9)'
-        ctx.fillText('legs ' + seat.legs, 26, y)
+      // legs as brass strokes: a match is three of them, and a row of marks
+      // reads at a glance in a way the word "legs 2" never does
+      for (let k = 0; k < MATCH_LEGS; k++) {
+        const lx = 28 + k * 13
+        ctx.fillStyle = k < seat.legs ? 'rgba(200,151,90,.95)' : 'rgba(217,207,174,.2)'
+        ctx.fillRect(lx, y - 12, 4, 13)
       }
     })
-    rule(258)
+    rule(194)
+
+    // THE HOUSE — the crowd, what it multiplies, and tonight's side bet. This
+    // block is the whole of the game that is not 501: how full the room is,
+    // what that is worth, and the alternate score that fills it.
+    const mult = crowdMultiplier(fans)
+    ctx.textAlign = 'left'
+    ctx.font = '15px Georgia, serif'
+    ctx.fillStyle = 'rgba(217,207,174,.72)'
+    ctx.fillText('THE HOUSE', 26, 218)
+    ctx.textAlign = 'right'
+    ctx.font = `600 ${mult > 1 ? 24 : 19}px Georgia, serif`
+    ctx.fillStyle = mult > 1 ? '#e0b578' : 'rgba(217,207,174,.5)'
+    ctx.fillText('×' + mult, w - 26, 219)
+    // one pip per pair of eyes, filled for the ones who are here
+    for (let i = 0; i < FANS_MAX; i++) {
+      const px = 33 + i * ((w - 66) / (FANS_MAX - 1))
+      ctx.beginPath()
+      ctx.arc(px, 236, 4.6, 0, Math.PI * 2)
+      if (i < fans) {
+        ctx.fillStyle = i < 9 ? 'rgba(224,181,120,.92)' : 'rgba(240,230,214,.95)'
+        ctx.fill()
+      } else {
+        ctx.strokeStyle = 'rgba(217,207,174,.28)'
+        ctx.lineWidth = 1.4
+        ctx.stroke()
+      }
+    }
+    const bet = QUIRKS[sideBet] ?? SMOKE_CALLS[sideBet]
+    ctx.textAlign = 'center'
+    ctx.font = 'italic 13px Georgia, serif'
+    ctx.fillStyle = 'rgba(200,151,90,.9)'
+    ctx.fillText(`tonight the house pays double: ${(bet?.shout ?? '').toLowerCase()}`, w / 2, 258)
+    ctx.font = '13px Georgia, serif'
+    ctx.fillStyle = 'rgba(217,207,174,.55)'
+    ctx.fillText(`tally ${tally} · next man at ${(tallyFans(tally) + 1) * TALLY_STEP}`, w / 2, 276)
+    rule(290)
 
     // THIS TURN — three lines, always three, so the empty ones read as darts
     // still in the hand rather than as nothing happening.
-    ctx.font = '24px Georgia, serif'
+    ctx.font = '23px Georgia, serif'
     for (let i = 0; i < 3; i++) {
-      const y = 292 + i * 34
+      const y = 318 + i * 32
       const d = turnDarts[i]
       ctx.textAlign = 'left'
       ctx.fillStyle = d ? '#d9cfae' : 'rgba(217,207,174,.22)'
@@ -1082,9 +1200,15 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       if (d) {
         ctx.textAlign = 'right'
         ctx.fillText(String(d.points), w - 30, y)
+        // the ring it landed in, in the alternate score's own currency
+        ctx.textAlign = 'center'
+        ctx.font = '13px Georgia, serif'
+        ctx.fillStyle = 'rgba(200,151,90,.75)'
+        ctx.fillText('+' + tallyOf(d), w / 2, y)
+        ctx.font = '23px Georgia, serif'
       }
     }
-    rule(404)
+    rule(400)
 
     // THE WAY OUT. A checkout hint is not a hint about the game, it IS the
     // game — knowing that 96 is T20, D18 is the difference between a player
@@ -1095,11 +1219,30 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     if (out) {
       ctx.font = '600 19px Georgia, serif'
       ctx.fillStyle = '#c8975a'
-      ctx.fillText(out.join('  '), w / 2, 400)
+      ctx.fillText(out.join('  '), w / 2, 424)
     }
-    ctx.font = 'italic 15px Georgia, serif'
+
+    // THE SHOUT. What the room just called, for as long as a room shouts it.
+    if (banner) {
+      const fade = Math.min(1, banner.t / 0.6)
+      ctx.font = `600 ${banner.shout.length > 16 ? 17 : 22}px Georgia, serif`
+      ctx.fillStyle = `rgba(240,230,214,${0.96 * fade})`
+      ctx.fillText(banner.shout, w / 2, 456)
+      if (banner.sub) {
+        ctx.font = `15px Georgia, serif`
+        ctx.fillStyle = `rgba(224,181,120,${0.95 * fade})`
+        ctx.fillText(banner.sub, w / 2, 476)
+      }
+    }
+    ctx.font = 'italic 14px Georgia, serif'
     ctx.fillStyle = 'rgba(217,207,174,.72)'
-    ctx.fillText(chalkNote, w / 2, 426)
+    ctx.fillText(chalkNote, w / 2, 498)
+    ctx.font = '12px Georgia, serif'
+    ctx.fillStyle = 'rgba(217,207,174,.45)'
+    ctx.fillText(
+      `matches ${record.won}–${record.lost}` + (record.best ? ` · best leg ${record.best} darts` : ''),
+      w / 2, 512,
+    )
     chalkTex.needsUpdate = true
   }
   drawChalk()
@@ -1149,13 +1292,11 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   pickables.push(boardFace)
   dartsGroup.add(boardFace)
   // warm halo + its own picture light: the room says "this one plays"
-  const dartHalo = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.5, 1.5),
-    new THREE.MeshBasicMaterial({
-      map: track(softDot()), color: 0xe0b578, transparent: true,
-      opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
-    }),
-  )
+  const dartHaloMat = track(new THREE.MeshBasicMaterial({
+    map: track(softDot()), color: 0xe0b578, transparent: true,
+    opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
+  }))
+  const dartHalo = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), dartHaloMat)
   dartHalo.position.z = -0.02
   dartsGroup.add(dartHalo)
   const dartHood = cyl(0.045, 0.055, 0.22, 10, brassGlow, 0, 0.56, 0.13)
@@ -1164,6 +1305,163 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   const dartSpot = new THREE.PointLight(0xffd9a0, 3.2, 2.6, 2)
   dartSpot.position.set(0, 0.5, 0.3)
   dartsGroup.add(dartSpot)
+
+  // ── THE CROWD ──────────────────────────────────────────────────────────
+  //
+  // A game needs somebody watching it. The regulars come over from the bar
+  // when the darts are worth watching and drift back when they are not, and
+  // how many of them are standing at the oche IS the multiplier on everything
+  // the house pays. The room's attention is a number, and you can see it.
+  //
+  // They are silhouettes on purpose — dark cloth, a head, one arm and a glass,
+  // lit by the board's own picture light. Faces would make them characters,
+  // and they are not characters, they are the ROOM.
+  const crowdGroup = new THREE.Group()
+  scene.add(slot('slot-darts', crowdGroup))
+  /** Where they stand, in the order they arrive.
+   *
+   *  The first four are up by the board and out to the sides, INSIDE what the
+   *  oche camera can see — a crowd you cannot see is not a crowd, and the
+   *  multiplier has to be a thing standing there rather than a number on a
+   *  board. The rest fill in behind, for the room view. The throwing lane and
+   *  the drinks cart are left clear: nobody stands in the flight. */
+  const CROWD_SPOTS: Array<[number, number]> = [
+    [-4.95, 2.30], [-4.90, -0.30],
+    [-5.05, 2.85], [-5.00, -0.85],
+    [-4.35, 2.95], [-4.30, -0.95],
+    [-3.60, 2.55], [-3.55, -0.55],
+    [-2.85, 2.85], [-2.80, -0.85],
+    [-3.85, 3.30], [-3.80, -1.30],
+  ]
+  // Nearly black on purpose. They stand a foot off the wall the board is on,
+  // under its picture light, so anything with real colour in it blows out and
+  // reads as furniture; dark cloth with a brass rim on it reads as a man.
+  const crowdCloth = [0x1a141f, 0x1d1512, 0x141019, 0x211812, 0x181420, 0x1e1a24]
+    .map(c => std({ color: c, roughness: 0.97, metalness: 0 }))
+  const crowdSkin = std({ color: 0x4a332a, roughness: 0.9, metalness: 0 })
+  const crowdGlass = std({
+    color: 0xa8845a, roughness: 0.34, metalness: 0.2,
+    transparent: true, opacity: 0.55,
+  })
+  type Regular = {
+    g: THREE.Group
+    /** The glass hand, on a shoulder pivot, so the room can raise it. */
+    arm: THREE.Group
+    base: [number, number]
+    phase: number
+    tall: number
+    /** 0 sat down at the bar · 1 standing at the oche. */
+    p: number
+  }
+  const crowd: Regular[] = CROWD_SPOTS.map(([x, z], i) => {
+    const g = new THREE.Group()
+    g.position.set(x, 0, z)
+    // square to the board, whichever side of the lane they are on
+    g.rotation.y = Math.atan2(-HALF_W + 0.1 - x, 1.0 - z)
+    const cloth = crowdCloth[i % crowdCloth.length]
+    const legs = cyl(0.13, 0.17, 0.86, 8, cloth, 0, 0.43, 0)
+    g.add(legs)
+    const coat = cyl(0.185, 0.15, 0.64, 10, cloth, 0, 1.16, 0)
+    g.add(coat)
+    const shoulders = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), cloth)
+    shoulders.scale.set(1, 0.42, 0.78)
+    shoulders.position.y = 1.47
+    g.add(shoulders)
+    // the far arm, hanging. Without it the silhouette is a bollard with a hat.
+    const idle = cyl(0.042, 0.036, 0.44, 6, cloth, -0.185, 1.2, 0.02)
+    idle.rotation.z = 0.07
+    g.add(idle)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.105, 10, 8), crowdSkin)
+    head.position.set(0, 1.62, 0.01)
+    g.add(head)
+    if (i % 3 === 0) {
+      g.add(cyl(0.16, 0.16, 0.012, 12, cloth, 0, 1.7, 0.01))
+      g.add(cyl(0.1, 0.11, 0.09, 12, cloth, 0, 1.75, 0.01))
+    }
+    const arm = new THREE.Group()
+    arm.position.set(0.185, 1.42, 0.03)
+    arm.rotation.x = -0.12
+    arm.add(cyl(0.045, 0.04, 0.42, 6, cloth, 0, -0.21, 0))
+    arm.add(cyl(0.038, 0.032, 0.075, 10, crowdGlass, 0, -0.46, 0.02))
+    g.add(arm)
+    // Only the legs cast: twelve figures' worth of shadow casters on the
+    // chandelier is a frame budget spent on shapes nobody looks at.
+    g.traverse(o => { if (o !== legs) (o as THREE.Mesh).castShadow = false })
+    crowdGroup.add(g)
+    return { g, arm, base: [x, z], phase: i * 1.73, tall: 0.94 + ((i * 37) % 13) / 100, p: 0 }
+  })
+
+  // ── THE SMOKE RINGS ────────────────────────────────────────────────────
+  //
+  // Somebody in a wingback blows a ring and it drifts across the board. It
+  // hangs over a bed for a few seconds — by preference the bed you are about
+  // to need, because the room is reading your checkout too — and a dart put
+  // through it pays by how near the middle of it went.
+  //
+  // It is the only bonus in the house that is about accuracy rather than
+  // arithmetic, and it is the one that makes the lounge itself part of the
+  // game: the smoke comes from the room, not from the board.
+  const smokeMat = track(new THREE.MeshBasicMaterial({
+    color: 0xcfc4b4, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  }))
+  const smokeMesh = new THREE.Mesh(track(new THREE.TorusGeometry(SMOKE_RING.r, 0.0055, 8, 44)), smokeMat)
+  smokeMesh.visible = false
+  smokeMesh.position.z = 0.098
+  dartsGroup.add(smokeMesh)
+  /** The live ring: where it started, where it is going, and how old it is. */
+  let smokeRing: { x: number; y: number; from: number; t: number } | null = null
+  let smokeWait = 7
+  /** Where a ring is worth putting: the bed you need if you have a checkout,
+   *  otherwise one of the beds anybody would be aiming at anyway. */
+  const smokeSpot = (): { x: number; y: number } => {
+    const out = checkout(seats[0].score, 3)
+    const label = out ? out[out.length - 1] : ['T20', 'T19', 'BULL', 'T18', 'D16'][Math.floor(Math.random() * 5)]
+    const shot = parseShot(label)
+    const c = bedCentre(shot.n, shot.mult)
+    return { x: c.x, y: c.y }
+  }
+
+  // ── THE POPS ───────────────────────────────────────────────────────────
+  // Brass light off the sisal when the room reacts. Restraint: a soft dot that
+  // grows and goes, no sparks, no confetti — this is a lounge.
+  const popMat = track(new THREE.MeshBasicMaterial({
+    map: track(softDot()), color: 0xffd9a0, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+  }))
+  const popGeo = track(new THREE.PlaneGeometry(1, 1))
+  const pops = Array.from({ length: 5 }, () => {
+    const m = new THREE.Mesh(popGeo, popMat.clone())
+    m.visible = false
+    m.position.z = 0.076
+    dartsGroup.add(m)
+    return { m, t: 0, size: 0.3 }
+  })
+  const popAt = (x: number, y: number, size: number): void => {
+    const p = pops.find(q => q.t <= 0) ?? pops[0]
+    p.m.position.set(x, y, 0.076)
+    p.t = 1
+    p.size = size
+    p.m.visible = true
+  }
+
+  /** How loud the room is, right now. The roar drives everything at once — the
+   *  shake, the fire, how far the crowd comes out of its seat — because a thing
+   *  that is loud in only one register reads as a bug. */
+  let shake = 0
+  let crowdRise = 0
+  let roomFlare = 0
+  /** How committed the room is to the board: 0 you are sitting by the fire,
+   *  1 you are AT the oche and the lounge has gone quiet for it. */
+  let oche = 0
+  let sinceThrow = 999
+  let viewIsDarts = false
+  const roar = (level: number): void => {
+    if (level <= 0) return
+    shake = Math.max(shake, 0.22 + level * 0.26)
+    crowdRise = Math.max(crowdRise, 0.45 + level * 0.18)
+    roomFlare = Math.max(roomFlare, level >= 3 ? 1 : level * 0.3)
+  }
 
   // thrown darts — shared geometry, three on the board at most
   const stuck = new THREE.Group()
@@ -1282,7 +1580,11 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   /** The throw in progress: where you pointed, and how long you have held. */
   let aim: { x: number; y: number; held: number } | null = null
   /** Darts in the air. */
-  type Flight = { g: THREE.Group; from: THREE.Vector3; to: THREE.Vector3; t: number; hit: DartHit }
+  type Flight = {
+    g: THREE.Group; from: THREE.Vector3; to: THREE.Vector3; t: number; hit: DartHit
+    /** Where it landed, board-local — the side bets need the sisal, not the score. */
+    at: { x: number; y: number }
+  }
   const flights: Flight[] = []
   /** Deferred beats — the pause before the Colonel steps up, the pause on a
    *  bust so you can read it. Ticked down with the room, so they stop when the
@@ -1304,13 +1606,129 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     const to = new THREE.Vector3(x, y, 0.069)
     g.position.copy(LAUNCH)
     stuck.add(g)
-    flights.push({ g, from: LAUNCH.clone(), to, t: 0, hit })
+    flights.push({ g, from: LAUNCH.clone(), to, t: 0, hit, at: { x, y } })
+    sinceThrow = 0
+  }
+
+  /**
+   * WHAT THE ROOM DOES ABOUT IT — every call in the house comes through here.
+   *
+   * The crowd moves FIRST and the house pays at the new multiplier, which is
+   * the right way round: a ton eighty fills the room and then pays for a full
+   * one. Nothing in this function knows the score, and nothing downstream of
+   * it can change one. That is the whole arrangement.
+   */
+  const reactTo = (spec: CallSpec, mine: boolean, doubled = false, quiet = false): number => {
+    fans = applyFans(fans, spec)
+    const mult = crowdMultiplier(fans)
+    const paid = mine ? spec.embers * mult * (doubled ? SIDE_BET_FACTOR : 1) : 0
+    if (paid > 0) {
+      // The ledger lives on the page. The board only ever says what happened.
+      window.dispatchEvent(new CustomEvent('lounge3d:call', {
+        detail: {
+          id: spec.id, shout: spec.shout, label: spec.label ?? spec.shout,
+          base: spec.embers, mult, doubled, embers: paid, fans, at: Date.now(),
+        },
+      }))
+    }
+    if (spec.shout && !quiet) {
+      const sub = paid > 0
+        ? '+' + paid + ' embers' +
+          (doubled ? ' · tonight’s bet, doubled'
+            : mult > 1 ? ' · ' + spec.embers + ' × ' + mult : '')
+        : ''
+      banner = { shout: spec.shout, sub, t: 2.7 }
+    }
+    roar(spec.roar)
+    return paid
+  }
+
+  /** THE ALTERNATE SCORE. Rings counted up, and the regulars they bring over —
+   *  the only thing in the room that pays no attention at all to the leg. */
+  const addTally = (hit: DartHit): void => {
+    tally = Math.max(0, tally + tallyOf(hit))
+    const owed = tallyFans(tally) - tallyGiven
+    if (owed > 0) {
+      tallyGiven += owed
+      fans = Math.min(FANS_MAX, fans + owed)
+      banner = { shout: 'THE ROOM COUNTS ' + tally, sub: 'another one over from the bar', t: 2.2 }
+      roar(1)
+    }
+    saveRecord()
+  }
+
+  /** The turn as the room saw it: its name, and every side bet the SHAPE of it
+   *  won. A bust pays nothing at all — nobody scored. The bets are paid poorest
+   *  first, so the dearest one is the one left chalked on the board. */
+  const endTurn = (busted: boolean): void => {
+    const mine = turnSeat === 0
+    const tc = turnCall(turnDarts, busted)
+    if (!mine) {
+      // The room turns to watch HIM, and a crowd facing the other way is worth
+      // nothing to you.
+      if (!busted && turnDarts.reduce((n, h) => n + h.points, 0) >= 100) reactTo(CALLS.housed, false)
+      return
+    }
+    // The turn's own name goes up FIRST and keeps the chalk: a ton eighty is
+    // not upstaged by the fact that it was also three even numbers. The bets
+    // pay quietly underneath it, at the fuller room the big call just brought
+    // in, and are listed on the second line.
+    if (tc) reactTo(tc, true)
+    if (!busted) sideBetsRide(!!tc)
+  }
+
+  /** The side bets on the turn just thrown, paid quietly and listed under
+   *  whatever the room is already shouting. Called from the end of a turn AND
+   *  from a leg won mid-turn — three primes that happen to check out are still
+   *  three primes, and it would be a mean house that noticed only one of them.
+   *
+   *  `headlined` says something is already on the chalk to ride under. */
+  const sideBetsRide = (headlined: boolean): void => {
+    const bets = quirkCalls(turnDarts, turnLandings).sort((a, b) => a.embers - b.embers)
+    let extra = 0
+    for (const q of bets) extra += reactTo(q, true, q.id === sideBet, true)
+    if (!bets.length) return
+    const names = bets.map(b => b.shout.toLowerCase()).reverse().join(' · ')
+    const paid = extra > 0 ? '+' + extra : ''
+    if (headlined && banner) {
+      banner.sub = [banner.sub, names, paid].filter(Boolean).join(' · ')
+    } else {
+      const best = bets[bets.length - 1]
+      banner = {
+        shout: best.shout,
+        sub: [paid ? paid + ' embers' : '', bets.length > 1 ? names : ''].filter(Boolean).join(' · '),
+        t: 2.7,
+      }
+    }
   }
 
   /** 501, applied. Everything that makes the last hundred hard lives here. */
-  const applyHit = (hit: DartHit): void => {
+  const applyHit = (hit: DartHit, at: { x: number; y: number }): void => {
     const seat = seats[turnSeat]
+    const mine = turnSeat === 0
     turnDarts.push(hit)
+    turnLandings.push(at)
+
+    if (mine) {
+      legDarts += 1
+      addTally(hit)
+      // THROUGH THE SMOKE — the ring is scored where it was when the dart
+      // arrived, and a threaded ring is spent: the room does not blow two.
+      if (smokeRing && smokeMat.opacity > 0.12) {
+        const sc = smokeCall(Math.hypot(at.x - smokeRing.x, at.y - smokeRing.y))
+        if (sc) {
+          reactTo(sc, true, sideBet === sc.id)
+          popAt(smokeRing.x, smokeRing.y, 0.55)
+          smokeRing = null
+          smokeMesh.visible = false
+          smokeWait = SMOKE_RING.gapMin * 0.7
+        }
+      }
+      const dc = dartCall(hit)
+      if (dc) reactTo(dc, true)
+      if (hit.mult === 3 || hit.label === 'D·BULL') popAt(at.x, at.y, 0.32)
+    }
+
     const res = resolveThrow(seat.score, hit)
     if (res.outcome === 'bust') {
       // A bust gives the WHOLE turn back, not just this dart.
@@ -1318,30 +1736,38 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       chalkNote = res.reason === 'no-double' ? 'not a double — bust'
         : res.reason === 'left-one' ? 'left on one — bust'
         : 'bust'
+      endTurn(true)
       drawChalk()
-      after(1.1, () => nextTurn())
+      after(1.3, () => nextTurn())
       return
     }
     seat.score = res.score
     if (res.outcome === 'leg') {
       seat.legs += 1
-      chalkNote = `${seat.name.toLowerCase()} takes the leg`
+      reactTo(mine ? legCall({ darts: legDarts, turnStart, finish: hit }) : CALLS.houseleg, mine)
+      if (mine) sideBetsRide(true)
+      if (mine && (record.best === 0 || legDarts < record.best)) record.best = legDarts
+      saveRecord()
+      chalkNote = seat.name.toLowerCase() + ' takes the leg'
+      popAt(at.x, at.y, 0.6)
       // The page pays Embers for a leg taken off the house. On `window`, not
       // the host element — buildRoom never sees the mount.
       window.dispatchEvent(new CustomEvent('lounge3d:leg', {
-        detail: { who: seat.name, legs: seat.legs, house: seat.name !== 'YOU' },
+        detail: { who: seat.name, legs: seat.legs, house: seat.name !== 'YOU', darts: legDarts },
       }))
       drawChalk()
-      after(2.0, () => newLeg())
+      if (seat.legs >= MATCH_LEGS) after(2.4, () => endMatch(mine))
+      else after(2.0, () => newLeg())
       return
     }
     if (turnDarts.length >= 3) {
-      chalkNote = `${turnStart - seat.score} scored`
+      chalkNote = (turnStart - seat.score) + ' scored'
+      endTurn(false)
       drawChalk()
-      after(1.1, () => nextTurn())
+      after(1.3, () => nextTurn())
       return
     }
-    chalkNote = hit.points === 0 ? 'off the wire' : `${3 - turnDarts.length} in hand`
+    chalkNote = hit.points === 0 ? 'off the wire' : (3 - turnDarts.length) + ' in hand'
     drawChalk()
     if (houseThrowing) after(0.75, () => houseDart())
   }
@@ -1351,6 +1777,7 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   const nextTurn = (): void => {
     turnSeat = turnSeat === 0 ? 1 : 0
     turnDarts = []
+    turnLandings = []
     turnStart = seats[turnSeat].score
     clearBoard()
     if (turnSeat === 1) {
@@ -1366,7 +1793,8 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   }
 
   /** Alternate the throw each leg — the loser of a leg starts the next, which
-   *  is the only mercy the game offers. */
+   *  is the only mercy the game offers. A fresh leg draws a fresh side bet, so
+   *  the quirk nobody has ever hit gets its evening eventually. */
   let legStarter = 0
   const newLeg = (): void => {
     seats[0].score = 501
@@ -1374,7 +1802,11 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     legStarter = legStarter === 0 ? 1 : 0
     turnSeat = legStarter
     turnDarts = []
+    turnLandings = []
     turnStart = 501
+    legDarts = 0
+    sideBet = drawSideBet()
+    banner = null
     clearBoard()
     houseThrowing = turnSeat === 1
     chalkNote = houseThrowing ? 'the colonel throws first' : 'you throw first'
@@ -1382,9 +1814,28 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     if (houseThrowing) after(1.0, () => houseDart())
   }
 
+  /** THE MATCH — three legs. The crowd you earned on the way stays where it is:
+   *  form is the one thing in this room that carries over. */
+  const endMatch = (mine: boolean): void => {
+    reactTo(mine ? CALLS.match : CALLS.housematch, mine)
+    if (mine) record.won += 1
+    else record.lost += 1
+    saveRecord()
+    chalkNote = mine ? 'the match is yours' : 'the colonel keeps the board'
+    window.dispatchEvent(new CustomEvent('lounge3d:match', {
+      detail: { won: mine, legs: [seats[0].legs, seats[1].legs], record: { ...record }, at: Date.now() },
+    }))
+    drawChalk()
+    after(3.4, () => {
+      seats[0].legs = 0
+      seats[1].legs = 0
+      newLeg()
+    })
+  }
+
   /** The Colonel's hand. Gaussian scatter about the bed he wants — good enough
-   *  to punish a loose leg, human enough to miss a double. He is beatable;
-   *  he is not a pushover. */
+   *  to punish a loose leg, human enough to miss a double. He is beatable; he
+   *  is not a pushover. */
   const houseDart = (): void => {
     if (!houseThrowing) return
     const seat = seats[1]
@@ -1436,13 +1887,108 @@ function buildRoom(art: Record<string, string | undefined>): Room {
 
   const cancelAim = (): void => { aim = null; aimGroup.visible = false }
 
-  /** Animate the aim bead and the darts in the air. Driven by the room's tick
-   *  so everything stops together when the scene leaves the screen. */
-  const tickDarts = (dt: number): void => {
+  /** Animate the aim bead, the darts in the air, the crowd, the smoke and the
+   *  room's own attention. Driven by the room's tick so everything stops
+   *  together when the scene leaves the screen. */
+  const tickDarts = (t: number, dt: number): void => {
     for (let i = beats.length - 1; i >= 0; i--) {
       const beat = beats[i]
       beat.t -= dt
       if (beat.t <= 0) { beats.splice(i, 1); beat.fn() }
+    }
+
+    // The shout fades off the chalk. Redrawn on a twelfth of a second while it
+    // goes, not every frame — it is a 260-pixel canvas, not a display.
+    if (banner) {
+      const was = banner.t
+      banner.t -= dt
+      if (banner.t <= 0) { banner = null; drawChalk() }
+      else if (banner.t < 0.6 && Math.floor(was * 12) !== Math.floor(banner.t * 12)) drawChalk()
+    }
+
+    // ── THE ROOM'S ATTENTION ───────────────────────────────────────────
+    // You never leave the lounge to play; the lounge comes to the board. At
+    // the oche the general light eases down, the board's own picture light
+    // comes up, and the halo behind it opens — the room commits to the game
+    // and everything else in it goes quiet.
+    sinceThrow += dt
+    const atOche = viewIsDarts || !!aim || flights.length > 0 || sinceThrow < 22
+    oche += ((atOche ? 1 : 0) - oche) * Math.min(1, dt * 2.4)
+    chandelierLight.intensity = 16 - oche * 7.5
+    hemi.intensity = 1.15 - oche * 0.42
+    roomFill.intensity = 13 - oche * 5.5
+    dartSpot.intensity = 3.2 + oche * 2.6
+    dartHaloMat.opacity = 0.2 + oche * 0.2
+
+    // ── THE ROAR ───────────────────────────────────────────────────────
+    // Trauma, spent down. The shake moves the ROOM rather than the camera:
+    // the orbit controls own the camera and would fight for it every frame.
+    shake = Math.max(0, shake - dt * 2.1)
+    crowdRise = Math.max(0, crowdRise - dt * 0.72)
+    roomFlare = Math.max(0, roomFlare - dt * 1.35)
+    const jolt = shake * shake * 0.045
+    scene.position.set(Math.sin(t * 71) * jolt, Math.cos(t * 53) * jolt * 0.6, 0)
+
+    // ── THE CROWD ──────────────────────────────────────────────────────
+    // They stand up for the darts and sit back down when the room loses
+    // interest. The hush is you on the board about to throw: the sway stops,
+    // and they lean in.
+    const hush = aim ? 1 : 0
+    for (let i = 0; i < crowd.length; i++) {
+      const c = crowd[i]
+      const here = oche > 0.12 && i < fans
+      c.p += ((here ? 1 : 0) - c.p) * Math.min(1, dt * (here ? 2.6 : 1.5))
+      const seen = c.p > 0.02
+      c.g.visible = seen
+      if (!seen) continue
+      c.g.rotation.z = Math.sin(t * 1.05 + c.phase) * 0.022 * (1 - hush * 0.85)
+      c.g.scale.set(1, c.tall * (0.44 + c.p * 0.56), 1)
+      c.g.position.set(
+        c.base[0] + (1 - c.p) * 0.34 - hush * 0.035,
+        crowdRise * 0.035 * Math.abs(Math.sin(t * 8.6 + c.phase)),
+        c.base[1],
+      )
+      // glasses up when the room goes up
+      c.arm.rotation.x = -0.12 - crowdRise * (1.9 + Math.sin(t * 7.4 + c.phase) * 0.25)
+    }
+
+    // ── THE SMOKE RINGS ────────────────────────────────────────────────
+    if (smokeRing) {
+      smokeRing.t += dt
+      const age = smokeRing.t / SMOKE_RING.life
+      if (age >= 1) {
+        smokeRing = null
+        smokeMesh.visible = false
+        smokeWait = SMOKE_RING.gapMin + Math.random() * (SMOKE_RING.gapMax - SMOKE_RING.gapMin)
+      } else {
+        smokeRing.x = smokeRing.from + age * SMOKE_RING.drift
+        const fade = Math.min(1, smokeRing.t / 0.9) * Math.min(1, (SMOKE_RING.life - smokeRing.t) / 1.3)
+        smokeMat.opacity = 0.34 * fade
+        smokeMesh.position.set(smokeRing.x, smokeRing.y + Math.sin(smokeRing.t * 0.8) * 0.006, 0.098)
+        // smoke widens and thins as it goes, and turns over slowly
+        smokeMesh.scale.setScalar(1 + age * 0.3)
+        smokeMesh.rotation.z = smokeRing.t * 0.35
+      }
+    } else if (oche > 0.5 && !houseThrowing && !aim) {
+      smokeWait -= dt
+      if (smokeWait <= 0) {
+        const spot = smokeSpot()
+        const from = spot.x - SMOKE_RING.drift / 2
+        smokeRing = { x: from, y: spot.y, from, t: 0 }
+        smokeMat.opacity = 0
+        smokeMesh.visible = true
+      }
+    }
+
+    // ── THE POPS ───────────────────────────────────────────────────────
+    for (const q of pops) {
+      if (q.t <= 0) continue
+      q.t -= dt * 2.4
+      const e = 1 - Math.max(0, q.t)
+      const mat = q.m.material as THREE.MeshBasicMaterial
+      q.m.scale.setScalar(0.02 + e * q.size)
+      mat.opacity = Math.max(0, 1 - e) * 0.8
+      if (q.t <= 0) { q.m.visible = false; mat.opacity = 0 }
     }
 
     if (aim) {
@@ -1468,7 +2014,7 @@ function buildRoom(art: Record<string, string | undefined>): Room {
         f.g.position.copy(f.to)
         f.g.rotation.set(Math.sin(f.to.x * 31) * 0.07, Math.cos(f.to.y * 23) * 0.07, 0)
         flights.splice(i, 1)
-        applyHit(f.hit)
+        applyHit(f.hit, f.at)
         continue
       }
       const e = f.t
@@ -1477,6 +2023,34 @@ function buildRoom(art: Record<string, string | undefined>): Room {
       f.g.position.y += Math.sin(e * Math.PI) * 0.055
       f.g.rotation.z = (1 - e) * 0.5
     }
+  }
+
+  /** The page tells the board when the camera has come to the oche — the room
+   *  dims for a match, and a match is what the darts view IS. */
+  const setView = (name: string): void => { viewIsDarts = name === 'darts' }
+
+  /** What the chalk says, for the page and for a harness. Read-only. */
+  const ocheState = (): Record<string, unknown> => ({
+    you: seats[0].score, house: seats[1].score,
+    legs: [seats[0].legs, seats[1].legs],
+    turn: turnSeat === 0 ? 'you' : 'house',
+    darts: turnDarts.map(d => d.label),
+    fans, mult: crowdMultiplier(fans), tally, sideBet,
+    ring: smokeRing
+      ? { x: +smokeRing.x.toFixed(4), y: +smokeRing.y.toFixed(4), lit: +smokeMat.opacity.toFixed(3) }
+      : null,
+    shout: banner?.shout ?? '', note: chalkNote, record: { ...record },
+    oche: +oche.toFixed(2), crowdUp: crowd.filter(c => c.g.visible).length,
+  })
+
+  /** Put a dart in at a board-local point, no aim and no skill — the Colonel's
+   *  own path in. It is here so the game can be driven by a test harness
+   *  through `RevLounge3D.oche`; the ledger it feeds is local to this browser,
+   *  same as the rest of the purse. */
+  const throwAt = (x: number, y: number): boolean => {
+    if (houseThrowing || turnSeat !== 0 || flights.length > 0) return false
+    launch(x, y)
+    return true
   }
 
   // ── window (right wall) ────────────────────────────────────────────────
@@ -2365,10 +2939,11 @@ function buildRoom(art: Record<string, string | undefined>): Room {
 
   const tick = (t: number, dt: number): void => {
     // the oche: the aim bead breathes, darts fly, the Colonel takes his turn
-    tickDarts(dt)
+    tickDarts(t, dt)
     // fire: flicker the flames and the light together
     const flick = 0.82 + Math.sin(t * 11.3) * 0.06 + Math.sin(t * 4.1) * 0.07 + Math.sin(t * 23.7) * 0.03
-    fireLight.intensity = 22 * flick
+    // the fire jumps when the room does — roomFlare is the roar, spent down
+    fireLight.intensity = 22 * flick * (1 + roomFlare * 0.5)
     if (cameraRef) cameraRef.getWorldPosition(camPos)
     for (const { mesh, mat, phase } of flames) {
       mesh.scale.set(0.85 + Math.sin(t * 5.5 + phase) * 0.12, 0.86 + Math.sin(t * 7.1 + phase) * 0.18, 1)
@@ -2433,7 +3008,10 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     scene, slots, pickables,
     attachCamera: c => { cameraRef = c },
     tick, dispose,
-    darts: { beginAim, moveAim, release: releaseAim, cancel: cancelAim },
+    darts: {
+      beginAim, moveAim, release: releaseAim, cancel: cancelAim,
+      view: setView, state: ocheState, throwAt,
+    },
   }
 }
 
@@ -2446,8 +3024,12 @@ const VIEWS: Record<string, { pos: [number, number, number]; target: [number, nu
   humidor: { pos: [1.1, 1.5, -0.9], target: [5.4, 0.9, -1.6] },
   // seated, just in front of the left wingback, facing the hearth
   chair: { pos: [-0.72, 1.24, 2.75], target: [0.05, 0.85, -4.0] },
-  // at the oche — square to the board, close enough to aim
-  darts: { pos: [-2.6, 1.66, 1.0], target: [-5.5, 1.72, 1.0] },
+  // AT THE OCHE — square to the board, close enough to aim at a treble and far
+  // enough back that the regulars who came over to watch are in the shot with
+  // it. A crowd you cannot see is not a crowd, and the crowd is the multiplier.
+  // (stood a foot to the near side of the floor lamp at z 0.35 — from directly
+  // behind it the shade fills a third of the frame at eye level)
+  darts: { pos: [-2.05, 1.74, 1.35], target: [-5.5, 1.66, 1.05] },
   // eye to the little doorway of the model on the pedestal
   miniature: { pos: [3.45, 1.22, 1.5], target: [4.35, 0.97, 2.15] },
   // El Mercado — one per purchasable prop, so a thing you just bought can
@@ -2598,6 +3180,7 @@ function boot(): boolean {
   const view = (name: string): void => {
     const v = VIEWS[name]
     if (!v) return
+    room.darts.view(name)
     tween = {
       from: camera.position.clone(),
       to: new THREE.Vector3(...v.pos),
@@ -2660,6 +3243,7 @@ function boot(): boolean {
     },
     view,
     frame: () => frame(1 / 60),
+    oche: { state: room.darts.state, throwAt: room.darts.throwAt },
     pose: () => ({
       pos: camera.position.toArray().map(n => +n.toFixed(2)),
       target: controls.target.toArray().map(n => +n.toFixed(2)),
