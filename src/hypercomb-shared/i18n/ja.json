@@ -241,6 +241,8 @@
   "providers.addClose": "閉じる",
   "providers.addHint": "プロバイダー仕様（llm-provider@1 JSON）を貼り付けてください",
   "providers.import": "インポート",
+  "providers.lend": "自分が使っていないとき、ローカルモデルを群れに貸します",
+  "providers.lendHint": "鍵の要らないモデルだけを提供します（課金されるモデルは決して提供しません）。同時に1件まで、ご自身の利用中は応じません。",
   "slash.atomize-ui": "アトマイザーツールバーを切替",
   "atomizer.spacing-placeholder": "例: 8px 12px",
   "atomizer.title": "アトマイザー",

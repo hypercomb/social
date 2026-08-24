@@ -237,6 +237,8 @@
   "providers.addClose": "Schließen",
   "providers.addHint": "Anbieter-Spezifikation einfügen (llm-provider@1 JSON)",
   "providers.import": "Importieren",
+  "providers.lend": "Den Schwarm meine lokalen Modelle nutzen lassen, wenn ich sie nicht brauche",
+  "providers.lendHint": "Angeboten werden nur Modelle ohne Schlüssel — nie eines, für das Sie zahlen. Eine Anfrage nach der anderen, und nie während Sie selbst arbeiten.",
   "slash.atomize-ui": "Atomisierer-Leiste umschalten",
   "atomizer.spacing-placeholder": "z.B. 8px 12px",
   "atomizer.title": "Atomisierer",

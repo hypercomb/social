@@ -237,6 +237,8 @@
   "providers.addClose": "关闭",
   "providers.addHint": "请粘贴提供方规范（llm-provider@1 JSON）",
   "providers.import": "导入",
+  "providers.lend": "我不用时，允许蜂群使用我的本地模型",
+  "providers.lendHint": "只提供无需密钥的模型，绝不提供需付费的模型。一次只处理一个请求，您自己使用时不会响应。",
   "slash.atomize-ui": "切换原子化器工具栏",
   "atomizer.spacing-placeholder": "例如 8px 12px",
   "atomizer.title": "原子化器",

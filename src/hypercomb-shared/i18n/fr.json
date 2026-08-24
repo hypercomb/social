@@ -237,6 +237,8 @@
   "providers.addClose": "Fermer",
   "providers.addHint": "Collez une spécification de fournisseur (JSON llm-provider@1)",
   "providers.import": "Importer",
+  "providers.lend": "Laisser l'essaim utiliser mes modèles locaux quand je ne m'en sers pas",
+  "providers.lendHint": "Seuls les modèles sans clé sont proposés — jamais un que vous payez. Une requête à la fois, et jamais pendant que vous l'utilisez.",
   "slash.atomize-ui": "basculer la barre de l'atomiseur",
   "atomizer.spacing-placeholder": "ex. 8px 12px",
   "atomizer.title": "atomiseurs",

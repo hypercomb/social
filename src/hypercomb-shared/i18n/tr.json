@@ -237,6 +237,8 @@
   "providers.addClose": "Kapat",
   "providers.addHint": "Bir sağlayıcı tanımı yapıştırın (llm-provider@1 JSON)",
   "providers.import": "İçe aktar",
+  "providers.lend": "Kullanmadığım zaman yerel modellerimi sürü kullanabilsin",
+  "providers.lendHint": "Yalnızca anahtar gerektirmeyen modeller sunulur — parasını ödediğiniz bir model asla. Aynı anda tek istek ve siz kullanırken asla.",
   "slash.atomize-ui": "atomizer araç çubuğunu değiştir",
   "atomizer.spacing-placeholder": "ör. 8px 12px",
   "atomizer.title": "atomizer'lar",

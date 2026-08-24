@@ -237,6 +237,8 @@
   "providers.addClose": "إغلاق",
   "providers.addHint": "الصق مواصفة مزوّد (llm-provider@1 JSON)",
   "providers.import": "استيراد",
+  "providers.lend": "اسمح للسرب باستخدام نماذجي المحلية عندما لا أستخدمها",
+  "providers.lendHint": "تُعرض فقط النماذج التي لا تحتاج مفتاحًا — ولا يُعرض أبدًا نموذج تدفع مقابله. طلب واحد في كل مرة، ولا شيء أثناء استخدامك أنت.",
   "slash.atomize-ui": "تبديل شريط المذرر",
   "atomizer.spacing-placeholder": "مثال: 8px 12px",
   "atomizer.title": "المذررات",

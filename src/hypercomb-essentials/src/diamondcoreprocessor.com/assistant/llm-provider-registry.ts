@@ -61,7 +61,7 @@ import type {
 
 export const LLM_PROVIDER_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/LlmProviderRegistry'
 
-const TRANSPORTS: readonly LlmTransport[] = ['browser-http', 'host-relay', 'agent-bridge']
+const TRANSPORTS: readonly LlmTransport[] = ['browser-http', 'host-relay', 'agent-bridge', 'peer-swarm']
 
 export class LlmProviderRegistry extends EventTarget {
 

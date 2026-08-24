@@ -27,7 +27,7 @@
 // the whole answer as a single chunk, so a caller never has to ask whether
 // its provider streams.
 
-import { llmKeyStore } from '@hypercomb/core'
+import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
 import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
@@ -83,12 +83,32 @@ const MAX_ERROR_BODY = 600
 
 const registry = (): LlmProviderRegistry => llmProviderRegistry()
 
-/** Can this provider be reached by `fetch` at all? An `agent-bridge` cannot:
+/** Can this seam answer with this provider at all? An `agent-bridge` cannot:
  *  it answers through the broker (an ask record a parked CLI drains), so it
- *  belongs to the ask path, never to this seam. Keeping the test here means
- *  one definition of "callable" for the roster and the resolver both. */
+ *  belongs to the ask path. A `peer-swarm` provider CAN — not by fetch, but
+ *  by asking the participant whose machine runs it — so it stays callable and
+ *  is routed below. Keeping the test here means one definition of "callable"
+ *  for the roster and the resolver both. */
 const isCallable = (provider: LlmProviderDescriptor): boolean =>
   provider.transport !== 'agent-bridge'
+
+/**
+ * THE PEER SEAM. `peer-models.drone` installs this when the swarm tier is
+ * live; without it a peer provider is simply not callable, which is the right
+ * answer for a shell that has no mesh. One function, so this file needs to
+ * know nothing about relays, pubkeys, or offers.
+ */
+export type PeerModelCaller = (
+  provider: LlmProviderDescriptor,
+  request: LlmRequest,
+  signal?: AbortSignal,
+) => Promise<LlmCallResult>
+
+let peerCaller: PeerModelCaller | null = null
+
+/** Install (or clear, with null) the transport that reaches other people's
+ *  machines. Called once, by the drone that owns the mesh conversation. */
+export const setPeerModelCaller = (caller: PeerModelCaller | null): void => { peerCaller = caller }
 
 /** The roster that can answer HTTP calls: reachable by fetch, has a key (or
  *  needs none), AND has not been switched off in the providers console.
@@ -98,6 +118,7 @@ const isCallable = (provider: LlmProviderDescriptor): boolean =>
 export const configuredProviders = (): LlmProviderDescriptor[] =>
   registry().all().filter(p =>
     isCallable(p) && llmActivation.isEnabled(p.id)
+    && (p.transport !== 'peer-swarm' || !!peerCaller)
     && (p.requiresKey === false || llmKeyStore.has(p.id)))
 
 /** Every ACTIVE provider whatever its transport — what the orchestrator picks
@@ -185,10 +206,32 @@ const send = async (
   return response
 }
 
-/** Ask a model. The normalized answer, whoever answered it. */
+/** Ask a model. The normalized answer, whoever answered it — including a
+ *  participant on the other side of the swarm. */
 export const callModel = async (call: LlmCall): Promise<LlmCallResult> => {
   const provider = resolveProvider(call)
   const request = buildRequest(provider, call)
+
+  // SOMEONE ELSE'S MACHINE. Routed rather than fetched, and refused clearly
+  // when this shell has no mesh — a peer provider left over from a previous
+  // session must not fail with a URL error.
+  if (provider.transport === 'peer-swarm') {
+    if (!peerCaller) {
+      throw new LlmDispatchError(
+        `"${provider.id}" runs on another participant's machine and the swarm is not available here`,
+        provider.id, request.model,
+      )
+    }
+    return peerCaller(provider, request, call.signal)
+  }
+
+  // THE PARTICIPANT'S OWN WORK WINS. A local model this machine may be
+  // lending to the swarm is busy the moment its owner uses it; peer-models
+  // reads this stamp to hold requests off until they are done.
+  if (provider.requiresKey === false && provider.transport === 'browser-http') {
+    EffectBus.emit('llm:local-used', { providerId: provider.id })
+  }
+
   const response = await send(provider, request, call.signal)
   return provider.fromResponse(await response.json(), request)
 }
@@ -234,7 +277,9 @@ async function* sseFrames(response: Response, signal?: AbortSignal): AsyncGenera
  */
 export async function* streamModel(call: LlmCall): AsyncGenerator<string> {
   const provider = resolveProvider(call)
-  if (!provider.fromStreamEvent) {
+  // A peer answers in one piece: the mesh carries a reply, not a stream. The
+  // caller's loop is unchanged — it just yields once.
+  if (provider.transport === 'peer-swarm' || !provider.fromStreamEvent) {
     const result = await callModel(call)
     if (result.text) yield result.text
     return

@@ -237,6 +237,8 @@
   "providers.addClose": "Tutup",
   "providers.addHint": "Tempel spesifikasi penyedia (JSON llm-provider@1)",
   "providers.import": "Impor",
+  "providers.lend": "Biarkan swarm memakai model lokal saya saat saya tidak memakainya",
+  "providers.lendHint": "Hanya model tanpa kunci yang ditawarkan — tidak pernah yang Anda bayar. Satu permintaan pada satu waktu, dan tidak pernah saat Anda sedang memakainya.",
   "slash.atomize-ui": "alihkan bilah atomizer",
   "atomizer.spacing-placeholder": "mis. 8px 12px",
   "atomizer.title": "atomizer",

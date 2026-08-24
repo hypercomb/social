@@ -241,6 +241,8 @@
   "providers.addClose": "Close",
   "providers.addHint": "Paste a provider spec (llm-provider@1 JSON)",
   "providers.import": "Import",
+  "providers.lend": "Let the swarm use my local models when I am not",
+  "providers.lendHint": "Only models that need no key are offered — never one you pay for. One request at a time, and never while you are using it yourself.",
   "slash.atomize-ui": "toggle the atomizer toolbar",
   "atomizer.spacing-placeholder": "e.g. 8px 12px",
   "atomizer.title": "atomizers",

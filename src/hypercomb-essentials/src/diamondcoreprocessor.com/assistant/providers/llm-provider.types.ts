@@ -29,6 +29,14 @@ export type LlmTransport =
   | 'host-relay'
   /** An ask record a parked agent session answers — the only tier that can READ THE HIVE. */
   | 'agent-bridge'
+  /**
+   * A MODEL ON SOMEBODY ELSE'S MACHINE, offered to the swarm. The request
+   * travels over the mesh to the participant who runs it; they answer with
+   * their own hardware and send the text back. No key, no endpoint you can
+   * reach, and no hive access — and unlike every other tier, whether it can
+   * answer at all depends on somebody else being awake and not busy.
+   */
+  | 'peer-swarm'
 
 /** How heavy a model is within its vendor's line-up. Mirrors ModelTier. */
 export type LlmTier = 'deep' | 'balanced' | 'fast'
@@ -114,6 +122,14 @@ export type LlmProviderDescriptor = {
    * the ask carries. The picker badges this — it must never be implied.
    */
   readonly readsHive?: boolean
+
+  /**
+   * `peer-swarm` only: the pubkey of the participant whose machine answers.
+   * Identity, not decoration — it is the address the request is sent to, and
+   * what keeps two peers offering the same model from collapsing into one
+   * provider.
+   */
+  readonly peer?: string
 
   /** Build the HTTP request for one call. Pure. */
   toRequest(request: LlmRequest): LlmHttpRequest

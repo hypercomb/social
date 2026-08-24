@@ -237,6 +237,8 @@
   "providers.addClose": "Закрыть",
   "providers.addHint": "Вставьте спецификацию провайдера (JSON llm-provider@1)",
   "providers.import": "Импортировать",
+  "providers.lend": "Разрешить рою использовать мои локальные модели, когда они мне не нужны",
+  "providers.lendHint": "Предлагаются только модели без ключа — никогда та, за которую вы платите. По одному запросу и никогда, пока вы работаете сами.",
   "slash.atomize-ui": "переключить панель атомизатора",
   "atomizer.spacing-placeholder": "напр. 8px 12px",
   "atomizer.title": "атомизаторы",

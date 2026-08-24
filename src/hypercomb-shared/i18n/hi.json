@@ -237,6 +237,8 @@
   "providers.addClose": "बंद करें",
   "providers.addHint": "प्रदाता विनिर्देश पेस्ट करें (llm-provider@1 JSON)",
   "providers.import": "आयात करें",
+  "providers.lend": "जब मैं उपयोग न करूँ तब झुंड को मेरे स्थानीय मॉडल इस्तेमाल करने दें",
+  "providers.lendHint": "केवल बिना कुंजी वाले मॉडल दिए जाते हैं — कभी वह नहीं जिसका आप भुगतान करते हैं। एक बार में एक अनुरोध, और जब आप स्वयं उपयोग कर रहे हों तब कभी नहीं।",
   "slash.atomize-ui": "ऐटमाइज़र टूलबार टॉगल करें",
   "atomizer.spacing-placeholder": "जैसे 8px 12px",
   "atomizer.title": "ऐटमाइज़र",

@@ -237,6 +237,8 @@
   "providers.addClose": "Cerrar",
   "providers.addHint": "Pega una especificación de proveedor (JSON llm-provider@1)",
   "providers.import": "Importar",
+  "providers.lend": "Dejar que el enjambre use mis modelos locales cuando yo no los use",
+  "providers.lendHint": "Solo se ofrecen modelos que no necesitan clave — nunca uno que pagas. Una petición a la vez, y nunca mientras lo estés usando tú.",
   "slash.atomize-ui": "alternar barra del atomizador",
   "atomizer.spacing-placeholder": "ej. 8px 12px",
   "atomizer.title": "atomizadores",

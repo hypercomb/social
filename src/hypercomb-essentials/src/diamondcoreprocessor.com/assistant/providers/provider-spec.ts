@@ -13,13 +13,20 @@
 // already-tested shared one. A vendor too odd for any family stays a code
 // descriptor, which is what the code path is for.
 //
-// There is a FOURTH shape that is not HTTP at all: `agent-bridge`. A frontier
+// Two of the shapes are not HTTP at all. `agent-bridge` A frontier
 // CLI parked on the broker (Claude Code, Codex, Gemini CLI, …) answers by
 // reading the hive and writing notes, not by returning a response body — so
 // its descriptor carries models, colour and honesty flags but no endpoint,
 // and building an HTTP request from it THROWS. `scripts/bridge/
 // bridge-agents.cjs` announces these after probing the machine's PATH; the
 // ask path (llm.queen → the broker) is how they are actually reached.
+//
+// `peer-swarm` is the other: a model running on ANOTHER PARTICIPANT'S
+// machine, offered to the swarm. It has no endpoint this client could dial —
+// the request travels over the mesh and the offering peer answers with their
+// own hardware — so building an HTTP request from it throws too. It differs
+// from a bridge in the one way that matters to a caller: a peer CAN answer a
+// normal call, so the dispatch routes it instead of refusing it.
 //
 // SECURITY POSTURE. A spec names an endpoint the participant's key will be
 // sent to. The compiler therefore refuses non-HTTPS endpoints (localhost
@@ -62,9 +69,9 @@ export type LlmProviderSpec = {
   /** Colour family hint. Unknown/omitted → inferred from the default model,
    *  else `local`. Never trusted into the registry unvalidated. */
   readonly vendor?: string
-  readonly shape: 'openai' | 'anthropic' | 'google' | 'agent-bridge'
+  readonly shape: 'openai' | 'anthropic' | 'google' | 'agent-bridge' | 'peer-swarm'
   /** Which tier reaches this provider. Omitted = `browser-http`. */
-  readonly transport?: 'browser-http' | 'agent-bridge'
+  readonly transport?: 'browser-http' | 'agent-bridge' | 'peer-swarm'
   /** Required for the HTTP shapes; meaningless (and refused) for a bridge. */
   readonly endpoint?: string
   readonly auth?: LlmAuthStyle
@@ -75,14 +82,23 @@ export type LlmProviderSpec = {
   readonly requiresKey?: boolean
   /** Only an agent-bridge may claim it — the registry's honesty badge. */
   readonly readsHive?: boolean
+  /** peer-swarm only: the pubkey of the participant whose machine runs it.
+   *  What makes two peers' identically-named models distinct providers. */
+  readonly peer?: string
 }
 
 const TIERS: readonly LlmTier[] = ['deep', 'balanced', 'fast']
-const SHAPES = ['openai', 'anthropic', 'google', 'agent-bridge'] as const
+const SHAPES = ['openai', 'anthropic', 'google', 'agent-bridge', 'peer-swarm'] as const
 
 /** A bridge is reached through the broker, so it declares no endpoint, needs
  *  no key, and is the one tier allowed to say it reads the hive. */
 const isBridgeShape = (shape: string): boolean => shape === 'agent-bridge'
+
+/** A peer's model is reached over the mesh: no endpoint, no key, no hive. */
+const isPeerShape = (shape: string): boolean => shape === 'peer-swarm'
+
+/** Neither of the two shapes that name no address. */
+const isAddressless = (shape: string): boolean => isBridgeShape(shape) || isPeerShape(shape)
 
 const fail = (reason: string): never => {
   throw new Error(`[provider-spec] ${reason}`)
@@ -126,9 +142,11 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
   // endpoints as "where your key goes" — a bridge that appears to name one
   // would be lying about a key it never takes.
   const bridge = isBridgeShape(shape)
+  const peer = isPeerShape(shape)
+  const addressless = isAddressless(shape)
   const endpoint = cleanString(raw['endpoint'])
-  if (bridge) {
-    if (endpoint) fail(`spec "${id}" is an agent-bridge and must not declare an endpoint`)
+  if (addressless) {
+    if (endpoint) fail(`spec "${id}" is a ${shape} and must not declare an endpoint`)
   } else if (!isAcceptableEndpoint(endpoint)) {
     fail(`spec "${id}" endpoint must be https (or http on localhost) — got "${endpoint}"`)
   }
@@ -157,10 +175,19 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     try { new RegExp(keyPattern) } catch { fail(`spec "${id}" keyPattern does not compile`) }
   }
 
-  const transport = cleanString(raw['transport']) || (bridge ? 'agent-bridge' : 'browser-http')
-  if (transport !== (bridge ? 'agent-bridge' : 'browser-http')) {
+  const expectedTransport = bridge ? 'agent-bridge' : peer ? 'peer-swarm' : 'browser-http'
+  const transport = cleanString(raw['transport']) || expectedTransport
+  if (transport !== expectedTransport) {
     fail(`spec "${id}" transport "${transport}" does not match shape "${shape}"`)
   }
+  // A peer's model runs on a named participant's machine; without the pubkey
+  // there is nobody to send the request to, and two peers offering `llama`
+  // would collapse into one row.
+  const peerKey = cleanString(raw['peer']).toLowerCase()
+  if (peer && !/^[0-9a-f]{64}$/.test(peerKey)) {
+    fail(`spec "${id}" is a peer-swarm offer and must name the peer's pubkey`)
+  }
+  if (!peer && peerKey) fail(`spec "${id}" may not name a peer — only a peer-swarm offer runs on one`)
   // Only the bridge tier may wear the honesty badge — an HTTP vendor claiming
   // it would be telling the participant their key can walk the tree.
   if (raw['readsHive'] === true && !bridge) {
@@ -169,7 +196,7 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
 
   const auth = raw['auth'] as LlmAuthStyle | undefined
   if (auth !== undefined) {
-    if (bridge) fail(`spec "${id}" is an agent-bridge and takes no auth`)
+    if (addressless) fail(`spec "${id}" is a ${shape} and takes no auth`)
     const named = typeof auth === 'string' && ['bearer', 'x-api-key', 'none'].includes(auth)
     const custom = !!auth && typeof auth === 'object' && !!cleanString((auth as { header?: string }).header)
     if (!named && !custom) fail(`spec "${id}" auth must be bearer | x-api-key | none | { header }`)
@@ -181,14 +208,15 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     label,
     ...(cleanString(raw['vendor']) ? { vendor: cleanString(raw['vendor']).toLowerCase() } : {}),
     shape,
-    transport: bridge ? 'agent-bridge' : 'browser-http',
-    ...(bridge ? {} : { endpoint: endpoint.replace(/\/+$/, '') }),
+    transport: expectedTransport,
+    ...(addressless ? {} : { endpoint: endpoint.replace(/\/+$/, '') }),
+    ...(peer ? { peer: peerKey } : {}),
     ...(auth !== undefined ? { auth } : {}),
     models,
     defaultModel,
     docsUrl,
     ...(keyPattern ? { keyPattern } : {}),
-    ...(bridge || raw['requiresKey'] === false ? { requiresKey: false } : {}),
+    ...(addressless || raw['requiresKey'] === false ? { requiresKey: false } : {}),
     ...(bridge ? { readsHive: true } : {}),
   }
 }
@@ -224,18 +252,35 @@ const modelsOf = (spec: LlmProviderSpec): LlmModelDescriptor[] =>
  */
 export const compileProviderSpec = (spec: LlmProviderSpec): LlmProviderDescriptor => {
   const bridge = spec.shape === 'agent-bridge'
+  const peer = spec.shape === 'peer-swarm'
   const base: Omit<LlmProviderDescriptor, 'toRequest' | 'fromResponse' | 'fromStreamEvent'> = {
     id: spec.id,
     label: spec.label,
     vendor: vendorOf(spec),
-    transport: bridge ? 'agent-bridge' : 'browser-http',
+    transport: bridge ? 'agent-bridge' : peer ? 'peer-swarm' : 'browser-http',
     ...(spec.endpoint ? { endpoint: spec.endpoint } : {}),
     models: modelsOf(spec),
     defaultModel: spec.defaultModel,
     docsUrl: spec.docsUrl,
     ...(spec.keyPattern ? { keyPattern: new RegExp(spec.keyPattern) } : {}),
-    ...(bridge || spec.requiresKey === false ? { requiresKey: false } : {}),
+    ...(bridge || peer || spec.requiresKey === false ? { requiresKey: false } : {}),
     ...(bridge ? { readsHive: true } : {}),
+    ...(peer && spec.peer ? { peer: spec.peer } : {}),
+  }
+
+  if (peer) {
+    // A PEER'S MODEL IS NOT AT AN ADDRESS THIS CLIENT CAN DIAL. The request
+    // goes over the mesh to the participant running it, so these two throw —
+    // but unlike a bridge, the dispatch does not stop here: it hands the call
+    // to the peer transport, which is why the message says "over the swarm"
+    // rather than "ask it a different way".
+    const refuse = (): never => {
+      throw new Error(
+        `[${spec.id}] runs on another participant's machine: it is answered over the swarm, ` +
+        `not by an HTTP request`,
+      )
+    }
+    return { ...base, toRequest: refuse, fromResponse: refuse }
   }
 
   if (bridge) {

@@ -21,6 +21,7 @@
 // shape as skills-window.view.
 
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
+import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
@@ -43,6 +44,7 @@ const TRANSPORT_LABEL: Record<string, string> = {
   'browser-http': 'your key, this browser',
   'host-relay': 'a host you named',
   'agent-bridge': 'a live agent session',
+  'peer-swarm': 'another participant’s machine',
 }
 
 export class ProvidersWindowView extends EventTarget {
@@ -188,6 +190,7 @@ export class ProvidersWindowView extends EventTarget {
       body.appendChild(empty)
     }
 
+    body.appendChild(this.#lendSection())
     body.appendChild(this.#addSection())
   }
 
@@ -403,6 +406,39 @@ export class ProvidersWindowView extends EventTarget {
 
   // ── add a provider (paste a spec) ─────────────────────────────────────────
 
+  /**
+   * LENDING — the other direction. Everything above this point is about
+   * models answering for the participant; this is the participant's machine
+   * answering for somebody else, which is a decision and therefore a switch
+   * they have to throw. Only ever offers models that cost nothing to run.
+   */
+  #lendSection(): HTMLElement {
+    const section = document.createElement('div')
+    section.className = 'hc-providers-lend'
+
+    const toggle = document.createElement('label')
+    toggle.className = 'hc-provider-toggle'
+    const checkbox = document.createElement('input')
+    checkbox.type = 'checkbox'
+    checkbox.checked = isLendingModels()
+    checkbox.addEventListener('change', () => {
+      EffectBus.emit('peer-models:lend', { on: checkbox.checked })
+      this.#renderBody()
+    })
+    toggle.append(checkbox, document.createTextNode(
+      this.#t('providers.lend', 'Let the swarm use my local models when I am not'),
+    ))
+
+    const hint = document.createElement('div')
+    hint.className = 'hc-provider-label'
+    hint.textContent = this.#t(
+      'providers.lendHint',
+      'Only models that need no key are offered — never one you pay for. One request at a time, and never while you are using it yourself.',
+    )
+    section.append(toggle, hint)
+    return section
+  }
+
   #addSection(): HTMLElement {
     const section = document.createElement('div')
     section.className = 'hc-providers-add'
@@ -519,6 +555,9 @@ export class ProvidersWindowView extends EventTarget {
       }
       .hc-provider-mono { font-size: 11px; opacity: 0.85; word-break: break-all; }
       .hc-provider-endpoint { display: block; }
+      .hc-providers-lend {
+        padding: 12px 2px 4px; margin-top: 8px; border-top: 1px solid rgba(${STEEL}, 0.15);
+      }
       .hc-providers-add { padding: 12px 2px; }
       .hc-providers-spec {
         width: 100%; margin: 4px 0 8px; padding: 6px 8px; background: rgba(${STEEL}, 0.06);

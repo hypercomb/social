@@ -237,6 +237,8 @@
   "providers.addClose": "Chiudi",
   "providers.addHint": "Incolla una specifica del fornitore (JSON llm-provider@1)",
   "providers.import": "Importa",
+  "providers.lend": "Lascia che lo sciame usi i miei modelli locali quando non li uso",
+  "providers.lendHint": "Vengono offerti solo modelli senza chiave — mai uno che paghi tu. Una richiesta alla volta, e mai mentre lo stai usando.",
   "slash.atomize-ui": "alterna barra atomizzatore",
   "atomizer.spacing-placeholder": "es. 8px 12px",
   "atomizer.title": "atomizzatori",
