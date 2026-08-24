@@ -17,6 +17,7 @@
 import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
+import { defaultViewForSegments } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
 import { rewritePageRefs } from '../../diamondcoreprocessor.com/sharing/decoration-closure.js'
 import { scopeCellPageCss } from '../../diamondcoreprocessor.com/presentation/tiles/cell-page-css-scope.js'
 import { WELCOME_VIEW } from './welcome.queen.js'
@@ -57,6 +58,11 @@ export class RoomViewDrone extends Drone {
         this.#vm()?.setMode(ROOM_VIEW)
         void this.#reconcile()
       })
+      // Follow the lineage like every renderer — a navigation that lands
+      // while the room is up re-mounts it for the new location (or falls
+      // through to hexagons when the cell has no page).
+      window.ioc?.get<EventTarget>('@hypercomb.social/Lineage')
+        ?.addEventListener?.('change', this.#lineageChange)
       // Right-click leaves the room the way the ‹ chip does — back onto the
       // wall, not out of the welcome entirely.
       this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
@@ -68,6 +74,8 @@ export class RoomViewDrone extends Drone {
 
   protected override dispose(): void {
     this.#vm()?.removeEventListener('change', this.#change)
+    window.ioc?.get<EventTarget>('@hypercomb.social/Lineage')
+      ?.removeEventListener?.('change', this.#lineageChange)
     window.removeEventListener('keydown', this.#key, true)
     this.#backOff?.()
     this.#backOff = null
@@ -75,6 +83,10 @@ export class RoomViewDrone extends Drone {
   }
 
   readonly #change = (): void => { void this.#reconcile() }
+  readonly #lineageChange = (): void => {
+    this.#targetSegments = null
+    void this.#reconcile()
+  }
   readonly #key = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || this.#vm()?.mode !== ROOM_VIEW) return
     event.preventDefault()
@@ -91,7 +103,11 @@ export class RoomViewDrone extends Drone {
     const segments = this.#targetSegments ?? []
     const parent = segments.slice(0, -1)
     if (!parent.length) { this.#vm()?.setMode('hexagons'); return }
+    // Same rule as stepping in: navigate on the one road, and only SUGGEST
+    // the wall when the parent declares no face of its own — a parent with
+    // a view:default mark opens as that, via the arrival system.
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(parent)
+    if (defaultViewForSegments(parent)) return
     this.emitEffect('view:open-for-tile', { view: WELCOME_VIEW, segments: parent })
   }
 

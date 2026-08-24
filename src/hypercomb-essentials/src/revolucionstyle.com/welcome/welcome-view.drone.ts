@@ -16,7 +16,7 @@
 // heavy — the interface is light now, in both senses.
 
 import { Drone } from '@hypercomb/core'
-import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
+import { titleForLabel, defaultViewForSegments } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
 import { isKindGloballyOff } from '../../diamondcoreprocessor.com/sharing/behavior-enablement.js'
 import { listDecorations } from '../../diamondcoreprocessor.com/commands/decoration-manifest.js'
@@ -65,6 +65,14 @@ export class WelcomeViewDrone extends Drone {
     if (!this.#bound) {
       this.#vm()?.addEventListener('change', this.#change)
       window.addEventListener('keydown', this.#key, true)
+      // A REAL RENDERER FOLLOWS THE LINEAGE. The plate click is the same
+      // click a hexagon gets — navigate, nothing more — so when the
+      // destination's own face is this same atelier, no mode change and no
+      // suggestion ever fires: the lineage moving IS the render trigger.
+      // (#targetSegments was the pre-navigation override; once the lineage
+      // has moved, the lineage is the truth.)
+      window.ioc?.get<EventTarget>('@hypercomb.social/Lineage')
+        ?.addEventListener?.('change', this.#lineageChange)
       this.onEffect('decorations:changed', this.#change)
       this.onEffect('feature:hidden', this.#change)
       this.onEffect('feature:restored', this.#change)
@@ -86,6 +94,8 @@ export class WelcomeViewDrone extends Drone {
 
   protected override dispose(): void {
     this.#vm()?.removeEventListener('change', this.#change)
+    window.ioc?.get<EventTarget>('@hypercomb.social/Lineage')
+      ?.removeEventListener?.('change', this.#lineageChange)
     window.removeEventListener('keydown', this.#key, true)
     this.#backOff?.()
     this.#backOff = null
@@ -93,6 +103,10 @@ export class WelcomeViewDrone extends Drone {
   }
 
   readonly #change = (): void => { void this.#reconcile() }
+  readonly #lineageChange = (): void => {
+    this.#targetSegments = null
+    void this.#reconcile()
+  }
   readonly #key = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || this.#vm()?.mode !== WELCOME_VIEW) return
     event.preventDefault()
@@ -279,7 +293,14 @@ export class WelcomeViewDrone extends Drone {
    *  child's OWN view — the room mounts the cell's page as its presence,
    *  and falls through to the hexagons when the cell has none. */
   #enter(segments: readonly string[]): void {
+    // THE TILE'S CLICK IS THE TILE'S CLICK — the same one a hexagon gets:
+    // navigate, and let the ARRIVAL system open whatever face the
+    // destination declares (its view:default mark). Forcing the room here
+    // was a second, private road that overrode the tile's own face — the
+    // room is only the atelier's FALLBACK presentation for a child that
+    // declares none.
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(segments)
+    if (defaultViewForSegments(segments)) return
     this.emitEffect('view:open-for-tile', { view: ROOM_VIEW, segments: [...segments] })
   }
 
