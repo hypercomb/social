@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// drive-stance-sigil — does the prompt glyph wear the stance?
+// drive-stance-sigil — does the prompt glyph wear the stance, and does the
+// slash live in the ICON rather than the text?
 //
 //   node scripts/drive-stance-sigil.cjs [--url http://localhost:4250]
 //
-// The command bar has two standing meanings and the left icon must wear the
-// one in force: typing '/' walks into command stance (the chevron becomes a
-// slash, the box tints), typing '>' walks back out to tile creation (chevron
-// returns, the '>' is consumed, never text). The stance survives a reload,
-// Enter on the bare seed is a no-op, and a lost seed re-slashes typed words.
+// Two standing meanings for the bar's plain text, worn by the left icon and
+// the box hue. Typing '/' walks into command stance and the slash DISAPPEARS
+// INTO THE ICON — commands are typed bare ('help', not '/help'), further
+// slashes are refused, and the typed text wears command honey (#ecbc57) so
+// words that will run code look alive. Typing '>' on the empty line (or
+// clicking the glyph) walks back to tile creation. Sticky across reloads.
 // Real keystrokes through Playwright so the Angular (input) pipeline runs.
 // HEADED like the other drive harnesses: the Pixi boot throws without a GPU.
 
@@ -35,7 +37,8 @@ async function glyph(page) {
     const chevron = document.querySelector('hc-command-shell .prompt-chevron')
     const tinted = !!document.querySelector('hc-command-shell .command-shell.stance-command')
     const input = document.querySelector('hc-command-shell input')
-    return { slash: !!slash, chevron: !!chevron, tinted, value: input ? input.value : null }
+    const color = input ? getComputedStyle(input).color : null
+    return { slash: !!slash, chevron: !!chevron, tinted, value: input ? input.value : null, color }
   })
 }
 
@@ -46,6 +49,15 @@ async function focusLine(page) {
   await page.evaluate(() => {
     const input = document.querySelector('hc-command-shell input')
     if (input) input.focus()
+  })
+}
+
+async function clickGlyph(page) {
+  // Dispatch the mousedown directly — the first-boot offer backdrop would
+  // intercept a real pointer, but the glyph's handler listens on the element.
+  await page.evaluate(() => {
+    const g = document.querySelector('hc-command-shell .prompt-glyph')
+    if (g) g.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
   })
 }
 
@@ -73,58 +85,73 @@ async function main() {
     let g = await glyph(page)
     check('boots in tile mode (chevron, untinted)', g.chevron && !g.slash && !g.tinted, JSON.stringify(g))
 
-    // 2 — typing '/' walks in: the icon becomes the slash, the box tints
+    // 2 — the first '/' disappears INTO the icon: consumed, icon flips, box tints
     await focusLine(page)
     await page.keyboard.type('/')
     await sleep(300)
     g = await glyph(page)
-    check("typing '/' flips the icon to '/'", g.slash && !g.chevron, JSON.stringify(g))
+    check("typing '/' consumes it into the icon", g.slash && !g.chevron && g.value === '', JSON.stringify(g))
     check('command stance tints the box', g.tinted)
 
-    // 3 — a command keeps the sigil while it is typed
-    await page.keyboard.type('help')
+    // 3 — commands are typed BARE, the dropdown still offers them, and the
+    //     text wears command honey
+    await page.keyboard.type('hel')
+    await sleep(400)
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll('hc-command-shell .command-results li')].map(li => li.textContent?.trim() ?? '')
+    )
+    check("bare 'hel' still gets command intellisense", rows.some(r => r.startsWith('help')), JSON.stringify(rows.slice(0, 3)))
+    await page.keyboard.type('p')
     await sleep(300)
     g = await glyph(page)
-    check("'/help' keeps the slash sigil", g.slash && g.value === '/help', JSON.stringify(g))
+    check("command typed bare ('help', no slash in text)", g.slash && g.value === 'help', JSON.stringify(g))
+    check('typed text wears the command color', g.color === 'rgb(236, 188, 87)', g.color)
 
-    // 4 — back down to the bare seed, then '>' walks out: consumed, chevron back
+    // 4 — a further '/' is refused (the icon already IS one)
     for (let i = 0; i < 4; i++) await page.keyboard.press('Backspace')
     await sleep(200)
+    await page.keyboard.type('/')
+    await sleep(300)
+    g = await glyph(page)
+    check("a second '/' never lands (not allowed in command stance)", g.slash && g.value === '', JSON.stringify(g))
+
+    // 5 — Enter on the empty command line is a no-op (no junk tile)
+    await page.keyboard.press('Enter')
+    await sleep(400)
+    g = await glyph(page)
+    check('Enter on the empty command line is a no-op', g.slash && g.value === '', JSON.stringify(g))
+
+    // 6 — '>' walks back out: consumed, chevron returns
     await page.keyboard.type('>')
     await sleep(300)
     g = await glyph(page)
     check("typing '>' returns to tile mode (chevron, consumed)", g.chevron && !g.slash && g.value === '', JSON.stringify(g))
 
-    // 5 — walk back in, Enter on the bare seed must be a no-op (no husk tile)
-    await page.keyboard.type('/')
-    await sleep(200)
-    await page.keyboard.press('Enter')
-    await sleep(400)
+    // 7 — one CLICK on the glyph toggles the stance, both directions
+    await clickGlyph(page)
+    await sleep(300)
     g = await glyph(page)
-    check('Enter on the bare seed is a no-op (stays in stance)', g.slash && g.value === '/', JSON.stringify(g))
+    check('clicking the glyph walks into command stance', g.slash && g.tinted, JSON.stringify(g))
+    await clickGlyph(page)
+    await sleep(300)
+    g = await glyph(page)
+    check('clicking again walks back to tile mode', g.chevron && !g.slash && !g.tinted, JSON.stringify(g))
 
-    // 6 — the stance survives a reload (participant preference)
+    // 8 — the stance survives a reload (participant preference)
+    await clickGlyph(page)
+    await sleep(300)
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.waitForSelector('hc-command-shell input', { timeout: 30000 })
     await sleep(1500)
     g = await glyph(page)
-    check('stance survives reload (slash icon on empty line)', g.slash && !g.chevron, JSON.stringify(g))
+    check('stance survives reload (slash icon, empty line)', g.slash && !g.chevron && g.value === '', JSON.stringify(g))
 
-    // 7 — lost seed: typing a word in command stance re-slashes it
+    // 9 — leave the hive as we found it: back to tile mode
     await focusLine(page)
-    await page.keyboard.type('f')
-    await sleep(300)
-    g = await glyph(page)
-    check("typed word re-slashes under the stance ('f' → '/f')", g.value === '/f', JSON.stringify(g))
-
-    // 8 — leave the hive as we found it: back to tile mode
-    await page.keyboard.press('Backspace')
-    await page.keyboard.press('Backspace')
-    await sleep(200)
     await page.keyboard.type('>')
     await sleep(300)
     g = await glyph(page)
-    check('final exit back to tile mode', g.chevron && !g.slash && !g.tinted, JSON.stringify(g))
+    check('final exit back to tile mode', g.chevron && !g.slash && !g.tinted && g.value === '', JSON.stringify(g))
   } finally {
     await browser.close()
   }

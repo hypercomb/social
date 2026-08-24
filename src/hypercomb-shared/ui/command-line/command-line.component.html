@@ -16,6 +16,7 @@
     [indicators]="activeIndicators()"
     [armedResource]="armedResource()"
     [promptSigil]="stanceSigil()"
+    (promptSigilToggle)="onStanceToggle()"
     [subject]="commandSubject()"
     [showOpenForSubscribersToggle]="showOpenForSubscribersToggle()"
     [openForSubscribers]="openForSubscribers()"

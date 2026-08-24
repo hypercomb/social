@@ -353,6 +353,11 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Emitted when the user clicks the armed-resource thumbnail to dismiss it. */
   readonly armedResourceDismiss = output<void>()
 
+  /** Emitted when the bare prompt sigil is clicked — one click toggles the
+   *  stance (chevron ↔ slash). Fires only when nothing is armed and no
+   *  subject occupies the slot; the parent owns the stance machine. */
+  readonly promptSigilToggle = output<void>()
+
   /** Emitted when the subject chip is clicked — "this line is no longer about
    *  that". Clears the chip only; the composed text stays, because deleting
    *  what someone is midway through typing is not what dismissing a label means. */
@@ -445,16 +450,21 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Template handler for clicks on the armed-resource thumbnail. */
+  /** Template handler for clicks on the prompt-glyph slot: armed resource
+   *  dismisses, subject dismisses, and the bare sigil toggles the stance. */
   onArmedGlyphMouseDown = (e: MouseEvent): void => {
     if (this.armedResource()) {
       e.preventDefault()
       this.armedResourceDismiss.emit()
       return
     }
-    if (!this.subject()) return
+    if (this.subject()) {
+      e.preventDefault()
+      this.subjectDismiss.emit()
+      return
+    }
     e.preventDefault()
-    this.subjectDismiss.emit()
+    this.promptSigilToggle.emit()
   }
 
   /** Initial(s) for a subject with no picture — the same fallback the portals

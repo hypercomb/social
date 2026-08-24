@@ -1051,7 +1051,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // and Escape are handled directly by the shell hooks.
     if (this.#captureMode()) return { active: false }
 
-    const v = this.value()
+    // In command stance the icon carries the slash — re-prefix it here so
+    // every register below reads exactly as a typed '/x' line always has.
+    const v = this.#toRegister(this.value())
 
     // `?` enters filter mode — bare `?keyword` is the form people actually
     // type (and the one the tutorial is read as teaching); `>?keyword` is
@@ -2174,12 +2176,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Bridge: shell value changed (fires on every keystroke). */
   // ── command stance ───────────────────────────────────────
-  // The bar's plain text has two standing meanings, and the prompt glyph wears
-  // the one in force: typing '/' walks into COMMAND stance (the icon becomes
-  // the slash), typing '>' walks back out to tile creation (the chevron).
-  // Sticky across lines and sessions — a participant preference, never hive
-  // truth. In command stance the line keeps a literal leading '/', so every
-  // register downstream (context, suggestions, Enter) reads exactly as today.
+  // The bar's plain text has two standing meanings, and the prompt glyph
+  // wears the one in force. Typing '/' walks into COMMAND stance: the first
+  // slash DISAPPEARS INTO THE ICON — from there commands are typed bare
+  // ('help', not '/help'), and further leading slashes are refused. Typing
+  // '>' on an empty line (or clicking the glyph) walks back out to tile
+  // creation, the chevron. Sticky across lines and sessions — a participant
+  // preference, never hive truth. The line itself never carries the stance:
+  // #toRegister() re-prefixes the slash for everything that PARSES.
   readonly #stance = signal<'tiles' | 'command'>(
     localStorage.getItem(STANCE_STORAGE_KEY) === 'command' ? 'command' : 'tiles'
   )
@@ -2190,14 +2194,37 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     localStorage.setItem(STANCE_STORAGE_KEY, s)
   }
 
-  /** The sigil the prompt slot wears: the line's own register when it has one,
-   *  the standing stance when it is empty. */
+  /**
+   * The line a register actually reads. In command stance the icon carries
+   * the slash, so plain text is prefixed back into slash-space before any
+   * parsing — but only PLAIN text. The first word decides: a word carrying
+   * '@' or ':' speaks its own grammar (behaviour calls, tags), a leading
+   * sigil ([, ~, #, ?, ., >) keeps its register, and a whole-line URL stays
+   * a URL so link intake still catches it. Everything else is a command.
+   */
+  #toRegister(raw: string): string {
+    if (this.#stance() !== 'command' || this.#captureMode()) return raw
+    if (raw.startsWith('/')) return raw
+    if (/^[\[~#?>.]/.test(raw)) return raw
+    if (/^~?\S*[@:]/.test(raw)) return raw
+    if (/^(https?:\/\/|www\.)/i.test(raw)) return raw
+    return '/' + raw
+  }
+
+  /** The sigil the prompt slot wears: the line's own register when it
+   *  literally carries one (a recalled '/x' line), else the standing stance. */
   public readonly stanceSigil = computed<'chevron' | 'slash'>(() => {
-    const v = this.value()
-    if (v.startsWith('/')) return 'slash'
-    if (!v && this.#stance() === 'command') return 'slash'
+    if (this.value().startsWith('/')) return 'slash'
+    if (this.#stance() === 'command' && !this.#captureMode()) return 'slash'
     return 'chevron'
   })
+
+  /** Clicking the prompt glyph toggles the stance — one click in, one click
+   *  out. The line's text survives the flip; only its meaning changes. */
+  public onStanceToggle = (): void => {
+    this.#setStance(this.#stance() === 'command' ? 'tiles' : 'command')
+    this.shell?.focus()
+  }
 
   public onShellValueChange = (v: string): void => {
     // Stance sigils come first — they are switches, not text. Capture modes
@@ -2205,27 +2232,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (this.#captureMode()) {
       // fall through to the plain handler below
     } else if (this.#stance() === 'tiles') {
-      if (v.startsWith('/')) this.#setStance('command')
+      if (v.startsWith('/')) {
+        // The first slash disappears into the icon; typing continues bare.
+        this.#setStance('command')
+        v = v.replace(/^\/+/, '')
+        this.shell?.setValue(v)
+      }
     } else {
-      if (v === '>' || v === '/>') {
+      if (v === '>') {
         // '>' walks back out to tile mode; the character is consumed.
         this.#setStance('tiles')
         this.clear()
         return
       }
-      if (/^\/(https?:\/\/|www\.)/i.test(v)) {
-        // A URL pasted over the seed slash: the slash would husk it into an
-        // unknown command — hand it back to the plain line (whole-line URLs
-        // route to link intake there) and step out of the stance.
-        v = v.slice(1)
-        this.#setStance('tiles')
-        this.shell?.setValue(v)
-      } else if (v && !/^[\/\[~#?!:.>]/.test(v)) {
-        // Command stance means typed words are commands: if the seed slash
-        // was lost (peel, capture exit), restore it rather than minting a
-        // tile under a '/' icon. Sigil grammars ([, ~, #, ?, :, ..) keep
-        // their own registers in both stances.
-        v = '/' + v
+      if (v.startsWith('/')) {
+        // Slashes are not allowed in command stance — the icon already IS
+        // the slash. The character simply never lands.
+        v = v.replace(/^\/+/, '')
         this.shell?.setValue(v)
       }
     }
@@ -2240,12 +2263,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!v.trim()) this.commandSubject.set(null)
 
     // auto-populate index when typing '(' after /move
-    if (this.#autoPopulateMoveIndex(v)) {
+    if (this.#autoPopulateMoveIndex(this.#toRegister(v))) {
       // shell value was mutated — re-sync
     }
 
     // auto-advance a fully-typed slash command into its parameter list
-    this.#autoEnterSlashParams(v)
+    // (register-space: in command stance 'move' must read as '/move')
+    this.#autoEnterSlashParams(this.#toRegister(v))
 
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') {
@@ -2318,14 +2342,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (e.key === 'Escape' && this.armedResource()) {
       e.preventDefault()
       this.onArmedResourceDismiss()
-      return
-    }
-
-    // Escape on the bare command-stance seed: there is nothing to peel — get
-    // out to the canvas and leave the stance (and its slash) standing.
-    if (e.key === 'Escape' && this.#stance() === 'command' && v === '/') {
-      e.preventDefault()
-      this.shell?.blur()
       return
     }
 
@@ -2438,16 +2454,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#commitCapture(capture, v)
       return
     }
-    // The bare stance seed is a posture, not a command — Enter on it is a no-op
-    // (without this it would fall to the create-goto builtin and mint junk).
-    if (v.trim() === '/') return
     const completed = this.#completeOnEnter(v)
     if (completed === null) return
+    // The register line: command stance re-prefixes its slash here, so the
+    // pipeline below sees the same '/x' lines it always has. A bare '/'
+    // (Enter on an empty command-stance line) is a posture, not a command —
+    // running it would fall to the create-goto builtin and mint junk.
+    const line = this.#toRegister(completed)
+    if (line.trim() === '/') return
     // The line has been spent, so it is no longer about anything. Cleared
     // BEFORE the dispatch: executing may prefill the line again (a command
     // that hands the participant a follow-up), and that prefill owns the chip.
     this.commandSubject.set(null)
-    void this.#preprocessTagsThenExecute(completed)
+    void this.#preprocessTagsThenExecute(line)
   }
 
   /**
@@ -3873,9 +3892,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // ui helpers (delegated to shell)
   // -------------------------------------------------
 
-  /** Set shell value and sync local state. */
+  /** Set shell value and sync local state. Write-backs from completion and
+   *  register machinery compose slash-space strings; in command stance the
+   *  icon carries that slash, so it comes off before the line is shown. */
   #setShellValue(v: string, suppress: boolean): void {
     if (!this.shell) return
+    if (v.startsWith('/') && this.#stance() === 'command' && !this.#captureMode()) {
+      v = v.slice(1)
+    }
     this.shell.setValue(v)
     this.value.set(v)
     if (suppress) this.shell.suppress()
@@ -3930,13 +3954,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (this.#selectOriginalSegments) {
       this.navigation.replaceRaw(this.#selectOriginalSegments)
       this.#selectOriginalSegments = null
-    }
-    // Command stance: the emptied line re-seeds its slash, so the bar stays in
-    // the register it stands in. A clear that ends a capture leaves the line
-    // bare — the capture flow owns what comes next.
-    if (!wasCapturing && this.#stance() === 'command') {
-      this.shell?.setValue('/')
-      this.value.set('/')
     }
   }
 

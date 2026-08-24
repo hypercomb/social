@@ -94,6 +94,7 @@ $bp-phone-max: 599px;
   margin-left: 0.4rem;
   top: 1px;
   opacity: 0.9;
+  cursor: pointer;   // the bare sigil is a switch: one click toggles the stance
   transition: opacity var(--transition-speed) ease;
 
   &.armed {
@@ -136,9 +137,16 @@ $bp-phone-max: 599px;
 
 // Command stance: the whole box shifts hue so the standing meaning of plain
 // text is readable before a character is typed — the mode is worn, not menu'd.
+// The typed text leaves the cold family and wears command honey: the words
+// ARE a command, and they must say so before Enter does. Overriding --cmd-fg
+// re-colors the input text and the slash sigil together — one register, one
+// hue. Deliberately deeper than the pale hover-echo gold so "the tile under
+// your pointer" still reads apart from what you typed.
 .command-shell.stance-command {
   background: color-mix(in srgb, var(--glow-color) 12%, transparent);
-  border-radius: 4px;
+  --cmd-fg: #ecbc57;
+
+  .command-input { caret-color: #ecbc57; }
 }
 
 .prompt-thumb {
