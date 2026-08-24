@@ -504,7 +504,29 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    * and the echo occupy the SAME column, and the two on top of each other are
    * unreadable. The prompt comes straight back when the pointer leaves.
    */
-  readonly effectivePlaceholder = computed(() => this.hoverEcho() ? '' : this.placeholder())
+  readonly effectivePlaceholder = computed(() => (this.hoverEcho() || this.ghostSuffix()) ? '' : this.placeholder())
+
+  /**
+   * The ONLY part of the ghost that is ever painted: what the completion adds
+   * BEYOND the typed text. The typed prefix is carried by an invisible mirror
+   * (.ghost-pad = the live input value), so the input's own glyphs and the
+   * ghost can never be drawn on top of each other — the alignment bug class
+   * (doubled letters, ghost mashed into the placeholder) is structurally
+   * impossible rather than tuned away. Empty unless the ghost genuinely
+   * extends the current value, and while the input is scrolled (the pad can't
+   * mirror scrollLeft, so the column would lie).
+   */
+  readonly ghostSuffix = computed(() => {
+    const ghost = this.ghostValue()
+    if (!ghost) return ''
+    const typed = this.value()
+    if (ghost.length <= typed.length || !ghost.startsWith(typed)) return ''
+    if (this.inputScrollLeft() > 0) return ''
+    return ghost.slice(typed.length)
+  })
+
+  /** Horizontal scroll of the input — a scrolled line hides the ghost. */
+  readonly inputScrollLeft = signal(0)
 
   readonly echoPad = computed(() => {
     const typed = this.value()
@@ -652,6 +674,12 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     this.syncSignalsFromDom()
     this.clampActiveIndex()
     this.valueChange.emit(this.value())
+  }
+
+  /** The input scrolls horizontally on its own (long line, caret moves) —
+   *  track it so the ghost hides rather than reporting a false column. */
+  onInputScroll = (): void => {
+    this.inputScrollLeft.set(this.inputElement?.scrollLeft ?? 0)
   }
 
   onKeyDown = (e: KeyboardEvent): void => {
@@ -803,6 +831,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   private syncSignalsFromDom(): void {
     this.value.set(this.inputElement?.value ?? '')
+    this.inputScrollLeft.set(this.inputElement?.scrollLeft ?? 0)
   }
 
   private clampActiveIndex(): void {

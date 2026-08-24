@@ -213,7 +213,25 @@ $bp-phone-max: 599px;
   color: rgba(var(--glow-color-rgb), 0.55);
   pointer-events: none;
   user-select: none;
+  // An input PRESERVES every space; a span COLLAPSES runs of them. The pad
+  // mirrors the input's value, so it must count spaces the way the input
+  // does — `pre` (no wrapping either, same as nowrap for a single line).
+  white-space: pre;
 }
+
+// The typed prefix is never painted by the ghost — this mirror of the input's
+// value is invisible and only carries the offset, so the visible suffix starts
+// exactly at the caret's column. Same doctrine as .echo-pad: every metric must
+// stay identical to the input (inherited from the shared rule above); any
+// styling belongs on .ghost-suffix.
+.ghost-pad { visibility: hidden; }
+
+// The typed prefix is never painted by the ghost — this mirror of the input's
+// value is invisible and only carries the offset, so the visible suffix starts
+// exactly at the caret's column. Same doctrine as .echo-pad: every metric must
+// stay identical to the input (inherited from the shared rule above); any
+// styling belongs on .ghost-suffix.
+.ghost-pad { visibility: hidden; }
 
 // The hovered tile's name, reported in the line at the caret's column. Its own
 // muted amber so it never reads as text you typed or as a completion on offer
@@ -223,6 +241,7 @@ $bp-phone-max: 599px;
   color: var(--hover-echo-color);
   pointer-events: none;
   user-select: none;
+  white-space: pre;   // same space-counting rule as .ghost — the pad mirrors the input
 }
 
 // The pad carries the OFFSET and nothing else, so it must keep the input's
