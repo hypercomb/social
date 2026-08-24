@@ -47,6 +47,46 @@ The `websiteSig` property name still exists in `tile-content-renderer.ts`
 export JSON for archaeology. `parseBundle` / `WebsiteManifest` in that
 file are dead — no live path calls them.
 
+## Coming back out
+
+A site is not a place you walked to — it is a surface that **took over**,
+spawned from wherever you were standing and whatever you were looking at.
+So leaving it has exactly one destination: **the page that spawned it, in
+the view that spawned it.** Nothing is derived, nothing is walked, nothing
+is guessed. Every exit path — the exit button, right-click at the site
+root, Escape, `/website off`, a toggle click — names the hexagons, and the
+renderer turns that into the spawn.
+
+The spawn record (`site-return.ts`, captured by `SiteViewDrone` the moment
+ViewMode flips into `'website'`) has two fields:
+
+- **the view** — `ViewMode.previous`, the surface that was up. '' or
+  `hexagons` means the hexagons spawned it.
+- **the page** — where the explorer stood. For a site you **arrived** into
+  (a `view:default` mark opened it as you walked in, and view.bee announced
+  the verdict as `view:arrival`) that is corrected to the page you came
+  FROM: the site's own cell is not somewhere you chose to be. For a site
+  you **toggled** on while standing still, the two are the same place.
+
+An INDIRECT session — the tab booted straight into website mode — has no
+spawn to remember, so leaving stays put: never teleport someone who never
+chose to be anywhere else.
+
+The move out is `Lineage.explorerReplace` (replaceState), the same one
+in-site page clicks use, so a whole reading session still costs the single
+history entry that entered it — you never press back a dozen times to
+escape a site.
+
+> This replaced an "entrance tile" rule that walked UP from the site page
+> through every ancestor that still carried a page, and always landed on
+> the hexagons. Both halves answered the wrong question ("where does this
+> site begin?" instead of "where was the reader before it opened?"):
+> stepping into a site from a deck and coming back out dropped you on the
+> site's own root cell, staring at the raw grid.
+
+Verify: `node scripts/drive-site-exit-spawn.cjs --url http://localhost:4251`
+(arrival / toggle / indirect on a live shell) + `site-return.spec.ts`.
+
 ## Rendering (what the bee does)
 
 The surface is gated on `ViewMode`. In hexagons mode the bee tears down

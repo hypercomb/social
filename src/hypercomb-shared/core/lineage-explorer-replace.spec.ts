@@ -6,7 +6,7 @@
 // a place the user chose to be), wrong for a site (a dozen pages read = a dozen
 // back presses to escape). `explorerReplace` is the site-reading counterpart:
 // one step, one replaceState, so the whole session collapses back to where it
-// stood when the site opened and leaving lands on the entrance tile.
+// stood when the site opened and leaving lands on the page that spawned it.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -44,7 +44,7 @@ describe('Lineage.explorerReplace', () => {
     for (const page of ['lounge', 'journal', 'humidor', 'flavor-wheel', 'mission']) {
       lineage.explorerReplace(['revolucion', page])
     }
-    // …and leaves to the entrance
+    // …and leaves, back to the page the site was spawned from
     lineage.explorerReplace(['revolucion'])
     expect(nav.goRaw).toHaveBeenCalledTimes(1)          // still just the entry
     expect(nav.replaceRaw).toHaveBeenCalledTimes(6)     // every site move replaced

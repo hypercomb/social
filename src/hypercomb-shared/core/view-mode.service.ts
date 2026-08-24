@@ -59,6 +59,7 @@ export function isTransientMode(mode: ViewMode): boolean {
 
 export class ViewModeService extends EventTarget {
   #mode: ViewMode
+  #previous: ViewMode
 
   constructor() {
     super()
@@ -66,10 +67,21 @@ export class ViewModeService extends EventTarget {
     // Restore a persisted mode, but never a transient (canvas-hiding) one —
     // booting into a stale 'website' with no page mounted is the white-screen bug.
     this.#mode = (stored && !TRANSIENT_MODES.has(stored)) ? stored : DEFAULT_MODE
+    this.#previous = this.#mode
   }
 
   get mode(): ViewMode {
     return this.#mode
+  }
+
+  /** The surface that was up immediately before the current one — THE VIEW
+   *  THAT SPAWNED IT. A takeover view is entered from somewhere, and the way
+   *  out of it is back to wherever that was; without this every view could
+   *  only ever exit to the hexagons, so stepping into a website from a deck
+   *  (or any other view) dumped the reader onto the raw grid. One step deep
+   *  on purpose: a view is a place you stepped into, not a stack you push. */
+  get previous(): ViewMode {
+    return this.#previous
   }
 
   /** True when the active mode equals `name`. Filter helper for drones
@@ -87,6 +99,7 @@ export class ViewModeService extends EventTarget {
     const cleaned = String(next ?? '').trim()
     if (!cleaned) throw new Error('[view-mode] empty mode name')
     if (this.#mode === cleaned) return
+    this.#previous = this.#mode
     this.#mode = cleaned
     try {
       // Never persist a transient (canvas-hiding) mode — it must not survive a
@@ -94,7 +107,7 @@ export class ViewModeService extends EventTarget {
       if (TRANSIENT_MODES.has(cleaned)) localStorage.removeItem(STORAGE_KEY)
       else localStorage.setItem(STORAGE_KEY, cleaned)
     } catch { /* private mode / storage full — non-fatal */ }
-    this.dispatchEvent(new CustomEvent('change', { detail: { mode: cleaned } }))
+    this.dispatchEvent(new CustomEvent('change', { detail: { mode: cleaned, previous: this.#previous } }))
   }
 
   /** Convenience toggle between two modes (default: hexagons ⇄ website). */

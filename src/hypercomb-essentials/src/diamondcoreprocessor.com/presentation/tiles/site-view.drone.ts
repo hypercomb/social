@@ -23,6 +23,7 @@ import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
+import { HEXAGONS_SURFACE, sameSegments, siteReturnTarget, type SiteSpawn } from './site-return.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -119,6 +120,7 @@ export class SiteViewDrone extends Drone {
   #registered = false
   #lineageBound = false
   #viewModeBound = false
+  #arrivalBound = false
   #globalContextMenuBound = false
   /**
    * Lineage of the cell where the current website session started —
@@ -132,17 +134,39 @@ export class SiteViewDrone extends Drone {
   #siteEntrySegments: readonly string[] | null = null
 
   /**
+   * THE VIEW AND THE PAGE THAT SPAWNED THIS SITE — the one destination
+   * leaving it has (the rule lives in `site-return.ts`). Captured the moment
+   * ViewMode flips into 'website': the surface that was up
+   * (`ViewMode.previous`) and where the explorer stood. When the flip turns
+   * out to have been an ARRIVAL — the reader walked into a cell whose
+   * `view:default` mark opened the site — the place is corrected to the page
+   * they came FROM, because the site's own cell is not somewhere they chose
+   * to be. Null outside a session, and for an INDIRECT one (booted straight
+   * into website mode) that never had a spawn to remember.
+   */
+  #spawn: SiteSpawn | null = null
+  /** Explorer path before the most recent move, and the current one. The
+   *  pair is what lets an arrival-opened site name the page that spawned it;
+   *  only a real change shifts them, so the several 'change' events one
+   *  navigation fires cannot eat the previous page. */
+  #prevSegments: readonly string[] = []
+  #lastSegments: readonly string[] = []
+  /** Re-entrancy guard: leaving sets ViewMode a second time (hexagons → the
+   *  spawning view) from inside the mode-change handler. */
+  #restoringSpawn = false
+
+  /**
    * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
    * created outside Angular by the renderer itself (the one piece of code that
    * is provably running whenever a site is on screen), appended straight to
    * <body> at a near-max z-index, and shown for the entire duration of website
    * mode — even on a page-less dead-end. No component, no signal binding, no
    * load-order failure mode: if a site can show, this button is there. Clicking
-   * it backs the reader OUT to the ENTRANCE — the site's root website tile, in
-   * the layer the session was entered from (`#siteEntrySegments`). It never
-   * opens the websites directory on the way out: `/websites` is the one way to
-   * show that window, so leaving a site returns you to where you came in
-   * rather than into a menu.
+   * it backs the reader OUT to the SPAWN — the page they were on, in the view
+   * they were looking at, when the site opened (`#spawn`). It never opens the
+   * websites directory on the way out: `/websites` is the one way to show
+   * that window, so leaving a site returns you to where you came in rather
+   * than into a menu.
    */
   #exitOverlay: HTMLButtonElement | null = null
   #exitTogglesBound = false
@@ -173,9 +197,29 @@ export class SiteViewDrone extends Drone {
     if (!this.#lineageBound) {
       const lineage = this.resolve<any>('lineage')
       if (lineage?.addEventListener) {
+        this.#lastSegments = [...(lineage.explorerSegments?.() ?? [])]
         lineage.addEventListener('change', this.#onLineageChange)
         this.#lineageBound = true
       }
+    }
+    if (!this.#arrivalBound) {
+      // A site the reader ARRIVED into: view.bee's verdict says this cell's
+      // `view:default` mark opened the surface as they walked in, so the
+      // place that spawned it is the page they came FROM, not this one.
+      // The subscription's own last-value replay is not a live arrival —
+      // ignore it, or a boot replay would rewrite a session's spawn.
+      let replay = true
+      this.onEffect<{ segments?: readonly string[]; view?: string }>('view:arrival', (payload) => {
+        if (replay) return
+        if (payload?.view !== 'website') return
+        const spawn = this.#spawn
+        const entry = this.#siteEntrySegments
+        if (!spawn || !entry) return
+        if (!sameSegments([...(payload.segments ?? [])], entry)) return
+        this.#spawn = { mode: spawn.mode, segments: [...this.#prevSegments] }
+      })
+      replay = false
+      this.#arrivalBound = true
     }
     if (!this.#viewModeBound) {
       const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<EventTarget>('@hypercomb.social/ViewMode')
@@ -240,33 +284,73 @@ export class SiteViewDrone extends Drone {
     this.#teardown()
   }
 
-  readonly #onLineageChange = (): void => { void this.#reconcile() }
+  readonly #onLineageChange = (): void => {
+    const segments = [...(this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? [])]
+    if (!sameSegments(segments, this.#lastSegments)) {
+      this.#prevSegments = this.#lastSegments
+      this.#lastSegments = segments
+    }
+    void this.#reconcile()
+  }
   readonly #onViewModeChange = (): void => {
     // Track session entry: capture on hexagons → website, drop on exit.
     // Boundary check in #onGlobalContextMenu / onAnchorClick keys off this.
+    if (this.#restoringSpawn) return
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
     if (vm?.mode === 'website') {
       if (this.#siteEntrySegments === null) this.#captureSiteEntry()
     } else {
+      const spawn = this.#spawn
       const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
-      // Exiting the site back to the HIVE lands on the ENTRANCE — the site's
-      // root website tile — not whatever page the reader browsed to, and not
-      // merely the cell the site was opened from. Reading a site is not tile
-      // navigation, so the browser history collapses back to where it stood
-      // before the site opened (see #leaveToEntrance). Only for exits to
-      // hexagons: a view toggle onto another surface (slides/tutor) stays on
-      // the current cell, and the launcher's dismiss-then-enter navigates
-      // itself right after this listener. Gated on a site having actually been
-      // on screen this session, so an unrelated mode flip never moves anyone.
-      if (vm?.mode === 'hexagons' && (entry || this.#mount)) void this.#leaveToEntrance(entry)
+      this.#spawn = null
+      // Leaving the site returns to WHERE IT WAS SPAWNED FROM — the page the
+      // reader was on, in the view they were looking at — never the page they
+      // happened to browse to inside it, and never the raw hexagons just
+      // because that is the default surface. Only for exits to hexagons,
+      // which is the destination every exit path names: a view toggle onto
+      // another surface (slides/tutor) is a change of face on this cell, not
+      // an exit, and the launcher's dismiss-then-enter navigates itself right
+      // after this listener. Gated on a site having actually been on screen
+      // this session, so an unrelated mode flip never moves anyone.
+      if (vm?.mode === 'hexagons' && (entry || this.#mount)) this.#returnToSpawn(spawn)
     }
     void this.#reconcile()
   }
 
   #captureSiteEntry(): void {
     const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
-    this.#siteEntrySegments = [...(lineage?.explorerSegments?.() ?? [])]
+    const here = [...(lineage?.explorerSegments?.() ?? [])]
+    this.#siteEntrySegments = here
+    const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ previous?: string }>('@hypercomb.social/ViewMode')
+    // The spawning PLACE starts as "right here"; a `view:arrival` verdict for
+    // this same cell corrects it to the page the reader came from.
+    this.#spawn = { mode: (vm?.previous ?? '').trim(), segments: here }
+  }
+
+  /** Come back out of the site: the view that spawned it, at the page it was
+   *  spawned from. The surface is restored FIRST — while the mode still reads
+   *  'website' any arrival at the destination would be judged as walking out
+   *  of a site's scope and released to the hexagons under us — and the place
+   *  follows with `explorerReplace`, so the whole reading session still costs
+   *  the single history entry that entered it. */
+  #returnToSpawn(spawn: SiteSpawn | null): void {
+    const lineage = this.resolve<any>('lineage')
+    const current: string[] = [...(lineage?.explorerSegments?.() ?? [])]
+    const target = siteReturnTarget(spawn, current)
+    if (target.mode !== HEXAGONS_SURFACE) {
+      const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')
+      this.#restoringSpawn = true
+      try { vm?.setMode(target.mode) } finally { this.#restoringSpawn = false }
+    }
+    if (sameSegments(target.segments, current)) return
+    const segments = [...target.segments]
+    if (typeof lineage?.explorerReplace === 'function') { lineage.explorerReplace(segments); return }
+    ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
+      ?.goRaw?.(segments)
   }
 
   /** Window-level contextmenu handler. Active only in website mode —
@@ -288,7 +372,7 @@ export class SiteViewDrone extends Drone {
    *     left the reader pressing a gesture that visibly did nothing
    *     on the one page they most wanted to leave from.) The exit
    *     runs through ViewMode, so `#onViewModeChange` lands them on
-   *     the entrance exactly as the exit hexagon does.
+   *     the spawn exactly as the exit button does.
    *   • Outside the site (sibling or unrelated cell, e.g. an
    *     `<a href="/elsewhere">` link navigated to a route not under
    *     the site root) → jump back to the entry. Without this the
@@ -843,11 +927,11 @@ export class SiteViewDrone extends Drone {
     btn.setAttribute('aria-label', label)
   }
 
-  /** Exit the website straight back to the HIVE TILES — no intermediate
-   *  websites-directory step. Flipping ViewMode is the whole exit: the
-   *  mode-change handler restores the lineage to the layer the site was
-   *  opened from (`#siteEntrySegments`), so the reader lands on the root
-   *  hexagon where the website starts, wherever they browsed inside it. */
+  /** Exit the website straight back to WHERE IT WAS SPAWNED FROM — no
+   *  intermediate websites-directory step. Flipping ViewMode is the whole
+   *  exit: the mode-change handler restores both halves of the spawn, the
+   *  view that was up and the page it was up on, wherever the reader browsed
+   *  inside the site. */
   #exitToHive(): void {
     const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
     ioc?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')?.setMode('hexagons')
@@ -1119,40 +1203,6 @@ export class SiteViewDrone extends Drone {
     for (let i = common; i < next.length; i++) lineage.explorerEnter?.(next[i])
   }
 
-  /** The ENTRANCE is the site's ROOT website tile — the topmost ancestor that
-   *  still carries a page — not merely the cell the reader happened to open
-   *  the site from. Walking up stops at the first ancestor WITHOUT a page (and
-   *  never reaches the hive root, which has no site of its own). */
-  async #entranceOf(from: readonly string[]): Promise<string[]> {
-    let entrance = [...from]
-    for (let i = from.length - 1; i >= 1; i--) {
-      const up = from.slice(0, i)
-      if (!(await this.#hasPage(up))) break
-      entrance = up
-    }
-    return entrance
-  }
-
-  /** Leaving a website: land on the entrance tile, with the browser history
-   *  collapsed back to where it was before the site was opened. `entry` is the
-   *  captured session start; an INDIRECT entry (session booted straight into
-   *  website mode) has none, so the entrance is derived from where the reader
-   *  actually is. */
-  async #leaveToEntrance(entry: readonly string[] | null): Promise<void> {
-    const lineage = this.resolve<any>('lineage')
-    const current: string[] = [...(lineage?.explorerSegments?.() ?? [])]
-    const base = entry && entry.length ? entry : current
-    if (!base.length) return
-    const entrance = await this.#entranceOf(base)
-    if (current.length === entrance.length && entrance.every((seg, i) => current[i] === seg)) return
-    if (typeof lineage?.explorerReplace === 'function') {
-      lineage.explorerReplace(entrance)
-      return
-    }
-    ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-      ?.get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
-      ?.goRaw?.(entrance)
-  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

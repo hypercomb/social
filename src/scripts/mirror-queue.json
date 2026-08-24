@@ -1368,6 +1368,15 @@
       "commit": "cdaf87dc3",
       "created": "2026-08-24",
       "status": "pending"
+    },
+    {
+      "id": "site-exit-spawn",
+      "title": "Coming out of a website lands on the view + page that spawned it",
+      "run": null,
+      "note": "behaviors/navigation collection: part tiles for site-return.ts (the rule), SiteViewDrone #spawn capture + #returnToSpawn, ViewMode.previous; notes on the three cases (arrival / toggle / indirect) and on what it replaced (the entrance-tile walk that always landed on hexagons). Mark parts with the declared part pheromone; gather under the navigation collection.",
+      "unattended": false,
+      "created": "2026-08-24",
+      "status": "pending"
     }
   ]
 }

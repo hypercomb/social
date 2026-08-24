@@ -32,6 +32,12 @@ A right-click is resolved top-down; the first rung that answers wins.
    to the page it was opened from rather than to the structural parent. At the
    hive root it is a no-op.
 
+Inside a **website** the gesture walks the site's own pages up to its root,
+and at the root it leaves the site — one gesture, one meaning: right-click
+always comes back out of where you are, and at the root of a site the thing
+you are inside IS the site. Leaving lands on the page that spawned it, in the
+view that spawned it (`documentation/embedded-sites.md` → *Coming back out*).
+
 Rung 4 is why **hierarchical menus need no wiring at all**: their rows walk the
 lineage in, so the gesture walks the lineage out. Only a surface that drills
 WITHOUT moving the lineage needs to register.
