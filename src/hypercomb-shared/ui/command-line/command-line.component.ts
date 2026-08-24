@@ -1227,6 +1227,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public readonly suggestions = computed<readonly string[]>(() => {
     if (this.shell?.suppressed()) return []
 
+    // AN EMPTY LINE OFFERS NOTHING. Not "an empty list is filtered down to
+    // nothing" — nothing is on offer at all, because nothing has been asked.
+    // This is the one gate for it: the dropdown, the ghost, and the detail
+    // pane all hang off this list, so quieting it here quiets every surface.
+    //
+    // Command stance made this load-bearing. #toRegister('') is '/' — the
+    // icon IS the slash — so a BLANK command-stance line parses as slash mode
+    // with an empty fragment, and the pool is every behaviour there is. Any
+    // recompute (a navigate, a stance toggle) then threw the whole catalogue
+    // in the participant's face. Tiles stance had the milder twin: a blank
+    // line listed every cell on the level.
+    if (!this.value()) return []
+
     const ctx = this.context()
     if (!ctx.active) return []
     if (ctx.mode === 'filter') return []

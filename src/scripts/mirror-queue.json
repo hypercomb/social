@@ -1315,6 +1315,15 @@
       "created": "2026-08-24",
       "status": "pending",
       "unattended": false
+    },
+    {
+      "id": "quiet-command-line",
+      "title": "Quiet line rule — a blank command line offers nothing",
+      "run": null,
+      "note": "The command line's intel window used to open on a line nobody had typed into. Root cause: in COMMAND stance the icon carries the slash, so #toRegister('') is '/' — a BLANK line parsed as slash mode with an empty fragment and the pool was every behaviour registered (166-177 rows, measured). Any recompute (a navigate, a stance toggle, an arrival) threw the whole catalogue up. Tiles stance had the milder twin: a blank line listed every cell on the level. Fixed with ONE gate in suggestions() — an empty line offers nothing, so the dropdown, the ghost and the detail pane all go quiet, and the first keystroke opens the window already filtered. Owed on the hive: a note on the command-line / intellisense behaviour cards stating the quiet-line rule (nothing is on offer until something is asked), and a part tile or note pointing at scripts/drive-quiet-line.cjs as the harness that holds it — it drives boot, stance toggles, first keystroke, emptying, and an arrival, and its control run reproduces the 177-row dump when the gate is removed. Files: hypercomb-shared/ui/command-line/command-line.component.ts, scripts/drive-quiet-line.cjs. note-add is additive — keep out of the idle drain.",
+      "unattended": false,
+      "created": "2026-08-24",
+      "status": "pending"
     }
   ]
 }
