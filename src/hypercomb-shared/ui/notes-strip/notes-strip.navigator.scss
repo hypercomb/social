@@ -50,6 +50,22 @@
   min-height: 0;          // let the row list shrink + scroll within the panel
   border-top: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
 }
+// THE HIVE'S TILE LIST, hosted. The rail carries its own stylesheet (it is
+// mounted by the chat window too, and must look the same in both), so all
+// this does is give it the box: fill the pane, scroll inside it, and drop the
+// panel's own filter row when the rail's find box is the one on screen.
+.cv2-tilerail {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+
+  // The rail appends its own head / find box / row list straight into this
+  // box, and its stylesheet is global (it is document-level, injected once
+  // by the rail itself) — so the box is all this has to be.
+  .cv2-tilelist.has-rail & { display: flex; flex-direction: column; }
+}
+
 .cv2-tilelist-filter {
   display: flex;
   align-items: center;

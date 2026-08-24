@@ -1289,6 +1289,15 @@
       "unattended": false,
       "created": "2026-08-23",
       "status": "pending"
+    },
+    {
+      "id": "notes-list-is-the-rail",
+      "title": "Mirror: the notes panel's tile list IS the chat window's tiles rail (one component, a PROFILE per surface)",
+      "run": null,
+      "note": "AgentTilesRail gained RailProfile (walk/chats/choose/badge/admits/matches/onHover/findLabel/clickLabel) + showLevel/showCurrent/refresh/paint; the notes panel mounts it through the IoC factory. Mirror as a tile beside [level-roster]: parts = agent-tiles-rail.ts, notes-strip.component.ts/.html, notes-strip.navigator.scss. Note: one list, two surfaces — the differences are a profile, never a second list; the notes profile does not walk because notes resolve by NAME against ONE location.",
+      "unattended": false,
+      "created": "2026-08-24",
+      "status": "pending"
     }
   ]
 }

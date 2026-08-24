@@ -57,6 +57,37 @@ const HOVER_CLOSE_DELAY = 120
 // Rows the navigator's hover list shows before it truncates to "+N more".
 const HOVER_LIST_MAX = 10
 
+/** THE TILES RAIL — the hive's one tile list (essentials,
+ *  assistant/agent-tiles-rail.ts). Shared may never import a module, so the
+ *  rail arrives structurally through the factory it registers in IoC, exactly
+ *  as the chat window takes it. The profile is how one list serves two
+ *  surfaces; `showLevel` is also the feature test — an essentials build
+ *  predating it hands back a rail that walks, which this panel cannot use. */
+type RailPickLike = { readonly name: string; readonly path: readonly string[]; readonly sig?: string }
+type RailRowLike = { readonly name: string; readonly segments: readonly string[] }
+type TilesRailLike = {
+  onSubjectChanged: (subject: RailPickLike | null) => void
+  mount(host: HTMLElement): void
+  showLevel?(segments: readonly string[]): void
+  showCurrent?(name: string | null): void
+  refresh?(): void
+  paint?(): void
+  dispose(): void
+}
+type TilesRailFactoryLike = {
+  create?: (profile?: {
+    walk?: boolean
+    chats?: boolean
+    choose?: boolean
+    badge?: (row: RailRowLike) => number
+    admits?: (row: RailRowLike) => boolean
+    matches?: (row: RailRowLike, query: string) => boolean
+    onHover?: (row: RailRowLike, event: PointerEvent | null) => void
+    findLabel?: string
+    clickLabel?: string
+  }) => TilesRailLike
+}
+
 
 
 // localStorage keys for the slide-resizable panel. Persisted as integer
@@ -344,7 +375,10 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   #t(key: string, fallback: string): string {
     const i18n = window.ioc?.get<I18nProvider>('@hypercomb.social/I18n')
-    return i18n?.t(key) ?? fallback
+    // A missing key comes back AS the key — that is the catalog saying it has
+    // nothing, and printing `notes.openTile` at a user is worse than English.
+    const value = i18n?.t(key)
+    return value && value !== key ? value : fallback
   }
 
   // ── PanelSizeOwner — the width this window SHARES ─────────
@@ -1483,6 +1517,10 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // for autocomplete — the fallback while an older provider is registered.
     const roster = provider.roster?.()
     this.#layerCellLabels.set(roster ? roster.map(row => row.name) : [...provider.suggestions()])
+    // The rail walks the same level for itself; this is the poll that says
+    // WHEN — the panel already hears every event that can move the layer.
+    this.#syncRail()
+    this.#rail?.refresh?.()
   }
 
   /** Click a row's body. Wherever the pane exists — docked and on the desk
@@ -2162,7 +2200,14 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   /** Does `cell` match the current filter (by name or any note/question text)? */
   #matchesFilter(cell: string): boolean {
-    const q = this.filterText().trim().toLowerCase()
+    return this.#matchesText(cell, this.filterText())
+  }
+
+  /** Does `cell` match `query` — by NAME, or by anything written on it? The
+   *  rail's find box searches names on its own; this is the half only the
+   *  notes panel can answer, handed to it as the profile's `matches`. */
+  #matchesText(cell: string, query: string): boolean {
+    const q = query.trim().toLowerCase()
     if (!q) return true
     if (cell.toLowerCase().includes(q)) return true
     const walk = (ns: readonly Note[]): boolean =>
@@ -2197,6 +2242,72 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       .filter(cell => this.#matchesFilter(cell))
       .map(cell => ({ cell, count: this.#cellCount(cell) }))
   })
+
+  // ── The tile list IS the hive's tile list ─────────────────
+  // Not a list of its own: the very same component the chat window's sidebar
+  // mounts (essentials, assistant/agent-tiles-rail.ts), reached structurally
+  // through IoC because shared may never import a module. Same rows, same
+  // SQUARE PICTURES, same search box, same collapse by name — the notes panel
+  // used to draw letter hexagons off its own read and drifted from the rail in
+  // both looks and content.
+  //
+  // What differs is a PROFILE, not a second list: the notes panel writes on
+  // the tiles of ONE location, so the list does not walk; it has no chats, so
+  // no › and no bee counts; its badge counts NOTES; and its find box searches
+  // what is written on a tile as well as what it is called.
+
+  readonly railHost = viewChild<ElementRef<HTMLElement>>('railHost')
+  /** True once the rail is mounted — until then (and on a shell whose
+   *  essentials build predates the profile) the panel's own chips stand in. */
+  readonly railMounted = signal(false)
+  #rail: TilesRailLike | null = null
+
+  #mountRail(host: HTMLElement): void {
+    if (this.#rail) return
+    const factory = get<TilesRailFactoryLike>('@diamondcoreprocessor.com/AgentTilesRailFactory')
+    // `walk` is the load-bearing one: an older essentials build ignores the
+    // profile entirely and would give a rail that walks INTO tiles, whose rows
+    // name cells at another location — and this panel resolves a tile's notes
+    // by NAME against the location it stands at. Rather than open the wrong
+    // tile's notes, keep the panel's own chips.
+    const rail = factory?.create?.({
+      walk: false,
+      chats: false,
+      choose: false,
+      badge: row => this.#cellCount(row.name),
+      // Only ever a NARROWING: while the page shows a filtered set, the list
+      // says so too. Unfiltered, the rail's own walk is the truth — gating it
+      // on the panel's separately-refreshed labels would blank the list for
+      // as long as that read lagged.
+      admits: row => !this.pageFiltered() || this.#navigatorCellLabels().includes(row.name),
+      matches: (row, query) => this.#matchesText(row.name, query),
+      findLabel: this.#t('notes.filterPlaceholder', 'find a tile…'),
+      clickLabel: this.#t('notes.openTile', 'open this tile’s notes'),
+      onHover: (row, event) => {
+        if (event) this.onChipEnter(row.name, event)
+        else this.onChipLeave()
+      },
+    })
+    if (!rail || typeof rail.showLevel !== 'function') return
+    this.#rail = rail
+    rail.onSubjectChanged = subject => {
+      if (subject?.name) this.activateCell(subject.name)
+    }
+    rail.mount(host)
+    rail.showLevel?.(this.platePath())
+    rail.showCurrent?.(this.cell())
+    this.railMounted.set(true)
+    this.#cleanups.push(() => { this.#rail?.dispose(); this.#rail = null })
+  }
+
+  /** Put the rail on the level the panel is standing at, and re-read it. The
+   *  panel's own polls already run on lineage change and `synchronize`. */
+  #syncRail(): void {
+    const rail = this.#rail
+    if (!rail) return
+    rail.showLevel?.(this.platePath())
+    rail.showCurrent?.(this.cell())
+  }
 
   /** First letter of a tile's name, for the hexagon on its row. Mirrors the
    *  identity plate's fallback, so a tile reads the same in both places. */
@@ -2762,6 +2873,30 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
         this.#notesServiceReady.set(true)
       })
     }
+
+    // Mount the hive's tile list as soon as its host is in the DOM (the panel
+    // rebuilds its DOM on fullscreen and on re-dock, so this re-runs).
+    effect(() => {
+      const host = this.railHost()?.nativeElement
+      if (host) untracked(() => this.#mountRail(host))
+    })
+
+    // The rail reads the panel's own facts through its profile — which tiles
+    // the page's filter leaves standing, and how many notes each row holds.
+    // Those move without the hive moving, so say when: a repaint, not a walk.
+    effect(() => {
+      this.#navigatorCellLabels()
+      this.#notesByCell()
+      this.#qaByCell()
+      untracked(() => this.#rail?.paint?.())
+    })
+
+    // The row that is lit is the tile whose notes are open — whether it was
+    // clicked in the list, on the canvas, or set by a capture.
+    effect(() => {
+      const cell = this.cell()
+      untracked(() => this.#rail?.showCurrent?.(cell))
+    })
 
     // The identity plate's picture follows the active tile. Tracks the facts
     // map too, so a tile whose canonical props sig lands AFTER the switch

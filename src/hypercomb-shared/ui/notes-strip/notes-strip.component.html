@@ -811,7 +811,16 @@
          on the canvas) is highlighted. Hidden tiles can't be clicked on the
          canvas but are still listed here. On the desk it is the left
          column of the three (SCSS places it). -->
-    <div class="cv2-tilelist">
+    <div class="cv2-tilelist" [class.has-rail]="railMounted()">
+      <!-- THE HIVE'S TILE LIST, mounted here. The chat window's sidebar and
+           this list are the same component (essentials, agent-tiles-rail),
+           so the rows carry the tiles' own SQUARE PICTURES and collapse the
+           same way — this panel used to draw its own letter hexagons and
+           drifted from the rail in both looks and content. The rail brings
+           its own find box; the chips below stand in only where the factory
+           is not there to ask (an older essentials build on web). -->
+      <div class="cv2-tilerail" #railHost></div>
+      @if (!railMounted()) {
       <div class="cv2-tilelist-filter">
         <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>
         <input type="text" class="cv2-tilelist-input"
@@ -859,6 +868,7 @@
           </div>
         }
       </div>
+      }
       <!-- The page's filter reaches in here: while one is on, this list is
            the page's surviving tiles, not the whole layer. Say so, or the
            missing tiles read as a bug. -->

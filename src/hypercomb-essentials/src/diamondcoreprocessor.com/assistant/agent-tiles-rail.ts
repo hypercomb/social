@@ -1,10 +1,18 @@
 // diamondcoreprocessor.com/assistant/agent-tiles-rail.ts
 //
-// THE TILES RAIL — the left sidebar of a full-screen surface: the agent
-// panel mounts it directly, and the chat window (shared shell, which must
-// never import essentials) reaches it through the IoC factory registered at
-// the bottom. It carries its own stylesheet so it looks the same wherever it
-// is mounted.
+// THE TILES RAIL — THE hive list. Wherever the product shows "the tiles at
+// this level", it is this: the agent panel mounts it directly, and the chat
+// window and the notes panel (shared shell, which must never import
+// essentials) reach it through the IoC factory registered at the bottom. It
+// carries its own stylesheet so it looks the same wherever it is mounted —
+// same rows, same square pictures, same search box, same collapse by name.
+//
+// A second list would drift, and did: the notes panel drew its own chips off
+// its own read and showed letters where this shows pictures, three rows where
+// this shows one. So the differences between surfaces are a PROFILE
+// (RailProfile) on one list, not a second list — what a click means, whether
+// the list can walk, what the badge counts, what the find box searches. The
+// defaults are the chat window's.
 //
 // One level of the hive at a time, as a vertical list: square picture icons,
 // names, a chevron where there is structure inside, and a quiet count of the
@@ -94,6 +102,46 @@ type RailRow = {
    *  deterministic: the same choice composes the same bytes forever. */
   readonly sig?: string
 }
+
+/** HOW A SURFACE WANTS THE LIST. The rail is the hive's one tile list — the
+ *  chat window's sidebar and the notes panel's tile picker are the same rows,
+ *  the same pictures, the same collapse-by-name, the same search box — but
+ *  they are not the same JOB, so the parts that are about CHATS are optional.
+ *
+ *  Defaults are the chat window's, so the surface that has always mounted the
+ *  rail keeps mounting it unchanged. */
+export type RailProfile = {
+  /** Can the list move? False keeps it on ONE level: no hold-to-enter, no
+   *  back, no right-click out. The notes panel writes on the tiles of the
+   *  location it is standing at — a row from a level below would open some
+   *  other tile's notes under its name. */
+  readonly walk?: boolean
+  /** Chat furniture: the › that unfolds a tile's conversations, the spoken /
+   *  unread / draft marks, the live-agent count. */
+  readonly chats?: boolean
+  /** Ctrl-click to gather a row as context, and drag a row out as a
+   *  reference. Off for a surface that has nothing to gather into. */
+  readonly choose?: boolean
+  /** The number at the end of a row. Default: agents at work on the tile.
+   *  The notes panel counts what is written on it instead. */
+  readonly badge?: (row: { readonly name: string; readonly segments: readonly string[] }) => number
+  /** Rows the surface will not list at all — the notes panel drops tiles the
+   *  page's own filter has narrowed away. */
+  readonly admits?: (row: { readonly name: string; readonly segments: readonly string[] }) => boolean
+  /** A match the NAME does not make. The notes panel's find box searches what
+   *  is written on a tile as well as what it is called. */
+  readonly matches?: (row: { readonly name: string; readonly segments: readonly string[] }, query: string) => boolean
+  /** The pointer entering (event) or leaving (null) a row. The notes panel
+   *  peeks at what is written on the tile under the pointer. */
+  readonly onHover?: (row: { readonly name: string; readonly segments: readonly string[] }, event: PointerEvent | null) => void
+  /** What the search box says it does. */
+  readonly findLabel?: string
+  /** What a click on a row does, for the row's tooltip. */
+  readonly clickLabel?: string
+}
+
+const PROFILE_DEFAULTS: Required<Pick<RailProfile, 'walk' | 'chats' | 'choose'>> =
+  { walk: true, chats: true, choose: true }
 
 type RailStore = WalkStore & ThumbnailStore
 
@@ -330,6 +378,12 @@ const ensureRailStyles = (): void => {
 }
 
 export class AgentTilesRail {
+  readonly #profile: RailProfile & Required<Pick<RailProfile, 'walk' | 'chats' | 'choose'>>
+
+  constructor(profile: RailProfile = {}) {
+    this.#profile = { ...PROFILE_DEFAULTS, ...profile }
+  }
+
   #host: HTMLElement | null = null
   #back: HTMLButtonElement | null = null
   #title: HTMLSpanElement | null = null
@@ -440,6 +494,7 @@ export class AgentTilesRail {
     back.type = 'button'
     back.className = 'hc-rail-back'
     back.textContent = '‹'
+    back.hidden = !this.#profile.walk
     back.addEventListener('click', () => this.#up())
     const title = document.createElement('span')
     title.className = 'hc-rail-title'
@@ -458,7 +513,7 @@ export class AgentTilesRail {
     search.value = this.#query
     search.autocomplete = 'off'
     search.spellcheck = false
-    const findLabel = this.#t('agent.rail-find', 'Search this level')
+    const findLabel = this.#profile.findLabel ?? this.#t('agent.rail-find', 'Search this level')
     search.placeholder = findLabel
     search.setAttribute('aria-label', findLabel)
     search.addEventListener('input', () => this.#setQuery(search.value))
@@ -491,10 +546,12 @@ export class AgentTilesRail {
     // RIGHT-CLICK COMES OUT. The way back is the cheapest gesture in the
     // list because it is the one made most: the ‹ is still there for a mouse
     // that would rather aim, and this is the same move without the aiming.
-    host.addEventListener('contextmenu', event => {
-      event.preventDefault()
-      this.#up()
-    })
+    if (this.#profile.walk) {
+      host.addEventListener('contextmenu', event => {
+        event.preventDefault()
+        this.#up()
+      })
+    }
 
     this.#registry = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
     this.#registry?.removeEventListener('change', this.#onRegistryChange)
@@ -503,9 +560,11 @@ export class AgentTilesRail {
     // The marks follow the pool, not this surface: a draft written from the
     // composer, from another window, or by a sweep shows up here the same way.
     this.#dropDraftWatch?.()
-    this.#dropDraftWatch = EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() })
     this.#dropChatWatch?.()
-    this.#dropChatWatch = EffectBus.on('chat:threads-changed', () => { void this.#refreshChats() })
+    if (this.#profile.chats) {
+      this.#dropDraftWatch = EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() })
+      this.#dropChatWatch = EffectBus.on('chat:threads-changed', () => { void this.#refreshChats() })
+    }
     this.#dropGroupWatch?.()
     this.#dropGroupWatch = EffectBus.on<{ paths?: readonly string[] }>('context:active-set', payload => {
       this.#grouped = new Set((payload?.paths ?? []).map(String))
@@ -519,10 +578,72 @@ export class AgentTilesRail {
       else this.#busy.delete(path)
       this.#paintStatus()
     })
-    void this.#refreshDrafts()
-    void this.#refreshChats()
+    if (this.#profile.chats) {
+      void this.#refreshDrafts()
+      void this.#refreshChats()
+    }
 
     void this.#load(0)
+  }
+
+  /** Re-read the level in hand. The surface calls this when the hive moves
+   *  under it (`synchronize`) — the rows repaint from the fresh walk, and the
+   *  cached shape holds the list steady in the meantime. */
+  refresh(): void {
+    if (!this.#host) return
+    void this.#load(0)
+  }
+
+  /** Repaint the level in hand from what is already resolved — no walk, no
+   *  wait. For when the SURFACE's facts moved rather than the hive's: a note
+   *  was written (the badge counts notes), the page's filter narrowed what the
+   *  list may show. */
+  paint(): void {
+    if (!this.#host) return
+    this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
+  }
+
+  /** Put the list ON a level, dropping the trail behind it. What a surface
+   *  bound to the participant's location (the notes panel writes on the tiles
+   *  of ONE place) calls when the location changes. */
+  showLevel(segments: readonly string[]): void {
+    const path = [...segments].map(s => String(s ?? '')).filter(Boolean)
+    this.#seeded = true
+    if (pathKey(path) === pathKey(this.#here())) { this.refresh(); return }
+    this.#query = ''
+    if (this.#find) this.#find.value = ''
+    this.#trail = [[]]
+    for (let i = 1; i <= path.length; i++) this.#trail.push(path.slice(0, i))
+    void this.#load(0)
+  }
+
+  /** Light the row for `name` on the level in hand WITHOUT announcing it —
+   *  the surface already knows (the tile was clicked on the canvas). Silent
+   *  on purpose: announcing would bounce straight back as another change. */
+  showCurrent(name: string | null): void {
+    if (!name) { this.#subject = null; this.#markCurrent(null); return }
+    const segments = [...this.#here(), name]
+    const key = pathKey(segments)
+    if (this.#subject?.key === key) return
+    this.#subject = { key, path: [...this.#here()], name }
+    this.#markCurrent(this.#list?.querySelector<HTMLElement>(`.hc-rail-row[data-key="${CSS.escape(key)}"]`) ?? null)
+  }
+
+  /** Re-read every row's badge from the surface, in place. */
+  #paintBadges(): void {
+    const list = this.#list
+    if (!list) return
+    const badge = this.#profile.badge
+    if (!badge) return
+    for (const row of list.querySelectorAll<HTMLElement>('.hc-rail-row')) {
+      const segments = keySegments(row.dataset['key'] ?? '')
+      const name = segments[segments.length - 1] ?? ''
+      const count = badge({ name, segments })
+      const slot = row.querySelector<HTMLElement>('.hc-rail-bees')
+      if (!slot) continue
+      slot.textContent = String(count)
+      slot.hidden = count === 0
+    }
   }
 
   /** Leave the conversation without entering another — Escape's first stop. */
@@ -562,6 +683,7 @@ export class AgentTilesRail {
   #here(): string[] { return this.#trail[this.#trail.length - 1] }
 
   #drill(segments: readonly string[]): void {
+    if (!this.#profile.walk) return
     this.#query = ''
     if (this.#find) this.#find.value = ''
     this.#trail.push([...segments])
@@ -569,7 +691,7 @@ export class AgentTilesRail {
   }
 
   #up(): void {
-    if (this.#trail.length <= 1) return
+    if (!this.#profile.walk || this.#trail.length <= 1) return
     this.#query = ''
     if (this.#find) this.#find.value = ''
     this.#trail.pop()
@@ -589,9 +711,13 @@ export class AgentTilesRail {
   /** The rows a query leaves standing — plain case-insensitive containment,
    *  which is what a name filter is expected to do. */
   #matching(rows: RailRow[]): RailRow[] {
-    if (!this.#query) return rows
+    const admits = this.#profile.admits
+    const listed = admits ? rows.filter(row => admits(row)) : rows
+    if (!this.#query) return listed
     const needle = this.#query.toLowerCase()
-    return rows.filter(row => row.name.toLowerCase().includes(needle))
+    const also = this.#profile.matches
+    return listed.filter(row =>
+      row.name.toLowerCase().includes(needle) || (also ? also(row, this.#query) : false))
   }
 
   /** Show a level: the cached shape instantly (else a skeleton), then the
@@ -669,14 +795,17 @@ export class AgentTilesRail {
     if (!visible.length) {
       const empty = document.createElement('div')
       empty.className = 'hc-rail-empty'
-      empty.textContent = this.#t('agent.rail-no-match', 'No tile here matches “{query}”.')
-        .replace('{query}', this.#query)
+      // A find box with nothing standing says so; a level narrowed to nothing
+      // by the surface itself is simply empty.
+      empty.textContent = this.#query
+        ? this.#t('agent.rail-no-match', 'No tile here matches “{query}”.').replace('{query}', this.#query)
+        : this.#t('agent.rail-empty', 'Nothing inside this tile yet.')
       list.appendChild(empty)
       return
     }
 
     const counts = this.#agentCounts()
-    const talkHint = this.#t('agent.rail-talk', 'Talk to this tile')
+    const talkHint = this.#profile.clickLabel ?? this.#t('agent.rail-talk', 'Talk to this tile')
     // Short on purpose: a tooltip on every row is furniture, and the one
     // gesture worth teaching there is the hold. The keyboard moves answer to
     // the arrow keys a list is already expected to honour.
@@ -694,7 +823,7 @@ export class AgentTilesRail {
       const main = document.createElement('button')
       main.type = 'button'
       main.className = 'hc-rail-main'
-      main.title = row.childCount ? `${talkHint} · ${insideHint}` : talkHint
+      main.title = row.childCount && this.#profile.walk ? `${talkHint} · ${insideHint}` : talkHint
       // The conversation you are in, said to a screen reader as well as to
       // the eye — `current` is only a background colour.
       if (current) main.setAttribute('aria-current', 'true')
@@ -711,9 +840,11 @@ export class AgentTilesRail {
       name.className = 'hc-rail-name'
       name.textContent = row.name
 
+      // The number at the end of the row: agents at work by default, or
+      // whatever the surface counts (the notes panel counts notes).
       const bees = document.createElement('span')
       bees.className = 'hc-rail-bees'
-      const busy = counts.get(key) ?? 0
+      const busy = this.#profile.badge ? this.#profile.badge(row) : (counts.get(key) ?? 0)
       bees.textContent = String(busy)
       bees.hidden = busy === 0
 
@@ -725,12 +856,12 @@ export class AgentTilesRail {
       // never moves the list either. Going deeper is the deliberate one, and
       // it is the hive's own hold-to-enter, so the list is walked with the
       // gesture the hands already know.
-      if (row.childCount > 0) this.#armHold(main, wrap, row)
+      if (row.childCount > 0 && this.#profile.walk) this.#armHold(main, wrap, row)
       main.addEventListener('click', event => {
         // The hold already went in; the click that ends it must not also
         // drag the conversation to the row we just left.
         if (this.#swallowClick) { this.#swallowClick = false; return }
-        if (event.ctrlKey || event.metaKey) this.#toggleChosen(wrap, key, row)
+        if ((event.ctrlKey || event.metaKey) && this.#profile.choose) this.#toggleChosen(wrap, key, row)
         else this.#enter(wrap, key, row)
       })
 
@@ -742,17 +873,18 @@ export class AgentTilesRail {
       main.addEventListener('keydown', event => {
         if (event.altKey || event.ctrlKey || event.metaKey) return
         if (event.key === 'ArrowRight') {
-          if (row.childCount === 0) return
+          if (row.childCount === 0 || !this.#profile.walk) return
           event.preventDefault()
           this.#focusFirstRow = true
           this.#drill(row.segments)
         } else if (event.key === 'ArrowLeft') {
-          if (this.#trail.length <= 1) return
+          if (this.#trail.length <= 1 || !this.#profile.walk) return
           event.preventDefault()
           this.#focusFirstRow = true
           this.#up()
         } else if (event.key === ' ' || event.key === 'Spacebar') {
           // The keyboard's ctrl-click. Enter still opens the conversation.
+          if (!this.#profile.choose) return
           event.preventDefault()
           this.#toggleChosen(wrap, key, row)
         } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -761,11 +893,17 @@ export class AgentTilesRail {
         }
       })
 
+      const hover = this.#profile.onHover
+      if (hover) {
+        main.addEventListener('pointerenter', event => hover(row, event))
+        main.addEventListener('pointerleave', () => hover(row, null))
+      }
+
       // A ROW IS DRAGGABLE, because the header's boxes are where a request is
       // composed and dragging is how you fill them. What travels is the tile's
       // SIGNATURE plus enough to name it on screen — never a live object, so
       // the drop is the same whether it lands now or after a reload.
-      main.draggable = true
+      main.draggable = this.#profile.choose
       main.addEventListener('dragstart', event => {
         // The PICTURE's address rides too: a reference is drawn as the tile's
         // own square, and the surface that draws it cannot walk the hive to
@@ -787,6 +925,7 @@ export class AgentTilesRail {
       const chevron = document.createElement('button')
       chevron.type = 'button'
       chevron.className = 'hc-rail-chev'
+      chevron.hidden = !this.#profile.chats
       chevron.textContent = '›'
       const chatsLabel = this.#t('agent.rail-chats', 'Conversations on this tile')
       chevron.title = chatsLabel
@@ -799,7 +938,7 @@ export class AgentTilesRail {
 
       wrap.append(main, chevron)
       list.appendChild(wrap)
-      if (this.#expanded.has(key)) list.appendChild(this.#chatsPanel(key, row))
+      if (this.#profile.chats && this.#expanded.has(key)) list.appendChild(this.#chatsPanel(key, row))
     }
 
     // The rows exist; now say what each one holds.
@@ -962,7 +1101,13 @@ export class AgentTilesRail {
   #enter(wrap: HTMLElement, key: string, row: RailRow): void {
     this.#markCurrent(wrap)
     // Clicking the row resumes the chat you were last in on this tile, or its
-    // first one. Which conversation you land in is never a surprise.
+    // first one. Which conversation you land in is never a surprise. A surface
+    // with no chats picks the tile and nothing else.
+    if (!this.#profile.chats) {
+      this.#subject = { key, path: row.segments.slice(0, -1), name: row.name, sig: row.sig }
+      this.onSubjectChanged(this.#subject)
+      return
+    }
     const path = tilePath(row.segments)
     const convoId = this.#stickyChat(path) || tileConvoId(row.segments)
     this.#rememberChat(path, convoId)
@@ -1032,6 +1177,9 @@ export class AgentTilesRail {
   #paintStatus(): void {
     const list = this.#list
     if (!list) return
+    // A surface with no chats has no spoken/unread/draft/live to paint — its
+    // badge is the surface's own count, written once when the row was drawn.
+    if (!this.#profile.chats) { this.#paintBadges(); return }
     const counts = this.#agentCounts()
     for (const row of list.querySelectorAll<HTMLElement>('.hc-rail-row')) {
       const key = row.dataset['key'] ?? ''
@@ -1170,10 +1318,11 @@ export class AgentTilesRail {
 
 // ── the seam to the shell ──────────────────────────────────────────────
 //
-// The chat window lives in hypercomb-shared, and shared must never import
-// essentials — so the rail is offered structurally, the same loose-IoC seam
-// TileContext uses. A fresh rail per call: each surface keeps its own trail
-// and picks.
+// The chat window and the notes panel live in hypercomb-shared, and shared
+// must never import essentials — so the rail is offered structurally, the same
+// loose-IoC seam TileContext uses. A fresh rail per call, with that surface's
+// profile: each keeps its own trail, its own picks, its own idea of what a
+// click means.
 window.ioc.register('@diamondcoreprocessor.com/AgentTilesRailFactory', {
-  create: (): AgentTilesRail => new AgentTilesRail(),
+  create: (profile?: RailProfile): AgentTilesRail => new AgentTilesRail(profile),
 })
