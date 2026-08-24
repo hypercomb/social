@@ -1732,6 +1732,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)
+      // A SURFACE HANDOVER QUIETS THE LINE (Jaime: "it should wait for me to
+      // type"). A staged, uncommitted command — a tile action's composed
+      // `remove (tile)`, a seeded arm name — was abandoned the moment a view
+      // took the surface, and letting that text (and the suggestion list it
+      // keeps open) greet the participant again when the view closes reads
+      // as a glitch. Both edges quiet: covering (the text can't be finished
+      // under a view) and revealing (the line must come back idle). Only an
+      // UNFOCUSED line is ever touched — live typing belongs to the typist —
+      // and the stance is untouched: the slash icon is a standing
+      // preference, not line state.
+      const typing = !!document.activeElement?.closest?.('hc-command-shell')
+      if (!typing && this.value().trim()) {
+        this.#setShellValue('', true)
+        this.#seededArmName = ''
+        this.commandSubject.set(null)
+      }
     })
 
     // Mobile input visibility — on desktop and PORTRAIT phones the command
@@ -2690,9 +2706,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // slash behaviour execution
+    // slash behaviour execution — the REGISTER line is passed in, never
+    // re-read from the shell: in command stance the shell holds the bare
+    // text ('providers'), and slicing ITS first character off minted
+    // 'roviders', an unknown command, and a junk tile.
     if (v.startsWith('/')) {
-      void this.#executeSlashBehaviour()
+      void this.#executeSlashBehaviour(v)
       return
     }
 
@@ -2869,8 +2888,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // slash behaviour execution
   // -------------------------------------------------
 
-  readonly #executeSlashBehaviour = async (): Promise<void> => {
-    const raw = this.value().slice(1).trim()
+  readonly #executeSlashBehaviour = async (line: string): Promise<void> => {
+    const raw = line.slice(1).trim()
     if (!raw) { this.clear(); return }
 
     // split on first space or '(' — /move(5) → command 'move', args '(5)'
@@ -2890,6 +2909,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // believed they had navigated — every follow-up create then landed
     // in the wrong layer.
     if (drone?.has && !drone.has(commandName)) {
+      // create-goto reads the shell value — hand it the register line, so a
+      // bare unknown word in command stance still navigates like '/name'.
+      this.value.set(line)
       await this.commitCreateCellInPlace()
       return
     }
