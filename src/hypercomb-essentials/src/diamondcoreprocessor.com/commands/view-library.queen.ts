@@ -1,6 +1,7 @@
 // The analytical and editorial siblings of Living Brief.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+import { markExplicitSurfaceRelease } from './view.bee.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import {
   listDecorations,
@@ -43,7 +44,7 @@ abstract class LibraryViewQueen extends QueenBee {
     }
     const vm = get<Mode>('@hypercomb.social/ViewMode')
     if (!vm) return
-    if (['off', 'close', 'hexagons'].includes(action)) vm.setMode('hexagons')
+    if (['off', 'close', 'hexagons'].includes(action)) (markExplicitSurfaceRelease(), vm.setMode('hexagons'))
     else vm.setMode(vm.mode === this.view && !['on', 'open', 'view'].includes(action) ? 'hexagons' : this.view)
   }
 

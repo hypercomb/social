@@ -2683,7 +2683,7 @@ export class ShowCellDrone extends Drone {
       // the decoration hydration walk) feeds on, and the mesh is what the
       // escape back to hexagons reveals with no repaint. Skipping it starved
       // the views of their own tiles (the "no tiles until toggled back" bug).
-      const arrival = await this.#arrivalGate(passSegments)
+      const arrival = await this.#arrivalGate(passSegments, locationKey !== this.renderedLocationKey)
       if (arrival === 'abandon') return
       return await this.#renderFromSynchronizeInner(lineage, locationKey, axial, passSegments)
     } finally {
@@ -2714,10 +2714,12 @@ export class ShowCellDrone extends Drone {
    *
    *  The mark is read synchronously from the warm decoration index — every
    *  in-hive navigation warmed it when the parent page hydrated this cell.
-   *  Only the very first pass of a session (boot deep-link: nothing painted,
-   *  index cold, splash still up) pays one async decoration read to ask —
-   *  the ROOT included: segments = [] signs the root location, the one place
-   *  the child-hydration walks can never warm the index for.
+   *  A NAVIGATION pass whose index comes up empty pays one async decoration
+   *  read to be sure: the index holds no negative entries, and the ROOT is
+   *  never in it at all (segments = [] signs the root location, the one
+   *  place the child-hydration walks can never warm) — mid-session arrivals
+   *  at the root were exactly the flash the boot-only probe missed.
+   *  Invalidation passes at an unchanged location skip the read.
    *
    *  The OPEN decision stays with view.bee — its verdict inherits every
    *  gate (dormant, hidden, scope, roster). Holding the paint for it is
@@ -2725,9 +2727,9 @@ export class ShowCellDrone extends Drone {
    *  the verdict, the view mounts, and only then do the hexagons paint —
    *  invisibly, under the covered canvas, keeping the tile roster and the
    *  hydration walk fed and the escape-to-hexagons instant. */
-  async #arrivalGate(passSegments: readonly string[]): Promise<'paint' | 'abandon'> {
+  async #arrivalGate(passSegments: readonly string[], isNavigation: boolean): Promise<'paint' | 'abandon'> {
     let want = defaultViewForSegments(passSegments)
-    if (!want && this.renderedLocationKey === '') {
+    if (!want && isNavigation) {
       want = await defaultViewAt(passSegments)
       if (!this.#segmentsAreCurrent(passSegments)) return 'abandon'
     }

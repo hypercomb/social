@@ -52,6 +52,25 @@ const DEFAULT_SURFACE = 'hexagons'
  *  `['a','b']` and `['a/b']` are never the same address. */
 const SEGMENT_SEPARATOR = String.fromCharCode(0)
 
+// ── EXPLICIT vs GESTURE surface release ─────────────────────────────────
+// Some thirty gesture handlers across the view drones end in
+// `setMode('hexagons')` — Escape, the ×, right-click back. On a layer whose
+// ARRIVAL opened the view, those gestures must LEAVE THE PLACE, not strand
+// the participant on hexagon tiles the layer said it never opens as
+// (Jaime: "you should never see any tiles when they're marked as defaulted
+// to other views"). view.bee watches the surface drop and re-routes — but
+// the deliberate off-switches (the command-line toggle, `/view off`, the
+// hidden/dormant policy releases, the website's own two-step exit) really
+// do mean "peel the face off, show me the hexagons". Those callers mark the
+// release EXPLICIT just before flipping the mode; the watcher stands down
+// inside the window. A time window rather than a flag because the mode
+// change dispatches synchronously but some callers flip after an await.
+let explicitReleaseAt = 0
+/** Call immediately before a deliberate `setMode('hexagons')` — the release
+ *  is then honored even on a layer whose default view is up. */
+export function markExplicitSurfaceRelease(): void { explicitReleaseAt = Date.now() }
+const wasExplicitRelease = (): boolean => Date.now() - explicitReleaseAt < 250
+
 type LineageLike = EventTarget & {
   domain?: () => string
   explorerSegments?: () => readonly string[]
@@ -120,12 +139,18 @@ export class ViewBee extends Worker {
    *  along on a walk, but a PLACE's claim ends where the place does. */
   #autoOpenedView = ''
 
+  /** The mode before the current one — #onSurfaceChanged needs to know what
+   *  the surface dropped FROM to recognise a gesture leaving the face. */
+  #lastMode = ''
+
   protected override act = async (): Promise<void> => {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     lineage?.addEventListener?.('change', () => this.#schedule())
 
     const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
+    this.#lastMode = vm?.mode ?? ''
     vm?.addEventListener?.('change', () => {
+      if (vm) this.#onSurfaceChanged(vm)
       this.#schedule()
       void this.#enforceActiveViewEnabled()
     })
@@ -169,7 +194,7 @@ export class ViewBee extends Worker {
       const descriptor = registry?.get?.(vmNow.mode)
       const ownsSurface = payload?.view === vmNow.mode ||
         (!!payload?.featKind && descriptor?.decorationKind === payload.featKind)
-      if (ownsSurface) vmNow.setMode(DEFAULT_SURFACE)
+      if (ownsSurface) { markExplicitSurfaceRelease(); vmNow.setMode(DEFAULT_SURFACE) }
       this.#schedule()
     })
     EffectBus.on('feature:restored', () => this.#schedule())
@@ -203,9 +228,9 @@ export class ViewBee extends Worker {
       }
       const vmNow = get<ViewModeLike>('@hypercomb.social/ViewMode')
       if (!vmNow) return
-      if (disable || mode === 'off') vmNow.setMode(DEFAULT_SURFACE)
+      if (disable || mode === 'off') { markExplicitSurfaceRelease(); vmNow.setMode(DEFAULT_SURFACE) }
       else if (mode === 'on') vmNow.setMode(view)
-      else vmNow.toggle(DEFAULT_SURFACE, view)
+      else { markExplicitSurfaceRelease(); vmNow.toggle(DEFAULT_SURFACE, view) }
       this.#schedule()
     })
 
@@ -229,14 +254,40 @@ export class ViewBee extends Worker {
     // Dormant (global roster off / publisher-withheld, no wake here) — the
     // surface must fall back to hexagons exactly as a hide does.
     if (isBehaviorDormant(descriptor.decorationKind, segments)) {
-      if (vm.mode === descriptor.view) vm.setMode(DEFAULT_SURFACE)
+      if (vm.mode === descriptor.view) { markExplicitSurfaceRelease(); vm.setMode(DEFAULT_SURFACE) }
       return
     }
     const branchScoped = descriptor.scope === 'branch' || !!descriptor.cascades
     const hidden = await (branchScoped
       ? isFeatureHiddenWithin(segments, descriptor.decorationKind)
       : isFeatureHidden(segments, descriptor.decorationKind)).catch(() => false)
-    if (hidden && vm.mode === descriptor.view) vm.setMode(DEFAULT_SURFACE)
+    if (hidden && vm.mode === descriptor.view) { markExplicitSurfaceRelease(); vm.setMode(DEFAULT_SURFACE) }
+  }
+
+  /** A LAYER'S FACE IS NOT OPTIONAL. When the surface drops to hexagons
+   *  while the ARRIVAL FACE of the location we are standing on was up, and
+   *  no explicit off-switch spoke, a GESTURE did it — Escape, the view's ×,
+   *  right-click back, in any of the ~30 per-drone handlers. On a marked
+   *  layer that gesture means LEAVE THE PLACE, never "show the tiles the
+   *  layer said it doesn't open as". Pin the face straight back up (before
+   *  a frame can show hexagons — the old view holds until the next surface
+   *  renders), then walk the lineage back; the parent's own arrival takes
+   *  over from there. At the root there is nowhere to go: the face stays.
+   *  The deliberate peels (toggle off, `/view off`, hidden/dormant policy,
+   *  the website's own exit) pass through `markExplicitSurfaceRelease`. */
+  #onSurfaceChanged(vm: ViewModeLike): void {
+    const prev = this.#lastMode
+    this.#lastMode = vm.mode
+    if (vm.mode !== DEFAULT_SURFACE) return
+    if (!prev || prev === DEFAULT_SURFACE) return
+    if (wasExplicitRelease()) return
+    if (!this.#autoOpenedView || prev !== this.#autoOpenedView) return
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    const segments = (lineage?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    if (this.#autoOpenedKey !== segments.join(SEGMENT_SEPARATOR)) return
+    vm.setMode(this.#autoOpenedView)
+    if (segments.length) get<{ back?(): void }>('@hypercomb.social/Navigation')?.back?.()
   }
 
   #schedule(): void {
@@ -450,6 +501,7 @@ export class ViewBee extends Worker {
       // branch-scoped view (a website) keeps its toggle on every descendant,
       // so inside the scope this never fires — releases the arrival surface
       // back to the hexagons.
+      markExplicitSurfaceRelease()
       vm.setMode(DEFAULT_SURFACE)
     }
     if (opened) this.#autoOpenedView = opened

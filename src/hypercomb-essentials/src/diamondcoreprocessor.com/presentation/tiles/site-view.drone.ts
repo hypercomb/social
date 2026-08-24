@@ -13,6 +13,7 @@
 // navigates the lineage one level down, and that cell's `context`
 // page mounts. No bundle, no manifest, no path-table.
 
+import { markExplicitSurfaceRelease } from '../../commands/view.bee.js'
 import {
   Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, THEME_IOC_KEY,
   type I18nProvider,
@@ -306,6 +307,7 @@ export class SiteViewDrone extends Drone {
       if (segments.length <= entry.length) {
         const mode = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
           ?.get<{ setMode(next: string): void }>('@hypercomb.social/ViewMode')
+        markExplicitSurfaceRelease()
         mode?.setMode('hexagons')
         return
       }
@@ -850,6 +852,7 @@ export class SiteViewDrone extends Drone {
    *  hexagon where the website starts, wherever they browsed inside it. */
   #exitToHive(): void {
     const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+    markExplicitSurfaceRelease()
     ioc?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')?.setMode('hexagons')
   }
 

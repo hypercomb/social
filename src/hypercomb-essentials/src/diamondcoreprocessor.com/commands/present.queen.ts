@@ -26,6 +26,7 @@
 // The render itself is SlidesViewDrone (presentation/tiles/slides-view.drone.ts).
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+import { markExplicitSurfaceRelease } from './view.bee.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
 
@@ -70,7 +71,7 @@ export class PresentQueenBee extends QueenBee {
     if (!vm) { this.#log('Slides view unavailable'); return }
 
     if (ON_KEYWORDS.has(a)) { vm.setMode('slides'); this.#log('Slides view — on', '▶'); return }
-    if (OFF_KEYWORDS.has(a)) { vm.setMode('hexagons'); this.#log('Slides view — off', '○'); return }
+    if (OFF_KEYWORDS.has(a)) { (markExplicitSurfaceRelease(), vm.setMode('hexagons')); this.#log('Slides view — off', '○'); return }
 
     // Bare /present (or 'toggle') — flip.
     const next = vm.mode === 'slides' ? 'hexagons' : 'slides'
