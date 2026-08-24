@@ -23,6 +23,7 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
+import { TIERS, candidatesFor, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
@@ -143,10 +144,12 @@ export class ProvidersWindowView extends EventTarget {
     registry.addEventListener('change', rerender)
     llmKeyStore.addEventListener('change', rerender)
     llmActivation.addEventListener('change', rerender)
+    llmPolicy.addEventListener('change', rerender)
     this.#unlisten = () => {
       registry.removeEventListener('change', rerender)
       llmKeyStore.removeEventListener('change', rerender)
       llmActivation.removeEventListener('change', rerender)
+      llmPolicy.removeEventListener('change', rerender)
     }
 
     this.#renderBody()
@@ -180,6 +183,8 @@ export class ProvidersWindowView extends EventTarget {
     if (!body) return
     body.textContent = ''
 
+    if (!this.#search.trim()) body.appendChild(this.#policySection())
+
     const providers = llmProviderRegistry().all().filter(p => this.#matches(p))
     for (const provider of providers) body.appendChild(this.#row(provider))
 
@@ -192,6 +197,86 @@ export class ProvidersWindowView extends EventTarget {
 
     body.appendChild(this.#lendSection())
     body.appendChild(this.#addSection())
+  }
+
+  /**
+   * WHO ANSWERS WHEN NOBODY SAID. The rows below are the roster; this is the
+   * standing instruction that picks from it. Three weights of work, each
+   * either pinned to one provider or left to the policy — and the line under
+   * each picker says who that resolves to RIGHT NOW, because a policy you
+   * cannot see the effect of is a policy you cannot trust.
+   */
+  #policySection(): HTMLElement {
+    const section = document.createElement('div')
+    section.className = 'hc-providers-policy'
+
+    const title = document.createElement('div')
+    title.className = 'hc-provider-label'
+    title.textContent = this.#t('providers.policy', 'Who answers when nobody says')
+    section.appendChild(title)
+
+    for (const tier of TIERS) {
+      const row = document.createElement('div')
+      row.className = 'hc-policy-row'
+
+      const name = document.createElement('span')
+      name.className = 'hc-policy-tier'
+      name.textContent = this.#t(`providers.tier.${tier}`, tier)
+
+      const picker = document.createElement('select')
+      picker.className = 'hc-policy-pick'
+      const auto = document.createElement('option')
+      auto.value = ''
+      auto.textContent = this.#t('providers.decide', 'Decide for me')
+      picker.appendChild(auto)
+      for (const provider of candidatesFor({ tier })) {
+        const option = document.createElement('option')
+        option.value = provider.id
+        option.textContent = provider.label
+        picker.appendChild(option)
+      }
+      picker.value = llmPolicy.pin(tier)
+      picker.addEventListener('change', () => {
+        llmPolicy.setPin(tier, picker.value)
+        this.#renderBody()
+      })
+
+      const resolved = document.createElement('div')
+      resolved.className = 'hc-policy-resolved'
+      resolved.textContent = explainChoice({ tier })
+
+      row.append(name, picker)
+      section.append(row, resolved)
+    }
+
+    section.appendChild(this.#policySwitch(
+      'providers.preferFree', 'Prefer models that cost nothing',
+      llmPolicy.preferFree, on => { llmPolicy.preferFree = on },
+    ))
+    section.appendChild(this.#policySwitch(
+      'providers.allowPeers', 'May use another participant’s machine automatically',
+      llmPolicy.allowPeers, on => { llmPolicy.allowPeers = on },
+    ))
+
+    const note = document.createElement('div')
+    note.className = 'hc-provider-label'
+    note.textContent = this.#t(
+      'providers.policyNote',
+      'Naming a model yourself always wins over this.',
+    )
+    section.appendChild(note)
+    return section
+  }
+
+  #policySwitch(key: string, fallback: string, value: boolean, set: (on: boolean) => void): HTMLElement {
+    const label = document.createElement('label')
+    label.className = 'hc-provider-toggle'
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.checked = value
+    box.addEventListener('change', () => { set(box.checked); this.#renderBody() })
+    label.append(box, document.createTextNode(this.#t(key, fallback)))
+    return label
   }
 
   #row(provider: LlmProviderDescriptor): HTMLElement {
@@ -555,6 +640,18 @@ export class ProvidersWindowView extends EventTarget {
       }
       .hc-provider-mono { font-size: 11px; opacity: 0.85; word-break: break-all; }
       .hc-provider-endpoint { display: block; }
+      .hc-providers-policy {
+        padding: 4px 2px 12px; margin-bottom: 6px;
+        border-bottom: 1px solid rgba(${STEEL}, 0.15);
+      }
+      .hc-policy-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+      .hc-policy-tier { min-width: 74px; font-size: 12px; opacity: 0.85; }
+      .hc-policy-pick {
+        flex: 1; min-width: 0; padding: 4px 6px; background: rgba(${STEEL}, 0.08);
+        border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px);
+        color: inherit; font: inherit; outline: none;
+      }
+      .hc-policy-resolved { font-size: 11px; opacity: 0.65; margin: 2px 0 0 82px; }
       .hc-providers-lend {
         padding: 12px 2px 4px; margin-top: 8px; border-top: 1px solid rgba(${STEEL}, 0.15);
       }

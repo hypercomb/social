@@ -29,6 +29,7 @@
 
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
+import { chooseProvider, modelForTier, type ModelNeed } from './model-policy.js'
 import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
 import type {
@@ -50,8 +51,15 @@ export type {
 
 /** What a caller asks for. Everything but `messages` has a sane default. */
 export type LlmCall = {
-  /** Provider id. Omitted → inferred from `model`, else the only configured one. */
+  /** Provider id. Omitted → inferred from `model`, else chosen by policy. */
   readonly providerId?: string
+  /**
+   * WHAT THE WORK NEEDS, for a caller that does not care who answers — the
+   * normal case for translation, expand, break-apart and friends. The
+   * participant's policy turns this into a provider (model-policy.ts), so a
+   * caller never has to know which tiers exist.
+   */
+  readonly need?: ModelNeed
   /** Wire id or the descriptor's human name (`opus`, `gemini`). */
   readonly model?: string
   readonly messages: readonly LlmChatMessage[]
@@ -130,11 +138,19 @@ export const activeProviders = (): LlmProviderDescriptor[] =>
     && (!isCallable(p) || p.requiresKey === false || llmKeyStore.has(p.id)))
 
 /**
- * Which provider answers this call. In order: the id the caller named, the
- * provider that owns the named model, the single configured provider if there
- * is exactly one, then anthropic as the historical default.
+ * Which provider answers this call.
+ *
+ *   1. the id the caller NAMED — always wins, policy included
+ *   2. the provider that owns the model the caller named
+ *   3. the participant's POLICY for the work described (model-policy.ts)
+ *   4. the single ready provider, if there is exactly one
+ *
+ * There is no vendor of last resort any more. A hive with nothing configured
+ * used to fall back to anthropic and fail with a missing-key error naming a
+ * vendor the participant may never have chosen; now it says plainly that
+ * nothing is set up, which is the true thing to say.
  */
-export const resolveProvider = (call: Pick<LlmCall, 'providerId' | 'model'>): LlmProviderDescriptor => {
+export const resolveProvider = (call: Pick<LlmCall, 'providerId' | 'model' | 'need'>): LlmProviderDescriptor => {
   const reg = registry()
   if (call.providerId) {
     const named = reg.get(call.providerId)
@@ -151,14 +167,20 @@ export const resolveProvider = (call: Pick<LlmCall, 'providerId' | 'model'>): Ll
   // bridge is returned and `buildRequest` raises its own honest error.
   if (byModel) return byModel
 
+  // THE POLICY DECIDES. Pins first, then the participant's cost preference —
+  // and never a peer unless they allowed automatic use of one.
+  const chosen = chooseProvider(call.need ?? {})
+  if (chosen) return chosen
+
   const configured = configuredProviders()
   if (configured.length === 1) return configured[0]
 
-  const fallback = reg.get('anthropic') ?? configured[0] ?? reg.all()[0]
-  if (!fallback) {
-    throw new LlmDispatchError('no LLM providers registered', '', call.model ?? '')
-  }
-  return fallback
+  throw new LlmDispatchError(
+    configured.length
+      ? 'no configured provider can do this work'
+      : 'no AI provider is set up yet — open /providers to add one',
+    '', call.model ?? '',
+  )
 }
 
 /** Build the vendor-shaped request for a call. Exported for tests and "test this key". */
@@ -177,7 +199,11 @@ export const buildRequest = (
     )
   }
   return {
-    model: registry().resolveModelId(provider, call.model),
+    // A caller that asked for `fast` work and named no model should get the
+    // provider's fast model, not whatever its default happens to be.
+    model: call.model
+      ? registry().resolveModelId(provider, call.model)
+      : modelForTier(provider, call.need?.tier ?? 'balanced'),
     messages: call.messages,
     system: call.system,
     maxTokens: call.maxTokens,

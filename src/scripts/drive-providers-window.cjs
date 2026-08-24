@@ -14,8 +14,10 @@
 //      field + docs + models; saving a key flips the row to active, clearing
 //      flips it back; the active switch turns it off
 //   3. paste an llm-provider@1 spec into Add provider → a new row appears
-//   4. reload → the discovered row is STILL THERE (pool sweep), the built-ins
-//      are unchanged, and the off-switch survived
+//   4. the POLICY section decides who answers when nobody says: pin a tier,
+//      see the resolved choice change, clear it again
+//   5. reload → the discovered row is STILL THERE (pool sweep), the built-ins
+//      are unchanged, and both the off-switch and the pin survived
 //
 // `--engine chrome` required: headless chromium cannot initialize Pixi's
 // shaders and never leaves the splash.
@@ -127,13 +129,38 @@ async function main() {
       (await panel.locator('.hc-provider-name', { hasText: 'Acme AI' }).count()) === 1)
     await shot('04-spec-imported')
 
-    // ── 4. reload — discovery sweep + device-local policy survive ────────
+    // ── 4. the selection policy ──────────────────────────────────────────
+    const policy = panel.locator('.hc-providers-policy')
+    check('the console says who answers when nobody says', (await policy.count()) === 1)
+    const rows = await policy.locator('.hc-policy-row').count()
+    check('one picker per weight of work', rows === 3, `rows=${rows}`)
+
+    const resolvedBefore = (await policy.locator('.hc-policy-resolved').first().innerText()).trim()
+    check('it shows who that resolves to right now', resolvedBefore.length > 0, resolvedBefore)
+
+    // Pin the heaviest tier and watch the resolved line follow. It must be a
+    // provider that could actually answer: Claude was switched off above and
+    // Acme has no key, so neither is offered here — which is itself the
+    // picker behaving correctly.
+    const options = await policy.locator('.hc-policy-pick').first().locator('option').allInnerTexts()
+    check('only providers that could answer are offered as pins',
+      !options.includes('Claude') && options.includes('Local model'), options.join(', '))
+
+    await policy.locator('.hc-policy-pick').first().selectOption({ label: 'Local model' })
+    await page.waitForTimeout(400)
+    const resolvedAfter = (await panel.locator('.hc-policy-resolved').first().innerText()).trim()
+    check('pinning a tier changes who answers',
+      /Local model/.test(resolvedAfter) && /pinned/.test(resolvedAfter), resolvedAfter)
+
+    // ── 5. reload — discovery sweep + device-local policy survive ────────
     await page.reload({ waitUntil: 'load' })
     await page.waitForTimeout(9000)
     await openConsole()
     check('the discovered provider survives a reload (pool sweep)',
       (await panel.locator('.hc-provider-name', { hasText: 'Acme AI' }).count()) === 1)
     check('the off-switch survived the reload', (await stateOf()) === 'off')
+    check('the pin survived the reload',
+      /pinned/.test((await panel.locator('.hc-policy-resolved').first().innerText()).trim()))
     await shot('05-after-reload')
 
     const fatal = errors.filter(e => !/favicon|net::|Failed to load resource/i.test(e))
