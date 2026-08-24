@@ -109,4 +109,40 @@ export const importProviderSpec = async (json: unknown): Promise<LlmProviderSpec
 }
 
 // ── boot: the local pool joins the roster as soon as the store exists ──────
-window.ioc?.whenReady?.('@hypercomb.social/Store', () => { void sweepProviderPool() })
+//
+// NOT `whenReady` alone. This module is pulled in by `builtin-providers`,
+// which `ai-key.drone` imports — the fourth entry in the side-effect barrel,
+// evaluated before the web shell has finished installing its own `window.ioc`
+// map. A callback parked on the map that is about to be replaced is never
+// called, and the symptom is the worst kind: discovered providers work for
+// the session that imported them and vanish on reload, which reads as "the
+// pool write failed" when the bytes are in fact on disk.
+//
+// So the sweep WAITS FOR THE STORE ITSELF rather than for a registration on
+// one particular ioc instance: a short poll, resolved the moment a Store with
+// `getPool` answers, given up after a bounded window so a shell that never
+// boots one costs nothing. `whenReady` stays as the fast path when it works.
+const SWEEP_POLL_MS = 500
+const SWEEP_GIVE_UP_MS = 30_000
+
+let swept = false
+const sweepOnce = (): void => {
+  if (swept) return
+  swept = true
+  void sweepProviderPool()
+}
+
+const awaitStoreThenSweep = (): void => {
+  const started = Date.now()
+  const tick = (): void => {
+    if (swept) return
+    const store = window.ioc?.get?.('@hypercomb.social/Store') as StoreLike | undefined
+    if (store?.getPool) { sweepOnce(); return }
+    if (Date.now() - started > SWEEP_GIVE_UP_MS) return
+    setTimeout(tick, SWEEP_POLL_MS)
+  }
+  tick()
+}
+
+window.ioc?.whenReady?.('@hypercomb.social/Store', () => { sweepOnce() })
+awaitStoreThenSweep()

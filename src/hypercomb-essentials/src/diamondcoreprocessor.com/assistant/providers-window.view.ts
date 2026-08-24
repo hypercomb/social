@@ -429,7 +429,7 @@ export class ProvidersWindowView extends EventTarget {
         position: fixed; top: 56px; right: 8px; bottom: 8px; width: 420px;
         display: flex; flex-direction: column; z-index: 99999;
         background: rgba(16, 22, 26, 0.96); border: 1px solid rgba(${STEEL}, 0.35);
-        border-radius: 10px; color: rgba(${STEEL}, 0.95);
+        border-radius: var(--hc-radius-floating, 4px); color: rgba(${STEEL}, 0.95);
         font: 13px/1.45 system-ui, sans-serif; overflow: hidden;
       }
       .hc-providers-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
@@ -442,7 +442,7 @@ export class ProvidersWindowView extends EventTarget {
       .hc-providers-close:hover { opacity: 1; }
       .hc-providers-search {
         margin: 4px 12px 8px; padding: 6px 8px; background: rgba(${STEEL}, 0.08);
-        border: 1px solid rgba(${STEEL}, 0.25); border-radius: 6px; color: inherit; outline: none;
+        border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px); color: inherit; outline: none;
       }
       .hc-providers-body { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
       .hc-providers-empty { opacity: 0.6; padding: 12px 2px; }
@@ -459,7 +459,7 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-dot.is-active { opacity: 1; box-shadow: 0 0 6px currentColor; }
       .hc-provider-name { font-weight: 600; }
       .hc-provider-badge {
-        font-size: 10px; padding: 1px 6px; border-radius: 8px;
+        font-size: 10px; padding: 1px 6px; border-radius: 999px;
         border: 1px solid rgba(${STEEL}, 0.3); opacity: 0.75; white-space: nowrap;
       }
       .hc-provider-badge.is-hive { border-color: rgba(240, 200, 90, 0.6); color: rgba(240, 200, 90, 0.95); }
@@ -470,18 +470,18 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-keyrow { display: flex; gap: 6px; }
       .hc-provider-input {
         flex: 1; min-width: 0; padding: 5px 8px; background: rgba(${STEEL}, 0.08);
-        border: 1px solid rgba(${STEEL}, 0.25); border-radius: 6px; color: inherit; outline: none;
+        border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px); color: inherit; outline: none;
       }
       .hc-provider-btn {
         padding: 5px 12px; background: rgba(${STEEL}, 0.15); color: inherit;
-        border: 1px solid rgba(${STEEL}, 0.35); border-radius: 6px; cursor: pointer; font: inherit;
+        border: 1px solid rgba(${STEEL}, 0.35); border-radius: var(--hc-radius-control, 2px); cursor: pointer; font: inherit;
       }
       .hc-provider-btn:hover { background: rgba(${STEEL}, 0.25); }
       .hc-provider-btn.is-quiet { background: none; border-color: rgba(${STEEL}, 0.2); opacity: 0.8; }
       .hc-provider-docs { display: inline-block; margin-top: 5px; color: rgba(${STEEL}, 0.9); font-size: 12px; }
       .hc-provider-models { display: flex; flex-wrap: wrap; gap: 5px; }
       .hc-provider-model {
-        font-size: 11px; padding: 2px 8px; border-radius: 9px; border: 1px solid rgba(${STEEL}, 0.3);
+        font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(${STEEL}, 0.3);
       }
       .hc-provider-model.is-deep { border-color: rgba(200, 150, 255, 0.5); }
       .hc-provider-model.is-fast { border-color: rgba(140, 220, 160, 0.5); }
@@ -493,7 +493,7 @@ export class ProvidersWindowView extends EventTarget {
       .hc-providers-add { padding: 12px 2px; }
       .hc-providers-spec {
         width: 100%; margin: 4px 0 8px; padding: 6px 8px; background: rgba(${STEEL}, 0.06);
-        border: 1px solid rgba(${STEEL}, 0.25); border-radius: 6px; color: inherit;
+        border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px); color: inherit;
         font: 11px/1.4 ui-monospace, monospace; outline: none; resize: vertical; box-sizing: border-box;
       }
     `

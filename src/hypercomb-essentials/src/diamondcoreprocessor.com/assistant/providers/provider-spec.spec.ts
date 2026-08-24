@@ -128,3 +128,58 @@ describe('compileProviderSpec', () => {
     expect(descriptor.models[0].tier).toBe('fast')
   })
 })
+
+// ── the fourth shape: a frontier CLI parked on the broker ────────────────────
+//
+// A bridge is the only tier that can READ THE HIVE, and the only one that
+// takes no key. Both facts are load-bearing in the console (badge, no key
+// field), so both are guarded here — as is the refusal to be fetched, which
+// is what stops the dispatch seam from inventing a URL for it.
+
+const bridgeSpec = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  format: PROVIDER_SPEC_FORMAT,
+  id: 'gemini-bridge',
+  label: 'Gemini CLI',
+  vendor: 'google',
+  shape: 'agent-bridge',
+  models: [{ name: 'gemini', id: 'gemini-2.5-flash', tier: 'balanced' }],
+  defaultModel: 'gemini-2.5-flash',
+  docsUrl: 'https://github.com/google-gemini/gemini-cli',
+  ...over,
+})
+
+describe('agent-bridge specs', () => {
+  it('needs no endpoint, no key, and reads the hive', () => {
+    const spec = parseProviderSpec(bridgeSpec())
+    expect(spec.transport).toBe('agent-bridge')
+    expect(spec.requiresKey).toBe(false)
+    expect(spec.readsHive).toBe(true)
+    expect(spec.endpoint).toBeUndefined()
+  })
+
+  it('refuses an endpoint, an auth style, and a mismatched transport', () => {
+    expect(() => parseProviderSpec(bridgeSpec({ endpoint: 'https://api.example/v1' })))
+      .toThrow(/must not declare an endpoint/)
+    expect(() => parseProviderSpec(bridgeSpec({ auth: 'bearer' }))).toThrow(/takes no auth/)
+    expect(() => parseProviderSpec(bridgeSpec({ transport: 'browser-http' }))).toThrow(/transport/)
+  })
+
+  it('refuses an HTTP vendor claiming it reads the hive', () => {
+    expect(() => parseProviderSpec(base({ readsHive: true }))).toThrow(/readsHive/)
+  })
+
+  it('compiles to a descriptor that refuses to be fetched', () => {
+    const descriptor = compileProviderSpec(parseProviderSpec(bridgeSpec()) as LlmProviderSpec)
+    expect(descriptor.transport).toBe('agent-bridge')
+    expect(descriptor.readsHive).toBe(true)
+    expect(descriptor.requiresKey).toBe(false)
+    expect(descriptor.endpoint).toBeUndefined()
+    expect(() => descriptor.toRequest(REQUEST)).toThrow(/cannot be called over HTTP/)
+    expect(() => descriptor.fromResponse({}, REQUEST)).toThrow(/cannot be called over HTTP/)
+  })
+
+  it('keeps its vendor colour when the palette knows it', () => {
+    const descriptor = compileProviderSpec(parseProviderSpec(bridgeSpec()) as LlmProviderSpec)
+    expect(descriptor.vendor).toBe('google')
+  })
+})

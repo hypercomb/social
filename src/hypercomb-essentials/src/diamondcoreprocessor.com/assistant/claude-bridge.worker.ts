@@ -53,6 +53,9 @@ type BridgeRequest = {
    *  unrelated to this filter. Also used by `decoration-add` as the
    *  kind tag on the new decoration record. */
   kind?: string
+  /** `agents-announce`: the frontier bridges this machine can spawn, each an
+   *  `llm-provider@1` spec with `shape: 'agent-bridge'`. */
+  agents?: unknown[]
   /** Decoration record fields (decoration-add). */
   appliesTo?: string[]
   payload?: unknown
@@ -236,6 +239,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'chat-reply':   return this.#chatReply(req)
       case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
+      case 'agents-announce': return this.#agentsAnnounce(req)
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
       case 'feedback-channel-status': return this.#feedbackChannelStatus(req)
@@ -327,6 +331,49 @@ export class ClaudeBridgeWorker extends Worker {
   // Layer-untouched: this directory is structurally separate from any
   // cell's layer slots. The feedback window and state-machine wrappers
   // around base objects pull from here at access/render time.
+
+  /**
+   * A BRIDGE FOR EVERY FRONTIER MODEL — the moment this machine has one.
+   *
+   * A browser cannot read PATH, so it cannot know that `codex` or `gemini` is
+   * installed here. `scripts/bridge/bridge-agents.cjs` probes locally and
+   * sends the result through this op: one `llm-provider@1` spec per installed
+   * CLI, `shape: 'agent-bridge'`. Each is validated by the SAME compiler that
+   * accepts a spec published by a domain (provider-spec.ts), registered in the
+   * provider registry, and persisted into the `llm:providers` pool — so the
+   * bridge keeps its row in `/providers` across reloads, and its model words
+   * (`/gemini`, `/codex`) become things the command line offers.
+   *
+   * Per-spec failure is per-spec: one bad entry is reported by id and the
+   * rest still land, because a roster that half-arrives is more useful than
+   * one that is refused wholesale.
+   */
+  async #agentsAnnounce(req: BridgeRequest): Promise<BridgeResponse> {
+    const specs = Array.isArray(req.agents) ? req.agents : []
+    if (!specs.length) return { id: req.id, ok: false, error: 'agents-announce needs `agents` (array of specs)' }
+
+    const { importProviderSpec } = await import('./providers/provider-discovery.js')
+    const registered: string[] = []
+    const rejected: { id: string; reason: string }[] = []
+    for (const spec of specs) {
+      const named = String((spec as { id?: unknown })?.id ?? '(unnamed)')
+      try {
+        const accepted = await importProviderSpec(spec)
+        registered.push(accepted.id)
+      } catch (err) {
+        rejected.push({ id: named, reason: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    if (registered.length) {
+      EffectBus.emit('toast:show', {
+        type: 'tip',
+        message: registered.length === 1
+          ? `${registered[0]} can answer from this machine — see /providers`
+          : `${registered.length} model bridges can answer from this machine — see /providers`,
+      })
+    }
+    return { id: req.id, ok: true, data: { registered: registered.length, ids: registered, rejected } }
+  }
 
   async #optimizationAdd(req: BridgeRequest): Promise<BridgeResponse> {
     const store = get<{ putOptimization?: (blob: Blob) => Promise<string> }>('@hypercomb.social/Store')

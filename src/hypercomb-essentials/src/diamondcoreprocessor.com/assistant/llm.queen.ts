@@ -30,6 +30,7 @@
 // IS the response — a live service the user triggers from the hive.
 
 import { QueenBee, EffectBus, isLocalClaudeBridgeConfigured, isSignature } from '@hypercomb/core'
+import { llmProviderRegistry } from './llm-provider-registry.js'
 import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
 import { resolveTileContext } from './tile-context.js'
 
@@ -279,16 +280,47 @@ export class LlmQueenBee extends QueenBee {
 class LlmProvider implements SlashBehaviourProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
+
   // The model name is a HINT carried in the ask record — the responder
   // decides what to honour it with (a parked session answers as whatever it
-  // already is; the scheduled drain maps the hint to a real model id, see
-  // scripts/bridge/drain-tick.cjs). Keep these names aligned with that map.
-  readonly behaviours: SlashBehaviour[] = [
+  // already is; the scheduled drain maps the hint to a CLI and a real model
+  // id, see scripts/bridge/agent-roster.cjs). Keep these names aligned with
+  // the roster's model `name` fields.
+  //
+  // The four Claude words ship in the box because Claude Code is the bridge
+  // that has always been here. Every OTHER frontier bridge earns its words
+  // the moment it is announced: `bridge-agents.cjs --announce` registers an
+  // `agent-bridge` provider per installed CLI, and the models it declares
+  // become commands below with no code change. That is the whole point of
+  // the bridge tier being a provider — one roster, one place to look.
+  static readonly #BUILT_IN: SlashBehaviour[] = [
     { name: 'opus', description: 'Open the chat with Claude Opus', descriptionKey: 'slash.opus' },
     { name: 'sonnet', description: 'Open the chat with Claude Sonnet', descriptionKey: 'slash.sonnet' },
     { name: 'haiku', description: 'Open the chat with Claude Haiku', descriptionKey: 'slash.haiku' },
     { name: 'fable', description: 'Open the chat with Claude Fable', descriptionKey: 'slash.fable' },
   ]
+
+  get behaviours(): SlashBehaviour[] {
+    const words = new Map<string, SlashBehaviour>(
+      LlmProvider.#BUILT_IN.map(behaviour => [behaviour.name, behaviour]),
+    )
+    // Bridges only. An HTTP vendor's models are NOT command words: typing
+    // `/gpt` must not silently spend a key on a tier that cannot read the
+    // hive, and the chat window is where a keyed provider is chosen.
+    // Through the accessor, never a bare `ioc.get`: this module and the
+    // registry are both early in the barrel, and the shell's map is not
+    // reliably populated yet at that point (see the heal in
+    // llm-provider-registry.ts).
+    for (const provider of llmProviderRegistry().all()) {
+      if (provider.transport !== 'agent-bridge') continue
+      for (const model of provider.models ?? []) {
+        const name = String(model?.name ?? '').trim().toLowerCase()
+        if (!name || words.has(name)) continue
+        words.set(name, { name, description: `Ask ${provider.label} (${name})` })
+      }
+    }
+    return [...words.values()]
+  }
 
   async execute(behaviourName: string, args: string): Promise<void> {
     const queen = get('@diamondcoreprocessor.com/LlmQueenBee') as

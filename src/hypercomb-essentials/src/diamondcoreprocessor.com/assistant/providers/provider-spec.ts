@@ -13,6 +13,14 @@
 // already-tested shared one. A vendor too odd for any family stays a code
 // descriptor, which is what the code path is for.
 //
+// There is a FOURTH shape that is not HTTP at all: `agent-bridge`. A frontier
+// CLI parked on the broker (Claude Code, Codex, Gemini CLI, …) answers by
+// reading the hive and writing notes, not by returning a response body — so
+// its descriptor carries models, colour and honesty flags but no endpoint,
+// and building an HTTP request from it THROWS. `scripts/bridge/
+// bridge-agents.cjs` announces these after probing the machine's PATH; the
+// ask path (llm.queen → the broker) is how they are actually reached.
+//
 // SECURITY POSTURE. A spec names an endpoint the participant's key will be
 // sent to. The compiler therefore refuses non-HTTPS endpoints (localhost
 // excepted — your own machine is the one place plaintext is fine), and the
@@ -54,18 +62,27 @@ export type LlmProviderSpec = {
   /** Colour family hint. Unknown/omitted → inferred from the default model,
    *  else `local`. Never trusted into the registry unvalidated. */
   readonly vendor?: string
-  readonly shape: 'openai' | 'anthropic' | 'google'
-  readonly endpoint: string
+  readonly shape: 'openai' | 'anthropic' | 'google' | 'agent-bridge'
+  /** Which tier reaches this provider. Omitted = `browser-http`. */
+  readonly transport?: 'browser-http' | 'agent-bridge'
+  /** Required for the HTTP shapes; meaningless (and refused) for a bridge. */
+  readonly endpoint?: string
   readonly auth?: LlmAuthStyle
   readonly models: readonly { name: string; id: string; tier?: LlmTier }[]
   readonly defaultModel: string
   readonly docsUrl: string
   readonly keyPattern?: string
   readonly requiresKey?: boolean
+  /** Only an agent-bridge may claim it — the registry's honesty badge. */
+  readonly readsHive?: boolean
 }
 
 const TIERS: readonly LlmTier[] = ['deep', 'balanced', 'fast']
-const SHAPES = ['openai', 'anthropic', 'google'] as const
+const SHAPES = ['openai', 'anthropic', 'google', 'agent-bridge'] as const
+
+/** A bridge is reached through the broker, so it declares no endpoint, needs
+ *  no key, and is the one tier allowed to say it reads the hive. */
+const isBridgeShape = (shape: string): boolean => shape === 'agent-bridge'
 
 const fail = (reason: string): never => {
   throw new Error(`[provider-spec] ${reason}`)
@@ -104,8 +121,15 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
   const shape = cleanString(raw['shape']) as LlmProviderSpec['shape']
   if (!SHAPES.includes(shape)) fail(`spec "${id}" shape must be one of ${SHAPES.join(', ')}`)
 
+  // A BRIDGE HAS NO ENDPOINT. Refusing one is not pedantry: an endpoint on a
+  // bridge spec would be an address nothing ever dials, and the console shows
+  // endpoints as "where your key goes" — a bridge that appears to name one
+  // would be lying about a key it never takes.
+  const bridge = isBridgeShape(shape)
   const endpoint = cleanString(raw['endpoint'])
-  if (!isAcceptableEndpoint(endpoint)) {
+  if (bridge) {
+    if (endpoint) fail(`spec "${id}" is an agent-bridge and must not declare an endpoint`)
+  } else if (!isAcceptableEndpoint(endpoint)) {
     fail(`spec "${id}" endpoint must be https (or http on localhost) — got "${endpoint}"`)
   }
 
@@ -133,8 +157,19 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     try { new RegExp(keyPattern) } catch { fail(`spec "${id}" keyPattern does not compile`) }
   }
 
+  const transport = cleanString(raw['transport']) || (bridge ? 'agent-bridge' : 'browser-http')
+  if (transport !== (bridge ? 'agent-bridge' : 'browser-http')) {
+    fail(`spec "${id}" transport "${transport}" does not match shape "${shape}"`)
+  }
+  // Only the bridge tier may wear the honesty badge — an HTTP vendor claiming
+  // it would be telling the participant their key can walk the tree.
+  if (raw['readsHive'] === true && !bridge) {
+    fail(`spec "${id}" may not claim readsHive — only an agent-bridge reads the hive`)
+  }
+
   const auth = raw['auth'] as LlmAuthStyle | undefined
   if (auth !== undefined) {
+    if (bridge) fail(`spec "${id}" is an agent-bridge and takes no auth`)
     const named = typeof auth === 'string' && ['bearer', 'x-api-key', 'none'].includes(auth)
     const custom = !!auth && typeof auth === 'object' && !!cleanString((auth as { header?: string }).header)
     if (!named && !custom) fail(`spec "${id}" auth must be bearer | x-api-key | none | { header }`)
@@ -146,13 +181,15 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     label,
     ...(cleanString(raw['vendor']) ? { vendor: cleanString(raw['vendor']).toLowerCase() } : {}),
     shape,
-    endpoint: endpoint.replace(/\/+$/, ''),
+    transport: bridge ? 'agent-bridge' : 'browser-http',
+    ...(bridge ? {} : { endpoint: endpoint.replace(/\/+$/, '') }),
     ...(auth !== undefined ? { auth } : {}),
     models,
     defaultModel,
     docsUrl,
     ...(keyPattern ? { keyPattern } : {}),
-    ...(raw['requiresKey'] === false ? { requiresKey: false } : {}),
+    ...(bridge || raw['requiresKey'] === false ? { requiresKey: false } : {}),
+    ...(bridge ? { readsHive: true } : {}),
   }
 }
 
@@ -186,23 +223,39 @@ const modelsOf = (spec: LlmProviderSpec): LlmModelDescriptor[] =>
  * concerned — that indistinguishability is the whole plug-in architecture.
  */
 export const compileProviderSpec = (spec: LlmProviderSpec): LlmProviderDescriptor => {
+  const bridge = spec.shape === 'agent-bridge'
   const base: Omit<LlmProviderDescriptor, 'toRequest' | 'fromResponse' | 'fromStreamEvent'> = {
     id: spec.id,
     label: spec.label,
     vendor: vendorOf(spec),
-    transport: 'browser-http',
-    endpoint: spec.endpoint,
+    transport: bridge ? 'agent-bridge' : 'browser-http',
+    ...(spec.endpoint ? { endpoint: spec.endpoint } : {}),
     models: modelsOf(spec),
     defaultModel: spec.defaultModel,
     docsUrl: spec.docsUrl,
     ...(spec.keyPattern ? { keyPattern: new RegExp(spec.keyPattern) } : {}),
-    ...(spec.requiresKey === false ? { requiresKey: false } : {}),
+    ...(bridge || spec.requiresKey === false ? { requiresKey: false } : {}),
+    ...(bridge ? { readsHive: true } : {}),
+  }
+
+  if (bridge) {
+    // A BRIDGE IS NOT FETCHABLE. It answers by reading the hive and writing
+    // back over the broker, which is the ask path — so these two throw rather
+    // than inventing a URL. `llm-dispatch` keeps bridges out of the implicit
+    // roster and gives a caller that names one explicitly this message.
+    const refuse = (): never => {
+      throw new Error(
+        `[${spec.id}] is an agent-bridge: ask it through the bridge (a question from the ` +
+        `command line, or an ask record) — it cannot be called over HTTP`,
+      )
+    }
+    return { ...base, toRequest: refuse, fromResponse: refuse }
   }
 
   if (spec.shape === 'anthropic') {
     return {
       ...base,
-      toRequest: request => anthropicRequest(spec.endpoint, request),
+      toRequest: request => anthropicRequest(String(spec.endpoint), request),
       fromResponse: anthropicResponse,
       fromStreamEvent: anthropicStreamEvent,
     }
@@ -210,15 +263,14 @@ export const compileProviderSpec = (spec: LlmProviderSpec): LlmProviderDescripto
   if (spec.shape === 'google') {
     return {
       ...base,
-      toRequest: request => googleRequest(spec.endpoint, request),
+      toRequest: request => googleRequest(String(spec.endpoint), request),
       fromResponse: googleResponse,
       fromStreamEvent: googleStreamEvent,
     }
   }
   const authHeader = authHeaderOf(spec)
-  const url = /\/chat\/completions$/.test(spec.endpoint)
-    ? spec.endpoint
-    : `${spec.endpoint}/chat/completions`
+  const endpoint = String(spec.endpoint)
+  const url = /\/chat\/completions$/.test(endpoint) ? endpoint : `${endpoint}/chat/completions`
   return {
     ...base,
     toRequest: (request: LlmRequest): LlmHttpRequest => openAiRequest(url, request, authHeader),

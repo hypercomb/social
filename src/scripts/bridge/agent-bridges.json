@@ -1,0 +1,181 @@
+{
+  "_comment": [
+    "THE FRONTIER-MODEL BRIDGE ROSTER — data, not code.",
+    "",
+    "The Claude bridge was never Claude-shaped: it is a coding agent with repo",
+    "access, spawned headless, told to read .claude/skills/bridge-listen/SKILL.md",
+    "and answer the hive's pending asks over the broker. EVERY frontier CLI can",
+    "do that, so every frontier CLI is a bridge — this file is the list of them.",
+    "",
+    "It is JSON rather than a .cjs module for the same reason a provider is a",
+    "spec: these vendors change their flags faster than this repo learns them,",
+    "and fixing a bridge must never mean editing code. Add a vendor by adding an",
+    "entry; nothing else in the system learns its name.",
+    "",
+    "FIELDS",
+    "  id          registry id. Becomes the provider id (agent-bridge transport).",
+    "  label       what a participant calls it in the providers console.",
+    "  vendor      colour family; must be one VENDOR_BODY knows, else it lands",
+    "              in `local` (see provider-spec.ts vendorOf).",
+    "  bin         executable to look for on PATH. On Windows the probe also",
+    "              tries <bin>.cmd / .exe / .ps1 — npm shims are .cmd.",
+    "  versionArgs argv that proves it is installed and answers fast.",
+    "  argv        the headless invocation. {prompt} and {model} are replaced;",
+    "              a {model} token in an entry with no model resolves to the",
+    "              defaultModel. An argv element that is ONLY an unresolved",
+    "              placeholder is dropped, so a flagless CLI still runs.",
+    "  models      what this bridge can be asked for. `name` is the word a",
+    "              participant types (/opus, /gemini); `id` is what the CLI is",
+    "              given; tier is deep|balanced|fast.",
+    "  docsUrl     where to install it — the console's whole guided setup.",
+    "",
+    "Anything here that is NOT installed is simply not announced. Verified",
+    "present on this machine: claude. The rest ship as ready-to-use defaults."
+  ],
+  "agents": [
+    {
+      "id": "claude-bridge",
+      "label": "Claude Code",
+      "vendor": "anthropic",
+      "bin": "claude",
+      "versionArgs": ["--version"],
+      "argv": [
+        "-p", "{prompt}",
+        "--model", "{model}",
+        "--permission-mode", "acceptEdits",
+        "--allowedTools", "Bash Read Grep Glob",
+        "--output-format", "text"
+      ],
+      "models": [
+        { "name": "fable", "id": "claude-fable-5", "tier": "deep" },
+        { "name": "opus", "id": "claude-opus-5", "tier": "deep" },
+        { "name": "sonnet", "id": "claude-sonnet-5", "tier": "balanced" },
+        { "name": "haiku", "id": "claude-haiku-4-5-20251001", "tier": "fast" }
+      ],
+      "defaultModel": "claude-haiku-4-5-20251001",
+      "docsUrl": "https://claude.com/claude-code"
+    },
+    {
+      "id": "codex-bridge",
+      "label": "Codex",
+      "vendor": "openai",
+      "bin": "codex",
+      "versionArgs": ["--version"],
+      "argv": [
+        "exec", "{prompt}",
+        "-m", "{model}",
+        "--sandbox", "workspace-write",
+        "--skip-git-repo-check"
+      ],
+      "models": [
+        { "name": "codex", "id": "gpt-5-codex", "tier": "deep" },
+        { "name": "codex-mini", "id": "gpt-5-codex-mini", "tier": "fast" }
+      ],
+      "defaultModel": "gpt-5-codex",
+      "docsUrl": "https://developers.openai.com/codex/cli"
+    },
+    {
+      "id": "gemini-bridge",
+      "label": "Gemini CLI",
+      "vendor": "google",
+      "bin": "gemini",
+      "versionArgs": ["--version"],
+      "argv": [
+        "-p", "{prompt}",
+        "-m", "{model}",
+        "--yolo"
+      ],
+      "models": [
+        { "name": "gemini-pro", "id": "gemini-2.5-pro", "tier": "deep" },
+        { "name": "gemini", "id": "gemini-2.5-flash", "tier": "balanced" }
+      ],
+      "defaultModel": "gemini-2.5-flash",
+      "docsUrl": "https://github.com/google-gemini/gemini-cli"
+    },
+    {
+      "id": "cursor-bridge",
+      "label": "Cursor Agent",
+      "vendor": "openai",
+      "bin": "cursor-agent",
+      "versionArgs": ["--version"],
+      "argv": [
+        "-p", "{prompt}",
+        "--model", "{model}",
+        "--force",
+        "--output-format", "text"
+      ],
+      "models": [
+        { "name": "cursor", "id": "auto", "tier": "balanced" }
+      ],
+      "defaultModel": "auto",
+      "docsUrl": "https://cursor.com/cli"
+    },
+    {
+      "id": "copilot-bridge",
+      "label": "Copilot CLI",
+      "vendor": "openai",
+      "bin": "copilot",
+      "versionArgs": ["--version"],
+      "argv": [
+        "-p", "{prompt}",
+        "--model", "{model}",
+        "--allow-all-tools"
+      ],
+      "models": [
+        { "name": "copilot", "id": "claude-sonnet-4.5", "tier": "balanced" }
+      ],
+      "defaultModel": "claude-sonnet-4.5",
+      "docsUrl": "https://github.com/github/copilot-cli"
+    },
+    {
+      "id": "grok-bridge",
+      "label": "Grok CLI",
+      "vendor": "xai",
+      "bin": "grok",
+      "versionArgs": ["--version"],
+      "argv": [
+        "-p", "{prompt}",
+        "-m", "{model}"
+      ],
+      "models": [
+        { "name": "grok", "id": "grok-4", "tier": "deep" },
+        { "name": "grok-fast", "id": "grok-4-fast", "tier": "fast" }
+      ],
+      "defaultModel": "grok-4",
+      "docsUrl": "https://github.com/superagent-ai/grok-cli"
+    },
+    {
+      "id": "qwen-bridge",
+      "label": "Qwen Code",
+      "vendor": "local",
+      "bin": "qwen",
+      "versionArgs": ["--version"],
+      "argv": [
+        "-p", "{prompt}",
+        "-m", "{model}",
+        "--yolo"
+      ],
+      "models": [
+        { "name": "qwen", "id": "qwen3-coder-plus", "tier": "balanced" }
+      ],
+      "defaultModel": "qwen3-coder-plus",
+      "docsUrl": "https://github.com/QwenLM/qwen-code"
+    },
+    {
+      "id": "opencode-bridge",
+      "label": "opencode",
+      "vendor": "local",
+      "bin": "opencode",
+      "versionArgs": ["--version"],
+      "argv": [
+        "run", "{prompt}",
+        "-m", "{model}"
+      ],
+      "models": [
+        { "name": "opencode", "id": "anthropic/claude-sonnet-4-5", "tier": "balanced" }
+      ],
+      "defaultModel": "anthropic/claude-sonnet-4-5",
+      "docsUrl": "https://opencode.ai"
+    }
+  ]
+}

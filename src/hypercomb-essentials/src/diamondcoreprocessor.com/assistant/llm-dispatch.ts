@@ -83,13 +83,30 @@ const MAX_ERROR_BODY = 600
 
 const registry = (): LlmProviderRegistry => llmProviderRegistry()
 
-/** The roster that can answer: has a key (or needs none) AND has not been
- *  switched off in the providers console. Naming a provider or a model
- *  explicitly still wins over this filter — an explicit ask is the
- *  participant overriding their own default, not the orchestrator choosing. */
+/** Can this provider be reached by `fetch` at all? An `agent-bridge` cannot:
+ *  it answers through the broker (an ask record a parked CLI drains), so it
+ *  belongs to the ask path, never to this seam. Keeping the test here means
+ *  one definition of "callable" for the roster and the resolver both. */
+const isCallable = (provider: LlmProviderDescriptor): boolean =>
+  provider.transport !== 'agent-bridge'
+
+/** The roster that can answer HTTP calls: reachable by fetch, has a key (or
+ *  needs none), AND has not been switched off in the providers console.
+ *  Naming a provider or a model explicitly still wins over the activation
+ *  filter — an explicit ask is the participant overriding their own default,
+ *  not the orchestrator choosing. */
 export const configuredProviders = (): LlmProviderDescriptor[] =>
   registry().all().filter(p =>
-    llmActivation.isEnabled(p.id) && (p.requiresKey === false || llmKeyStore.has(p.id)))
+    isCallable(p) && llmActivation.isEnabled(p.id)
+    && (p.requiresKey === false || llmKeyStore.has(p.id)))
+
+/** Every ACTIVE provider whatever its transport — what the orchestrator picks
+ *  from when it is choosing WHO answers rather than building a fetch. Bridges
+ *  belong here: they are the only tier that can read the hive. */
+export const activeProviders = (): LlmProviderDescriptor[] =>
+  registry().all().filter(p =>
+    llmActivation.isEnabled(p.id)
+    && (!isCallable(p) || p.requiresKey === false || llmKeyStore.has(p.id)))
 
 /**
  * Which provider answers this call. In order: the id the caller named, the
@@ -108,6 +125,9 @@ export const resolveProvider = (call: Pick<LlmCall, 'providerId' | 'model'>): Ll
     return named
   }
   const byModel = call.model ? reg.providerForModel(call.model) : undefined
+  // A model word can name a BRIDGE model (`opus`, `gemini`). Falling through
+  // to the HTTP roster would silently answer with a different vendor, so the
+  // bridge is returned and `buildRequest` raises its own honest error.
   if (byModel) return byModel
 
   const configured = configuredProviders()
