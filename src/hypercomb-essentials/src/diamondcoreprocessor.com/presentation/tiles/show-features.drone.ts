@@ -727,8 +727,15 @@ export class ShowFeaturesDrone extends Drone {
       // back missing until they re-opened the panel. Wait (briefly, bounded)
       // for the kind to actually be on the layer, then refresh in place.
       await this.#settleKind(segments, settleKind)
-      // refresh the panel group in place ([] = the hive-root group)
-      if (label) await this.#open(label, segments.length ? undefined : [])
+      // Refresh THE LAYER WE JUST WROTE — `segments`, always, never the
+      // label-at-current-location default. That default is for a tile you
+      // HOLD (parent + child); when the subject is the layer you are STANDING
+      // ON it appended the label to its own path (`/quiet/quiet`), so the
+      // refresh described a phantom child: the deposit was real but the row
+      // came back dark, and the second press wrote a decoration at the
+      // phantom path just to make the bulb light. One press, one light.
+      // ([] = the hive-root group, and an explicit empty array says so.)
+      if (label) await this.#open(label, segments)
     } catch (err) {
       console.warn('[show-features] enable failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
@@ -873,7 +880,9 @@ export class ShowFeaturesDrone extends Drone {
         this.emitEffect('activity:log', { message: `"${label}" opens as ${view}`, icon: '▶' })
       }
       this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: true, message: '' })
-      if (label) await this.#open(label, segments.length ? undefined : [])
+      // Same rule as the enable above: refresh the layer we wrote, not the
+      // label resolved at wherever the participant happens to stand.
+      if (label) await this.#open(label, segments)
     } catch (err) {
       console.warn('[show-features] default view failed', { view, segments, clear, err })
       this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: false, message: `couldn't set how "${label}" opens` })
