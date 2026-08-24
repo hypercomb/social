@@ -1306,6 +1306,15 @@
       "note": "Built 2026-08-22 (Common Tongue phase 1, first slice). The command bar now has two standing meanings: tile mode (chevron) and command stance ('/' icon + tinted box). Typing '/' enters, typing '>' exits (consumed), stance persists in localStorage hc:command-line-stance, Enter on the bare seed is a no-op, lost seeds re-slash typed words. Sources: hypercomb-shared/ui/command-line/command-line.component.ts (stance machine in onShellValueChange/clear/onShellCommit/Escape), hypercomb-shared/ui/command-shell/command-shell.component.{ts,html,scss} (promptSigil input, .prompt-slash glyph, .stance-command tint), scripts/drive-stance-sigil.cjs (9-check harness). Owes: a tile under behaviors/input (extend, never re-run the behaviors mirror) named for the stance switch, notes carrying the two-mode grammar + the sigil pair, tags behavior+input; note-add is additive so this pass is NOT safely re-runnable.",
       "created": "2026-08-24",
       "status": "pending"
+    },
+    {
+      "id": "llm-providers-console",
+      "title": "AI providers console + declarative provider specs + llm:providers pool discovery",
+      "run": null,
+      "note": "MANUAL (note-add is additive; do not auto-drain). Built 2026-08-23: /providers opens the one-list console (assistant/providers-window.view.ts) — every registered provider, universal panel (key, endpoint-before-key, docs, models, active switch the orchestrator honours via configuredProviders). providers/provider-spec.ts compiles llm-provider@1 JSON specs (three shape families) into live descriptors; providers/provider-discovery.ts sweeps the llm:providers pool at boot and persists imported specs; assistant/llm-activation.ts is the device-local off-switch. Mirror wants a collection under behaviors/assistant (extend, never re-run): one part tile per source file above plus the refactored anthropic/google shape exports, marked part, notes carrying the module comments' doctrine (spec-as-content vs key-as-device-local, endpoint trust posture, activation vs key separation), and a themed card for the /providers behaviour. Verified by scripts/drive-providers-window.cjs (13/13 on dev 4251).",
+      "created": "2026-08-24",
+      "status": "pending",
+      "unattended": false
     }
   ]
 }

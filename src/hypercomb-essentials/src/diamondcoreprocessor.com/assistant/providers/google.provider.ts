@@ -21,14 +21,18 @@ type GoogleBody = {
   modelVersion?: string
 }
 
+export const googleStreamEvent = (event: unknown): string => textOf(event)
+
 const textOf = (json: unknown): string =>
   ((json ?? {}) as GoogleBody).candidates?.[0]?.content?.parts
     ?.map(p => p.text ?? '').join('') ?? ''
 
-const toRequest = (request: LlmRequest): LlmHttpRequest => ({
+/** Build a Gemini `generateContent` POST against any base that speaks the
+ *  shape. Exported for the declarative spec compiler (`provider-spec.ts`). */
+export const googleRequest = (base: string, request: LlmRequest): LlmHttpRequest => ({
   // `streamGenerateContent?alt=sse` is the streaming twin; the dispatch picks
   // it by asking for `stream`, and the SSE frames are the same shape.
-  url: `${BASE}/${encodeURIComponent(request.model)}:`
+  url: `${base}/${encodeURIComponent(request.model)}:`
     + (request.stream ? 'streamGenerateContent?alt=sse' : 'generateContent'),
   init: {
     method: 'POST',
@@ -47,7 +51,7 @@ const toRequest = (request: LlmRequest): LlmHttpRequest => ({
   },
 })
 
-const fromResponse = (json: unknown, request: LlmRequest): LlmCallResult => {
+export const googleResponse = (json: unknown, request: LlmRequest): LlmCallResult => {
   const body = (json ?? {}) as GoogleBody
   return {
     text: textOf(json),
@@ -72,9 +76,9 @@ export const GOOGLE_PROVIDER: LlmProviderDescriptor = {
   defaultModel: 'gemini-2.5-flash',
   docsUrl: 'https://aistudio.google.com/app/apikey',
   keyPattern: /^AIza[A-Za-z0-9_-]{30,}$/,
-  toRequest,
-  fromResponse,
-  fromStreamEvent: (event: unknown): string => textOf(event),
+  toRequest: request => googleRequest(BASE, request),
+  fromResponse: googleResponse,
+  fromStreamEvent: googleStreamEvent,
 }
 
 registerLlmProvider(GOOGLE_PROVIDER)

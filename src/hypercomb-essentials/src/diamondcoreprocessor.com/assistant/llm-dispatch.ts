@@ -28,6 +28,7 @@
 // its provider streams.
 
 import { llmKeyStore } from '@hypercomb/core'
+import { llmActivation } from './llm-activation.js'
 import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
 import type {
@@ -82,9 +83,13 @@ const MAX_ERROR_BODY = 600
 
 const registry = (): LlmProviderRegistry => llmProviderRegistry()
 
-/** Provider ids that have a key (or need none). The roster that can answer. */
+/** The roster that can answer: has a key (or needs none) AND has not been
+ *  switched off in the providers console. Naming a provider or a model
+ *  explicitly still wins over this filter — an explicit ask is the
+ *  participant overriding their own default, not the orchestrator choosing. */
 export const configuredProviders = (): LlmProviderDescriptor[] =>
-  registry().all().filter(p => p.requiresKey === false || llmKeyStore.has(p.id))
+  registry().all().filter(p =>
+    llmActivation.isEnabled(p.id) && (p.requiresKey === false || llmKeyStore.has(p.id)))
 
 /**
  * Which provider answers this call. In order: the id the caller named, the

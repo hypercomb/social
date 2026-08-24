@@ -30,8 +30,16 @@ type AnthropicBody = {
 
 type AnthropicStreamFrame = { type?: string; delta?: { text?: string } }
 
-const toRequest = (request: LlmRequest): LlmHttpRequest => ({
-  url: ANTHROPIC_ENDPOINT,
+export const anthropicStreamEvent = (event: unknown): string => {
+  const frame = (event ?? {}) as AnthropicStreamFrame
+  return frame.type === 'content_block_delta' ? frame.delta?.text ?? '' : ''
+}
+
+/** Build an Anthropic `/v1/messages` POST against any endpoint that speaks
+ *  the shape — the official API, or a proxy a spec names. Exported so the
+ *  declarative spec compiler (`provider-spec.ts`) can reuse the family. */
+export const anthropicRequest = (url: string, request: LlmRequest): LlmHttpRequest => ({
+  url,
   init: {
     method: 'POST',
     headers: {
@@ -59,7 +67,7 @@ const toRequest = (request: LlmRequest): LlmHttpRequest => ({
   },
 })
 
-const fromResponse = (json: unknown, request: LlmRequest): LlmCallResult => {
+export const anthropicResponse = (json: unknown, request: LlmRequest): LlmCallResult => {
   const body = (json ?? {}) as AnthropicBody
   return {
     text: body.content?.[0]?.text ?? '',
@@ -84,12 +92,9 @@ export const ANTHROPIC_PROVIDER: LlmProviderDescriptor = {
   defaultModel: 'claude-sonnet-4-6',
   docsUrl: 'https://console.anthropic.com/settings/keys',
   keyPattern: /^sk-ant-[A-Za-z0-9_-]{20,}$/,
-  toRequest,
-  fromResponse,
-  fromStreamEvent: (event: unknown): string => {
-    const frame = (event ?? {}) as AnthropicStreamFrame
-    return frame.type === 'content_block_delta' ? frame.delta?.text ?? '' : ''
-  },
+  toRequest: request => anthropicRequest(ANTHROPIC_ENDPOINT, request),
+  fromResponse: anthropicResponse,
+  fromStreamEvent: anthropicStreamEvent,
 }
 
 registerLlmProvider(ANTHROPIC_PROVIDER)

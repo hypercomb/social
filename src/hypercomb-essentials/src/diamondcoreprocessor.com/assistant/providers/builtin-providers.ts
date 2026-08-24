@@ -18,4 +18,8 @@ import './deepseek.provider.js'
 import './mistral.provider.js'
 import './local.provider.js'
 
+// Not a vendor: the sweep that adds every DISCOVERED provider (specs in the
+// `llm:providers` pool) to the same roster, the moment the store is ready.
+import './provider-discovery.js'
+
 export {}
