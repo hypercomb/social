@@ -35,7 +35,6 @@
 // icon opens it in place; clicking the tile body still navigates normally.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { markExplicitSurfaceRelease } from './view.bee.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
 
@@ -86,7 +85,7 @@ export class LightboxQueenBee extends QueenBee {
     if (!vm) { this.#log('Lightbox unavailable'); return }
 
     if (ON_KEYWORDS.has(a)) { vm.setMode(LIGHTBOX_VIEW); this.#log('Lightbox — on', '▶'); return }
-    if (OFF_KEYWORDS.has(a)) { (markExplicitSurfaceRelease(), vm.setMode('hexagons')); this.#log('Lightbox — off', '○'); return }
+    if (OFF_KEYWORDS.has(a)) { vm.setMode('hexagons'); this.#log('Lightbox — off', '○'); return }
 
     const next = vm.mode === LIGHTBOX_VIEW ? 'hexagons' : LIGHTBOX_VIEW
     vm.setMode(next)

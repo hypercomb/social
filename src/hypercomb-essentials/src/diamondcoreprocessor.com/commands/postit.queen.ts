@@ -10,7 +10,6 @@
 // the plain-text case entirely from the command line.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { markExplicitSurfaceRelease } from './view.bee.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import {
   listDecorations,
@@ -103,7 +102,7 @@ export class PostitQueenBee extends QueenBee {
     const vm = get<ViewModeShape>('@hypercomb.social/ViewMode')
     if (!vm) return
     if (verb === 'off' || verb === 'close') {
-      (markExplicitSurfaceRelease(), vm.setMode('hexagons'))
+      vm.setMode('hexagons')
       return
     }
     vm.setMode(verb === 'on' || verb === 'open'

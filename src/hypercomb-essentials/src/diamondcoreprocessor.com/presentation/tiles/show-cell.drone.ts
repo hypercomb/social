@@ -954,6 +954,13 @@ export class ShowCellDrone extends Drone {
    *  Used by takeover features (screensaver) that need the visible tile set,
    *  what each tile shows, and where it sits, without reaching into render
    *  internals. */
+  /** The location whose tiles the mesh currently shows ('' before the
+   *  first paint). view.bee holds a departing arrival face up until this
+   *  catches up with the lineage, so the hexagon reveal always shows the
+   *  DESTINATION's grid — never the previous page's mesh, never a blank
+   *  field mid-stream. */
+  public get paintedLocationKey(): string { return this.renderedLocationKey }
+
   public snapshotCells(): { q: number; r: number; label: string; imageSig?: string; hideText?: boolean }[] {
     return [...this.renderedCells.values()].map(c => ({ q: c.q, r: c.r, label: c.label, imageSig: c.imageSig, hideText: c.hideText }))
   }

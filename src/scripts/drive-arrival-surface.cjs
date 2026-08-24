@@ -156,19 +156,18 @@ async function main() {
     check('the splash dismissed off the verdict', boot.splash === false,
       boot.splash ? 'splash still up' : 'gone')
 
-    // ── 4. A GESTURE OFF THE FACE ──────────────────────────────────────
-    // New grammar: a gesture (Escape) off an ARRIVAL face leaves the place;
-    // at the ROOT there is nowhere to go, so the face holds. Tiles never
-    // appear on a marked layer — the explicit toggle/`/view off` is the one
-    // sanctioned peel.
+    // ── 4. THE WAY OUT ─────────────────────────────────────────────────
+    // The exits (Escape, ×, right-click) must take you OUT of the view —
+    // otherwise the hexagons and the rest of the interface are unreachable
+    // once a marked layer opens (Jaime). The mesh painted under the covered
+    // canvas is what makes the reveal instant.
     await page.keyboard.press('Escape')
     await page.waitForTimeout(3500)
     await shot('03-escaped')
     const back = await page.evaluate(() => ({
       mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
     }))
-    check('Escape at the ROOT arrival holds the face — never hexagons on a marked layer',
-      !!back.mode && back.mode !== 'hexagons', 'mode=' + back.mode)
+    check('Escape takes you out — hexagons are reachable again', back.mode === 'hexagons', 'mode=' + back.mode)
   } finally {
     const real = errors.filter(e => !/Could not initialize shader|favicon|ResizeObserver/i.test(e))
     if (real.length) console.log('\npage errors:\n  ' + real.slice(0, 8).join('\n  '))

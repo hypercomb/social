@@ -1,18 +1,24 @@
 #!/usr/bin/env node
-// drive-arrival-practice — Jaime's drill: mark BOTH the root and a child
-// ("behaviors") with default views, then PRACTICE SWITCHING between them and
-// screenshot every beat. The rule under test: a layer marked as opening in a
-// view must NEVER show its hexagon tiles — not at rest, not mid-transition.
+// drive-arrival-practice — Jaime's drill: mark the root and a child
+// ("behaviors") with default views, keep one child ("plain") on hexagons,
+// then PRACTICE SWITCHING between all three and screenshot every beat.
 //
 //   node scripts/drive-arrival-practice.cjs [--url http://localhost:4253]
 //                                           [--out <dir>] [--engine chrome]
 //
+// The contract under test, in Jaime's words — "dead simple":
+//   • a marked layer opens DIRECTLY as its view: no hexagons, no blank,
+//     nothing else rendered in between;
+//   • view → view navigation swaps face to face the same way;
+//   • a grid of hexagons that IS the destination's face shows up without a
+//     glitch either — the old view holds until the new grid is painted;
+//   • the exits (×, Escape, right-click) still take you OUT to hexagons —
+//     the interface must always be reachable.
+//
 // A page-side sampler polls every 80ms: {mode, covered-class, canvas
-// visibility, rendered cell count}. "Tiles visible" = rendered cells > 0
-// while the canvas is actually visible. The go()-switching legs must have
-// ZERO such samples. The gesture exits (right-click back, Escape) are
-// sampled and screenshotted too, and reported — they are where the hexagon
-// stop lives.
+// visibility, rendered cell count}. The one global invariant across the
+// whole drill: THE CANVAS IS ONLY EVER VISIBLE WHILE THE SURFACE IS
+// OFFICIALLY HEXAGONS — tiles never peek out from under any view.
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -74,15 +80,27 @@ async function main() {
 
   const mode = () => page.evaluate(() => window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '')
   const go = (segs) => page.evaluate((s) => {
-    const nav = window.ioc?.get?.('@hypercomb.social/Navigation')
-    if (s.length) nav?.go?.(s); else nav?.go?.([])
+    window.ioc?.get?.('@hypercomb.social/Navigation')?.go?.(s)
   }, segs)
   const markBeat = (m) => page.evaluate((x) => window.__practice?.mark(x), m)
+  const addTile = (name) => page.evaluate(async (cellName) => {
+    const input = document.querySelector('hc-command-line input') || document.querySelector('input[type="text"]')
+    if (!input) return false
+    input.focus(); input.value = cellName
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 150))
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
+    return true
+  }, name)
 
-  // Set a view as THIS layer's default via the Beehaviors panel. Picks the
-  // Nth available (off, non-inherited) view row so root and child can wear
-  // DIFFERENT views. Returns the row's name ('' = nothing available).
-  async function markLayerDefault(nth) {
+  // Set POST-IT as THIS layer's default via the Beehaviors panel (bulb =
+  // deposit, icon = "opens here by default") and VERIFY the mark landed (the
+  // icon wears is-default) — a silent miss here would make every later check
+  // test an illusion. Post-it deliberately: it is NODE-LOCAL, so the child
+  // gets its OWN row (an inherited row refuses the default icon — "managed
+  // where it flows from"), and its scope cannot bleed over the plain page
+  // the way a hierarchy view's (Brief's) would. Returns '' unless verified.
+  async function markLayerDefault() {
     const beeBtn = page.locator('.rail-btn.features-toggle-btn, [aria-label*="eehavior" i]').first()
     if (!(await page.locator('.features-panel').count()) && await beeBtn.count()) {
       await beeBtn.click().catch(() => {})
@@ -90,20 +108,51 @@ async function main() {
     }
     const panel = page.locator('.features-panel')
     if (!(await panel.count())) return ''
-    const rows = panel.locator('.features-row.view.off:not(.inherited)')
-    const n = Math.min(nth, Math.max(0, (await rows.count()) - 1))
-    const row = rows.nth(n)
-    if (!(await row.count())) return ''
-    const named = (await row.locator('.feature-name').first().innerText().catch(() => '')).trim()
-    await row.click()
-    await page.waitForTimeout(3500)
-    const icon = panel.locator('.features-row.view.lit .feature-icon.as-default').last()
-    if (await icon.count()) { await icon.click(); await page.waitForTimeout(3000) }
-    return named
+    const row = panel.locator('.features-row.view.off:not(.inherited)')
+      .filter({ has: page.locator('.feature-name', { hasText: /post/i }) }).first()
+    if (await row.count()) {
+      await row.click()
+      await page.waitForTimeout(3500)
+    }
+    const named = 'postit'
+    // State the intent the panel's icon states — the write side is
+    // show-features' features:default handler either way. (The panel icon
+    // itself is mid-rework and its clear-vs-set state is scoped wrong at
+    // children today; the drill tests ARRIVALS, not the panel.)
+    const segs = await page.evaluate(() =>
+      (window.ioc?.get?.('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).map(String))
+    await page.evaluate(({ s }) => {
+      window.__hypercombEffectBus?.emit?.('features:default',
+        { cell: s.length ? s[s.length - 1] : '/', segments: s, view: 'postit', clear: false })
+    }, { s: segs })
+    // verify against the layer itself — the mark must be readable back
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const ok = await page.evaluate(async ({ s }) => {
+        const ioc = window.ioc
+        const history = ioc?.get?.('@diamondcoreprocessor.com/HistoryService')
+        const lineage = ioc?.get?.('@hypercomb.social/Lineage')
+        const store = ioc?.get?.('@hypercomb.social/Store')
+        if (!history || !store) return false
+        try {
+          const locSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => s })
+          const layer = await history.currentLayerAt(locSig)
+          for (const sig of (layer?.decorations ?? [])) {
+            const blob = await store.getResource(sig).catch(() => null)
+            if (!blob) continue
+            const rec = JSON.parse(await blob.text())
+            if (rec?.kind === 'view:default' && rec?.payload?.view === 'postit') return true
+          }
+        } catch { }
+        return false
+      }, { s: segs })
+      if (ok) return named
+      await page.waitForTimeout(1000)
+    }
+    return ''
   }
 
   try {
-    // ── setup: a hive with a "behaviors" child, both layers marked ──────
+    // ── setup: behaviors (marked), plain (hexagons, with a tile inside) ──
     await page.goto(url, { waitUntil: 'load' })
     await page.waitForTimeout(9000)
     const startEmpty = page.getByText('Start empty', { exact: true })
@@ -111,92 +160,81 @@ async function main() {
       await startEmpty.first().click({ timeout: 8000 }).catch(() => {})
       await page.waitForTimeout(2500)
     }
-    // a child to practice against
-    await page.evaluate(async () => {
-      const input = document.querySelector('hc-command-line input') || document.querySelector('input[type="text"]')
-      if (!input) return
-      input.focus(); input.value = 'behaviors'
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-      await new Promise(r => setTimeout(r, 150))
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
-    })
-    await page.waitForTimeout(3000)
+    await addTile('behaviors'); await page.waitForTimeout(2000)
+    await addTile('plain'); await page.waitForTimeout(2000)
+    await go(['plain']); await page.waitForTimeout(2500)
+    await addTile('x'); await page.waitForTimeout(2000)
+    await go([]); await page.waitForTimeout(2500)
 
-    const rootView = await markLayerDefault(0)
+    const rootView = await markLayerDefault()
     check('the root wears a default view', rootView !== '', rootView)
-    await shot('01-root-marked')
-
     await go(['behaviors']); await page.waitForTimeout(3000)
-    const childView = await markLayerDefault(0)
+    const childView = await markLayerDefault()
     check('behaviors wears a default view', childView !== '', childView)
-    check('both layers wear a default view', !!rootView && !!childView,
-      rootView + ' / ' + childView)
-    await shot('02-behaviors-marked')
+    await shot('02-marked')
 
-    // ── the practice: switch, switch, switch ────────────────────────────
+    // ── the practice: marked ⇄ marked ⇄ hexagons ────────────────────────
     await page.evaluate(SAMPLER)
     const legs = [
-      { segs: [], name: 'root' },
-      { segs: ['behaviors'], name: 'behaviors' },
-      { segs: [], name: 'root' },
-      { segs: ['behaviors'], name: 'behaviors' },
-      { segs: [], name: 'root' },
+      { segs: [], name: 'root', face: 'view' },
+      { segs: ['behaviors'], name: 'behaviors', face: 'view' },
+      { segs: ['plain'], name: 'plain', face: 'hexagons' },
+      { segs: ['behaviors'], name: 'behaviors', face: 'view' },
+      { segs: [], name: 'root', face: 'view' },
     ]
-    let i = 0
     const settled = []
+    let i = 0
     for (const leg of legs) {
       i++
-      await markBeat(`leg-${i}-${leg.name}:go`)
+      await markBeat(`leg-${i}:go`)
       await go(leg.segs)
       await page.waitForTimeout(300)
-      await shot(`1${i}-leg-${leg.name}-early`)
-      await page.waitForTimeout(2200)
-      const settledMode = await mode()
-      settled.push({ leg: i, name: leg.name, mode: settledMode })
-      await markBeat(`leg-${i}-${leg.name}:settled mode=${settledMode}`)
-      await shot(`1${i}-leg-${leg.name}-settled`)
+      await shot(`1${i}-${leg.name}-early`)
+      await page.waitForTimeout(2400)
+      const st = await page.evaluate(() => ({
+        mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
+        cells: window.ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone')?.snapshotCells?.().length ?? -1,
+      }))
+      settled.push({ leg: i, name: leg.name, face: leg.face, ...st })
+      await markBeat(`leg-${i}:settled`)
+      await shot(`1${i}-${leg.name}-settled`)
     }
-    const hexStops = settled.filter(l => l.mode === 'hexagons')
-    check('every leg SETTLES on a view — marked layers never rest on hexagons',
-      hexStops.length === 0, JSON.stringify(settled))
 
-    const practice = await page.evaluate(() => window.__practice.log)
-    const leak = practice.filter(s => !s.mark && s.cells > 0 && s.canvas === 'visible')
-    check('SWITCHING NEVER SHOWS TILES — zero visible-tile samples across 5 legs',
-      leak.length === 0,
-      leak.length + ' leaked sample(s): ' + JSON.stringify(leak.slice(0, 4)))
-    const modesSeen = [...new Set(practice.filter(s => s.mode).map(s => s.mode))]
-    console.log('  info  modes seen while switching =', modesSeen.join(', '))
-    check('both arrival views actually took the surface during practice',
-      modesSeen.filter(m => m !== 'hexagons').length >= 1, modesSeen.join(','))
+    const badSettles = settled.filter(l =>
+      l.face === 'view' ? l.mode === 'hexagons' : (l.mode !== 'hexagons' || l.cells < 1))
+    check('every leg settles on its OWN face — views as views, plain as its hexagon grid',
+      badSettles.length === 0, JSON.stringify(settled))
 
-    // ── the gesture exits — where the hexagon stop lives today ──────────
-    const before = await page.evaluate(() => window.__practice.log.length)
-    await markBeat('right-click-back')
+    const log = await page.evaluate(() => window.__practice.log)
+    fs.writeFileSync(path.join(out, 'practice-log.json'), JSON.stringify(log, null, 1))
+    const samples = log.filter(s => !s.mark)
+    const underView = samples.filter(s => s.canvas === 'visible' && s.mode !== 'hexagons')
+    check('THE INVARIANT — the canvas is only ever visible while the surface is hexagons',
+      underView.length === 0, underView.length + ' leak(s): ' + JSON.stringify(underView.slice(0, 3)))
+
+    // the plain leg's reveal must be the DESTINATION's grid, never a blank
+    const marks = log.map((s, idx) => ({ ...s, idx })).filter(s => s.mark)
+    const legWindow = (n) => {
+      const a = marks.find(m => m.mark === `leg-${n}:go`)
+      const b = marks.find(m => m.mark === `leg-${n}:settled`)
+      return log.slice(a.idx + 1, b.idx).filter(s => !s.mark)
+    }
+    const plainReveal = legWindow(3).find(s => s.canvas === 'visible')
+    check('the hexagon reveal is never blank — first visible frame already carries the grid',
+      !!plainReveal && plainReveal.cells > 0, JSON.stringify(plainReveal ?? 'never revealed'))
+
+    // ── the way out: an exit gesture must reach the interface ───────────
+    await markBeat('exit')
     await page.mouse.click(720, 450, { button: 'right' })
     await page.waitForTimeout(2500)
-    await shot('20-after-right-click')
-    const rc = await page.evaluate((n) => ({
+    await shot('20-after-exit')
+    const exit = await page.evaluate(() => ({
       mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
-      segs: window.ioc?.get?.('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [],
-      leak: (window.__practice?.log ?? []).slice(n).filter(s => !s.mark && s.cells > 0 && s.canvas === 'visible').length,
-    }), before)
-    console.log('  info  right-click at root arrival →', JSON.stringify(rc))
-    check('right-click on an arrival face never lands on tiles (leaves the place, or the face holds at the root)',
-      rc.leak === 0 && rc.mode !== 'hexagons', 'mode=' + rc.mode + ' leaked=' + rc.leak)
-
-    await page.evaluate(SAMPLER)   // survive any reload the gesture caused
-    const before2 = await page.evaluate(() => window.__practice.log.length)
-    await markBeat('escape')
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(2500)
-    await shot('21-after-escape')
-    const esc = await page.evaluate((n) => ({
-      mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
-      leak: (window.__practice?.log ?? []).slice(n).filter(s => !s.mark && s.cells > 0 && s.canvas === 'visible').length,
-    }), before2)
-    check('Escape off an arrival face never lands on tiles (leaves the place, or the face holds at the root)',
-      esc.leak === 0 && esc.mode !== 'hexagons', 'mode=' + esc.mode + ' leaked=' + esc.leak)
+      cells: window.ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone')?.snapshotCells?.().length ?? -1,
+      canvas: (() => { const c = document.querySelector('#pixi-host canvas'); return c ? getComputedStyle(c).visibility : 'none' })(),
+    }))
+    check('the exit takes you OUT — hexagons and the interface are reachable again',
+      exit.mode === 'hexagons' && exit.canvas === 'visible' && exit.cells > 0, JSON.stringify(exit))
   } finally {
     const real = errors.filter(e => !/Could not initialize shader|favicon|ResizeObserver/i.test(e))
     if (real.length) console.log('\npage errors:\n  ' + real.slice(0, 8).join('\n  '))

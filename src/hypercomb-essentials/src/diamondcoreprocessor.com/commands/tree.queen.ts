@@ -20,7 +20,6 @@
 // is a way of naming one.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { markExplicitSurfaceRelease } from './view.bee.js'
 import { parseTreeTarget, TREE_VIEW } from '../presentation/tiles/tree-view.drone.js'
 import type { TreeRoot } from '../presentation/tiles/tree-walk.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
@@ -98,7 +97,7 @@ export class TreeQueenBee extends QueenBee {
     if (!vm || !view) { this.#log('Tree view unavailable'); return }
 
     if (OFF_KEYWORDS.has(lower)) {
-      (markExplicitSurfaceRelease(), vm.setMode('hexagons'))
+      vm.setMode('hexagons')
       this.#log('Tree — closed', '○')
       return
     }
@@ -151,7 +150,7 @@ export class TreeQueenBee extends QueenBee {
 
     if (!raw || ON_KEYWORDS.has(lower)) {
       // Bare /tree toggles; the trunk is wherever you are standing.
-      if (!raw && vm.mode === TREE_VIEW) { (markExplicitSurfaceRelease(), vm.setMode('hexagons')); this.#log('Tree — closed', '○'); return }
+      if (!raw && vm.mode === TREE_VIEW) { vm.setMode('hexagons'); this.#log('Tree — closed', '○'); return }
       view.setRootToCurrent()
       vm.setMode(TREE_VIEW)
       this.#log('Tree — the branch under you')

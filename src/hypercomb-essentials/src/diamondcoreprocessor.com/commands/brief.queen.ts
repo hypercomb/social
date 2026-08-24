@@ -4,7 +4,6 @@
 // notes remain on their original tiles; the renderer reads them live.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { markExplicitSurfaceRelease } from './view.bee.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import {
   listDecorations,
@@ -57,7 +56,7 @@ export class BriefQueenBee extends QueenBee {
     const vm = get<ViewModeShape>('@hypercomb.social/ViewMode')
     if (!vm) return
     if (action === 'off' || action === 'close' || action === 'hexagons') {
-      (markExplicitSurfaceRelease(), vm.setMode('hexagons'))
+      vm.setMode('hexagons')
       return
     }
     vm.setMode(action === 'on' || action === 'open' || action === 'view'
