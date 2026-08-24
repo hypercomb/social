@@ -171,16 +171,22 @@
     @if (viewToggles().length) {
       <div class="action-group behaviours">
         @for (vt of viewToggles(); track vt.view) {
+          <!-- THREE MEANINGS, ONE ICON: click enters the view, ctrl/cmd-click
+               decides how this layer OPENS (the `view:default` mark), a long
+               press turns the view off here. `.is-default` is the standing
+               mark — it holds while the view is off, which is the only way to
+               read the layer's face from the hexagons. -->
           <button
             class="rail-btn view-toggle-btn"
             [class.on]="vt.active"
+            [class.is-default]="vt.isDefault"
             type="button"
             (mousedown)="onViewToggleDown($event, vt.view)"
             (mouseup)="onViewToggleUp(vt.view)"
             (mouseleave)="onViewToggleCancel()"
-            [attr.aria-label]="vt.label"
+            [attr.aria-label]="vt.isDefault ? vt.label + ' — ' + ('features.default.on' | t) : vt.label"
             [attr.aria-pressed]="vt.active"
-            [title]="vt.label"
+            [title]="vt.isDefault ? vt.label + ' — ' + ('features.default.on' | t) : vt.label"
           >
             <span class="mat-sym" aria-hidden="true">{{ vt.icon }}</span>
           </button>

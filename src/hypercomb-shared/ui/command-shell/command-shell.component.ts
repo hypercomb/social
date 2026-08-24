@@ -266,7 +266,14 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    * from VisualBeeRegistry via the parent's ViewBee subscription. The shell
    * stays presentational — it never reads the registry itself.
    */
-  readonly viewToggles = input<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
+  readonly viewToggles = input<readonly {
+    view: string; icon: string; label: string; active: boolean
+    /** The layer's `view:default` mark names this view — what it OPENS AS.
+     *  Optional because the toggles come from a RUNTIME-LOADED bee: a shell
+     *  running against an older essentials bundle simply reads undefined and
+     *  marks nothing. */
+    isDefault?: boolean
+  }[]>([])
 
   // Arcade game toggles (Solomon's Key, Bubble Bobble, Arkanoid, …) are no
   // longer per-game header icons — they aggregate under the "games" launch
@@ -399,12 +406,21 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   /**
    * Emitted when a view toggle is clicked. `view` is the view name (e.g.
-   * `'website'`); `disable` is true for a cmd/ctrl-click or long-press —
-   * the "back to tiles, permanently" gesture that turns the view OFF for
-   * the tile. A plain click (`disable:false`) just enters / leaves the
-   * view while keeping the tile sticky. Parent forwards it to ViewBee.
+   * `'website'`); `disable` is true for a long-press — the "back to tiles,
+   * permanently" gesture that turns the view OFF for the tile. A plain click
+   * (`disable:false`) just enters / leaves the view while keeping the tile
+   * sticky. Parent forwards it to ViewBee.
    */
   readonly viewToggle = output<{ view: string; disable: boolean }>()
+
+  /**
+   * A cmd/ctrl-click on a view toggle: make this view the LAYER'S DEFAULT —
+   * the face it opens as when you walk in — or clear the mark when it is
+   * already the default. Three gestures, three meanings, on one icon: click
+   * enters, ctrl-click decides how the place opens, long-press turns the
+   * view off here. The parent owns the write (it knows where we stand).
+   */
+  readonly viewDefault = output<{ view: string }>()
 
   /** Pending long-press timer for the view toggle, and a latch so the
    *  mouseup that follows a long-press / modifier-click doesn't ALSO emit a
@@ -422,14 +438,21 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     this.micPress.emit()
   }
 
-  /** Pointer-down on a view toggle. A cmd/ctrl-click disables immediately; a
-   *  plain press starts the long-press timer and defers the toggle to mouseup. */
+  /** Pointer-down on a view toggle. A cmd/ctrl-click sets (or clears) this
+   *  layer's default view immediately; a plain press starts the long-press
+   *  timer and defers the toggle to mouseup.
+   *
+   *  The modifier used to be a second way to say "off", duplicating the
+   *  long-press that is still here. Deciding what the place OPENS AS had no
+   *  gesture at all outside the Beehaviors panel — and the panel refuses
+   *  inherited rows, so on many children it could not be reached. The
+   *  modifier now carries the meaning that had nowhere to live. */
   onViewToggleDown(e: MouseEvent, view: string): void {
     e.preventDefault()
     this.#viewToggleDisabled = false
     if (e.metaKey || e.ctrlKey) {
       this.#viewToggleDisabled = true
-      this.viewToggle.emit({ view, disable: true })
+      this.viewDefault.emit({ view })
       return
     }
     this.#viewTogglePressTimer = setTimeout(() => {

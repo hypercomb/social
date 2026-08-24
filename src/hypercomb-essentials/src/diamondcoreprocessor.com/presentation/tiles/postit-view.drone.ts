@@ -25,6 +25,7 @@ import { listDecorations, replaceDecoration } from '../../commands/decoration-ma
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
 import { tilePictureCandidates } from '../../editor/tile-properties.js'
+import { trackScrollGutter } from './scroll-gutter.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY, type PostitPayload } from '../../commands/postit.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
@@ -67,6 +68,9 @@ export class PostitViewDrone extends Drone {
   #stickies: HTMLElement | null = null
   #noteByKey = new Map<string, HTMLButtonElement>()
   #post: HTMLElement | null = null
+  /** Stops the scrollbar-width tracker that keeps the × clear of the post's
+   *  own scrollbar (scroll-gutter.ts). */
+  #gutterOff: (() => void) | null = null
   #targetSegments: string[] | null = null
   #bound = false
   #active = false
@@ -577,6 +581,9 @@ export class PostitViewDrone extends Drone {
 
     host.append(close)
     document.body.appendChild(host)
+    // The post scrolls, so on Windows it wears a real scrollbar — measure it
+    // and let the × step aside by that much (scroll-gutter.ts).
+    this.#gutterOff = trackScrollGutter(host)
     this.#post = host
     this.#setActive(true)
   }
@@ -611,6 +618,8 @@ export class PostitViewDrone extends Drone {
   }
 
   #teardownPost(): void {
+    this.#gutterOff?.()
+    this.#gutterOff = null
     this.#post?.remove()
     this.#post = null
     this.#setActive(false)
@@ -687,7 +696,7 @@ const POST_CSS = `
 .postit-image{min-height:100%;display:flex;align-items:center;justify-content:center;padding:2rem;box-sizing:border-box}
 .postit-image img{max-width:min(94vw,1100px);max-height:88vh;box-shadow:0 22px 60px rgba(0,0,0,.55)}
 .postit-empty{color:#8fa3b3;font-family:system-ui;font-size:1rem}
-.postit-close{position:fixed;z-index:2147483600;right:calc(0.75rem + env(safe-area-inset-right,0px));top:calc(0.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(12,17,24,.82);border:1px solid rgba(126,182,214,.42);backdrop-filter:blur(6px);color:#cfe2ee;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.55;transition:opacity .16s ease}
+.postit-close{position:fixed;z-index:2147483600;right:calc(0.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(0.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(12,17,24,.82);border:1px solid rgba(126,182,214,.42);backdrop-filter:blur(6px);color:#cfe2ee;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.55;transition:opacity .16s ease}
 .postit-close:hover{opacity:1}
 `
 

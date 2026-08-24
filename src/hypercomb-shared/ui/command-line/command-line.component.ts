@@ -757,7 +757,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // (e.g. website). Sourced from the essentials ViewBee over EffectBus
   // (`view-toggles:changed`); a click routes back as `view:toggle`. The
   // shell renders them next to the open-for-subscribers antenna.
-  readonly #viewToggles = signal<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
+  readonly #viewToggles = signal<readonly {
+    view: string; icon: string; label: string; active: boolean
+    /** The layer's `view:default` mark names this view. Optional: the
+     *  toggles come from a runtime-loaded bee, so an older bundle just
+     *  reads undefined and nothing is marked. */
+    isDefault?: boolean
+  }[]>([])
   readonly viewToggles = this.#viewToggles.asReadonly()
 
   // NOTE: there is deliberately no `activeViewToggle` exit chip here any
@@ -880,7 +886,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }),
       // View-behavior toggles, recomputed by ViewBee on every navigation.
       // Late-subscriber replay means we get the current set immediately.
-      EffectBus.on<{ toggles?: { view: string; icon: string; label: string; active: boolean }[] }>(
+      EffectBus.on<{ toggles?: { view: string; icon: string; label: string; active: boolean; isDefault?: boolean }[] }>(
         'view-toggles:changed',
         (p) => this.#viewToggles.set(Array.isArray(p?.toggles) ? p!.toggles : []),
       ),
@@ -1046,6 +1052,32 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   onViewToggle(e: { view: string; disable: boolean }): void {
     if (!e?.view) return
     EffectBus.emit('view:toggle', { view: e.view, disable: e.disable })
+  }
+
+  /** THE ARRIVAL FACE, set from the rail — ctrl/cmd-click on a view's icon.
+   *
+   *  "When you come to this layer, open as this." Ctrl-clicking the icon that
+   *  already carries the mark clears it, so the layer opens as hexagons again;
+   *  mutual exclusivity is the writer's (`replaceDecoration`), not ours.
+   *
+   *  Same division of labour as every other decoration the shell asks for: the
+   *  header states the INTENT at the location we stand on, and show-features —
+   *  which has the signer — owns the write. `silent` keeps the Beehaviors
+   *  panel shut: the gesture happened on the rail, and its answer is the icon
+   *  lighting up, not a tool window opening over the hive. */
+  onViewDefault(e: { view: string }): void {
+    if (!e?.view) return
+    const segments = this.navigation.segments().map(s => String(s ?? '').trim()).filter(Boolean)
+    const clear = this.#viewToggles().some(t => t.view === e.view && t.isDefault === true)
+    EffectBus.emit('features:default', {
+      // '/' names the HIVE ROOT, where there is no last segment to name it
+      // (the same label the panel's root group states).
+      cell: segments[segments.length - 1] ?? '/',
+      segments,
+      view: e.view,
+      clear,
+      silent: true,
+    })
   }
 
   onIndicatorDismiss(key: string): void {
