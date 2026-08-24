@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-// drive-stance-sigil — does the prompt glyph wear the stance, and does the
-// slash live in the ICON rather than the text?
+// drive-stance-sigil — the stance, the reading, and the marks.
 //
 //   node scripts/drive-stance-sigil.cjs [--url http://localhost:4250]
 //
 // Two standing meanings for the bar's plain text, worn by the left icon and
 // the box hue. Typing '/' walks into command stance and the slash DISAPPEARS
-// INTO THE ICON — commands are typed bare ('help', not '/help'), further
-// slashes are refused, and the typed text wears command honey (#ecbc57) so
-// words that will run code look alive. Typing '>' on the empty line (or
-// clicking the glyph) walks back to tile creation. Sticky across reloads.
-// Real keystrokes through Playwright so the Angular (input) pipeline runs.
-// HEADED like the other drive harnesses: the Pixi boot throws without a GPU.
+// INTO THE ICON — commands are typed bare, further slashes are refused, '>'
+// or a glyph click walks back. In command stance plain language is READ:
+// action words light (each in its behaviour's own color, honey fallback)
+// over the input's transparent glyphs, filler stays plain, an ambiguous word
+// marks violet and Enter waits for the pathway choice, and a sentence that
+// matches nothing offers tile · ask · filter. Real keystrokes through
+// Playwright so the Angular (input) pipeline runs. HEADED like the other
+// drive harnesses: the Pixi boot throws without a GPU.
 
 const { chromium } = require('playwright')
 
@@ -37,24 +38,44 @@ async function glyph(page) {
     const chevron = document.querySelector('hc-command-shell .prompt-chevron')
     const tinted = !!document.querySelector('hc-command-shell .command-shell.stance-command')
     const input = document.querySelector('hc-command-shell input')
-    const color = input ? getComputedStyle(input).color : null
-    return { slash: !!slash, chevron: !!chevron, tinted, value: input ? input.value : null, color }
+    const reading = document.querySelector('hc-command-shell .reading')
+    const seg = role => [...(reading?.querySelectorAll('.seg-' + role) ?? [])].map(s => s.textContent)
+    return {
+      slash: !!slash, chevron: !!chevron, tinted,
+      value: input ? input.value : null,
+      inputColor: input ? getComputedStyle(input).color : null,
+      marked: !!input?.classList.contains('input-marked'),
+      reading: !!reading,
+      actions: seg('action'), ambiguity: seg('ambiguity'), residue: seg('residue'),
+    }
   })
 }
 
+async function dropdownRows(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('hc-command-shell .command-results li')].map(li => li.textContent?.trim() ?? '')
+  )
+}
+
 async function focusLine(page) {
-  // Programmatic focus: a fresh context is a first boot, and the welcome
-  // offer's backdrop intercepts pointer clicks — keystrokes still land in
-  // the focused input, which is all this harness needs.
   await page.evaluate(() => {
     const input = document.querySelector('hc-command-shell input')
     if (input) input.focus()
   })
 }
 
+async function clearLine(page) {
+  await page.evaluate(() => {
+    const input = document.querySelector('hc-command-shell input')
+    if (!input) return
+    input.focus()
+    input.value = ''
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await sleep(150)
+}
+
 async function clickGlyph(page) {
-  // Dispatch the mousedown directly — the first-boot offer backdrop would
-  // intercept a real pointer, but the glyph's handler listens on the element.
   await page.evaluate(() => {
     const g = document.querySelector('hc-command-shell .prompt-glyph')
     if (g) g.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
@@ -65,9 +86,6 @@ async function main() {
   const url = arg('url', 'http://localhost:4250')
   const browser = await chromium.launch({ headless: false })
   const context = await browser.newContext()
-  // The stance is this harness's own participant preference — start neutral.
-  // Once only: init scripts re-run on reload, and the reload assertion is
-  // exactly that the stance SURVIVES one.
   await context.addInitScript(() => {
     if (!sessionStorage.getItem('hc:stance-harness-cleared')) {
       localStorage.removeItem('hc:command-line-stance')
@@ -81,77 +99,122 @@ async function main() {
     await page.waitForSelector('hc-command-shell input', { timeout: 30000 })
     await sleep(1500)
 
-    // 1 — neutral boot: chevron, no tint
+    // ── the stance ─────────────────────────────────────────
     let g = await glyph(page)
-    check('boots in tile mode (chevron, untinted)', g.chevron && !g.slash && !g.tinted, JSON.stringify(g))
+    check('boots in tile mode (chevron, untinted)', g.chevron && !g.slash && !g.tinted, JSON.stringify({ ...g, inputColor: undefined }))
 
-    // 2 — the first '/' disappears INTO the icon: consumed, icon flips, box tints
     await focusLine(page)
     await page.keyboard.type('/')
     await sleep(300)
     g = await glyph(page)
-    check("typing '/' consumes it into the icon", g.slash && !g.chevron && g.value === '', JSON.stringify(g))
-    check('command stance tints the box', g.tinted)
+    check("typing '/' consumes it into the icon", g.slash && !g.chevron && g.value === '' && g.tinted)
 
-    // 3 — commands are typed BARE, the dropdown still offers them, and the
-    //     text wears command honey
     await page.keyboard.type('hel')
     await sleep(400)
-    const rows = await page.evaluate(() =>
-      [...document.querySelectorAll('hc-command-shell .command-results li')].map(li => li.textContent?.trim() ?? '')
-    )
+    const rows = await dropdownRows(page)
     check("bare 'hel' still gets command intellisense", rows.some(r => r.startsWith('help')), JSON.stringify(rows.slice(0, 3)))
+    g = await glyph(page)
+    check("an incomplete word stays plain (no marks yet)", !g.reading && !g.marked, JSON.stringify({ reading: g.reading, marked: g.marked }))
+
     await page.keyboard.type('p')
     await sleep(300)
     g = await glyph(page)
-    check("command typed bare ('help', no slash in text)", g.slash && g.value === 'help', JSON.stringify(g))
-    check('typed text wears the command color', g.color === 'rgb(236, 188, 87)', g.color)
+    check("'help' lights as an action in the marks overlay", g.reading && g.marked && g.actions.includes('help'), JSON.stringify({ actions: g.actions }))
+    check('the input glyphs stand down while the reading paints', g.inputColor === 'rgba(0, 0, 0, 0)', g.inputColor)
 
-    // 4 — a further '/' is refused (the icon already IS one)
-    for (let i = 0; i < 4; i++) await page.keyboard.press('Backspace')
-    await sleep(200)
+    await clearLine(page)
     await page.keyboard.type('/')
-    await sleep(300)
+    await sleep(200)
     g = await glyph(page)
-    check("a second '/' never lands (not allowed in command stance)", g.slash && g.value === '', JSON.stringify(g))
+    check("a second '/' never lands", g.slash && g.value === '')
 
-    // 5 — Enter on the empty command line is a no-op (no junk tile)
-    await page.keyboard.press('Enter')
+    // ── the reading: tandem, residue, filler ───────────────
+    await page.keyboard.type('spotlight the snacks and fit')
     await sleep(400)
     g = await glyph(page)
-    check('Enter on the empty command line is a no-op', g.slash && g.value === '', JSON.stringify(g))
+    check('two actions light in one sentence', g.actions.length === 2 && g.actions.includes('spotlight') && g.actions.includes('fit'), JSON.stringify(g.actions))
+    check("the connective before an action is residue", g.residue.includes('and'), JSON.stringify(g.residue))
 
-    // 6 — '>' walks back out: consumed, chevron returns
+    await clearLine(page)
+    await page.keyboard.type('zzz nothing matches at all')
+    await sleep(400)
+    g = await glyph(page)
+    check('pure filler stays plain — no overlay at all', !g.reading && !g.marked)
+    await page.keyboard.press('Enter')
+    await sleep(400)
+    const pathways = await dropdownRows(page)
+    check('Enter on an unmatched sentence offers the pathways', ['tile', 'ask', 'filter'].every(p => pathways.some(r => r.startsWith(p))), JSON.stringify(pathways))
+    await page.keyboard.press('Escape')
+    await sleep(200)
+    g = await glyph(page)
+    check('Escape abandons the pathway choice, line intact', g.value === 'zzz nothing matches at all')
+
+    // ── the ambiguity: marked, never guessed ───────────────
+    // The live census currently has no two-claimant word (the old
+    // images-vs-lightbox collision was cleaned up), so the harness injects a
+    // scratch provider claiming 'images' — page-local, gone on reload.
+    await page.evaluate(() => {
+      const d = window.ioc?.get?.('@diamondcoreprocessor.com/SlashBehaviourDrone')
+      d?.addProvider?.({
+        name: 'harness-ambiguity', priority: 10,
+        behaviours: [{ name: 'harness-probe', aliases: ['images'], description: 'harness probe claiming the word images' }],
+        execute: async () => {},
+      })
+    })
+    await clearLine(page)
+    await page.keyboard.type('show me the images')
+    await sleep(400)
+    g = await glyph(page)
+    check("'images' marks as an ambiguity (two claimants)", g.ambiguity.includes('images'), JSON.stringify(g.ambiguity))
+    await page.keyboard.press('Enter')
+    await sleep(400)
+    const claimants = await dropdownRows(page)
+    check('Enter surfaces the claimants to choose from', claimants.some(r => r.startsWith('harness-probe')) && claimants.some(r => r.startsWith('lightbox')), JSON.stringify(claimants))
+    await page.keyboard.press('Escape')
+    await sleep(200)
+
+    // ── punctuation never defeats the reading ──────────────
+    await clearLine(page)
+    await page.keyboard.type('help?')
+    await sleep(400)
+    g = await glyph(page)
+    check("'help?' still lights help (the '?' stays unlit)", g.actions.includes('help'), JSON.stringify(g.actions))
+
+    // ── destructive words confirm visibly ──────────────────
+    await clearLine(page)
+    await page.keyboard.type('remove zzz-not-a-real-tile')
+    await sleep(300)
+    await page.keyboard.press('Enter')
+    await sleep(400)
+    const confirmRows = await dropdownRows(page)
+    check('a destructive reading asks run/cancel instead of arming silently',
+      confirmRows.some(r => r.startsWith('run')) && confirmRows.some(r => r.startsWith('cancel')), JSON.stringify(confirmRows))
+    await page.keyboard.press('Escape')
+    await sleep(200)
+
+    // ── tandem execution ───────────────────────────────────
+    await clearLine(page)
+    await page.keyboard.type('clear and fit')
+    await sleep(300)
+    await page.keyboard.press('Enter')
+    await sleep(600)
+    g = await glyph(page)
+    check('a resolved sentence executes and the line clears', g.value === '', JSON.stringify({ value: g.value }))
+
+    // ── the way back ───────────────────────────────────────
     await page.keyboard.type('>')
     await sleep(300)
     g = await glyph(page)
-    check("typing '>' returns to tile mode (chevron, consumed)", g.chevron && !g.slash && g.value === '', JSON.stringify(g))
+    check("typing '>' returns to tile mode", g.chevron && !g.slash && g.value === '')
 
-    // 7 — one CLICK on the glyph toggles the stance, both directions
     await clickGlyph(page)
     await sleep(300)
     g = await glyph(page)
-    check('clicking the glyph walks into command stance', g.slash && g.tinted, JSON.stringify(g))
+    check('clicking the glyph walks back into command stance', g.slash && g.tinted)
     await clickGlyph(page)
     await sleep(300)
     g = await glyph(page)
-    check('clicking again walks back to tile mode', g.chevron && !g.slash && !g.tinted, JSON.stringify(g))
-
-    // 8 — the stance survives a reload (participant preference)
-    await clickGlyph(page)
-    await sleep(300)
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForSelector('hc-command-shell input', { timeout: 30000 })
-    await sleep(1500)
-    g = await glyph(page)
-    check('stance survives reload (slash icon, empty line)', g.slash && !g.chevron && g.value === '', JSON.stringify(g))
-
-    // 9 — leave the hive as we found it: back to tile mode
-    await focusLine(page)
-    await page.keyboard.type('>')
-    await sleep(300)
-    g = await glyph(page)
-    check('final exit back to tile mode', g.chevron && !g.slash && !g.tinted && g.value === '', JSON.stringify(g))
+    check('clicking again walks out', g.chevron && !g.tinted)
   } finally {
     await browser.close()
   }

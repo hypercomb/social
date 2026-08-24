@@ -1324,6 +1324,14 @@
       "unattended": false,
       "created": "2026-08-24",
       "status": "pending"
+    },
+    {
+      "id": "utterance-reader-marks",
+      "title": "The reader and the marks — plain language read into lit spans",
+      "run": null,
+      "note": "Built 2026-08-22 (Common Tongue phase 1, second slice). In command stance plain language is READ, never guessed: UtteranceReader (essentials commands/utterance/, IoC '@diamondcoreprocessor.com/UtteranceReader') resolves an utterance into action/argument/residue/ambiguity spans against the live SlashBehaviourDrone.entries() census (hidden behaviours never light from prose); marks render over the input's transparent glyphs — action words in their behaviour tile's category color via tagsForLabel+TagRegistry (honey fallback, solid underline), ambiguity violet dashed, filler receding plain; Enter executes actions in WORD ORDER through drone.execute then ONE synchronize; an ambiguous word or unmatched sentence surfaces a choice dropdown (claimants, or tile/ask/filter pathways); destructive words (remove family) wait for a second Enter. Sources: utterance-reading.ts (pure, spec-covered 11 tests), utterance-reader.ts (wired), command-line.component.ts (#commitUtterance/#pendingChoice), command-shell .reading overlay. Owes: tiles under behaviors/input for the reader + the marks (extend, never re-run), notes carrying the four span roles + the-light-is-the-contract law + the pathway grammar, tags behavior+input; ALSO owed later: words.* i18n keys x14 and the language:word decoration (phase 4). note-add is additive so this pass is NOT safely re-runnable.",
+      "created": "2026-08-24",
+      "status": "pending"
     }
   ]
 }

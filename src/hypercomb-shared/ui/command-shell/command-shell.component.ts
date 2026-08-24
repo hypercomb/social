@@ -314,6 +314,16 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    */
   readonly promptSigil = input<'chevron' | 'slash'>('chevron')
 
+  /**
+   * The utterance reading, as render segments covering the ENTIRE input text
+   * in order (spans and the whitespace gaps between them). Non-null activates
+   * the marks overlay: the input's own glyphs go transparent and this mirror
+   * paints them instead — action words lit (each in its behaviour's own
+   * color), ambiguity dashed, filler receding. The light is the contract:
+   * what is lit is what fires. Null = no reading, input paints itself.
+   */
+  readonly readingMarks = input<readonly { text: string; role: string; color?: string }[] | null>(null)
+
   // ── outputs to parent ───────────────────────────────────
 
   /** Emitted on every input change (after leading-space strip). */

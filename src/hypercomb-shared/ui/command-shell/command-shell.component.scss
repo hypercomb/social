@@ -137,17 +137,19 @@ $bp-phone-max: 599px;
 
 // Command stance: the whole box shifts hue so the standing meaning of plain
 // text is readable before a character is typed — the mode is worn, not menu'd.
-// The typed text leaves the cold family and wears command honey: the words
-// ARE a command, and they must say so before Enter does. Overriding --cmd-fg
-// re-colors the input text and the slash sigil together — one register, one
-// hue. Deliberately deeper than the pale hover-echo gold so "the tile under
-// your pointer" still reads apart from what you typed.
+// The TEXT is not blanket-colored: filler stays plain and only the words the
+// READING lights get color (see .reading below) — the light is the contract.
+// The caret and the slash sigil carry the register's honey.
 .command-shell.stance-command {
   background: color-mix(in srgb, var(--glow-color) 12%, transparent);
-  --cmd-fg: #ecbc57;
 
   .command-input { caret-color: #ecbc57; }
+  .prompt-slash { color: #ecbc57; }
 }
+
+// While the reading paints, the input's own glyphs stand down — one text,
+// painted once, caret still the input's own.
+.command-input.input-marked { color: transparent; }
 
 .prompt-thumb {
   width: 100%;
@@ -194,6 +196,7 @@ $bp-phone-max: 599px;
 
 .ghost,
 .hover-echo,
+.reading,
 .command-input {
   grid-area: 1 / 1;
   box-sizing: border-box;
@@ -248,6 +251,53 @@ $bp-phone-max: 599px;
 // exact metrics — every letter-spacing / weight tweak belongs on the visible
 // run below, or the echo drifts off the caret's column.
 .echo-pad { visibility: hidden; }
+
+// THE READING — the marks overlay. Shares every metric with the input (the
+// grouped rule above) and paints the SAME text over the input's transparent
+// glyphs, so coloring can never change layout: color and text-decoration
+// only — never weight, never size (glyph widths must stay identical, or the
+// caret walks a lie). Action words are lit in their behaviour's own category
+// color (inline style from the reading; this honey is the fallback) with a
+// solid underline; an ambiguity is violet with a dashed underline — marked,
+// never guessed; residue visibly recedes; argument text stays in the cold
+// typed family. Never color alone: the underline styles carry the live/inert
+// distinction past color-blindness.
+//
+// This block sits AFTER the grouped metrics rule on purpose: same trap as
+// .ghost — an input PRESERVES every space, a nowrap span COLLAPSES runs of
+// them, so `pre` must win the cascade or every mark past a double space
+// paints one column off its glyph.
+//
+// Scroll: the OUTER span keeps the grouped rule's overflow clip, static in
+// the row; the INNER track translates by -scrollLeft. Clipping happens in
+// local coordinates before transforms, so the clip box must not move.
+.reading {
+  pointer-events: none;
+  user-select: none;
+  white-space: pre;
+}
+
+.reading-track {
+  display: inline-block;   // transforms don't apply to plain inline boxes
+  white-space: pre;
+
+  .seg-action {
+    color: #ecbc57;
+    text-decoration: underline;
+    text-underline-offset: 0.22em;
+  }
+  .seg-ambiguity {
+    color: #b48ad8;
+    text-decoration: underline dashed;
+    text-underline-offset: 0.22em;
+  }
+  .seg-residue {
+    color: color-mix(in srgb, ghostwhite 42%, transparent);
+  }
+  .seg-argument {
+    color: var(--cmd-fg);
+  }
+}
 
 // Set a little wider than the typed line so a name reads as a name at a
 // glance, and never as something you half-typed.
@@ -783,6 +833,7 @@ $bp-phone-max: 599px;
 @media (pointer: coarse) {
   .command-input { font-size: 16px; }
   .ghost { font-size: 16px; }
+  .reading { font-size: 16px; }   // the marks mirror the input's metrics, always
 }
 
 // phone results max-height
@@ -806,6 +857,7 @@ $bp-phone-max: 599px;
     color: rgba(180, 215, 255, 0.55);
     font-size: 1.4em;
   }
+  .reading { font-size: 1.4em; }   // the marks mirror the input's metrics, always
   .prompt-glyph {
     width: 1.55em;
     height: 1.55em;

@@ -55,9 +55,28 @@
           ><span class="ghost-pad">{{ value() }}</span
           ><span class="ghost-suffix">{{ ghostSuffix() }}</span></span>
 
+        <!-- THE READING — the utterance's marks, painted over the input's
+             (transparent) glyphs: same grid cell, same metrics, segment for
+             segment the same text, so the caret walks colored words. The
+             OUTER span is the static clip box; the INNER track translates by
+             the input's own scroll — the mirror is exact, not approximate. -->
+        @if (readingMarks(); as marks) {
+          <span class="reading" aria-hidden="true"
+            ><span class="reading-track"
+              [style.transform]="'translateX(' + (-inputScrollLeft()) + 'px)'"
+              >@for (m of marks; track $index) {<span
+                [class.seg-action]="m.role === 'action'"
+                [class.seg-argument]="m.role === 'argument'"
+                [class.seg-residue]="m.role === 'residue'"
+                [class.seg-ambiguity]="m.role === 'ambiguity'"
+                [style.color]="(m.role === 'action' && m.color) ? m.color : null"
+                >{{ m.text }}</span>}</span></span>
+        }
+
         <input
           #shellInput
           class="command-input"
+          [class.input-marked]="!!readingMarks()?.length"
           type="text"
           name="command-input"
           autocomplete="off"

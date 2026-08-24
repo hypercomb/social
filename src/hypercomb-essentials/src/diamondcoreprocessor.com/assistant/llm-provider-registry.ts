@@ -190,16 +190,32 @@ export class LlmProviderRegistry extends EventTarget {
 // Singleton: one instance per app, registered with window.ioc so every
 // consumer (across bees, namespaces) shares it.
 const _llmProviderRegistry = new LlmProviderRegistry()
-window.ioc.register(LLM_PROVIDER_REGISTRY_IOC_KEY, _llmProviderRegistry)
+window.ioc?.register?.(LLM_PROVIDER_REGISTRY_IOC_KEY, _llmProviderRegistry)
 
 /**
  * Resolve the singleton. Prefers the shell registry (what every other module
  * sees) and falls back to the module-local instance for node-side tests where
  * no shell has booted.
+ *
+ * THE HEAL. This module is evaluated very early — `ai-key.drone` imports it,
+ * and that is the fourth entry in the side-effect barrel — which is before
+ * the web shell finishes installing its OWN `window.ioc` map. The eager
+ * registration above therefore lands in a map that is then replaced, and the
+ * key silently disappears: `ioc.get('…/LlmProviderRegistry')` answers
+ * undefined in a fully-booted app while this file's own callers keep working
+ * off the module-local instance. Anything resolving BY KEY (the command
+ * line's model words, a drone, a bridge op) sees no registry at all.
+ *
+ * So the accessor re-registers when the shell has no entry. It is idempotent
+ * and never overwrites: `register` is first-wins, and we only ever offer the
+ * one instance this module owns, so a healed map and a lucky map agree.
  */
-export const llmProviderRegistry = (): LlmProviderRegistry =>
-  (window.ioc?.get?.(LLM_PROVIDER_REGISTRY_IOC_KEY) as LlmProviderRegistry | undefined)
-  ?? _llmProviderRegistry
+export const llmProviderRegistry = (): LlmProviderRegistry => {
+  const shell = window.ioc?.get?.(LLM_PROVIDER_REGISTRY_IOC_KEY) as LlmProviderRegistry | undefined
+  if (shell) return shell
+  try { window.ioc?.register?.(LLM_PROVIDER_REGISTRY_IOC_KEY, _llmProviderRegistry) } catch { /* no shell yet */ }
+  return _llmProviderRegistry
+}
 
 /** Colocation helper — what a vendor adapter calls at module load. */
 export const registerLlmProvider = (provider: LlmProviderDescriptor): void => {

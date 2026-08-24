@@ -163,6 +163,30 @@ const COMMAND_HISTORY_MAX = 100
  *  register, the '/' sigil). Never hive truth. */
 const STANCE_STORAGE_KEY = 'hc:command-line-stance'
 
+/** Actions whose words must wait for a second Enter when read from prose —
+ *  the same law the DESTRUCTIVE_SLASH_RE gives typed /remove. */
+const DESTRUCTIVE_COMMANDS = new Set(['remove', 'rm', 'delete', 'del'])
+
+// The reader's shapes, structurally — shared may NEVER import essentials,
+// so the '@diamondcoreprocessor.com/UtteranceReader' seam is duck-typed.
+interface UtteranceSpanLike {
+  start: number; end: number; text: string
+  role: 'action' | 'argument' | 'residue' | 'ambiguity'
+  command?: string
+  candidates?: readonly { name: string; description: string }[]
+  color?: string
+}
+interface UtteranceReadingLike {
+  text: string
+  spans: readonly UtteranceSpanLike[]
+  actions: readonly { command: string; args: string }[]
+  ambiguous: boolean
+  hasAction: boolean
+}
+interface UtteranceReaderLike {
+  read(text: string, resolutions?: ReadonlyMap<number, string>): UtteranceReadingLike | null
+}
+
 function loadCommandHistory(): string[] {
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(COMMAND_HISTORY_KEY) ?? '[]')
@@ -356,6 +380,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * features) so the shell stays presentational and one binding covers both.
    */
   readonly descriptionMap = computed<ReadonlyMap<string, string>>(() => {
+    const pendingUtterance = this.#pendingChoice()
+    if (pendingUtterance) return new Map(pendingUtterance.options.map(o => [o.label, o.description]))
     const ctx = this.context()
     // A member describes itself, in the same breath as its swatch — so the
     // right-hand column needs no per-mode source once an object is walked.
@@ -394,6 +420,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     name: string; kind?: string; description?: string; icon?: string; count?: number; options?: readonly string[]
   } | null>(() => {
     if (this.shell?.suppressed()) return null
+    // An utterance choice carries its whole story in the rows — a detail pane
+    // computed from the ORDINARY registers would describe the wrong thing.
+    if (this.#pendingChoice()) return null
     const ctx = this.context()
     if (!ctx.active) return null
     const list = this.suggestions()
@@ -460,6 +489,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Prefix of the current suggestion fragment — used by shell for highlight split. */
   readonly completionTypedPrefix = computed<string>(() => {
+    // A pending utterance choice lists whole options — nothing is "typed".
+    if (this.#pendingChoice()) return ''
     const ctx = this.context()
     if (!ctx.active) return ''
 
@@ -1226,6 +1257,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   public readonly suggestions = computed<readonly string[]>(() => {
     if (this.shell?.suppressed()) return []
+
+    // A pending utterance choice OWNS the dropdown: the claimants of an
+    // ambiguous word, or the three pathways for a sentence nothing matched.
+    const pendingUtterance = this.#pendingChoice()
+    if (pendingUtterance) return pendingUtterance.options.map(o => o.label)
 
     // AN EMPTY LINE OFFERS NOTHING. Not "an empty list is filtered down to
     // nothing" — nothing is on offer at all, because nothing has been asked.
@@ -2255,6 +2291,195 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.shell?.focus()
   }
 
+  // ── the utterance reading (Common Tongue: the reader + the marks) ────────
+  // In command stance plain language is READ, never guessed: action words
+  // light in their behaviour's own color (the category keyword its mirror
+  // tile wears), argument text attaches verbatim, filler stays plain, and a
+  // word two behaviours claim marks as an AMBIGUITY the line must resolve
+  // before Enter fires. The reader lives in essentials
+  // ('@diamondcoreprocessor.com/UtteranceReader'); this component only
+  // renders the reading and executes it — the light is the contract.
+
+  /** Pinned ambiguity choices, keyed by span start. Typing invalidates them. */
+  readonly #utteranceResolutions = signal<ReadonlyMap<number, string>>(new Map())
+
+  /** A choice the line is waiting on: an ambiguous word's claimants, the
+   *  pathway for a sentence that matched nothing (tile · ask · filter), or
+   *  the run/cancel confirmation of a destructive reading. */
+  readonly #pendingChoice = signal<
+    | { kind: 'ambiguity'; spanStart: number; text: string; options: readonly { label: string; description: string }[] }
+    | { kind: 'pathway'; text: string; options: readonly { label: string; description: string }[] }
+    | { kind: 'confirm'; text: string; options: readonly { label: string; description: string }[] }
+    | null
+  >(null)
+
+  /** Localize a choice string with a hard fallback: the keys ship ahead of
+   *  the catalogs (the words phase owes all 14), so a missing key must never
+   *  leak into the dropdown. */
+  #utteranceText(key: string, fallback: string): string {
+    const i18n = get('@hypercomb.social/I18n') as { t?(k: string): string } | undefined
+    const s = i18n?.t?.(key)
+    return s && s !== key ? s : fallback
+  }
+
+  #utteranceReader(): UtteranceReaderLike | undefined {
+    return get('@diamondcoreprocessor.com/UtteranceReader') as UtteranceReaderLike | undefined
+  }
+
+  /** The live reading of the current line — null outside command stance, for
+   *  exempt registers (sigils, calls, tags, URLs), and during captures. */
+  public readonly utteranceReading = computed<UtteranceReadingLike | null>(() => {
+    if (this.#stance() !== 'command' || this.#captureMode()) return null
+    const raw = this.value()
+    if (!raw.trim()) return null
+    if (this.#toRegister(raw) === raw) return null   // its own register, not plain language
+    return this.#utteranceReader()?.read(raw, this.#utteranceResolutions()) ?? null
+  })
+
+  /** Mark segments for the shell overlay: the whole line, split into spans
+   *  and the gaps between them. Only a reading with something LIT renders —
+   *  pure filler stays plain text. */
+  public readonly readingMarks = computed<readonly { text: string; role: string; color?: string }[] | null>(() => {
+    const reading = this.utteranceReading()
+    if (!reading) return null
+    if (!reading.spans.some(s => s.role === 'action' || s.role === 'ambiguity')) return null
+    const raw = this.value()
+    const segs: { text: string; role: string; color?: string }[] = []
+    let at = 0
+    for (const s of reading.spans) {
+      if (s.start > at) segs.push({ text: raw.slice(at, s.start), role: 'gap' })
+      segs.push({ text: s.text, role: s.role, color: s.color })
+      at = s.end
+    }
+    if (at < raw.length) segs.push({ text: raw.slice(at), role: 'gap' })
+    return segs
+  })
+
+  /**
+   * Commit a read utterance. Returns true when the reading owned the commit:
+   * an ambiguity or pathway choice was surfaced, a destructive reading armed
+   * its second Enter, or the actions executed in word order.
+   */
+  #commitUtterance(text: string): boolean {
+    const reading = this.#utteranceReader()?.read(text, this.#utteranceResolutions())
+    if (!reading) return false
+
+    const ambiguousSpan = reading.spans.find(s => s.role === 'ambiguity')
+    if (ambiguousSpan) {
+      this.#pendingChoice.set({
+        kind: 'ambiguity', spanStart: ambiguousSpan.start, text,
+        options: (ambiguousSpan.candidates ?? []).map(c => ({ label: c.name, description: c.description })),
+      })
+      this.shell?.unsuppress()
+      return true
+    }
+
+    if (!reading.actions.length) {
+      // Nothing matched. No implicit anything — the line offers its pathways.
+      this.#pendingChoice.set({
+        kind: 'pathway', text,
+        options: [
+          { label: 'tile', description: this.#utteranceText('utterance.pathway.tile', `make a tile named "${text}"`) },
+          { label: 'ask', description: this.#utteranceText('utterance.pathway.ask', 'ask the assistant') },
+          { label: 'filter', description: this.#utteranceText('utterance.pathway.filter', 'filter tiles by these words') },
+        ],
+      })
+      this.shell?.unsuppress()
+      return true
+    }
+
+    // Destructive words never run off a first Enter — the same law typed
+    // /remove has, but VISIBLE: the confirmation is a rendered choice, so it
+    // can never be satisfied blind, and any edit or recall dissolves it.
+    // (Known limit: this set is the shared-code remove family — a
+    // module-shipped destructive behaviour should ship `hidden`, which keeps
+    // it out of prose entirely.)
+    const destructive = reading.actions.filter(a => DESTRUCTIVE_COMMANDS.has(a.command))
+    if (destructive.length) {
+      const names = destructive.map(a => a.command).join(', ')
+      this.#pendingChoice.set({
+        kind: 'confirm', text,
+        options: [
+          { label: 'run', description: this.#utteranceText('utterance.confirm.run', `yes — run ${names}`) },
+          { label: 'cancel', description: this.#utteranceText('utterance.confirm.cancel', 'leave the line as typed') },
+        ],
+      })
+      this.shell?.unsuppress()
+      return true
+    }
+    void this.#executeReading(reading)
+    return true
+  }
+
+  /** The sentence is the transaction: actions run in word order through the
+   *  same executor typed slash commands use, then ONE synchronize pass. */
+  async #executeReading(reading: UtteranceReadingLike): Promise<void> {
+    this.#recordHistory(reading.text)
+    this.#pendingChoice.set(null)
+    this.#utteranceResolutions.set(new Map())
+    this.clear()
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+      { execute?(name: string, args: string): Promise<unknown> } | undefined
+    if (!drone?.execute) return
+    for (const action of reading.actions) {
+      try { await drone.execute(action.command, action.args) }
+      catch (e) { console.warn('[utterance] action failed:', action.command, e) }
+    }
+    this.requestSynchronize()
+  }
+
+  /** Resolve the pending choice with the option at `index` (highlighted row
+   *  on Enter, clicked row, or Tab-accepted row). */
+  #applyPendingChoice(index: number): void {
+    const pending = this.#pendingChoice()
+    if (!pending) return
+    const option = pending.options[index] ?? pending.options[0]
+    this.#pendingChoice.set(null)
+    if (!option) return
+
+    if (pending.kind === 'ambiguity') {
+      const next = new Map(this.#utteranceResolutions())
+      next.set(pending.spanStart, option.label)
+      this.#utteranceResolutions.set(next)
+      // Re-read with the pin: executes, or surfaces the next open question.
+      this.#commitUtterance(pending.text)
+      return
+    }
+
+    if (pending.kind === 'confirm') {
+      // 'run' executes directly — never back through #commitUtterance, which
+      // would just ask again. 'cancel' leaves the line exactly as typed.
+      if (option.label === 'run') {
+        const reading = this.#utteranceReader()?.read(pending.text, this.#utteranceResolutions())
+        if (reading?.actions.length) void this.#executeReading(reading)
+      }
+      return
+    }
+
+    const text = pending.text
+    if (option.label === 'tile') {
+      // Verbatim creation — straight to the tile maker, never back through
+      // the pipeline where a stray colon would be read as a tag op.
+      this.commandSubject.set(null)
+      void this.commitCreateCellInPlace()
+      return
+    }
+    if (option.label === 'ask') {
+      EffectBus.emit('chat:open', { prefill: text })
+      this.clear()
+      return
+    }
+    // filter — enter live filter mode over these words, with the same state
+    // the typed '?' path maintains (so the filter window opens and a later
+    // clear() actually lifts the filter).
+    this.#setShellValue('?' + text, true)
+    const keyword = this.completions.normalize(text)
+    EffectBus.emit('search:filter', { keyword })
+    if (!this.#filterModeOpen) EffectBus.emit('swarm:filter-view-open', {})
+    this.lastFilterKeyword = keyword
+    this.#filterModeOpen = true
+  }
+
   public onShellValueChange = (v: string): void => {
     // Stance sigils come first — they are switches, not text. Capture modes
     // own their line outright: nothing here runs while one is active.
@@ -2285,6 +2510,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Typing leaves the recall walk — the line is the user's again.
     this.#historyIndex = -1
+
+    // Typing also reopens every utterance question: pinned ambiguity choices
+    // point at offsets that just moved, and a pending choice referred to
+    // text that no longer exists.
+    if (this.#pendingChoice()) this.#pendingChoice.set(null)
+    if (this.#utteranceResolutions().size) this.#utteranceResolutions.set(new Map())
 
     // An emptied line is about nothing. Editing the composed text does NOT
     // clear the chip — renaming the tile is the whole point of handing the line
@@ -2334,6 +2565,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Bridge: shell forwarded a keydown it didn't consume (not Escape/Up/Down/Tab/Enter). */
   public onShellKeydown = (e: KeyboardEvent): void => {
     const v = this.value()
+
+    // Escape abandons a pending utterance choice — the line stays as typed.
+    if (e.key === 'Escape' && this.#pendingChoice()) {
+      e.preventDefault()
+      this.#pendingChoice.set(null)
+      return
+    }
 
     // Shift+Enter → run the pluggable behaviors with the REAL event so the
     // Shift-gated ones (ShiftEnterNavigateBehavior — navigate, never create)
@@ -2483,6 +2721,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#commitCapture(capture, v)
       return
     }
+    // A pending utterance choice owns Enter: accept the highlighted row.
+    if (this.#pendingChoice()) {
+      this.#applyPendingChoice(this.shell?.getActiveIndex() ?? 0)
+      return
+    }
     const completed = this.#completeOnEnter(v)
     if (completed === null) return
     // The register line: command stance re-prefixes its slash here, so the
@@ -2491,6 +2734,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // running it would fall to the create-goto builtin and mint junk.
     const line = this.#toRegister(completed)
     if (line.trim() === '/') return
+    // Common Tongue: plain language in command stance is READ — the reading
+    // may carry several actions (tandem, word order), an ambiguity to
+    // resolve, or nothing (a pathway choice). Exempt registers (line ===
+    // completed: sigils, calls, tags, URLs) flow to the pipeline unchanged,
+    // as does everything when the reader is not installed.
+    // Never while a resource is armed: an armed drop's Enter means "make the
+    // tile and attach the cargo" — its seeded name must not be read as prose.
+    if (this.#stance() === 'command' && line !== completed && !this.armedResource()
+        && this.#commitUtterance(completed)) {
+      return
+    }
     // The line has been spent, so it is no longer about anything. Cleared
     // BEFORE the dispatch: executing may prefill the line again (a command
     // that hands the participant a follow-up), and that prefill owns the chip.
@@ -3768,6 +4022,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Bridge: shell accepted a suggestion (keyboard resolution above, or click). */
   public onShellCompletionAccepted = (best: string): void => {
+    // A pending utterance choice: the accepted row IS the answer.
+    const pendingUtterance = this.#pendingChoice()
+    if (pendingUtterance) {
+      const idx = pendingUtterance.options.findIndex(o => o.label === best)
+      this.#applyPendingChoice(idx >= 0 ? idx : 0)
+      return
+    }
     const ctx = this.context()
     if (!ctx.active) return
 
@@ -3932,6 +4193,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  icon carries that slash, so it comes off before the line is shown. */
   #setShellValue(v: string, suppress: boolean): void {
     if (!this.shell) return
+    // A programmatic line replacement dissolves any pending utterance choice —
+    // the question was about text that is no longer there (typed edits clear
+    // it in onShellValueChange; this covers recall, peel, and completions).
+    if (this.#pendingChoice()) this.#pendingChoice.set(null)
     if (v.startsWith('/') && this.#stance() === 'command' && !this.#captureMode()) {
       v = v.slice(1)
     }
