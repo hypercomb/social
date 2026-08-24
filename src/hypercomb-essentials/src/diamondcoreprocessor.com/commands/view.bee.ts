@@ -40,7 +40,8 @@ import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-regist
 import { WEBSITE_SLOT } from './website-slot.js'
 import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
-import { DEFAULT_VIEW_DECORATION_KIND } from './decoration-kind-index.js'
+import { DEFAULT_VIEW_DECORATION_KIND, normalizeViewToken } from './decoration-kind-index.js'
+import { defaultViewWithinAt } from './view-default.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
@@ -51,6 +52,12 @@ const DEFAULT_SURFACE = 'hexagons'
 /** Joins a path into one latch key. A separator no tile name can contain, so
  *  `['a','b']` and `['a/b']` are never the same address. */
 const SEGMENT_SEPARATOR = String.fromCharCode(0)
+
+/** Does this record's kind belong to the view — under its current name OR a
+ *  retired one (`legacyKinds`)? Marks written before a rename live on layers
+ *  forever; presence must keep answering for them. */
+const recordBelongsTo = (v: VisualBeeDescriptor, kind: string): boolean =>
+  kind === v.decorationKind || (v.legacyKinds?.includes(kind) ?? false)
 
 type LineageLike = EventTarget & {
   domain?: () => string
@@ -93,6 +100,12 @@ export type ViewToggle = {
   readonly icon: string
   readonly label: string
   readonly active: boolean
+  /** This layer's `view:default` mark names THIS view — the face it opens as.
+   *  A standing fact about the place, not a live state: it is true whether or
+   *  not the view is currently up, which is exactly why the rail has to show
+   *  it. Back on the hexagons every toggle is `active:false`, and without
+   *  this the participant cannot tell which one the layer will open as. */
+  readonly isDefault: boolean
 }
 
 export class ViewBee extends Worker {
@@ -125,6 +138,26 @@ export class ViewBee extends Worker {
    *  paint (see #releaseWhenPainted). Non-null while one is armed. */
   #pendingRelease: (() => void) | null = null
 
+  /** INHERITED arrival face per address — the nearest ancestor's
+   *  `view:default`, resolved by an O(depth) decoration walk. #recompute
+   *  fires many times at one address (cell-count, ViewMode, enablement),
+   *  and the ancestors' marks cannot change between those triggers without
+   *  a decoration or cursor event — the two that clear this. */
+  #inheritedDefault = new Map<string, string>()
+
+  /** Nearest ancestor's default view for the address ('' = none / opted
+   *  out). The node's OWN mark is the caller's to read — it already holds
+   *  the layer's records; this walk starts at the parent. */
+  async #inheritedDefaultView(segments: readonly string[]): Promise<string> {
+    if (!segments.length) return ''
+    const key = segments.join(SEGMENT_SEPARATOR)
+    const hit = this.#inheritedDefault.get(key)
+    if (hit !== undefined) return hit
+    const view = await defaultViewWithinAt(segments.slice(0, -1)).catch(() => '')
+    this.#inheritedDefault.set(key, view)
+    return view
+  }
+
   protected override act = async (): Promise<void> => {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     lineage?.addEventListener?.('change', () => this.#schedule())
@@ -140,7 +173,12 @@ export class ViewBee extends Worker {
     // pages, `decorations:changed` populates the kind index, and this makes
     // the toggle appear without a navigation.)
     EffectBus.on('render:cell-count', () => this.#schedule())
-    EffectBus.on('decorations:changed', () => this.#schedule())
+    EffectBus.on('decorations:changed', () => {
+      // An ancestor's mark may have changed — the inherited-face memo is
+      // only valid between decoration events.
+      this.#inheritedDefault.clear()
+      this.#schedule()
+    })
 
     // The layer's DEFAULT VIEW mark landed (or was cleared) — re-arm the
     // arrival latch so setting one from the Beehaviors panel shows you what
@@ -148,6 +186,9 @@ export class ViewBee extends Worker {
     // indexed by the hydration walk must never re-open a view the
     // participant has just escaped out of.
     EffectBus.on<{ label?: string }>('default-view:indexed', (payload) => {
+      // Whatever cell it landed on, it may be an ancestor of somewhere the
+      // memo has already answered for.
+      this.#inheritedDefault.clear()
       const lineage = get<LineageLike>('@hypercomb.social/Lineage')
       const here = (lineage?.explorerSegments?.() ?? [])
         .map(s => String(s ?? '').trim()).filter(Boolean)
@@ -160,7 +201,12 @@ export class ViewBee extends Worker {
     // which layer "here" resolves to. Without this, a navigation whose
     // cursor.load() finished after our last recompute left the PREVIOUS
     // node's toggles (the website icon) stuck on the new page.
-    EffectBus.on('history:cursor-changed', () => this.#schedule())
+    EffectBus.on('history:cursor-changed', () => {
+      // Undo/rewind can add or drop an ancestor's mark without a live
+      // decoration event — drop the inherited-face memo with the cursor.
+      this.#inheritedDefault.clear()
+      this.#schedule()
+    })
 
     // One activation choke point for every render view. The Beehaviors and
     // Views panels both publish `feature:hidden` at the gesture boundary; if
@@ -279,6 +325,21 @@ export class ViewBee extends Worker {
       .map(s => String(s ?? '').trim()).filter(Boolean)
     const layer = await this.#currentNodeLayer(segments)
     const records = await this.#decorationRecords(layer)
+    // The layer's ARRIVAL FACE, read once for both consumers: the strip marks
+    // it, and #openDefaultView opens it. THE CASCADE: the layer's own mark
+    // wins; with none, the NEAREST ancestor's mark covers this page — a
+    // default is a fact about a place, and the place reaches everything under
+    // it until a descendant declares its own. An explicit `hexagons` mark is
+    // that declaration's opt-out: it resolves to no face at all.
+    const ownDefault = normalizeViewToken(String(
+      records.find(r => r.kind === DEFAULT_VIEW_DECORATION_KIND)?.payload?.['view'] ?? '',
+    ).trim())
+    const resolved = ownDefault || await this.#inheritedDefaultView(segments)
+    // An explicit `hexagons` mark is the OPT-OUT: "no view here, and
+    // deliberately so" — it must also RELEASE an inherited arrival surface
+    // that would otherwise ride along (see #openDefaultView).
+    const optedOut = resolved === DEFAULT_SURFACE
+    const defaultView = optedOut ? '' : resolved
 
     const toggles: ViewToggle[] = []
     for (const v of views) {
@@ -308,6 +369,9 @@ export class ViewBee extends Worker {
           icon: v.toggleIcon || FALLBACK_TOGGLE_ICON,
           label: this.#label(v),
           active: !!controller.isActive?.(),
+          // A navigation behaviour opens a lineage, not a surface, so it can
+          // never be what a layer opens AS (#defaultViewAt refuses one).
+          isDefault: false,
         })
         continue
       }
@@ -330,7 +394,7 @@ export class ViewBee extends Worker {
         if (Array.isArray(slotVal) && slotVal.some(s => typeof s === 'string' && SIG_RE.test(s))) present = true
       }
       if (!present && v.decorationKind) {
-        const record = records.find(r => r.kind === v.decorationKind)
+        const record = records.find(r => recordBelongsTo(v, r.kind))
         if (record) {
           present = true
           // This cell's own decoration payload supplies its distinct icon /
@@ -365,12 +429,12 @@ export class ViewBee extends Worker {
       let hierarchyMember = false
       const walkable = v.scope === 'branch' ||
         (v.sourceScopes?.includes('hierarchy') ?? false)
-      if (!present && walkable && segments.length > 1) {
+      if (!present && walkable && segments.length > 0) {
         const root = await this.#branchScopeRoot(segments, v)
         if (root) {
           present = true
           hierarchyMember = v.scope !== 'branch'
-          const record = v.decorationKind ? root.records.find(r => r.kind === v.decorationKind) : undefined
+          const record = v.decorationKind ? root.records.find(r => recordBelongsTo(v, r.kind)) : undefined
           const payload = record?.payload
           payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
           payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
@@ -398,16 +462,19 @@ export class ViewBee extends Worker {
         icon: payloadIcon || v.toggleIcon || FALLBACK_TOGGLE_ICON,
         label: payloadLabel || this.#label(v),
         active: vm.is(v.view),
+        isDefault: !!defaultView && v.view === defaultView,
       })
     }
     this.#emit(toggles)
-    this.#openDefaultView(segments, toggles, layer, records, vm)
+    this.#openDefaultView(segments, toggles, layer, defaultView, vm, optedOut)
   }
 
   /** THE ARRIVAL SURFACE — a layer can declare which view it opens as, and
    *  walking in lands on it instead of on hexagons. The mark is
    *  `view:default` on the layer, written by clicking a view row's icon in
-   *  the Beehaviors panel; one per layer, so there is nothing to arbitrate.
+   *  the Beehaviors panel or ctrl/cmd-clicking the view's icon on the header
+   *  rail; one per layer, so there is nothing to arbitrate. `want` is that
+   *  mark, read by the caller (it also marks the strip with it).
    *
    *  Every gate above is inherited for free by asking one question — is this
    *  view in the toggle strip we just built? Dormant, hidden, not present
@@ -434,8 +501,9 @@ export class ViewBee extends Worker {
     segments: readonly string[],
     toggles: readonly ViewToggle[],
     layer: LayerLike | null,
-    records: readonly DecorationRecord[],
+    want: string,
     vm: ViewModeLike,
+    optedOut = false,
   ): void {
     // A cold layer read is indistinguishable from "no default" — don't latch
     // on it, let the next trigger answer properly.
@@ -451,8 +519,6 @@ export class ViewBee extends Worker {
     // decorations, ViewMode change, enablement flips), and a second pass must
     // not undo an Escape back to the hexagons.
     this.#autoOpenedKey = key
-    const mark = records.find(r => r.kind === DEFAULT_VIEW_DECORATION_KIND)
-    const want = String(mark?.payload?.['view'] ?? '').trim()
     const available = !!want && toggles.some(t => t.view === want)
     // Whose is the surface that's up? A view the PARTICIPANT chose rides
     // along on a walk — never yank them out of it into the one the layer
@@ -468,7 +534,7 @@ export class ViewBee extends Worker {
       vm.setMode(want)
       opened = want
     } else if (!available && prevArrival && vm.mode === prevArrival
-               && !toggles.some(t => t.view === prevArrival)) {
+               && (optedOut || !toggles.some(t => t.view === prevArrival))) {
       // Walking OUT of the layer — and out of its whole scope: a
       // branch-scoped view (a website) keeps its toggle on every descendant,
       // so inside the scope this never fires — releases the arrival surface
@@ -577,7 +643,10 @@ export class ViewBee extends Worker {
     v: VisualBeeDescriptor,
   ): Promise<{ layer: LayerLike; records: DecorationRecord[] } | null> {
     const branch = v.scope === 'branch'
-    for (let d = 1; d < segments.length; d++) {
+    // d = 0 is the HIVE ROOT — it can be a scope root like any other layer
+    // (a mark on the root makes the whole hive its branch). Still strict
+    // prefixes only: the walk never probes the node itself.
+    for (let d = 0; d < segments.length; d++) {
       const layer = await this.#layerAtSegments(segments.slice(0, d))
       if (!layer) continue
       if (branch && v.slot) {
@@ -591,7 +660,7 @@ export class ViewBee extends Worker {
       }
       if (v.decorationKind) {
         const records = await this.#decorationRecords(layer)
-        const record = records.find(r => r.kind === v.decorationKind)
+        const record = records.find(r => recordBelongsTo(v, r.kind))
         if (record && (branch || record.payload?.['sourceScope'] === 'hierarchy')) {
           return { layer, records }
         }

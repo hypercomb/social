@@ -13,8 +13,8 @@ import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import { visitRecordAt } from '../../sharing/visit-genome.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
-import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewForSegments } from '../../commands/decoration-kind-index.js'
-import { defaultViewAt } from '../../commands/view-default.js'
+import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
+import { defaultViewWithinAt } from '../../commands/view-default.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
@@ -2735,12 +2735,16 @@ export class ShowCellDrone extends Drone {
    *  invisibly, under the covered canvas, keeping the tile roster and the
    *  hydration walk fed and the escape-to-hexagons instant. */
   async #arrivalGate(passSegments: readonly string[], isNavigation: boolean): Promise<'paint' | 'abandon'> {
-    let want = defaultViewForSegments(passSegments)
+    // THE CASCADE: own mark or the nearest ancestor's — a branch default
+    // covers every page under it, so the gate must hold on those pages too.
+    // An explicit `hexagons` mark is the opt-out: the hexagons ARE the
+    // surface here, so paint straight away.
+    let want = defaultViewWithinSegments(passSegments)
     if (!want && isNavigation) {
-      want = await defaultViewAt(passSegments)
+      want = await defaultViewWithinAt(passSegments)
       if (!this.#segmentsAreCurrent(passSegments)) return 'abandon'
     }
-    if (!want) return 'paint'
+    if (!want || want === HEXAGONS_SURFACE) return 'paint'
     const vm = get<{ mode: string; is(name: string): boolean }>('@hypercomb.social/ViewMode')
     if (!vm || vm.is(want)) return 'paint'
     // The mark says a view opens here but the arbiter has not ruled for THIS

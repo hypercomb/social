@@ -43,7 +43,9 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // has been removed and strand the participant on a blank canvas.
   'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
   'living-brief', 'evidence-atlas', 'knowledge-studio', 'postit',
-  'revolucion-welcome', 'revolucion-room',
+  // `revolucion-welcome` is retired (renamed to `square-tile-view`
+  // 2026-08-23) — tombstone for older builds that persisted it.
+  'square-tile-view', 'revolucion-welcome', 'revolucion-room',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells

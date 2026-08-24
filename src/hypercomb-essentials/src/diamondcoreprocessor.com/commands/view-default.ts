@@ -23,7 +23,7 @@ import {
   removeDecorationAndWait,
   replaceDecoration,
 } from './decoration-manifest.js'
-import { DEFAULT_VIEW_DECORATION_KIND } from './decoration-kind-index.js'
+import { DEFAULT_VIEW_DECORATION_KIND, normalizeViewToken } from './decoration-kind-index.js'
 
 interface DefaultViewPayload {
   /** The ViewMode token — `VisualBeeDescriptor.view`, e.g. `postit`. */
@@ -38,10 +38,26 @@ export async function defaultViewAt(segments: readonly string[]): Promise<string
       segments: [...segments],
     })
     for (const record of records) {
-      const view = String(record.record?.payload?.view ?? '').trim()
+      const view = normalizeViewToken(String(record.record?.payload?.view ?? '').trim())
       if (view) return view
     }
   } catch { /* cold read — the caller treats a miss as "no default" */ }
+  return ''
+}
+
+/** THE CASCADE, cold side: the view this location OPENS AS — its own mark,
+ *  else the nearest ancestor's, walked one prefix at a time down to the
+ *  root (a mark at the root covers the whole hive). The nearest mark wins.
+ *  An explicit `hexagons` mark is terminal and returned AS-IS — callers
+ *  treat it as "no view, and deliberately so" (the opt-out under a branch
+ *  default), distinct from '' = no mark anywhere. O(depth) decoration
+ *  reads, so this is for navigation-time cold paths; warm paths ask the
+ *  synchronous index first (`defaultViewWithinSegments`). */
+export async function defaultViewWithinAt(segments: readonly string[]): Promise<string> {
+  for (let d = segments.length; d >= 0; d--) {
+    const view = await defaultViewAt(segments.slice(0, d))
+    if (view) return view
+  }
   return ''
 }
 

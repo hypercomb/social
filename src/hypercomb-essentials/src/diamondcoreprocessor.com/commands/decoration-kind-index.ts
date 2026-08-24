@@ -538,10 +538,48 @@ export const DEFAULT_VIEW_DECORATION_KIND = 'view:default'
 /** Map<locationKey, view token>. */
 const defaultViewByKey = new Map<string, string>()
 
-/** The view this location opens as, or '' when it has no default.
- *  Synchronous and O(1) — see the kind's note above. */
+/** The view this location's OWN mark names, or '' when it carries none.
+ *  Synchronous and O(1) — see the kind's note above. Ancestors are not
+ *  consulted: this answers "what mark sits HERE", which is what the glyph
+ *  tint and the panel need. The arrival face — own mark or the nearest
+ *  ancestor's — is `defaultViewWithinSegments`. */
 export function defaultViewForSegments(segments: readonly string[]): string {
   return defaultViewByKey.get(locationKey(segments)) ?? ''
+}
+
+/** The surface token that means "plain hexagons — no view". A `view:default`
+ *  record may carry it EXPLICITLY: under a branch default (an ancestor's mark
+ *  covering everything beneath it), it is how one page says "not here". The
+ *  cascade resolvers treat it as a terminal answer, never a view to open. */
+export const HEXAGONS_SURFACE = 'hexagons'
+
+/** RETIRED view tokens → their current names. `view:default` payloads carry
+ *  the token as data on layers in the wild, so a rename must keep old
+ *  records resolving. Read-side only — writers always mint current tokens. */
+const VIEW_TOKEN_ALIASES: Record<string, string> = {
+  'revolucion-welcome': 'square-tile-view',
+}
+
+/** A `view:default` payload token under its CURRENT name. */
+export function normalizeViewToken(view: string): string {
+  return VIEW_TOKEN_ALIASES[view] ?? view
+}
+
+/** THE CASCADE, warm-index side: the view this location OPENS AS — its own
+ *  mark first, else the NEAREST ancestor's. A default is a fact about a
+ *  place, and a place includes everything under it until a descendant
+ *  declares its own; the nearest mark always wins. An explicit `hexagons`
+ *  mark is terminal and returned AS-IS — "no view, deliberately" (the
+ *  opt-out under a branch default), distinct from '' = no mark anywhere.
+ *  O(depth) map lookups. The index holds no negative entries, so a miss
+ *  here is not proof of "no mark" — navigation passes fall back to the
+ *  async walk (`defaultViewWithinAt` in view-default.ts). */
+export function defaultViewWithinSegments(segments: readonly string[]): string {
+  for (let d = segments.length; d >= 0; d--) {
+    const view = defaultViewByKey.get(locationKey(segments.slice(0, d)))
+    if (view) return view
+  }
+  return ''
 }
 
 /** Map<locationKey, shapeId> — the owning group's silhouette for a launcher tile. */
@@ -926,7 +964,9 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
     else titleByKey.delete(key)
   }
   if (kind === DEFAULT_VIEW_DECORATION_KIND) {
-    const view = String((record.payload as { view?: unknown } | undefined)?.view ?? '').trim()
+    const view = normalizeViewToken(
+      String((record.payload as { view?: unknown } | undefined)?.view ?? '').trim(),
+    )
     if (view) defaultViewByKey.set(key, view)
     else defaultViewByKey.delete(key)
   }

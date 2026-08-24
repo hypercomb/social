@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// drive-atelier-click — Jaime's exact gesture: the ROOT opens as the
-// Revolución welcome atelier, the "behaviors" child opens as post-it, and
-// clicking the behaviors PLATE from INSIDE the atelier must behave exactly
+// drive-atelier-click — Jaime's exact gesture: the ROOT opens as the square
+// tile view (marked with the LEGACY revolucion kind, so this drill is also
+// the rename-alias proof), the "behaviors" child opens as post-it, and
+// clicking the behaviors PLATE from INSIDE the view must behave exactly
 // like clicking the tile on the canvas: navigate on the one road, and the
 // destination's OWN face renders — instantly, with nothing in between.
 //
@@ -9,8 +10,11 @@
 //                                        [--out <dir>] [--engine chrome]
 //
 // This is the click-path contract: THE TILE HAS A CLICK, and the same click
-// is used no matter what view it is rendered in. A view may only SUGGEST its
-// own child presentation (the room) for a destination that declares no face.
+// is used no matter what view it is rendered in. There are NO suggestions
+// any more — the arrival system opens the destination's resolved face: its
+// own view:default mark, else the nearest ancestor's (THE BRANCH CASCADE),
+// and an explicit `hexagons` mark opts a page back out. The tail of the
+// drill proves both cascade legs on a second, unmarked child.
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -123,9 +127,13 @@ async function main() {
       await page.waitForTimeout(2500)
     }
     await addTile('behaviors'); await page.waitForTimeout(2500)
+    await addTile('plain'); await page.waitForTimeout(2500)
 
-    check('the root wears the atelier (revolucion-welcome) as its face',
-      await dressLayer([], 'visual:revolucion:welcome', 'revolucion-welcome'))
+    // LEGACY KIND on purpose: marks written before the rename must still
+    // classify the root (registry legacyKinds). The default token is the
+    // CURRENT name — writers always mint current names.
+    check('the root wears the square tile view as its face (legacy kind recognized)',
+      await dressLayer([], 'visual:revolucion:welcome', 'square-tile-view'))
     await go(['behaviors']); await page.waitForTimeout(2500)
     check('behaviors wears post-it as its face',
       await dressLayer(['behaviors'], 'visual:postit:note', 'postit'))
@@ -134,16 +142,16 @@ async function main() {
     await go([]); await page.waitForTimeout(3500)
     const atRoot = await page.evaluate(() => ({
       mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
-      plates: document.querySelectorAll('.hc-welcome-view .wv-plate').length,
+      plates: document.querySelectorAll('.hc-square-tile-view .wv-plate').length,
     }))
-    check('arriving at the root opens the atelier with the behaviors plate on the wall',
-      atRoot.mode === 'revolucion-welcome' && atRoot.plates >= 1, JSON.stringify(atRoot))
-    await shot('01-atelier')
+    check('arriving at the root opens the square tile view with both plates on the page',
+      atRoot.mode === 'square-tile-view' && atRoot.plates >= 2, JSON.stringify(atRoot))
+    await shot('01-square-tile-view')
 
     // ── THE CLICK — same click as the canvas tile, from inside the view ──
     await page.evaluate(SAMPLER)
     await page.evaluate(() => window.__practice?.mark('click'))
-    await page.locator('.hc-welcome-view .wv-plate').first().click()
+    await page.locator('.hc-square-tile-view .wv-plate', { hasText: 'behaviors' }).first().click()
     await page.waitForTimeout(600)
     await shot('02-just-after-click')
     await page.waitForTimeout(2900)
@@ -157,7 +165,7 @@ async function main() {
     fs.writeFileSync(path.join(out, 'click-log.json'), JSON.stringify(after.log, null, 1))
     check('the plate click lands at behaviors', JSON.stringify(after.segs) === '["behaviors"]',
       JSON.stringify(after.segs))
-    check("behaviors opens as ITS OWN face — the tile's mark wins over the view's room",
+    check("behaviors opens as ITS OWN face — the nearest mark wins over the branch cascade",
       after.mode === 'postit', 'mode=' + after.mode)
     const samples = after.log.filter(s => !s.mark)
     const hexFlash = samples.filter(s => s.mode === 'hexagons')
@@ -185,8 +193,43 @@ async function main() {
     check('back from the face is a NAVIGATE — lands at the root', back.segs.length === 0,
       JSON.stringify(back.segs))
     check('...and the root opens as ITS face, never hexagons',
-      back.mode === 'revolucion-welcome' && back.hex === 0 && back.leak === 0,
+      back.mode === 'square-tile-view' && back.hex === 0 && back.leak === 0,
       'mode=' + back.mode + ' hexSamples=' + back.hex + ' leaks=' + back.leak)
+
+    // ── THE BRANCH CASCADE — an unmarked child inherits the root's face ──
+    await page.locator('.hc-square-tile-view .wv-plate', { hasText: 'plain' }).first().click()
+    await page.waitForTimeout(3200)
+    await shot('05-cascade-into-plain')
+    const cascaded = await page.evaluate(() => ({
+      mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
+      segs: window.ioc?.get?.('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [],
+    }))
+    check('an UNMARKED child inherits the branch face — plain opens as square tiles',
+      JSON.stringify(cascaded.segs) === '["plain"]' && cascaded.mode === 'square-tile-view',
+      JSON.stringify(cascaded))
+
+    // ── THE OPT-OUT — an explicit `hexagons` mark stops the cascade here ──
+    await page.evaluate(() => {
+      window.__hypercombEffectBus?.emit?.('features:default',
+        { cell: 'plain', segments: ['plain'], view: 'hexagons', clear: false, silent: true })
+    })
+    await page.waitForTimeout(2500)
+    await go([]); await page.waitForTimeout(2500)
+    await page.locator('.hc-square-tile-view .wv-plate', { hasText: 'plain' }).first().click()
+    await page.waitForTimeout(3500)
+    await shot('06-opt-out-hexagons')
+    const optedOut = await page.evaluate(() => {
+      const canvas = document.querySelector('#pixi-host canvas') || document.getElementById('pixi-host')
+      return {
+        mode: window.ioc?.get?.('@hypercomb.social/ViewMode')?.mode ?? '',
+        segs: window.ioc?.get?.('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [],
+        canvas: canvas ? getComputedStyle(canvas).visibility : 'none',
+      }
+    })
+    check('an explicit `hexagons` mark opts the page out — plain opens as its hexagon grid',
+      JSON.stringify(optedOut.segs) === '["plain"]' && optedOut.mode === 'hexagons'
+        && optedOut.canvas === 'visible',
+      JSON.stringify(optedOut))
   } finally {
     const real = errors.filter(e => !/Could not initialize shader|favicon|ResizeObserver/i.test(e))
     if (real.length) console.log('\npage errors:\n  ' + real.slice(0, 8).join('\n  '))

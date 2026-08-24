@@ -17,10 +17,9 @@
 import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
-import { defaultViewForSegments } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
 import { rewritePageRefs } from '../../diamondcoreprocessor.com/sharing/decoration-closure.js'
 import { scopeCellPageCss } from '../../diamondcoreprocessor.com/presentation/tiles/cell-page-css-scope.js'
-import { WELCOME_VIEW } from './welcome.queen.js'
+import { trackScrollGutter } from '../../diamondcoreprocessor.com/presentation/tiles/scroll-gutter.js'
 import type { BackGesture } from '../../diamondcoreprocessor.com/navigation/back-gesture.service.js'
 
 export const ROOM_VIEW = 'revolucion-room'
@@ -98,17 +97,14 @@ export class RoomViewDrone extends Drone {
     return window.ioc?.get<ViewModeShape>('@hypercomb.social/ViewMode')
   }
 
-  /** Escape / ‹ — out of the room, back onto the wall of the parent layer. */
+  /** Escape / ‹ — out of the room: navigate to the parent, nothing else.
+   *  The ARRIVAL system opens whatever face the parent resolves to (its own
+   *  mark or the branch's) — no suggestion, same rule as stepping in. */
   #backToWall(): void {
     const segments = this.#targetSegments ?? []
     const parent = segments.slice(0, -1)
     if (!parent.length) { this.#vm()?.setMode('hexagons'); return }
-    // Same rule as stepping in: navigate on the one road, and only SUGGEST
-    // the wall when the parent declares no face of its own — a parent with
-    // a view:default mark opens as that, via the arrival system.
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(parent)
-    if (defaultViewForSegments(parent)) return
-    this.emitEffect('view:open-for-tile', { view: WELCOME_VIEW, segments: parent })
   }
 
   async #reconcile(): Promise<void> {
@@ -263,6 +259,10 @@ export class RoomViewDrone extends Drone {
     host.append(chrome, back, close)
 
     document.body.appendChild(host)
+    // The page scrolls inside the host, so on Windows the host wears a real
+    // scrollbar — measure it so the × steps aside instead of being crowded
+    // against it (scroll-gutter.ts).
+    this.#undo.push(trackScrollGutter(host))
     this.#host = host
     this.#setActive(true)
   }
@@ -286,7 +286,7 @@ export class RoomViewDrone extends Drone {
 const ROOM_CHROME_CSS = `
 .hc-room-back,.hc-room-close{position:fixed;z-index:2147483600;top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(20,12,7,.82);border:1px solid rgba(212,175,55,.45);backdrop-filter:blur(6px);color:#e8d9ae;cursor:pointer;padding:0;opacity:.55;transition:opacity .16s ease}
 .hc-room-back{left:calc(.75rem + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));font:1.5rem/1 serif}
-.hc-room-close{right:calc(.75rem + env(safe-area-inset-right,0px));font:1.3rem/1 serif}
+.hc-room-close{right:calc(.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));font:1.3rem/1 serif}
 .hc-room-back:hover,.hc-room-close:hover{opacity:1}
 `
 

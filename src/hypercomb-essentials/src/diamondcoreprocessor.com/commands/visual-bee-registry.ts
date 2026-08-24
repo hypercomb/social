@@ -177,6 +177,16 @@ export type VisualBeeDescriptor = {
   readonly decorationKind: string
 
   /**
+   * RETIRED kind strings this bee still answers for. A rename mints a new
+   * `decorationKind`, but marks written under the old name live on layers
+   * in the wild (and on adopted branches) forever — these keep them
+   * recognized: `byDecorationKind` resolves them to this bee, and ViewBee's
+   * presence checks match them alongside the current kind. Writers always
+   * use `decorationKind`; legacy kinds are read-side only.
+   */
+  readonly legacyKinds?: readonly string[]
+
+  /**
    * For `behavior: 'render'` views whose content is a FIRST-CLASS LAYER
    * SLOT (not a decoration): the slot name on the layer JSON (e.g.
    * `'tutor'`). When set, ViewBee surfaces the per-node toggle whenever
@@ -472,10 +482,11 @@ export class VisualBeeRegistry extends EventTarget {
     return out
   }
 
-  /** Look up the bee that owns a decoration kind. */
+  /** Look up the bee that owns a decoration kind — current or legacy. */
   byDecorationKind(kind: string): VisualBeeDescriptor | undefined {
     for (const bee of this.#bees.values()) {
       if (bee.decorationKind === kind) return bee
+      if (bee.legacyKinds?.includes(kind)) return bee
     }
     return undefined
   }

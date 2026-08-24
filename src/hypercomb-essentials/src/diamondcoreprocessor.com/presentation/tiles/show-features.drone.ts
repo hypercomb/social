@@ -493,16 +493,21 @@ export class ShowFeaturesDrone extends Drone {
       void this.#bindAt(segments, kind, p?.bound !== false)
     })
 
-    // The panel's DEFAULT toggle — clicking a view row's ICON. The layer gets
-    // one mark saying which view it opens as; clicking the lit one clears it.
-    // Same division of labour as the three above: the shell states the
-    // intent, this side owns the write.
-    this.onEffect<{ cell?: string; segments?: string[]; view?: string; clear?: boolean }>('features:default', (p) => {
+    // The DEFAULT toggle — clicking a view row's ICON in the panel, or
+    // ctrl/cmd-clicking the view's icon on the header rail. The layer gets
+    // one mark saying which view it opens as; the same gesture on the lit one
+    // clears it. Same division of labour as the three above: the shell states
+    // the intent, this side owns the write.
+    //
+    // `silent` is the rail's: the panel asks for the refresh because the
+    // participant is looking AT the panel, while a rail gesture must not pop
+    // a tool window open over the hive — its answer is the icon lighting up.
+    this.onEffect<{ cell?: string; segments?: string[]; view?: string; clear?: boolean; silent?: boolean }>('features:default', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const view = String(p?.view ?? '').trim()
       const cell = String(p?.cell ?? '').trim()
       if (segments.length === 0 && !cell) return
-      void this.#defaultViewAt(segments, view, p?.clear === true, cell)
+      void this.#defaultViewAt(segments, view, p?.clear === true, cell, p?.silent === true)
     })
 
     // `name@view` from the command line (`diagram@slides` / `~diagram@slides`).
@@ -857,6 +862,7 @@ export class ShowFeaturesDrone extends Drone {
     view: string,
     clear: boolean,
     cellLabel = '',
+    silent = false,
   ): Promise<void> {
     const label = segments[segments.length - 1] ?? cellLabel
     try {
@@ -864,6 +870,19 @@ export class ShowFeaturesDrone extends Drone {
         await clearDefaultView(segments)
         this.emitEffect('activity:log', { message: `"${label}" opens as hexagons again`, icon: '○' })
       } else {
+        // `hexagons` is not a view — it is the EXPLICIT OPT-OUT mark. Under
+        // a branch default (an ancestor's mark covering this page), clearing
+        // the record only re-inherits; writing `hexagons` is how the page
+        // says "not here" and stays hexagons. The cascade resolvers treat it
+        // as terminal.
+        if (view === 'hexagons') {
+          await writeDefaultView(segments, view)
+          await this.#settleKind(segments, DEFAULT_VIEW_DECORATION_KIND)
+          this.emitEffect('activity:log', { message: `"${label}" opens as hexagons — the branch's view stops here`, icon: '○' })
+          this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: true, message: '' })
+          if (label && !silent) await this.#open(label, segments)
+          return
+        }
         // Only a REGISTERED RENDER view can be a surface to arrive on. A
         // navigation behaviour opens a lineage rather than a surface, so it
         // has nothing to be the default of.
@@ -881,8 +900,11 @@ export class ShowFeaturesDrone extends Drone {
       }
       this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: true, message: '' })
       // Same rule as the enable above: refresh the layer we wrote, not the
-      // label resolved at wherever the participant happens to stand.
-      if (label) await this.#open(label, segments)
+      // label resolved at wherever the participant happens to stand. A SILENT
+      // write (the header rail's ctrl-click) skips it — the refresh opens the
+      // Beehaviors panel, which is right when the gesture happened inside it
+      // and wrong when it happened on the rail.
+      if (label && !silent) await this.#open(label, segments)
     } catch (err) {
       console.warn('[show-features] default view failed', { view, segments, clear, err })
       this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: false, message: `couldn't set how "${label}" opens` })

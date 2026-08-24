@@ -1,30 +1,35 @@
-// The Revolución threshold — a daylight welcome page built from the layer.
+// The SQUARE TILE VIEW — a bright page built from the layer.
 //
-// The decorated cell's CHILDREN are the elements of the page: each child
-// tile is a plate in a bright ATELIER — warm ivory paper, espresso ink,
-// gold hairlines — laid out as a clean centred gallery grid. Every element
-// visible at once, obviously clickable, nothing floating and nothing to
-// learn: hovering lifts a plate, stepping through one opens that child's
-// own view (the room mounts its page; a bespoke view takes over when the
-// child earns one). This drone renders exactly ONE layer; children are
-// doorways. Depth is garnish here — soft shadows, a staggered entrance —
-// never a scene the visitor has to navigate.
+// The marked cell's CHILDREN are the elements of the page: each child tile
+// is a square plate — warm ivory paper, espresso ink, gold hairlines — laid
+// out as a clean centred gallery grid. Every element visible at once,
+// obviously clickable, nothing floating and nothing to learn: hovering
+// lifts a plate, stepping through one is a plain NAVIGATION — the arrival
+// system opens whatever face the destination resolves to (its own
+// `view:default` mark, else the branch's). This drone renders exactly ONE
+// layer; children are doorways. Depth is garnish here — soft shadows, a
+// staggered entrance — never a scene the visitor has to navigate.
 //
 // No dependencies, no canvases, no fetching beyond the hive's own
-// sig-addressed tile art. Earlier concepts are recorded in the behaviour's
+// sig-addressed tile art. Born as the Revolución welcome threshold;
+// promoted first-class 2026-08-23 (see square-tile-view.queen.ts for the
+// legacy-name aliases). Earlier concepts are recorded in the behaviour's
 // hive notes: the dark colonnade hid the layer, the dark 3D wall read as
 // heavy — the interface is light now, in both senses.
 
 import { Drone } from '@hypercomb/core'
-import { titleForLabel, defaultViewForSegments } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
-import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
-import { isKindGloballyOff } from '../../diamondcoreprocessor.com/sharing/behavior-enablement.js'
-import { listDecorations } from '../../diamondcoreprocessor.com/commands/decoration-manifest.js'
-import { tilePictureCandidates } from '../../diamondcoreprocessor.com/editor/tile-properties.js'
-import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../diamondcoreprocessor.com/history/layer-placement.js'
-import { WELCOME_KIND, WELCOME_VIEW, type WelcomePayload } from './welcome.queen.js'
-import { ROOM_VIEW } from './room-view.drone.js'
-import type { BackGesture } from '../../diamondcoreprocessor.com/navigation/back-gesture.service.js'
+import { titleForLabel } from '../../commands/decoration-kind-index.js'
+import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
+import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
+import { listDecorations } from '../../commands/decoration-manifest.js'
+import { tilePictureCandidates } from '../../editor/tile-properties.js'
+import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
+import { trackScrollGutter } from './scroll-gutter.js'
+import {
+  SQUARE_TILE_KIND, SQUARE_TILE_VIEW, LEGACY_WELCOME_KIND,
+  type SquareTilePayload,
+} from '../../commands/square-tile-view.queen.js'
+import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -45,11 +50,11 @@ const revokeAll = (urls: readonly string[]): void => {
   for (const url of urls) URL.revokeObjectURL(url)
 }
 
-export class WelcomeViewDrone extends Drone {
-  readonly namespace = 'revolucionstyle.com'
+export class SquareTileViewDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   override description =
-    'Revolución welcome renderer — the decorated cell opens into a daylight atelier whose plates are its children.'
+    'Square tile view renderer — the marked cell opens as a bright page whose square plates are its children.'
 
   #host: HTMLElement | null = null
   #targetSegments: string[] | null = null
@@ -58,6 +63,9 @@ export class WelcomeViewDrone extends Drone {
   #gen = 0
   /** Unregisters the right-click way out (back-gesture.service.ts). */
   #backOff: (() => void) | null = null
+  /** Stops the scrollbar-width tracker that keeps the × clear of the sheet's
+   *  own scrollbar (scroll-gutter.ts). */
+  #gutterOff: (() => void) | null = null
   /** Object URLs handed to the plates — process-wide until revoked. */
   #objectUrls: string[] = []
 
@@ -67,7 +75,7 @@ export class WelcomeViewDrone extends Drone {
       window.addEventListener('keydown', this.#key, true)
       // A REAL RENDERER FOLLOWS THE LINEAGE. The plate click is the same
       // click a hexagon gets — navigate, nothing more — so when the
-      // destination's own face is this same atelier, no mode change and no
+      // destination's own face is this same view, no mode change and no
       // suggestion ever fires: the lineage moving IS the render trigger.
       // (#targetSegments was the pre-navigation override; once the lineage
       // has moved, the lineage is the truth.)
@@ -77,16 +85,16 @@ export class WelcomeViewDrone extends Drone {
       this.onEffect('feature:hidden', this.#change)
       this.onEffect('feature:restored', this.#change)
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
-        if (payload?.view !== WELCOME_VIEW) return
+        if (payload?.view !== SQUARE_TILE_VIEW) return
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
-        this.#vm()?.setMode(WELCOME_VIEW)
+        this.#vm()?.setMode(SQUARE_TILE_VIEW)
         void this.#reconcile()
       })
-      // Right-click is the way out of the atelier, the same as Escape — the
-      // entry is keyed by this view's `view:active` owner, so it only answers
-      // while the wall is actually up.
+      // Right-click is the way out, the same as Escape — the entry is keyed
+      // by this view's `view:active` owner, so it only answers while the
+      // page is actually up.
       this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
-        ?.register({ owner: 'welcome-view', back: () => this.#vm()?.setMode('hexagons') }) ?? null
+        ?.register({ owner: 'square-tile-view', back: () => this.#vm()?.setMode('hexagons') }) ?? null
       this.#bound = true
     }
     await this.#reconcile()
@@ -108,7 +116,7 @@ export class WelcomeViewDrone extends Drone {
     void this.#reconcile()
   }
   readonly #key = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || this.#vm()?.mode !== WELCOME_VIEW) return
+    if (event.key !== 'Escape' || this.#vm()?.mode !== SQUARE_TILE_VIEW) return
     event.preventDefault()
     event.stopImmediatePropagation()
     this.#vm()?.setMode('hexagons')
@@ -120,7 +128,7 @@ export class WelcomeViewDrone extends Drone {
 
   async #reconcile(): Promise<void> {
     const gen = ++this.#gen
-    if (this.#vm()?.mode === WELCOME_VIEW) { await this.#mount(gen); return }
+    if (this.#vm()?.mode === SQUARE_TILE_VIEW) { await this.#mount(gen); return }
     this.#targetSegments = null
     this.#teardown()
   }
@@ -128,15 +136,22 @@ export class WelcomeViewDrone extends Drone {
   async #mount(gen: number): Promise<void> {
     const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
     const segments = this.#targetSegments ?? [...(lineage?.explorerSegments?.() ?? [])]
-    if (isKindGloballyOff(WELCOME_KIND) || await isFeatureHidden(segments, WELCOME_KIND)) {
+    // Hidden reach matches the view's BRANCH scope: a hide at the marked
+    // root silences the view all the way down, same as view.bee's gate.
+    if (isKindGloballyOff(SQUARE_TILE_KIND) || await isFeatureHiddenWithin(segments, SQUARE_TILE_KIND)) {
       this.#targetSegments = null
       this.#teardown()
       this.#vm()?.setMode('hexagons')
       return
     }
 
-    const records = await listDecorations<WelcomePayload>({ kind: WELCOME_KIND, segments })
-    if (gen !== this.#gen || this.#vm()?.mode !== WELCOME_VIEW) return
+    // Payload (title/tagline) — current kind first, retired kind as the
+    // read fallback for marks written before the rename.
+    let records = await listDecorations<SquareTilePayload>({ kind: SQUARE_TILE_KIND, segments })
+    if (!records.length) {
+      records = await listDecorations<SquareTilePayload>({ kind: LEGACY_WELCOME_KIND, segments })
+    }
+    if (gen !== this.#gen || this.#vm()?.mode !== SQUARE_TILE_VIEW) return
     const payload = records.at(-1)?.record.payload
     const label = segments.at(-1) ?? ''
     const title = payload?.title
@@ -148,12 +163,15 @@ export class WelcomeViewDrone extends Drone {
     // the new plates are about to use would blank the page it just built.
     const fresh: string[] = []
     const panels = await this.#panels(segments, fresh)
-    if (gen !== this.#gen || this.#vm()?.mode !== WELCOME_VIEW) { revokeAll(fresh); return }
+    if (gen !== this.#gen || this.#vm()?.mode !== SQUARE_TILE_VIEW) { revokeAll(fresh); return }
 
     this.#teardown()
     this.#objectUrls = fresh
     this.#host = this.#build(title, payload?.tagline ?? '', segments, panels)
     document.body.appendChild(this.#host)
+    // The sheet scrolls, so on Windows it wears a real scrollbar — measure it
+    // and let the × step aside by that much (see scroll-gutter.ts).
+    this.#gutterOff = trackScrollGutter(this.#host)
     this.#setActive(true)
   }
 
@@ -212,7 +230,7 @@ export class WelcomeViewDrone extends Drone {
 
   #build(title: string, tagline: string, segments: readonly string[], panels: PanelData[]): HTMLElement {
     const host = document.createElement('section')
-    host.className = 'hc-welcome-view'
+    host.className = 'hc-square-tile-view'
     host.innerHTML = `<style>${SCENE_CSS}</style>`
     // The page scrolls like a page; the hex wheel-zoom handler must not
     // preventDefault our wheel events (same hatch the site view uses).
@@ -289,22 +307,20 @@ export class WelcomeViewDrone extends Drone {
     return host
   }
 
-  /** Step through a doorway: real navigation into the child, then the
-   *  child's OWN view — the room mounts the cell's page as its presence,
-   *  and falls through to the hexagons when the cell has none. */
+  /** Step through a doorway: real navigation, nothing else. THE TILE'S
+   *  CLICK IS THE TILE'S CLICK — the same one a hexagon gets — and the
+   *  ARRIVAL system opens whatever face the destination resolves to: its
+   *  own `view:default` mark, else the nearest ancestor's (the branch
+   *  cascade). No suggestion rides along: the view must not assume the
+   *  child is a website page (or anything else) — how you got there never
+   *  changes what a place opens as. */
   #enter(segments: readonly string[]): void {
-    // THE TILE'S CLICK IS THE TILE'S CLICK — the same one a hexagon gets:
-    // navigate, and let the ARRIVAL system open whatever face the
-    // destination declares (its view:default mark). Forcing the room here
-    // was a second, private road that overrode the tile's own face — the
-    // room is only the atelier's FALLBACK presentation for a child that
-    // declares none.
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(segments)
-    if (defaultViewForSegments(segments)) return
-    this.emitEffect('view:open-for-tile', { view: ROOM_VIEW, segments: [...segments] })
   }
 
   #teardown(): void {
+    this.#gutterOff?.()
+    this.#gutterOff = null
     this.#host?.remove()
     this.#host = null
     revokeAll(this.#objectUrls)
@@ -316,17 +332,17 @@ export class WelcomeViewDrone extends Drone {
     if (this.#active === active) return
     this.#active = active
     const modes = window.ioc?.get<{ enter(m: string, o: string): void; exit(m: string, o: string): void }>('@diamondcoreprocessor.com/ModeRegistry')
-    if (active) modes?.enter('view:active', 'welcome-view')
-    else modes?.exit('view:active', 'welcome-view')
+    if (active) modes?.enter('view:active', 'square-tile-view')
+    else modes?.exit('view:active', 'square-tile-view')
   }
 }
 
-// Daylight atelier: warm ivory paper, espresso ink, gold hairlines. The
+// Bright gallery: warm ivory paper, espresso ink, gold hairlines. The
 // plates are the only pictures on the sheet; everything else is type and
 // air. Depth is garnish — soft shadows and a staggered entrance — never a
 // scene to navigate.
 const SCENE_CSS = `
-.hc-welcome-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:auto;background:
+.hc-square-tile-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:auto;background:
  radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.75),transparent 60%),
  linear-gradient(180deg,#f8f3e8 0%,#f3ecdd 60%,#ede4d1 100%);
  color:#31241a}
@@ -348,7 +364,7 @@ const SCENE_CSS = `
 .wv-caption{color:#5c4630;font:600 .78rem/1.3 Georgia,'Times New Roman',serif;letter-spacing:.14em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wv-plate:hover .wv-caption{color:#3a2a1c}
 .wv-hint{margin:auto auto 0;padding-top:2.6rem;text-align:center;color:rgba(138,118,87,.75);font:400 .74rem/1 Georgia,serif;letter-spacing:.26em;text-transform:uppercase;animation:wv-fade 1s ease .6s backwards}
-.wv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
+.wv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
 .wv-close:hover{opacity:1}
 @keyframes wv-rise{from{opacity:0;translate:0 14px}to{opacity:1;translate:0 0}}
 @keyframes wv-fade{from{opacity:0}to{opacity:1}}
@@ -356,5 +372,5 @@ const SCENE_CSS = `
 @media(max-width:560px){.wv-grid{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}.wv-mat{padding:6px}.wv-caption{font-size:.68rem;letter-spacing:.1em}}
 `
 
-const _welcomeView = new WelcomeViewDrone()
-window.ioc.register('@revolucionstyle.com/WelcomeViewDrone', _welcomeView)
+const _squareTileView = new SquareTileViewDrone()
+window.ioc.register('@diamondcoreprocessor.com/SquareTileViewDrone', _squareTileView)
