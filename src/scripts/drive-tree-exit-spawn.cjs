@@ -21,6 +21,8 @@
 //      anywhere, so closing stays put.
 //   D. TRAVEL — clicking a node in the tree is choosing a destination, and a
 //      destination outranks the way back in.
+//   E. THE ROOT — the reported case: standing at `/`, the icon opens the tree
+//      on `/behaviors`, and coming out has to land back on `/`.
 //
 // Vendor-neutral Playwright, no bridge. `--engine chrome` is the one with a
 // GPU — headless chromium cannot initialize Pixi's shaders and never leaves
@@ -161,6 +163,19 @@ async function main() {
     console.log('    typed   →', JSON.stringify(typed))
     check('C. a typed /tree closes where it opened',
       JSON.stringify(typed.at) === JSON.stringify(['family', 'susan']), 'at=' + JSON.stringify(typed.at))
+
+    // ── E. the ROOT — the reported case: click the icon standing at `/` ──
+    const fromRoot = await page.evaluate(DRIVE, {
+      from: [], tile: 'behaviors', view: '',
+    })
+    console.log('    root    →', JSON.stringify(fromRoot))
+    check('E. the icon opened the tree on /behaviors',
+      JSON.stringify(fromRoot.openedAt) === JSON.stringify(['behaviors']),
+      'opened at ' + JSON.stringify(fromRoot.openedAt))
+    check('E. coming out lands back on the hive root, not on /behaviors',
+      JSON.stringify(fromRoot.at) === JSON.stringify([]), 'at=' + JSON.stringify(fromRoot.at))
+    check('E. …and the URL follows the explorer home',
+      new URL(page.url()).pathname === '/', 'path=' + new URL(page.url()).pathname)
 
     // ── D. travel — choosing a destination outranks the way back in ──────
     const travel = await page.evaluate(async () => {
