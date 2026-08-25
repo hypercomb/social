@@ -100,51 +100,8 @@
   pointer-events: none;
 }
 
-.portal-close {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 1.4rem;
-
-  background: rgba(14, 18, 24, 0.88);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-
-  color: rgba(245, 245, 245, 0.85);
-  font-family: var(--hc-mono);
-  cursor: pointer;
-  pointer-events: auto;
-  transition: opacity 200ms ease, transform 200ms ease, background 200ms ease;
-
-  &:hover {
-    background: rgba(14, 18, 24, 0.95);
-    border-color: rgba(255, 255, 255, 0.22);
-  }
-
-  &:active {
-    transform: scale(0.97);
-  }
-}
-
-.close-icon {
-  font-size: 1.1rem;
-  line-height: 1;
-  color: rgba(200, 151, 90, 0.9);
-}
-
-.close-label {
-  font-size: 0.62rem;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(245, 245, 245, 0.7);
-}
-
-// Primary ACCEPT — the only control that installs the pending changes.
-// Accent-gold fill so it reads as the affirmative action next to the
-// neutral, glass back button.
+// DONE — the only button in the bar, and the way out. Accent-gold fill: it is
+// the one deliberate exit next to the passive ones (backdrop, Escape).
 .portal-apply {
   display: flex;
   align-items: center;
@@ -179,74 +136,6 @@
   color: #161616;
 }
 
-.portal-restore-point {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.45rem 0.55rem 0.45rem 0.8rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--hc-radius-floating);
-  background: rgba(14, 18, 24, 0.94);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  pointer-events: auto;
-
-  label {
-    color: rgba(245, 245, 245, 0.58);
-    font: 600 0.58rem/1 var(--hc-mono);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  input {
-    width: min(18rem, 32vw);
-    height: 2rem;
-    box-sizing: border-box;
-    padding: 0 0.65rem;
-    border: 1px solid rgba(200, 151, 90, 0.46);
-    border-radius: 3px;
-    outline: 0;
-    color: rgba(245, 245, 245, 0.92);
-    background: rgba(4, 8, 12, 0.72);
-    font: 500 0.72rem/1 var(--hc-ui-font, system-ui, sans-serif);
-
-    &:focus { border-color: rgba(212, 164, 102, 1); }
-    &:disabled { opacity: 0.55; }
-  }
-
-  .portal-apply {
-    box-shadow: none;
-    padding: 0.55rem 1rem;
-  }
-}
-
-.portal-cancel-restore {
-  padding: 0.45rem 0.65rem;
-  border: 0;
-  color: rgba(245, 245, 245, 0.62);
-  background: transparent;
-  cursor: pointer;
-  font: 600 0.6rem/1 var(--hc-mono);
-  text-transform: uppercase;
-
-  &:hover:not(:disabled) { color: rgba(245, 245, 245, 0.95); }
-  &:disabled { opacity: 0.45; cursor: default; }
-}
-
-.portal-restore-error {
-  position: absolute;
-  bottom: calc(100% + 0.45rem);
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: min(34rem, 80vw);
-  padding: 0.45rem 0.7rem;
-  border-radius: 4px;
-  color: #f0b0b0;
-  background: rgba(35, 12, 12, 0.94);
-  font: 600 0.65rem/1.3 var(--hc-ui-font, system-ui, sans-serif);
-}
-
 // Pending +adds / −removes, sitting at the LEFT of the action bar.
 // Display-only — clicks pass through. tabular-nums so the digits don't
 // jitter as counts change.
@@ -274,18 +163,12 @@
     bottom: calc(1.2rem + var(--hc-safe-bottom, 0px));
   }
 
-  .portal-close,
   .portal-apply {
     padding: 0.7rem 1.6rem;
   }
 
-  .close-label,
   .apply-label {
     font-size: 0.7rem;
-  }
-
-  .close-icon {
-    font-size: 1.2rem;
   }
 }
 
@@ -295,7 +178,6 @@
     bottom: calc(1rem + var(--hc-safe-bottom, 0px));
   }
 
-  .portal-close,
   .portal-apply {
     padding: 0.6rem 1.5rem;
   }

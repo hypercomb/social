@@ -37,12 +37,20 @@ const DEFAULT_MODE: ViewMode = 'hexagons'
 // essentials VisualBeeRegistry (dependency direction) — when a new
 // full-surface view registers, add its mode string. Missing entries were
 // exactly the 2026-07-27 lightbox/tutor boot-strand bug.
+//
+// IT DRIFTED AGAIN: `document` was missing (found 2026-08-24), and a missing
+// entry costs twice — the canvas is never suppressed under the view, and,
+// worse, setMode PERSISTS the mode, so the next reload boots into a surface
+// with no page mounted and the participant lands on a blank screen. The list
+// is now guarded by a ratchet (`view-modes.spec.ts`): every view token the
+// essentials side registers must appear here, and the ratchet fails the suite
+// when one does not. Do not silence it — add the mode.
 const TRANSIENT_MODES = new Set<ViewMode>([
   // `home` is retired, but older builds persisted it. Keep it here as a
   // tombstone so an existing browser cannot boot into a mode whose renderer
   // has been removed and strand the participant on a blank canvas.
   'website', 'home', 'slides', 'tree', 'lightbox', 'tutor', 'workflow',
-  'living-brief', 'evidence-atlas', 'knowledge-studio', 'postit',
+  'living-brief', 'evidence-atlas', 'knowledge-studio', 'postit', 'document',
   // `revolucion-welcome` is retired (renamed to `square-tile-view`
   // 2026-08-23) — tombstone for older builds that persisted it.
   'square-tile-view', 'revolucion-welcome', 'revolucion-room',
@@ -102,10 +110,21 @@ export class ViewModeService extends EventTarget {
     this.#previous = this.#mode
     this.#mode = cleaned
     try {
-      // Never persist a transient (canvas-hiding) mode — it must not survive a
-      // reload, or the hive boots into a blank, body-coloured screen.
-      if (TRANSIENT_MODES.has(cleaned)) localStorage.removeItem(STORAGE_KEY)
-      else localStorage.setItem(STORAGE_KEY, cleaned)
+      // PERSIST THE GROUND, NOTHING ELSE. A takeover mode must never survive a
+      // reload — the hive would boot into a surface with no page mounted and
+      // the participant would land on a blank, body-coloured screen. That used
+      // to be gated on the hand-maintained TRANSIENT_MODES set, which meant a
+      // view missing from the list persisted itself and stranded the next boot
+      // (`document` did exactly that until 2026-08-24).
+      //
+      // So the test is INVERTED: only the hexagons — the one surface that is
+      // the ground rather than a view — are written. An unknown mode is now
+      // assumed to be a takeover, which is the safe direction: the cost of
+      // being wrong is that a surface is not restored across a reload, not a
+      // white screen with no way back. Nothing can drift into the dangerous
+      // side of this branch any more.
+      if (cleaned === DEFAULT_MODE) localStorage.setItem(STORAGE_KEY, cleaned)
+      else localStorage.removeItem(STORAGE_KEY)
     } catch { /* private mode / storage full — non-fatal */ }
     this.dispatchEvent(new CustomEvent('change', { detail: { mode: cleaned, previous: this.#previous } }))
   }

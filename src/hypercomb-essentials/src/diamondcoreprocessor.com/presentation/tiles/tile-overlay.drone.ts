@@ -482,6 +482,9 @@ export class TileOverlayDrone extends Drone {
   /** The cursor is on chrome above the canvas, so the hive is standing down.
    *  Latched so the "nothing hovered" broadcast fires once per entry. */
   #hoverSuppressed = false
+
+  /** Text is in the command line — hover stands down until it clears. */
+  #composing = false
   #touchDragging = false
   // The screensaver has taken over the screen — keep the icon overlay hidden
   // until it ends. Enforced centrally in #updateVisibility.
@@ -559,6 +562,7 @@ export class TileOverlayDrone extends Drone {
     'render:host-ready', 'render:mesh-offset', 'render:cell-count',
     'render:set-orientation', 'render:geometry-changed', 'render:set-hive-visible',
     'navigation:guard-start', 'navigation:guard-end',
+    'command:composing',
     'mesh:public-changed', 'world:mode', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
     'drop:dragging',
@@ -948,6 +952,15 @@ export class TileOverlayDrone extends Drone {
       })
 
       this.onEffect('navigation:guard-start', () => { this.#beginNavigationTransition() })
+
+      // Writing in the command line stands the hive's hover down (see the
+      // gate in #onPointerMove). Standing it down IMMEDIATELY matters as much
+      // as the gate: the pointer is parked while the participant types, so
+      // nothing would re-broadcast to clear a band or an echo already showing.
+      this.onEffect<{ composing?: boolean }>('command:composing', ({ composing }) => {
+        this.#composing = !!composing
+        if (this.#composing) this.#suppressHover()
+      })
 
       // Post-reveal mirror of the render:cell-count release. Redundant with it
       // (cell-count fires just before this, from applyGeometry/clearMesh, so the
@@ -2465,6 +2478,19 @@ export class TileOverlayDrone extends Drone {
       if (this.#dropDragging) this.#emitDropTarget(null)
       return
     }
+    // The participant is WRITING, not pointing: the caret is in the command
+    // line, or text is waiting in it. Either way the line is the surface they
+    // are working on and the hive must not answer a pointer that merely
+    // crosses it. Both halves matter — clicking into an EMPTY line and then
+    // hovering a tile brought the labels straight back when only text counted.
+    // The state arrives as `command:composing`. Coordinate-resolved paths
+    // (click, drop) are untouched; only hover stands down, so the first
+    // pointer move after the line is left re-derives.
+    if (this.#composing) {
+      this.#suppressHover()
+      return
+    }
+
     this.#hoverSuppressed = false
 
     const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')

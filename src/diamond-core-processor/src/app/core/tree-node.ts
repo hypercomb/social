@@ -98,6 +98,12 @@ export interface TreeNode {
   className?: string
 
   /**
+   * The source file this artifact was built from, off the bundle's first-line
+   * comment. A pointer back to the code from any row that carries it.
+   */
+  sourcePath?: string
+
+  /**
    * IDENTITY — what this node IS, independent of which build generation its
    * signature names (`<lineage>/<ClassName>`). Two nodes sharing an identity
    * are revisions of one artifact; exactly one of them may render, activate,

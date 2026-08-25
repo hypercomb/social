@@ -85,6 +85,8 @@
           [placeholder]="effectivePlaceholder()"
           (keydown)="onKeyDown($event)"
           (input)="onInput()"
+          (focus)="onInputFocus()"
+          (blur)="onInputBlur()"
           (scroll)="onInputScroll()"
         />
 

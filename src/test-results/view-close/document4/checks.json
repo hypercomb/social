@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "name": "the hive paints its tiles first",
+      "ok": true,
+      "detail": "372604 bytes"
+    },
+    {
+      "name": "the view took the surface",
+      "ok": true,
+      "detail": "mode=document classes=hc-view-document,hc-view-covered"
+    },
+    {
+      "name": "the canvas is no longer suppressed",
+      "ok": false,
+      "detail": "classes=hc-view-document,hc-view-covered"
+    },
+    {
+      "name": "nothing full-screen is left covering it",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "show-cell still holds a painted location",
+      "ok": true,
+      "detail": "/"
+    },
+    {
+      "name": "THE TILES ARE BACK",
+      "ok": true,
+      "detail": "357634 vs 372604 on the way in"
+    }
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 ()",
+    "Failed to load resource: the server responded with a status of 404 ()"
+  ]
+}

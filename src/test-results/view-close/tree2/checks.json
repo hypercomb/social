@@ -1,0 +1,13 @@
+{
+  "checks": [
+    {
+      "name": "the hive paints its tiles first",
+      "ok": true,
+      "detail": "373652 bytes"
+    }
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 ()",
+    "Failed to load resource: the server responded with a status of 404 ()"
+  ]
+}

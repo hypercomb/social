@@ -73,8 +73,12 @@ async function main() {
     await page.waitForTimeout(400)
 
     // ── the rail's switch raises the panel, resting on the WHOLE list ──
-    await page.locator('.rail-btn.features-toggle-btn').click()
-    await page.waitForTimeout(4000)
+    // The switch TOGGLES, and the panel's open-ness survives a reload — so a
+    // run that lands with it already up must not press it closed.
+    if (!(await page.locator('.features-panel').count())) {
+      await page.locator('.rail-btn.features-toggle-btn').click()
+      await page.waitForTimeout(4000)
+    }
     await shot('00-open')
 
     let s = await page.evaluate(SNAP)

@@ -254,6 +254,7 @@ export class HomeComponent implements OnDestroy {
   readonly domains = signal<string[]>(this.#loadDomains())
   readonly domainInput = signal('')
   readonly searchTerm = signal('')
+  setSearchTerm(value: string): void { this.searchTerm.set(value) }
   readonly sections = signal<DomainSection[]>([])
   readonly inspectBee = signal<string | null>(null)
   readonly inspectKind = signal<TreeNodeKind>('bee')
@@ -1872,7 +1873,7 @@ export class HomeComponent implements OnDestroy {
 
   cancelInstall(): void { this.pendingInstallScope.set(null) }
 
-  removeDomain(domain: string): void {
+  async removeDomain(domain: string): Promise<void> {
     const next = this.domains().filter(d => d !== domain)
     this.domains.set(next)
     localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
@@ -1880,10 +1881,15 @@ export class HomeComponent implements OnDestroy {
     // otherwise #refreshFromLineage rebuilds them from the lineage on the next
     // reload (which is why stale adopts kept coming back). Keyed by the tile
     // name (domainName), the sigbag's tile key.
+    //
+    // AWAITED, not fired and forgotten: the registry snapshot below is built
+    // from the sigbag, so a snapshot posted while these were still in flight
+    // would still list the branch that was just removed — and an accept
+    // carrying it would re-fold what the participant just discarded.
     const removedNames = new Set(this.sections().filter(s => s.domain === domain).map(s => s.domainName))
-    for (const name of removedNames) {
-      if (name) void this.#domainStorage.removeDomain(name).catch(() => { /* non-fatal */ })
-    }
+    await Promise.all([...removedNames]
+      .filter(Boolean)
+      .map(name => this.#domainStorage.removeDomain(name).catch(() => { /* non-fatal */ })))
     const remaining = this.sections().filter(s => s.domain !== domain)
     this.sections.set(remaining)
 
@@ -1895,10 +1901,26 @@ export class HomeComponent implements OnDestroy {
       this.layersCollapsed.set(false)
     }
 
+    // Recompute the union WITHOUT the removed silos and push the registry
+    // that describes it, so the hive's next accept reads a snapshot the
+    // removal is already absent from.
+    try {
+      await this.#domainStorage.recomputeLogical()
+      this.#logicalVersion.update(v => v + 1)
+      await this.#postRegistrySnapshot()
+    } catch (e) {
+      console.warn('[home] removeDomain: logical/registry refresh failed', e)
+    }
+
     // Drop the domain's content from any connected web tab — the next
     // sync sig will exclude these sigs and resyncFromSentinel removes
     // disabled files.
     this.#toggleState.notifyChanged()
+
+    // An uninstall is a change to the install state like any other, so it
+    // commits like any other. Here rather than in discardPackage, because the
+    // row's DISCARD and the domain header's × are the same act.
+    this.#signalCommit()
   }
 
   togglePackage(section: DomainSection): void {
@@ -1964,13 +1986,19 @@ export class HomeComponent implements OnDestroy {
     }
   }
 
-  /** Adopt: install + enable (live in the logical view now). The restore
-   *  point arrives already NAMED by the naming service — the same word-pair
-   *  the breadcrumb and the upgrade pill use, minted from the package
-   *  signature so one adoption reads as one name on every device. The field
-   *  stays the participant's to overwrite, never theirs to supply. */
+  /** Adopt: install + enable (live in the logical view now) — and, in an
+   *  embedded installer, THE COMMIT: the gesture that tells the hive to fold
+   *  and resync (see confirmPackageAdopt). Pressable even when the package
+   *  already reads as adopted, because "adopted" is about the package while
+   *  the commit is about the STATE: flipping a bee on inside an
+   *  already-adopted package produces no package-level change, and an inert
+   *  Adopt would leave that opt-in with no way to reach the hive.
+   *
+   *  The restore point arrives already NAMED by the naming service — the same
+   *  word-pair the breadcrumb and the upgrade pill use, minted from the
+   *  package signature so one adoption reads as one name on every device. The
+   *  field stays the participant's to overwrite, never theirs to supply. */
   adoptPackage(section: DomainSection): void {
-    if (this.packageState(section) === 'adopted') return
     this.adoptingPackageSig.set(section.rootSig)
     // Mint from the RAW deploy label, not displayLabel — the naming service
     // ignores branch-machinery labels itself, and displayLabel may already BE
@@ -2021,9 +2049,9 @@ export class HomeComponent implements OnDestroy {
         if (!saved) throw new Error('named restore point was not saved')
       }
 
-      // Let the embedding hive reuse this exact name for its whole-hive
-      // checkpoint at final Apply. One typed name covers both DCP install
-      // state and hive content; the participant is not asked twice.
+      // Let the embedding hive reuse this exact name for the restore point it
+      // takes before folding. One typed name covers both DCP install state and
+      // hive content; the participant is not asked twice.
       if (window.parent !== window) {
         window.parent.postMessage({ type: 'dcp:restore-point', name }, '*')
       }
@@ -2043,6 +2071,10 @@ export class HomeComponent implements OnDestroy {
       window.setTimeout(() => {
         if (this.revisionStatus() === 'saved') this.revisionStatus.set('idle')
       }, 4000)
+
+      // ADOPT IS THE COMMIT: install and enable, live now. Save and discard
+      // send the same signal — see #signalCommit.
+      this.#signalCommit()
     } catch (err) {
       console.warn('[home] safe package adopt stopped', err)
       this.revisionStatus.set('error')
@@ -2050,10 +2082,29 @@ export class HomeComponent implements OnDestroy {
     }
   }
 
-  savePackage(section: DomainSection): void { void this.#setPackageEnabled(section, false) }
+  async savePackage(section: DomainSection): Promise<void> {
+    if (await this.#setPackageEnabled(section, false)) this.#signalCommit()
+  }
 
-  /** Discard: uninstall the package (same removal the × performs). */
-  discardPackage(section: DomainSection): void { this.removeDomain(section.domain) }
+  /** Discard: uninstall the package — the same removal the × performs, which
+   *  commits on its own (the hive un-folds what the installer no longer
+   *  holds). */
+  discardPackage(section: DomainSection): Promise<void> {
+    return this.removeDomain(section.domain)
+  }
+
+  /** Tell the embedding hive to ACCEPT the install state as it now stands:
+   *  fold what is enabled, un-fold what is not, resync the shell. One signal
+   *  for all three verbs — adopt, save, discard — because the hive folds on
+   *  exactly one (`actions:available`, dispatched from the portal's apply)
+   *  and the chrome's Done button only leaves.
+   *
+   *  ALWAYS SENT LAST, after this change has pushed its registry snapshot:
+   *  postMessage keeps order, so the hive reads the new state before it reads
+   *  the accept. */
+  #signalCommit(): void {
+    if (window.parent !== window) window.parent.postMessage({ type: 'dcp:confirm' }, '*')
+  }
 
   async #refreshHomeRevisions(): Promise<void> {
     try {
@@ -3093,7 +3144,7 @@ export class HomeComponent implements OnDestroy {
       // separate computed MERGE of what's enabled across them (see
       // logicalViewItems), so it never appears here as a static section.
       for (const child of domainChildren) {
-        siblings.push(mk(base, child.name, child.signature ?? rootSig, child.children, null))
+        siblings.push(mk(base, child.name, child.signature ?? rootSig, this.#openRootItems(child.children), null))
       }
       // the host/import source — a sibling created on import. Opening it (the
       // accordion action) reveals the current import; adopted items (e.g.
@@ -3390,9 +3441,17 @@ export class HomeComponent implements OnDestroy {
 
   #flattenDomainSubfolder(items: TreeNode[]): { items: TreeNode[], displayDomain: string | null } {
     if (items.length === 1 && items[0].kind === 'layer' && items[0].name.includes('.')) {
-      return { items: items[0].children, displayDomain: items[0].name }
+      return { items: this.#openRootItems(items[0].children), displayDomain: items[0].name }
     }
-    return { items, displayDomain: null }
+    return { items: this.#openRootItems(items), displayDomain: null }
+  }
+
+  /** The landing state of a tree that just resolved: the root level is the
+   *  whole of what shows. Root items stay CLOSED — a resolved tree can carry
+   *  hundreds of leaves, and opening every root dumped the entire census on
+   *  screen at once. Their chevrons are the reader's from the first frame. */
+  #openRootItems(items: TreeNode[]): TreeNode[] {
+    return items
   }
 
   #containsNode(nodes: TreeNode[], id: string): boolean {
@@ -3433,7 +3492,13 @@ export class HomeComponent implements OnDestroy {
   #filterTree(nodes: TreeNode[], term: string): TreeNode[] {
     const result: TreeNode[] = []
     for (const node of nodes) {
-      const nameMatch = node.name.toLowerCase().includes(term)
+      // The row's three names: what it is called, what its class is called,
+      // and the file it was built from — so a path pasted from the editor
+      // finds its entry from anywhere in the tree.
+      const nameMatch =
+        node.name.toLowerCase().includes(term)
+        || !!node.className?.toLowerCase().includes(term)
+        || !!node.sourcePath?.toLowerCase().includes(term)
       const filteredChildren = this.#filterTree(node.children, term)
 
       if (nameMatch || filteredChildren.length > 0) {

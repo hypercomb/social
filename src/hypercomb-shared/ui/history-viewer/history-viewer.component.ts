@@ -381,6 +381,14 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
       EffectBus.on('history:view-open', () => this.#visible.set(true)),
       EffectBus.on('history:view-close', () => this.#visible.set(false)),
       EffectBus.on('history:view-toggle', () => this.#visible.set(!this.#visible())),
+      // The layer of deleted tiles (PruneService, essentials). The panel
+      // owns the TOGGLE, never the mode: it asks over the bus and reflects
+      // whatever answer comes back, so the same state is shown whether the
+      // participant clicked here or spoke the word.
+      EffectBus.on<{ active?: boolean; count?: number }>('prune:mode-changed', (state) => {
+        this.#pruneMode.set(!!state?.active)
+        this.#prunedCount.set(Number(state?.count ?? 0))
+      }),
     )
 
     // When the panel becomes visible, refresh entries + contents. Done
@@ -869,6 +877,19 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
   }
 
   // ── marked places (cross-tree) ──────────────────────────────────────
+
+  // Prune mode — the hive is showing the tiles deleted at this location
+  // instead of the tiles it has. Mirrored from `prune:mode-changed`; this
+  // panel never sets it directly, so a mode opened by the `prune` word and
+  // one opened by this button are the same mode.
+  #pruneMode = signal(false)
+  readonly pruneMode = this.#pruneMode.asReadonly()
+  #prunedCount = signal(0)
+  readonly prunedCount = this.#prunedCount.asReadonly()
+
+  readonly togglePruneMode = (): void => {
+    EffectBus.emit('prune:mode-toggle', undefined)
+  }
 
   #markedMode = signal(false)
   readonly markedMode = this.#markedMode.asReadonly()

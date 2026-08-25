@@ -1,0 +1,16 @@
+<!-- The whole pill is the release — one target, no hunting for a button. -->
+@if (visible()) {
+  <button
+    type="button"
+    class="landing-badge"
+    (click)="onShow()"
+    [attr.aria-label]="'landing.aria' | t"
+  >
+    <span class="dot" aria-hidden="true"></span>
+    <span class="count">{{ 'landing.pending' | t: { count: count() } }}</span>
+    @if (where()) {
+      <span class="where">{{ 'landing.where' | t: { where: where() } }}</span>
+    }
+    <span class="show">{{ 'landing.show' | t }}</span>
+  </button>
+}

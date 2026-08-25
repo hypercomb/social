@@ -66,6 +66,7 @@ export class DocumentViewDrone extends Drone {
   #lineageBound = false
   #viewModeBound = false
   #contextMenuBound = false
+  #escapeBound = false
   #reconciling = false
 
   protected override deps = {
@@ -101,6 +102,24 @@ export class DocumentViewDrone extends Drone {
       window.addEventListener('contextmenu', this.#onContextMenu, true)
       this.#contextMenuBound = true
     }
+    if (!this.#escapeBound) {
+      // ESCAPE IS A PEEL, AND IT IS EVERYWHERE. This used to hang off the
+      // EDITOR, so it only answered while the caret was in the text — press
+      // Escape with focus anywhere else and the view held. That was survivable
+      // only while this mode was (wrongly) left out of the shell's takeover
+      // list and the hexagons still showed through it; now that the canvas is
+      // properly suppressed underneath, an Escape that does not answer is a
+      // participant with no way back.
+      //
+      // CAPTURE + stopImmediatePropagation, the same shape every other view
+      // uses (tree-view.drone.ts:212): the shell runs an escape CASCADE of its
+      // own, and it preventDefaults. A bubble-phase listener that politely
+      // stands aside for an already-handled Escape therefore never answers at
+      // all — which is exactly how the first attempt at this failed. While a
+      // view owns the surface, its Escape is the first claim on the key.
+      window.addEventListener('keydown', this.#onKeyDown, true)
+      this.#escapeBound = true
+    }
     void this.#reconcile()
   }
 
@@ -110,6 +129,7 @@ export class DocumentViewDrone extends Drone {
     const vm = this.#vm()
     if (this.#viewModeBound && vm?.removeEventListener) vm.removeEventListener('change', this.#onViewModeChange)
     if (this.#contextMenuBound) window.removeEventListener('contextmenu', this.#onContextMenu, true)
+    if (this.#escapeBound) { window.removeEventListener('keydown', this.#onKeyDown, true); this.#escapeBound = false }
     this.#teardown()
   }
 
@@ -205,7 +225,6 @@ export class DocumentViewDrone extends Drone {
       'flex:1 1 auto;width:100%;box-sizing:border-box;padding:28px 18px;border:0;outline:0;resize:none;' +
       'background:transparent;color:#e8e6f0;font:14px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;'
     editor.addEventListener('input', this.#onInput)
-    editor.addEventListener('keydown', this.#onKeyDown)
 
     host.append(hint, editor)
     document.body.appendChild(host)
@@ -223,7 +242,10 @@ export class DocumentViewDrone extends Drone {
 
   readonly #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return
+    const vm = this.#vm()
+    if (!vm || vm.mode !== DOCUMENT_VIEW) return
     e.preventDefault()
+    e.stopImmediatePropagation()
     void this.#exit()
   }
 
@@ -285,7 +307,6 @@ export class DocumentViewDrone extends Drone {
     if (this.#mount) {
       if (this.#mount.timer !== null) window.clearTimeout(this.#mount.timer)
       this.#mount.editor.removeEventListener('input', this.#onInput)
-      this.#mount.editor.removeEventListener('keydown', this.#onKeyDown)
       this.#mount.host.remove()
       this.#mount = null
     }

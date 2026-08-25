@@ -55,19 +55,15 @@ export const showCell = async (stage: TutorialStage, label: string): Promise<voi
  * through to create-cell — `normalizeCell` strips the `>` and the `?` and the
  * "filter" lesson quietly CREATED a tile called "mark" on the practice page.
  *
- * So: put the line in the box for the participant to read, and raise the two
- * effects filter mode raises. `search:filter` is what the renderer listens to;
- * `swarm:filter-view-open` is what opens the filters window, exactly as typing
- * does the first time a line enters filter mode.
+ * So: put the line in the box for the participant to read, and raise the effect
+ * filter mode raises — `search:filter` is what the renderer listens to.
  */
 export const showFilter = async (
   stage: TutorialStage,
   keyword: string,
-  opts?: { openWindow?: boolean },
 ): Promise<void> => {
   stage.emit('search:prefill', { value: `>?${keyword}`, focus: false })
   stage.emit('search:filter', { keyword })
-  if (opts?.openWindow) stage.emit('swarm:filter-view-open', {})
   await stage.wait(600)
 }
 

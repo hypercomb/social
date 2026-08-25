@@ -1,21 +1,28 @@
 // diamondcoreprocessor.com/assistant/providers-window.view.ts
 //
-// THE PROVIDERS CONSOLE — one list, one form.
+// THE PROVIDERS CONSOLE — three ways of paying, one form.
 //
 // Opened by `/providers` (or the `providers:open` effect). Every AI provider
-// the registry knows — built-in vendors, discovered specs, local models —
-// appears as one row in one list, and clicking a row opens the SAME panel
-// for all of them: key field (when one is needed), endpoint (shown before a
-// key ever travels to it), docs link, model roster, a test button, and the
-// active switch the orchestrator honours. No vendor has a bespoke screen; if
+// the registry knows — built-in vendors, discovered specs, bridged CLI
+// sessions, local and lent models — appears as one row under one of three
+// tabs, and clicking a row opens the SAME panel for all of them: key field
+// (when one is needed), endpoint (shown before a key ever travels to it),
+// docs link, model roster, a test button, and the active switch the
+// orchestrator honours. No vendor has a bespoke screen; if
 // a spec ever needs a field this form lacks, the FORM grows the field, for
-// everyone at once.
+// everyone at once. The tabs group rows; they never change what a row IS.
 //
-// Everything here is a pure read of four live sources — the provider
+// Everything here is a pure read of five live sources — the provider
 // registry (rows), the key store (lights), the activation store (switches),
-// and localStorage's local-host override — plus one write path each. The
-// window re-renders on any of their `change` events, so a provider
-// discovered mid-session simply appears.
+// the policy store (who answers by default), and localStorage's local-host
+// override — plus one write path each. The window re-renders on any of their
+// `change` events, so a provider discovered mid-session simply appears on
+// whichever tab its cost class puts it.
+//
+// The standing instruction — who answers when nobody says — is the FOOT of
+// the window, not its head: a status bar that always states who would answer
+// right now, and opens into the pickers when you want to change it. It sits
+// outside the tabs because it picks across the whole roster.
 //
 // A panel, not a takeover — cold chrome, DOM singleton, no Angular; the same
 // shape as skills-window.view.
@@ -23,7 +30,7 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
-import { TIERS, candidatesFor, explainChoice, llmPolicy } from './model-policy.js'
+import { TIERS, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
@@ -35,10 +42,64 @@ import { modelPalette } from '../presentation/avatars/agent-model.js'
 const STYLE_ID = 'hc-providers-styles'
 const STEEL = '126, 182, 214'
 const WIDTH_KEY = 'hc:providers-window-width'
+const TAB_KEY = 'hc:providers-window-tab'
+const POLICY_OPEN_KEY = 'hc:providers-window-policy'
 const MIN_WIDTH = 340
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
+
+/**
+ * THREE WAYS A MODEL GETS PAID FOR — and that is the whole grouping.
+ *
+ * A participant does not sort providers by protocol; they sort them by what
+ * saying yes costs. A plan they already signed, answered by a CLI session on
+ * this machine. A key that meters every request. Or a machine — theirs, or a
+ * neighbour's — that bills nothing but has to be awake.
+ *
+ * So the tabs are a pure fold of the COST CLASS the selection policy already
+ * reasons in (`costOf`), never a second classification: register a provider
+ * anywhere and it lands on the right tab without this file learning its name.
+ * Subscriptions is the tab that opens, because a plan already paid for is the
+ * answer that costs the participant nothing more.
+ */
+export type ProviderTab = 'subscription' | 'api' | 'swarm'
+
+const TABS: readonly { id: ProviderTab; label: string; hint: string }[] = [
+  {
+    id: 'subscription',
+    label: 'Subscriptions',
+    hint: 'A plan you already pay for. A CLI session running on this machine answers '
+      + 'through its own account — and these are the only responders that can read your hive.',
+  },
+  {
+    id: 'api',
+    label: 'API requests',
+    hint: 'Billed per request against a key you paste here. The key stays in this browser, '
+      + 'and the endpoint it would travel to is shown before you paste it.',
+  },
+  {
+    id: 'swarm',
+    label: 'Swarm',
+    hint: 'Models that answer from a machine instead of a bill — your own, and any a '
+      + 'participant is lending right now. Free, but only while somebody is awake.',
+  },
+]
+
+/** Which tab a provider sits on. A fold of its cost class, never a field. */
+const tabOf = (provider: LlmProviderDescriptor): ProviderTab => {
+  const cost = costOf(provider)
+  return cost === 'bridge' ? 'subscription' : cost === 'keyed' ? 'api' : 'swarm'
+}
+
+/** The tab the console last showed — or Subscriptions, the plan already paid. */
+const rememberedTab = (): ProviderTab => {
+  try {
+    const stored = localStorage.getItem(TAB_KEY) as ProviderTab | null
+    if (stored && TABS.some(tab => tab.id === stored)) return stored
+  } catch { /* session-only */ }
+  return 'subscription'
+}
 
 /** Transport, said the way a participant would ask about it. */
 const TRANSPORT_LABEL: Record<string, string> = {
@@ -48,10 +109,27 @@ const TRANSPORT_LABEL: Record<string, string> = {
   'peer-swarm': 'another participant’s machine',
 }
 
+/**
+ * How this row is reached, in one phrase. A LOCAL server speaks the same HTTP
+ * as a vendor but there is no key and no account behind it, so the transport
+ * name would be a small lie — the cost class is what the participant actually
+ * sees, and it decides the wording.
+ */
+const reachLabel = (provider: LlmProviderDescriptor): string =>
+  costOf(provider) === 'local'
+    ? 'this machine, no key'
+    : TRANSPORT_LABEL[provider.transport] ?? provider.transport
+
 export class ProvidersWindowView extends EventTarget {
   #panel: HTMLDivElement | null = null
+  #footHost: HTMLDivElement | null = null
+  #tabsHost: HTMLDivElement | null = null
   #body: HTMLDivElement | null = null
   #search = ''
+  #tab: ProviderTab = rememberedTab()
+  #policyOpen = (() => {
+    try { return localStorage.getItem(POLICY_OPEN_KEY) === '1' } catch { return false }
+  })()
   #openId: string | null = null
   #addOpen = false
   /** providerId → transient test/status line ('…' = running). */
@@ -123,11 +201,17 @@ export class ProvidersWindowView extends EventTarget {
     header.append(title, close)
     panel.appendChild(header)
 
+    const tabsHost = document.createElement('div')
+    tabsHost.className = 'hc-providers-tabs'
+    tabsHost.setAttribute('role', 'tablist')
+    panel.appendChild(tabsHost)
+    this.#tabsHost = tabsHost
+
     const search = document.createElement('input')
     search.className = 'hc-providers-search'
     search.placeholder = this.#t('providers.search', 'Search providers and models')
     search.value = this.#search
-    search.addEventListener('input', () => { this.#search = search.value; this.#renderBody() })
+    search.addEventListener('input', () => { this.#search = search.value; this.#render() })
     panel.appendChild(search)
 
     const body = document.createElement('div')
@@ -135,11 +219,18 @@ export class ProvidersWindowView extends EventTarget {
     panel.appendChild(body)
     this.#body = body
 
+    // The foot of the window: a bar that always says who would answer, and
+    // opens upward into the pickers. Last child, so it is the last word.
+    const foot = document.createElement('div')
+    foot.className = 'hc-providers-foot'
+    panel.appendChild(foot)
+    this.#footHost = foot
+
     document.body.appendChild(panel)
     this.#panel = panel
     window.addEventListener('keydown', this.#onKey, true)
 
-    const rerender = (): void => this.#renderBody()
+    const rerender = (): void => this.#render()
     const registry = llmProviderRegistry()
     registry.addEventListener('change', rerender)
     llmKeyStore.addEventListener('change', rerender)
@@ -152,7 +243,7 @@ export class ProvidersWindowView extends EventTarget {
       llmPolicy.removeEventListener('change', rerender)
     }
 
-    this.#renderBody()
+    this.#render()
     search.focus()
   }
 
@@ -164,6 +255,8 @@ export class ProvidersWindowView extends EventTarget {
     window.removeEventListener('keydown', this.#onKey, true)
     this.#panel?.remove()
     this.#panel = null
+    this.#footHost = null
+    this.#tabsHost = null
     this.#body = null
   }
 
@@ -178,42 +271,180 @@ export class ProvidersWindowView extends EventTarget {
       || provider.models.some(m => m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
   }
 
+  /** Everything the console shows, in the order the panel stacks it. */
+  #render(): void {
+    this.#renderTabs()
+    this.#renderBody()
+    this.#renderFoot()
+  }
+
+  /**
+   * The three chips. Each carries how many rows it holds RIGHT NOW — which
+   * matters most while searching: a tab you are not on can be the one with
+   * what you typed, and a count says so without making you hunt.
+   */
+  #renderTabs(): void {
+    const host = this.#tabsHost
+    if (!host) return
+    host.textContent = ''
+    for (const tab of TABS) {
+      const active = this.#tab === tab.id
+      const chip = document.createElement('button')
+      chip.className = `hc-providers-tab${active ? ' is-active' : ''}`
+      chip.setAttribute('role', 'tab')
+      chip.setAttribute('aria-selected', String(active))
+      chip.append(document.createTextNode(this.#t(`providers.tab.${tab.id}`, tab.label)))
+
+      const count = document.createElement('span')
+      count.className = 'hc-providers-count'
+      count.textContent = String(this.#providersOn(tab.id).length)
+      chip.appendChild(count)
+
+      chip.addEventListener('click', () => this.#setTab(tab.id))
+      host.appendChild(chip)
+    }
+  }
+
+  /** Providers on one tab, already through the search filter. */
+  #providersOn(tab: ProviderTab): LlmProviderDescriptor[] {
+    return llmProviderRegistry().all().filter(p => tabOf(p) === tab && this.#matches(p))
+  }
+
+  /** Remember the tab without redrawing — for callers about to redraw anyway. */
+  #rememberTab(tab: ProviderTab): void {
+    this.#tab = tab
+    try { localStorage.setItem(TAB_KEY, tab) } catch { /* session-only */ }
+  }
+
+  /** Switch tabs. The console reopens where you left it. */
+  #setTab(tab: ProviderTab): void {
+    if (this.#tab === tab) return
+    this.#rememberTab(tab)
+    this.#render()
+  }
+
   #renderBody(): void {
     const body = this.#body
     if (!body) return
     body.textContent = ''
 
-    if (!this.#search.trim()) body.appendChild(this.#policySection())
+    const tab = TABS.find(entry => entry.id === this.#tab) ?? TABS[0]
+    const hint = document.createElement('div')
+    hint.className = 'hc-providers-hint'
+    hint.textContent = this.#t(`providers.tabHint.${tab.id}`, tab.hint)
+    body.appendChild(hint)
 
-    const providers = llmProviderRegistry().all().filter(p => this.#matches(p))
-    for (const provider of providers) body.appendChild(this.#row(provider))
+    // A badge that reads the same on every row of a tab is noise — the tab
+    // already said it. It comes back the moment two rows disagree.
+    const providers = this.#providersOn(tab.id)
+    const varied = new Set(providers.map(reachLabel)).size > 1
+    for (const provider of providers) body.appendChild(this.#row(provider, varied))
+    if (!providers.length) body.appendChild(this.#emptyLine(tab.id))
 
-    if (!providers.length) {
-      const empty = document.createElement('div')
-      empty.className = 'hc-providers-empty'
-      empty.textContent = this.#t('providers.empty', 'Nothing matches')
-      body.appendChild(empty)
-    }
-
-    body.appendChild(this.#lendSection())
-    body.appendChild(this.#addSection())
+    // The tab's own verb. Lending is the swarm's, and pasting a spec is the
+    // API tab's — the two other tabs are filled by a CLI and by the mesh.
+    if (tab.id === 'swarm') body.appendChild(this.#lendSection())
+    if (tab.id === 'api') body.appendChild(this.#addSection())
   }
 
   /**
-   * WHO ANSWERS WHEN NOBODY SAID. The rows below are the roster; this is the
-   * standing instruction that picks from it. Three weights of work, each
-   * either pinned to one provider or left to the policy — and the line under
-   * each picker says who that resolves to RIGHT NOW, because a policy you
-   * cannot see the effect of is a policy you cannot trust.
+   * "Nothing here" is a different fact on each tab — no bridge running, no
+   * neighbour awake, nothing matching what you typed — so each says its own.
    */
-  #policySection(): HTMLElement {
+  #emptyLine(tab: ProviderTab): HTMLElement {
+    const empty = document.createElement('div')
+    empty.className = 'hc-providers-empty'
+    if (this.#search.trim()) {
+      const elsewhere = TABS.filter(entry => entry.id !== tab)
+        .reduce((total, entry) => total + this.#providersOn(entry.id).length, 0)
+      empty.textContent = elsewhere
+        ? this.#t('providers.emptyHere', 'Nothing here — the counts above say which tab has it')
+        : this.#t('providers.empty', 'Nothing matches')
+      return empty
+    }
+    empty.textContent = tab === 'subscription'
+      ? this.#t(
+          'providers.emptySubscription',
+          'No agent session is bridged to this machine yet. Start a CLI you already pay for — '
+          + 'Claude Code, Codex, Gemini — and it announces itself here.',
+        )
+      : tab === 'swarm'
+        ? this.#t('providers.emptySwarm', 'No machine is offering models right now.')
+        : this.#t('providers.emptyApi', 'No provider on the roster takes a key.')
+    return empty
+  }
+
+  // ── the foot: who answers when nobody says ───────────────────────────────
+
+  /**
+   * THE LAST WORD, not the first. The tabs above are the roster; this is the
+   * standing instruction that picks from it, and it belongs at the foot for
+   * two reasons: it is set once and then lives on, and it reaches across
+   * every tab, so sitting inside one would read as that tab's setting.
+   *
+   * Collapsed it is a status line — the provider that would answer an
+   * ordinary request right now, in its own vendor colour. That is the whole
+   * point of a default: you should be able to see it without opening
+   * anything. Clicking opens the three pickers upward.
+   */
+  #renderFoot(): void {
+    const host = this.#footHost
+    if (!host) return
+    host.textContent = ''
+    if (this.#policyOpen) host.appendChild(this.#policyPanel())
+    host.appendChild(this.#policyBar())
+  }
+
+  #policyBar(): HTMLElement {
+    const bar = document.createElement('button')
+    bar.className = `hc-providers-footbar${this.#policyOpen ? ' is-open' : ''}`
+    bar.setAttribute('aria-expanded', String(this.#policyOpen))
+    bar.title = explainChoice({})
+
+    const label = document.createElement('span')
+    label.className = 'hc-foot-label'
+    label.textContent = this.#t('providers.policyBrief', 'When nobody says')
+
+    const value = document.createElement('span')
+    value.className = 'hc-foot-value'
+    const chosen = chooseProvider({})
+    if (chosen) {
+      const dot = document.createElement('span')
+      dot.className = 'hc-provider-dot is-active'
+      dot.style.background = modelPalette(chosen.defaultModel).body
+      value.append(dot, document.createTextNode(chosen.label))
+    } else {
+      value.classList.add('is-dim')
+      value.textContent = this.#t('providers.noAnswer', 'nobody yet')
+    }
+
+    const caret = document.createElement('span')
+    caret.className = 'hc-foot-caret'
+    caret.textContent = this.#policyOpen ? '▾' : '▴'
+
+    bar.append(label, value, caret)
+    bar.addEventListener('click', () => {
+      this.#policyOpen = !this.#policyOpen
+      try { localStorage.setItem(POLICY_OPEN_KEY, this.#policyOpen ? '1' : '0') } catch { /* session-only */ }
+      this.#renderFoot()
+    })
+    return bar
+  }
+
+  /**
+   * Three weights of work, each either pinned to one provider or left to the
+   * policy. The picker itself carries the answer — "Decide for me — Claude"
+   * — so the row is one line and you can still see what the default does
+   * without opening anything else.
+   *
+   * The line UNDER a picker is reserved for the one case the picker cannot
+   * state: a pin that fell through (its key is gone, or it cannot do this
+   * work), where what you asked for and what will happen differ. Everything
+   * else was repetition, and repetition is what made this block heavy.
+   */
+  #policyPanel(): HTMLElement {
     const section = document.createElement('div')
     section.className = 'hc-providers-policy'
-
-    const title = document.createElement('div')
-    title.className = 'hc-provider-label'
-    title.textContent = this.#t('providers.policy', 'Who answers when nobody says')
-    section.appendChild(title)
 
     for (const tier of TIERS) {
       const row = document.createElement('div')
@@ -223,11 +454,18 @@ export class ProvidersWindowView extends EventTarget {
       name.className = 'hc-policy-tier'
       name.textContent = this.#t(`providers.tier.${tier}`, tier)
 
+      const pinned = llmPolicy.pin(tier)
+      const chosen = chooseProvider({ tier })
+
+      const wrap = document.createElement('span')
+      wrap.className = 'hc-policy-pickwrap'
       const picker = document.createElement('select')
       picker.className = 'hc-policy-pick'
+      picker.title = explainChoice({ tier })
       const auto = document.createElement('option')
       auto.value = ''
-      auto.textContent = this.#t('providers.decide', 'Decide for me')
+      const decide = this.#t('providers.decide', 'Decide for me')
+      auto.textContent = chosen && !pinned ? `${decide} — ${chosen.label}` : decide
       picker.appendChild(auto)
       for (const provider of candidatesFor({ tier })) {
         const option = document.createElement('option')
@@ -238,15 +476,19 @@ export class ProvidersWindowView extends EventTarget {
       picker.value = llmPolicy.pin(tier)
       picker.addEventListener('change', () => {
         llmPolicy.setPin(tier, picker.value)
-        this.#renderBody()
+        this.#render()
       })
+      wrap.appendChild(picker)
+      row.append(name, wrap)
 
-      const resolved = document.createElement('div')
-      resolved.className = 'hc-policy-resolved'
-      resolved.textContent = explainChoice({ tier })
-
-      row.append(name, picker)
-      section.append(row, resolved)
+      // ONLY when the pin is not what happens. See the doc comment.
+      if (pinned && chosen?.id !== pinned) {
+        const resolved = document.createElement('div')
+        resolved.className = 'hc-policy-resolved'
+        resolved.textContent = explainChoice({ tier })
+        row.appendChild(resolved)
+      }
+      section.appendChild(row)
     }
 
     section.appendChild(this.#policySwitch(
@@ -259,7 +501,7 @@ export class ProvidersWindowView extends EventTarget {
     ))
 
     const note = document.createElement('div')
-    note.className = 'hc-provider-label'
+    note.className = 'hc-policy-note'
     note.textContent = this.#t(
       'providers.policyNote',
       'Naming a model yourself always wins over this.',
@@ -274,12 +516,12 @@ export class ProvidersWindowView extends EventTarget {
     const box = document.createElement('input')
     box.type = 'checkbox'
     box.checked = value
-    box.addEventListener('change', () => { set(box.checked); this.#renderBody() })
+    box.addEventListener('change', () => { set(box.checked); this.#render() })
     label.append(box, document.createTextNode(this.#t(key, fallback)))
     return label
   }
 
-  #row(provider: LlmProviderDescriptor): HTMLElement {
+  #row(provider: LlmProviderDescriptor, showReach = true): HTMLElement {
     const needsKey = provider.requiresKey !== false
     const hasKey = llmKeyStore.has(provider.id)
     const enabled = llmActivation.isEnabled(provider.id)
@@ -292,7 +534,7 @@ export class ProvidersWindowView extends EventTarget {
     head.className = 'hc-provider-head'
     head.addEventListener('click', () => {
       this.#openId = this.#openId === provider.id ? null : provider.id
-      this.#renderBody()
+      this.#render()
     })
 
     const dot = document.createElement('span')
@@ -315,7 +557,9 @@ export class ProvidersWindowView extends EventTarget {
         : this.#t('providers.noKey', 'no key')
     state.classList.toggle('is-dim', !usable)
 
-    head.append(dot, name, this.#badge(TRANSPORT_LABEL[provider.transport] ?? provider.transport), state)
+    head.append(dot, name)
+    if (showReach) head.appendChild(this.#badge(reachLabel(provider)))
+    head.appendChild(state)
     if (provider.readsHive) {
       head.insertBefore(this.#badge(this.#t('providers.readsHive', 'reads the hive'), 'hive'), state)
     }
@@ -471,7 +715,7 @@ export class ProvidersWindowView extends EventTarget {
 
   #note(providerId: string, text: string): void {
     this.#status.set(providerId, text)
-    this.#renderBody()
+    this.#render()
   }
 
   /** One tiny real call — the only honest key test there is. */
@@ -489,13 +733,15 @@ export class ProvidersWindowView extends EventTarget {
     }
   }
 
-  // ── add a provider (paste a spec) ─────────────────────────────────────────
+  // ── what each tab lets you DO ────────────────────────────────────────────
 
   /**
-   * LENDING — the other direction. Everything above this point is about
-   * models answering for the participant; this is the participant's machine
-   * answering for somebody else, which is a decision and therefore a switch
-   * they have to throw. Only ever offers models that cost nothing to run.
+   * LENDING — the other direction, and the swarm tab's own verb. Every row
+   * above is about models answering FOR the participant; this is their
+   * machine answering for somebody else, which is a decision and therefore a
+   * switch they have to throw. Only ever offers models that cost nothing to
+   * run — and it sits on the swarm tab because that tab is already the one
+   * about machines rather than bills.
    */
   #lendSection(): HTMLElement {
     const section = document.createElement('div')
@@ -508,7 +754,7 @@ export class ProvidersWindowView extends EventTarget {
     checkbox.checked = isLendingModels()
     checkbox.addEventListener('change', () => {
       EffectBus.emit('peer-models:lend', { on: checkbox.checked })
-      this.#renderBody()
+      this.#render()
     })
     toggle.append(checkbox, document.createTextNode(
       this.#t('providers.lend', 'Let the swarm use my local models when I am not'),
@@ -524,6 +770,9 @@ export class ProvidersWindowView extends EventTarget {
     return section
   }
 
+  /** Pasting a spec — the API tab's verb, since a pasted `llm-provider@1` is
+   *  nearly always a keyed endpoint. A bridge or peer spec still imports; the
+   *  console just follows it to the tab it lands on. */
   #addSection(): HTMLElement {
     const section = document.createElement('div')
     section.className = 'hc-providers-add'
@@ -533,7 +782,7 @@ export class ProvidersWindowView extends EventTarget {
     toggle.textContent = this.#addOpen
       ? this.#t('providers.addClose', 'Close')
       : this.#t('providers.add', '+ Add provider')
-    toggle.addEventListener('click', () => { this.#addOpen = !this.#addOpen; this.#renderBody() })
+    toggle.addEventListener('click', () => { this.#addOpen = !this.#addOpen; this.#render() })
     section.appendChild(toggle)
     if (!this.#addOpen) return section
 
@@ -554,7 +803,12 @@ export class ProvidersWindowView extends EventTarget {
         .then(spec => {
           this.#addOpen = false
           this.#openId = spec.id
-          this.#renderBody()
+          // A pasted spec is usually keyed, but it may be a bridge or a peer.
+          // Follow it to whichever tab it landed on rather than leaving the
+          // participant staring at the tab it is not on.
+          const landed = llmProviderRegistry().get(spec.id)
+          if (landed) this.#rememberTab(tabOf(landed))
+          this.#render()
         })
         .catch(err => { status.textContent = `✗ ${err instanceof Error ? err.message : String(err)}` })
     })
@@ -584,8 +838,23 @@ export class ProvidersWindowView extends EventTarget {
         cursor: pointer; opacity: 0.7; padding: 0 4px;
       }
       .hc-providers-close:hover { opacity: 1; }
+      .hc-providers-tabs {
+        display: flex; align-items: stretch; gap: 2px; padding: 0 10px; flex: none;
+        border-bottom: 1px solid rgba(${STEEL}, 0.25);
+      }
+      .hc-providers-tab {
+        display: flex; align-items: center; gap: 6px;
+        background: none; border: 0; border-bottom: 2px solid transparent;
+        color: rgba(${STEEL}, 0.55); font: inherit; font-weight: 600; letter-spacing: 0.03em;
+        padding: 7px 10px 5px; cursor: pointer;
+      }
+      .hc-providers-tab:hover { color: rgba(${STEEL}, 0.85); }
+      .hc-providers-tab.is-active { color: rgba(${STEEL}, 0.96); border-bottom-color: rgba(${STEEL}, 0.8); }
+      .hc-providers-tab:focus-visible { outline: 1px solid rgba(${STEEL}, 0.7); outline-offset: -1px; }
+      .hc-providers-count { font-size: 10px; font-weight: 500; opacity: 0.6; }
+      .hc-providers-hint { font-size: 11px; line-height: 1.5; opacity: 0.6; padding: 9px 2px 7px; }
       .hc-providers-search {
-        margin: 4px 12px 8px; padding: 6px 8px; background: rgba(${STEEL}, 0.08);
+        margin: 8px 12px; padding: 6px 8px; background: rgba(${STEEL}, 0.08);
         border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px); color: inherit; outline: none;
       }
       .hc-providers-body { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
@@ -631,6 +900,23 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-model.is-fast { border-color: rgba(140, 220, 160, 0.5); }
       .hc-provider-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
       .hc-provider-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
+      .hc-provider-toggle input[type="checkbox"] {
+        appearance: none; -webkit-appearance: none; flex: none; margin: 0;
+        width: 13px; height: 13px; border-radius: 2px; cursor: pointer;
+        border: 1px solid rgba(${STEEL}, 0.4); background: rgba(${STEEL}, 0.08);
+        display: grid; place-content: center;
+      }
+      .hc-provider-toggle input[type="checkbox"]::before {
+        content: ''; width: 9px; height: 9px; transform: scale(0);
+        background: rgba(${STEEL}, 0.95);
+        clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+      }
+      .hc-provider-toggle input[type="checkbox"]:checked { border-color: rgba(${STEEL}, 0.65); }
+      .hc-provider-toggle input[type="checkbox"]:checked::before { transform: scale(1); }
+      .hc-provider-toggle input[type="checkbox"]:hover { border-color: rgba(${STEEL}, 0.6); }
+      .hc-provider-toggle input[type="checkbox"]:focus-visible {
+        outline: 1px solid rgba(${STEEL}, 0.7); outline-offset: 1px;
+      }
       .hc-provider-status { margin-top: 8px; font-size: 12px; word-break: break-word; opacity: 0.9; }
       .hc-provider-origin { font-size: 11px; opacity: 0.7; margin: 6px 0 2px; }
       .hc-provider-warn {
@@ -640,18 +926,56 @@ export class ProvidersWindowView extends EventTarget {
       }
       .hc-provider-mono { font-size: 11px; opacity: 0.85; word-break: break-all; }
       .hc-provider-endpoint { display: block; }
+      /* THE FOOT — a status bar that opens upward into the pickers. */
+      .hc-providers-foot {
+        flex: none; display: flex; flex-direction: column;
+        border-top: 1px solid rgba(${STEEL}, 0.22); background: rgba(${STEEL}, 0.045);
+      }
+      .hc-providers-footbar {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        padding: 8px 12px; background: none; border: 0; color: inherit;
+        font: inherit; font-size: 11px; letter-spacing: 0.04em;
+        text-align: left; cursor: pointer;
+      }
+      .hc-providers-footbar:hover { background: rgba(${STEEL}, 0.06); }
+      .hc-providers-footbar:focus-visible { outline: 1px solid rgba(${STEEL}, 0.7); outline-offset: -1px; }
+      .hc-foot-label { opacity: 0.55; white-space: nowrap; }
+      .hc-foot-value {
+        margin-left: auto; display: flex; align-items: center; gap: 6px;
+        min-width: 0; opacity: 0.95; font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .hc-foot-value.is-dim { opacity: 0.5; font-weight: 400; font-style: italic; }
+      .hc-foot-value .hc-provider-dot { width: 7px; height: 7px; }
+      .hc-foot-caret { opacity: 0.5; font-size: 9px; }
       .hc-providers-policy {
-        padding: 4px 2px 12px; margin-bottom: 6px;
-        border-bottom: 1px solid rgba(${STEEL}, 0.15);
+        padding: 10px 12px 12px; max-height: 46vh; overflow-y: auto;
+        border-bottom: 1px solid rgba(${STEEL}, 0.14);
       }
-      .hc-policy-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-      .hc-policy-tier { min-width: 74px; font-size: 12px; opacity: 0.85; }
+      .hc-policy-row {
+        display: grid; grid-template-columns: 66px 1fr; align-items: center;
+        column-gap: 10px; margin-bottom: 9px;
+      }
+      .hc-policy-tier { font-size: 11px; opacity: 0.6; letter-spacing: 0.04em; }
+      .hc-policy-pickwrap { position: relative; display: block; min-width: 0; }
+      .hc-policy-pickwrap::after {
+        content: '▾'; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+        pointer-events: none; font-size: 10px; opacity: 0.65;
+      }
       .hc-policy-pick {
-        flex: 1; min-width: 0; padding: 4px 6px; background: rgba(${STEEL}, 0.08);
-        border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px);
-        color: inherit; font: inherit; outline: none;
+        appearance: none; -webkit-appearance: none;
+        width: 100%; padding: 5px 22px 5px 8px; background: rgba(${STEEL}, 0.08);
+        border: 1px solid rgba(${STEEL}, 0.22); border-radius: var(--hc-radius-control, 2px);
+        color: inherit; font: inherit; font-size: 12px; outline: none; cursor: pointer;
       }
-      .hc-policy-resolved { font-size: 11px; opacity: 0.65; margin: 2px 0 0 82px; }
+      .hc-policy-pick:hover { border-color: rgba(${STEEL}, 0.4); }
+      .hc-policy-pick:focus-visible { border-color: rgba(${STEEL}, 0.7); }
+      .hc-policy-pick option { background: rgb(18, 25, 30); color: rgba(${STEEL}, 0.95); }
+      .hc-policy-resolved {
+        grid-column: 2; font-size: 10.5px; opacity: 0.5; margin-top: 3px;
+      }
+      .hc-policy-note { font-size: 10.5px; opacity: 0.45; margin-top: 10px; }
+      .hc-providers-policy .hc-provider-toggle { font-size: 11.5px; margin-top: 7px; }
       .hc-providers-lend {
         padding: 12px 2px 4px; margin-top: 8px; border-top: 1px solid rgba(${STEEL}, 0.15);
       }

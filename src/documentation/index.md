@@ -73,6 +73,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 ## Operations
 
+- [publishing.md](publishing.md) — How to publish today: content, modules, and apps — three rails and their gotchas
 - [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
 - [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime split: hypercomb.io → meadowverse.ca
 - [feedback-channel.md](feedback-channel.md) — Durable feedback transport — the loop routed through jwize.com
@@ -81,6 +82,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 Forward-looking proposals and migration plans — not yet built. Retained so the intended direction is legible before any code lands.
 
+- [read-only-deployment.md](read-only-deployment.md) — Creations hosted on their own domains: visitor shell, zero install, nothing updatable
 - [piece-protocol.md](piece-protocol.md) — Creation = pieces + arrangement; views as geometries, no unmarked tiles, the portal stamp law, bouquets as lenses
 - [workflow-inputs.md](workflow-inputs.md) — Structured question cards, one-click answers, workflow pauses, and shared voice input
 - [feature-tuning-garage.md](feature-tuning-garage.md) — Installer feature-gating, two-lens review, capability dedup, and signature-addressed tuning recipes

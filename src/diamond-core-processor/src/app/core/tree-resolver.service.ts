@@ -55,9 +55,11 @@ export class TreeResolverService {
   #cache = new Map<string, LayerJson>()
   // depSig → namespace lineage (e.g. "diamondcoreprocessor.com/core/axial")
   #depLineage = new Map<string, string>()
-  // Derived cache: what a SIGNATURE is, keyed by that signature. Pure
-  // derivation of immutable bytes, so it can never go stale — and never
-  // load-bearing, so every path below still works with it empty.
+  // Derived cache: what a SIGNATURE is, keyed by that signature. The bytes
+  // are immutable, but the code deriving from them is not — SigInfoCache
+  // carries a DERIVATION_VERSION and drops the record whole when the logic
+  // below changes its answer. Never load-bearing: every path below still
+  // works with it empty.
   #sigInfo = new SigInfoCache()
   #auditor = inject(AuditorService)
   #installer = inject(DcpInstallerService)
@@ -248,6 +250,7 @@ export class TreeResolverService {
         // reads the very same toggle store by sig. Identity is carried
         // alongside it, never in place of it.
         className: className ?? undefined,
+        sourcePath: (await this.#detectSourcePath(beeSig)) ?? undefined,
         identity: identityKey(parent.lineage, className) ?? undefined,
       }
       parent.children.push(beeNode)
@@ -349,20 +352,92 @@ export class TreeResolverService {
     try {
       const bytes = await this.#store.readFile(this.#store.bees, `${sig}.js`)
       if (bytes) {
-        const text = new TextDecoder().decode(bytes)
-        // match: var ClassName = class extends Worker/Drone/Bee
-        // or:    class ClassName extends Worker/Drone/Bee
-        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
-        if (m) {
-          const className = m[1] || m[2]
-          const rawKind = m[3].toLowerCase() as TreeNodeKind
-          const kind = rawKind === 'bee' ? 'bee' : rawKind
-          this.#sigInfo.set(sig, { kind, className })
-          return { kind, className }
+        const best = this.#scanBundle(bytes, await this.#detectSourcePath(sig))
+        if (best) {
+          this.#sigInfo.set(sig, best)
+          return best
         }
       }
     } catch { /* fallback */ }
     return { kind: 'bee', className: null }
+  }
+
+  /**
+   * The artifact a compiled bundle declares, from its bytes and the file it
+   * was built from. THE ONE implementation — the local and network detectors
+   * both call this, because two copies of it drifted apart and the stricter
+   * copy silently won for anything reached by the local path.
+   *
+   * Four declarations of the same fact, weakest last:
+   *   1. the base class (`extends Drone`)
+   *   2. the class NAME (`…Drone`) — a *Drone extending EventTarget, or a
+   *      *QueenBee extending nothing, is still what its name says
+   *   3. the FILE name (`layer-committer.drone.ts`)
+   * and, orthogonal to all three, a class whose name matches the file's own
+   * stem outranks one that doesn't — a bundle inlines its helpers, so without
+   * that the first class wins and the row is named after an internal
+   * (CommitMachine, not LayerCommitter). Nothing in the bytes marks the export.
+   *
+   * Requiring the extends clause left ~130 artifacts with no name at all: the
+   * signature rendered in place of a name, and — because the failure path also
+   * returns kind 'bee' — the generic hexagon in place of their own glyph.
+   */
+  #scanBundle(
+    bytes: ArrayBuffer,
+    sourcePath: string | null,
+  ): { kind: TreeNodeKind, className: string } | null {
+    const text = new TextDecoder().decode(bytes)
+    const src = sourcePath ?? ''
+    // A supporting service ships as a bee sig and gets a row like any other,
+    // so it needs a kind too — 'bee' is the generic the failure path already
+    // returned for it, but now it arrives with a name attached.
+    const fromFile = src.match(/\.(drone|worker|queen|bee|service)\.[cm]?ts$/)?.[1]
+    const fileKind = fromFile
+      ? (fromFile === 'queen' || fromFile === 'service' ? 'bee' : fromFile as TreeNodeKind)
+      : null
+    const stem = src.split('/').pop()?.split('.')[0] ?? ''
+    const expected = stem.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')
+
+    let best: { kind: TreeNodeKind, className: string, rank: number } | null = null
+    for (const m of text.matchAll(
+      /(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))(?:\s+extends\s+(\w+))?/g,
+    )) {
+      const className = m[1] || m[2]
+      const base = m[3] ?? ''
+      const fromBase = /^(Worker|Drone|Bee)$/.test(base)
+        ? base.toLowerCase() as TreeNodeKind
+        : null
+      const fromName = /Worker$/.test(className) ? 'worker'
+        : /Drone$/.test(className) ? 'drone'
+        : /Queen(Bee)?$|Bee$/.test(className) ? 'bee'
+        : null
+      const kind = fromBase ?? fromName ?? fileKind
+      if (!kind) continue
+      const rank = (fromBase ? 3 : fromName ? 2 : 1)
+        + (expected && className.startsWith(expected) ? 3 : 0)
+      if (!best || rank > best.rank) best = { kind, className, rank }
+    }
+    return best ? { kind: best.kind, className: best.className } : null
+  }
+
+  /** The SOURCE PATH a bundle was built from, off its first-line comment
+   *  (`// src/diamondcoreprocessor.com/notes/notes.drone.ts`). esbuild writes
+   *  it on every bundle, and nothing read it — it is the one pointer that can
+   *  take a reader from an installer row back to the file it came from. */
+  async #detectSourcePath(sig: string): Promise<string | null> {
+    const cached = this.#sigInfo.get(sig)
+    if (cached?.sourcePath !== undefined) return cached.sourcePath
+    let source: string | null = null
+    try {
+      const bytes = await this.#store.readFile(this.#store.bees, `${sig}.js`)
+      if (bytes) {
+        const firstLine = new TextDecoder().decode(bytes.slice(0, 400)).split('\n')[0] ?? ''
+        const m = firstLine.match(/^\/\/\s*(\S+\.[cm]?[jt]sx?)\s*$/)
+        if (m) source = m[1]
+      }
+    } catch { /* a bundle without the comment simply has no pointer */ }
+    this.#sigInfo.set(sig, { sourcePath: source })
+    return source
   }
 
   /**
@@ -682,6 +757,7 @@ export class TreeResolverService {
         depth: parent.depth + 1,
         doc,
         className: className ?? undefined,
+        sourcePath: (await this.#detectSourcePath(beeSig)) ?? undefined,
         identity: identityKey(parent.lineage, className) ?? undefined,
       }
       parent.children.push(beeNode)
@@ -782,13 +858,8 @@ export class TreeResolverService {
     if (cached?.kind && cached.className !== undefined) {
       return { kind: cached.kind, className: cached.className }
     }
-    const scan = (bytes: ArrayBuffer): { kind: TreeNodeKind, className: string } | null => {
-      const text = new TextDecoder().decode(bytes)
-      const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
-      if (!m) return null
-      const raw = m[3].toLowerCase()
-      return { kind: (raw === 'bee' ? 'bee' : raw) as TreeNodeKind, className: m[1] || m[2] }
-    }
+    const srcPath = await this.#detectSourcePath(sig)
+    const scan = (bytes: ArrayBuffer) => this.#scanBundle(bytes, srcPath)
     // check patched bees first
     try {
       const patchedDir = await this.#store.patchedBeesDir(domain)

@@ -718,3 +718,42 @@
 .marked-row .when {
   grid-area: when;
 }
+
+/* The layer of deleted tiles. An outlined hexagon — the shape of a tile
+   with nothing left in it — sitting beside the ★ and ⁘ toggles it behaves
+   like. Red only when ARMED, because while it is on, Delete destroys. */
+.history-viewer-header .prune-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(200, 210, 230, 0.45);
+  font-size: 1.05em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.167em 0.5em;
+  border-radius: 3px;
+  transition: color 80ms linear, background 80ms linear, border-color 80ms linear, opacity 80ms linear;
+  position: relative;
+  z-index: 2;
+  opacity: 0.6;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+}
+.history-viewer-header .prune-toggle:hover {
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.05);
+  opacity: 1;
+}
+.history-viewer-header .prune-toggle.active {
+  color: rgba(255, 130, 130, 1);
+  background: rgba(255, 90, 90, 0.12);
+  border-color: rgba(255, 90, 90, 0.4);
+  opacity: 1;
+}
+/* How much junk is standing behind the toggle. Reads at a glance without
+   entering the mode. */
+.history-viewer-header .prune-toggle .prune-count {
+  font-size: 0.72em;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}

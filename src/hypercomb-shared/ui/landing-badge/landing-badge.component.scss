@@ -1,0 +1,90 @@
+// hypercomb-shared/ui/landing-badge/landing-badge.component.scss
+//
+// Same chrome family as the preview / presence banners: frosted dark pill,
+// top-center, one soft pulse and nothing else moving. It reports work that
+// already succeeded — it must read as an offer, never an alarm.
+
+:host {
+  position: fixed;
+  // One step below the preview banner so the two never overlap when a
+  // visitor is previewing a hive AND the bridge is writing into it.
+  top: max(calc(2.5rem * var(--hc-header-zoom, 1) + 4.9rem), calc(var(--hc-header-anchor) + 4.57rem));
+  left: 50%;
+  transform: translateX(-50%);
+  // #pixi-host reparents to <body> at 59989 with a pointer-events:auto
+  // canvas inside, which would eat the tap that is this badge's entire
+  // reason to exist. Sit above it, still below every piece of shell chrome
+  // (edit-actions 59995, controls bars 59999, header 60000). One above the
+  // preview banner (59991), which is the surface directly over it.
+  z-index: 59992;
+  pointer-events: none;
+  display: block;
+  max-width: 86vw;
+}
+
+@media (pointer: coarse) {
+  :host {
+    top: max(calc(3.5rem * var(--hc-header-zoom, 1) + 4.9rem), calc(var(--hc-header-anchor) + 5.57rem));
+  }
+}
+
+.landing-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 78%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(245, 245, 245, 0.1);
+  border-radius: 999px;
+  pointer-events: auto;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: rgba(245, 245, 245, 0.85);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+
+  &:hover {
+    border-color: rgba(226, 183, 94, 0.45);
+    background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 86%, transparent);
+  }
+}
+
+// Honey, not green: green is the swarm's "connected", and this is the
+// hive's own work coming home.
+.dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #e2b75e;
+  box-shadow: 0 0 6px rgba(226, 183, 94, 0.7);
+  animation: landing-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes landing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot { animation: none; }
+}
+
+.count { font-weight: 600; }
+
+.where {
+  color: rgba(245, 245, 245, 0.45);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22vw;
+}
+
+.show {
+  border: 1px solid rgba(226, 183, 94, 0.5);
+  border-radius: 999px;
+  padding: 0.18rem 0.7rem;
+  font-size: 0.74rem;
+  color: #e2b75e;
+}

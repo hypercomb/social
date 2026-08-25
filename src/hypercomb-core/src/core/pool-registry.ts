@@ -81,6 +81,19 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
  *  is the expensive half: `sign()` of a typo mints a different address forever,
  *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
+  // How this participant actually TALKS to the command line — one record
+  // holding the lead-in→behaviour phrasings learned from utterances that RAN,
+  // plus per-behaviour run counts (essentials/commands/utterance/
+  // spoken-habits.ts). It moves with the participant rather than with the
+  // browser, which is the whole reason it is a pool and not localStorage:
+  // habits that did not follow you to your other machine were not habits.
+  //
+  // TRUTH POOL, never minted from the optimize phase. "I said it this way and
+  // ran it" is the record of an act, not a derivation of sig-addressed inputs
+  // — no cold client could rebuild it from layers (optimize-phase.md litmus).
+  // localStorage still holds a mirror of it, but only as a boot cache: the
+  // completions are read synchronously and cannot wait on an OPFS round trip.
+  'habits:spoken',
   'pheromones:deposits',
   // Sig-keyed author marks — one record per TARGET signature, member named
   // by that sig (the substrate:references pattern: the pool listing IS the

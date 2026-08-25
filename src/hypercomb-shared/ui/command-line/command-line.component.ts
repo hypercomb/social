@@ -176,6 +176,15 @@ interface UtteranceSpanLike {
   candidates?: readonly { name: string; description: string }[]
   color?: string
 }
+/** The learned-phrasing store, structurally — it lives in essentials
+ *  ('@diamondcoreprocessor.com/SpokenHabits') and shared may never import it. */
+interface SpokenHabitsLike {
+  learn(reading: UtteranceReadingLike): void
+  phrasings(fragment: string): readonly { phrasing: string; command: string; count: number }[]
+  useCount(command: string): number
+  forgetPhrasing(phrasing: string): boolean
+}
+
 interface UtteranceReadingLike {
   text: string
   spans: readonly UtteranceSpanLike[]
@@ -275,7 +284,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       behaviour: { name: b.behaviour.name, description: t?.t(b.behaviour.descriptionKey) ?? b.behaviour.description },
       provider: null,
     }))
-    return [...builtinMatches, ...droneMatches]
+    const all = [...builtinMatches, ...droneMatches]
+    // The behaviours you live in rise. A STABLE sort keyed on run count only:
+    // ties keep the census order exactly as it was, so this reorders what you
+    // have actually used and touches nothing else. Counts come from execution
+    // alone, so a catalogue you have never run reads precisely as it always did.
+    const habits = this.#spokenHabits()
+    if (!habits) return all
+    return all
+      .map((m, i) => ({ m, i, uses: habits.useCount(m.behaviour.name) }))
+      .sort((a, b) => b.uses - a.uses || a.i - b.i)
+      .map(x => x.m)
   })
 
   readonly slashDescriptionMap = computed<ReadonlyMap<string, string>>(() => {
@@ -285,8 +304,32 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     for (const m of this.#slashMatches()) {
       map.set(m.behaviour.name, m.behaviour.description)
     }
+    // A learned row must say what it RUNS. The phrasing is the participant's
+    // own words, so it carries no meaning the catalogue can look up — without
+    // this the row would offer "open providers" and never admit that the
+    // thing it reaches is `providers`.
+    // A learned row must say what it RUNS, and admit that it is YOURS — the
+    // mark is what makes the row prunable in the participant's mind before
+    // they ever reach for Shift+Delete. Without it a phrasing reads as though
+    // the hive shipped it, and a suggestion you believe is built in is one
+    // you put up with instead of removing.
+    const known = this.#slashMatches()
+    for (const p of this.#learnedPhrasings()) {
+      const described = known.find(m => m.behaviour.name === p.command)?.behaviour.description
+        ?? this.#learnedDescription(p.command)
+      map.set(p.phrasing, `${this.#utteranceText('utterance.learned.yours', 'yours')} · ${described}`)
+    }
     return map
   })
+
+  /** What a learned row says when the census cannot describe its command
+   *  (the behaviour is gone, or its description has not loaded). */
+  #learnedDescription(command: string): string {
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+      { match?(q: string): { behaviour: { name: string; description: string } }[] } | undefined
+    const hit = drone?.match?.(command)?.find(m => m.behaviour.name === command)
+    return hit?.behaviour.description ?? `runs ${command} — your phrasing`
+  }
 
   /**
    * Feature behaviours matching the current `@` fragment, sourced live from
@@ -736,7 +779,33 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // the pheromone card ride, including its `{label:null}` "pointer left the
   // grid" clear, so the echo can never stick to a tile you already left.
   readonly #hoverEcho = signal('')
-  readonly hoverEcho = this.#hoverEcho.asReadonly()
+  /** The echo is silent while the participant is COMPOSING. Once there is text
+   *  in the line the caret owns the surface: a tile name printed beside what is
+   *  being typed reads as part of the utterance, and the last hovered tile
+   *  stuck there (the pointer is parked — nothing re-broadcasts to clear it)
+   *  is a name the participant never asked for. Empty line = pointing again. */
+  readonly hoverEcho = computed(() => this.#composing() ? '' : this.#hoverEcho())
+
+  /** The caret is IN the input (focus), reported by the shell. */
+  readonly #caretInLine = signal(false)
+
+  /** The line is the participant's SURFACE right now: the caret sits in it, or
+   *  there is text in it waiting to be sent. Either way they are writing, not
+   *  pointing, and the hive stands its hover down (see `command:composing`).
+   *  Focus alone is not enough — a line can hold a half-typed command while
+   *  focus is elsewhere — and text alone is not enough either, which is the
+   *  case the participant reported: click into an empty line, then hover a
+   *  tile, and the labels came back. */
+  readonly #composing = computed(() => this.#caretInLine() || this.value().trim().length > 0)
+
+  onCaretPresence(present: boolean): void { this.#caretInLine.set(present) }
+
+  /** Tell the hive when the line is being written in. The overlay cannot see
+   *  Angular state, so the state travels as an effect (sticky, so a drone that
+   *  registers later still learns the current answer). */
+  readonly #composingBroadcast = effect(() => {
+    EffectBus.emit('command:composing', { composing: this.#composing() })
+  })
 
   // ── status indicators ─────────────────────────────────
 
@@ -1306,7 +1375,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // recompute (a navigate, a stance toggle) then threw the whole catalogue
     // in the participant's face. Tiles stance had the milder twin: a blank
     // line listed every cell on the level.
-    if (!this.value()) return []
+    // …unless the catalogue was ASKED FOR. Ctrl+Space is the deliberate
+    // request this gate exists to distinguish from an accidental one: the list
+    // is never thrown at you, and it is always one chord away.
+    if (!this.value() && !this.#catalogueRequested()) return []
 
     const ctx = this.context()
     if (!ctx.active) return []
@@ -1332,6 +1404,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           return [...drone.complete(cmdName, fullArgs)]
         }
       }
+      // Your own phrasings come first when the line has become a sentence:
+      // past the first space the census has nothing to say, so anything here
+      // is offered where the dropdown would otherwise be empty.
+      const learned = this.#learnedPhrasings().map(p => p.phrasing)
+      if (learned.length) return learned
       return this.#slashMatches().map(m => m.behaviour.name)
     }
 
@@ -2003,6 +2080,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       },
     )
 
+    // The create BEHAVIOUR's door onto the one create path. Beehaviour mode
+    // mints nothing implicitly, so `create <name>` is how a tile is made
+    // there — and it must be the SAME commit the chevron stance runs, not a
+    // second implementation that drifts. The queen names the act; the line
+    // performs it: seed the value the create path reads, commit, restore.
+    this.#createCellsUnsub = EffectBus.on<{ name?: string }>(
+      'command:create-cells',
+      (payload) => {
+        const name = (payload?.name ?? '').trim()
+        if (!name) return
+        // A leading/trailing slash means navigate-after-create in the create
+        // path. Said out loud the name is just a name, so strip them: the
+        // behaviour makes a tile, it does not walk you into it.
+        const seed = name.replace(/^\/+|\/+$/g, '').trim()
+        if (!seed) return
+        this.#setShellValue(seed, false)
+        void this.commitCreateCellInPlace()
+      },
+    )
+
     // A slot armed on release can be retracted — the safety check runs after
     // the arm now, so a denied link has to take its chevron back down.
     this.#disarmResourceUnsub = EffectBus.on<{ armId?: string | null }>(
@@ -2086,6 +2183,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #armResourceUnsub?: () => void
   #disarmResourceUnsub?: () => void
   #commitArmedUnsub?: () => void
+  #createCellsUnsub?: () => void
   /** True when the command-line should be collapsed on mobile (toggle off). */
   readonly mobileHidden = signal(false)
   #mobileVisibilityUnsub?: () => void
@@ -2250,6 +2348,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#armResourceUnsub?.()
     this.#disarmResourceUnsub?.()
     this.#commitArmedUnsub?.()
+    this.#createCellsUnsub?.()
     this.onArmedResourceDismiss()
     if (this.#micHoldTimer) {
       clearTimeout(this.#micHoldTimer)
@@ -2332,6 +2431,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // ('@diamondcoreprocessor.com/UtteranceReader'); this component only
   // renders the reading and executes it — the light is the contract.
 
+  /**
+   * The participant asked to SEE the catalogue (Ctrl+Space).
+   *
+   * A blank line offers nothing, deliberately — the whole behaviour list
+   * thrown up on every recompute is noise, and that gate is load-bearing. But
+   * "never unbidden" is not "never": this flag is the bid. It survives typing,
+   * because filtering the list you just opened is the entire point, and it
+   * lifts on Escape or once the line is spent.
+   */
+  readonly #catalogueRequested = signal(false)
+
+  /** Bumped whenever the habit store changes under us. The store lives in
+   *  essentials and is not a signal, so this is what tells the completion
+   *  computeds that a pruned row is gone. */
+  readonly #habitsRevision = signal(0)
+
   /** Pinned ambiguity choices, keyed by span start. Typing invalidates them. */
   readonly #utteranceResolutions = signal<ReadonlyMap<number, string>>(new Map())
 
@@ -2357,6 +2472,34 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #utteranceReader(): UtteranceReaderLike | undefined {
     return get('@diamondcoreprocessor.com/UtteranceReader') as UtteranceReaderLike | undefined
   }
+
+  #spokenHabits(): SpokenHabitsLike | undefined {
+    return get('@diamondcoreprocessor.com/SpokenHabits') as SpokenHabitsLike | undefined
+  }
+
+  /**
+   * The participant's own phrasings, offered where the census has nothing.
+   *
+   * Only once the fragment holds a SPACE — a bare word is a behaviour name
+   * being typed, and that belongs to the shared tongue. Past the first space
+   * the line is a sentence, the census is silent, and what you have actually
+   * said before is the best thing anyone can offer. `open ` → `open providers`,
+   * because you once ran exactly that.
+   *
+   * Strictly additive: these appear where the dropdown was empty, so the
+   * ordinary catalogue reads exactly as it always has.
+   */
+  readonly #learnedPhrasings = computed<readonly { phrasing: string; command: string }[]>(() => {
+    this.#habitsRevision()          // a pruned row must leave the list at once
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return []
+    if (this.#stance() !== 'command') return []
+    // ctx.raw is the fragment WITH its whitespace — the trailing space in
+    // 'open ' is the whole signal that a lead-in has been finished.
+    const fragment = ctx.head === '/' ? ctx.raw : ''
+    if (!fragment.includes(' ')) return []
+    return this.#spokenHabits()?.phrasings(fragment) ?? []
+  })
 
   /** The live reading of the current line — null outside command stance, for
    *  exempt registers (sigils, calls, tags, URLs), and during captures. */
@@ -2408,10 +2551,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     if (!reading.actions.length) {
       // Nothing matched. No implicit anything — the line offers its pathways.
+      //
+      // Creation is NOT one of them. This stance mints nothing off an unread
+      // sentence: offering "make a tile named <the whole sentence>" turned
+      // every typo and half-remembered command into a junk tile named after
+      // the mistake. In beehaviour mode a tile is made by SAYING so — the
+      // create behaviour — which is why that word is the hint here and not a
+      // one-keystroke pathway sitting where the misread landed.
+      //
+      // 'create' still leads the list, because "I meant a tile" is still the
+      // likeliest reading of an unmatched sentence and the default row should
+      // be where the participant was going. What changed is what taking it
+      // DOES: it hands you the sentence instead of the tile.
       this.#pendingChoice.set({
         kind: 'pathway', text,
         options: [
-          { label: 'tile', description: this.#utteranceText('utterance.pathway.tile', `make a tile named "${text}"`) },
+          { label: 'create', description: this.#utteranceText('utterance.pathway.create', `say it: create ${text}`) },
           { label: 'ask', description: this.#utteranceText('utterance.pathway.ask', 'ask the assistant') },
           { label: 'filter', description: this.#utteranceText('utterance.pathway.filter', 'filter tiles by these words') },
         ],
@@ -2457,6 +2612,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       try { await drone.execute(action.command, action.args) }
       catch (e) { console.warn('[utterance] action failed:', action.command, e) }
     }
+    // ONLY EXECUTION TEACHES. The phrasing is learned here, after the actions
+    // have actually run — never from typing, never from a pathway the
+    // participant backed out of. A habit is evidence of intent, so this is the
+    // only place in the component allowed to mint one.
+    this.#spokenHabits()?.learn(reading)
     this.requestSynchronize()
   }
 
@@ -2489,11 +2649,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     const text = pending.text
-    if (option.label === 'tile') {
-      // Verbatim creation — straight to the tile maker, never back through
-      // the pipeline where a stray colon would be read as a tag op.
-      this.commandSubject.set(null)
-      void this.commitCreateCellInPlace()
+    if (option.label === 'create') {
+      // Does NOT create. It hands you the sentence that would: the line
+      // becomes `create <text>`, the word lights as a behaviour, and Enter is
+      // yours to press. The pathway teaches the word — the participant still
+      // makes the tile by saying so, which is the whole rule of this stance.
+      this.#setShellValue('create ' + text, true)
+      this.shell?.focus()
       return
     }
     if (option.label === 'ask') {
@@ -2502,14 +2664,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
     // filter — enter live filter mode over these words, with the same state
-    // the typed '?' path maintains (so the filter window opens and a later
-    // clear() actually lifts the filter).
+    // the typed '?' path maintains (so a later clear() actually lifts the
+    // filter).
     this.#setShellValue('?' + text, true)
     const keyword = this.completions.normalize(text)
     EffectBus.emit('search:filter', { keyword })
-    if (!this.#filterModeOpen) EffectBus.emit('swarm:filter-view-open', {})
     this.lastFilterKeyword = keyword
-    this.#filterModeOpen = true
   }
 
   public onShellValueChange = (v: string): void => {
@@ -2566,7 +2726,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') {
       EffectBus.emit('search:filter', { keyword: ctx.normalized })
-      if (!this.#filterModeOpen) EffectBus.emit('swarm:filter-view-open', {})
     } else if (this.lastFilterKeyword) {
       EffectBus.emit('search:filter', { keyword: '' })
       this.lastFilterKeyword = ''
@@ -2574,7 +2733,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (ctx.active && ctx.mode === 'filter') {
       this.lastFilterKeyword = ctx.normalized
     }
-    this.#filterModeOpen = ctx.active && ctx.mode === 'filter'
 
     // select mode side-effects: index overlay, move preview, real-time navigation
     if (ctx.active && ctx.mode === 'select') {
@@ -2592,16 +2750,57 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   private lastFilterKeyword = ''
-  #filterModeOpen = false
 
   /** Bridge: shell forwarded a keydown it didn't consume (not Escape/Up/Down/Tab/Enter). */
   public onShellKeydown = (e: KeyboardEvent): void => {
     const v = this.value()
 
+    // Ctrl+Space — SHOW ME WHAT THERE IS. The one deliberate way past the
+    // blank-line gate: on an empty command-stance line that is every
+    // behaviour, and typing from there filters it down. It also un-suppresses,
+    // so a list dismissed with Escape can be called straight back rather than
+    // needing the line cleared and retyped.
+    if (e.code === 'Space' && e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault()
+      this.#catalogueRequested.set(true)
+      this.shell?.unsuppress()
+      return
+    }
+
+    // Shift+Delete — PRUNE the highlighted row. The browser gesture for
+    // "stop suggesting this", pointed at the one list that can hold a bad
+    // guess: your own phrasings. A learned list you can only empty wholesale
+    // is one you stop trusting the first time something wrong gets in, so the
+    // row you are looking at is the unit of removal. Only ever removes a
+    // LEARNED row — the census is not yours to edit, and Shift+Delete over a
+    // real behaviour does nothing rather than something surprising.
+    if (e.key === 'Delete' && e.shiftKey) {
+      const list = this.suggestions()
+      const row = list[this.shell?.getActiveIndex() ?? 0]
+      if (row && this.#learnedPhrasings().some(p => p.phrasing === row)) {
+        e.preventDefault()
+        if (this.#spokenHabits()?.forgetPhrasing(row)) {
+          // The list is a computed over the store, but the store is not a
+          // signal — nudge the line so the dropdown recomputes without it.
+          this.#habitsRevision.update(n => n + 1)
+        }
+        return
+      }
+    }
+
     // Escape abandons a pending utterance choice — the line stays as typed.
     if (e.key === 'Escape' && this.#pendingChoice()) {
       e.preventDefault()
       this.#pendingChoice.set(null)
+      return
+    }
+
+    // Escape also puts the asked-for catalogue away, so the next Escape gets
+    // the line's own behaviour (peel a segment, clear, blur) as it always did.
+    if (e.key === 'Escape' && this.#catalogueRequested()) {
+      e.preventDefault()
+      this.#catalogueRequested.set(false)
+      this.shell?.suppress()
       return
     }
 
@@ -3202,14 +3401,24 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as any
 
-    // Unknown command → the documented create-goto built-in (`/name`
-    // creates the cell and navigates into it). Swallowing unknown slash
-    // input silently left the user on the CURRENT layer while they
-    // believed they had navigated — every follow-up create then landed
-    // in the wrong layer.
+    // Unknown command. The old create-goto built-in minted the cell and
+    // navigated into it, which is the second silent creation leak in this
+    // stance: the reader normally owns a command-stance Enter, but when it is
+    // not installed (essentials still loading, an empty census) EVERY bare
+    // word fell through here and became a tile named after a command the
+    // participant thought they were running. Beehaviour mode creates nothing
+    // it was not asked to create — say so instead, and name the word that
+    // would. Tiles stance keeps the built-in: laying tiles IS its job.
     if (drone?.has && !drone.has(commandName)) {
-      // create-goto reads the shell value — hand it the register line, so a
-      // bare unknown word in command stance still navigates like '/name'.
+      if (this.#stance() === 'command') {
+        EffectBus.emit('activity:log', {
+          message: `"${commandName}" is not a behaviour — to make a tile say: create ${commandName}`,
+          icon: '⬡',
+        })
+        this.clear()
+        return
+      }
+      // create-goto reads the shell value — hand it the register line.
       this.value.set(line)
       await this.commitCreateCellInPlace()
       return
@@ -4261,6 +4470,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.shell?.clear()
     this.value.set('')
     this.#captureMode.set(null)
+    // The line is spent, so the standing request to see the catalogue is too —
+    // otherwise every command left the whole list hanging open behind it.
+    this.#catalogueRequested.set(false)
     if (wasCapturing) {
       EffectBus.emit('command:exit-mode', { mode: 'note-capture', target: wasCapturing.target })
     }

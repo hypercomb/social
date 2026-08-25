@@ -282,4 +282,13 @@ window.ioc.register('@diamondcoreprocessor.com/TileContext', {
   resolve: resolveTileContext,
   signaturesFor: contextSignaturesFor,
   detach: detachTileContext,
+  // The branch summaries, behind the same seam. Loaded on demand from a
+  // SIBLING module: summary generation imports this one, so importing it up
+  // here would close the circle, and the shell may never name an essentials
+  // path itself (it tried, and the build broke on a path that only exists
+  // over here).
+  withSummaries: async (branches: readonly ContextBranch[]): Promise<string[]> => {
+    const { contextWithSummaries } = await import('./context-summary-gen.js')
+    return contextWithSummaries(branches)
+  },
 })

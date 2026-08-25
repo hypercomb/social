@@ -1,0 +1,37 @@
+[
+  {
+    "name": "the root shows the app word alone",
+    "ok": true,
+    "detail": "Beehaviors"
+  },
+  {
+    "name": "the pool says global",
+    "ok": true,
+    "detail": "Beehaviors/Global"
+  },
+  {
+    "name": "the pool names no tile",
+    "ok": true,
+    "detail": "Beehaviors/Global"
+  },
+  {
+    "name": "two segments, never three",
+    "ok": true,
+    "detail": "1 separators"
+  },
+  {
+    "name": "the layer is named by its own name",
+    "ok": true,
+    "detail": "Beehaviors/atelier"
+  },
+  {
+    "name": "the scope word steps aside for it",
+    "ok": true,
+    "detail": "Beehaviors/atelier"
+  },
+  {
+    "name": "still two segments",
+    "ok": true,
+    "detail": "1 separators"
+  }
+]

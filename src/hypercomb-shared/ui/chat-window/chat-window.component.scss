@@ -83,6 +83,19 @@ $accent: #7eb6d6;
 // THE HEADER IS THE REQUEST. The tile it is about, then the branch that needs
 // changing, then everything the responder should read — left to right, in the
 // order a sentence would say it.
+// THE HIVE, named in the header the way the rail names it: the amber the
+// rail's top row wears, so "I am in a global conversation" is one colour in
+// both places rather than two different words.
+.chat-subject-hive {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(226, 196, 140, 0.92);
+  font-family: var(--hc-mono, monospace);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .chat-subject {
   display: inline-flex;
   align-items: center;
@@ -244,8 +257,11 @@ $accent: #7eb6d6;
   right: 0.5rem;
   z-index: 3;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
+  // A COLUMN, since each entry is a row that names itself. Wrapped squares
+  // made a grid you had to hover to read.
+  flex-direction: column;
+  gap: 0.15rem;
+  max-width: 22rem;
   max-height: 40vh;
   padding: 0.4rem;
   overflow-y: auto;
@@ -255,21 +271,22 @@ $accent: #7eb6d6;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
-// One thing there is to paste. The picture leads — a square is recognised
-// faster than a name is read — with the name under it for when it is not.
+// One thing there is to paste — a ROW, not a card: the mark at 60% of the
+// square it used to be, then the name, then the branch under it. The list
+// is read down its left edge and each line says what it is and where from.
 .chat-clip-item {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
-  width: 3.4rem;
-  padding: 0.2rem;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.2rem 0.3rem;
   border: 1px solid transparent;
   border-radius: var(--hc-radius-control, 2px);
   background: none;
   color: rgba($accent, 0.9);
   font: inherit;
   font-size: 0.72em;
+  text-align: left;
   cursor: pointer;
 
   &:hover { border-color: rgba($accent, 0.6); background: rgba($accent, 0.14); }
@@ -277,15 +294,30 @@ $accent: #7eb6d6;
 }
 
 .chat-clip-img {
-  width: 2.6rem;
-  height: 2.6rem;
+  flex: 0 0 auto;
+  // 60% of the 2.6rem square it was — the picture identifies the row, the
+  // words carry it.
+  width: 1.56rem;
+  height: 1.56rem;
   object-fit: cover;
   border-radius: var(--hc-radius-control, 2px);
 }
 
 .chat-clip-glyph {
-  font-size: 2.2em;
+  flex: 0 0 auto;
+  width: 1.56rem;
+  font-size: 1.3em;
+  text-align: center;
   opacity: 0.5;
+}
+
+// The words: name over branch, both clipped rather than wrapped so every
+// row is the same height and the list scans.
+.chat-clip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
 }
 
 .chat-clip-name {
@@ -296,47 +328,94 @@ $accent: #7eb6d6;
   font-family: var(--hc-mono, monospace);
 }
 
+.chat-clip-branch {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.55;
+  font-size: 0.88em;
+  font-family: var(--hc-mono, monospace);
+}
+
 .chat-clip-empty {
   padding: 0.2rem 0.3rem;
   color: rgba($accent, 0.5);
   font-size: 0.78em;
 }
 
-// THE SQUARES. A gathered reference wears its PICTURE — resolved 'large'
-// (never the hex capture when a real picture exists), edge to edge in a
-// square. The name rides the title attr; the × sits over the corner so
-// removal stays one click without stealing room from the image.
-.chat-box-context.pictured {
-  position: relative;
-  // 1.5rem, not 1.9: the square only has to be RECOGNISED, and the smaller
-  // it is the more of the strip is air — which is what makes several of them
-  // read as a list rather than as a wall.
-  width: 1.5rem;
-  height: 1.5rem;
-  min-width: 1.5rem;
-  padding: 0;
-  overflow: hidden;
+// THE SHELF READS AS A SENTENCE. A gathered reference wears its PICTURE —
+// resolved 'large' (never the hex capture when a real picture exists) — but
+// the picture is a MARK now, not a portrait: 60% of the square it was when
+// it stood alone. What the shrink bought is WORDS. Side by side, references
+// are there to be RELATED, and a wall of squares answers "how many" while
+// never answering "which" — so the name, and the branch it hangs off, sit
+// right beside the mark where they can be read at a glance.
+.chat-box-context {
+  // Hold your own width and let the STRIP scroll. Squeezing every chip to
+  // fit is how four references become four ellipses.
+  flex: 0 0 auto;
+  gap: 0.28em;
+  // Room for a name AND a two-segment branch before anything is clipped;
+  // past that the STRIP scrolls rather than the words disappearing.
+  max-width: 20rem;
+  padding: 0.1em 0.2em 0.1em 0.3em;
 
+  // 0.9rem = 60% of the 1.5rem square. Small enough that the row reads as
+  // a line of text with marks in it, large enough that the mark is still
+  // recognisably the tile's own picture.
   .chat-box-img {
-    width: 100%;
-    height: 100%;
+    flex: 0 0 auto;
+    width: 0.9rem;
+    height: 0.9rem;
     object-fit: cover;
+    border-radius: var(--hc-radius-control, 2px);
     display: block;
   }
 
+  // No picture is still a mark — a gap where the others have one would
+  // break the column the marks make down the strip.
+  .chat-box-glyph {
+    flex: 0 0 auto;
+    font-size: 0.9rem;
+    opacity: 0.5;
+  }
+
+  // THE NAME IS WHAT YOU CAME FOR. It does not give up room AT ALL for the
+  // branch beside it — even a fraction of a pixel of shrink costs two
+  // characters to the ellipsis — it only clips against its own cap.
+  .chat-box-name { flex: 0 0 auto; max-width: 11rem; }
+
+  // WHERE IT HANGS FROM. Dimmer and smaller than the name, because the name
+  // is what you are looking for and the branch is what tells you which of
+  // two same-named tiles you are looking at.
+  .chat-box-branch {
+    flex: 0 1 auto;
+    flex-shrink: 6;
+    min-width: 0;
+    // A breath between the name and where it comes from — they are two
+    // different facts and must not read as one long word.
+    margin-left: 0.15em;
+    // A deep address may not push the name out of its own chip: past this
+    // the branch ellipses and the full path is on the hover.
+    max-width: 9.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.55;
+    font-size: 0.86em;
+    font-family: var(--hc-mono, monospace);
+  }
+
+  // The × rides the end of the pill now — the square it used to sit over is
+  // too small to hold it, and there is a whole row for it to sit in.
   .chat-box-off {
-    position: absolute;
-    top: 0;
-    right: 0;
-    padding: 0 0.15em;
-    line-height: 1.2;
-    background: rgba(10, 14, 20, 0.72);
-    border-bottom-left-radius: var(--hc-radius-control, 2px);
-    opacity: 0;
+    flex: 0 0 auto;
+    opacity: 0.35;
   }
 
   &:hover .chat-box-off,
-  &:focus-visible .chat-box-off { opacity: 0.95; }
+  &:focus-within .chat-box-off { opacity: 0.9; }
 }
 
 // THE TITLE IS A CONTROL. It names the conversation and opens the roster, so
@@ -707,6 +786,14 @@ $accent: #7eb6d6;
   &:hover { background: rgba($accent, 0.09); }
 }
 
+// With the rail carrying the list, the name is only a NAME: it says which of
+// the tile's conversations you are in and offers nothing to press, so it must
+// not look pressable either.
+.chat-current-still {
+  cursor: default;
+  &:hover { background: none; }
+}
+
 .chat-current-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -882,15 +969,24 @@ $accent: #7eb6d6;
 .chat-foot {
   flex: 0 0 auto;
   padding: 0.55em 0.75em 0.7em;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  // NO RULE ACROSS THE TOP. The footer already separates itself with its own
+  // ground, and a hairline right above the availability line read as a stray
+  // mark tucked into the corner. The one rule in here is the one that does
+  // work: between the standing fact and the choices under it.
   background: rgba(255, 255, 255, 0.015);
 }
 
+// THE CHOICES ABOUT THIS QUESTION — model, where you stand, what is chosen.
+// Under the rule that separates them from the standing fact above it, with
+// the same air on both sides so the footer reads as three even bands:
+// availability · choices · the box you type in.
 .chat-status {
   display: flex;
   align-items: center;
   gap: 0.45em;
   min-width: 0;
+  padding-top: 0.5em;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   font-size: 0.68em;
   color: rgba(255, 255, 255, 0.5);
 }
@@ -922,7 +1018,6 @@ $accent: #7eb6d6;
   color: rgba($accent, 0.95);
 }
 
-.chat-subject-free { color: rgba(238, 244, 250, 0.82); }
 
 .chat-title-caret {
   flex: 0 0 auto;
@@ -999,11 +1094,14 @@ $accent: #7eb6d6;
   .mat-sym { font-size: 1.15em; }
 }
 
+// AVAILABILITY, at the top of the footer: it is the standing fact — whether
+// an answer can arrive at all — and it is read before any choice about this
+// particular question.
 .chat-link {
   display: flex;
   align-items: center;
   gap: 0.35em;
-  margin-top: 0.3em;
+  padding-bottom: 0.5em;
   font-size: 0.65em;
   color: rgba(140, 220, 170, 0.85);
 
@@ -1023,20 +1121,29 @@ $accent: #7eb6d6;
   align-items: flex-end;
   gap: 0.4em;
   margin-top: 0.45em;
+  // ONE HEIGHT FOR THE ROW. The line the composer is typed in, and the
+  // square beside it, are the same measure said once — a send button a
+  // few pixels short of the box it belongs to is the kind of thing you
+  // cannot un-see.
+  --hc-chat-line: max(0.8em, 16px);
+  // 2.45 lines: one line of text in the box, plus its padding and border.
+  // Measured, not guessed — the send button is exactly the height of the
+  // composer at rest.
+  --hc-chat-box: calc(2.45 * var(--hc-chat-line));
 }
 
 .chat-input {
   flex: 1 1 auto;
   box-sizing: border-box;
   resize: none;
-  min-height: 2.3em;
+  min-height: var(--hc-chat-box);
   max-height: 160px;
   padding: 0.5em 0.6em;
   font: inherit;
   // You WRITE prose here — same reading face the transcript answers in.
   font-family: var(--hc-read, inherit);
   // 16px floor: anything smaller and iOS Safari zooms the page on focus.
-  font-size: max(0.8em, 16px);
+  font-size: var(--hc-chat-line);
   line-height: 1.45;
   color: whitesmoke;
   caret-color: rgba($accent, 0.95);
@@ -1050,11 +1157,33 @@ $accent: #7eb6d6;
     border-color: rgba($accent, 0.6);
     box-shadow: 0 0 0 1px rgba($accent, 0.18);
   }
+
+  // A LONG MESSAGE SCROLLS QUIETLY. Left alone, this is the platform's own
+  // scrollbar — a light trough with stepper arrows, sitting inside a dark
+  // composer looking like something that broke. Thin, themed, no steppers.
+  scrollbar-width: thin;
+  scrollbar-color: rgba($accent, 0.38) transparent;
+
+  &::-webkit-scrollbar { width: 0.5em; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+  &::-webkit-scrollbar-thumb {
+    background: rgba($accent, 0.32);
+    border-radius: 0.25em;
+    // Inset from the border, so the thumb never touches the rounded edge.
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  &:hover::-webkit-scrollbar-thumb { background-clip: padding-box; background: rgba($accent, 0.5); }
 }
 
 .chat-send {
   flex: 0 0 auto;
   @include tw.icon-button;
+  // The composer's own measure — square, and exactly as tall as one line of
+  // the box beside it.
+  width: var(--hc-chat-box);
+  height: var(--hc-chat-box);
   background: rgba($accent, 0.9);
   border: 1px solid rgba($accent, 0.9);
   color: #0c1118;

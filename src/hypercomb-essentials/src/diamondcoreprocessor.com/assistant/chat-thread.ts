@@ -459,6 +459,35 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
   return out.sort((a, b) => b.lastAt - a.lastAt)
 }
 
+/** The hive's own address — the location every tile hangs under. `tilePath([])`
+ *  said once, so the root is spelled the same everywhere. */
+export const HIVE_PATH = tilePath([])
+
+/** THE HIVE'S OWN CONVERSATIONS — the ones about no single tile.
+ *
+ *  The root is a LOCATION like any other: `tileConvoId([])` is `chat:tile:/`,
+ *  and a conversation there is about the hive as a whole. Older free-floating
+ *  chats (`chat:<stamp>`, minted before there was a row that could show them)
+ *  are folded in at the same address rather than left stranded — they were
+ *  global too; nothing else was ever true about them. */
+export const listGlobalConversations = async (): Promise<TileConversation[]> => {
+  const seen = seenMap()
+  const out: TileConversation[] = []
+  for (const convo of await listConversations()) {
+    const path = tilePathOf(convo.convoId)
+    if (path && path !== HIVE_PATH) continue
+    out.push({
+      path: HIVE_PATH,
+      convoId: convo.convoId,
+      title: convo.title,
+      turns: convo.turnCount,
+      lastAt: convo.lastAt,
+      unread: convo.lastAt > (seen[convo.convoId] ?? 0),
+    })
+  }
+  return out.sort((a, b) => b.lastAt - a.lastAt)
+}
+
 /** What a row has to say about a TILE, folded from all of its conversations:
  *  the deepest thread's turn count is not the point — whether ANY of them is
  *  unread, and how much has been said here in total, is. */

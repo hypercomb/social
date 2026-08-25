@@ -38,10 +38,12 @@ import type { TreeNode } from '../core/tree-node'
         <dcp-diamond [kind]="node().kind" (clicked)="open.emit(node())" />
 
         <!-- col 4 — name + inline metadata -->
-        <button class="label" (click)="hasChildren() ? expandToggle.emit(node()) : open.emit(node())">
+        <button class="label" [attr.title]="node().sourcePath ?? null"
+          (click)="hasChildren() ? expandToggle.emit(node()) : open.emit(node())">
           <span class="name" [class]="node().kind">{{ node().name }}</span>
           @if (lineageDisplay()) { <span class="crumb">{{ lineageDisplay() }}</span> }
           @else if (splitClassName()) { <span class="crumb">{{ splitClassName() }}</span> }
+          @else if (node().sourcePath) { <span class="crumb src">{{ node().sourcePath }}</span> }
           @if (node().freshlyUpgraded && !node().hatchBlocker) { <span class="chip new">new</span> }
           @if (activeElsewhere() && !node().hatchBlocker) { <span class="chip active">active</span> }
           @if (node().visualContext) { <span class="chip ctx">in&nbsp;install</span> }
@@ -147,6 +149,7 @@ import type { TreeNode } from '../core/tree-node'
     .name.drone { color: var(--dcp-k-drone); }
     .name.dependency { color: var(--dcp-k-dependency); }
     .crumb { font-family: var(--hc-mono); font-size: 10.5px; color: var(--dcp-ink-4); white-space: nowrap; flex: none; }
+    .crumb.src { opacity: 0.75; }
     .desc { font-size: 11.5px; color: var(--dcp-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
 
     /* chips — sharp, uppercase tags */

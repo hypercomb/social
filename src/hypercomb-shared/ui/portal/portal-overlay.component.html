@@ -33,11 +33,11 @@
       </div>
     }
 
-    <!-- Bottom action bar. The ×/back button DISMISSES — it never installs.
-         When there are pending changes (+adds / −removes), an explicit "Done"
-         button appears: it is the ONLY thing that folds the adds in and
-         un-folds the removes (recoverable). Dismissing discards the pending
-         diff, which DCP keeps and re-surfaces next open. -->
+    <!-- Bottom action bar — ONE button: Done, and Done means LEAVE. It never
+         saves and never installs, so it can never fail and strand the
+         participant in the overlay. Same exit as the backdrop, Escape and a
+         touch-drag. The pending diff isn't lost — DCP keeps it and re-surfaces
+         it next open; committing rides its own triggers, outside this bar. -->
     <div class="portal-actions">
       @if (pendingAdds || pendingRemoves) {
         <div class="portal-diff" [attr.aria-label]="'portal.pending-changes' | t">
@@ -46,37 +46,9 @@
         </div>
       }
 
-      <button class="portal-close" (click)="close()">
-        <span class="close-icon">&times;</span>
-        <span class="close-label">{{ 'portal.back' | t }}</span>
+      <button class="portal-apply" type="button" (click)="done()">
+        <span class="apply-label">{{ 'portal.done' | t }}</span>
       </button>
-
-      @if (hasPendingCommit && !namingRestorePoint) {
-        <button class="portal-apply" (click)="beginApply()">
-          <span class="apply-label">{{ 'upgrade.adopt' | t }}</span>
-        </button>
-      }
-
-      @if (namingRestorePoint) {
-        <div class="portal-restore-point" role="group" aria-label="Name restore point before adopting">
-          <label for="portal-restore-name">Restore point</label>
-          <input id="portal-restore-name" type="text" autofocus
-            [value]="restorePointName"
-            [disabled]="applyingRestorePoint"
-            (input)="restorePointName = $any($event.target).value"
-            (keydown.enter)="confirmApply()"
-            (keydown.escape)="cancelRestorePoint()" />
-          <button class="portal-apply" type="button" (click)="confirmApply()"
-            [disabled]="applyingRestorePoint || !restorePointName.trim()">
-            <span class="apply-label">{{ applyingRestorePoint ? 'Saving…' : ('upgrade.adopt' | t) }}</span>
-          </button>
-          <button class="portal-cancel-restore" type="button" (click)="cancelRestorePoint()"
-            [disabled]="applyingRestorePoint">Cancel</button>
-          @if (restorePointError) {
-            <span class="portal-restore-error">{{ restorePointError }}</span>
-          }
-        </div>
-      }
     </div>
   </div>
 }

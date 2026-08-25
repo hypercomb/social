@@ -1,12 +1,14 @@
 // swarm-adopt-checkpoint.spec.ts — a restore point is taken BEFORE an
 // incoming content fold changes the hive.
 //
-// The installer's Done fold (`actions:available`) folds enabled content
-// branches into the hive at potentially many locations. Undo is per-location,
-// so the way back is a named restore point taken FIRST — the same safety
-// /restore takes before it rewinds. This pins: (1) a real diff checkpoints
-// before it mutates, (2) an empty diff checkpoints nothing, (3) a snapshot
-// failure never blocks the accepted fold.
+// An accepted install (`actions:available`) folds enabled content branches
+// into the hive at potentially many locations. Undo is per-location, so the
+// way back is a named restore point taken FIRST — the same safety /restore
+// takes before it rewinds. This is the ONLY hive checkpoint on the accept
+// path (the portal chrome used to take a second one and refuse the accept
+// when it failed). This pins: (1) a real diff checkpoints before it mutates,
+// (2) an empty diff checkpoints nothing, (3) a snapshot failure never blocks
+// the accepted fold, (4) the participant's typed name is the one used.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -76,7 +78,7 @@ const oneIncomingBranch = (opts: { snapshotThrows?: boolean } = {}) => {
   registrySnapshot = { branches: [{ branchSig: BRANCH, name: 'thing', at: [], enabled: true, kind: 'content' }] }
 }
 
-const done = (detail?: { checkpointed?: boolean; transactionId?: string }) =>
+const done = (detail?: { restorePointName?: string; transactionId?: string }) =>
   window.dispatchEvent(detail
     ? new CustomEvent('actions:available', { detail })
     : new Event('actions:available'))
@@ -108,13 +110,22 @@ describe('restore point before an incoming fold', () => {
     expect(committer.importTree).not.toHaveBeenCalled()
   })
 
-  it('does not duplicate the checkpoint already committed by the portal', async () => {
+  it('names the restore point with the word the participant typed', async () => {
     oneIncomingBranch()
-    done({ checkpointed: true, transactionId: 'adopt:test' })
+    done({ restorePointName: 'Before the blue tiles', transactionId: 'adopt:test' })
     await settle()
 
-    expect(snapshotInvoke).not.toHaveBeenCalled()
-    expect(timeline).toContain('fold')
+    expect(snapshotInvoke).toHaveBeenCalledTimes(1)
+    expect(snapshotInvoke.mock.calls[0][0]).toBe('Before the blue tiles')
+  })
+
+  it('mints its own name when the accept carried none', async () => {
+    oneIncomingBranch()
+    done({ transactionId: 'adopt:test' })
+    await settle()
+
+    expect(snapshotInvoke).toHaveBeenCalledTimes(1)
+    expect(String(snapshotInvoke.mock.calls[0][0])).toMatch(/before installing 1 change/)
   })
 
   it('a snapshot failure never blocks the accepted fold', async () => {

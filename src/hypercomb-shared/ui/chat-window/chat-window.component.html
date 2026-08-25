@@ -39,7 +39,9 @@
         @if (subjectName()) {
           <span class="chat-subject-tile">{{ subjectName() }}</span>
         } @else {
-          <span class="chat-subject-free">{{ 'chat.title' | t }}</span>
+          <!-- About no single tile is about the HIVE — the same thing the
+               rail's top row says, so the two agree on what you are in. -->
+          <span class="chat-subject-hive">{{ 'agent.rail-hive' | t }}</span>
         }
       </span>
 
@@ -74,14 +76,15 @@
         </button>
 
         <!-- THE REFERENCES — supporting layers and meta contexts, there to
-             be READ, never changed. Each is drawn as the tile's own square:
-             at this size a picture is recognised faster than a name is read,
-             and the name is one hover away when recognition is not enough.
+             be READ, never changed. Each reads as a small sentence: the
+             tile's picture shrunk to a MARK, its name, then the branch it
+             hangs off. A wall of squares answered "how many" and never
+             "which", and the whole point of putting references side by side
+             is seeing WHAT is being related to what.
              Draggable: pulling one off the shelf sends it back to the
              clipboard, and the × drops it from the request outright. -->
         @for (pick of references(); track pick.key; let i = $index) {
           <span class="chat-box chat-box-context filled"
-            [class.pictured]="contextThumbs()[pick.key]"
             draggable="true"
             (dragstart)="onReferenceDragStart($event, i)"
             (dragend)="onReferenceDragEnd()"
@@ -89,7 +92,15 @@
             @if (contextThumbs()[pick.key]; as url) {
               <img class="chat-box-img" [src]="url" alt="">
             } @else {
-              <span class="chat-box-name">{{ pick.name }}</span>
+              <span class="mat-sym chat-box-glyph" aria-hidden="true">hexagon</span>
+            }
+            <span class="chat-box-name">{{ pick.name }}</span>
+            @if (isPicture(pick)) {
+              <!-- A picture has no branch to come from; what it has is a
+                   weight, and that is what belongs in the same slot. -->
+              <span class="chat-box-branch">{{ 'chat.reference.picture' | t: { size: sizeOf(pick) } }}</span>
+            } @else if (branchOf(pick); as branch) {
+              <span class="chat-box-branch" [title]="pathOf(pick)">{{ branch }}</span>
             }
             <button class="chat-box-off" type="button"
               (click)="removeContext(i)"
@@ -118,7 +129,12 @@
               } @else {
                 <span class="mat-sym chat-clip-glyph" aria-hidden="true">hexagon</span>
               }
-              <span class="chat-clip-name">{{ pick.name }}</span>
+              <span class="chat-clip-text">
+                <span class="chat-clip-name">{{ pick.name }}</span>
+                @if (branchOf(pick); as branch) {
+                  <span class="chat-clip-branch" [title]="pathOf(pick)">{{ branch }}</span>
+                }
+              </span>
             </button>
           } @empty {
             <span class="chat-clip-empty">{{ 'chat.clipboard.empty' | t }}</span>
@@ -259,22 +275,32 @@
         }
       </section>
     } @else {
-    <!-- Which conversation you are in. The thread you came for is named here;
-         the others are one press away rather than permanently on screen. -->
+    <!-- Which conversation you are in — the NAME, not a list. The list of a
+         tile's conversations hangs under that tile in the rail, where it can
+         say what each one is about; a flat list of every chat above the
+         transcript was a second home for the same thing and could not.
+         Without a rail (a narrow shell hides it) the window still has to
+         carry the list, and only then does the name become a control. -->
     <div class="chat-bar">
-      <button class="chat-current" type="button" (click)="toggleList()"
-        [attr.aria-expanded]="listOpen()"
-        [title]="'chat.list.toggle' | t">
-        <span class="mat-sym" aria-hidden="true">{{ listOpen() ? 'expand_more' : 'chevron_right' }}</span>
-        <span class="chat-current-name">{{ activeTitle() || ('chat.untitled' | t) }}</span>
-      </button>
+      @if (railVisible()) {
+        <span class="chat-current chat-current-still">
+          <span class="chat-current-name">{{ activeTitle() || ('chat.untitled' | t) }}</span>
+        </span>
+      } @else {
+        <button class="chat-current" type="button" (click)="toggleList()"
+          [attr.aria-expanded]="listOpen()"
+          [title]="'chat.list.toggle' | t">
+          <span class="mat-sym" aria-hidden="true">{{ listOpen() ? 'expand_more' : 'chevron_right' }}</span>
+          <span class="chat-current-name">{{ activeTitle() || ('chat.untitled' | t) }}</span>
+        </button>
+      }
       <button class="chat-new" type="button" (click)="newChat()"
         [title]="'chat.new' | t" [attr.aria-label]="'chat.new' | t">
         <span class="mat-sym" aria-hidden="true">add</span>
       </button>
     </div>
 
-    @if (listOpen()) {
+    @if (!railVisible() && listOpen()) {
       <ul class="chat-list">
         @if (roster().length === 0) {
           <li class="chat-list-empty">{{ 'chat.list.empty' | t }}</li>
@@ -385,7 +411,15 @@
     </div>
 
     <footer class="chat-foot">
-      <!-- Context, REPORTED. Where you are standing and what you have selected
+      <!-- Availability, named — FIRST, because whether an answer can come at
+           all is read before which model would give it. A rule under it
+           separates the standing fact from the choices about this question. -->
+      <div class="chat-link" [class.waiting]="!bridgeUp()">
+        <span class="chat-dot" aria-hidden="true"></span>
+        <span>{{ (bridgeUp() ? 'chat.link.up' : hostConfigured() ? 'chat.link.host' : 'chat.link.waiting') | t }}</span>
+      </div>
+
+      <!-- Context, REPORTED, under the rule. Where you are standing and what you have selected
            is what the question carries — there is nothing to maintain here. -->
       <div class="chat-status">
         <select class="chat-model" (change)="onModelChange($event)"
@@ -410,18 +444,12 @@
         }
       </div>
 
-      <!-- Availability, named. A host is ready now; a configured local bridge
-           may instead wait durably for its Claude session. -->
-      <div class="chat-link" [class.waiting]="!bridgeUp()">
-        <span class="chat-dot" aria-hidden="true"></span>
-        <span>{{ (bridgeUp() ? 'chat.link.up' : hostConfigured() ? 'chat.link.host' : 'chat.link.waiting') | t }}</span>
-      </div>
-
       <div class="chat-inputrow">
         <textarea #input class="chat-input" rows="1"
           [placeholder]="'chat.placeholder' | t"
           [attr.aria-label]="'chat.placeholder' | t"
           (keydown)="onInputKey($event)"
+          (paste)="onComposerPaste($event)"
           (input)="onInput($event)"></textarea>
         <!-- STOP means two different acts, because the tiers fail differently:
              a live host stream is aborted, a queued bridge ask is withdrawn

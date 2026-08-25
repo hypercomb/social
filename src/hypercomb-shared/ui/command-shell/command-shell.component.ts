@@ -361,6 +361,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    */
   readonly shellKeydown = output<KeyboardEvent>()
 
+  /** The caret entered (true) or left (false) the input. The hive stands its
+   *  hover down while the caret is here — see `command:composing`. */
+  readonly caretPresence = output<boolean>()
+
   /** Emitted when an indicator pill is clicked (to turn it off). */
   readonly indicatorDismiss = output<string>()
 
@@ -747,6 +751,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     // Forward everything else to parent
     this.shellKeydown.emit(e)
   }
+
+  onInputFocus = (): void => { this.caretPresence.emit(true) }
+
+  onInputBlur = (): void => { this.caretPresence.emit(false) }
 
   onShellMouseDown = (e: MouseEvent): void => {
     if (e.target === this.inputElement) return

@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "name": "the hive paints its tiles first",
+      "ok": true,
+      "detail": "375867 bytes"
+    },
+    {
+      "name": "the view took the surface",
+      "ok": true,
+      "detail": "mode=(no ViewMode) classes="
+    },
+    {
+      "name": "the canvas is no longer suppressed",
+      "ok": true,
+      "detail": "classes="
+    },
+    {
+      "name": "nothing full-screen is left covering it",
+      "ok": false,
+      "detail": "div."
+    },
+    {
+      "name": "show-cell still holds a painted location",
+      "ok": false,
+      "detail": "(none)"
+    },
+    {
+      "name": "THE TILES ARE BACK",
+      "ok": false,
+      "detail": "6237 vs 375867 on the way in"
+    }
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 ()",
+    "Failed to load resource: the server responded with a status of 404 ()"
+  ]
+}

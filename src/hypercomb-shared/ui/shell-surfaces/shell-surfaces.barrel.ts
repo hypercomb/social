@@ -20,7 +20,6 @@ import '../notes-strip/notes-strip.component'
 // declares a source and inherits the panel's chrome AND its drag-to-create-
 // meaning. See aggregate-index/aggregate-source.ts.
 import '../aggregate-index/aggregate-index.component'
-import '../filter-configurations/filter-configurations.component'
 import '../aggregate-index/sources/collections.source'
 import '../aggregate-index/sources/websites.source'
 import '../notes-viewer/notes-viewer.component'
@@ -54,6 +53,9 @@ import '../layer-cycle-strip/layer-cycle-strip.component'
 import '../toast/toast.component'
 import '../presence-banner/presence-banner.component'
 import '../preview-banner/preview-banner.component'
+// The quiet-landing badge — a background write landed and the repaint is
+// being held until the participant taps for it (show-cell #quietLanding).
+import '../landing-badge/landing-badge.component'
 import '../example-hives/example-hives-offer.component'
 import '../youtube-viewer/youtube-viewer.component'
 import '../activity-log/activity-log.component'

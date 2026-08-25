@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/history.service.ts
-import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, isPoolAddress, packedStoreEnabled, poolAddresses, poolMeaningOf, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, isPoolAddress, packedStoreEnabled, poolAddresses, poolMeaningOf, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -3892,6 +3892,201 @@ export class HistoryService {
     const out = new TextEncoder().encode(JSON.stringify(record))
     const writable = await handle.createWritable()
     try { await writable.write(out.buffer as ArrayBuffer) } finally { await writable.close() }
+  }
+
+  // -------------------------------------------------
+  // prune — the ONE hard delete of user content
+  // -------------------------------------------------
+  //
+  // Everything else in this service is additive: commits append, /remove
+  // drops a sig from a list, /flatten archives. These three methods are the
+  // only ones that destroy a participant's own tiles, and they exist for
+  // exactly one caller (PruneService, reachable only from prune mode). Each
+  // is written to refuse rather than guess.
+
+  /**
+   * Which of `candidates` are referenced ANYWHERE outside `locationSig`.
+   *
+   * Layers are content-addressed, so two tiles with byte-identical content
+   * share one sig — an empty tile called `notes` under two different parents
+   * IS one file. Deleting a sig because this location finished with it would
+   * silently blank the other parent's live tile. So before anything is
+   * removed, every candidate is checked against every OTHER bag: its markers
+   * (a sig that is some revision's layer) and those layers' children (a sig
+   * that is somebody's child).
+   *
+   * Membership-only, and it stops the moment every candidate is accounted
+   * for — the common case (a handful of junk tiles nobody else references)
+   * still walks the tree, but a shared sig is found early and cheaply.
+   * Cooperative yields keep the tab responsive; this runs behind a confirm,
+   * never on a render path.
+   */
+  public readonly sigsReferencedOutside = async (
+    locationSig: string,
+    candidates: readonly string[],
+  ): Promise<Set<string>> => {
+    const found = new Set<string>()
+    const remaining = new Set(candidates.filter(s => HistoryService.#SIG_RE.test(s)))
+    if (remaining.size === 0) return found
+
+    let sliceStart = performance.now()
+    const yieldIfDue = async (): Promise<void> => {
+      if (performance.now() - sliceStart < 12) return
+      await new Promise<void>(r => setTimeout(r, 0))
+      sliceStart = performance.now()
+    }
+    const hit = (sig: string): void => {
+      if (!remaining.delete(sig)) return
+      found.add(sig)
+    }
+
+    const bags = await this.enumerateBags()
+    for (const [lineageSig, dirHandle] of bags) {
+      if (remaining.size === 0) break
+      if (lineageSig === locationSig) continue
+      const bag = dirHandle as FileSystemDirectoryHandle
+      for await (const [name, handle] of (bag as any).entries()) {
+        if (remaining.size === 0) break
+        if (handle.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(name)) continue
+        await yieldIfDue()
+        try {
+          const bytes = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
+          const { layerSig } = await extractLayerSigFromMarker(bytes)
+          hit(layerSig)
+          // The revision's own children are references too — a sig this
+          // location deleted may still be a live child three branches over.
+          const layer = await this.getLayerBySig(layerSig).catch(() => null)
+          if (!layer) continue
+          for (const slot of CHILD_SLOTS) {
+            const value = (layer as Record<string, unknown>)[slot]
+            if (!Array.isArray(value)) continue
+            for (const child of value) hit(String(child))
+          }
+        } catch { /* unreadable marker — cannot prove anything from it */ }
+      }
+    }
+    return found
+  }
+
+  /**
+   * Hard-delete content bytes at the flat root: `<root>/<sig>`.
+   *
+   * FILES ONLY. A sig-named DIRECTORY at the root is a lineage sigbag or a
+   * pool of meaning (the root is an untagged union of the three), and this
+   * must never touch one — `removeLineageBag` is the deliberate door for a
+   * bag, and a pool is never this method's business. Returns how many were
+   * actually removed; an already-absent sig is not an error (a purge is
+   * idempotent, and two revisions of one tile can name the same sig).
+   */
+  public readonly removeContentSigs = async (sigs: readonly string[]): Promise<number> => {
+    let root: FileSystemDirectoryHandle
+    try { root = this.hiveRoot } catch { return 0 }
+    if (!root) return 0
+    let removed = 0
+    for (const raw of sigs) {
+      const sig = String(raw ?? '').trim().toLowerCase()
+      if (!HistoryService.#SIG_RE.test(sig)) continue
+      try {
+        // Probe as a FILE first. getFileHandle throws TypeMismatchError on a
+        // directory, which is the guard: a bag or pool can never be reached
+        // through this path even if its address landed in the list.
+        await root.getFileHandle(sig, { create: false })
+      } catch { continue }
+      try {
+        await root.removeEntry(sig)
+        removed++
+        this.#preloaderCache.delete(sig)
+        this.#parsedLayerCache.delete(sig)
+      } catch { /* raced with another writer — nothing left to do */ }
+    }
+    return removed
+  }
+
+  /**
+   * Hard-delete a lineage sigbag — the deleted tile's own history, markers
+   * and all.
+   *
+   * REFUSES A POOL ADDRESS, for the same reason `#quarantineNonLayerFiles`
+   * does: a bare-word pool meaning hashes to the same address as a root tile
+   * of that name, and a recursive remove there would take the participant's
+   * whole clipboard/registry/computation pool with it. When in doubt, do
+   * nothing and say so.
+   */
+  public readonly removeLineageBag = async (lineageSig: string): Promise<boolean> => {
+    const sig = String(lineageSig ?? '').trim().toLowerCase()
+    if (!HistoryService.#SIG_RE.test(sig)) return false
+    if (await isPoolAddress(sig)) {
+      const meaning = await poolMeaningOf(sig)
+      console.warn(
+        `[prune] refusing to remove bag ${sig.slice(0, 8)}… — it is the ` +
+        `sign('${meaning}') pool sharing an address with this location.`,
+      )
+      return false
+    }
+    let root: FileSystemDirectoryHandle
+    try { root = this.hiveRoot } catch { return false }
+    if (!root) return false
+    try {
+      await root.getDirectoryHandle(sig, { create: false })
+    } catch { return false }
+    try {
+      await root.removeEntry(sig, { recursive: true })
+    } catch { return false }
+    this.#layerListCache.delete(sig)
+    this.#latestSigByLineage.delete(sig)
+    return true
+  }
+
+  /**
+   * Stamp a supporting-data sig onto an existing marker.
+   *
+   * A marker is the revision, and its record was always an open shape —
+   * `{layer}` plus named sig fields for decorations, context, RECEIPTS (see
+   * MarkerRecord). A purge destroys bytes that past revisions still name, so
+   * the transaction is not finished when the files are gone: history has to
+   * carry the record of what happened and why those sigs no longer resolve.
+   * That record is a receipt resource, and this is how it gets attached —
+   * the marker file is rewritten in place, exactly as a ★ mark is.
+   *
+   * Same rewrite discipline as `setMarkerMeta`: the layer pointer is
+   * re-derived so a legacy inline-layer marker converges on pointer shape
+   * rather than being clobbered.
+   */
+  public readonly stampMarkerSig = async (
+    locationSig: string,
+    filename: string,
+    field: string,
+    sig: string,
+  ): Promise<boolean> => {
+    if (!HistoryService.#MARKER_RE.test(filename)) return false
+    if (!HistoryService.#SIG_RE.test(sig)) return false
+    const key = String(field ?? '').trim()
+    // `layer` is the pointer itself — a caller that overwrote it would
+    // re-point the revision at foreign content.
+    if (!key || key === 'layer') return false
+    let bag: FileSystemDirectoryHandle
+    try { bag = await this.bagForRead(locationSig) } catch { return false }
+    let handle: FileSystemFileHandle
+    try { handle = await bag.getFileHandle(filename, { create: false }) } catch { return false }
+
+    let record: Record<string, unknown>
+    try {
+      const bytes = await (await handle.getFile()).arrayBuffer()
+      const { layerSig } = await extractLayerSigFromMarker(bytes)
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(bytes))
+        record = (parsed && typeof parsed === 'object' && typeof parsed.layer === 'string')
+          ? parsed as Record<string, unknown>
+          : { layer: layerSig }
+      } catch { record = { layer: layerSig } }
+    } catch { return false }
+
+    record[key] = sig
+    const out = new TextEncoder().encode(JSON.stringify(record))
+    const writable = await handle.createWritable()
+    try { await writable.write(out.buffer as ArrayBuffer) } finally { await writable.close() }
+    return true
   }
 
   /**

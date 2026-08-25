@@ -264,8 +264,9 @@ const bootstrap = async (): Promise<void> => {
           // same-origin dcp-toggle-state channel) must NOT pull or run anything
           // in the live session: nothing activates before the participant is
           // done. The host syncs DCP's FINAL enabled set only on an explicit
-          // done — the embedded "Done" button (→ actions:available, below) or
-          // closing a standalone DCP tab (onDcpClosed). First-run "Start"
+          // accept (→ actions:available, below — the embedded installer's own
+          // confirm, never its Done button, which only leaves) or closing a
+          // standalone DCP tab (onDcpClosed). First-run "Start"
           // (hypercomb:start-install) is the cold-install equivalent. Leaving
           // onToggleChanged unset means the sentinel still relays toggle events
           // but the host ignores them.
@@ -352,12 +353,12 @@ const bootstrap = async (): Promise<void> => {
   window.addEventListener('portal:open', (e) => {
     if ((e as CustomEvent).detail?.target === 'dcp') void getSentinel()
   })
-  // Install/resync ONLY on the participant's explicit accept (Done →
-  // `actions:available`). A passive installer close (× / backdrop / Escape /
-  // touch-drag) fires `dcp:embed-closed`, but that must NOT pull bytes or
-  // activate anything — nothing runs before authorization. reloadIfDrifted
-  // resyncs and reloads the shell only if the accepted change advanced the
-  // sync sig.
+  // Install/resync ONLY on the participant's explicit accept
+  // (`actions:available`). Every installer EXIT — the Done button, the
+  // backdrop, Escape, a touch-drag — fires `dcp:embed-closed` instead, and
+  // that must NOT pull bytes or activate anything: nothing runs before
+  // authorization. reloadIfDrifted resyncs and reloads the shell only if the
+  // accepted change advanced the sync sig.
   window.addEventListener('actions:available', event => {
     const detail = (event as CustomEvent<{ contentChanges?: number; transactionId?: string }>).detail
     const expectedContentChanges = Math.max(0, Number(detail?.contentChanges ?? 0))

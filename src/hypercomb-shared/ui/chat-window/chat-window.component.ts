@@ -181,8 +181,12 @@ type RailPickLike = {
   readonly name: string
   readonly sig?: string
   readonly convoId?: string
-  /** What the signature points at: one layer, or a whole context group. */
+  /** What the signature points at: one layer, a whole context group, or —
+   *  when it is a media type — a picture attached to the question. */
   readonly kind?: string
+  /** Bytes, for an attached picture. Absent for a tile: a tile's weight is
+   *  not a fact about the reference. */
+  readonly size?: number
 }
 
 /** A tile dragged out of the sidebar. The CONTRACT with essentials is this
@@ -194,6 +198,10 @@ type TilesRailLike = {
   onSubjectChanged: (subject: RailPickLike | null) => void
   onSelectionChanged: (selection: RailPickLike[]) => void
   readonly subject: RailPickLike | null
+  /** Start ANOTHER conversation on the tile in hand, and list it there.
+   *  False when no tile is in hand. Absent on an older essentials build —
+   *  then the window mints a free chat as it always did. */
+  newChatOnSubject?(): boolean
   /** Tiles ctrl-clicked as context, and the signatures they resolve to. */
   readonly selection: RailPickLike[]
   readonly selectionSigs: string[]
@@ -211,6 +219,10 @@ type NavigationLike = { goRaw?(segments: readonly string[]): void }
 type StoreLike = {
   removeOptimization?(signature: string): Promise<boolean>
   putOptimization?(blob: Blob): Promise<string>
+  /** Content in, signature out — the same address a layer or a note gets.
+   *  An image dropped into a question is content like any other. */
+  putResource?(blob: Blob): Promise<string>
+  getResource?(sig: string): Promise<Blob | null>
 }
 
 /** The notes module (notes/notes.drone.ts), over IoC. `addAtSegments` takes an
@@ -302,6 +314,17 @@ const RENDER_CACHE_MAX = 240
 // when the loop is proven. Only the tools step takes the participant's word.
 /** Set once the whole checklist has been completed (or skipped). */
 const SETUP_DONE_KEY = 'hc:bridge-setup-done'
+
+/** The rail is on screen above this width — the twin of the `max-width: 700px`
+ *  rule in the stylesheet, where the sidebar is hidden because a narrow shell
+ *  has no room beside a conversation. Kept next to nothing else so the two
+ *  numbers are one edit apart. */
+const RAIL_QUERY = '(min-width: 701px)'
+
+/** The most a single attached picture may weigh. A phone screenshot is ~2 MB;
+ *  past this it is a file to keep in the hive deliberately, not something to
+ *  staple to one question. */
+const IMAGE_MAX_BYTES = 12 * 1024 * 1024
 /** The one manual step — "I have Claude Code and the repo". */
 const SETUP_TOOLS_KEY = 'hc:bridge-setup-tools'
 /** A bridge answer has landed at least once — the loop is proven. */
@@ -481,6 +504,31 @@ export class ChatWindowComponent implements OnDestroy {
   /** The gathered tiles, named, for the chip's tooltip. */
   readonly contextNames = computed(() => this.references().map(pick => pick.name).join(', '))
 
+  /** WHICH BRANCH IT CAME FROM. A shelf of pictures says how many references
+   *  a request carries and never which — and a gathered set exists to relate
+   *  things, so the relation has to be readable without hovering anything.
+   *  The last two segments are what distinguishes two same-named tiles in
+   *  practice; the whole address rides the title. */
+  branchOf(pick: RailPickLike): string {
+    return pick.path.length ? pick.path.slice(-2).join(' / ') : ''
+  }
+
+  /** The full address, for the hover — same ` / ` crumb the clipboard panel
+   *  writes, so one path is spelled one way everywhere. */
+  pathOf(pick: RailPickLike): string { return pick.path.join(' / ') }
+
+  /** Is this reference a picture rather than something in the hive's tree? */
+  isPicture(pick: RailPickLike): boolean { return !!pick.kind?.startsWith('image/') }
+
+  /** A picture's weight, where a tile's branch would be — the one fact worth
+   *  knowing about a file you just attached. */
+  sizeOf(pick: RailPickLike): string {
+    const bytes = pick.size ?? 0
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+    return `${bytes} B`
+  }
+
   /** pick.key → blob: URL of the tile's PICTURE ('large' — a square must
    *  never wear the hex capture when the tile has a real picture). Absent →
    *  the box falls back to its name chip. Shares the panel's resolver, so
@@ -509,8 +557,13 @@ export class ChatWindowComponent implements OnDestroy {
     }
     const pending = entries.filter(entry => !this.#thumbUrls.has(entry.key))
     if (pending.length) {
+      const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
       await Promise.all(pending.map(async (entry) => {
-        const url = await resolveEntryImageUrl(entry.name, entry.path, 'large').catch(() => null)
+        // An attached PICTURE is its own thumbnail: it has no tile to walk to,
+        // only bytes at a signature.
+        const url = entry.kind?.startsWith('image/')
+          ? await this.#imageUrl(store, entry.sig ?? '')
+          : await resolveEntryImageUrl(entry.name, entry.path, 'large').catch(() => null)
         if (token !== this.#thumbToken) { if (url) URL.revokeObjectURL(url); return }
         if (url) this.#thumbUrls.set(entry.key, url)
       }))
@@ -519,6 +572,17 @@ export class ChatWindowComponent implements OnDestroy {
     const map: Record<string, string> = {}
     for (const [k, v] of this.#thumbUrls) map[k] = v
     this.contextThumbs.set(map)
+  }
+
+  /** The bytes at a signature, as something an <img> can show. Bounded by the
+   *  same cache the rest of the shelf uses, so it is revoked with everything
+   *  else when the reference leaves. */
+  async #imageUrl(store: StoreLike | undefined, sig: string): Promise<string | null> {
+    if (!store?.getResource || !/^[0-9a-f]{64}$/.test(sig)) return null
+    try {
+      const blob = await store.getResource(sig)
+      return blob ? URL.createObjectURL(blob) : null
+    } catch { return null }
   }
 
   // ── TWO KINDS OF DATA IN ONE REQUEST ──────────────────────────────────
@@ -628,7 +692,74 @@ export class ChatWindowComponent implements OnDestroy {
     event.preventDefault()
     this.dragOverReference.set(false)
     const tile = this.readDrop(event)
-    if (tile) this.addContext(tile)
+    if (tile) { this.addContext(tile); return }
+    // A PICTURE IS A REFERENCE TOO. Files dropped here are kept in the hive
+    // like everything else — content in, signature out — and ride on the
+    // question by that signature.
+    const files = [...(event.dataTransfer?.files ?? [])].filter(file => file.type.startsWith('image/'))
+    if (files.length) void this.#attachImages(files)
+  }
+
+  // ── PICTURES ────────────────────────────────────────────────────────────
+  //
+  // A question about a screenshot is the most ordinary question there is, and
+  // until now the only way to ask it was to describe the picture in words.
+  //
+  // The image is CONTENT: `putResource` stores the bytes at the content root
+  // under their own signature, exactly like a layer or a note body, so the
+  // same picture pasted twice is stored once and the reference is a 64-hex
+  // string either way. What rides on the ask is that signature plus the media
+  // type as its KIND — the responder resolves the bytes itself (the bridge
+  // serves them base64) rather than being handed a copy inline.
+
+  /** Paste an image straight into the composer. The clipboard is where a
+   *  screenshot already is; making you save it to a file first would be a
+   *  step invented by the software. */
+  onComposerPaste(event: ClipboardEvent): void {
+    const files = [...(event.clipboardData?.files ?? [])].filter(file => file.type.startsWith('image/'))
+    if (!files.length) return
+    // Only when it IS a picture — pasting text must stay ordinary pasting.
+    event.preventDefault()
+    void this.#attachImages(files)
+  }
+
+  /** Store each picture and put it on the shelf. Anything that will not store
+   *  says so rather than sitting there looking attached. */
+  async #attachImages(files: readonly File[]): Promise<void> {
+    const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
+    if (!store?.putResource) {
+      EffectBus.emit('toast:show', { type: 'warning', message: 'No hive to keep the picture in.' })
+      return
+    }
+    for (const file of files) {
+      if (file.size > IMAGE_MAX_BYTES) {
+        EffectBus.emit('toast:show', {
+          type: 'warning',
+          message: `${file.name || 'That picture'} is too large to attach.`,
+        })
+        continue
+      }
+      let sig = ''
+      try { sig = await store.putResource(file) } catch { sig = '' }
+      if (!/^[0-9a-f]{64}$/.test(sig)) {
+        EffectBus.emit('toast:show', { type: 'warning', message: 'Could not keep that picture.' })
+        continue
+      }
+      const key = `image:${sig}`
+      if (this.references().some(held => held.key === key)) continue
+      this.references.set([...this.references(), {
+        key,
+        path: [],
+        name: file.name || 'pasted image',
+        sig,
+        size: file.size,
+        // The MEDIA TYPE is the kind: a responder reading the ask knows both
+        // that this is a picture and how to open it, from one field.
+        kind: file.type || 'image/png',
+      }])
+    }
+    this.#announceSet()
+    void this.#refreshContextThumbs()
   }
 
   // ── DRAG IT BACK OFF THE SHELF ─────────────────────────────────────
@@ -939,6 +1070,23 @@ export class ChatWindowComponent implements OnDestroy {
     return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
   })
 
+  // ── WHERE A CONVERSATION IS LISTED ────────────────────────────────────
+  //
+  // A conversation about a tile is listed UNDER THAT TILE, in the rail, and
+  // nowhere else. A tile is a subject and its threads hang off it — walk to
+  // another page and each tile there carries its own. The window used to
+  // print a second, flat list of every chat above the transcript; two homes
+  // for one thing is how you end up not knowing which is the real one, and
+  // the flat one could not say what any of it was ABOUT.
+  //
+  // The list survives in exactly one case: a window with NO rail (the narrow
+  // shell hides it below 700px, the twin of the rule in the stylesheet).
+  // There the rail cannot carry it, so the window still must.
+
+  /** Is the sidebar on screen — i.e. is the rail carrying the chat list? */
+  readonly railVisible = signal(true)
+  #railQuery: MediaQueryList | null = null
+
   #cleanups: (() => void)[] = []
   #elapsedTimer: ReturnType<typeof setInterval> | null = null
 
@@ -946,6 +1094,7 @@ export class ChatWindowComponent implements OnDestroy {
   #abort: AbortController | null = null
 
   #onSync = (): void => { if (this.visible()) this.#refreshContext() }
+  #onRailQuery = (event: MediaQueryListEvent): void => { this.railVisible.set(event.matches) }
   #onStorage = (event: StorageEvent): void => {
     if (event.key !== PARTICIPANT_AI_HOST_STORAGE_KEY && event.key !== null) return
     const configured = isParticipantAiHostConfigured()
@@ -1087,6 +1236,15 @@ export class ChatWindowComponent implements OnDestroy {
     window.addEventListener('synchronize', this.#onSync)
     window.addEventListener('storage', this.#onStorage)
 
+    // Is the rail on screen? A media query, not a resize handler: the browser
+    // already knows, and the stylesheet is asking the same question one line
+    // away. Answered once now so the first paint is right.
+    if (typeof window.matchMedia === 'function') {
+      this.#railQuery = window.matchMedia(RAIL_QUERY)
+      this.railVisible.set(this.#railQuery.matches)
+      this.#railQuery.addEventListener('change', this.#onRailQuery)
+    }
+
     // A configured-but-down bridge re-dials quietly, so the checklist's
     // broker step (and an ordinary dropped connection) recovers hands-free.
     // The worker never retries a first attempt on its own — this is the nudge.
@@ -1120,6 +1278,8 @@ export class ChatWindowComponent implements OnDestroy {
     for (const cleanup of this.#cleanups) cleanup()
     window.removeEventListener('synchronize', this.#onSync)
     window.removeEventListener('storage', this.#onStorage)
+    this.#railQuery?.removeEventListener('change', this.#onRailQuery)
+    this.#railQuery = null
     if (this.#retryTimer) clearInterval(this.#retryTimer)
     this.#stopClock()
     this.#abort?.abort()
@@ -1569,7 +1729,12 @@ export class ChatWindowComponent implements OnDestroy {
     await this.#flushDraft()
     this.railSubject.set(subject)
     if (!subject) return
-    const convoId = this.#threads()?.tileConvoId?.([...subject.path, subject.name])
+    // WHICH conversation, not just which tile. The rail hands the exact id —
+    // a tile holds several, and the hive's own row hands a global one whose
+    // path is `/`, which no tile-name derivation could ever produce. Falling
+    // back to the derivation only for an older rail that sends no id.
+    const convoId = subject.convoId
+      || this.#threads()?.tileConvoId?.([...subject.path, subject.name])
     if (convoId) await this.#load(convoId)
     await this.#restoreDraft()
     this.listOpen.set(false)
@@ -1583,6 +1748,12 @@ export class ChatWindowComponent implements OnDestroy {
   newChat(focus = true): void {
     const threads = this.#threads()
     void this.#flushDraft()
+    // A CHAT ABOUT A TILE BELONGS UNDER THAT TILE. When the rail has a tile
+    // in hand it mints the id and lists the new row itself — the window would
+    // otherwise start a thread about nothing in particular, which is
+    // unlistable: no row can hold it. It answers false when there is no tile,
+    // and then a free chat is the honest thing to make.
+    if (this.#rail?.newChatOnSubject?.()) { if (focus) this.#focus(); return }
     this.activeId.set(threads?.newConvoId() ?? '')
     this.#heldDraft = ''
     const box = this.input()?.nativeElement

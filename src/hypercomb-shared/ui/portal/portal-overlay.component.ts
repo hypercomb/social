@@ -113,7 +113,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   #activeUrl: string | null = null
   #activeTarget: string | null = null
 
-  /** Pending membership changes shown to the LEFT of the back/Done button:
+  /** Pending membership changes shown to the LEFT of the Done button:
    *  the installer's enabled content branches vs what's actually folded into
    *  the hive (the recoverable `hc:last-folded` receipt). adds = enabled but
    *  not yet folded; removes = folded but now disabled. Recomputed as the
@@ -126,20 +126,21 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
    *  `kind:'content'` adoptions, so a pure functionality opt-in — enabling new
    *  bees/workers/drones inside a `kind:'package'` branch, which is exactly what
    *  the header "New features" upgrade flow routes here to do — produced NO
-   *  content diff, so the Done button never appeared and the change could not be
-   *  committed (only BACK = discard). We detect it by baselining the installer's
+   *  content diff, so nothing read the change as committable and it could only be
+   *  discarded. We detect it by baselining the installer's
    *  `logicalRootSig` when the portal opens and flagging when a later projection
    *  differs. Same value-space on both sides (logicalRootSig vs logicalRootSig),
-   *  so there are no cross-namespace false positives. Drives Done alongside the
-   *  content diff; apply() → `actions:available` already resyncs the package.
+   *  so there are no cross-namespace false positives. Counts as pending alongside
+   *  the content diff; apply() → `actions:available` already resyncs the package.
    *
    *  The baseline is `undefined` until a projection is SEEN and `null` when the
    *  seen projection is an EMPTY install. Those must stay distinct: on a hive
    *  with nothing installed yet the installer projects `logicalRootSig: null`,
    *  so collapsing both onto `null` made the participant's FIRST opt-in look
    *  like the still-missing baseline — it was absorbed instead of flagged, and
-   *  Done never appeared on a first-run install (only a second change surfaced
-   *  it). Presence of a snapshot, not truthiness of the sig, is the signal. */
+   *  a first-run install read as having nothing to commit (only a second change
+   *  surfaced it). Presence of a snapshot, not truthiness of the sig, is the
+   *  signal. */
   pendingPackageChange = false
   #openLogicalBaseline: string | null | undefined = undefined
 
@@ -171,20 +172,20 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
    *  accepted headless install from a discarded one. */
   #applyInProgress = false
 
-  namingRestorePoint = false
+  /** The restore point NAME the installer typed, relayed to the fold in the
+   *  accept event (`dcp:restore-point` → `actions:available`). One typed name
+   *  covers both sides; nothing here takes a snapshot. */
   restorePointName = 'Default'
-  applyingRestorePoint = false
-  restorePointError = ''
   #restorePointNamedByDcp = false
 
   /** Full URL of the currently-loaded iframe content, for the title-attr tooltip. */
   get activeUrl(): string | null { return this.#activeUrl }
 
-  /** Show the explicit Done button when there is ANYTHING to commit — content
-   *  adoptions/removals OR a package/code change. Done is the only affordance
-   *  that dispatches `actions:available` (fold + resync + reload); BACK always
-   *  discards. Gating it on the package change too is what makes a feature
-   *  update installable from the embedded installer. */
+  /** Is there ANYTHING to commit — content adoptions/removals OR a package /
+   *  code change? Read by whatever triggers a commit; the bar's Done button
+   *  never consults it, because Done only leaves. Counting the package change
+   *  as well is what makes a pure functionality opt-in (new bees enabled
+   *  inside a package, no content diff) committable at all. */
   get hasPendingCommit(): boolean {
     return !!(this.pendingAdds || this.pendingRemoves || this.pendingPackageChange)
   }
@@ -376,7 +377,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#recomputeDiff()   // also calls detectChanges()
   }
 
-  /** Recompute the pending +adds/−removes shown next to the back/Done button.
+  /** Recompute the pending +adds/−removes shown next to the Done button.
    *  Reads the installer's enabled CONTENT branches (RegistrySnapshot, pushed
    *  over postMessage) and the hive's recoverable folded receipt
    *  (`hc:last-folded`, written by SwarmAdoptDrone). Pure read — never mutates. */
@@ -462,8 +463,9 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
 
       case 'portal:confirm':
       case 'dcp:confirm':
-        // Iframe-initiated accept — equivalent to clicking Done in the chrome.
-        void this.beginApply()
+        // Iframe-initiated accept — the installer committing from inside
+        // (its ADOPT), which is the ONLY visible path that installs.
+        this.beginApply()
         break
 
       case 'portal:cancel':
@@ -502,7 +504,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (this.#headlessApplyTimer !== null) window.clearTimeout(this.#headlessApplyTimer)
     this.#headlessApplyTimer = window.setTimeout(() => {
       this.#headlessApplyTimer = null
-      if (this.headless) void this.beginApply()
+      if (this.headless) this.beginApply()
     }, HEADLESS_SETTLE_MS)
   }
 
@@ -641,7 +643,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       if (active && this.isOpen && !this.headless) this.close()
     })
     // Installer pushed a new config while the portal is open → refresh the
-    // pending +adds/−removes next to the back/Done button.
+    // pending +adds/−removes next to the Done button.
     this.#unsubDiff = EffectBus.on('registry:snapshot', () => this.#recomputeDiff())
     // Headless installs the last session queued but never ran (the web shell
     // reloads after each accepted install) resume here.
@@ -723,9 +725,6 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#activeTarget = null
     this.#activeRequest = null
     this.pendingPackageChange = false
-    this.namingRestorePoint = false
-    this.applyingRestorePoint = false
-    this.restorePointError = ''
     this.#restorePointNamedByDcp = false
     this.#openLogicalBaseline = undefined
     this.#cdr.detectChanges()
@@ -752,87 +751,35 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // -------------------------------------------------
   // apply portal — ACCEPT (the only path that installs)
   // -------------------------------------------------
-  // Fired by the explicit "Done" button (and by an iframe-initiated
-  // portal:confirm / dcp:confirm). Tears the overlay down like close(), then
-  // dispatches `actions:available` — the SOLE signal that folds the
-  // installer's enabled config into the hive (SwarmAdoptDrone) and resyncs /
-  // reloads the web shell (main.ts). Nothing installs or runs until the
-  // participant authorizes it here.
-  /** First click exposes a restore-point name. A headless install uses a
-   * deterministic name because it has no visible form. */
-  public beginApply = async (): Promise<void> => {
-    if (this.applyingRestorePoint) return
-    if (this.#restorePointNamedByDcp && this.restorePointName.trim()) {
-      await this.#applyWithCheckpoint(this.restorePointName.trim())
-      return
-    }
-    if (this.headless) {
-      const label = this.#requestLabel(this.#activeRequest).replaceAll('"', '')
-      await this.#applyWithCheckpoint(await this.#suggestRestorePointName(`Before adopting ${label}`))
-      return
-    }
-    this.restorePointName = await this.#suggestRestorePointName(
-      `Before update ${new Date().toLocaleDateString()}`,
-    )
-    this.namingRestorePoint = true
-    this.restorePointError = ''
-    this.#cdr.detectChanges()
+  // Reached by an iframe-initiated portal:confirm / dcp:confirm, or by a
+  // headless install settling — never by the chrome's Done button, which only
+  // leaves. Tears the overlay down like close(), then dispatches
+  // `actions:available` — the SOLE signal that folds the installer's enabled
+  // config into the hive (SwarmAdoptDrone) and resyncs / reloads the web shell
+  // (main.ts). Nothing installs or runs until it fires.
+  /** The ONE button in the bar, and it does ONE thing: LEAVE. It never saves
+   *  and never installs — a Done that can fail is a Done that traps you in
+   *  the overlay with no way back to the hive (a restore point that wouldn't
+   *  save held the panel open and locked the hexagons out). Committing rides
+   *  its own triggers, outside this button: the installer's own
+   *  `dcp:confirm`, or a headless install settling. */
+  public done = (): void => { this.close() }
+
+  /** Accept: hand the fold the participant's NAME and get out of its way.
+   *
+   *  This used to take a hive restore point of its own (SnapshotQueenBee)
+   *  and REFUSE the whole accept when it failed — the failure that stranded
+   *  the panel. It was always the second of two: SwarmAdoptDrone takes a
+   *  pre-fold checkpoint too, best-effort, only when the diff is real, and
+   *  it ran precisely when this one didn't. Two snapshots of the same hive,
+   *  opposite failure policies, different names. So this one is gone: the
+   *  fold owns the checkpoint, and the typed name rides along in the event
+   *  so the one that IS taken carries the participant's word. */
+  public beginApply = (): void => {
+    this.#finishApply(this.#restorePointNamedByDcp ? this.restorePointName.trim() : '')
   }
 
-  public cancelRestorePoint = (): void => {
-    if (this.applyingRestorePoint) return
-    this.namingRestorePoint = false
-    this.restorePointError = ''
-    this.#cdr.detectChanges()
-  }
-
-  public confirmApply = (): void => {
-    const name = this.restorePointName.trim()
-    if (!name || this.applyingRestorePoint) return
-    void this.#applyWithCheckpoint(name)
-  }
-
-  async #suggestRestorePointName(fallback: string): Promise<string> {
-    const queen = window.ioc?.get<{
-      suggestedRestorePointName?: (name?: string) => Promise<string>
-    }>('@diamondcoreprocessor.com/SnapshotQueenBee')
-    return await queen?.suggestedRestorePointName?.(fallback).catch(() => fallback) ?? fallback
-  }
-
-  async #applyWithCheckpoint(restorePointName: string): Promise<void> {
-    if (this.#activeTarget !== 'dcp') {
-      this.#finishApply(restorePointName, false)
-      return
-    }
-
-    this.applyingRestorePoint = true
-    this.restorePointError = ''
-    this.#cdr.detectChanges()
-    EffectBus.emit('update:status', { phase: 'snapshotting', message: 'Saving restore point…' })
-
-    try {
-      const queen = window.ioc?.get<{
-        createRestorePoint?: (name: string) => Promise<boolean>
-      }>('@diamondcoreprocessor.com/SnapshotQueenBee')
-      const checkpointed = await queen?.createRestorePoint?.(restorePointName)
-      if (!checkpointed) {
-        this.applyingRestorePoint = false
-        this.restorePointError = 'The restore point could not be saved. Nothing was adopted.'
-        EffectBus.emit('update:status', { phase: 'error', message: 'Adopt stopped — restore point not saved' })
-        this.#cdr.detectChanges()
-        return
-      }
-      this.#finishApply(restorePointName, true)
-    } catch (err) {
-      console.warn('[portal] pre-adopt restore point failed', err)
-      this.applyingRestorePoint = false
-      this.restorePointError = 'The restore point could not be saved. Nothing was adopted.'
-      EffectBus.emit('update:status', { phase: 'error', message: 'Adopt stopped — restore point not saved' })
-      this.#cdr.detectChanges()
-    }
-  }
-
-  #finishApply(restorePointName: string, checkpointed: boolean): void {
+  #finishApply(restorePointName: string): void {
     const wasDcp = this.#activeTarget === 'dcp'
     const contentChanges = this.pendingAdds + this.pendingRemoves
     const transactionId = `adopt:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
@@ -841,7 +788,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (wasDcp) {
       EffectBus.emit('update:status', { phase: 'applying', message: 'Adopting packages and website…' })
       window.dispatchEvent(new CustomEvent('actions:available', {
-        detail: { checkpointed, restorePointName, contentChanges, transactionId },
+        detail: { restorePointName, contentChanges, transactionId },
       }))
     }
   }

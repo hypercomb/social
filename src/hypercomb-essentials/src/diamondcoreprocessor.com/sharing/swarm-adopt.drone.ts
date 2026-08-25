@@ -398,11 +398,13 @@ export class SwarmAdoptDrone extends Drone {
     // ── DCP installer round-trip → hive config fold (on ACCEPT) ────────
     // The participant adopts/enables inside the DCP installer; their intent
     // streams over as `registry:snapshot` while they toggle. NOTHING is
-    // folded until they EXPLICITLY ACCEPT by clicking Done — portal-overlay
-    // dispatches `actions:available` ONLY from apply(). Every passive exit
-    // (the ×/back button, the backdrop, Escape, a touch-drag) fires
-    // `dcp:embed-closed` instead and is DISCARDED here: a change must never
-    // enter your hive — and start running — before you authorize it.
+    // folded until an EXPLICIT ACCEPT — portal-overlay dispatches
+    // `actions:available` ONLY from apply(), which is reached by the
+    // installer's own `dcp:confirm` or a headless install settling. Every
+    // EXIT — the chrome's Done button (it only leaves), the backdrop, Escape,
+    // a touch-drag — fires `dcp:embed-closed` instead and is DISCARDED here:
+    // a change must never enter your hive — and start running — before you
+    // authorize it.
     //
     // On accept we fold the installer's enabled CONTENT config into the hive
     // sigbag via the SAME #commitBranch / update({children}) cascade a manual
@@ -1947,19 +1949,22 @@ export class SwarmAdoptDrone extends Drone {
   // ── DCP→hive config fold (accept-gated: actions:available) ────────
   #onDcpDone = (ev?: Event): void => {
     console.info('[swarm-adopt] fold trigger:', ev?.type ?? 'manual')
-    const detail = (ev as CustomEvent<{ checkpointed?: boolean; transactionId?: string }> | undefined)?.detail
-    void this.#foldEnabledConfig(!!detail?.checkpointed, String(detail?.transactionId ?? ''))
+    const detail = (ev as CustomEvent<{ restorePointName?: string; transactionId?: string }> | undefined)?.detail
+    void this.#foldEnabledConfig(String(detail?.transactionId ?? ''), String(detail?.restorePointName ?? ''))
   }
 
   #folding = false
   #foldQueued = false
-  #queuedFoldCheckpointed = false
   #foldTransactionId = ''
   #queuedFoldTransactionId = ''
   // One auto-checkpoint per accept-burst (not per coalesced sub-run) — reset
-  // when the burst ends so the next Done takes a fresh restore point.
+  // when the burst ends so the next accept takes a fresh restore point.
   #checkpointedThisFold = false
-  #foldEnabledConfig = async (alreadyCheckpointed = false, transactionId = ''): Promise<void> => {
+  /** The name the accept carried, if the participant typed one in the
+   *  installer. Read once per burst — the burst's single checkpoint belongs
+   *  to the accept that opened it. */
+  #foldRestorePointName = ''
+  #foldEnabledConfig = async (transactionId = '', restorePointName = ''): Promise<void> => {
     // COALESCE re-entry, never drop it: sequential headless installs (the
     // portal-overlay pending-open queue) fire `actions:available` back-to-back,
     // and a trigger landing while a fold is mid-flight carries NEWLY-accepted
@@ -1967,21 +1972,17 @@ export class SwarmAdoptDrone extends Drone {
     // single trailing re-run reads the latest snapshot, so N triggers coalesce.
     if (this.#folding) {
       this.#foldQueued = true
-      this.#queuedFoldCheckpointed ||= alreadyCheckpointed
       if (transactionId) this.#queuedFoldTransactionId = transactionId
       return
     }
     this.#folding = true
-    this.#checkpointedThisFold = alreadyCheckpointed
+    this.#checkpointedThisFold = false
+    this.#foldRestorePointName = restorePointName.trim()
     this.#foldTransactionId = transactionId
     try {
       do {
         this.#foldQueued = false
         await this.#foldEnabledConfigOnce()
-        if (this.#foldQueued && this.#queuedFoldCheckpointed) {
-          this.#checkpointedThisFold = true
-          this.#queuedFoldCheckpointed = false
-        }
         if (this.#foldQueued && this.#queuedFoldTransactionId) {
           this.#foldTransactionId = this.#queuedFoldTransactionId
           this.#queuedFoldTransactionId = ''
@@ -1989,7 +1990,7 @@ export class SwarmAdoptDrone extends Drone {
       } while (this.#foldQueued)
     } finally {
       this.#folding = false
-      this.#queuedFoldCheckpointed = false
+      this.#foldRestorePointName = ''
       this.#foldTransactionId = ''
       this.#queuedFoldTransactionId = ''
     }
@@ -2043,20 +2044,28 @@ export class SwarmAdoptDrone extends Drone {
    * complete (a cold tile) must NEVER block the fold the participant already
    * accepted. Reuses the proven /snapshot path (SnapshotQueenBee.invoke), the
    * same call restore.queen makes. Code/package updates are excluded from the
-   * seal, so this only fires for real tile changes.
+   * seal, so this only fires for real tile changes — a package-only accept
+   * rolls back through the installer's own revision history instead.
+   *
+   * This is the ONLY hive checkpoint on the accept path. The portal chrome
+   * used to take a second one first and refuse the accept when it failed;
+   * one snapshot, best-effort, taken by the code that knows what is about to
+   * change, is the whole of it now.
    */
   #checkpointBeforeFold = async (sigs: readonly string[]): Promise<void> => {
     try {
       const queen = this.#ioc()?.get?.(SNAPSHOT_QUEEN_KEY) as { invoke?: (a: string) => Promise<void> } | undefined
       if (!queen?.invoke) return
       EffectBus.emit('activity:log', { message: 'saving a restore point before installing…', icon: '●' })
-      // The restore point is NAMED by the naming service — two deterministic
-      // words from the set of branch sigs this burst installs (sorted, so
-      // the same install reads as the same name on every device), then what
-      // is about to happen.
+      // The participant's own word wins when the accept carried one (they
+      // typed it in the installer, and one typed name covers both sides).
+      // Otherwise the naming service mints it — two deterministic words from
+      // the set of branch sigs this burst installs (sorted, so the same
+      // install reads as the same name on every device), then what is about
+      // to happen.
       const locale = (this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale
       const n = sigs.length
-      await queen.invoke(revisionName({
+      await queen.invoke(this.#foldRestorePointName || revisionName({
         packageSig: [...sigs].sort().join('+'),
         label: `before installing ${n} change${n === 1 ? '' : 's'}`,
         locale,

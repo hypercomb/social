@@ -38,6 +38,11 @@ import { restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './fea
 import { setKindGlobalOn, ENABLEMENT_CHANGED } from './behavior-enablement'
 import { enableAggregation, disableAggregation, listAggregation } from '../../core/aggregation-layer'
 
+/** How long a row treats another press as THE SAME PRESS. See #isRepeatPress:
+ *  a switch nobody saw move gets pressed again, and without this the second
+ *  press undoes the first. */
+const PRESS_REPEAT_MS = 400
+
 /** A feature applied to the tile — a decoration (or slot) it carries. */
 interface FeatureRow {
   view: string
@@ -420,6 +425,7 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  ever asks again from a list row (the review surface handles real code
    *  review when the render gate demands it). */
   readonly storeToggle = (row: StoreRow): void => {
+    if (this.#isRepeatPress('pool/' + row.kind)) return
     const next = !row.on
     setKindGlobalOn(row.kind, next)
     this.storeRows.set(this.storeRows().map(r => r.kind === row.kind ? { ...r, on: next } : r))
@@ -475,7 +481,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   readonly selectedKeys = signal<ReadonlySet<string>>(new Set())
 
   /** Rows whose add/remove is in flight — guards double-clicks. */
-  readonly pending = signal<ReadonlySet<string>>(new Set())
+  readonly pending = signal<ReadonlyMap<string, boolean>>(new Map())
 
   /** Row-level FAILURE notes by row key (`features:outcome`). Success is the
    *  state flipping — ok outcomes only clear. */
@@ -598,8 +604,9 @@ export class FeaturesViewerComponent implements OnDestroy {
         this.visible.set(true)
         EffectBus.emit('features:viewer-state', { open: true })
       }
-      // A fresh group replaces its rows — any in-flight action is settled.
-      if (this.pending().size) this.pending.set(new Set())
+      // A fresh group replaces its rows — any in-flight action is settled,
+      // and the truth it carries is what the wish was standing in for.
+      if (this.pending().size) this.pending.set(new Map())
       void this.#refreshHidden()
       void this.#refreshMembers()
       // A tile subject arriving takes the panel out of the store.
@@ -736,13 +743,13 @@ export class FeaturesViewerComponent implements OnDestroy {
         ? (group.applied.find(f => f.kind === kind) ?? group.available.find(f => f.kind === kind))
         : undefined
       if (!feat) {
-        if (this.pending().size) this.pending.set(new Set())
+        if (this.pending().size) this.pending.set(new Map())
         return
       }
       const key = this.rowKey(group, feat)
-      this.pending.update(set => {
-        if (!set.has(key)) return set
-        const next = new Set(set)
+      this.pending.update(map => {
+        if (!map.has(key)) return map
+        const next = new Map(map)
         next.delete(key)
         return next
       })
@@ -842,7 +849,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     EffectBus.emit('features:viewer-state', { open: false })
     this.group.set(null)
     this.selectedKeys.set(new Set())
-    this.pending.set(new Set())
+    this.pending.set(new Map())
     this.rowNotes.set(new Map())
     this.query.set('')
     this.mode.set('tile')
@@ -974,7 +981,7 @@ export class FeaturesViewerComponent implements OnDestroy {
       rows.push({
         kind: f.kind, view: f.view, icon: f.icon, label: f.label,
         description: f.description, slashCommand: f.slashCommand,
-        on: this.isOn(group, f), applied: true,
+        on: this.#painted(group, f, this.isOn(group, f)), applied: true,
         inherited: f.origin === 'cascade',
         openable: f.openable === true && this.isOn(group, f),
         // Deliberately NOT ANDed with on-ness the way `openable` is: a view
@@ -991,7 +998,7 @@ export class FeaturesViewerComponent implements OnDestroy {
       rows.push({
         kind: f.kind, view: f.view, icon: f.icon, label: f.label,
         description: f.description, slashCommand: f.slashCommand,
-        on: false, applied: false, inherited: false, openable: false,
+        on: this.#painted(group, f, false), applied: false, inherited: false, openable: false,
         isView: f.isView === true, manageScopes: false,
         bound: f.bound, feat: f,
       })
@@ -1091,6 +1098,7 @@ export class FeaturesViewerComponent implements OnDestroy {
       return
     }
     if (this.isPending(group, row.feat)) return
+    if (this.#isRepeatPress(this.rowKey(group, row.feat))) return
     if (!row.applied) {
       this.enableHere(group, row.feat as AvailableRow)
       return
@@ -1184,7 +1192,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (!this.canRemove(group, feat)) return
     const key = this.rowKey(group, feat)
     if (this.pending().has(key)) return
-    this.pending.update(set => new Set([...set, key]))
+    this.pending.update(map => new Map(map).set(key, false))
     this.#clearNote(key)
     EffectBus.emit('features:remove', {
       cell: group.cell,
@@ -1242,6 +1250,22 @@ export class FeaturesViewerComponent implements OnDestroy {
     return this.pending().has(this.rowKey(group, feat))
   }
 
+  /** THE PRESS ANSWERS ITSELF. A layer row's truth comes back from the drone,
+   *  and until it does the row paints WHAT THE PRESS ASKED FOR. `pending`
+   *  carries that wish for exactly the right window — set on the press,
+   *  dropped when the fresh group lands — so a slow answer can never look
+   *  like a press that did nothing. The pool never needed this: its switch is
+   *  a localStorage write, so it was always instant, and the two scopes now
+   *  behave the same way for the same reason.
+   *
+   *  ONLY THE PAINT IS OPTIMISTIC. Every handler still branches on the truth
+   *  (`applied`, `origin`, suppression) — which is why a second press has to
+   *  be refused while the first is in flight. */
+  #painted(group: FeatureGroup, feat: RowLike, truth: boolean): boolean {
+    const wish = this.pending().get(this.rowKey(group, feat))
+    return wish === undefined ? truth : wish
+  }
+
   /** The row's plain-words outcome note ('' = none). Failures only. */
   rowNote(group: FeatureGroup, feat: RowLike): string {
     return this.rowNotes().get(this.rowKey(group, feat)) ?? ''
@@ -1266,13 +1290,32 @@ export class FeaturesViewerComponent implements OnDestroy {
     })
   }
 
+  /** ONE PRESS PER SETTLED STATE. A switch that answers in 136ms on an empty
+   *  hive answers slower on a full one, and a participant who does not see it
+   *  move presses again — landing a SECOND flip that puts the row back where
+   *  it started. That reads as "I had to click it twice", and with a third
+   *  press to fix it, as a three-stage control. A repeat press on the SAME row
+   *  inside this window is that doubt, not a change of mind, so it is dropped.
+   *  Long enough to cover a double-click and an impatient re-press, far short
+   *  of anyone deciding they wanted it the other way after all. */
+  #isRepeatPress(key: string): boolean {
+    const now = Date.now()
+    const last = this.#lastPress.get(key) ?? 0
+    // Stamped even when the press is dropped: a held-down repeat stays one
+    // gesture instead of leaking a flip every other press.
+    this.#lastPress.set(key, now)
+    return now - last < PRESS_REPEAT_MS
+  }
+
+  readonly #lastPress = new Map<string, number>()
+
   /** Backstop leash for a row action: the drone answers every add/remove
    *  with `features:outcome` — this fires only when the producer died. */
   #armRowLeash(key: string): void {
     setTimeout(() => {
       if (!this.pending().has(key)) return
-      this.pending.update(set => {
-        const next = new Set(set)
+      this.pending.update(map => {
+        const next = new Map(map)
         next.delete(key)
         return next
       })
@@ -1286,7 +1329,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   enableHere(group: FeatureGroup, feat: AvailableRow): void {
     const key = this.rowKey(group, feat)
     if (this.pending().has(key)) return
-    this.pending.update(set => new Set([...set, key]))
+    this.pending.update(map => new Map(map).set(key, true))
     this.#clearNote(key)
     EffectBus.emit('features:enable', {
       cell: group.cell,

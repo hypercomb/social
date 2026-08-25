@@ -131,8 +131,15 @@ interface BeeDepCacheEntry {
 // holding the same module rebuilt correctly. Found 2026-08-20: SlidesViewDrone
 // shipped a pre-change `embedUrlFor` while the `link` dependency carried the
 // new one. The bump busts every v4 unit so each bee re-records its real inputs.
+//
+// version 6 = the class NAME (and the source file name) declare an artifact's
+// role, not just its extends clause, and the best-declared class in a bundle
+// wins rather than the first. The doc cache is keyed by SOURCE CONTENT, and
+// this change edited the EXTRACTOR, not any source — so every one of the 333
+// files previously cached as `doc: null` would hit the cache and stay
+// nameless. Bumping is what makes an extractor change take effect at all.
 interface BuildCache {
-  version: 5
+  version: 6
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
@@ -148,7 +155,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 5) return raw
+    if (raw?.version === 6) return raw
   } catch {}
   return null
 }
@@ -327,20 +334,54 @@ interface BeeDocEntry {
   aliases: string[]
 }
 
-const extractBeeDoc = (sourceText: string): BeeDocEntry | null => {
-  // class name + kind from extends clause
-  const classMatch = sourceText.match(
-    /export\s+class\s+(\w+)\s+extends\s+(QueenBee|Worker|Drone|Bee)\b/
-  )
-  if (!classMatch) return null
+const kindFromName = (className: string): BeeDocEntry['kind'] | null =>
+  /QueenBee$|Queen$/.test(className) ? 'queen'
+  : /Worker$/.test(className) ? 'worker'
+  : /Drone$/.test(className) ? 'drone'
+  : /Bee$/.test(className) ? 'bee'
+  : null
 
-  const className = classMatch[1]
-  const extendsName = classMatch[2]
-  const kind: BeeDocEntry['kind'] =
-    extendsName === 'QueenBee' ? 'queen'
-    : extendsName === 'Drone' ? 'drone'
-    : extendsName === 'Worker' ? 'worker'
-    : 'bee'
+/** The role a source file names itself for: `*.queen.ts`, `*.drone.ts`, … A
+ *  supporting `*.service.ts` ships as a bee sig too, so it is named as one. */
+const kindFromFile = (path: string): BeeDocEntry['kind'] | null => {
+  const m = path.match(/\.(drone|worker|queen|bee|service)\.ts$/)
+  if (!m) return null
+  return m[1] === 'service' ? 'bee' : m[1] as BeeDocEntry['kind']
+}
+
+const extractBeeDoc = (sourceText: string, sourcePath = ''): BeeDocEntry | null => {
+  // Three declarations of the same fact, in order of specificity: the base
+  // class, the class NAME, then the FILE name. A *Drone extending EventTarget
+  // is still a drone; so is a HistoryRecorder in history-recorder.drone.ts.
+  // Requiring the extends clause left all of them with no doc at all, so the
+  // installer had only the signature to render as their name.
+  //
+  // A file may declare several classes, so the artifact is the best-declared
+  // one, not the first one: exported outranks internal, and a recognised base
+  // or role-suffixed name outranks a bare helper. Taking the first match named
+  // layer-committer.drone.ts after its internal CommitMachine.
+  const candidates = [...sourceText.matchAll(
+    /(?:^|\n)\s*(export\s+)?(?:abstract\s+)?class\s+(\w+)(?:<[^>]*>)?(?:\s+extends\s+(\w+))?/g,
+  )].map(m => {
+    const className = m[2]
+    const extendsName = m[3] ?? ''
+    const fromBase: BeeDocEntry['kind'] | null =
+      extendsName === 'QueenBee' ? 'queen'
+      : extendsName === 'Drone' ? 'drone'
+      : extendsName === 'Worker' ? 'worker'
+      : extendsName === 'Bee' ? 'bee'
+      : null
+    return {
+      className,
+      kind: fromBase ?? kindFromName(className) ?? kindFromFile(sourcePath),
+      rank: (m[1] ? 2 : 0) + (fromBase || kindFromName(className) ? 1 : 0),
+    }
+  }).filter(c => c.kind)
+
+  if (!candidates.length) return null
+  const best = candidates.reduce((a, b) => (b.rank > a.rank ? b : a))
+  const className = best.className
+  const kind = best.kind as BeeDocEntry['kind']
 
   // description — single-line or multi-line string literal
   const descMatch = sourceText.match(
@@ -910,7 +951,7 @@ const main = async (): Promise<void> => {
       docCacheHits++
     } else {
       const tsSource = readFileSync(src.entry, 'utf8')
-      doc = extractBeeDoc(tsSource)
+      doc = extractBeeDoc(tsSource, src.entry)
       if (fileLeaf) {
         newDocCache[src.entry] = { contentSignature: fileLeaf.sig, doc }
       }
@@ -984,7 +1025,7 @@ const main = async (): Promise<void> => {
       docCacheHits++
     } else {
       const tsSource = readFileSync(src.entry, 'utf8')
-      beeDoc = extractBeeDoc(tsSource)
+      beeDoc = extractBeeDoc(tsSource, src.entry)
       if (beeFileLeaf) {
         newDocCache[src.entry] = { contentSignature: beeFileLeaf.sig, doc: beeDoc }
       }
@@ -1241,7 +1282,7 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 5,
+    version: 6,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,

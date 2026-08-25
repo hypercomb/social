@@ -1,23 +1,28 @@
 #!/usr/bin/env node
 // drive-providers-window — proves the AI PROVIDERS CONSOLE end to end:
-// one list of every registered provider, the universal panel (key, endpoint,
-// docs, models, active switch), and the declarative-spec plug-in path — a
-// pasted llm-provider@1 spec becomes a live row, lands in the `llm:providers`
-// pool, and SURVIVES A RELOAD via the boot sweep.
+// three tabs over one roster (Subscriptions / API requests / Swarm, a fold of
+// the cost class), the universal panel (key, endpoint, docs, models, active
+// switch), and the declarative-spec plug-in path — a pasted llm-provider@1
+// spec becomes a live row, lands in the `llm:providers` pool, and SURVIVES A
+// RELOAD via the boot sweep.
 //
 //   node scripts/drive-providers-window.cjs [--url http://localhost:4250]
 //                                           [--out <dir>] [--engine chrome]
 //
 // Flow:
 //   1. boot a fresh hive (Start empty), open the console via providers:open
-//   2. the seven built-in vendors are rows; anthropic's panel shows key
+//   2. it opens on Subscriptions — the plan already paid for; the keyed
+//      vendors are on API requests and the local model is on Swarm, and no
+//      provider is ever on two tabs
+//   3. the seven built-in vendors are rows; anthropic's panel shows key
 //      field + docs + models; saving a key flips the row to active, clearing
 //      flips it back; the active switch turns it off
-//   3. paste an llm-provider@1 spec into Add provider → a new row appears
-//   4. the POLICY section decides who answers when nobody says: pin a tier,
-//      see the resolved choice change, clear it again
-//   5. reload → the discovered row is STILL THERE (pool sweep), the built-ins
-//      are unchanged, and both the off-switch and the pin survived
+//   4. paste an llm-provider@1 spec into Add provider → a new row appears
+//   5. the FOOT of the window states who answers when nobody says and opens
+//      into the pickers: pin a tier, see the pin stick, and see the bar name
+//      the provider that would answer right now
+//   6. reload → the discovered row is STILL THERE (pool sweep), the built-ins
+//      are unchanged, and the off-switch, the pin and the tab all survived
 //
 // `--engine chrome` required: headless chromium cannot initialize Pixi's
 // shaders and never leaves the splash.
@@ -89,11 +94,45 @@ async function main() {
     const panel = page.locator('.hc-providers')
     check('the console opened on providers:open', (await panel.count()) === 1)
 
-    const rowNames = await panel.locator('.hc-provider-name').allInnerTexts()
-    check('the built-in roster is listed', rowNames.length >= 7, rowNames.join(', '))
-    await shot('01-roster')
+    // ── 2. three tabs, one roster ────────────────────────────────────────
+    const tabs = panel.locator('.hc-providers-tab')
+    check('the roster is grouped in three tabs', (await tabs.count()) === 3,
+      (await tabs.allInnerTexts()).join(' | '))
+    check('it opens on the plan already paid for',
+      (await panel.locator('.hc-providers-tab.is-active').innerText()).startsWith('Subscriptions'))
 
-    // ── 2. the universal panel on one vendor ─────────────────────────────
+    const openTab = async (label) => {
+      await panel.locator('.hc-providers-tab', { hasText: label }).click()
+      await page.waitForTimeout(250)
+    }
+    const rowsNow = async () => panel.locator('.hc-provider-name').allInnerTexts()
+
+    // With no CLI bridged, Subscriptions says so rather than showing nothing.
+    check('an empty Subscriptions tab explains how a bridge arrives',
+      /CLI/.test(await panel.locator('.hc-providers-empty').innerText().catch(() => '')))
+    await shot('01-subscriptions')
+
+    await openTab('API requests')
+    const apiRows = await rowsNow()
+    check('the keyed vendors are on API requests', apiRows.length >= 6, apiRows.join(', '))
+    check('a keyless local model is NOT billed per request',
+      !apiRows.includes('Local model'), apiRows.join(', '))
+    check('pasting a spec is the API tab\'s verb',
+      (await panel.locator('.hc-provider-btn', { hasText: 'Add provider' }).count()) === 1)
+    await shot('01b-api')
+
+    await openTab('Swarm')
+    const swarmRows = await rowsNow()
+    check('the machine tier is on Swarm', swarmRows.includes('Local model'), swarmRows.join(', '))
+    check('lending is the Swarm tab\'s verb',
+      (await panel.locator('.hc-providers-lend').count()) === 1)
+    check('lending is NOT offered on the other tabs', !apiRows.includes('Local model'))
+    await shot('01c-swarm')
+
+    // Back to the keyed tab for the panel checks below.
+    await openTab('API requests')
+
+    // ── 3. the universal panel on one vendor ─────────────────────────────
     const claude = panel.locator('.hc-provider', { hasText: 'Claude' }).first()
     await claude.locator('.hc-provider-head').click()
     await page.waitForTimeout(300)
@@ -120,7 +159,7 @@ async function main() {
     check('the switch turns the provider off', (await stateOf()) === 'off')
     await shot('03-switched-off')
 
-    // ── 3. a pasted spec becomes a row ───────────────────────────────────
+    // ── 4. a pasted spec becomes a row ───────────────────────────────────
     await panel.locator('.hc-provider-btn', { hasText: 'Add provider' }).click()
     await panel.locator('.hc-providers-spec').fill(ACME_SPEC)
     await panel.locator('.hc-provider-btn', { hasText: 'Import' }).click()
@@ -129,14 +168,33 @@ async function main() {
       (await panel.locator('.hc-provider-name', { hasText: 'Acme AI' }).count()) === 1)
     await shot('04-spec-imported')
 
-    // ── 4. the selection policy ──────────────────────────────────────────
+    // ── 5. the selection policy, at the FOOT ─────────────────────────────
+    // It sits below the tabs, outside all of them: it picks across the whole
+    // roster, so belonging to one tab would misstate its reach. Collapsed it
+    // is a status line; the pickers open upward.
+    const bar = panel.locator('.hc-providers-footbar')
     const policy = panel.locator('.hc-providers-policy')
-    check('the console says who answers when nobody says', (await policy.count()) === 1)
+    check('the foot says who answers when nobody says', (await bar.count()) === 1)
+    check('the bar names the provider that would answer right now',
+      /Local model/.test(await bar.innerText()), (await bar.innerText()).replace(/\n/g, ' '))
+    check('the pickers stay shut until asked for', (await policy.count()) === 0)
+
+    const openPolicy = async () => {
+      if (await panel.locator('.hc-providers-policy').count()) return
+      await bar.click()
+      await page.waitForTimeout(250)
+    }
+    await openPolicy()
     const rows = await policy.locator('.hc-policy-row').count()
     check('one picker per weight of work', rows === 3, `rows=${rows}`)
 
-    const resolvedBefore = (await policy.locator('.hc-policy-resolved').first().innerText()).trim()
-    check('it shows who that resolves to right now', resolvedBefore.length > 0, resolvedBefore)
+    // The picker carries the answer: "Decide for me — <who>". No second line.
+    const autoOption = (await policy.locator('.hc-policy-pick').first().locator('option').first().innerText()).trim()
+    check('the picker itself says who "decide for me" resolves to',
+      /Decide for me — Local model/.test(autoOption), autoOption)
+    check('nothing repeats that underneath',
+      (await policy.locator('.hc-policy-resolved').count()) === 0)
+    await shot('05-policy-open')
 
     // Pin the heaviest tier and watch the resolved line follow. It must be a
     // provider that could actually answer: Claude was switched off above and
@@ -148,19 +206,28 @@ async function main() {
 
     await policy.locator('.hc-policy-pick').first().selectOption({ label: 'Local model' })
     await page.waitForTimeout(400)
-    const resolvedAfter = (await panel.locator('.hc-policy-resolved').first().innerText()).trim()
-    check('pinning a tier changes who answers',
-      /Local model/.test(resolvedAfter) && /pinned/.test(resolvedAfter), resolvedAfter)
+    check('the pin sticks to the tier it was set on',
+      (await policy.locator('.hc-policy-pick').first().inputValue()) === 'local')
+    // A pin that is honoured needs no explanation — the picker already says
+    // it. The line under it is reserved for a pin that fell through.
+    const deepRow = policy.locator('.hc-policy-row').first()
+    check('an honoured pin does not repeat itself underneath',
+      (await deepRow.locator('.hc-policy-resolved').count()) === 0)
+    check('a pinned picker drops the "— who" suffix, since it IS the who',
+      !/—/.test((await deepRow.locator('option').first().innerText()).trim()))
 
-    // ── 5. reload — discovery sweep + device-local policy survive ────────
+    // ── 6. reload — discovery sweep + device-local policy survive ────────
     await page.reload({ waitUntil: 'load' })
     await page.waitForTimeout(9000)
     await openConsole()
+    check('the console reopens on the tab you left it on',
+      (await panel.locator('.hc-providers-tab.is-active').innerText()).startsWith('API requests'))
     check('the discovered provider survives a reload (pool sweep)',
       (await panel.locator('.hc-provider-name', { hasText: 'Acme AI' }).count()) === 1)
     check('the off-switch survived the reload', (await stateOf()) === 'off')
+    await openPolicy()
     check('the pin survived the reload',
-      /pinned/.test((await panel.locator('.hc-policy-resolved').first().innerText()).trim()))
+      (await panel.locator('.hc-policy-pick').first().inputValue()) === 'local')
     await shot('05-after-reload')
 
     const fatal = errors.filter(e => !/favicon|net::|Failed to load resource/i.test(e))

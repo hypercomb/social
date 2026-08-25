@@ -222,7 +222,74 @@ export class ClaudeBridgeWorker extends Worker {
     }
   }
 
+  // ── QUIET LANDING ─────────────────────────────────────────────────
+  // Everything this worker writes is somebody's ANSWER — an ask raised
+  // from a tile, a drained batch of notes, a generated page. It lands as
+  // truth the moment it arrives; nothing here is deferred. What it must
+  // not do is repaint the surface the participant is still working in,
+  // once per write, for a burst of twenty.
+  //
+  // So a MUTATING op opens a quiet window and the renderer holds its
+  // repaint behind a badge (see show-cell.drone.ts #quietLanding).
+  // Read-only ops never open one — a `list` arriving mid-burst must not
+  // extend somebody else's window.
+  //
+  // Depth-counted, because a drain runs many ops at once. And closed on a
+  // SETTLE delay rather than at the last op's return: the commit machine
+  // flushes its markers just after the handler resolves, so closing on the
+  // dot would let that trailing lineage change through as exactly the
+  // flicker this exists to prevent. A burst is therefore ONE window.
+  static readonly #QUIET_SETTLE_MS = 400
+
+  static readonly #MUTATING_OPS = new Set([
+    'update', 'note-add', 'note-delete', 'note-split', 'put-resource',
+    'optimization-add', 'optimization-remove', 'decoration-add',
+    'bag-add', 'bag-remove', 'bag-set', 'build-record', 'stamp',
+    'add', 'remove', 'summary-add', 'chat-reply', 'submit',
+  ])
+
+  #quietDepth = 0
+  #quietClose: ReturnType<typeof setTimeout> | null = null
+
+  /** Mutating ops in the CURRENT window. The badge shows this, not the
+   *  renderer's held-paint count: paints coalesce, writes don't, and the
+   *  number a person reads has to mean what it says. Reset when a window
+   *  actually opens, never while one is running. */
+  #quietWrites = 0
+
+  #quietOpen = (): void => {
+    if (this.#quietClose) { clearTimeout(this.#quietClose); this.#quietClose = null }
+    if (this.#quietDepth++ === 0) this.#quietWrites = 0
+    this.#quietWrites++
+    EffectBus.emit('landing:quiet', {
+      active: true, source: 'bridge', writes: this.#quietWrites,
+    })
+  }
+
+  #quietDone = (): void => {
+    if (this.#quietDepth > 0) this.#quietDepth--
+    if (this.#quietDepth > 0) return
+    if (this.#quietClose) clearTimeout(this.#quietClose)
+    this.#quietClose = setTimeout(() => {
+      this.#quietClose = null
+      // A new op during the settle re-opened the window — leave it open.
+      if (this.#quietDepth === 0) {
+        EffectBus.emit('landing:quiet', { active: false, source: 'bridge', writes: 0 })
+      }
+    }, ClaudeBridgeWorker.#QUIET_SETTLE_MS)
+  }
+
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
+    if (!ClaudeBridgeWorker.#MUTATING_OPS.has(String(req.op))) return this.#route(req)
+    this.#quietOpen()
+    try {
+      return await this.#route(req)
+    } finally {
+      this.#quietDone()
+    }
+  }
+
+  async #route(req: BridgeRequest): Promise<BridgeResponse> {
     switch (req.op) {
       case 'update':       return this.#update(req)
       case 'note-add':     return this.#noteAdd(req)

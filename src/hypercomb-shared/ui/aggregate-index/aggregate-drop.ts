@@ -236,15 +236,20 @@ export const dropContextOnTile = async (
     try {
       const tileContext = (window as { ioc?: { get?(k: string): unknown } }).ioc?.get?.(
         '@diamondcoreprocessor.com/TileContext',
-      ) as { resolve: (segments: readonly string[]) => Promise<unknown> } | undefined
+      ) as {
+        resolve: (segments: readonly string[]) => Promise<unknown>
+        /** Absent on an older essentials build — then the drop lands and the
+         *  responder simply reads raw sigs. */
+        withSummaries?: (branches: readonly unknown[]) => Promise<string[]>
+      } | undefined
       if (tileContext?.resolve) {
         const branches = await tileContext.resolve([...item.segments])
-        // Import here to avoid a circular dependency with essentials.
-        const { contextWithSummaries } = await import(
-          '../assistant/context-summary-gen.js'
-        ).catch(() => ({ contextWithSummaries: () => [] }))
+        // Through the IoC seam, never by path: this file is SHELL, and shell
+        // may never import a module. It is also the only way the call can
+        // survive the web shell, where essentials is loaded from OPFS at
+        // runtime and no relative path to it exists at all.
         if (Array.isArray(branches) && branches.length > 0) {
-          await contextWithSummaries(branches)
+          await tileContext.withSummaries?.(branches)
         }
       }
     } catch {

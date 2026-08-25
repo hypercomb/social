@@ -25,6 +25,13 @@
         }
       }
       <button type="button"
+              class="prune-toggle"
+              [class.active]="pruneMode()"
+              [attr.aria-pressed]="pruneMode()"
+              [attr.aria-label]="'history.prune-toggle' | t"
+              [title]="'history.prune-toggle' | t"
+              (click)="togglePruneMode()">⬡@if (prunedCount() > 0) {<span class="prune-count">{{ prunedCount() }}</span>}</button>
+      <button type="button"
               class="marked-toggle"
               [class.active]="markedMode()"
               [attr.aria-pressed]="markedMode()"

@@ -634,8 +634,8 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -961,6 +961,31 @@ export class ShowCellDrone extends Drone {
    *  field mid-stream. */
   public get paintedLocationKey(): string { return this.renderedLocationKey }
 
+  /** The ViewMode service we are listening to, so dispose can let go. */
+  #viewModeSource: EventTarget | null = null
+
+  /** BACK ON THE HEXAGONS. Make sure the tiles under the surface are THIS
+   *  location's, and painted. Any other mode is a takeover mounting — it
+   *  owns the screen, and the arrival gate orders its paint.
+   *
+   *  The FORCE is the whole point: closing a view usually leaves the
+   *  location alone, so without it the pass is dropped as an unchanged
+   *  page and the empty field stays empty. While the hive is deliberately
+   *  hidden (the screensaver's takeover) this stands aside — that owner
+   *  restores its own visibility, and un-hiding here would tear a hole in
+   *  its screen. */
+  readonly #onViewModeChange = (event: Event): void => {
+    const mode = String((event as CustomEvent<{ mode?: string }>).detail?.mode ?? '')
+    if (mode !== HEXAGONS_SURFACE || this.#hiveHidden) return
+    const currentKey = String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+    if (this.renderedLocationKey && currentKey !== this.renderedLocationKey) {
+      this.clearMesh('left a view standing somewhere else — drop the stale tiles before the repaint')
+    }
+    if (this.layer) this.layer.visible = true
+    this.#forceNextRender = true
+    this.requestRender()
+  }
+
   public snapshotCells(): { q: number; r: number; label: string; imageSig?: string; hideText?: boolean }[] {
     return [...this.renderedCells.values()].map(c => ({ q: c.q, r: c.r, label: c.label, imageSig: c.imageSig, hideText: c.hideText }))
   }
@@ -1220,9 +1245,6 @@ export class ShowCellDrone extends Drone {
   #lastTriggeredRepublishAtMs = new Map<string, number>()
 
   private filterKeyword = ''
-  /** null = ordinary canvas; a Set (including empty) = an active named/draft
-   * filter view whose members are the only tiles allowed to render. */
-  #filterViewLabels: Set<string> | null = null
   private filterTags = new Set<string>()
   /** Marks a REFERENCE demands of what it shows, in force while the participant
    *  stands inside what that reference points at (see
@@ -1422,6 +1444,10 @@ export class ShowCellDrone extends Drone {
   }
 
   private readonly onLineageChange = (): void => {
+    this.requestRender()
+  }
+
+  private readonly onNavigate = (): void => {
     this.requestRender()
   }
 
@@ -2038,7 +2064,103 @@ export class ShowCellDrone extends Drone {
 
   #renderScheduled = false
 
+  // ── QUIET LANDING ─────────────────────────────────────────────────
+  // A background writer — the bridge answering an ask raised from a tile
+  // — lands its payload as TRUTH the moment it arrives: the layer is
+  // minted, the note is on the cell, the resource is in the pool. What it
+  // must NOT do is pull the surface out from under the participant. A
+  // drained ask writes a dozen notes in one burst, and a dozen full
+  // re-walks is a dozen flickers on a hive somebody is still working in.
+  //
+  // So the WRITE lands and the PAINT waits. `landing:quiet` brackets the
+  // writer's burst (the producer owns the depth count and the settle
+  // delay, so a burst is ONE window); every render request inside the
+  // window is counted instead of run, and the count goes out on
+  // `landing:pending` for the badge to show. The participant taps it when
+  // they are ready — `landing:apply` — and that tap is the only release.
+  //
+  // Held is not dropped, and never lost: holding ARMS #forceNextRender, so
+  // whenever the pass finally runs it survives the unchanged-page fast
+  // path. And a render that happens for any other reason (they panned,
+  // they walked into a layer, they edited something) has already shown
+  // them what landed, so it clears the count on the way through — the
+  // badge means "there is something you have not seen yet", never "there
+  // is something unwritten".
+  #quietLanding = false
+  #heldRenders = 0
+
+  /** Location the hold happened at. A pass at a DIFFERENT location is the
+   *  participant walking somewhere — that must always paint, and seeing the
+   *  new page spends the badge. */
+  #heldAtKey: string | null = null
+
+  /** When the last pass was held.
+   *
+   *  A WRITE'S CONSEQUENCES ARRIVE AS A CHAIN, NOT AN EVENT. The producer's
+   *  window covers the write itself; what follows is the commit flushing its
+   *  marker, then the readiness repaint as each new tile's visual resolves,
+   *  then the optimize tick — measured at 8ms, 36ms, 204ms, 353ms, 407ms,
+   *  659ms, 929ms after one three-tile burst, from SEVEN different call sites.
+   *  No settle delay on the producer covers that, and tagging the callers is a
+   *  losing game: the chain reaches requestRender through paths that look
+   *  exactly like a participant's.
+   *
+   *  So the renderer measures the chain instead of guessing at it. While paints
+   *  keep being held, the landing is still landing. Once nothing has been held
+   *  for #CASCADE_QUIET_MS, the chain is done and the next paint belongs to the
+   *  participant — it runs, and it spends the badge. */
+  #lastHeldAt = 0
+  static readonly #CASCADE_QUIET_MS = 1500
+
+  #locationKeyNow = (): string =>
+    String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+
+  /** WRITES landed during the window, as counted by the producer — the only
+   *  honest number to show a person. Held renders are not writes: a burst of
+   *  twelve notes coalesces into far fewer paints, so counting paints would
+   *  under-report, and a producer that writes nothing but touches the layer
+   *  would over-report. Survives the window closing (the badge outlives the
+   *  burst); cleared only when a real paint shows them. */
+  #landedWrites = 0
+
+  /** Publish the unseen-change count for the landing badge. */
+  #publishHeld = (): void => {
+    this.emitEffect('landing:pending', {
+      count: this.#heldRenders > 0 ? (this.#landedWrites || this.#heldRenders) : 0,
+      where: String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/'),
+    })
+  }
+
   private readonly requestRender = (): void => {
+    // Held while the producer's window is open — whatever caused this pass, a
+    // bridge `add` reaches here through `cell:added`, not only synchronize —
+    // and afterwards for as long as that write is still cascading at a
+    // location the participant has not left.
+    const now = Date.now()
+    const cascading = this.#heldRenders > 0
+      && this.#heldAtKey === this.#locationKeyNow()
+      && (now - this.#lastHeldAt) < ShowCellDrone.#CASCADE_QUIET_MS
+    if (this.#quietLanding || cascading) {
+      if (this.#heldRenders === 0) this.#heldAtKey = this.#locationKeyNow()
+      this.#heldRenders++
+      this.#lastHeldAt = now
+      this.#publishHeld()
+      return
+    }
+
+    // Not held: this pass is about to show them whatever landed — either they
+    // acted, or they walked somewhere else. Either way the badge is spent, and
+    // the pass that spends it must actually RUN: the held change is at the same
+    // location, so the unchanged-page fast path would otherwise return having
+    // done nothing and the badge would clear over a surface that never moved.
+    if (this.#heldRenders > 0) {
+      this.#heldRenders = 0
+      this.#landedWrites = 0
+      this.#heldAtKey = null
+      this.#forceNextRender = true
+      this.#publishHeld()
+    }
+
     if (this.rendering) {
       this.renderQueued = true
       return
@@ -2663,7 +2785,14 @@ export class ShowCellDrone extends Drone {
       // with nothing queued behind it. Keep #forceNextRender armed (it is
       // only consumed below, when a pass actually runs) and retry once the
       // active pass / stream has settled.
-      if (this.#forceNextRender) setTimeout(() => this.requestRender(), 50)
+      // ...unless a landing is being held. This retry is an internal
+      // continuation, not a participant asking for a paint, so it must not be
+      // the thing that spends the badge — it used to re-arm itself every 50ms
+      // and paint the moment the quiet window closed, which is the exact
+      // flicker quiet landing exists to prevent. The tap runs the pass.
+      if (this.#forceNextRender && this.#heldRenders === 0) {
+        setTimeout(() => this.requestRender(), 50)
+      }
       return
     }
     this.#forceNextRender = false
@@ -3289,6 +3418,36 @@ export class ShowCellDrone extends Drone {
           }
         }
 
+        // PRUNE MODE — the layer of deleted tiles (history/prune.service.ts).
+        //
+        // Same seam as rewinding, and for the same reason: a layer is just
+        // `{name, children}`, so "the tiles this location threw away" IS a
+        // layer and the entire pipeline below — child-name resolution,
+        // images, layout, hit-testing — works on it unchanged. Nothing here
+        // knows what prune mode is beyond "somebody handed me a different
+        // layer", which is the only way a mode should ever reach a renderer.
+        //
+        // Placed AFTER the rewind branch so scrubbing history while pruning
+        // cannot half-apply: the deleted layer is what you are standing on
+        // until you leave the mode.
+        const pruneService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/PruneService') as
+          { active?: boolean; names?: readonly string[]; layerFor?: (locationSig: string) => LayerContent | null } | undefined
+        let pruneLayerActive = false
+        if (pruneService?.active && pruneService.layerFor) {
+          const prunedLayer = pruneService.layerFor(sig.sig)
+          if (prunedLayer) {
+            content = prunedLayer
+            pruneLayerActive = true
+            union.clear()
+            localCellSet.clear()
+            // These tiles are gone — paint them with the treatment that
+            // already means exactly that (divergence 2, "future-remove").
+            // The mode borrows the existing visual vocabulary rather than
+            // minting a ghost of its own.
+            this.#divergenceFutureRemoves = new Set(pruneService.names ?? [])
+          }
+        }
+
         if (content) {
           // Layer-as-primitive: the layer's children list is the truth at
           // every position (HEAD and REWOUND alike). Cells in OPFS but not
@@ -3332,7 +3491,17 @@ export class ShowCellDrone extends Drone {
           try {
             passLocSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
           } catch { /* leave empty — seed skipped, compute seeds instead */ }
-          if (!parentLayerSig && passLocSig && historyService?.latestMarkerSigFor) {
+          // The prune layer is SYNTHETIC — it was never committed, so it has
+          // no head sig and no children manifest. Leaving parentLayerSig as
+          // the location's real head would key both the manifest and the
+          // complete-child-names memo under a layer that is NOT the one being
+          // rendered: when the deleted set happens to be the same SIZE as the
+          // live set, the memo's size guard passes and the hive paints the
+          // LIVE tiles while standing on the deleted layer (observed with one
+          // ghost and one live tile). An empty sig is the honest answer — no
+          // memo read, no manifest read, no memo write; resolve per child.
+          if (pruneLayerActive) parentLayerSig = ''
+          else if (!parentLayerSig && passLocSig && historyService?.latestMarkerSigFor) {
             try {
               const label = String((lineage as { explorerLabel?: () => string }).explorerLabel?.() ?? '/')
               parentLayerSig = await historyService.latestMarkerSigFor(passLocSig, label) ?? ''
@@ -5189,8 +5358,8 @@ export class ShowCellDrone extends Drone {
     this.listening = true
 
     // respond to processor-emitted synchronize and URL navigation
-    window.addEventListener('synchronize', this.requestRender)
-    window.addEventListener('navigate', this.requestRender)
+    window.addEventListener('synchronize', this.onSynchronize)
+    window.addEventListener('navigate', this.onNavigate)
     // CLICK → TILES, AS ONE NUMBER. Every perf claim about navigation has been
     // argued from reading code; this makes the next one a measurement. One
     // line per navigation, when the first non-empty pass lands.
@@ -5223,6 +5392,32 @@ export class ShowCellDrone extends Drone {
     const lineage = this.resolve<EventTarget>('lineage')
     lineage?.addEventListener('change', this.onLineageChange)
 
+    // ── THE SURFACE COMES BACK ────────────────────────────────────────
+    // Leaving a view puts the participant back on the tiles, and THE
+    // ARRIVAL GATE'S BARGAIN is that the mesh painted under the covered
+    // canvas is sitting there to be revealed with no repaint. That is one
+    // assumption too many. A pass abandoned mid-walk, a view that navigated
+    // before it closed, a takeover that mounted before this drone ever
+    // painted the address — each of them leaves the mesh holding SOMEWHERE
+    // ELSE, or holding nothing, and the reveal is an empty ink field.
+    //
+    // Nothing arrives to fix it, either: closing a view rarely changes the
+    // location, so the pass that would repaint meets the unchanged-page
+    // fast path at the top of renderFromSynchronize and returns having done
+    // nothing. Blank until the participant navigates away and back.
+    //
+    // So the return is TOLD, not assumed: on the change back to the
+    // hexagons, drop a mesh that belongs to another location and FORCE one
+    // paint for where the participant actually stands. Same rule the
+    // hive-visible restore already uses, and just as cheap — one paint per
+    // view close. Read over IoC because ViewMode is a shell service and a
+    // module may never import the shell.
+    const viewMode = get<EventTarget & { addEventListener?: EventTarget['addEventListener'] }>('@hypercomb.social/ViewMode')
+    if (viewMode?.addEventListener) {
+      viewMode.addEventListener('change', this.#onViewModeChange)
+      this.#viewModeSource = viewMode
+    }
+
     // Initial-load kick. When the page boots at a non-root URL (e.g.
     // /dolphin), the Lineage has already settled to that path before
     // ensureListeners runs, so the 'change' event we just hooked never
@@ -5242,6 +5437,33 @@ export class ShowCellDrone extends Drone {
     // layer, so the render trigger has to be explicit. Last-value replay means
     // a snapshot already cached fires this immediately on subscribe.
     this.onEffect('registry:snapshot', () => this.requestRender())
+
+    // ── QUIET LANDING ── see #quietLanding for the whole bargain: the
+    // bridge's write is truth the instant it lands, the repaint is what
+    // waits. This side is a plain on/off — the DEPTH count and the settle
+    // delay that make a burst of twenty writes into ONE window belong to
+    // the producer, which is the only thing that knows a burst is a burst.
+    this.onEffect<{ active?: boolean; writes?: number }>('landing:quiet', (payload) => {
+      this.#quietLanding = payload?.active === true
+      // Carry the producer's tally while the window is OPEN only: the close
+      // emit reports zero, and adopting that would wipe a badge that is
+      // still owed. Cleared by the paint that shows them, not by the burst
+      // ending.
+      const writes = Number(payload?.writes ?? 0)
+      if (this.#quietLanding && writes > 0) this.#landedWrites = writes
+    })
+
+    // The badge was tapped — the participant asked for what landed. The
+    // held change is at the SAME location, so without the force the
+    // unchanged-page fast path returns having done nothing and the tap
+    // does visibly nothing. Guarded on the held count so EffectBus's
+    // last-value replay can't fire a stray forced paint at boot.
+    this.onEffect('landing:apply', () => {
+      if (this.#heldRenders <= 0) return
+      this.#quietLanding = false
+      this.#forceNextRender = true
+      this.requestRender()
+    })
 
     // content:arrived (kind: layer) — LAYER bytes just landed detached from
     // the host/mesh (Store.fetchLayerFromHost, the layer-side self-heal).
@@ -5629,6 +5851,26 @@ export class ShowCellDrone extends Drone {
     // each time. When cursor is at head and a NEW layer arrives (not a cursor
     // move), the incremental cell:added / cell:removed path has already
     // reconciled the view, so we skip to avoid wiping in-flight work.
+    // Prune mode swaps the layer under this location (see the override in
+    // the render pass). Entering, leaving, and every purge change what the
+    // hive is showing, so each one is a repaint — and it has to be a FORCED
+    // one: the location and its revision are both unchanged, so the
+    // unchanged-page fast path at the top of renderFromSynchronize would
+    // otherwise drop the pass before any layer is read (the mode toggled
+    // and the hive kept painting the live tiles).
+    //
+    // The back-nav cells cache is dropped for this location in the same
+    // breath. It is keyed by location alone, so an entry written while the
+    // ghosts were on screen would restore DELETED tiles onto a live page
+    // the next time the participant walked back here.
+    this.onEffect<{ active?: boolean }>('prune:mode-changed', () => {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.cellImageCache.clear()
+      this.#forceNextRender = true
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     this.onEffect<CursorState>('history:cursor-changed', (state) => {
       const nowRewound = state?.rewound ?? false
       const nowPosition = state?.position ?? -1
@@ -5769,16 +6011,6 @@ export class ShowCellDrone extends Drone {
       // flag exists: the in-flight pass gathered its cells before the keyword
       // changed, so its result is already stale. Arming it makes the drop
       // path re-queue instead of swallow.
-      this.#forceNextRender = true
-      this.requestRender()
-    })
-
-    this.onEffect<{ active?: boolean; labels?: readonly string[] }>('filter:view', ({ active, labels }) => {
-      this.#filterViewLabels = active === false
-        ? null
-        : new Set((labels ?? []).map(label => String(label).trim()).filter(Boolean))
-      this.renderedCellsKey = ''
-      this.#layerCellsCache.clear()
       this.#forceNextRender = true
       this.requestRender()
     })
@@ -6678,8 +6910,8 @@ export class ShowCellDrone extends Drone {
   #applyCursorLayout = async (): Promise<void> => { /* no-op under slim layer */ }
 
   protected override dispose = (): void => {
-    window.removeEventListener('synchronize', this.requestRender)
-    window.removeEventListener('navigate', this.requestRender)
+    window.removeEventListener('synchronize', this.onSynchronize)
+    window.removeEventListener('navigate', this.onNavigate)
     window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
     window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
 
@@ -6708,6 +6940,11 @@ export class ShowCellDrone extends Drone {
       const lineage = this.resolve<EventTarget>('lineage')
       lineage?.removeEventListener('change', this.onLineageChange)
       this.lineageChangeListening = false
+    }
+
+    if (this.#viewModeSource) {
+      this.#viewModeSource.removeEventListener('change', this.#onViewModeChange)
+      this.#viewModeSource = null
     }
 
     if (this.#missWindowTimer !== null) {
@@ -7775,10 +8012,6 @@ export class ShowCellDrone extends Drone {
         s.toLowerCase().includes(kw)
         || this.#tagsFor(s).some(t => t.toLowerCase().includes(kw))
       cellNames = cellNames.map(s => s && matches(s) ? s : '')
-    }
-    if (this.#filterViewLabels !== null) {
-      const allowed = this.#filterViewLabels
-      cellNames = cellNames.map(name => name && allowed.has(name) ? name : '')
     }
     return cellNames
   }

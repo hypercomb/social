@@ -1483,10 +1483,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly #renderedCellLabels = signal<readonly string[]>([])
   readonly #tagFilterActive = signal(false)
   readonly #searchFilterActive = signal(false)
-  readonly #viewFilterActive = signal(false)
   /** Is the page showing a narrowed view right now? */
   readonly pageFiltered = computed(() =>
-    this.#tagFilterActive() || this.#searchFilterActive() || this.#viewFilterActive())
+    this.#tagFilterActive() || this.#searchFilterActive())
 
   /** The tiles the navigator may list: the page's surviving tiles while a
    *  filter is on, else every tile in the layer.
@@ -2803,9 +2802,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     }))
     this.#cleanups.push(EffectBus.on<{ keyword?: string }>('search:filter', (p) => {
       this.#searchFilterActive.set(!!(p?.keyword ?? '').trim())
-    }))
-    this.#cleanups.push(EffectBus.on<{ active?: boolean }>('filter:view', (p) => {
-      this.#viewFilterActive.set(p?.active === true)
     }))
 
     // A viewport resize moves the panel's own box (max-width, and fullscreen

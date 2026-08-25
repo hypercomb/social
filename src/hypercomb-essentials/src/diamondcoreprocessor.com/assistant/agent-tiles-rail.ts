@@ -68,7 +68,8 @@
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
-  foldTileConversations, listTileConversations, listTileDrafts, newTileConvoId, tileConvoId, tilePath,
+  HIVE_PATH, foldTileConversations, listGlobalConversations, listTileConversations, listTileDrafts,
+  newTileConvoId, tileConvoId, tilePath, tilePathOf,
   type TileConversation,
 } from './chat-thread.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
@@ -154,6 +155,11 @@ const MAX_ROWS = 500
  *  gesture: whatever the hands learned on the hexagons works in the list. */
 const ENTER_HOLD_MS = 450
 
+/** How long after a hold a trailing click still belongs to that press. Long
+ *  enough for touch to deliver it, short enough that it can never eat a click
+ *  you meant. */
+const SWALLOW_WINDOW_MS = 600
+
 /** A press that wanders this far was a scroll, not a hold. */
 const HOLD_SLOP = 9
 
@@ -162,6 +168,12 @@ const pathKey = (segments: readonly string[]): string => segments.join('\u0000')
 /** The inverse of {@link pathKey} — a row's own key back to its segments, so
  *  the separator is written down exactly once. */
 const keySegments = (key: string): string[] => key.split('\u0000').filter(Boolean)
+
+/** THE HIVE ITSELF, at the top of every level. Its key is the ROOT's key —
+ *  `pathKey([])` — because that is what it is: the location every tile hangs
+ *  under, holding the conversations that are about no single tile. A tile can
+ *  never claim it (a tile has at least one segment). */
+const HIVE_KEY = ''
 
 /** Which chat you were last in, per tile. */
 const STICKY_KEY = 'hc:rail-chat'
@@ -211,6 +223,26 @@ const ensureRailStyles = (): void => {
   scrollbar-color:rgba(${STEEL},0.3) transparent;}
 @keyframes hcRailIn{from{opacity:0;transform:translateX(0.6rem);}to{opacity:1;transform:none;}}
 @keyframes hcRailOut{from{opacity:0;transform:translateX(-0.6rem);}to{opacity:1;transform:none;}}
+/* THE HIVE'S BLOCK. It is not a tile and must never be mistaken for one, so
+   nothing about it is a tile's: a GOLD COMB CELL where a picture would be,
+   the name in the hive's own uppercase letterforms, and a rule under it that
+   says everything below is this page while this is the whole thing. */
+.hc-rail-hive{margin-bottom:0.35rem;padding-bottom:0.3rem;
+  border-bottom:1px solid rgba(${STEEL},0.18);}
+.hc-rail-hive .hc-rail-name{font-family:var(--hc-mono,monospace);font-size:0.78rem;
+  font-weight:600;letter-spacing:0.14em;text-transform:uppercase;
+  color:rgba(${AMBER},0.92);}
+.hc-rail-hive .hc-rail-main{padding-top:0.5rem;padding-bottom:0.5rem;}
+.hc-rail-hive .hc-rail-row:hover{background:rgba(${AMBER},0.08);}
+.hc-rail-hive.current{background:rgba(${AMBER},0.1);
+  box-shadow:inset 0 0 0 1px rgba(${AMBER},0.42);}
+.hc-rail-hive .hc-rail-chat.current{background:rgba(${AMBER},0.14);
+  box-shadow:inset 2px 0 0 rgba(${AMBER},0.9);}
+.hc-rail-hive .hc-rail-chat-new{color:rgba(${AMBER},0.85);}
+/* Its gutter tick is the hive's colour too — the same sentence, said in the
+   one place the eye is already reading state. */
+.hc-rail-hive .hc-rail-row.spoken::before{background:rgba(${AMBER},0.7);}
+
 /* A TILE'S BLOCK — its row, and under it whatever the row has unfolded. The
    lit edge goes here so an open tile is one object, never a box with a list
    loose beneath it. */
@@ -436,8 +468,14 @@ export class AgentTilesRail {
    *  about a tile's own conversations: it can be in three sets and still have
    *  a solo chat about nothing but itself. */
   #grouped = new Set<string>()
-  /** A hold already acted — eat the click that ends the same press. */
-  #swallowClick = false
+  /** A hold already acted — eat the click that ends THE SAME PRESS, and only
+   *  that one. A bare flag stayed armed forever when the click never came:
+   *  going inside re-renders the level, so the element the click was due on
+   *  no longer exists, and the flag then ate the NEXT row click on the page
+   *  you had just walked into — the first thing you clicked in there did
+   *  nothing. A press's trailing click arrives in milliseconds; a window is
+   *  the honest guard. */
+  #swallowUntil = 0
   /** The level changed from the keyboard: put focus on the level that
    *  arrives, or the keyboard is stranded on a row that no longer exists. */
   #focusFirstRow = false
@@ -666,16 +704,24 @@ export class AgentTilesRail {
    *  in hand — then a free chat is the honest answer and the caller mints it.
    */
   newChatOnSubject(): boolean {
+    if (!this.#profile.chats) return false
     const subject = this.#subject
-    if (!subject || !this.#profile.chats) return false
-    const segments = [...subject.path, subject.name]
+    // No tile in hand — or the hive itself is what you are in: the new
+    // conversation is a GLOBAL one, and it lists under the hive's own row.
+    const onHive = !subject || subject.key === HIVE_KEY
+    const segments = onHive ? [] : [...subject.path, subject.name]
+    const key = onHive ? HIVE_KEY : subject.key
     const path = tilePath(segments)
-    if (!path || path === '/') return false
-    const row: RailRow = { name: subject.name, segments, childCount: 0, sig: subject.sig }
+    const row: RailRow = {
+      name: onHive ? this.#t('agent.rail-hive', 'Hypercomb') : subject.name,
+      segments,
+      childCount: 0,
+      sig: onHive ? undefined : subject.sig,
+    }
     const held = this.#chatsFor(path)
     const convoId = held.length ? newTileConvoId(segments) : tileConvoId(segments)
-    this.#expanded.add(subject.key)
-    this.#enterChat(row, subject.key, convoId)
+    this.#expanded.add(key)
+    this.#enterChat(row, key, convoId)
     this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
     return true
   }
@@ -807,6 +853,13 @@ export class AgentTilesRail {
       list.style.animation = `${direction > 0 ? 'hcRailIn' : 'hcRailOut'} 0.18s ease`
     }
 
+    // THE HIVE ITSELF, first and always. Every tile can hold a conversation
+    // and the hive could not — the one place with nothing to hang a global
+    // question on. It sits above the level whatever level you are on, so
+    // "ask about the whole thing" is never somewhere else. Hidden only while
+    // the find box is narrowing the list: it is not one of the matches.
+    if (this.#profile.chats && !this.#query) list.appendChild(this.#hiveGroup())
+
     if (rows === null) {
       for (let i = 0; i < 4; i++) {
         const skeleton = document.createElement('div')
@@ -894,7 +947,7 @@ export class AgentTilesRail {
       main.addEventListener('click', event => {
         // The hold already went in; the click that ends it must not also
         // drag the conversation to the row we just left.
-        if (this.#swallowClick) { this.#swallowClick = false; return }
+        if (performance.now() < this.#swallowUntil) { this.#swallowUntil = 0; return }
         if ((event.ctrlKey || event.metaKey) && this.#profile.choose) this.#toggleChosen(wrap, key, row)
         else this.#enter(wrap, key, row)
       })
@@ -1027,7 +1080,7 @@ export class AgentTilesRail {
         stop()
         // Swallow the click this press will end with — on touch it arrives
         // after the hold has already moved the list.
-        this.#swallowClick = true
+        this.#swallowUntil = performance.now() + SWALLOW_WINDOW_MS
         this.#drill(row.segments)
       }, ENTER_HOLD_MS)
     })
@@ -1040,10 +1093,13 @@ export class AgentTilesRail {
     }
   }
 
-  /** Fold a tile's conversations open or shut. */
+  /** Fold a tile's conversations open or shut. ONE AT A TIME: opening one
+   *  shuts the rest, so the level is always a list of tiles with at most one
+   *  of them showing its threads. Six open folds is not a list any more. */
   #toggleChats(key: string, row: RailRow): void {
-    if (this.#expanded.has(key)) this.#expanded.delete(key)
-    else this.#expanded.add(key)
+    const wasOpen = this.#expanded.has(key)
+    this.#expanded.clear()
+    if (!wasOpen) this.#expanded.add(key)
     this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
   }
 
@@ -1053,10 +1109,76 @@ export class AgentTilesRail {
     if (!list) return
     for (const panel of list.querySelectorAll<HTMLElement>('.hc-rail-chats')) {
       const key = panel.dataset['key'] ?? ''
+      if (key === HIVE_KEY) { panel.replaceWith(this.#chatsPanel(key, this.#hiveRow())); continue }
       const rows = this.#levels.get(pathKey(this.#here())) ?? []
       const row = rows.find(candidate => pathKey(candidate.segments) === key)
       if (row) panel.replaceWith(this.#chatsPanel(key, row))
     }
+  }
+
+  /** THE HIVE'S ROW — one block at the top, drawn as itself: a gold comb cell
+   *  instead of a tile's picture, its name in the hive's own letterforms, and
+   *  a rule under it separating what is GLOBAL from what is on this page.
+   *  Same fold, same "+ New conversation" as any tile; what hangs under it is
+   *  every conversation that is about the hive rather than one tile in it. */
+  #hiveRow(): RailRow {
+    return { name: this.#t('agent.rail-hive', 'Hypercomb'), segments: [], childCount: 0 }
+  }
+
+  #hiveGroup(): HTMLElement {
+    const row = this.#hiveRow()
+    const name = row.name
+    const current = this.#subject?.key === HIVE_KEY
+
+    const group = document.createElement('div')
+    group.className = 'hc-rail-group hc-rail-hive'
+    group.dataset['key'] = HIVE_KEY
+    group.classList.toggle('current', current)
+
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-rail-row'
+    wrap.dataset['key'] = HIVE_KEY
+    wrap.setAttribute('role', 'listitem')
+    wrap.classList.toggle('current', current)
+
+    const main = document.createElement('button')
+    main.type = 'button'
+    main.className = 'hc-rail-main'
+    const hint = this.#t('agent.rail-hive-hint', 'Conversations about the whole hive')
+    main.title = hint
+    if (current) main.setAttribute('aria-current', 'true')
+
+    // NO MARK OF ITS OWN. A comb cell here sat beside the gutter's unread
+    // cell — two hexagons in a row, one meaning "this is the hive" and one
+    // meaning "something is unread", and nothing to tell them apart. The
+    // gutter keeps the shape (it is the vocabulary of STATE everywhere in
+    // this list) and the hive is named instead: amber, uppercase, over a
+    // rule. Identity in the letterforms, state in the hexagon.
+    const label = document.createElement('span')
+    label.className = 'hc-rail-name'
+    label.textContent = name
+    main.append(label)
+    main.addEventListener('click', event => {
+      event.stopPropagation()
+      this.#enterChat(row, HIVE_KEY, this.#stickyChat(tilePath([])) || tileConvoId([]))
+    })
+
+    const chevron = document.createElement('button')
+    chevron.type = 'button'
+    chevron.className = 'hc-rail-chev'
+    chevron.textContent = '›'
+    chevron.title = hint
+    chevron.setAttribute('aria-label', hint)
+    chevron.setAttribute('aria-expanded', this.#expanded.has(HIVE_KEY) ? 'true' : 'false')
+    chevron.addEventListener('click', event => {
+      event.stopPropagation()
+      this.#toggleChats(HIVE_KEY, row)
+    })
+
+    wrap.append(main, chevron)
+    group.appendChild(wrap)
+    if (this.#expanded.has(HIVE_KEY)) group.appendChild(this.#chatsPanel(HIVE_KEY, row))
+    return group
   }
 
   /** THE TILE'S CONVERSATIONS. Every thread that names this tile, newest
@@ -1111,7 +1233,13 @@ export class AgentTilesRail {
       event.stopPropagation()
       // The FIRST chat on a tile is the derived id — no suffix, no
       // bookkeeping. Only a second one needs minting.
-      const id = chats.length ? newTileConvoId(row.segments) : tileConvoId(row.segments)
+      //
+      // Counted at CLICK time, never from the list this panel was drawn
+      // with: a panel that was replaced under you (a chat landing, a level
+      // repaint) leaves a button whose idea of "how many" is one render old,
+      // and minting the derived id twice silently hands you the same thread.
+      const held = this.#chatsFor(path)
+      const id = held.length ? newTileConvoId(row.segments) : tileConvoId(row.segments)
       this.#enterChat(row, key, id)
     })
     panel.appendChild(fresh)
@@ -1122,13 +1250,26 @@ export class AgentTilesRail {
    *  chat so coming back resumes it. */
   #enterChat(row: RailRow, key: string, convoId: string): void {
     const path = tilePath(row.segments)
+    // The conversation you are IN is always a row you can see — including a
+    // tile's first one, which the threads pool cannot know about until
+    // something is said in it.
+    //
+    // ONE FOLD AT A TIME. Entering a conversation shuts every other tile's
+    // list: you are in one thread, the rail should show one tile's threads,
+    // and a column of half a dozen open folds is a list you have to read
+    // rather than scan. The arrow still opens a tile without entering it.
     this.#pending.add(convoId)
+    this.#expanded.clear()
+    this.#expanded.add(key)
     this.#rememberChat(path, convoId)
     const wrap = this.#list?.querySelector<HTMLElement>(`.hc-rail-row[data-key="${CSS.escape(key)}"]`)
     if (wrap) this.#markCurrent(wrap)
     this.#subject = { key, path: row.segments.slice(0, -1), name: row.name, sig: row.sig, convoId }
     this.onSubjectChanged(this.#subject)
-    this.#repaintExpanded()
+    // A fold that is already drawn repaints in place; one that has never been
+    // opened has to be drawn, and only a level pass can do that.
+    if (this.#list?.querySelector(`.hc-rail-chats[data-key="${CSS.escape(key)}"]`)) this.#repaintExpanded()
+    else this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
   }
 
   /** Choose or release a row as CONTEXT. Independent of the conversation you
@@ -1159,12 +1300,11 @@ export class AgentTilesRail {
       this.onSubjectChanged(this.#subject)
       return
     }
+    // Clicking a row is entering one of its conversations, so it UNFOLDS —
+    // the sticky one you land in is lit, and the rest of the tile's threads
+    // are there without a second gesture at the arrow.
     const path = tilePath(row.segments)
-    const convoId = this.#stickyChat(path) || tileConvoId(row.segments)
-    this.#rememberChat(path, convoId)
-    this.#subject = { key, path: row.segments.slice(0, -1), name: row.name, sig: row.sig, convoId }
-    this.onSubjectChanged(this.#subject)
-    this.#repaintExpanded()
+    this.#enterChat(row, key, this.#stickyChat(path) || tileConvoId(row.segments))
   }
 
   /** Light exactly one row as the conversation in hand — in colour AND in the
@@ -1196,7 +1336,16 @@ export class AgentTilesRail {
   /** Which tiles hold a conversation at all, and whether it has been read. */
   async #refreshChats(): Promise<void> {
     let chats: TileConversation[] = []
-    try { chats = await listTileConversations() } catch { return }
+    try {
+      // Two walks, one list: the tiles' threads, and the hive's own — which
+      // includes every free-floating chat ever minted, now that there is a
+      // row that can show them. Deduped by id, because a conversation at the
+      // root satisfies both descriptions.
+      const [tiles, global] = await Promise.all([listTileConversations(), listGlobalConversations()])
+      const byId = new Map<string, TileConversation>()
+      for (const chat of [...tiles, ...global]) byId.set(chat.convoId, chat)
+      chats = [...byId.values()]
+    } catch { return }
     if (this.#disposed) return
     this.#chatList = chats
     this.#chats = foldTileConversations(chats)
@@ -1214,7 +1363,7 @@ export class AgentTilesRail {
     const known = new Set(held.map(chat => chat.convoId))
     const fresh: TileConversation[] = []
     for (const convoId of this.#pending) {
-      if (known.has(convoId) || tilePath(keySegments(convoId)) !== path) continue
+      if (known.has(convoId) || (tilePathOf(convoId) || HIVE_PATH) !== path) continue
       fresh.push({ path, convoId, title: '', turns: 0, lastAt: 0, unread: false })
     }
     return [...fresh, ...held]

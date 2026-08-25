@@ -1,0 +1,67 @@
+{
+  "layer": {
+    "before": {
+      "cls": "features-row off view",
+      "checked": "false",
+      "bulb": "feat-bulb",
+      "busy": null,
+      "label": "Brief /brief"
+    },
+    "after": {
+      "cls": "features-row view lit",
+      "checked": "true",
+      "bulb": "feat-bulb on",
+      "busy": null,
+      "label": "Brief /brief"
+    },
+    "firstChange": 134,
+    "lastChange": 134,
+    "frames": [
+      {
+        "at": 134,
+        "cls": "features-row view lit",
+        "bulb": "feat-bulb on",
+        "checked": "true",
+        "busy": null
+      }
+    ]
+  },
+  "impatient": {
+    "start": {
+      "cls": "features-row view off",
+      "checked": "false"
+    },
+    "end": {
+      "cls": "features-row view lit",
+      "checked": "true"
+    },
+    "elapsed": 6398
+  },
+  "pool": {
+    "before": {
+      "cls": "features-row lit",
+      "checked": "true",
+      "bulb": "feat-bulb on",
+      "busy": null,
+      "label": "Atlas /atlas"
+    },
+    "after": {
+      "cls": "features-row off",
+      "checked": "false",
+      "bulb": "feat-bulb",
+      "busy": null,
+      "label": "Atlas /atlas"
+    },
+    "firstChange": 134,
+    "lastChange": 134,
+    "frames": [
+      {
+        "at": 134,
+        "cls": "features-row off",
+        "bulb": "feat-bulb",
+        "checked": "false",
+        "busy": null
+      }
+    ]
+  }
+}

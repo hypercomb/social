@@ -63,7 +63,7 @@ export interface UtteranceReading {
  *  "spotlight the snacks AND record" discards the 'and'. Anywhere else they
  *  are ordinary argument words ("meeting with sam and ana" keeps its 'and').
  *  English seed; the words phase (words.* catalogs) will localize this. */
-const CONNECTIVES = new Set(['and', 'then', 'also', 'plus'])
+export const CONNECTIVES = new Set(['and', 'then', 'also', 'plus'])
 
 interface Token { start: number; end: number; text: string; lower: string }
 

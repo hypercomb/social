@@ -30,6 +30,21 @@
         </div>
       </div>
       <div class="top-bar-right">
+        <div class="search-control">
+          <svg class="search-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.3-4.3"/></svg>
+          <input type="search" class="search-input"
+            [value]="searchTerm()"
+            (input)="setSearchTerm($any($event.target).value)"
+            [attr.aria-label]="'dcp.search' | t"
+            [placeholder]="'dcp.search' | t" />
+          @if (searchTerm()) {
+            <button type="button" class="search-clear" (click)="setSearchTerm('')"
+              [attr.aria-label]="'dcp.search-clear' | t">×</button>
+          }
+        </div>
+
+        <span class="vsep"></span>
+
         @if (!advancedView()) {
           <!-- THE one switch: which of the two things the list holds. -->
           <div class="scope-control" role="group" [attr.aria-label]="'dcp.list' | t">

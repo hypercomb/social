@@ -96,7 +96,19 @@ const SIDE_EFFECT_SUFFIXES = [
 // Module-level side-effect patterns — files containing any of these at
 // module scope self-register or wire global listeners on first import.
 // `EffectBus.on<T>(` and `register<T>(` allow an optional TS type argument.
-const SIDE_EFFECT_PATTERN = /^[ \t]*(register(?:<[^>]*>)?\(|window\.ioc\.register\(|EffectBus\.on(?:<[^>]*>)?\()/m
+//
+// The `?.` forms are NOT optional to match. A module that registers
+// boot-order-safely — `window.ioc?.register?.(…)`, the form recommended after
+// a bare register took the dev shell down — is exactly as much a side-effect
+// module as one that registers bare, but it used to read as none: the regex
+// knew only `window.ioc.register(`, so the file was dropped from the barrel
+// on the next regeneration and its registration silently stopped happening.
+// That is how the whole Common Tongue reader (utterance-reader.ts, which
+// matches no naming suffix either) went dead between two unrelated commits.
+// Defence in depth against a repeat: the barrel's own generation is now the
+// only thing that has to be right, and it recognises both spellings.
+const SIDE_EFFECT_PATTERN =
+  /^[ \t]*(register(?:<[^>]*>)?\(|window\.ioc\??\.register(?:\?\.)?\(|EffectBus\.on(?:<[^>]*>)?\()/m
 
 const hasSideEffectBySuffix = (f: string): boolean =>
   SIDE_EFFECT_SUFFIXES.some(suffix => f.endsWith(suffix))

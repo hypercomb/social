@@ -408,38 +408,6 @@ tutorialLessons.register({
   },
 })
 
-// ── 90 · the filters window ────────────────────────────────────────────
-
-tutorialLessons.register({
-  id: 'window-filters',
-  level: L,
-  order: 90,
-  title: 'The filters window',
-  pheromones: ['tutorial', 'lesson', 'expert', 'meaning', 'view'],
-  requires: () => hasWindow('hc-filter-configurations'),
-  async run(stage) {
-    await subjects(stage, 2, names(stage), 24)
-
-    await stage.flyToRect(stage.commandInput())
-    await stage.say('filters-window', 'Filters you keep',
-      'Typing ? filters once. This window is where a filter becomes something you KEEP — named, saved, and reopened whenever you want that view of your hive back.')
-    stage.highlight(null)
-
-    // The window opens the moment a line ENTERS filter mode — but only from the
-    // command line's own DOM `valueChange`, which a scripted prefill does not
-    // raise. So the lesson used to narrate a window that never appeared while
-    // quietly creating a tile named "practice". `showFilter` raises the two
-    // effects filter mode raises, and nothing is submitted.
-    await showFilter(stage, PRACTICE_MARK, { openWindow: true })
-    await stage.wait(1600)
-    await stage.say('filters-window-done', 'A lens, still',
-      'Saved or not, a filter never changes a single tile — it decides what you are looking at. /clear puts everything back, and the saved one is still there for next time.')
-    await stage.typeAndSubmit('/clear', false)
-    stage.emit('swarm:filter-view-close', {})
-    await stage.wait(700)
-  },
-})
-
 // ── 100 · the clipboard window ─────────────────────────────────────────
 
 tutorialLessons.register({
