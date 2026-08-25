@@ -25,7 +25,7 @@ import type {
   ShortcutGroup,
   ShortcutSheetState,
   SlashCommandEntry,
-} from '@hypercomb/essentials/diamondcoreprocessor.com/commands/shortcut-sheet.drone'
+} from '@hypercomb/core'
 
 @Component({
   selector: 'hc-shortcut-sheet',

@@ -148,9 +148,8 @@ export class PixiHostWorker extends Worker {
     if (document.querySelector('[data-hypercomb-pixi="root"] canvas')) return false
 
     const settings = this.resolve<any>('settings')
-    const host = document.getElementById('pixi-host') as HTMLDivElement | null
 
-    return !!settings && !!host
+    return !!settings
   }
 
   protected override act = async (): Promise<void> => {
@@ -167,8 +166,18 @@ export class PixiHostWorker extends Worker {
     // dom root (single, inert)
     // -------------------------------------------------
 
-    const host = this.host = document.getElementById('pixi-host') as HTMLDivElement
-    if (!host) return
+    // The renderer OWNS its DOM contract: #pixi-host is minted here when
+    // absent, so no shell template has to carry the node (global
+    // `#pixi-host` CSS rules are body-descendant selectors and reach a
+    // minted node the same as a template one). An existing node is adopted
+    // unchanged — legacy shells, and re-acts, land in the same place.
+    const host = this.host = (document.getElementById('pixi-host')
+      ?? (() => {
+        const el = document.createElement('div')
+        el.id = 'pixi-host'
+        document.body.appendChild(el)
+        return el
+      })()) as HTMLDivElement
     host.dataset['hypercombPixi'] = 'root'
     host.style.position = 'fixed'
     host.style.inset = '0'

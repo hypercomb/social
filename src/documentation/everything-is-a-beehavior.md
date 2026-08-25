@@ -170,23 +170,25 @@ Progress is measured by three numbers, all of which may only shrink:
 Before moving anything, make drift impossible — the doctrine-ratchet pattern
 (`doctrine.spec.ts`), applied to the shrink itself.
 
-- [ ] **Ratchet the shell IoC census.** New ratchet: enumerate every
-  `register('@…')` in shared/shell against a frozen allowlist of the current
-  ~52 keys. May only shrink; every Phase 1–3 item deletes its line.
-- [ ] **Fix the two compile-time shared→essentials leaks** (reach via IoC
-  instead): `hypercomb-shared/ui/shortcut-sheet/shortcut-sheet.component.ts:28`
-  and `hypercomb-shared/ui/youtube-viewer/youtube-viewer.component.ts:15-16`.
-- [ ] **Put `#pixi-host` under doctrine.** It is the most load-bearing
-  template node and invisible to the tag ratchet (an `id`, not an element).
-  Best fix: `pixi-host.worker.ts` (essentials) mints the node when absent;
-  delete the div from both `app.html` files. The renderer's DOM contract
-  becomes behavior-owned.
-- [ ] **Turn ScriptPreloader's render-critical key list into data.** It
-  hardcodes essentials knowledge (`PixiHostWorker`, `Settings`,
-  `AxialService`, `LayoutService`, `ShowCellDrone`, `BackgroundDrone`) —
-  the shim must not know module names. Move the "what must register before
-  first pulse" set into the install manifest (or a colon-named pool record),
-  authored at build time by the module build.
+- [x] **Ratchet the shell IoC census.** `doctrine.spec.ts` "shell-side IoC
+  registrations may only shrink" — 54 frozen entries (literal keys, `*KEY`
+  constants, and interpolated templates, each with its file). Every
+  Phase 1–3 item deletes its line.
+- [x] **Fix the two compile-time shared→essentials leaks.** Both utilities
+  migrated DOWN to core (`core/link-utilities.ts`: `openExternalLink` +
+  `parseYouTubeVideoId`; `core/shortcut-sheet.types.ts`: the sheet's data
+  contract) with essentials re-exporting for existing call sites. Zero
+  `@hypercomb/essentials` imports remain in shared.
+- [x] **Put `#pixi-host` under doctrine.** `pixi-host.worker.ts` mints the
+  node onto `<body>` when absent; the div is gone from both `app.html`
+  files, and the template ratchet now asserts `id="pixi-host"` never
+  returns. The renderer owns its DOM contract.
+- [x] **Turn ScriptPreloader's render-critical key list into data.**
+  Authored in `hypercomb-essentials/src/render-critical.json` → stamped by
+  the module build into `manifest.renderCriticalKeys` → read from the
+  cached install manifest. The sentinel resync carries the set forward;
+  an empty answer un-gates first paint (dev) and never erases the
+  learned-sig cache (legacy clients). The shim carries no module names.
 
 ## Phase 1 — shared/core data layer moves down (~9,000 LOC, mostly as-is)
 

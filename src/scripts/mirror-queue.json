@@ -1656,6 +1656,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "everything-is-a-beehavior-phase-0",
+      "title": "Mirror Phase 0 of the shrink campaign: guardrails tiles under the campaign collection — census ratchet, leak fixes, pixi-host minting, render-critical-as-data — notes carrying what each ratchet forbids",
+      "run": null,
+      "note": "Code on branch worktree-everything-is-a-beehavior; extend the campaign collection from the plan mirror. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }

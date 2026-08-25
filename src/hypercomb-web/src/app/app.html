@@ -5,16 +5,13 @@
 </div>
 }
 <router-outlet></router-outlet>
-<!-- Pixi canvas hosts the hexagon surface. The pixi worker REPARENTS this node
-     to <body> (position:fixed, z-index:59989, pointer-events:none) at boot, so
-     Angular `:host > #pixi-host` CSS can't reach it. It is hidden in website
+<!-- The Pixi canvas host (#pixi-host) is NOT a template node: the pixi worker
+     MINTS it onto <body> (position:fixed, z-index:59989, pointer-events:none)
+     at boot — the renderer owns its own DOM contract. It is hidden in website
      mode by the GLOBAL `body.hc-view-website #pixi-host{,canvas}` rule in
-     styles.scss — a body-descendant selector DOES reach the reparented node —
-     using visibility (NOT display:none, which collapses it to 0×0 and corrupts
-     scale/zoom) plus pointer-events:none on the <canvas> (whose Pixi-set
-     pointer-events:auto otherwise EATS website clicks at z 59989, one above the
-     site overlay's 59988). Single source of truth — see styles.scss. -->
-<div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+     styles.scss (body-descendant selectors reach the minted node) using
+     visibility (NOT display:none, which collapses it to 0×0 and corrupts
+     scale/zoom) plus pointer-events:none on the <canvas>. -->
 <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
 <div class="update-status-dock">
   <hc-upgrade-indicator></hc-upgrade-indicator>

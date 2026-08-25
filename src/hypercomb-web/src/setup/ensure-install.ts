@@ -46,6 +46,10 @@ type InstallManifest = {
   beeDeps?: Record<string, string[]>
   dependenciesBag?: string
   beesBag?: string
+  // Render-critical IoC keys, stamped by the module build (data, not code):
+  // ScriptPreloader gates first paint on these. Absent on pre-field
+  // manifests → the preloader un-gates and keeps its learned-sig cache.
+  renderCriticalKeys?: string[]
   // Sidecar branch metadata (does not affect packageSig). Ignored at install.
   label?: string
   at?: string
@@ -403,6 +407,7 @@ type BundledPackage = {
   // that URL shape). Absent for older bundles.
   dependenciesBag?: string
   beesBag?: string
+  renderCriticalKeys?: string[]
   // Sidecar branch metadata (does not affect packageSig). Ignored at install.
   label?: string
   at?: string
@@ -413,7 +418,7 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
     const res = await fetch('/content/manifest.json', { cache: 'no-store' })
     if (!res.ok) return null
-    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string; label?: string; at?: string; previous?: string | null }> }
+    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string; renderCriticalKeys?: string[]; label?: string; at?: string; previous?: string | null }> }
     const sig = Object.keys(content.packages ?? {})[0]
     if (!sig) return null
     const pkg = content.packages![sig]
@@ -425,6 +430,7 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
       beeDeps: pkg.beeDeps,
       dependenciesBag: pkg.dependenciesBag,
       beesBag: pkg.beesBag,
+      renderCriticalKeys: pkg.renderCriticalKeys,
       // Sidecar branch metadata — carried through so the post-boot update
       // check can hand the installer the version's walkback link + label.
       label: pkg.label,
@@ -607,6 +613,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     beeDeps: bundled.beeDeps,
     dependenciesBag: bundled.dependenciesBag,
     beesBag: bundled.beesBag,
+    renderCriticalKeys: bundled.renderCriticalKeys,
     // Came from the shell's bundled package → the bundle IS this install's
     // update authority (checkForUpdate compares against it).
     source: 'bundled' as const,
@@ -816,6 +823,10 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
     beeDeps,
     dependenciesBag: undefined,
     beesBag: priorManifest?.beesBag,
+    // The DCP union carries no manifest.json, so the render-critical set is
+    // CARRIED FORWARD from the prior install — a resync must not blank the
+    // first-paint gate.
+    renderCriticalKeys: priorManifest?.renderCriticalKeys,
     // DCP logical union → DCP is this install's update authority, NOT the shell
     // bundle. checkForUpdate uses this to suppress phantom bundle-drift updates.
     source: 'sentinel' as const,

@@ -35,27 +35,12 @@
 const EXTERNAL = /^(https?:|mailto:|tel:)/i
 const INERT = /^(data:|blob:|javascript:|resource:)/i
 
-type NativeInvoke = (command: string, args: Record<string, unknown>) => Promise<unknown>
+// The policy helper itself lives in core (link-utilities.ts) so shell
+// chrome can share it without importing a module; re-exported here for
+// this domain's call sites.
+import { openExternalLink } from '@hypercomb/core'
 
-const nativeInvoke = (): NativeInvoke | null => {
-  const invoke = (globalThis as { __TAURI__?: { core?: { invoke?: NativeInvoke } } })
-    .__TAURI__?.core?.invoke
-  return typeof invoke === 'function' ? invoke : null
-}
-
-/** Open a link OUTSIDE the hive — the OS browser natively, a new tab on the
- *  web. Never the shell's own document, on either. */
-export function openExternalLink(href: string): void {
-  const invoke = nativeInvoke()
-  if (invoke) {
-    // The host validates the scheme again before it reaches the OS; this
-    // side keeps the failure visible rather than silent.
-    void Promise.resolve(invoke('open_external', { url: href })).catch(err =>
-      console.warn('[document-view] host could not open', href, err))
-    return
-  }
-  window.open(href, '_blank', 'noopener,noreferrer')
-}
+export { openExternalLink }
 
 /** A contents/rail entry. A button, not an anchor, precisely because an
  *  anchor would have to carry an href to look like one. */

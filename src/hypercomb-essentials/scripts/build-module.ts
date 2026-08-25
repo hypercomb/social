@@ -1187,6 +1187,14 @@ const main = async (): Promise<void> => {
   // defeat the skip-write below. deploy-azure.ps1 sets `at` + `previous` +
   // `generation` (the version counter) against the remote manifest at deploy
   // time; `label` stays this short genesis name.)
+  // Render-critical keys ride the manifest as DATA (same non-identity
+  // category as label/bags): the shell's ScriptPreloader gates first paint
+  // on whatever the installed package declares, and carries no module
+  // names of its own. Authored in src/render-critical.json.
+  const renderCriticalKeys = (JSON.parse(
+    readFileSync(resolve(PROJECT_ROOT, 'src', 'render-critical.json'), 'utf8'),
+  ) as { keys: string[] }).keys
+
   const packageEntry = {
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
@@ -1194,6 +1202,7 @@ const main = async (): Promise<void> => {
     beeDeps: Object.fromEntries(beeDepsMap),
     dependenciesBag,
     beesBag,
+    renderCriticalKeys,
     label: resolveGenesisLabel(),
     previous: null as string | null,
   }

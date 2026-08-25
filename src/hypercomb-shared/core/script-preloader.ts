@@ -16,26 +16,30 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // SHA-256 of canonical JSON: [] → 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
   static readonly #EMPTY_SIGS: readonly string[] = Object.freeze([])
 
-  // Render-critical IoC keys. find() resolves as soon as every key here
-  // is registered; remaining bees keep loading in background. This is the
-  // minimum set required to paint the first hive frame: Pixi host, hex
-  // math, layout solver, the cell renderer, and its prerequisites.
+  // Render-critical IoC keys — DATA, not code. find() resolves as soon as
+  // every key is registered; remaining bees keep loading in background.
+  // The set is authored by the module build
+  // (hypercomb-essentials/src/render-critical.json → the manifest's
+  // renderCriticalKeys) and read from the cached install manifest, so the
+  // shim carries no module names of its own — what gates first paint is
+  // whatever the INSTALLED package declares.
   //
-  // Keep this list small — every entry blocks first paint. If a drone
-  // belongs here, it should be because the visible grid genuinely cannot
-  // render without it. Anything tile-action / overlay / network / history
-  // related does NOT belong here.
-  static readonly #RENDER_CRITICAL_KEYS: readonly string[] = Object.freeze([
-    '@diamondcoreprocessor.com/PixiHostWorker',
-    '@diamondcoreprocessor.com/Settings',
-    '@diamondcoreprocessor.com/AxialService',
-    '@diamondcoreprocessor.com/LayoutService',
-    '@diamondcoreprocessor.com/ShowCellDrone',
-    // Hot-reloaded class name in dev shell (esbuild collision-rename adds
-    // a `_` prefix). Production sees the un-prefixed form.
-    '@diamondcoreprocessor.com/_ShowCellDrone',
-    '@diamondcoreprocessor.com/BackgroundDrone',
-  ])
+  // An empty answer (dev shell with no install manifest, or a
+  // pre-renderCriticalKeys manifest) simply un-gates first paint: in dev
+  // every bee is registered by direct import before the first act(''), and
+  // a legacy web client still has the learned-sig fast path below.
+  static #renderCriticalKeys(): readonly string[] {
+    try {
+      // MANIFEST_KEY in hypercomb-web/src/setup/ensure-install.ts — the
+      // normalized install manifest both install paths persist.
+      const raw = localStorage.getItem('core-adapter.installed-manifest')
+      if (!raw) return []
+      const keys = (JSON.parse(raw) as { renderCriticalKeys?: unknown }).renderCriticalKeys
+      return Array.isArray(keys)
+        ? keys.filter((k): k is string => typeof k === 'string')
+        : []
+    } catch { return [] }
+  }
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
 
@@ -404,7 +408,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // ── COLD PATH (no cache yet) ─────────────────────────────────
     const allLoads = pending.map(sig => this.#loadBeeBySignature(sig))
 
-    const critical = ScriptPreloader.#RENDER_CRITICAL_KEYS
+    const critical = ScriptPreloader.#renderCriticalKeys()
     const tCriticalStart = performance.now()
     const criticalReady = new Promise<void>(resolve => {
       const stillNeeded = new Set<string>(critical)
@@ -483,8 +487,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  module-boundary because esbuild keeps the class name. */
   static #updateLearnedCriticalSigs(beeCache: Map<string, Bee>): void {
     try {
+      const criticalKeys = ScriptPreloader.#renderCriticalKeys()
+      // No data (pre-renderCriticalKeys manifest) — writing [] here would
+      // erase a legacy client's learned fast path. Keep what it has.
+      if (criticalKeys.length === 0) return
       const criticalClassNames = new Set<string>()
-      for (const key of ScriptPreloader.#RENDER_CRITICAL_KEYS) {
+      for (const key of criticalKeys) {
         const className = key.split('/').pop()
         if (className) criticalClassNames.add(className)
       }

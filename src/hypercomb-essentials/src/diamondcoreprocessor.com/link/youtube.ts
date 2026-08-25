@@ -1,42 +1,13 @@
 // diamondcoreprocessor.com/link/youtube.ts
 // Pure YouTube URL parsing utilities — no class, no IoC.
+//
+// The ID parser itself lives in core (link-utilities.ts) so shell chrome
+// can share it without importing a module; re-exported here for this
+// domain's call sites.
 
-/**
- * Extract a YouTube video ID from common URL formats.
- * Handles: youtu.be/{id}, youtube.com/watch?v={id}, /embed/{id}, /shorts/{id}
- * Returns null if the URL is not a recognised YouTube link or the ID is invalid.
- */
-export function parseYouTubeVideoId(link: string): string | null {
-  let url: URL
-  try {
-    url = new URL(link)
-  } catch {
-    return null
-  }
+import { parseYouTubeVideoId } from '@hypercomb/core'
 
-  const host = url.hostname.toLowerCase()
-  let videoId: string | null = null
-
-  if (host === 'youtu.be') {
-    videoId = url.pathname.split('/').filter(Boolean)[0] || null
-  }
-
-  if (!videoId && host.includes('youtube.com')) {
-    if (url.pathname === '/watch') {
-      videoId = url.searchParams.get('v')
-    } else if (url.pathname.startsWith('/embed/')) {
-      videoId = url.pathname.split('/')[2] || null
-    } else if (url.pathname.startsWith('/shorts/')) {
-      videoId = url.pathname.split('/')[2] || null
-    }
-  }
-
-  if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
-    return null
-  }
-
-  return videoId
-}
+export { parseYouTubeVideoId }
 
 /**
  * The open-graph card a dropped YouTube link carries: what the video calls

@@ -11,9 +11,7 @@
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, HostListener, signal } from '@angular/core'
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser'
-import { EffectBus } from '@hypercomb/core'
-import { parseYouTubeVideoId } from '@hypercomb/essentials/diamondcoreprocessor.com/link/youtube'
-import { openExternalLink } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/document-view-links'
+import { EffectBus, openExternalLink, parseYouTubeVideoId } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
 

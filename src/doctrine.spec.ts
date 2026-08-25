@@ -163,7 +163,113 @@ describe('doctrine ratchets', () => {
         [...html.matchAll(/<([a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s>]/g)].map(m => m[1]),
       )].sort()
       assertRatchet(tags, allowed, `template surface (${file})`)
+      // #pixi-host is an id, invisible to the tag scan above — and it was the
+      // single most load-bearing template node. The renderer MINTS it now
+      // (pixi-host.worker.ts creates the node on <body> when absent), so no
+      // template may reintroduce a <div id="pixi-host"> DOM contract.
+      expect(
+        /id\s*=\s*["']pixi-host["']/.test(html),
+        `${file}: #pixi-host is minted by the pixi worker — never a template node`,
+      ).toBe(false)
     }
+  })
+
+  it('shell-side IoC registrations may only shrink — every entry here is migration debt', () => {
+    // The everything-is-a-beehavior campaign
+    // (documentation/everything-is-a-beehavior.md): implementations bees
+    // reach through IoC should live in signature-addressed modules, not in
+    // shared/shell code compiled into the shim. This census freezes every
+    // IoC registration made from hypercomb-shared and the two shells.
+    // Migrating a service down to essentials removes its entry (the ratchet
+    // clicks tight); adding a NEW shell-side registration is drift — put the
+    // implementation in a module instead.
+    //
+    // Three registration shapes are counted: string-literal keys (only
+    // IoC-shaped ones — containing '@' or ':' — so serviceWorker.register
+    // URLs don't trip it), ALL-CAPS *KEY constants, and template literals
+    // with interpolation (recorded by their raw source text). A
+    // registration this scan cannot see is a registration a reader cannot
+    // grep either — keep keys literal or *KEY-constant.
+    const SHELL_DIRS = ['hypercomb-shared', 'hypercomb-web/src', 'hypercomb-dev/src']
+    const LITERAL = /\bregister\s*\(\s*['"]([^'"]+)['"]/g
+    const BACKTICK = /\bregister\s*\(\s*`([^`$]+)`/g
+    const CONSTANT = /\bregister\s*\(\s*([A-Z][A-Z0-9_]*KEY)\b/g
+    const TEMPLATE = /\bregister\s*\(\s*(`[^`]*\$\{[^`]*`)/g
+
+    const found: string[] = []
+    for (const dir of SHELL_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const rel = relative(ROOT, file).replace(/\\/g, '/')
+        const code = stripComments(readFileSync(file, 'utf8'))
+        for (const m of code.matchAll(LITERAL)) {
+          if (m[1].includes('@') || m[1].includes(':')) found.push(`${m[1]} (${rel})`)
+        }
+        for (const m of code.matchAll(BACKTICK)) {
+          if (m[1].includes('@') || m[1].includes(':')) found.push(`${m[1]} (${rel})`)
+        }
+        for (const m of code.matchAll(CONSTANT)) found.push(`${m[1]} (${rel})`)
+        for (const m of code.matchAll(TEMPLATE)) found.push(`${m[1]} (${rel})`)
+      }
+    }
+
+    assertRatchet([...new Set(found)].sort(), [
+      '@hypercomb.social/AppRoutes (hypercomb-dev/src/app/app.routes.ts)',
+      '@hypercomb.social/BootstrapHistory (hypercomb-shared/core/bootstrap-history.ts)',
+      '@hypercomb.social/BouquetRegistry (hypercomb-shared/core/bouquet-registry.ts)',
+      '@hypercomb.social/CellSuggestionProvider (hypercomb-shared/core/cell-suggestion.provider.ts)',
+      '@hypercomb.social/CommandLineBehaviors (hypercomb-shared/ui/command-line/command-line.component.ts)',
+      '@hypercomb.social/CompletionUtility (hypercomb-shared/core/completion-utility.ts)',
+      '@hypercomb.social/DependencyLoader (hypercomb-shared/core/dependency-loader.ts)',
+      '@hypercomb.social/DevLayerSource (hypercomb-shared/core/layer-install-sources/dev-layer.source.ts)',
+      '@hypercomb.social/DirectoryWalker (hypercomb-shared/core/directory-walker.ts)',
+      '@hypercomb.social/DomainLayerSource (hypercomb-shared/core/layer-install-sources/domain-layer.source.ts)',
+      '@hypercomb.social/DroneRegistry (hypercomb-shared/core/drone-registry.ts)',
+      '@hypercomb.social/GroupLauncher (hypercomb-shared/core/group-registry.ts)',
+      '@hypercomb.social/HeaderSizeQueenBee (hypercomb-shared/core/header-size.ts)',
+      '@hypercomb.social/I18n (hypercomb-shared/core/i18n.service.ts)',
+      '@hypercomb.social/IconEditMode (hypercomb-shared/core/icon-edit.service.ts)',
+      '@hypercomb.social/IconOverrides (hypercomb-shared/core/icon-override.store.ts)',
+      '@hypercomb.social/IconProviderRegistry (hypercomb-shared/core/tile-icon-provider-registry.ts)',
+      '@hypercomb.social/InitHistory (hypercomb-dev/src/app/core/init-history.ts)',
+      '@hypercomb.social/InstallMonitor (hypercomb-shared/core/install-monitor.ts)',
+      '@hypercomb.social/LayerInstaller (hypercomb-shared/core/layer-installer.ts)',
+      '@hypercomb.social/LayerService (hypercomb-web/src/app/layer-service.ts)',
+      '@hypercomb.social/Lineage (hypercomb-shared/core/lineage.ts)',
+      '@hypercomb.social/MovementService (hypercomb-shared/core/movement.service.ts)',
+      '@hypercomb.social/NameRegistry (hypercomb-shared/core/name-registry.ts)',
+      '@hypercomb.social/Navigation (hypercomb-shared/core/navigation.ts)',
+      '@hypercomb.social/OpfsInstallFileSource (hypercomb-shared/core/layer-install-sources/opfs-install-file.source.ts)',
+      '@hypercomb.social/OpfsTreeLogger (hypercomb-shared/core/tree-logger.ts)',
+      '@hypercomb.social/RecentPortalsStore (hypercomb-shared/core/recent-portals.store.ts)',
+      '@hypercomb.social/RegistrySnapshot (hypercomb-shared/core/registry-snapshot.ts)',
+      '@hypercomb.social/ResourceCompletionService (hypercomb-shared/core/resource-completion.service.ts)',
+      '@hypercomb.social/ResourceMessageHandler (hypercomb-shared/core/resource-message-handler.ts)',
+      '@hypercomb.social/RoomStore (hypercomb-shared/core/room-store.ts)',
+      '@hypercomb.social/RouteSinkComponent (hypercomb-dev/src/app/router/route-sink.component.ts)',
+      '@hypercomb.social/RuntimeMediator (hypercomb-shared/ui/runtime-mediator.ts)',
+      '@hypercomb.social/SavedLocationsStore (hypercomb-shared/core/saved-locations-store.ts)',
+      '@hypercomb.social/ScriptPreloader (hypercomb-shared/core/script-preloader.ts)',
+      '@hypercomb.social/SecretStore (hypercomb-shared/core/secret-store.ts)',
+      '@hypercomb.social/SecretStrengthProvider (hypercomb-shared/core/secret-strength.ts)',
+      '@hypercomb.social/ServerInitializer (hypercomb-shared/core/initializers/server-initializer.service.ts)',
+      '@hypercomb.social/Store (hypercomb-shared/core/store.ts)',
+      '@hypercomb.social/TagRegistry (hypercomb-shared/core/tag-registry.ts)',
+      '@hypercomb.social/TrustService (hypercomb-shared/core/trust-service.ts)',
+      '@hypercomb.social/UsageTracker (hypercomb-shared/core/usage-tracker.ts)',
+      '@hypercomb.social/ViewMode (hypercomb-shared/core/view-mode.service.ts)',
+      '@hypercomb.social/VoiceInputService (hypercomb-shared/core/voice-input.service.ts)',
+      '@hypercomb/SignatureStore (hypercomb-dev/src/main.ts)',
+      '@hypercomb/SignatureStore (hypercomb-web/src/setup/ensure-install.ts)',
+      'BEE_RESOLVER_KEY (hypercomb-dev/src/app/app.config.ts)',
+      'BEE_RESOLVER_KEY (hypercomb-web/src/app.config.ts)',
+      'NOTE_MARKS_IOC_KEY (hypercomb-shared/core/note-marks.store.ts)',
+      'SHELL_SURFACE_REGISTRY_KEY (hypercomb-shared/core/shell-surface-registry.ts)',
+      'THEME_IOC_KEY (hypercomb-shared/core/theme.service.ts)',
+      'TOOL_WINDOWS_IOC_KEY (hypercomb-shared/ui/tool-windows.ts)',
+      '`${ATOMIZABLE_TARGET_PREFIX}input:command-line` (hypercomb-shared/ui/command-line/command-line.atomizer.ts)',
+    ], 'shell-side IoC registration')
   })
 
   it('derived-cache manifests are written only by the store, the optimize phase, and the render backfill', () => {

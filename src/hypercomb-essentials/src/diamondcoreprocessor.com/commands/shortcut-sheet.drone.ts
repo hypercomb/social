@@ -7,29 +7,21 @@ import { EffectBus, type KeyBinding } from '@hypercomb/core'
 import type { SlashBehaviour } from './slash-behaviour.provider.js'
 import type { InputGate } from '../navigation/input-gate.service.js'
 
-export interface ShortcutGroup {
-  category: string
-  bindings: KeyBinding[]
-}
+// The sheet's data shapes are the module↔shell contract, so they live in
+// core (shortcut-sheet.types.ts) — shared renders them without importing
+// this module. Re-exported here for this domain's call sites.
+import type {
+  CommandLineOperationEntry,
+  ShortcutGroup,
+  ShortcutSheetState,
+  SlashCommandEntry,
+} from '@hypercomb/core'
 
-export interface SlashCommandEntry {
-  name: string
-  aliases: readonly string[]
-  description: string
-}
-
-export interface CommandLineOperationEntry {
-  behavior: string
-  trigger: string
-  description: string
-  example?: { input: string; result: string }
-}
-
-export interface ShortcutSheetState {
-  open: boolean
-  slashCommands: SlashCommandEntry[]
-  commandLineOps: CommandLineOperationEntry[]
-  shortcutGroups: ShortcutGroup[]
+export type {
+  CommandLineOperationEntry,
+  ShortcutGroup,
+  ShortcutSheetState,
+  SlashCommandEntry,
 }
 
 const CATEGORY_ORDER = [

@@ -1,0 +1,26 @@
+{
+  "//": [
+    "Render-critical IoC keys — the minimum set that must register before",
+    "the first hive frame can paint: Pixi host, settings, hex math, layout",
+    "solver, the cell renderer, and the background. The module BUILD stamps",
+    "this list into manifest.json (renderCriticalKeys); the shell's",
+    "ScriptPreloader reads it from the cached install manifest and gates",
+    "find() on it — the shim itself carries no module names.",
+    "",
+    "Keep this list small: every entry blocks first paint. If a drone",
+    "belongs here, it is because the visible grid genuinely cannot render",
+    "without it. Tile-action / overlay / network / history drones do NOT",
+    "belong here. The _ShowCellDrone entry is the dev-shell hot-reload",
+    "alias (esbuild collision-rename prefixes `_`); production registers",
+    "the un-prefixed form."
+  ],
+  "keys": [
+    "@diamondcoreprocessor.com/PixiHostWorker",
+    "@diamondcoreprocessor.com/Settings",
+    "@diamondcoreprocessor.com/AxialService",
+    "@diamondcoreprocessor.com/LayoutService",
+    "@diamondcoreprocessor.com/ShowCellDrone",
+    "@diamondcoreprocessor.com/_ShowCellDrone",
+    "@diamondcoreprocessor.com/BackgroundDrone"
+  ]
+}
