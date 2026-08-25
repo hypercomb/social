@@ -152,6 +152,27 @@ the signature IS the install.
   --to <dir>` alongside the existing `build` and `inspect`. That makes
   "anybody can use it" literal: no repo checkout, no bridge, just Node.
 
+**The whole server surface, then, is two things.** A **shim that gets the
+signature** — the one mutable pointer, everything else resolves from it —
+and **upload by resolution**: there is no file-upload protocol to invent,
+because handing the host a new meta layer IS the upload. The host runs the
+same walk the resolver runs — pull what the meta layer names, verify each
+byte against its name, write the flat pool — whether the bytes come from
+R2, another oasis, or a folder the owner copied up. Update, upload, and
+install are one operation wearing three hats; the signature is always the
+entire interface.
+
+Named plainly: **the server shim is a slim server install that lets the
+site sync to a signature, securely.** Its whole life: hold the pin, serve
+the folder, and on a new signature run the resolver's walk and repoint —
+complete-or-absent, never a half-synced site. "Securely" is two gates that
+already exist in the architecture: every byte proves itself against its
+name (the Merkle gate), and the pointer move itself is owner-signed — the
+same pubkey-signed head the hive index already uses — so a host operator
+can sync *for* the owner but can never sync *as* the owner. The resolver
+CLI is this shim minus the daemon: `hypercomb install` run by hand is one
+sync; the shim is the same verb standing by.
+
 **The xcopy contract** survives as the degenerate path: run the resolver
 locally, get the folder, copy it to the server (`xcopy`, FTP, drag-and-drop —
 anything) and it just works. Either way, the folder that lands on the server
