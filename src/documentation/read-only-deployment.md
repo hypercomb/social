@@ -169,9 +169,30 @@ complete-or-absent, never a half-synced site. "Securely" is two gates that
 already exist in the architecture: every byte proves itself against its
 name (the Merkle gate), and the pointer move itself is owner-signed — the
 same pubkey-signed head the hive index already uses — so a host operator
-can sync *for* the owner but can never sync *as* the owner. The resolver
-CLI is this shim minus the daemon: `hypercomb install` run by hand is one
-sync; the shim is the same verb standing by.
+can sync *for* the owner but can never sync *as* the owner.
+
+**The shim IS a standalone server — BUILT (2026-08-25).** Installing it on
+a server is two commands:
+
+```bash
+npm install -g @hypercomb/cli
+hypercomb serve /var/www/site --site <sig> --from https://content.jwize.com --port 8080
+```
+
+That one process syncs the folder to the signature (resolver walk + the
+website faces — `hypercomb site` is the sync verb alone) and serves it
+read-only with the full contract: GET/HEAD/OPTIONS only, directory-index,
+immutable caching for sig files, no-cache faces, wide CORS,
+traversal-guarded. Loopback by default (front it with a tunnel);
+`--public` binds 0.0.0.0 for a bare VPS. Update = run it again with the
+new signature; delta-only; older signature = rollback. Verified live: a
+fresh folder synced 523 sigs from the CDN, materialized 12 pages, and
+served them — root, cold deep links, sig fetches, refused writes, blocked
+traversal all probed. Face materialization lives in the CLI
+(`commands/site.ts`); `publish:site` reuses it, one implementation.
+Still owed: the owner-signed head *listener* (sync on a signed
+announcement instead of a re-run), and publishing `@hypercomb/cli` to npm
+so the install line works outside this repo.
 
 Once the shim is up, **resolution fills the directory where your packages
 are installed — by signature, and by tile and branch expansion.** The walk

@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url'
 import { writeFileSync, renameSync } from 'node:fs'
 import WebSocket from 'ws'
 import { resolveClosure, type ResolverIO } from '../hypercomb-cli/src/commands/install.js'
+import { materializePages } from '../hypercomb-cli/src/commands/site.js'
 
 const SRC = dirname(dirname(fileURLToPath(import.meta.url)))
 const RELAY_DIR = join(SRC, 'hypercomb-relay', 'content')
@@ -96,62 +97,8 @@ const siteIO = (out: string, sources: string[]): ResolverIO => ({
   },
 })
 
-/** A layer's visual:website:page htmlSig, read from the resolved pool. */
-const pageSigOf = (out: string, layerSig: string): string | null => {
-  try {
-    const layer = JSON.parse(readFileSync(join(out, layerSig), 'utf8'))
-    for (const sig of (Array.isArray(layer?.decorations) ? layer.decorations.map(String) : [])) {
-      try {
-        const rec = JSON.parse(readFileSync(join(out, sig), 'utf8'))
-        const html = String(rec?.payload?.htmlSig ?? '')
-        if (rec?.kind === 'visual:website:page' && SIG.test(html)) return html
-      } catch { /* not a JSON decoration record */ }
-    }
-  } catch { /* not a JSON layer */ }
-  return null
-}
-
-/** Make a page copy stand alone on a dumb server. The pool bytes are the
- *  canonical page; this face copy may be rewritten because it is a SERVED
- *  VIEW, not a pool member. `resource:<sig>/x.css` links become inline
- *  <style> (a <link> is MIME-enforced and dumb hosts serve sig files as
- *  octet-stream); any other resource: ref becomes the one contract /<sig>
- *  (img/fetch consumers don't enforce MIME). */
-const standalone = (out: string, html: string): string =>
-  html
-    .replace(/<link\b[^>]*href="resource:([a-f0-9]{64})\/[^"]*\.css"[^>]*>/g, (tag, sig) => {
-      try { return `<style>\n${readFileSync(join(out, sig), 'utf8')}\n</style>` } catch { return tag }
-    })
-    .replace(/resource:([a-f0-9]{64})\/[^"' )]*/g, '/$1')
-
-/** Materialize the WHOLE page tree: every descendant layer carrying a
- *  visual:website:page becomes <out>/<name>/…/index.html, so the absolute
- *  links the pages already carry (/branch/child) work on any static host
- *  that serves a directory's index.html — which is all of them. */
-const materializePages = (out: string, headSig: string): number => {
-  let pages = 0
-  const walk = (layerSig: string, at: string[]): void => {
-    let layer: Record<string, unknown>
-    try { layer = JSON.parse(readFileSync(join(out, layerSig), 'utf8')) } catch { return }
-    const name = String(layer?.['name'] ?? '').trim()
-    if (!name) return
-    const here = [...at, name]
-    const pageSig = pageSigOf(out, layerSig)
-    if (pageSig) {
-      const html = standalone(out, readFileSync(join(out, pageSig), 'utf8'))
-      const dir = join(out, ...here)
-      mkdirSync(dir, { recursive: true })
-      writeFileSync(join(dir, 'index.html'), html)
-      if (at.length === 0) writeFileSync(join(out, 'index.html'), html) // the root face
-      pages++
-    }
-    for (const child of (Array.isArray(layer?.['children']) ? (layer['children'] as unknown[]).map(String) : [])) {
-      if (SIG.test(child)) walk(child, here)
-    }
-  }
-  walk(headSig, [])
-  return pages
-}
+// Face materialization lives in the CLI (the standalone shim uses the same
+// code): resolve + page tree + standalone rewrites, one implementation.
 
 const main = async (): Promise<void> => {
   const args = process.argv.slice(2)

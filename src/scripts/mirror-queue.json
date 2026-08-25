@@ -1683,6 +1683,40 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "chat-blurb-summaries",
+      "title": "Mirror the chat blurb: a conversation said briefly, one recycled slot per thread",
+      "run": null,
+      "note": "New creation: hypercomb-essentials/src/diamondcoreprocessor.com/assistant/chat-blurb.ts (+chat-blurb.spec.ts), the orchestrator's silent drain in orchestrator.drone.ts, and the rail's read side in agent-tiles-rail.ts (+spec). Tiles 1:1 with source under an assistant collection, marks per declared vocabulary, notes carrying: (1) STICKY, NOT ON THE FLY — a finished thread can never say anything new, and a summary you can only see while a model is reachable is a tooltip; (2) ONE SLOT PER CONVERSATION, RECYCLED — keying by the turn-set hash is right for a BRANCH and wrong for a conversation, because a conversation GROWS and would leave one orphan per turn; putPoolDoc's own exactly-one-member rule IS the recycling; (3) VERSIONED — keyed-by-input is not self-invalidating, BLURB_VERSION is the second half of the key; (4) NEVER LOAD-BEARING — the row draws from its title alone when a blurb is missing, which is what makes the whole pool disposable; (5) the payoff — a written-down summary makes the rail's filter reach into what was SAID, which a derived-on-open blurb could never do. New pool meaning: chat:blurbs (colon mandatory). note-add is additive — manual drain only.",
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "chat-shelf-picture-viewer",
+      "title": "Mirror the shelf picture viewer: look at what the request carries, without leaving",
+      "run": null,
+      "note": "New creation in hypercomb-shared/ui/chat-window: chat-look.scss (new fourth sheet), the viewer state in chat-window.component.ts (viewing/viewingUrl/picturesOnShelf/stepPicture/onPictureKey + the new first rung of the Escape cascade + the fold closing it), and the shelf thumbnail becoming a press target in chat-window.component.html. Tiles 1:1 with source under the chat-window collection, marks per declared vocabulary, notes carrying: (1) IN PLACE, NEVER A TAB — the composer holds an unsent question and the shelf holds what you gathered, and on the native shell a document navigation takes the window with it (no view may link out), so the overlay is a child of .chat-panel; (2) NO SECOND FETCH — it paints the URL contextThumbs already holds (a tile's large picture, an attached image's own bytes, both full size), so opening is free and the thumbnail cache stays the sole owner of every object-URL; (3) THE PICTURE IS THE ONLY NEW GESTURE — the chip is still a drag handle and the x still drops the reference, so three gestures share one chip and the cursor tells them apart; (4) LEFT/RIGHT WALK THE SHELF, the same 'next one of these' axis the rest of the product uses, wrapping; (5) Escape unwinds it FIRST — nothing was composed, put down or chosen, so it is the smallest commitment in the cascade. New i18n keys landed in all 14 catalogs: chat.reference.look/previous/next/done. note-add is additive — manual drain only.",
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "folder-sync-one-shape",
+      "title": "Mirror the one folder shape: the chosen folder IS the hive, in the interchange form",
+      "run": null,
+      "note": "Behaviour change to folder-sync (hypercomb-essentials/src/diamondcoreprocessor.com/sharing/folder-sync.service.ts + folder-sync.spec.ts + folder-sync-drain.spec.ts). Extends the existing folder-sync mirror (scripts/mirror-folder-sync.ts, -bounds, -correction) — EXTEND, never re-run. Notes to carry: (1) ONE SHAPE EVERYWHERE — root/<sig> content, root/<lineageSig>/ bags, root/<sign(meaning)>/ pools, root/dcp/<domain>/ identity zone; the same tree web OPFS, the native client's store, a backup folder and a published host all speak, so a Windows client can be STARTED from a backup folder and a folder can be handed to somebody as-is. (2) A READ-ONLY HOST CARRIES LESS OF IT, not a different shape — a layer signature is a complete handshake, so publish-site.ts serves only the content half ('the folder IS the pool'). (3) THE SIDECAR IS NOT CONTENT — .hypercomb/ holds device manifests, seals and reports; non-signature names are exactly what the native restore's as_sig filter ignores, which is why bookkeeping can sit beside a hive without ever being mistaken for a bag or a pool. (4) LEGACY NEST IS READ-FALLBACK ONLY — hypercomb-backup/devices/<id>/opfs/ is never written again and still imports, probed by looking for the opfs dir rather than by recording which layout was chosen, so a folder caught mid-migration reads from either side. (5) CONVERGENCE IS NOT YET CLOSED — content is conflict-free by construction (sha256-addressed) and pools union by member, but put_marker_at REFUSES an occupied index, so a hive edited on web and desktop between drains silently drops the loser's markers; needs a lease or a rebase-on-drain before two-way sync is safe.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "standalone-shim-commands",
+      "title": "Mirror hypercomb site + serve (the standalone server shim)",
+      "run": null,
+      "note": "New CLI creations: hypercomb-cli/src/commands/site.ts (sync verb: resolveClosure + materializePages/standaloneFace, exported, reused by scripts/publish-site.ts) and serve.ts (standalone read-only server: same contract as the app SiteServer, loopback default, --public, --site sync-then-serve). Tiles 1:1 with the two sources under the read-only-deployment collection; notes carry the verified one-liner (npm i -g @hypercomb/cli; hypercomb serve dir --site sig --from cdn) and the 523-sig/12-page live proof. note-add additive - manual drain.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }
