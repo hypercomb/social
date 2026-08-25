@@ -1,22 +1,28 @@
-// hypercomb-shared/core/icon-override.store.ts
-//
-// IconOverrideStore — participant-local, per-element icon overrides for the
-// universal icon protocol. Any icon site resolves `glyph(id, default)`; if the
-// participant has reskinned that element (via the icon-hive picker in edit
-// mode), the override wins. This is UI chrome — localStorage, never hive
+// icon-overrides.store.ts — participant-local, per-element icon overrides for
+// the universal icon protocol. Any icon site resolves `glyph(id, default)`;
+// if the participant has reskinned that element (via the icon-hive picker in
+// edit mode), the override wins. This is UI chrome — localStorage, never hive
 // content or history; it does not sync across the swarm.
 //
 // Element ids are namespaced by surface so they never collide:
 //   control:pin · view:website · group:websites · overlay:edit
 //
-// Registered in IoC at `@hypercomb.social/IconOverrides`. Emits `change`
-// ({ id, glyph|null }) so every surface re-resolves live.
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1:
+// the contract lives in core (icon-overrides.types.ts); shells reach the
+// instance only through IoC. Emits `change` ({ id, glyph|null }) on the
+// EventTarget and ICON_OVERRIDE_CHANGED on EffectBus so every surface
+// re-resolves live without holding the instance.
 
-import { EffectBus } from '@hypercomb/core'
+import {
+  EffectBus,
+  ICON_OVERRIDES_KEY,
+  ICON_OVERRIDE_CHANGED,
+  type IconOverridesProvider,
+} from '@hypercomb/core'
 
 const STORAGE_KEY = 'hc:icon-overrides'
 
-export class IconOverrideStore extends EventTarget {
+export class IconOverrideStore extends EventTarget implements IconOverridesProvider {
   #map = new Map<string, string>()
 
   constructor() {
@@ -57,11 +63,11 @@ export class IconOverrideStore extends EventTarget {
     this.#notify(id, null)
   }
 
-  /** Notify both the DOM (EventTarget, for Angular) and EffectBus (for Pixi /
-   *  essentials drones that can't subscribe to this EventTarget). */
+  /** Notify both the DOM (EventTarget) and EffectBus (for surfaces that
+   *  cannot hold this instance — shells resolve lazily, Pixi drones batch). */
   #notify(id: string, glyph: string | null): void {
     this.dispatchEvent(new CustomEvent('change', { detail: { id, glyph } }))
-    EffectBus.emit('icon:override-changed', { id, glyph })
+    EffectBus.emit(ICON_OVERRIDE_CHANGED, { id, glyph })
   }
 
   #persist(): void {
@@ -72,4 +78,14 @@ export class IconOverrideStore extends EventTarget {
 }
 
 export const iconOverrides = new IconOverrideStore()
-register('@hypercomb.social/IconOverrides', iconOverrides)
+
+/** Register into whatever IoC map is LIVE. Module-eval order in the dev
+ *  barrel can see `window.ioc` replaced after early modules register (the
+ *  llm-provider-registry lesson), so the render path re-asserts before use
+ *  instead of trusting the module-scope registration alone. */
+export const ensureIconOverridesRegistered = (): void => {
+  if (!window.ioc?.has?.(ICON_OVERRIDES_KEY)) {
+    window.ioc?.register?.(ICON_OVERRIDES_KEY, iconOverrides)
+  }
+}
+ensureIconOverridesRegistered()

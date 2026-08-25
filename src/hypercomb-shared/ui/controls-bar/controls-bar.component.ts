@@ -19,8 +19,7 @@ import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
-import { EffectBus, consumePointerGesture } from '@hypercomb/core'
-import { iconOverrides } from '../../core/icon-override.store'
+import { EffectBus, consumePointerGesture, ICON_OVERRIDES_KEY, ICON_OVERRIDE_CHANGED, type IconOverridesProvider } from '@hypercomb/core'
 import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
 import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
@@ -792,7 +791,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  re-renders. */
   readonly iconSymbol = (ctrl: ControlItem): string => {
     this.iconRev()   // CD dependency: re-resolve when an override changes
-    return iconOverrides.glyph('control:' + ctrl.id, this.#rawIconSymbol(ctrl))
+    // Lazy IoC lookup: the store lives in the presentation module now; until
+    // it loads, the author default stands (overrides are never load-bearing).
+    const ov = window.ioc?.get?.(ICON_OVERRIDES_KEY) as IconOverridesProvider | undefined
+    const raw = this.#rawIconSymbol(ctrl)
+    return ov ? ov.glyph('control:' + ctrl.id, raw) : raw
   }
 
   readonly #rawIconSymbol = (ctrl: ControlItem): string => {
@@ -1348,6 +1351,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #lockBumpUnsub: (() => void) | null = null
   #iconEditUnsub: (() => void) | null = null
   #configureControlUnsub: (() => void) | null = null
+  #iconOverrideUnsub: (() => void) | null = null
   #onIconOverride = (): void => this.iconRev.update(v => v + 1)
 
   ngOnInit(): void {
@@ -1383,7 +1387,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
         this.#persistEnabledMap()
       },
     )
-    iconOverrides.addEventListener('change', this.#onIconOverride)
+    // Instance-free: reskins broadcast on EffectBus, so the bar needs no
+    // handle on the store (which now loads with the presentation module).
+    this.#iconOverrideUnsub = EffectBus.on(ICON_OVERRIDE_CHANGED, this.#onIconOverride)
 
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
@@ -1819,7 +1825,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#configureControlUnsub?.()
     this.#titleTickUnsub?.()
     this.#localeTickUnsub?.()
-    iconOverrides.removeEventListener('change', this.#onIconOverride)
+    this.#iconOverrideUnsub?.()
     this.#clearIconPress()
     this.#detachListDrag()   // in case we're torn down mid drag-scroll
     if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)

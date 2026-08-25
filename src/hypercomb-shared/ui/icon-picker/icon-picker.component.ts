@@ -17,11 +17,12 @@ import {
   ICON_PICKER_OPEN,
   ICON_PICK_REQUEST,
   ICON_PICK_RESULT,
+  ICON_OVERRIDES_KEY,
+  type IconOverridesProvider,
   type IconPickRequest,
   type IconPickResult,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { iconOverrides } from '../../core/icon-override.store'
 import { MATERIAL_ICON_NAMES } from './material-icon-names'
 
 @Component({
@@ -113,7 +114,9 @@ export class IconPickerComponent implements OnDestroy {
     if (!req) return
     this.#pending = null
     if (req.token) this.#settled.add(req.token)
-    if (name && req.store !== false) iconOverrides.set(req.id, name)
+    if (name && req.store !== false) {
+      (window.ioc?.get?.(ICON_OVERRIDES_KEY) as IconOverridesProvider | undefined)?.set(req.id, name)
+    }
     EffectBus.emitTransient<IconPickResult>(ICON_PICK_RESULT, { id: req.id, token: req.token, name })
   }
 

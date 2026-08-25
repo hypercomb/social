@@ -2,6 +2,7 @@
 import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Sprite, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
+import { iconOverrides, ensureIconOverridesRegistered } from './icon-overrides.store.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
@@ -1591,9 +1592,9 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.addChild(btn)
       // Icon protocol: a participant reskin (overlay:<name>) wins over the
       // author SVG — render the chosen Material glyph to a texture instead.
-      const ov = window.ioc.get<{ has(id: string): boolean; glyph(id: string, d: string): string }>('@hypercomb.social/IconOverrides')
+      ensureIconOverridesRegistered()
       const overrideId = 'overlay:' + desc.name
-      if (ov?.has(overrideId)) void btn.setGlyph(ov.glyph(overrideId, ''))
+      if (iconOverrides.has(overrideId)) void btn.setGlyph(iconOverrides.glyph(overrideId, ''))
       else void btn.load(desc.svgMarkup)
 
       this.#actions.push({

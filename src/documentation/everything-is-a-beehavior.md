@@ -198,9 +198,20 @@ sites** — essentials' 217 `Store` lookups and 184 `Lineage` lookups don't
 care where the implementation loaded from. Order: leaves first, heavyweights
 last.
 
-- [ ] Leaf stores: `note-marks.store`, `recent-portals.store`,
-  `pinned-entrances.store`, `saved-locations-store`, `room-store`,
-  `secret-store`, `secret-strength`, `icon-overrides.store`, `icon-pick`
+**The proven move pattern** (established by `icon-overrides`, first down):
+contract → `hypercomb-core/src/core/<name>.types.ts` (interface + IoC KEY +
+effect-name constants); implementation → essentials beside its heaviest
+consumer, `window.ioc?.register?.` at module scope **plus** an
+`ensure<X>Registered()` re-assert called on a post-boot path (the
+llm-provider-registry live-map lesson); exactly ONE essentials entry imports
+the file (two importers inline two instances — the dup-inlining trap);
+shared consumers switch to lazy `window.ioc?.get?.(KEY)` with the author
+default as fallback, and instance-free EffectBus subscriptions for change
+events; the census ratchet line is deleted in the same commit.
+
+- [ ] Leaf stores: ~~`icon-overrides.store`~~ ✓, `note-marks.store`,
+  `recent-portals.store`, `pinned-entrances.store`, `saved-locations-store`,
+  `room-store`, `secret-store`, `secret-strength`, `icon-pick`
 - [ ] Registries: `tag-registry`, `bouquet-registry`, `name-registry`,
   `group-registry` + the group sources (`websites-group`, `help-group`,
   `games-group`, `launch-group*`), `tile-icon-provider-registry`,

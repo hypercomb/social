@@ -1665,6 +1665,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "phase1-icon-overrides-down",
+      "title": "Mirror Phase 1 first leaf: icon-overrides moved to essentials — tile on the shrink-campaign collection, note carrying the proven move pattern (types→core, impl beside consumer, single importer, EffectBus instance-free)",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }
