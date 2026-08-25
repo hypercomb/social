@@ -18,7 +18,7 @@
       <div class="host-row">
         <span class="host-row__label">{{ 'hosting.serving' | t }}</span>
         <span class="host-dot" [class.host-dot--on]="s.serving"></span>
-        <span class="host-row__value">{{ s.serving ? ('hosting.on-port' | t: { port: s.port }) : ('hosting.off' | t) }}</span>
+        <span class="host-row__value">{{ s.serving ? ('hosting.on-port' | t: { port: s.port ?? '' }) : ('hosting.off' | t) }}</span>
         @if (s.serving) {
           <button type="button" [disabled]="busy()" (click)="stopServing()">{{ 'hosting.stop' | t }}</button>
         } @else {
@@ -45,7 +45,7 @@
           <button type="button" [disabled]="busy()" (click)="login()">{{ 'hosting.login' | t }}</button>
           @if (s.tunnel_running) {
             <button type="button" [disabled]="busy()" (click)="goOffline()">{{ 'hosting.go-offline' | t }}</button>
-            <button type="button" class="host-live" (click)="openLive()">{{ 'hosting.live' | t: { domain: s.domain } }}</button>
+            <button type="button" class="host-live" (click)="openLive()">{{ 'hosting.live' | t: { domain: s.domain ?? '' } }}</button>
           } @else {
             <button type="button" class="host-primary" [disabled]="busy() || !domainDraft().trim()" (click)="goLive()">
               {{ 'hosting.go-live' | t }}
