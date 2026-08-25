@@ -81,27 +81,43 @@ There is no step where the host is believed. The handshake is: *you name a
 publisher and a place; the publisher's signature names the head; the head
 names every byte; the domain merely delivers them.*
 
-**The more elegant form: one signature, resolved against where you stand.**
-The caller never actually brings a domain along, because the domain is
-always in one of two places already:
+**The elegant form: one signature, resolved against where you stand.**
+Can a domain be passed along safely? **With the Merkle proof — yes.** A
+passed domain has no power over content: every byte must hash to its name
+or it is refused, so a lying source achieves nothing and any domain serving
+the right bytes is interchangeable with any other. The proof is what
+disarms the transport. What remains is only a soft consideration — which
+servers your client calls is a privacy courtesy, not a security boundary —
+and the elegant default makes even that moot, because the domain usually
+doesn't need passing at all. It is already in one of two places:
 
 - **Under your feet.** Adopting from a published site, the byte source is
-  `location.origin` — the door you walked through IS the oasis. The meta
-  layer degenerates to a bare signature (plus the publisher pubkey for
-  later updates); the where is implicit in the being-there.
-- **Written in the layer.** For roaming resolution — other mirrors, R2, a
-  friend's desktop — additional domains are ordinary CONTENT of the meta
-  layer itself (its hosting incidences), not a protocol parameter. The
-  broker learns where-else by reading what it just accepted, the same way
-  it learns everything: the communication language is meta layers
-  everywhere, so the where travels in-band as layer content.
+  `location.origin` — the door you walked through IS the oasis, and you
+  chose to walk through it. The meta layer degenerates to a bare signature
+  (plus the publisher pubkey for later updates); the where is implicit in
+  the being-there.
+- **Inside verified bytes you accepted.** For roaming resolution — mirrors,
+  R2, a friend's desktop — additional oases are CONTENT of the publisher's
+  own sig-verified meta layer (its hosting incidences), pulled from where
+  you stand. They inherit the publisher's authorship because they sit
+  behind the signature; a link-crafter cannot inject them.
 
-So the whole handshake is: **accept one signature; everything else —
-head, place, publisher, oases — is content resolved from it.** No
-side-band, no argument list, and the degenerate case (a bare sig, standing
-on the site) already works. The resolver CLI's `--from` is just this
-handshake spoken from a terminal, where "where you stand" has to be said
-out loud because a terminal stands nowhere.
+And sharing needs no special link format carrying hosts: **share the
+website's URL** — the link IS the domain, and clicking it is the same
+deliberate trust act as all web navigation. Every entrance becomes the
+standing-there case. One web.
+
+Even the hand-off — "add to hypercomb" walking a visitor from a published
+site into hypercomb.io — passes nothing: **the referrer should be enough.**
+The origin you arrived from IS the oasis the staged hive resolves from; the
+browser already says where you stood. (A publisher who wants their site
+adoptable simply keeps a referrer policy that exposes the origin — opting
+in by policy, which is exactly where that choice belongs.)
+
+The resolver CLI's `--from` stays honest under this rule: an operator
+typing a source at their own terminal is the standing act itself — the
+operator chooses their oasis the way a visitor chooses a link. What is
+forbidden is a domain arriving inside a message someone else composed.
 
 And the presentation isn't one declared mode — it is **any number of
 whatever views you had configured in the publish**. View marks live on the
