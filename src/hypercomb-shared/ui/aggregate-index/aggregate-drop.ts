@@ -187,6 +187,12 @@ export const dropReferenceTile = async (
  * requires knowing about the dropped place too. So the drop writes a `context`
  * decoration: a live pointer, resolved at read time, never a copy.
  *
+ * When the drop lands, a summary of the branch is generated asynchronously
+ * (Haiku explores the tree, caches the summary by branch sig) so the responder
+ * receives not just raw content sigs but a human-readable guide to what they
+ * mean. Summaries ride in the context array BEFORE the sigs, framing the
+ * responder's understanding before it tries to parse layer bytes.
+ *
  * ── This REPLACED attaching the item's keywords ─────────────────────────────
  *
  * That gesture used to mean "make this tile a member of this collection" by
@@ -222,6 +228,31 @@ export const dropContextOnTile = async (
     const sig = await store.putResource(
       new Blob([JSON.stringify(record)], { type: 'application/json' }))
     EffectBus.emit('decorations:changed', { segments: [...tileSegments], op: 'append', sig })
+
+    // Fire-and-forget: generate a branch summary so the responder has a guide
+    // to the supporting data. The summary is cached by branch sig, so
+    // subsequent drops of the same branch read the cache instantly. If the
+    // branch is edited, its content sigs change and the cache misses.
+    try {
+      const tileContext = (window as { ioc?: { get?(k: string): unknown } }).ioc?.get?.(
+        '@diamondcoreprocessor.com/TileContext',
+      ) as { resolve: (segments: readonly string[]) => Promise<unknown> } | undefined
+      if (tileContext?.resolve) {
+        const branches = await tileContext.resolve([...item.segments])
+        // Import here to avoid a circular dependency with essentials.
+        const { contextWithSummaries } = await import(
+          '../assistant/context-summary-gen.js'
+        ).catch(() => ({ contextWithSummaries: () => [] }))
+        if (Array.isArray(branches) && branches.length > 0) {
+          await contextWithSummaries(branches)
+        }
+      }
+    } catch {
+      // Summary generation is purely informational; a failure must not break
+      // the drop gesture. The decoration lands, context rides with the next
+      // request, and the responder sees raw sigs if the summary was not minted.
+    }
+
     return true
   } catch {
     return false

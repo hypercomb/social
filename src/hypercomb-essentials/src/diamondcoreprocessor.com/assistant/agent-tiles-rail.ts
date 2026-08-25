@@ -211,10 +211,16 @@ const ensureRailStyles = (): void => {
   scrollbar-color:rgba(${STEEL},0.3) transparent;}
 @keyframes hcRailIn{from{opacity:0;transform:translateX(0.6rem);}to{opacity:1;transform:none;}}
 @keyframes hcRailOut{from{opacity:0;transform:translateX(-0.6rem);}to{opacity:1;transform:none;}}
+/* A TILE'S BLOCK — its row, and under it whatever the row has unfolded. The
+   lit edge goes here so an open tile is one object, never a box with a list
+   loose beneath it. */
+.hc-rail-group{display:flex;flex-direction:column;
+  border-radius:var(--hc-radius-control, 2px);}
+.hc-rail-group.current{background:rgba(${STEEL},0.1);
+  box-shadow:inset 0 0 0 1px rgba(${STEEL},0.4);}
 .hc-rail-row{display:flex;align-items:center;border-radius:var(--hc-radius-control, 2px);}
 .hc-rail-row:hover{background:rgba(255,255,255,0.05);}
 .hc-rail-row.holding{background:rgba(${STEEL},0.16);transition:background 0.12s ease;}
-.hc-rail-row.current{background:rgba(${STEEL},0.1);box-shadow:inset 0 0 0 1px rgba(${STEEL},0.4);}
 .hc-rail-main{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:0.6rem;
   padding:0.35rem 0.2rem 0.35rem 0.45rem;border:0;background:none;text-align:left;font:inherit;
   cursor:pointer;border-radius:var(--hc-radius-control, 2px);color:inherit;}
@@ -341,12 +347,11 @@ const ensureRailStyles = (): void => {
 .hc-rail-chev:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
 .hc-rail-chev[aria-expanded="true"]{transform:rotate(90deg);color:rgba(${STEEL},0.95);}
 
-/* THE TILE'S CONVERSATIONS, unfolded under its row. Indented to the width of
-   the picture so they read as belonging to it, and quiet enough that an open
-   panel never competes with the list it sits inside. */
+/* THE TILE'S CONVERSATIONS, unfolded under its row. A SHORT step in, no rule
+   down the side: the fold already says what they belong to, and a line plus a
+   picture's worth of indent turned a list of two chats into a diagram. */
 .hc-rail-chats{display:flex;flex-direction:column;gap:1px;
-  margin:1px 0 4px 3.4rem;padding-left:0.5rem;
-  border-left:1px solid rgba(${STEEL},0.25);}
+  margin:1px 0 4px 0.9rem;padding-left:0;}
 .hc-rail-chat{display:flex;align-items:baseline;gap:0.5rem;width:100%;
   padding:0.28rem 0.45rem;border:0;background:none;cursor:pointer;
   text-align:left;font:inherit;font-size:0.8rem;
@@ -414,6 +419,13 @@ export class AgentTilesRail {
   #drafts = new Set<string>()
   /** Every tile conversation, and the per-tile fold the row marks read. */
   #chatList: TileConversation[] = []
+  /** CONVERSATIONS THAT EXIST ONLY AS INTENT — started here, nothing said in
+   *  them yet, so the threads pool cannot see them. Without this a tile could
+   *  not visibly hold a SECOND chat until you had spoken in it, and pressing
+   *  "+ New conversation" twice landed you back in the same derived thread.
+   *  Session-local on purpose: an empty conversation nobody spoke in is not
+   *  worth a record, and forgetting it on reload costs nothing said. */
+  #pending = new Set<string>()
   #chats = new Map<string, { turns: number; unread: boolean; chats: number; lastAt: number }>()
   #busy = new Set<string>()
   /** Row keys whose chat list is unfolded. */
@@ -644,6 +656,28 @@ export class AgentTilesRail {
       slot.textContent = String(count)
       slot.hidden = count === 0
     }
+  }
+
+  /** ANOTHER CONVERSATION ON THE TILE YOU ARE IN. The composer's own "new
+   *  chat" press lands here rather than minting a free-floating thread: a
+   *  conversation about a tile belongs UNDER that tile, where it can be found
+   *  again, and the rail is the only place that list lives. Unfolds the tile
+   *  so the new row is seen being made. Returns false when there is no tile
+   *  in hand — then a free chat is the honest answer and the caller mints it.
+   */
+  newChatOnSubject(): boolean {
+    const subject = this.#subject
+    if (!subject || !this.#profile.chats) return false
+    const segments = [...subject.path, subject.name]
+    const path = tilePath(segments)
+    if (!path || path === '/') return false
+    const row: RailRow = { name: subject.name, segments, childCount: 0, sig: subject.sig }
+    const held = this.#chatsFor(path)
+    const convoId = held.length ? newTileConvoId(segments) : tileConvoId(segments)
+    this.#expanded.add(subject.key)
+    this.#enterChat(row, subject.key, convoId)
+    this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
+    return true
   }
 
   /** Leave the conversation without entering another — Escape's first stop. */
@@ -936,9 +970,18 @@ export class AgentTilesRail {
         this.#toggleChats(key, row)
       })
 
+      // ONE BLOCK PER TILE. The conversations are not a sibling of the row
+      // they belong to — they are INSIDE it, so an unfolded tile is one
+      // object with a lit edge around all of it. Appended beside the row,
+      // they hung outside the lit box and read as belonging to nothing.
+      const group = document.createElement('div')
+      group.className = 'hc-rail-group'
+      group.dataset['key'] = key
+      group.classList.toggle('current', current)
       wrap.append(main, chevron)
-      list.appendChild(wrap)
-      if (this.#profile.chats && this.#expanded.has(key)) list.appendChild(this.#chatsPanel(key, row))
+      group.appendChild(wrap)
+      if (this.#profile.chats && this.#expanded.has(key)) group.appendChild(this.#chatsPanel(key, row))
+      list.appendChild(group)
     }
 
     // The rows exist; now say what each one holds.
@@ -1039,11 +1082,18 @@ export class AgentTilesRail {
 
       const title = document.createElement('span')
       title.className = 'hc-rail-chat-name'
-      title.textContent = chat.title || this.#t('agent.rail-chat-untitled', 'Untitled')
+      title.textContent = chat.title
+        || (chat.turns
+          ? this.#t('agent.rail-chat-untitled', 'Untitled')
+          : this.#t('agent.rail-chat-fresh', 'New conversation'))
 
       const meta = document.createElement('span')
       meta.className = 'hc-rail-chat-meta'
-      meta.textContent = this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(chat.turns))
+      // "0 turns" is a fact nobody needs. A conversation with nothing in it
+      // is named by being EMPTY, not by counting what is not there.
+      meta.textContent = chat.turns
+        ? this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(chat.turns))
+        : this.#t('agent.rail-chat-empty', 'empty')
 
       item.append(title, meta)
       item.addEventListener('click', event => {
@@ -1072,6 +1122,7 @@ export class AgentTilesRail {
    *  chat so coming back resumes it. */
   #enterChat(row: RailRow, key: string, convoId: string): void {
     const path = tilePath(row.segments)
+    this.#pending.add(convoId)
     this.#rememberChat(path, convoId)
     const wrap = this.#list?.querySelector<HTMLElement>(`.hc-rail-row[data-key="${CSS.escape(key)}"]`)
     if (wrap) this.#markCurrent(wrap)
@@ -1123,8 +1174,12 @@ export class AgentTilesRail {
       other.classList.remove('current')
       other.querySelector('.hc-rail-main')?.removeAttribute('aria-current')
     }
+    for (const other of this.#list?.querySelectorAll('.hc-rail-group.current') ?? []) {
+      other.classList.remove('current')
+    }
     if (!wrap) return
     wrap.classList.add('current')
+    wrap.closest('.hc-rail-group')?.classList.add('current')
     wrap.querySelector('.hc-rail-main')?.setAttribute('aria-current', 'true')
   }
 
@@ -1150,9 +1205,19 @@ export class AgentTilesRail {
     if (this.#expanded.size) this.#repaintExpanded()
   }
 
-  /** The conversations on one tile, newest first. */
+  /** The conversations on one tile, newest first — what the pool holds, and
+   *  ahead of them the ones started here that hold nothing yet. A chat you
+   *  just made is the one you are IN; it belongs at the top even though it
+   *  has no last-turn time to sort by. */
   #chatsFor(path: string): TileConversation[] {
-    return this.#chatList.filter(chat => chat.path === path)
+    const held = this.#chatList.filter(chat => chat.path === path)
+    const known = new Set(held.map(chat => chat.convoId))
+    const fresh: TileConversation[] = []
+    for (const convoId of this.#pending) {
+      if (known.has(convoId) || tilePath(keySegments(convoId)) !== path) continue
+      fresh.push({ path, convoId, title: '', turns: 0, lastAt: 0, unread: false })
+    }
+    return [...fresh, ...held]
   }
 
   /** THE CHAT YOU WERE LAST IN on this tile — sticky, so coming back to a

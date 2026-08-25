@@ -61,20 +61,49 @@ const CONTEXT_SIG_CAP = 64
  *  a branch resolved to an error (attached but unreadable), or the composed
  *  cap below bit. The union call discards those flags, and a responder told
  *  "this is everything" when it is not answers confidently out of ignorance —
- *  the exact failure the context system's honesty doctrine exists to prevent. */
+ *  the exact failure the context system's honesty doctrine exists to prevent.
+ *
+ *  Context SUMMARIES ride in the array BEFORE the content sigs: the responder
+ *  sees what each branch IS ABOUT before trying to parse its layer bytes.
+ *  Summaries are cached by branch signature so they reuse across requests. */
 const composeContext = async (
   segments: readonly string[],
 ): Promise<{ context?: string[]; contextTruncated?: boolean }> => {
   try {
     const branches = await resolveTileContext(segments)
     if (!branches.length) return {}
-    const union = new Set<string>()
+
+    // Summaries first, content sigs after — the responder frames understanding
+    // from the summaries before expanding the raw resources.
+    let sigs: string[] = []
     let incomplete = false
+
+    // Import the summary generator (essentials module, safe to import at runtime).
+    try {
+      const { contextWithSummaries } = await import(
+        './context-summary-gen.js'
+      )
+      if (typeof contextWithSummaries === 'function') {
+        sigs = await contextWithSummaries(branches)
+      }
+    } catch {
+      // Fallback if the import fails: return just content sigs, no summaries.
+    }
+
+    // If summaries didn't populate, fall back to raw content sigs.
+    if (sigs.length === 0) {
+      const union = new Set<string>()
+      for (const branch of branches) {
+        if (branch.truncated || branch.error) incomplete = true
+        for (const sig of branch.signatures) union.add(sig)
+      }
+      sigs = [...union]
+    }
+
     for (const branch of branches) {
       if (branch.truncated || branch.error) incomplete = true
-      for (const sig of branch.signatures) union.add(sig)
     }
-    const sigs = [...union]
+
     if (!sigs.length) return incomplete ? { contextTruncated: true } : {}
     return {
       context: sigs.slice(0, CONTEXT_SIG_CAP),
