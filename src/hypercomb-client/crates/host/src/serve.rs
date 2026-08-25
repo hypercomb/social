@@ -211,7 +211,6 @@ fn handle(mut stream: TcpStream, root: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
 
     fn request(port: u16, raw: &str) -> String {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
