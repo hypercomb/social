@@ -1656,6 +1656,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "resolver-install-command",
+      "title": "Mirror the resolver: hypercomb install (read-only deployment Phase 3)",
+      "run": null,
+      "note": "New CLI creation: hypercomb-cli/src/commands/install.ts (+spec, +index wiring) — the resolver from documentation/read-only-deployment.md. Mirror = tiles for the parts (install.ts, install.spec.ts, index.ts wiring) 1:1 with source, a collection gathering them under the read-only-deployment creation, pheromones marking part/behavior per declared vocabulary, and a note per tile carrying what it does (signature+domain -> exact Merkle install; delta; refusal; holes). note-add is additive — manual drain only.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }

@@ -40,6 +40,69 @@ dependencies, the domain allowlist. The published site is the
 try-before-trust tier; the gate is crossed only when the visitor chooses to
 bring the creation home.
 
+And the door only opens from the inside: nothing on a published site can
+push itself into a hive — the client pulls a chosen signature and verifies
+the bytes. **When you open the door from the inside, you are accepting your
+own request** — requester and acceptor are the same person performing the
+same act, which is why no external party can ever open it for you. What you
+accept is **the layer metadata that resolves the hive from the website you
+were just on**: the site carries its own meta layer (head, place, publisher),
+and accepting it is the whole handshake — no other format, no other channel.
+
+Adoption from a published site is also a **warm start**: since the website
+is there, all the dependencies and resources resolve instantly — the origin
+already serves the full closure, so the pull that follows your acceptance is
+cache-hits from the very site you were just on, not cold fetches from
+somewhere else.
+
+### The handshake
+
+The caller brings the domain with the request and uses it to get resources —
+because a domain is only a WHERE, never a WHAT. The protocol (already built
+in `sharing/hive-visit.drone.ts` for hive-links; the resolver's `--from` is
+the same move from the command line):
+
+1. **The meta layer names everything**: publisher pubkey, place (segments),
+   the domains that serve the bytes, and a head hint for when the index is
+   cold.
+2. **Resolve "now" against the publisher, not the host**: fetch the signed
+   hive index from any of the named domains and verify it against the
+   pinned pubkey (`hive-pointer.ts`) — no host can substitute a head.
+3. **Bring the domain to the broker**: `noteDomainsForSig(head, domains)` —
+   the caller teaches its own byte tier where this closure lives. The
+   domains ride along with every subsequent request precisely because they
+   authenticate nothing.
+4. **Pull and prove**: walk the closure from those domains, sha256-gating
+   every byte against its name. The signature is the trust; the domain is
+   disposable transport — any domain serving the right bytes is
+   interchangeable with any other.
+
+There is no step where the host is believed. The handshake is: *you name a
+publisher and a place; the publisher's signature names the head; the head
+names every byte; the domain merely delivers them.*
+
+**The more elegant form: one signature, resolved against where you stand.**
+The caller never actually brings a domain along, because the domain is
+always in one of two places already:
+
+- **Under your feet.** Adopting from a published site, the byte source is
+  `location.origin` — the door you walked through IS the oasis. The meta
+  layer degenerates to a bare signature (plus the publisher pubkey for
+  later updates); the where is implicit in the being-there.
+- **Written in the layer.** For roaming resolution — other mirrors, R2, a
+  friend's desktop — additional domains are ordinary CONTENT of the meta
+  layer itself (its hosting incidences), not a protocol parameter. The
+  broker learns where-else by reading what it just accepted, the same way
+  it learns everything: the communication language is meta layers
+  everywhere, so the where travels in-band as layer content.
+
+So the whole handshake is: **accept one signature; everything else —
+head, place, publisher, oases — is content resolved from it.** No
+side-band, no argument list, and the degenerate case (a bare sig, standing
+on the site) already works. The resolver CLI's `--from` is just this
+handshake spoken from a terminal, where "where you stand" has to be said
+out loud because a terminal stands nowhere.
+
 And the presentation isn't one declared mode — it is **any number of
 whatever views you had configured in the publish**. View marks live on the
 branches (the default-view cascade: nearest mark wins), so they ride the
@@ -203,6 +266,16 @@ publish names is which pools go out (the creation's branch head plus the
 pools its beehaviors read). A deployment is a published set of pools — the
 vocabulary of the publish command is meanings, not file paths.
 
+And the communication language is **always layers — meta layers everywhere**.
+That is the dialect of the Hypercomb communication protocol, the same way a
+single event shape is the dialect of Nostr: one message shape for
+everything, with meaning distinguished by content and marks (as Nostr does
+with kinds), never by minting a new format. Meta-information about content
+travels as layers too — announcing a published head IS broadcasting a meta
+layer, just the same as broadcasting a Nostr message. The practical consequence for tooling like the
+resolver: it mints NO bespoke side-formats — its output is flat sig files,
+and any "what's current" pointer rides the existing layer/sigbag doctrine.
+
 **It is the perfect reciprocal format to achieve sharing and installation.**
 One format, two directions: what a publisher shares is byte-for-byte what an
 installer consumes — publish pushes the closure out, resolve pulls it in,
@@ -279,11 +352,19 @@ gate. Signatures make the pruning safe to add later without format changes.
 - Doctrine ratchet: visitor build may not register authoring surfaces.
 
 **Phase 3 — the resolver + `publish:site`**
-- `hypercomb install <sig> --from <url> --to <dir>` in `hypercomb-cli`: the
-  pull twin of publish-content's push walk — resolve the Merkle closure from
-  any content host, sha256-gate every byte, write the flat pool + manifest.
-  Idempotent and delta-only: re-running with a new signature fetches only
-  what's missing; an older signature is a rollback.
+- **BUILT (2026-08-25)**: `hypercomb install <sig> --from <url> [--from …]
+  --to <dir> [--verify] [--max <n>]` in `hypercomb-cli`
+  (`src/commands/install.ts`): the pull twin of publish-content's push walk —
+  resolve the Merkle closure from any content host over the one contract
+  (`<base>/<sig>`), sha256-gate every byte before it touches disk (staged
+  `.part` write + rename, so a crash can't leave a torn file the delta skip
+  would trust), mine refs from text payloads, refuse lying sources, report
+  holes. Present files are never refetched but ARE mined, so resolving a new
+  signature over an existing folder fetches only the delta; an older
+  signature is a rollback. Honors the meta-layers dialect: NO bespoke
+  side-formats — output is flat sig files only. Six-case contract spec
+  (`install.spec.ts`) + verified live: a 9-sig closure resolved from
+  content.jwize.com with zero holes, rerun = 9 present / 0 fetched.
 - `scripts/publish-site.ts`: assemble the full deployable folder locally —
   website harness build + resolver output + baked `site.json`. One command,
   no git required. `npm run publish:site -- /revolucion --out

@@ -1,5 +1,6 @@
 import { runBuild } from './commands/build.js'
 import { runInspect } from './commands/inspect.js'
+import { runInstall } from './commands/install.js'
 import { runTile } from './commands/tile.js'
 import { runDo } from './commands/do.js'
 import { runBridge } from './bridge/server.js'
@@ -9,6 +10,8 @@ const USAGE = `Usage: hypercomb <command> [options]
 Commands:
   build [--local]              Build essentials modules (--local skips Azure deploy)
   inspect [--keys|--registry]  Show IoC keys or live registry contents
+  install <sig> --from <url> --to <dir>
+                               Resolve a signature's Merkle closure into a flat sig-file pool
   bridge                       Start WebSocket relay (port 2401)
   tile <subcommand>            Manage tiles via bridge (add/remove/list/inspect/history)
   do "<text>" | do --stdin     Submit text through the in-app command line
@@ -25,6 +28,8 @@ async function main(): Promise<void> {
       return runBuild(rest)
     case 'inspect':
       return runInspect(rest)
+    case 'install':
+      return runInstall(rest)
     case 'bridge':
       return runBridge()
     case 'tile':
