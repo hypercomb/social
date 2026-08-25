@@ -38,6 +38,11 @@ always comes back out of where you are, and at the root of a site the thing
 you are inside IS the site. Leaving lands on the page that spawned it, in the
 view that spawned it (`documentation/embedded-sites.md` → *Coming back out*).
 
+Leaving a view you **stepped into** from a tile icon — the tree is the first —
+lands the same way: on the page the icon was clicked from, in the view that was
+up (`documentation/stepping-into-a-view.md`). The icon's walk to the branch
+entrance is undone on the way out, so coming back out lands where you came in.
+
 Rung 4 is why **hierarchical menus need no wiring at all**: their rows walk the
 lineage in, so the gesture walks the lineage out. Only a surface that drills
 WITHOUT moving the lineage needs to register.

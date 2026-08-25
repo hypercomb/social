@@ -48,6 +48,7 @@ import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-regist
 import { hasDecorationKind, defaultViewForSegments } from './decoration-kind-index.js'
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
 import { resolveViewEntrance } from './view-entrance.js'
+import { VIEW_SPAWN_EFFECT } from '../presentation/tiles/view-spawn.js'
 import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
 
 /** IoC key for the shell-side icon registry. */
@@ -343,7 +344,7 @@ function dispatchViewAction(action: string, label: string | undefined): void {
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
-type ViewModeLike = { setMode?: (next: string) => void }
+type ViewModeLike = { mode?: string; setMode?: (next: string) => void }
 
 /** Dispatch a click on an ENTER icon: go to the view's ENTRANCE and open the
  *  view there. Mirrors the websites launch group's activation — navigate
@@ -377,6 +378,14 @@ function dispatchEnterAction(action: string, label: string | undefined): void {
   const nav = window.ioc.get<NavigationLike>('@hypercomb.social/Navigation')
   const vm = window.ioc.get<ViewModeLike>('@hypercomb.social/ViewMode')
   if (!nav?.goRaw || !vm?.setMode) return
+
+  // WHERE THIS STEP-IN CAME FROM, announced before the walk erases it. The
+  // entrance below is not where the participant was standing — for a
+  // branch-scoped behaviour it can be several rings up — so a view that
+  // wants to come back out where you came in has to be told now, while
+  // "here" still means here. Receivers gate on `view` (see view-spawn.ts);
+  // a view that ignores it simply closes onto the entrance as before.
+  EffectBus.emit(VIEW_SPAWN_EFFECT, { view: bee.view, mode: (vm.mode ?? '').trim(), segments: here })
 
   // Async only because the entrance is read from layers; the pair stays
   // ordered (navigate, then flip) so the renderer sees the entrance as its

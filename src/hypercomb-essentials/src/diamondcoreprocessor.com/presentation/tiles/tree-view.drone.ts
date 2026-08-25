@@ -35,6 +35,9 @@ import {
   loadInsights, saveInsight, deleteInsight, newInsight, withCall, withoutCall, isValidInsightName,
   type Insight, type InsightCatalog, type InsightStore,
 } from './tree-insight.js'
+import {
+  VIEW_SPAWN_EFFECT, HEXAGONS, sameSegments, spawnForView, viewReturnTarget, type ViewSpawn,
+} from './view-spawn.js'
 
 export const TREE_VIEW = 'tree'
 
@@ -138,6 +141,22 @@ export class TreeViewDrone extends Drone {
   #contextMenuBound = false
   #keyBound = false
   #effectsBound = false
+  #spawnBound = false
+
+  // ── the way back out ──
+  /** THE VIEW AND THE PAGE THIS TREE WAS STEPPED INTO FROM — the one
+   *  destination closing it has (the rule lives in `view-spawn.ts`).
+   *  Announced by the tile icon that opened it, BEFORE it walked the
+   *  explorer to the branch root, because after the walk "where you stood"
+   *  is unreadable. Null for a tree opened by `/tree`, by the header toggle,
+   *  or as a layer's arrival face: nothing stepped anywhere, so closing
+   *  stays put. */
+  #spawn: ViewSpawn | null = null
+  /** A tree session is up — so an unrelated mode flip never moves anyone. */
+  #session = false
+  /** Re-entrancy guard: coming back out sets ViewMode a second time
+   *  (hexagons → the spawning view) from inside the mode-change handler. */
+  #restoringSpawn = false
 
   // ── view state ──
   #root: TreeRoot = {}
@@ -211,6 +230,20 @@ export class TreeViewDrone extends Drone {
     if (!this.#keyBound) {
       window.addEventListener('keydown', this.#onKeyDown, true)
       this.#keyBound = true
+    }
+    if (!this.#spawnBound) {
+      // Where the icon that opened this tree stepped in FROM. The
+      // subscription's own last-value replay is not a live step-in — ignore
+      // it, or a boot replay would hand this session a spawn recorded before
+      // the page was reloaded.
+      let replay = true
+      this.onEffect(VIEW_SPAWN_EFFECT, (payload) => {
+        if (replay) return
+        const spawn = spawnForView(payload, TREE_VIEW)
+        if (spawn) this.#spawn = spawn
+      })
+      replay = false
+      this.#spawnBound = true
     }
     if (!this.#effectsBound) {
       // Structure changing under the view — re-walk, coalesced.
@@ -354,7 +387,48 @@ export class TreeViewDrone extends Drone {
 
   // ── reactivity ─────────────────────────────────────────────
 
-  readonly #onModeChange = (): void => { this.#sync() }
+  /** Track the session, and on the way out come back to where the tree was
+   *  stepped into from. Every exit path — Escape, right-click, the toolbar
+   *  button, `/tree off`, the toggle — names the hexagons; that name is
+   *  turned into the spawn here, in one synchronous re-set, so no exit had
+   *  to be rewired and there is no flash of the default surface on the way.
+   *  Only exits TO the hexagons: a flip onto another view is a change of
+   *  face on this cell, not a way out. */
+  readonly #onModeChange = (): void => {
+    if (!this.#restoringSpawn) {
+      const mode = this.#vm()?.mode
+      if (mode === TREE_VIEW) this.#session = true
+      else if (this.#session) {
+        const spawn = this.#spawn
+        this.#session = false
+        this.#spawn = null
+        if (mode === HEXAGONS) this.#returnToSpawn(spawn)
+      }
+    }
+    this.#sync()
+  }
+
+  /** The surface is restored FIRST — while the mode still reads 'tree' an
+   *  arrival at the destination would be judged as walking out of the
+   *  branch and released to the hexagons under us — and the place follows
+   *  with `explorerReplace`, so the whole reading of a tree still costs the
+   *  single history entry that entered it. */
+  #returnToSpawn(spawn: ViewSpawn | null): void {
+    const lineage = this.resolve<{
+      explorerSegments?: () => readonly string[]
+      explorerReplace?: (segments: readonly string[]) => void
+    }>('lineage')
+    const current = [...(lineage?.explorerSegments?.() ?? [])]
+    const target = viewReturnTarget(spawn, current)
+    if (target.mode !== HEXAGONS) {
+      this.#restoringSpawn = true
+      try { this.#vm()?.setMode(target.mode) } finally { this.#restoringSpawn = false }
+    }
+    if (sameSegments(target.segments, current)) return
+    const segments = [...target.segments]
+    if (typeof lineage?.explorerReplace === 'function') { lineage.explorerReplace(segments); return }
+    window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(segments)
+  }
 
   /** Navigating elsewhere while the tree is up does not re-root it: the view
    *  is a lens on a chosen branch, not a mirror of the cursor. Only a
@@ -1737,8 +1811,12 @@ export class TreeViewDrone extends Drone {
     }
   }
 
-  /** Traveling means leaving the view — hexagons first, then go. */
+  /** Traveling means leaving the view — hexagons first, then go. Choosing a
+   *  destination outranks the way back in: drop the spawn before the flip,
+   *  or the exit handler would put the traveller straight back where they
+   *  opened the tree. */
   #navigate(segments: readonly string[]): void {
+    this.#spawn = null
     this.#vm()?.setMode('hexagons')
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw([...segments])
   }

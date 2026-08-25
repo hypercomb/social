@@ -1574,6 +1574,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "tree-exit-spawn",
+      "title": "Coming out of the tree lands on the view + page you stepped in from",
+      "run": null,
+      "note": "Same family as the pending site-exit-spawn entry — mirror them together under the behaviors/navigation collection. Part tiles: view-spawn.ts (the general rule + the view:spawn effect), the emit in visual-bee-icons.ts dispatchEnterAction, TreeViewDrone's spawn latch + #returnToSpawn + the spawn drop in #navigate, drive-tree-exit-spawn.cjs, documentation/stepping-into-a-view.md. Notes: a stepped-into view is a takeover not a walk; the icon's walk to the branch entrance is what has to be undone; the record travels on EffectBus because module state is per-bee-bundle; surface restored before place; travel outranks the way back in; no record (typed / toggle / arrival face) means stay put. Mark parts with the declared part pheromone. MANUAL: note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }
