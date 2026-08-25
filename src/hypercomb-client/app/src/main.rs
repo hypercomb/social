@@ -25,6 +25,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use hypercomb_host::{Head, Host, HostError};
 use tauri::{Manager, State};
 
+mod hosting;
+
 /// Commands return the host's error type directly so the renderer sees a
 /// category it can act on, never an internal path or a raw storage message.
 type Result<T> = std::result::Result<T, HostError>;
@@ -555,6 +557,7 @@ fn main() {
 
             let host = Host::open(&dir).map_err(|e| format!("opening hive at {}: {e}", dir.display()))?;
             app.manage(host);
+            app.manage(hosting::Hosting::new(dir.clone()));
 
             // Truncated per launch, so a log always describes ONE run rather
             // than an accumulating pile that hides which failure was current.
@@ -981,7 +984,23 @@ fn main() {
             renderer_log,
             diagnostic_log_path,
             open_external,
+            hosting::hosting_status,
+            hosting::hosting_pick_folder,
+            hosting::hosting_serve_start,
+            hosting::hosting_serve_stop,
+            hosting::hosting_tunnel_login,
+            hosting::hosting_go_live,
+            hosting::hosting_go_offline,
         ])
-        .run(tauri::generate_context!())
-        .expect("running the Hypercomb window");
+        .build(tauri::generate_context!())
+        .expect("building the Hypercomb window")
+        .run(|app, event| {
+            // The tunnel is a real child process; the OS does not reap it for
+            // us. Going dark on exit beats a ghost tunnel serving a stopped app.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(hosting) = app.try_state::<hosting::Hosting>() {
+                    hosting.shutdown();
+                }
+            }
+        });
 }

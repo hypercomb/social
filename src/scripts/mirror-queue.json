@@ -1674,6 +1674,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "native-host-feature",
+      "title": "Mirror the native Host feature (executable makes anybody a host)",
+      "run": null,
+      "note": "New creation across client+shared: crates/host/src/serve.rs (SiteServer, 4 tests), app/src/hosting.rs (cloudflared orchestration, hosting.json beside hive, RunEvent::Exit teardown), app/src/main.rs wiring (7 hosting_* commands), hypercomb-shared/ui/host-panel/* (native-gated shell surface, hosting.* i18n en+ja). Tiles 1:1 with these sources under the read-only-deployment collection, marks per vocabulary, notes carry: serves ONLY the picked published folder (consent boundary), tunnel run --url never config.yml (jwize protection), CSP forbids localhost fetch so status rides IPC. note-add additive - manual drain.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }

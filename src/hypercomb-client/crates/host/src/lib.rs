@@ -41,6 +41,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+pub mod serve;
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 

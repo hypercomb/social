@@ -498,7 +498,23 @@ anywhere.
   hands the visitor a hive-link (the adopt path already exists) — off by
   default until decided.
 
-**Phase 5 — the executable makes anybody a host**
+**Phase 5 — the executable makes anybody a host** *(core BUILT 2026-08-25)*
+
+Built: the site server (`hypercomb-client/crates/host/src/serve.rs` —
+loopback-only, GET/HEAD/OPTIONS, directory-index, immutable sig caching,
+traversal-guarded, zero new dependencies, 4 tests), the orchestration
+(`app/src/hosting.rs` — 7 `hosting_*` IPC commands: status / pick folder
+via native dialog / serve start-stop / cloudflared login / go-live /
+go-offline; per-run `tunnel run --url` flags so an operator's hand-built
+`~/.cloudflared/config.yml` is NEVER touched; `hosting.json` +
+`hosting.log` beside the hive per instance; tunnel child killed on
+go-offline and app exit), and the Host panel
+(`hypercomb-shared/ui/host-panel/` — native-gated shell surface, `hosting.*`
+i18n in en+ja; status polls over IPC because the app CSP forbids fetching
+localhost). It serves ONLY the picked published folder — the consented
+public subset — never the live store. Still owed: bundling cloudflared as
+a sidecar (`bundle.externalBin`, first ever) so "get cloudflared" is not a
+manual step, and an end-to-end live-domain test.
 - The point is not that the developer's machine is close — it is that
   **anybody who installs the Windows/Mac/Linux executable is there
   instantly after they point their Cloudflare.** The app takes care of
