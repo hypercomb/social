@@ -173,6 +173,17 @@ can sync *for* the owner but can never sync *as* the owner. The resolver
 CLI is this shim minus the daemon: `hypercomb install` run by hand is one
 sync; the shim is the same verb standing by.
 
+Once the shim is up, **resolution fills the directory where your packages
+are installed — by signature, and by tile and branch expansion.** The walk
+has the layer protocol as its grammar: a branch expands through its
+`children`, a tile expands through its layer's decorations, resources, and
+pages, a package expands through its manifest's bees and dependencies —
+and every expansion bottoms out in sig-named bytes landing in the one flat
+pool. The resolver's ref-mining is the universal implementation of exactly
+this: packages and content fill the same directory through the same
+expansion, which is why one folder can be a website, a package source, and
+an oasis at once.
+
 **The xcopy contract** survives as the degenerate path: run the resolver
 locally, get the folder, copy it to the server (`xcopy`, FTP, drag-and-drop —
 anything) and it just works. Either way, the folder that lands on the server
