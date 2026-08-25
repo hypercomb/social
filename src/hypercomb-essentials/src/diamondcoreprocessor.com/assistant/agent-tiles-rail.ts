@@ -34,25 +34,35 @@
 // separate roster to keep in step and no control to opt a tile in. Three
 // gestures, and nothing else:
 //
-//   click        enter this tile's conversation (what you type goes here)
+//   click        GO INSIDE it — a row with children opens, the way a row with
+//                children opens in every other list in the shell. A LEAF has
+//                nowhere to go, so there a click enters the tile's
+//                conversation instead. (Hold-to-enter is retired: the rail is
+//                how you FIND a tile, and hiding the walk behind a press
+//                nobody discovers made its ordinary gesture the one thing it
+//                is not for.)
 //   the ›        open the tile's CHATS — a tile is a subject, not a single
 //                thread, so the arrow unfolds the conversations it holds and
-//                lets you pick one (or start another). The pick is sticky:
-//                coming back to the tile reopens the chat you were in.
+//                lets you pick one (or start another). This is where a
+//                PARENT's own conversation lives, and it always ends with a
+//                fresh one, so nothing lost a home when click stopped
+//                meaning "talk". The pick is sticky: coming back to the tile
+//                reopens the chat you were in.
 //   ctrl-click   CHOOSE it — add the tile to the context the next request
 //                carries. Any number, gathered across any number of levels
 //                (the choice survives walking in and out), because what is
 //                being built is a LIST OF SIGNATURES: content-addressed, so
-//                the same choice composes the same payload every time.
-//   hold         go INSIDE it — the same hold-to-enter the hive itself uses,
-//                so the list is walked with the gesture already in the hands
+//                the same choice composes the same payload every time. The
+//                SAME chord gathers on the hexagons while the chat window is
+//                folded away (see chat-peek.scss), so choosing context is one
+//                gesture whether you are in the list or out in the hive.
 //   right-click  come back out
 //
-// All three are pointer gestures, and a list that can only be walked with a
-// mouse is a list some people cannot walk at all — so the same three moves
-// answer to the keyboard: Enter opens the conversation, → goes inside, ←
-// comes back out, ↑↓ walk the rows, and the level that arrives takes the
-// focus so a keyboard is never stranded on a row that no longer exists.
+// All of them are pointer gestures, and a list that can only be walked with a
+// mouse is a list some people cannot walk at all — so the same moves answer to
+// the keyboard: → goes inside, ← comes back out, ↑↓ walk the rows, Space
+// chooses, and the level that arrives takes the focus so a keyboard is never
+// stranded on a row that no longer exists.
 //
 // A tile nobody has spoken to is DORMANT: the conversation is derived, not
 // minted, so it costs nothing until a draft or a turn lands in it. A row
@@ -68,8 +78,8 @@
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
-  HIVE_PATH, foldTileConversations, listGlobalConversations, listTileConversations, listTileDrafts,
-  newTileConvoId, tileConvoId, tilePath, tilePathOf,
+  HIVE_PATH, foldTileConversations, listRailConversations, listTileDrafts,
+  newTileConvoId, readConversationSummary, tileConvoId, tilePath, tilePathOf,
   type TileConversation,
 } from './chat-thread.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
@@ -150,18 +160,14 @@ type RailStore = WalkStore & ThumbnailStore
  *  rather than hanging the rail — the canvas behind it still shows it all. */
 const MAX_ROWS = 500
 
-/** Hold-to-enter, matched to the hive's own (TILE_ENTER_HOLD_MS in
- *  presentation/tiles/tile-overlay.drone.ts). The same wait means the same
- *  gesture: whatever the hands learned on the hexagons works in the list. */
-const ENTER_HOLD_MS = 450
+/** How long a burst of landing turns is gathered before the list is folded.
+ *  Long enough that a drain delivering several replies is one repaint, short
+ *  enough that a reply you are watching for appears as it lands. */
+const CHAT_SETTLE_MS = 180
 
-/** How long after a hold a trailing click still belongs to that press. Long
- *  enough for touch to deliver it, short enough that it can never eat a click
- *  you meant. */
-const SWALLOW_WINDOW_MS = 600
-
-/** A press that wanders this far was a scroll, not a hold. */
-const HOLD_SLOP = 9
+/** Past this many changed threads in one burst, a single walk of the pool is
+ *  cheaper than reading each bucket — so take the walk. */
+const CHAT_MERGE_CAP = 12
 
 const pathKey = (segments: readonly string[]): string => segments.join('\u0000')
 
@@ -252,7 +258,6 @@ const ensureRailStyles = (): void => {
   box-shadow:inset 0 0 0 1px rgba(${STEEL},0.4);}
 .hc-rail-row{display:flex;align-items:center;border-radius:var(--hc-radius-control, 2px);}
 .hc-rail-row:hover{background:rgba(255,255,255,0.05);}
-.hc-rail-row.holding{background:rgba(${STEEL},0.16);transition:background 0.12s ease;}
 .hc-rail-main{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:0.6rem;
   padding:0.35rem 0.2rem 0.35rem 0.45rem;border:0;background:none;text-align:left;font:inherit;
   cursor:pointer;border-radius:var(--hc-radius-control, 2px);color:inherit;}
@@ -458,6 +463,10 @@ export class AgentTilesRail {
    *  Session-local on purpose: an empty conversation nobody spoke in is not
    *  worth a record, and forgetting it on reload costs nothing said. */
   #pending = new Set<string>()
+  /** Conversations a turn has landed in since the last merge, and the timer
+   *  that folds them in together. */
+  #chatDirty = new Set<string>()
+  #chatSettle: ReturnType<typeof setTimeout> | null = null
   #chats = new Map<string, { turns: number; unread: boolean; chats: number; lastAt: number }>()
   #busy = new Set<string>()
   /** Row keys whose chat list is unfolded. */
@@ -468,14 +477,6 @@ export class AgentTilesRail {
    *  about a tile's own conversations: it can be in three sets and still have
    *  a solo chat about nothing but itself. */
   #grouped = new Set<string>()
-  /** A hold already acted — eat the click that ends THE SAME PRESS, and only
-   *  that one. A bare flag stayed armed forever when the click never came:
-   *  going inside re-renders the level, so the element the click was due on
-   *  no longer exists, and the flag then ate the NEXT row click on the page
-   *  you had just walked into — the first thing you clicked in there did
-   *  nothing. A press's trailing click arrives in milliseconds; a window is
-   *  the honest guard. */
-  #swallowUntil = 0
   /** The level changed from the keyboard: put focus on the level that
    *  arrives, or the keyboard is stranded on a row that no longer exists. */
   #focusFirstRow = false
@@ -613,7 +614,8 @@ export class AgentTilesRail {
     this.#dropChatWatch?.()
     if (this.#profile.chats) {
       this.#dropDraftWatch = EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() })
-      this.#dropChatWatch = EffectBus.on('chat:threads-changed', () => { void this.#refreshChats() })
+      this.#dropChatWatch = EffectBus.on<{ convoId?: string }>(
+        'chat:threads-changed', payload => { void this.#chatChanged(String(payload?.convoId ?? '')) })
     }
     this.#dropGroupWatch?.()
     this.#dropGroupWatch = EffectBus.on<{ paths?: readonly string[] }>('context:active-set', payload => {
@@ -676,7 +678,7 @@ export class AgentTilesRail {
     const key = pathKey(segments)
     if (this.#subject?.key === key) return
     this.#subject = { key, path: [...this.#here()], name }
-    this.#markCurrent(this.#list?.querySelector<HTMLElement>(`.hc-rail-row[data-key="${CSS.escape(key)}"]`) ?? null)
+    this.#markCurrent(this.#rowFor(key))
   }
 
   /** Re-read every row's badge from the surface, in place. */
@@ -736,6 +738,7 @@ export class AgentTilesRail {
 
   dispose(): void {
     this.#disposed = true
+    if (this.#chatSettle) { clearTimeout(this.#chatSettle); this.#chatSettle = null }
     this.#dropDraftWatch?.()
     this.#dropDraftWatch = null
     this.#dropChatWatch?.()
@@ -937,19 +940,30 @@ export class AgentTilesRail {
 
       main.append(icon, name, bees)
 
-      // CLICK TALKS, CTRL-CLICK CHOOSES, HOLD GOES IN. A plain click can never
-      // navigate — it is the gesture you make while mid-thought, so it only
-      // ever changes who you are talking to. Ctrl-click gathers context and
-      // never moves the list either. Going deeper is the deliberate one, and
-      // it is the hive's own hold-to-enter, so the list is walked with the
-      // gesture the hands already know.
-      if (row.childCount > 0 && this.#profile.walk) this.#armHold(main, wrap, row)
+      // CLICK GOES IN, CTRL-CLICK CHOOSES, THE ARROW TALKS.
+      //
+      // Click used to mean "enter this tile's conversation" and hold-to-enter
+      // meant "go inside". That put the rail's ordinary gesture on the one
+      // thing the rail is not for — it is a way to FIND a tile — and hid
+      // walking behind a press nobody discovers, on a list whose whole point
+      // is to be walked. It also disagreed with every other list in the shell,
+      // where clicking a row with children opens it.
+      //
+      // So a click on a row that HAS children goes in. A leaf has nowhere to
+      // go, so there a click still opens the conversation — the same rule the
+      // hive follows, not a second one. Conversations did not lose a home:
+      // the ▸ was always their control and it unfolds them (including a fresh
+      // one) without moving the list.
       main.addEventListener('click', event => {
-        // The hold already went in; the click that ends it must not also
-        // drag the conversation to the row we just left.
-        if (performance.now() < this.#swallowUntil) { this.#swallowUntil = 0; return }
-        if ((event.ctrlKey || event.metaKey) && this.#profile.choose) this.#toggleChosen(wrap, key, row)
-        else this.#enter(wrap, key, row)
+        if ((event.ctrlKey || event.metaKey) && this.#profile.choose) {
+          this.#toggleChosen(wrap, key, row)
+          return
+        }
+        if (row.childCount > 0 && this.#profile.walk) {
+          this.#drill(row.segments)
+          return
+        }
+        this.#enter(wrap, key, row)
       })
 
       // THE SAME THREE MOVES, FROM THE KEYBOARD. Hold and right-click are
@@ -1046,7 +1060,9 @@ export class AgentTilesRail {
     // the participant already was.
     if (this.#focusFirstRow) {
       this.#focusFirstRow = false
-      list.querySelector<HTMLElement>('.hc-rail-main')?.focus()
+      // The first TILE, not the hive's row above them: the keyboard walked
+      // into this level and the level is what it should land in.
+      list.querySelector<HTMLElement>('.hc-rail-group:not(.hc-rail-hive) .hc-rail-main')?.focus()
     }
   }
 
@@ -1056,41 +1072,6 @@ export class AgentTilesRail {
     const index = rows.indexOf(from)
     if (index < 0) return
     rows[Math.min(rows.length - 1, Math.max(0, index + delta))]?.querySelector<HTMLElement>('.hc-rail-main')?.focus()
-  }
-
-  /** Hold a row to go inside it. Cancelled by a pointer that wanders (that
-   *  was a scroll), by lifting early (that was a click), and by the level
-   *  changing under it. */
-  #armHold(main: HTMLElement, wrap: HTMLElement, row: RailRow): void {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let from: { x: number; y: number } | null = null
-
-    const stop = (): void => {
-      if (timer !== null) { clearTimeout(timer); timer = null }
-      from = null
-      wrap.classList.remove('holding')
-    }
-
-    main.addEventListener('pointerdown', event => {
-      if (event.button !== 0) return
-      from = { x: event.clientX, y: event.clientY }
-      wrap.classList.add('holding')
-      timer = setTimeout(() => {
-        timer = null
-        stop()
-        // Swallow the click this press will end with — on touch it arrives
-        // after the hold has already moved the list.
-        this.#swallowUntil = performance.now() + SWALLOW_WINDOW_MS
-        this.#drill(row.segments)
-      }, ENTER_HOLD_MS)
-    })
-    main.addEventListener('pointermove', event => {
-      if (!from) return
-      if (Math.abs(event.clientX - from.x) > HOLD_SLOP || Math.abs(event.clientY - from.y) > HOLD_SLOP) stop()
-    })
-    for (const name of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
-      main.addEventListener(name, stop)
-    }
   }
 
   /** Fold a tile's conversations open or shut. ONE AT A TIME: opening one
@@ -1262,14 +1243,41 @@ export class AgentTilesRail {
     this.#expanded.clear()
     this.#expanded.add(key)
     this.#rememberChat(path, convoId)
-    const wrap = this.#list?.querySelector<HTMLElement>(`.hc-rail-row[data-key="${CSS.escape(key)}"]`)
+    const wrap = this.#rowFor(key)
     if (wrap) this.#markCurrent(wrap)
     this.#subject = { key, path: row.segments.slice(0, -1), name: row.name, sig: row.sig, convoId }
     this.onSubjectChanged(this.#subject)
     // A fold that is already drawn repaints in place; one that has never been
-    // opened has to be drawn, and only a level pass can do that.
-    if (this.#list?.querySelector(`.hc-rail-chats[data-key="${CSS.escape(key)}"]`)) this.#repaintExpanded()
-    else this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
+    // opened has to be drawn, and only a level pass can do that — and a pass
+    // replaces the row the keyboard was standing on, so the focus has to be
+    // put back where the hands left it.
+    const held = document.activeElement
+    const refocus = held instanceof HTMLElement && this.#list?.contains(held)
+    if (this.#panelFor(key)) this.#repaintExpanded()
+    else {
+      this.#renderLevel(this.#here(), this.#levels.get(pathKey(this.#here())) ?? null, 0)
+      if (refocus) this.#rowFor(key)?.querySelector<HTMLElement>('.hc-rail-main')?.focus()
+    }
+  }
+
+  /** A row by its key, WITHOUT an attribute selector. Keys carry the NUL that
+   *  joins path segments, so they must be escaped to go in a selector — and
+   *  `CSS.escape` is absent in more environments than you would think (jsdom,
+   *  where this list is tested, is one). Walking the rows costs nothing at
+   *  this size and cannot be broken by a character in a tile's name. */
+  #rowFor(key: string): HTMLElement | null {
+    for (const row of this.#list?.querySelectorAll<HTMLElement>('.hc-rail-row') ?? []) {
+      if ((row.dataset['key'] ?? '') === key) return row
+    }
+    return null
+  }
+
+  /** The open fold for a key, by the same rule. */
+  #panelFor(key: string): HTMLElement | null {
+    for (const panel of this.#list?.querySelectorAll<HTMLElement>('.hc-rail-chats') ?? []) {
+      if ((panel.dataset['key'] ?? '') === key) return panel
+    }
+    return null
   }
 
   /** Choose or release a row as CONTEXT. Independent of the conversation you
@@ -1333,19 +1341,48 @@ export class AgentTilesRail {
     this.#paintStatus()
   }
 
-  /** Which tiles hold a conversation at all, and whether it has been read. */
+  /** A TURN LANDED. What changed is ONE conversation, and the pool can say so
+   *  without being walked end to end — which matters because this fires on
+   *  every reply, and a session grinding away over the bridge is already
+   *  using the same main thread the bees pulse on. The full walk is kept for
+   *  the case it is actually needed: a change that does not name its thread.
+   *
+   *  Named changes are also COALESCED — a drain that delivers six replies in
+   *  a burst is one repaint, not six. */
+  async #chatChanged(convoId: string): Promise<void> {
+    if (!convoId) { void this.#refreshChats(); return }
+    this.#chatDirty.add(convoId)
+    if (this.#chatSettle) return
+    this.#chatSettle = setTimeout(() => {
+      this.#chatSettle = null
+      const ids = [...this.#chatDirty]
+      this.#chatDirty.clear()
+      // Past the cap, reading each bucket costs more than one walk of the
+      // pool — so take the walk rather than a hundred directory opens.
+      if (ids.length > CHAT_MERGE_CAP) { void this.#refreshChats(); return }
+      void this.#mergeChats(ids)
+    }, CHAT_SETTLE_MS)
+  }
+
+  /** Fold what those conversations say now into the list already in hand. */
+  async #mergeChats(ids: readonly string[]): Promise<void> {
+    const fresh = (await Promise.all(ids.map(id => readConversationSummary(id).catch(() => null))))
+      .filter((chat): chat is TileConversation => !!chat)
+    if (this.#disposed || !fresh.length) return
+    const byId = new Map(this.#chatList.map(chat => [chat.convoId, chat]))
+    for (const chat of fresh) byId.set(chat.convoId, chat)
+    this.#chatList = [...byId.values()].sort((a, b) => b.lastAt - a.lastAt)
+    this.#chats = foldTileConversations(this.#chatList)
+    this.#paintStatus()
+    if (this.#expanded.size) this.#repaintExpanded()
+  }
+
+  /** Which tiles hold a conversation at all, and whether it has been read.
+   *  ONE walk: a chat about no tile is filed at the hive's own address, so
+   *  the tiles' threads and the hive's arrive together. */
   async #refreshChats(): Promise<void> {
     let chats: TileConversation[] = []
-    try {
-      // Two walks, one list: the tiles' threads, and the hive's own — which
-      // includes every free-floating chat ever minted, now that there is a
-      // row that can show them. Deduped by id, because a conversation at the
-      // root satisfies both descriptions.
-      const [tiles, global] = await Promise.all([listTileConversations(), listGlobalConversations()])
-      const byId = new Map<string, TileConversation>()
-      for (const chat of [...tiles, ...global]) byId.set(chat.convoId, chat)
-      chats = [...byId.values()]
-    } catch { return }
+    try { chats = await listRailConversations() } catch { return }
     if (this.#disposed) return
     this.#chatList = chats
     this.#chats = foldTileConversations(chats)

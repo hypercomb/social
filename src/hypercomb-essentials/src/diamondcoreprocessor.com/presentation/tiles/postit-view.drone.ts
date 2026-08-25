@@ -29,6 +29,9 @@ import { trackScrollGutter } from './scroll-gutter.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY, type PostitPayload } from '../../commands/postit.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
+/** This drone's name in the owner-counted `view:active` mode. */
+const POSTIT_OWNER = 'postit-view'
+
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
 type HistoryShape = {
@@ -89,6 +92,13 @@ export class PostitViewDrone extends Drone {
   #justDragged = false
   /** Unregisters the right-click way out (back-gesture.service.ts). */
   #backOff: (() => void) | null = null
+  /** A COVERING surface is up — any owner of `view:active` other than this
+   *  drone itself. The stickies deliberately sit above the docked toolwindow
+   *  layer so a note dropped over a side panel stays grabbable, and that same
+   *  z-index left them floating over anything full-screen. Covered is a
+   *  VISIBILITY flag, not a teardown: the notes (and an opened post) keep
+   *  their nodes and come back exactly as they were. */
+  #covered = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -107,6 +117,25 @@ export class PostitViewDrone extends Drone {
       // (and stayed missing after it was switched back on) until some unrelated
       // pass happened to reconcile.
       this.onEffect(ENABLEMENT_CHANGED, this.#change)
+      // A toolwindow opening or closing changes the free area. The docked
+      // column reads `--hc-inset-*` in CSS and reflows on its own, but a
+      // PINNED note is fixed at absolute pixels and would sit under the
+      // panel — reconcile so it re-clamps into whatever room is left.
+      this.onEffect('viewport:inset', this.#change)
+      // WHO HAS THE SURFACE, asked of the one registry that knows. This used
+      // to read `chat:window-state` — the chat window by name — which was
+      // right about the only cover that existed and wrong in two ways since:
+      // it could not see any OTHER full-screen surface, and it could not see
+      // the chat window FOLDED AWAY (peek), where the whole point is that the
+      // hive underneath is live and its post-its belong on screen.
+      //
+      // `view:active` answers both. It is owner-counted, so a closing overlay
+      // can never uncover a still-open one; and it is re-read from the
+      // registry rather than taken from the payload, because the payload
+      // names only the owner that caused the transition. This drone's OWN
+      // owner is excluded: the post-it view holds `view:active` while it is
+      // showing, and hiding the surface it just opened is exactly backwards.
+      this.onEffect('view:active', () => this.#recheckCover())
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
         if (payload?.view !== POSTIT_VIEW) return
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
@@ -149,9 +178,46 @@ export class PostitViewDrone extends Drone {
     this.#vm()?.setMode('hexagons')
   }
 
+  /** Show or hide both surfaces for the covering window. `display` rather
+   *  than a teardown: the opened post keeps its scroll position and its
+   *  mounted page (a shadow root with live scripts), so closing the chat
+   *  brings back what was there instead of remounting it. */
+  /** Re-read the cover from the registry and repaint if it moved. */
+  #recheckCover(): void {
+    const modes = window.ioc?.get<{ ownersOf(mode: string): readonly string[] }>(
+      '@diamondcoreprocessor.com/ModeRegistry')
+    const covered = (modes?.ownersOf('view:active') ?? []).some(owner => owner !== POSTIT_OWNER)
+    if (covered === this.#covered) return
+    this.#covered = covered
+    this.#applyCover()
+  }
+
+  #applyCover(): void {
+    for (const surface of [this.#stickies, this.#post]) {
+      if (surface) surface.style.display = this.#covered ? 'none' : ''
+    }
+  }
+
+  /** The room a fixed note may sit in — the viewport minus what the docked
+   *  toolwindows reserve (`--hc-inset-*`, shared/core/viewport-inset-vars). */
+  #freeArea(): { left: number; top: number; right: number; bottom: number } {
+    const read = (name: string): number => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue(name)
+      const value = parseFloat(raw)
+      return Number.isFinite(value) ? value : 0
+    }
+    return {
+      left: read('--hc-inset-left'),
+      top: read('--hc-inset-top'),
+      right: window.innerWidth - read('--hc-inset-right'),
+      bottom: window.innerHeight - read('--hc-inset-bottom'),
+    }
+  }
+
   #vm(): ViewModeShape | undefined {
     return window.ioc?.get<ViewModeShape>('@hypercomb.social/ViewMode')
   }
+
 
   async #reconcile(): Promise<void> {
     if (this.#dragging || this.#writing) return
@@ -167,6 +233,13 @@ export class PostitViewDrone extends Drone {
     this.#teardownPost()
     if (mode === 'hexagons') await this.#renderStickies(gen)
     else { this.#stickies?.remove(); this.#stickies = null }
+    // A pass that mints FRESH nodes mints them visible, so the cover has to be
+    // re-stated over them — otherwise any reconcile while a surface is up
+    // (a synchronize, a decoration landing) puts the stickies back on top of
+    // it. Re-read first: this is also how a cold mount under an already-open
+    // surface learns it is covered.
+    this.#recheckCover()
+    this.#applyCover()
   }
 
   // ── Surface 1: the small stickies ────────────────────────────────────
@@ -225,6 +298,7 @@ export class PostitViewDrone extends Drone {
       host.innerHTML = `<style>${STICKY_CSS}</style>`
       document.body.appendChild(host)
       this.#stickies = host
+      this.#applyCover()
     }
     const keep = new Set<string>()
     decorated.forEach((cell, index) => {
@@ -285,8 +359,14 @@ export class PostitViewDrone extends Drone {
       if (pin && Number.isFinite(pin.x) && Number.isFinite(pin.y)) {
         note.classList.add('postit-pinned')
         const w = window.innerWidth, h = window.innerHeight
-        note.style.left = `${Math.min(Math.max(-112, pin.x * w), Math.max(0, w - 24))}px`
-        note.style.top = `${Math.min(Math.max(-56, pin.y * h), Math.max(0, h - 24))}px`
+        // The rescue clamp keeps a grabbable corner inside the FREE area,
+        // not the raw viewport — with a toolwindow open, the last 400px of
+        // glass belong to the panel, and a note kept "in reach" there is
+        // under it. The stored fractions never change: reserving room is a
+        // render-side clamp, so closing the panel restores the drop spot.
+        const free = this.#freeArea()
+        note.style.left = `${Math.min(Math.max(free.left - 112, pin.x * w), Math.max(free.left, free.right - 24))}px`
+        note.style.top = `${Math.min(Math.max(free.top - 56, pin.y * h), Math.max(free.top, free.bottom - 24))}px`
       } else {
         note.classList.remove('postit-pinned')
         note.style.left = ''
@@ -585,6 +665,7 @@ export class PostitViewDrone extends Drone {
     // and let the × step aside by that much (scroll-gutter.ts).
     this.#gutterOff = trackScrollGutter(host)
     this.#post = host
+    this.#applyCover()
     this.#setActive(true)
   }
 
@@ -629,8 +710,8 @@ export class PostitViewDrone extends Drone {
     if (this.#active === active) return
     this.#active = active
     const modes = window.ioc?.get<{ enter(m: string, o: string): void; exit(m: string, o: string): void }>('@diamondcoreprocessor.com/ModeRegistry')
-    if (active) modes?.enter('view:active', 'postit-view')
-    else modes?.exit('view:active', 'postit-view')
+    if (active) modes?.enter('view:active', POSTIT_OWNER)
+    else modes?.exit('view:active', POSTIT_OWNER)
   }
 }
 

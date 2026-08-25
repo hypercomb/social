@@ -50,6 +50,24 @@ export function hasGlobalOnList(): boolean {
   try { return localStorage.getItem(GLOBAL_ON_KEY) != null } catch { return false }
 }
 
+/** A BRAND-NEW install starts DARK: the opt-in on-list is materialized
+ *  EMPTY, so every behaviour — every view, every decoration kind the module
+ *  graph brings — is globally off until the participant lights it in the
+ *  Beehaviors roster. Called by the shell at the one moment it can tell a
+ *  fresh hive from an existing one: cold `ensureInstall`, before any bee has
+ *  registered and long before essentials' census seed (`seedGlobalOnKinds`)
+ *  could light everything. Writing the list here is what makes that seed a
+ *  no-op for the rest of this hive's life.
+ *
+ *  No-op once the list exists — an existing hive keeps exactly the lights it
+ *  had, and re-running a cold install never darkens it. No change event: the
+ *  bus has no subscribers this early, and the first read is the truth. */
+export function seedDarkOnFreshInstall(): boolean {
+  if (hasGlobalOnList()) return false
+  try { localStorage.setItem(GLOBAL_ON_KEY, '[]') } catch { return false }
+  return true
+}
+
 export function readGlobalOffKinds(): string[] {
   return readStringArray(GLOBAL_OFF_KEY)
 }

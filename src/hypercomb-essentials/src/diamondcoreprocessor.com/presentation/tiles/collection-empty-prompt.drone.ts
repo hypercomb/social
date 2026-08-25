@@ -103,6 +103,9 @@ class CollectionEmptyPromptDrone {
     EffectBus.on<{ open?: boolean }>('features:viewer-state', payload => {
       this.#behaviorsPanelOpen = payload?.open === true
     })
+    // A surface claiming or releasing the canvas is the notice's cue too: it
+    // must leave with whatever covers the hexagons and come back with them.
+    EffectBus.on('view:active', () => { void this.#reconcile() })
     window.addEventListener('synchronize', () => { void this.#reconcile() })
     this.#ensureLineage()
     this.#ensureViewMode()
@@ -156,10 +159,16 @@ class CollectionEmptyPromptDrone {
     // layer's. The EMPTY HIVE ROOT is no longer excluded: it is the first thing
     // a new participant ever sees, and it used to be skipped in favour of "the
     // onboarding path" that was never built. It is now the onboarding path.
+    // A full-screen surface with no ViewMode of its own (the chat window) is
+    // covering the canvas just as completely as a takeover view is — the
+    // owner-counted mode is the half of that question ViewMode cannot answer.
+    const covered = ((window.ioc?.get<{ ownersOf(m: string): readonly string[] }>(
+      '@diamondcoreprocessor.com/ModeRegistry')?.ownersOf('view:active')) ?? []).length > 0
     const mode = this.#ensureViewMode()?.mode ?? 'hexagons'
     if (!this.#lastSettledEmpty
       || (segments.length === 1 && segments[0] === SETS)
       || mode !== 'hexagons'
+      || covered
       || isLauncherLocation(segments)) {
       this.#hide()
       return

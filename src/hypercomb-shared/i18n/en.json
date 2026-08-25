@@ -1661,6 +1661,8 @@
   "slash.context": "Manage the branches this tile’s AI requests read",
   "chat.title": "Chat",
   "chat.close": "Close the chat",
+  "chat.peek.on": "Fold away to the hive",
+  "chat.peek.off": "Back to the conversation",
   "chat.setup.title": "Set up your AI",
   "chat.setup.body": "Four steps, checked off as they happen. Your own Claude Code answers — nothing is shared.",
   "chat.setup.step.tools.title": "Get the tools",

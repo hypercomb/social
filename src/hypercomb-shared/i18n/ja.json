@@ -1568,6 +1568,8 @@
   "context.ask": "「{cell}」について尋ねる",
   "chat.title": "チャット",
   "chat.close": "チャットを閉じる",
+  "chat.peek.on": "ハイブを表示する",
+  "chat.peek.off": "会話に戻る",
   "chat.setup.title": "AIをセットアップ",
   "chat.setup.body": "4つのステップが、進むたびに自動でチェックされます。答えるのはあなた自身のClaude Code — 何も共有されません。",
   "chat.setup.step.tools.title": "ツールを用意する",

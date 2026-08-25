@@ -2173,6 +2173,8 @@
   "slash.context": "이 타일의 AI 요청이 읽는 가지를 관리합니다",
   "chat.title": "채팅",
   "chat.close": "채팅 닫기",
+  "chat.peek.on": "접어서 하이브 보기",
+  "chat.peek.off": "대화로 돌아가기",
   "chat.setup.title": "AI 설정하기",
   "chat.setup.body": "네 단계, 진행되는 대로 체크됩니다. 내 Claude Code가 직접 답합니다 — 아무것도 공유되지 않습니다.",
   "chat.setup.step.tools.title": "도구 준비하기",

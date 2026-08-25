@@ -550,7 +550,9 @@ export class ShowFeaturesDrone extends Drone {
 
   /** Materialize `hc:behavior-global-on` once: the census minus the legacy
    *  off-list, so a hive that predates the opt-in model keeps exactly the
-   *  lights it had. From then on the on-list is the truth — a kind it
+   *  lights it had. A NEW install never reaches this: the shell already
+   *  wrote the list EMPTY at cold install (`seedDarkOnFreshInstall`), so a
+   *  fresh hive starts DARK and this is a no-op. From then on the on-list is the truth — a kind it
    *  doesn't name (a new module, a foreign decoration) arrives OFF until
    *  it is lit in the pool. */
   #seedEnablement(): void {
@@ -1114,10 +1116,18 @@ export class ShowFeaturesDrone extends Drone {
         websiteRow.hideAt = 'node'
         // WEBSITES BELONG TO A TILE: any site the panel sees — authored,
         // generated, adopted, or legacy — attaches to its root as a
-        // behaviour binding (website-binding.ts). Fire-and-forget; the
-        // attachment is derived from where the pages live, so this is a
-        // recall, never a decision.
-        void ensureWebsiteBoundAt(websiteRow.scopeSegments)
+        // behaviour binding (website-binding.ts). The attachment is derived
+        // from where the pages live, so this is a recall, never a decision.
+        //
+        // AWAITED, not fire-and-forget (2026-08-24). §5 stamps dormancy a few
+        // lines below, and a website with no binding YET reads as "bound to
+        // some other tile" — so the row this pass just built was dropped from
+        // the very panel that was discovering the site. The site then only
+        // appeared on a SECOND open, which is indistinguishable from "websites
+        // don't show in the panel". The recall has to land BEFORE the lens is
+        // asked; it is one localStorage read on the common path (the binding
+        // already exists) and a one-time tree sweep on the rare one.
+        await ensureWebsiteBoundAt(websiteRow.scopeSegments)
       }
     }
 

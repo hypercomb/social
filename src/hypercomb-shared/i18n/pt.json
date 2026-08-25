@@ -2173,6 +2173,8 @@
   "slash.context": "Gerir os ramos que os pedidos de IA desta peça leem",
   "chat.title": "Chat",
   "chat.close": "Fechar o chat",
+  "chat.peek.on": "Recolher para a colmeia",
+  "chat.peek.off": "Voltar à conversa",
   "chat.setup.title": "Configure sua IA",
   "chat.setup.body": "Quatro passos, marcados conforme acontecem. Quem responde é o seu próprio Claude Code — nada é compartilhado.",
   "chat.setup.step.tools.title": "Obtenha as ferramentas",

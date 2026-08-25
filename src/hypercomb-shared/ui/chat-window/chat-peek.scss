@@ -1,0 +1,112 @@
+// hypercomb-shared/ui/chat-window/chat-peek.scss
+//
+// PEEK — the chat window folded away to the hive.
+//
+// The window has ONE shape (full screen) and this is not a second one. It is
+// the same window with its READING half folded: transcript, rail and
+// conversation bar go, the header (the shelf — what the request carries) and
+// the footer (the box you type in) stay, and the live hive shows between them.
+//
+// Nothing is removed from the DOM. The rail keeps the level it walked to and
+// the picks it made; the transcript keeps its scroll; the draft keeps its
+// half-written sentence. Unfolding returns to exactly what you left, now
+// carrying whatever you gathered while you were out.
+//
+// The panel stops taking pointer events so the hexagons underneath get them —
+// that, plus the window releasing its `view:active` claim while folded (see
+// chat-window.component.ts `#claimSurface`), is the whole mechanism. The hive
+// navigates with its OWN grammar while peeking: an ordinary click walks in,
+// ctrl-click gathers onto the shelf. There is no second grammar to learn.
+//
+// Frost goes on a ::before, never on the bars themselves: `backdrop-filter`
+// makes the element a containing block for fixed descendants, and the header
+// carries the clipboard flyout.
+
+$accent: #7eb6d6;
+
+.chat-panel.peeking {
+  // Let the hive through — the bars re-arm themselves below.
+  pointer-events: none;
+  background: none;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  // The rail is hidden, so its gutter goes with it.
+  padding-left: 0;
+
+  // The reading half. Hidden, not removed.
+  .chat-rail,
+  .chat-bar,
+  .chat-list,
+  .chat-threadwrap,
+  .chat-setup {
+    display: none;
+  }
+
+  // Header at the top, footer at the bottom, hive in between.
+  .chat-foot {
+    margin-top: auto;
+  }
+
+  .chat-header,
+  .chat-foot {
+    pointer-events: auto;
+    position: relative;
+    isolation: isolate;
+    background: none;
+    border-color: rgba($accent, 0.3);
+
+    // The bars need a ground of their own now that the panel has none —
+    // otherwise they read as text lying loose on the hexagons.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      background: rgba(6, 10, 16, 0.82);
+      backdrop-filter: blur(10px) saturate(1.1);
+    }
+  }
+
+  .chat-header::before {
+    border-bottom: 1px solid rgba($accent, 0.28);
+  }
+
+  .chat-foot::before {
+    border-top: 1px solid rgba($accent, 0.28);
+  }
+}
+
+// The fold control itself. Lit while folded, because that is a state you can
+// otherwise only infer from the absence of the transcript.
+.chat-peek {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9em;
+  height: 1.9em;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.35em;
+  background: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition: color 0.14s ease, background 0.14s ease, border-color 0.14s ease;
+
+  .mat-sym {
+    font-size: 1.05em;
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: rgba($accent, 0.95);
+    background: rgba($accent, 0.12);
+  }
+
+  &.on {
+    color: rgba($accent, 0.95);
+    background: rgba($accent, 0.16);
+    border-color: rgba($accent, 0.4);
+  }
+}

@@ -2173,6 +2173,8 @@
   "slash.context": "Gestisci i rami che le richieste IA di questa tessera leggono",
   "chat.title": "Chat",
   "chat.close": "Chiudi la chat",
+  "chat.peek.on": "Richiudi verso l'alveare",
+  "chat.peek.off": "Torna alla conversazione",
   "chat.setup.title": "Configura la tua IA",
   "chat.setup.body": "Quattro passi, spuntati man mano. Risponde il tuo Claude Code — niente viene condiviso.",
   "chat.setup.step.tools.title": "Procurati gli strumenti",

@@ -361,6 +361,16 @@ const rememberChatVisibility = (visible: boolean): void => {
 const ioc = (): { get(k: string): unknown } | undefined =>
   (globalThis as { ioc?: { get(k: string): unknown } }).ioc
 
+/** This window's name in the owner-counted `view:active` mode. */
+const SURFACE_OWNER = 'chat-window'
+
+const MODE_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/ModeRegistry'
+
+type ModeRegistryLike = {
+  enter(mode: string, owner: string): void
+  exit(mode: string, owner: string): void
+}
+
 @Component({
   selector: 'hc-chat-window',
   standalone: true,
@@ -371,7 +381,9 @@ const ioc = (): { get(k: string): unknown } | undefined =>
   // entry — so splitting is the only thing that lowers the number a `@use`'d
   // partial cannot. The markdown sheet is last because it styles the message
   // bodies the first sheet lays out.
-  styleUrls: ['./chat-window.component.scss', './chat-markdown.scss'],
+  // Three sheets, not one: Angular's component style budget is per-sheet, and
+  // the peek geometry is a self-contained state that reads better apart.
+  styleUrls: ['./chat-window.component.scss', './chat-markdown.scss', './chat-peek.scss'],
 })
 export class ChatWindowComponent implements OnDestroy {
 
@@ -1087,6 +1099,64 @@ export class ChatWindowComponent implements OnDestroy {
   readonly railVisible = signal(true)
   #railQuery: MediaQueryList | null = null
 
+  // ── PEEK: the hive, without leaving the conversation ────────────────────
+  //
+  // The window is full screen, which is right while you are reading an answer
+  // and wrong while you are deciding WHICH tiles the next question should
+  // carry. The rail names tiles; it does not show you the hive.
+  //
+  // So: peek. The transcript, the rail and the conversation bar fold away and
+  // the panel stops taking pointer events, leaving the header (the shelf) and
+  // the footer (the input) floating over the LIVE hive. Navigation is the
+  // hive's own — ordinary clicks walk, ctrl-click gathers onto the shelf —
+  // because a second navigation grammar over the same hexagons is a second
+  // thing to learn for no gain.
+  //
+  // Peek is a state of the OPEN window, not a second shape: the conversation,
+  // the draft and the shelf are all still there, and unfolding returns to
+  // exactly what you left, now carrying whatever you picked up.
+  readonly peeking = signal(false)
+
+  /** Fold the window away to the hive, or bring it back. */
+  togglePeek(): void {
+    const next = !this.peeking()
+    this.peeking.set(next)
+    // Folding away closes the things that only make sense over a transcript.
+    if (next) { this.clipboardOpen.set(false); this.listOpen.set(false) }
+    this.#claimSurface(!next)
+    if (!next) this.#focus()
+  }
+
+  /** THE SURFACE IS OWNED, and the owner is counted (ModeRegistry). A full
+   *  screen window is a view covering the canvas by any honest reading, and
+   *  everything that hides itself for a view — the pixi canvas, the post-it
+   *  stickies, the empty-collection prompt — was drawing straight over this
+   *  window because it never said so. Peeking releases the claim, which is
+   *  what makes the hive underneath live and clickable again. */
+  #claimSurface(active: boolean): void {
+    this.#surfaceWanted = active
+    const modes = ioc()?.get(MODE_REGISTRY_IOC_KEY) as ModeRegistryLike | undefined
+    if (!modes) {
+      // The registry is an essentials bee and the window can boot open before
+      // it lands. Claim on the SETTLED intent when it arrives, never on the
+      // intent that was current when this call was made.
+      if (active) this.#whenModes(late => {
+        if (this.#surfaceWanted) late.enter('view:active', SURFACE_OWNER)
+      })
+      return
+    }
+    if (active) modes.enter('view:active', SURFACE_OWNER)
+    else modes.exit('view:active', SURFACE_OWNER)
+  }
+
+  /** Is the surface claimed, as far as this window is concerned. */
+  #surfaceWanted = false
+
+  #whenModes(run: (modes: ModeRegistryLike) => void): void {
+    (globalThis as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+      ?.whenReady?.(MODE_REGISTRY_IOC_KEY, value => run(value as ModeRegistryLike))
+  }
+
   #cleanups: (() => void)[] = []
   #elapsedTimer: ReturnType<typeof setInterval> | null = null
 
@@ -1261,6 +1331,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#refreshAvailability()
     EffectBus.emit('chat:window-state', { open: this.visible() })
     if (this.visible()) {
+      this.#claimSurface(true)
       this.#refreshContext()
       void this.#resume()
     }
@@ -1275,6 +1346,9 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    // A leaked enter() strands `view:active` on forever — the canvas and the
+    // stickies would never come back.
+    this.#claimSurface(false)
     for (const cleanup of this.#cleanups) cleanup()
     window.removeEventListener('synchronize', this.#onSync)
     window.removeEventListener('storage', this.#onStorage)
@@ -1499,6 +1573,9 @@ export class ChatWindowComponent implements OnDestroy {
     const prefill = String(payload?.prefill ?? '').trim()
     this.visible.set(true)
     rememberChatVisibility(true)
+    // Reopening always lands on the conversation, never folded away.
+    this.peeking.set(false)
+    this.#claimSurface(true)
     // Announce symmetrically with close() — the controls-bar launcher light
     // (and anything else watching) reads this state.
     EffectBus.emit('chat:window-state', { open: true })
@@ -1561,6 +1638,8 @@ export class ChatWindowComponent implements OnDestroy {
     if (!this.visible()) return
     this.visible.set(false)
     rememberChatVisibility(false)
+    this.peeking.set(false)
+    this.#claimSurface(false)
     this.listOpen.set(false)
     this.armed.set('')
     // Closing the window is a real close: the sidebar's trail and subject go
@@ -1587,6 +1666,9 @@ export class ChatWindowComponent implements OnDestroy {
     // outermost-first rule.
     // The flyout is the smallest thing open, so it unwinds first.
     if (this.clipboardOpen()) { this.clipboardOpen.set(false); return }
+    // Folded away is a smaller commitment than the window itself: Escape
+    // brings the conversation back before it takes the window down.
+    if (this.peeking()) { this.togglePeek(); return }
     // Then the RAIL'S OWN picks; a reference on the shelf is let go with its
     // × or by dragging it back, never by a keystroke that means "go up".
     if (this.#railSeen.size) { this.#rail?.clearSelection(); return }

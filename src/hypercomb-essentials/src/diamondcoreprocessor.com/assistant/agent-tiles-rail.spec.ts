@@ -1,9 +1,11 @@
 // agent-tiles-rail.spec.ts — the hive list: three gestures and a search box.
 //
-// EVERY ROW IS A CONVERSATION. Click enters the tile's chat and never moves
-// the list; hold goes inside it (the hive's own hold-to-enter); right-click
-// comes back out. A row holding unsent thinking wears a mark, so the list
-// shows where you left off thinking as well as what is there.
+// CLICK GOES IN. A row with children opens on an ordinary click; a LEAF has
+// nowhere to go, so there a click enters the tile's chat. Ctrl-click gathers
+// context without moving the list; right-click comes back out. (Hold-to-enter
+// is retired — see the rail's header for why.) A row holding unsent thinking
+// wears a mark, so the list shows where you left off thinking as well as what
+// is there.
 //
 // The rail shows one level at a time and a real level runs to dozens of
 // tiles, so the box under the title filters the rows already in hand: no
@@ -11,7 +13,7 @@
 // another level empties it — a filter held over fresh children reads as an
 // empty tile — and Escape empties it before the escape cascade sees the key.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { PlacementLayer } from '../history/layer-placement.js'
 
 const sig = (n: number): string => String(n).padStart(64, '0')
@@ -92,8 +94,12 @@ const settle = async (): Promise<void> => {
   for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0))
 }
 
+/** THE TILES ON THE LEVEL — not the hive's own row, which sits above them on
+ *  every level and is not one of them: it is the whole thing these are in. */
+const TILE_ROWS = '.hc-rail-group:not(.hc-rail-hive)'
+
 const names = (host: HTMLElement): string[] =>
-  [...host.querySelectorAll('.hc-rail-name')].map(n => n.textContent ?? '')
+  [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-name`)].map(n => n.textContent ?? '')
 
 describe('tiles rail search', () => {
   let host: HTMLElement
@@ -161,7 +167,8 @@ describe('tiles rail gestures — every row is a conversation', () => {
   let rail: InstanceType<typeof AgentTilesRail>
   let entered: Array<string | null>
 
-  const rows = (): HTMLButtonElement[] => [...host.querySelectorAll('.hc-rail-main')] as HTMLButtonElement[]
+  const rows = (): HTMLButtonElement[] =>
+    [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-main`)] as HTMLButtonElement[]
 
   beforeEach(async () => {
     host = document.createElement('div')
@@ -173,58 +180,56 @@ describe('tiles rail gestures — every row is a conversation', () => {
     await settle()
   })
 
-  it('a click enters that tile’s conversation and never navigates', async () => {
+  it('a click on a row WITH CHILDREN goes inside it', async () => {
+    // 'pheromone-workflow' holds 'inside'. One ordinary click, no press to
+    // discover, and the conversation is untouched: going somewhere is not
+    // the same act as talking to something.
     rows()[0].click()
-    await settle()
-
-    expect(entered).toEqual(['pheromone-workflow'])
-    expect(rail.subject?.name).toBe('pheromone-workflow')
-    // Still the same level: a click that also went inside would move the list
-    // out from under the person mid-thought.
-    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
-    expect(host.querySelector('.hc-rail-row.current .hc-rail-name')?.textContent).toBe('pheromone-workflow')
-  })
-
-  it('one conversation at a time — entering another lets the first go', async () => {
-    rows()[0].click()
-    await settle()
-    rows()[1].click()
-    await settle()
-
-    expect(rail.subject?.name).toBe('diagrams')
-    expect(host.querySelectorAll('.hc-rail-row.current').length).toBe(1)
-  })
-
-  it('a HOLD goes inside, and the click that ends it does not enter a chat', async () => {
-    vi.useFakeTimers()
-    try {
-      const row = rows()[0]
-      row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
-      vi.advanceTimersByTime(500)
-      row.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-      row.click()
-    } finally {
-      vi.useRealTimers()
-    }
     await settle()
 
     expect(names(host)).toEqual(['inside'])
     expect(entered).toEqual([])
   })
 
-  it('a press that wanders is a scroll, not a hold', async () => {
-    vi.useFakeTimers()
-    try {
-      const row = rows()[0]
-      row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
-      row.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 10, clientY: 60 }))
-      vi.advanceTimersByTime(500)
-    } finally {
-      vi.useRealTimers()
-    }
+  it('a click on a LEAF enters that tile’s conversation and never navigates', async () => {
+    // 'diagrams' has no children, so there is nowhere for a click to go —
+    // and the rail's other job takes it.
+    rows()[1].click()
     await settle()
 
+    expect(entered).toEqual(['diagrams'])
+    expect(rail.subject?.name).toBe('diagrams')
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+    expect(host.querySelector(`${TILE_ROWS} .hc-rail-row.current .hc-rail-name`)?.textContent).toBe('diagrams')
+  })
+
+  it('one conversation at a time — entering another lets the first go', async () => {
+    rows()[1].click()
+    await settle()
+    rows()[2].click()
+    await settle()
+
+    expect(rail.subject?.name).toBe('ai-videos')
+    expect(host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.current`).length).toBe(1)
+  })
+
+  it('the › still opens a PARENT’s own conversations — click no longer can', async () => {
+    // The one thing the swap could have cost: a tile with children losing
+    // its way into a chat. The arrow is where they live, and it always
+    // offers a fresh one.
+    const chevron = host.querySelector(`${TILE_ROWS} .hc-rail-chev`) as HTMLButtonElement
+    chevron.click()
+    await settle()
+
+    // The list did NOT move — the arrow shows, it does not walk.
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+
+    const fresh = host.querySelector('.hc-rail-chat-new') as HTMLButtonElement
+    expect(fresh).toBeTruthy()
+    fresh.click()
+    await settle()
+
+    expect(rail.subject?.name).toBe('pheromone-workflow')
   })
 
   it('right-click comes back out', async () => {
@@ -281,29 +286,29 @@ describe('tiles rail gestures — every row is a conversation', () => {
   })
 
   it('a tile holding unsent thinking wears a mark', () => {
-    const marked = [...host.querySelectorAll('.hc-rail-row.draft')]
+    const marked = [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.draft`)]
       .map(row => row.querySelector('.hc-rail-name')?.textContent)
 
     expect(marked).toEqual(['pheromone-workflow'])
   })
 
   it('a tile that has been spoken to says so, and how deep it goes', () => {
-    const spoken = [...host.querySelectorAll('.hc-rail-row.spoken')]
+    const spoken = [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.spoken`)]
       .map(row => row.querySelector('.hc-rail-name')?.textContent)
     expect(spoken).toEqual(['diagrams'])
 
-    const row = [...host.querySelectorAll<HTMLElement>('.hc-rail-row')]
+    const row = [...host.querySelectorAll<HTMLElement>(`${TILE_ROWS} .hc-rail-row`)]
       .find(r => r.querySelector('.hc-rail-name')?.textContent === 'diagrams')
     // two turns of a twelve-turn ladder
     expect(row?.style.getPropertyValue('--hc-rail-depth')).toBe(String(2 / 12))
   })
 
   it('an answer nobody has read wears the sealed cell, and says so out loud', () => {
-    const unread = [...host.querySelectorAll('.hc-rail-row.unread')]
+    const unread = [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.unread`)]
       .map(row => row.querySelector('.hc-rail-name')?.textContent)
     expect(unread).toEqual(['diagrams'])
 
-    const label = [...host.querySelectorAll<HTMLElement>('.hc-rail-main')]
+    const label = [...host.querySelectorAll<HTMLElement>(`${TILE_ROWS} .hc-rail-main`)]
       .find(m => m.textContent?.includes('diagrams'))
       ?.getAttribute('aria-label')
     expect(label).toContain('2 turns')
@@ -311,7 +316,7 @@ describe('tiles rail gestures — every row is a conversation', () => {
   })
 
   it('a dormant tile draws nothing at all', () => {
-    const quiet = [...host.querySelectorAll<HTMLElement>('.hc-rail-row')]
+    const quiet = [...host.querySelectorAll<HTMLElement>(`${TILE_ROWS} .hc-rail-row`)]
       .find(r => r.querySelector('.hc-rail-name')?.textContent === 'ai-videos')
 
     expect(quiet?.className).toBe('hc-rail-row')

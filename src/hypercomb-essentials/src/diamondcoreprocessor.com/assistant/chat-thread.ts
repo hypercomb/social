@@ -463,6 +463,59 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
  *  said once, so the root is spelled the same everywhere. */
 export const HIVE_PATH = tilePath([])
 
+/** EVERY CONVERSATION A ROW CAN SHOW, in ONE walk of the pool.
+ *
+ *  The rail needs the tiles' threads and the hive's own, and asking for them
+ *  separately walked the pool twice — once per list — for the same buckets.
+ *  Every reply that lands re-runs this, so a walk you did not need is a walk
+ *  taken out of the frames the rest of the hive was going to use: while a
+ *  session is grinding away over the bridge, the bees are competing with the
+ *  chat for the same main thread, and this is the cheapest place to give it
+ *  back. One walk, and a chat about no tile is filed at the hive's address. */
+export const listRailConversations = async (): Promise<TileConversation[]> => {
+  const seen = seenMap()
+  const out: TileConversation[] = []
+  for (const convo of await listConversations()) {
+    out.push({
+      path: tilePathOf(convo.convoId) || HIVE_PATH,
+      convoId: convo.convoId,
+      title: convo.title,
+      turns: convo.turnCount,
+      lastAt: convo.lastAt,
+      unread: convo.lastAt > (seen[convo.convoId] ?? 0),
+    })
+  }
+  return out.sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/** ONE conversation, read from ITS OWN bucket. What a turn landing actually
+ *  changed is one thread; re-walking every bucket in the pool to learn that
+ *  is the difference between a read that costs one directory and a read that
+ *  costs all of them — and it is paid on every single reply. */
+export const readConversationSummary = async (convoId: string): Promise<TileConversation | null> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return null
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool || !store) return null
+  try {
+    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    const bucket = await pool.getDirectoryHandle(name, { create: false })
+    const raw = (await readBucketRaw(bucket, true) ?? []).filter(turn => turn.convoId === id)
+    if (!raw.length) return null
+    const lastAt = raw[raw.length - 1]?.at ?? 0
+    return {
+      path: tilePathOf(id) || HIVE_PATH,
+      convoId: id,
+      title: await titleOfRaw(raw, store),
+      turns: raw.length,
+      lastAt,
+      unread: lastAt > (seenMap()[id] ?? 0),
+    }
+  } catch { /* no bucket yet — an empty conversation, not an error */ }
+  return null
+}
+
 /** THE HIVE'S OWN CONVERSATIONS — the ones about no single tile.
  *
  *  The root is a LOCATION like any other: `tileConvoId([])` is `chat:tile:/`,

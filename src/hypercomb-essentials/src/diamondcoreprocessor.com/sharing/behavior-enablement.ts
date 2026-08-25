@@ -4,7 +4,10 @@
 // lens beside hidden (feature-hidden.ts) and verified (feature-availability.ts).
 //
 // One switch, one meaning — and the model is OPT-IN: everything is off
-// until it is lit in the pool. `hc:behavior-global-on` is the truth once it
+// until it is lit in the pool. A NEW INSTALL STARTS DARK — the shell writes
+// this list EMPTY at cold install (`seedDarkOnFreshInstall`, shell-side),
+// which is what makes the census seed below a no-op there: nothing is lit
+// until the participant lights it in the roster. `hc:behavior-global-on` is the truth once it
 // exists: a kind it doesn't name is DORMANT everywhere — not rendered, not
 // offered, not shared into a swarm — even though its decorations stay on
 // their tiles untouched. The list is seeded ONCE on boot from the census

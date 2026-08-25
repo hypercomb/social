@@ -2173,6 +2173,8 @@
   "slash.context": "Die Zweige verwalten, die die KI-Anfragen dieser Kachel lesen",
   "chat.title": "Chat",
   "chat.close": "Chat schließen",
+  "chat.peek.on": "Zum Stock einklappen",
+  "chat.peek.off": "Zurück zum Gespräch",
   "chat.setup.title": "Richte deine KI ein",
   "chat.setup.body": "Vier Schritte, die sich von selbst abhaken. Dein eigenes Claude Code antwortet — nichts wird geteilt.",
   "chat.setup.step.tools.title": "Hol dir die Werkzeuge",

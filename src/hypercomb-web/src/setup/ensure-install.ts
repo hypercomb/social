@@ -10,6 +10,7 @@
 
 import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
+import { seedDarkOnFreshInstall } from '@hypercomb/shared/ui/features-viewer/behavior-enablement'
 import type { SentinelBridge } from './sentinel-bridge'
 
 export type BootStatus =
@@ -83,6 +84,19 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   const usableCache = cachedManifest && cachedManifest.bees.length > 0
   if (!usableCache) localStorage.removeItem(INSTALLED_FLAG_KEY)
+
+  // A NEW INSTALL STARTS DARK. This is the one moment the shell can tell a
+  // fresh hive from an existing one — no install cache means nothing has ever
+  // been installed here — so it is where the opt-in on-list is materialized
+  // EMPTY: every behaviour arrives globally off, and the participant lights
+  // what they want from the Beehaviors roster. Without this, essentials'
+  // census seed (`seedGlobalOnKinds`, 8s after boot) would light every kind
+  // the module graph brought, which is the OPPOSITE of opt-in for someone who
+  // has chosen nothing yet. Writing the list here makes that seed a no-op
+  // forever after. An existing hive already HAS the list, so this cannot
+  // darken it — and a hive whose install cache was wiped is unaffected for
+  // the same reason.
+  if (!usableCache) seedDarkOnFreshInstall()
 
   if (!store.opfsAvailable) {
     // 'no-storage', not 'no-sentinel' — the welcome card renders an

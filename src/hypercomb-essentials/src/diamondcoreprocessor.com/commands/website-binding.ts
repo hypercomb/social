@@ -18,11 +18,13 @@
 //     content alone. The binding record itself is a participant-local lens
 //     and never travels.
 //
-// FIRST-BINDING SWEEP. The binding model withdraws a bound kind everywhere
-// outside its bindings — so the FIRST website bound would silently withdraw
-// every OTHER site until each happened to be visited. Before the first
-// binding lands, one full-tree sweep binds every existing site root
-// together; after that, each newly discovered root simply joins the list.
+// ONCE-PER-SESSION SWEEP. The binding model withdraws a bound kind everywhere
+// outside its bindings — so ONE website bound would silently withdraw every
+// OTHER site until each happened to be visited. The first attachment of a
+// session therefore runs one full-tree sweep and binds every existing site
+// root together; after that, each newly discovered root simply joins the
+// list. The sweep does NOT wait for a standing start: a list that already
+// holds one binding is exactly the partial census that needs completing.
 // (Same reason the pool registry is seeded with a census: a partial list of
 // an untagged union is worse than none.)
 
@@ -130,27 +132,48 @@ let sweptThisSession = false
 
 /** Attach the website at `rootSegments` to its tile: ensure a binding of
  *  the website kind to that root's location. Idempotent and cheap when the
- *  attachment already exists; the first attachment of a session that finds
- *  NO bindings at all runs the full-tree sweep first, so every existing
- *  site binds together and none is silently withdrawn. Fire-and-forget
- *  from discovery paths — never load-bearing (a cold client re-derives
- *  everything from the layers). */
+ *  attachment already exists. The returned promise settles once THIS root is
+ *  attached — a caller about to ask the dormancy lens (the panel) must await
+ *  it; the once-per-session whole-tree sweep that completes every other site
+ *  continues behind it (`websiteBindingIdle` waits for that too). Never
+ *  load-bearing: a cold client re-derives all of it from the layers. */
 export function ensureWebsiteBoundAt(rootSegments: readonly string[]): Promise<void> {
   const segments = rootSegments.map(s => String(s ?? '').trim()).filter(Boolean)
-  if (segments.length === 0) return chain   // the hive root is not a site root
+  if (segments.length === 0) return Promise.resolve()   // the hive root is not a site root
+  // THIS root's attachment is what the caller waits on — the panel stamps
+  // dormancy the moment it returns, and an unbound site reads as "belongs to
+  // some other tile" and vanishes from its own panel. The whole-tree sweep
+  // that completes every OTHER site rides the same chain but is NOT awaited:
+  // on a large hive it is seconds of layer reads, and nothing on screen right
+  // now depends on it.
+  let released!: () => void
+  const local = new Promise<void>(resolve => { released = resolve })
   chain = chain.then(async () => {
-    const path = behaviorPath(segments)
-    if (bindingsFor(WEBSITE_PAGE_KIND).some(b => b.path === path)) return
     const history = get<HistoryLike>(HISTORY_KEY)
     const store = get<StoreLike>(STORE_KEY)
-    if (!history?.sign) return
-    if (!sweptThisSession && bindingsFor(WEBSITE_PAGE_KIND).length === 0 && store?.getResource) {
-      sweptThisSession = true
-      const roots = await sweepSiteRoots(history, store).catch(() => [] as string[][])
-      for (const root of roots) await bindRoot(history, root)
-    }
-    await bindRoot(history, segments)
+    try {
+      if (history?.sign) await bindRoot(history, segments)
+    } finally { released() }
+    // ONCE PER SESSION, NOT ONCE PER HIVE (2026-08-24). The sweep used to run
+    // only from a standing start (`bindings.length === 0`), which left every
+    // hive that already had ONE binding permanently partial: site #1 was
+    // bound, and every other site stayed withdrawn from the Beehaviors panel
+    // until it happened to be visited — indistinguishable from "the panel
+    // refuses to show my websites". A binding list is an untagged census:
+    // partial is worse than none, so the first attachment of any session
+    // completes it whatever it already holds, INCLUDING the common case of
+    // standing on the one site that IS bound, which used to return at the
+    // door and leave every other site withdrawn.
+    if (sweptThisSession || !history?.sign || !store?.getResource) return
+    sweptThisSession = true
+    const roots = await sweepSiteRoots(history, store).catch(() => [] as string[][])
+    for (const root of roots) await bindRoot(history, root)
   }).catch(() => undefined)
+  return local
+}
+
+/** Test seam — resolves when the chain (this root AND the sweep) is idle. */
+export function websiteBindingIdle(): Promise<void> {
   return chain
 }
 

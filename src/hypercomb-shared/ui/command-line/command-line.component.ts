@@ -1987,10 +1987,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#setShellValue(text, false)
     })
 
-    // voice input: auto-submit on release (push-to-talk complete)
+    // voice input: auto-submit on release (push-to-talk complete).
+    // RELEASING THE MIC IS ENTER. Dictation is plain language, so it must
+    // take the same route a typed line takes when Enter is pressed —
+    // stance re-prefixing and the Common Tongue reader included. Handing
+    // the raw prose straight to the tag/parse pipeline was the "the text
+    // just disappears and nothing happens" bug: an unread sentence found
+    // no register, cleared the line, and opened nothing.
     this.#voiceSubmitUnsub = EffectBus.on<{ text: string }>('voice:submit', ({ text }) => {
       this.#setShellValue(text, false)
-      void this.#preprocessTagsThenExecute(text)
+      this.#submitAsEnter(text)
     })
 
     // remote bridge submit (Claude CLI, future /transcript) — same path as a
@@ -3089,6 +3095,29 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * Pre-process tags from input, persist them, then dispatch to the appropriate handler
    * with the cleaned input (tag syntax stripped).
    */
+  /**
+   * Submit a line that arrived without keystrokes (voice release, remote
+   * bridge) exactly as Enter submits a typed one — minus the dropdown
+   * completion step, which has nothing to offer a line the participant
+   * never typed into. Everything else is {@link onShellCommit}'s tail:
+   * capture mode, the register prefix, then the reader.
+   */
+  #submitAsEnter(text: string): void {
+    const capture = this.#captureMode()
+    if (capture) {
+      this.#commitCapture(capture, text)
+      return
+    }
+    const line = this.#toRegister(text)
+    if (line.trim() === '/') return
+    if (this.#stance() === 'command' && line !== text && !this.armedResource()
+        && this.#commitUtterance(text)) {
+      return
+    }
+    this.commandSubject.set(null)
+    void this.#preprocessTagsThenExecute(line)
+  }
+
   async #preprocessTagsThenExecute(original: string): Promise<void> {
     // In capture mode any incoming submission (voice, mobile "go", etc.) must
     // still route to the configured commit effect rather than the normal parser.
@@ -3272,7 +3301,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // default: create cell
+    // default: create cell — TILES STANCE ONLY.
+    //
+    // Beehaviour (command) stance mints nothing implicitly. The unknown-command
+    // door already says so, but it is not the only way in: a line carrying its
+    // own register (`name:tag`, a leading `.`) is EXEMPT from #toRegister, so it
+    // never becomes a slash line and never reaches that door — it walked the
+    // whole pipeline unmatched and fell out here as a tile. Same law, same
+    // hint: in this stance a tile is made by SAYING create.
+    if (this.#stance() === 'command' && !this.#captureMode()) {
+      const said = this.value().trim()
+      EffectBus.emit('activity:log', {
+        message: said
+          ? `nothing here reads as a behaviour — to make a tile say: create ${said}`
+          : 'nothing here reads as a behaviour',
+        icon: '⬡',
+      })
+      this.clear()
+      return
+    }
     void this.commitCreateCellInPlace()
   }
 

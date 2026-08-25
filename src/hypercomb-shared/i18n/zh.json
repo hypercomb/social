@@ -2173,6 +2173,8 @@
   "slash.context": "管理此格子的 AI 请求所读取的分支",
   "chat.title": "聊天",
   "chat.close": "关闭聊天",
+  "chat.peek.on": "折叠以查看蜂巢",
+  "chat.peek.off": "返回对话",
   "chat.setup.title": "设置你的 AI",
   "chat.setup.body": "四个步骤，完成一项就自动勾选一项。回答的是你自己的 Claude Code — 不会共享任何内容。",
   "chat.setup.step.tools.title": "获取工具",

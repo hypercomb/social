@@ -4,9 +4,10 @@
 //   1. Ensuring a site root binds `visual:website:page` to that root's
 //      LOCATION signature — the attachment the panel and the dormancy lens
 //      read ("shows within the branch, acts at the parent it belongs to").
-//   2. FIRST-BINDING SWEEP: the first attachment of a session that finds no
-//      bindings walks the whole tree and binds EVERY existing site root —
-//      one site binding must never silently withdraw the others.
+//   2. ONCE-PER-SESSION SWEEP: the first attachment of a session walks the
+//      whole tree and binds EVERY existing site root — one site binding must
+//      never silently withdraw the others. It runs whatever the list already
+//      holds, so a hive left partially bound is completed rather than frozen.
 //   3. Descent stops at a root: a page deeper inside a site is part of that
 //      site, never a second root.
 //   4. Idempotent — re-ensuring an attached root writes nothing new.
@@ -41,10 +42,17 @@ const store = { getResource: async () => null }
   } as Record<string, unknown>)[key],
 }
 
-const { ensureWebsiteBoundAt, _resetWebsiteBindingSweep, WEBSITE_PAGE_KIND } =
+const { ensureWebsiteBoundAt, websiteBindingIdle, _resetWebsiteBindingSweep, WEBSITE_PAGE_KIND } =
   await import('./website-binding.js')
 const { bindingsFor, BOUND_KEY, ENABLEMENT_CHANGED } =
   await import('../sharing/behavior-enablement.js')
+
+/** Await BOTH halves — the caller-facing local bind and the background
+ *  sweep — so the assertions see the settled census. */
+const ensure = async (segments: readonly string[]): Promise<void> => {
+  await ensureWebsiteBoundAt(segments)
+  await websiteBindingIdle()
+}
 
 const boundPaths = (): string[] => bindingsFor(WEBSITE_PAGE_KIND).map(b => b.path)
 
@@ -71,7 +79,7 @@ beforeEach(() => {
 describe('websites belong to a tile', () => {
 
   it('attaches a site to its root — a binding of the page kind to the root location', async () => {
-    await ensureWebsiteBoundAt(['garden'])
+    await ensure(['garden'])
     const bindings = bindingsFor(WEBSITE_PAGE_KIND)
     const garden = bindings.find(b => b.path === '/garden')
     expect(garden).toBeTruthy()
@@ -84,27 +92,40 @@ describe('websites belong to a tile', () => {
   })
 
   it('the FIRST attachment sweeps: every existing site binds together', async () => {
-    await ensureWebsiteBoundAt(['garden'])
+    await ensure(['garden'])
     // library/essays was never named — the sweep found it, so binding garden
     // did not withdraw it.
     expect(boundPaths().sort()).toEqual(['/garden', '/library/essays'])
   })
 
+  it('a hive left PARTIALLY bound is completed by the next sweep', async () => {
+    // The failure this guards: one binding already on record (from a session
+    // that predates the sweep, or a hive where only site #1 was ever visited)
+    // used to SUPPRESS the sweep, so every other site stayed withdrawn from
+    // the Beehaviors panel forever.
+    localStorage.setItem(BOUND_KEY, JSON.stringify({
+      [WEBSITE_PAGE_KIND]: [{ sig: 'loc:garden', path: '/garden', name: 'garden' }],
+    }))
+    EffectBus.emit(ENABLEMENT_CHANGED, {})
+    await ensure(['garden'])
+    expect(boundPaths().sort()).toEqual(['/garden', '/library/essays'])
+  })
+
   it('descent stops at a root — an inner page is the site\'s, never a second root', async () => {
-    await ensureWebsiteBoundAt(['garden'])
+    await ensure(['garden'])
     expect(boundPaths()).not.toContain('/garden/inner')
   })
 
   it('idempotent — re-ensuring an attached root adds nothing', async () => {
-    await ensureWebsiteBoundAt(['garden'])
+    await ensure(['garden'])
     const before = boundPaths().sort()
-    await ensureWebsiteBoundAt(['garden'])
-    await ensureWebsiteBoundAt(['library', 'essays'])
+    await ensure(['garden'])
+    await ensure(['library', 'essays'])
     expect(boundPaths().sort()).toEqual(before)
   })
 
   it('the hive root is never a site root', async () => {
-    await ensureWebsiteBoundAt([])
+    await ensure([])
     expect(boundPaths()).toEqual([])
   })
 

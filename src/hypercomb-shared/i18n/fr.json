@@ -2173,6 +2173,8 @@
   "slash.context": "Gérer les branches que lisent les requêtes IA de cette tuile",
   "chat.title": "Chat",
   "chat.close": "Fermer le chat",
+  "chat.peek.on": "Replier vers la ruche",
+  "chat.peek.off": "Revenir à la conversation",
   "chat.setup.title": "Configurez votre IA",
   "chat.setup.body": "Quatre étapes, cochées au fur et à mesure. C’est votre propre Claude Code qui répond — rien n’est partagé.",
   "chat.setup.step.tools.title": "Obtenez les outils",

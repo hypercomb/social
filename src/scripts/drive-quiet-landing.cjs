@@ -124,6 +124,18 @@ async function main() {
       before ? `${before.length} tile(s)` : 'no render:cell-count seen')
     if (before === null) { console.error('[drive] no scene — cannot judge a held paint'); process.exit(1) }
 
+    // ── WHOSE RENDERER IS ANSWERING? ────────────────────────────────────
+    // The broker has ONE renderer slot. If another tab holds it, every read
+    // here describes somebody else's hive AND — far worse — the writes below
+    // land in it. That happened: three probe tiles ended up at the root of a
+    // real hive. This page starts from "Start empty", so its root is empty;
+    // anything else means we are not talking to ourselves. Refuse to write.
+    if (before.length > 0) {
+      console.error(`[drive] ABORT: the broker's renderer is NOT this page — it is showing ${before.length} tile(s): ${before.slice(0, 6).join(', ')}`)
+      console.error('[drive] close the other hive tab (or point --port at a private broker) and re-run. Nothing was written.')
+      process.exit(1)
+    }
+
     // ── 2. a burst of writes lands ──────────────────────────────────────
     const NEW = ['quiet-landing-probe-a', 'quiet-landing-probe-b', 'quiet-landing-probe-c']
     for (const cell of NEW) {

@@ -2173,6 +2173,8 @@
   "slash.context": "Bu karonun YZ isteklerinin okuduğu dalları yönet",
   "chat.title": "Sohbet",
   "chat.close": "Sohbeti kapat",
+  "chat.peek.on": "Kovanı görmek için katla",
+  "chat.peek.off": "Sohbete geri dön",
   "chat.setup.title": "Yapay zekanızı kurun",
   "chat.setup.body": "Dört adım, gerçekleştikçe işaretlenir. Yanıtlayan sizin kendi Claude Code’unuz — hiçbir şey paylaşılmaz.",
   "chat.setup.step.tools.title": "Araçları edinin",

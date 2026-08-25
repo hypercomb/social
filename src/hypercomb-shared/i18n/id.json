@@ -2173,6 +2173,8 @@
   "slash.context": "Kelola cabang yang dibaca permintaan AI ubin ini",
   "chat.title": "Obrolan",
   "chat.close": "Tutup obrolan",
+  "chat.peek.on": "Lipat untuk melihat sarang",
+  "chat.peek.off": "Kembali ke percakapan",
   "chat.setup.title": "Siapkan AI Anda",
   "chat.setup.body": "Empat langkah, tercentang saat terjadi. Yang menjawab adalah Claude Code milik Anda sendiri — tidak ada yang dibagikan.",
   "chat.setup.step.tools.title": "Dapatkan alatnya",

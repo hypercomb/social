@@ -11,6 +11,7 @@ export class VoiceInputService extends EventTarget {
   #active = false
   #finalText = ''
   #interimText = ''
+  #carriedText = ''
   #wantActive = false
 
   static supported(): boolean {
@@ -47,6 +48,7 @@ export class VoiceInputService extends EventTarget {
 
     this.#finalText = ''
     this.#interimText = ''
+    this.#carriedText = ''
     this.#wantActive = true
 
     this.#recognition.onstart = () => {
@@ -74,7 +76,7 @@ export class VoiceInputService extends EventTarget {
       this.#interimText = interim
 
       // emit interim for live preview (final + current interim)
-      const preview = (this.#finalText + ' ' + interim).trim()
+      const preview = (this.#carriedText + ' ' + this.#finalText + ' ' + interim).trim()
       if (preview) {
         EffectBus.emit('voice:interim', { text: preview })
       }
@@ -90,6 +92,12 @@ export class VoiceInputService extends EventTarget {
     this.#recognition.onend = () => {
       // auto-restart if user is still holding the button (speech API times out after silence)
       if (this.#wantActive) {
+        // The API ends a session on its own after a silence. Its results
+        // list restarts empty, so carry what was said before the restart
+        // or the first half of a long dictation is lost.
+        this.#carriedText = (this.#carriedText + ' ' + this.#finalText + ' ' + this.#interimText).trim()
+        this.#finalText = ''
+        this.#interimText = ''
         try {
           this.#recognition.start()
         } catch {
@@ -121,7 +129,7 @@ export class VoiceInputService extends EventTarget {
     // Web Speech API may not have promoted interim → final yet, so fall
     // back to the current interim so the user's last utterance isn't lost.
     // release = cue to submit, so emit voice:submit for auto-execution.
-    const text = (this.#finalText + ' ' + this.#interimText).trim()
+    const text = (this.#carriedText + ' ' + this.#finalText + ' ' + this.#interimText).trim()
     if (text) {
       EffectBus.emit('voice:final', { text })
       EffectBus.emit('voice:submit', { text })
@@ -133,6 +141,7 @@ export class VoiceInputService extends EventTarget {
   #cleanup(): void {
     this.#active = false
     this.#wantActive = false
+    this.#carriedText = ''
     this.#recognition = null
     EffectBus.emit('voice:active', { active: false })
     this.dispatchEvent(new CustomEvent('change'))

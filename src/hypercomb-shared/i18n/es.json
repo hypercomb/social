@@ -2173,6 +2173,8 @@
   "slash.context": "Gestionar las ramas que leen las peticiones de IA de esta tesela",
   "chat.title": "Chat",
   "chat.close": "Cerrar el chat",
+  "chat.peek.on": "Plegar y ver la colmena",
+  "chat.peek.off": "Volver a la conversación",
   "chat.setup.title": "Configura tu IA",
   "chat.setup.body": "Cuatro pasos que se marcan solos a medida que ocurren. Responde tu propio Claude Code — no se comparte nada.",
   "chat.setup.step.tools.title": "Consigue las herramientas",

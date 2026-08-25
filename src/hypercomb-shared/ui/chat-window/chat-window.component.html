@@ -4,6 +4,7 @@
        the close button are the ways back. -->
   <aside
     class="chat-panel"
+    [class.peeking]="peeking()"
     hcDockedPanel="chat-window"
     [hasReadingSurface]="true"
     [hcSession]="session"
@@ -22,6 +23,9 @@
          is about. Built by essentials (agent-tiles-rail.ts) and mounted
          through IoC; absolutely positioned, so the column flow of the window
          is untouched. -->
+    <!-- Hidden by the stylesheet while folded away, never removed: the rail
+         holds the level you walked to and the picks you made, and a fold is
+         not a reason to lose either. -->
     <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
     <header class="chat-header">
       <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
@@ -142,6 +146,16 @@
         </div>
       }
       <span class="chat-header-space"></span>
+      <!-- FOLD AWAY TO THE HIVE. Not a second shape to choose between — the
+           conversation is still here, it is just not in front of the tiles
+           while you go and find them. -->
+      <button class="chat-peek" type="button" (click)="togglePeek()"
+        [class.on]="peeking()"
+        [attr.aria-pressed]="peeking()"
+        [title]="(peeking() ? 'chat.peek.off' : 'chat.peek.on') | t"
+        [attr.aria-label]="(peeking() ? 'chat.peek.off' : 'chat.peek.on') | t">
+        <span class="mat-sym" aria-hidden="true">{{ peeking() ? 'unfold_more' : 'unfold_less' }}</span>
+      </button>
       <button class="chat-close" type="button" (click)="close()"
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>

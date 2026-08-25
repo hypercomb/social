@@ -1520,6 +1520,60 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "fresh-install-starts-dark",
+      "title": "Note the fresh-install-dark default on the behavior-enablement-roster tile",
+      "run": null,
+      "note": "Cold ensureInstall writes hc:behavior-global-on = [] (seedDarkOnFreshInstall); essentials' census seed no-ops; every behaviour globally off until lit in the Beehaviors roster.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "websites-bound-census-completed",
+      "title": "Note on the websites-belong-to-a-tile tile: the sweep completes a partial census",
+      "run": null,
+      "note": "Once-per-session sweep now runs whatever the binding list holds (was: only from zero bindings), and the panel awaits this root's attachment before stamping dormancy — a site used to vanish from its own Beehaviors panel on first open.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "bees-keep-working-while-chat-grinds",
+      "title": "A grinding chat must not take the main thread from the bees",
+      "run": null,
+      "note": "Jaime 2026-08-25: 'we have to make sure the bees are working while the chat sessions are grinding - as long as there is a connection.' Found: the rail re-walked the ENTIRE threads pool on every landing turn (and briefly TWICE per turn, from the hive row's own list) - with 14 conversations that is 14 bucket reads + 14 title resource reads per reply, on the same main thread the processor pulses on, at exactly the moment a session is delivering replies in a burst. Built: chat-thread.listRailConversations (ONE walk, a chat about no tile filed at HIVE_PATH) replaces the two lists; chat-thread.readConversationSummary reads ONE bucket by its own sha256 name; the rail's chat:threads-changed handler now merges the NAMED conversation and coalesces a burst (CHAT_SETTLE_MS 180) into one repaint, falling back to the walk when a change names no thread or more than CHAT_MERGE_CAP=12 threads changed at once. Measured with scripts/drive-chat-grind-cost.cjs on dev 4450: a burst of 8 replies = 8 pool walks -> 0 walks + 8 bucket opens. Also fixed on the way: CSS.escape is absent in jsdom (and older webviews) and every row lookup used it - now a dataset walk, which cannot be broken by a character in a tile's name either; entering a chat re-renders the level, so the keyboard's focus is put back on the row it was standing on; walking into a level with the keyboard lands on the first TILE, not the hive row above them. Verified: agent-tiles-rail.spec + doctrine 130 green, drive-chat-lines-under-tile 13 green. NOT covered: the optimize phase is idle+2s-timeout scheduled (never starved outright) and the bridge's quiet-landing window already coalesces repaints - both were read, neither needed changing. Owes: mirror tiles for the refresh path.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "command-line-stance-no-implicit-create",
+      "title": "note on the command-line behaviour tile: command stance refuses implicit tile creation",
+      "run": null,
+      "note": "Beehaviour (command) stance now mints nothing on register-exempt lines (name:tag, leading '.') — the pipeline's default create is tiles-stance only; hint names 'create <text>'.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "postit-chat-cover",
+      "title": "Post-it yields to the chat window",
+      "run": null,
+      "note": "chat:window-state hides the sticky column and an opened post while the full-screen chat window is up, restoring them on close; viewport:inset re-clamps a pinned note into the free area beside a docked toolwindow. Note it on the postit behavior tile in the behaviors mirror.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "chat-peek",
+      "title": "Chat window PEEK + the rail's click grammar",
+      "run": null,
+      "note": "One themed card on the behaviors mirror: (1) PEEK — the chat window folds its reading half away (transcript, rail, conversation bar) and floats only the header shelf and the composer over the LIVE hive; it releases the owner-counted view:active claim while folded, which is what makes the hexagons clickable and brings back every chrome that hides for a view. Ctrl-click on the hive gathers onto the shelf, the same chord the rail uses. Escape unfolds before it closes. (2) THE RAIL'S CLICK GOES IN — a row with children opens on an ordinary click, a leaf still opens its conversation, hold-to-enter is retired, and a parent's own conversations live under the chevron. (3) SURFACE OWNERSHIP — the chat window now enters view:active on open, and the post-it stickies read the registry instead of the chat window by name. Tiles: chat-peek.scss, chat-window.component.ts, agent-tiles-rail.ts, postit-view.drone.ts, collection-empty-prompt.drone.ts, drive-chat-peek.cjs.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }

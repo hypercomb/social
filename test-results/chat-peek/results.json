@@ -1,0 +1,66 @@
+[
+  {
+    "name": "the open window owns view:active",
+    "ok": true,
+    "detail": "[\"chat-window\"]"
+  },
+  {
+    "name": "it is not folded to begin with",
+    "ok": true
+  },
+  {
+    "name": "the fold control is in the header",
+    "ok": true
+  },
+  {
+    "name": "folded away",
+    "ok": true
+  },
+  {
+    "name": "the surface claim is released",
+    "ok": true,
+    "detail": "[]"
+  },
+  {
+    "name": "the panel no longer takes pointer events",
+    "ok": true
+  },
+  {
+    "name": "the input still does",
+    "ok": true
+  },
+  {
+    "name": "the transcript is hidden, not removed",
+    "ok": true
+  },
+  {
+    "name": "the rail is hidden, not removed",
+    "ok": true
+  },
+  {
+    "name": "the rail node survives the fold",
+    "ok": true
+  },
+  {
+    "name": "the hive is what the middle of the screen hits",
+    "ok": true,
+    "detail": "span.description"
+  },
+  {
+    "name": "unfolding brings the conversation back",
+    "ok": true
+  },
+  {
+    "name": "and re-claims the surface",
+    "ok": true
+  },
+  {
+    "name": "Escape unfolds first, it does not close",
+    "ok": true
+  },
+  {
+    "name": "no page errors",
+    "ok": true,
+    "detail": ""
+  }
+]
