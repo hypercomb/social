@@ -381,16 +381,26 @@ gate. Signatures make the pruning safe to add later without format changes.
   side-formats — output is flat sig files only. Six-case contract spec
   (`install.spec.ts`) + verified live: a 9-sig closure resolved from
   content.jwize.com with zero holes, rerun = 9 present / 0 fetched.
-- `scripts/publish-site.ts`: assemble the full deployable folder locally —
-  website harness build + resolver output + baked `site.json`. One command,
-  no git required. `npm run publish:site -- /revolucion --out
-  ../deploy/revolucion`.
-- Acceptance = the xcopy contract: publish (or resolve) → serve the folder
-  with the dumbest static server available (defaults, zero config) →
-  Playwright pass (`npm run shot`) proves render + navigation + a beehavior
-  firing, including a hash deep link opened cold. Then: resolve a SECOND
-  signature over the same folder and prove the delta property (only new sigs
-  written, site now serves the new head).
+- **BUILT (2026-08-25)**: `npm run publish:site -- <headSig|/branch> --out
+  <dir> [--from <url>…]` (`scripts/publish-site.ts`). Assembles the xcopy
+  folder: the creation's closure flat at the ROOT (materialized by the
+  resolver's own `resolveClosure` — publish and install are literally the
+  same walk), the module package verbatim at `/content`, and the branch's
+  full `visual:website:page` TREE materialized as `<name>/…/index.html` so
+  the absolute links pages already carry work on any host that serves a
+  directory's index. Face copies only are rewritten for standalone life
+  (`resource:<sig>/x.css` → inline style, since `<link>` is MIME-enforced
+  and dumb hosts serve sig files as octet-stream; other `resource:` refs →
+  `/<sig>`) — the pool bytes stay canonical under their sigs. A bare head
+  sig needs no bridge; a `/branch` path resolves its head over ws:2401.
+  No pin files, per the meta-layers dialect.
+- Acceptance PASSED: revolucion (523-sig closure, zero holes) assembled and
+  served by a deliberately dumb static server (no rewrites, octet-stream
+  for everything but .html) — root page fully styled, `/revolucion/flavor-
+  wheel` opened COLD renders the interactive wheel live, sig files resolve
+  at `/<sig>`, and a re-run fetches nothing (delta). Playwright-proven.
+- Still owed from this phase: resolving a SECOND head over the same folder
+  as the update gesture becomes routine once revolucion republishes.
 
 **Phase 4 — first real domain**
 - Ship one creation (revolucion is the natural candidate) to its own domain

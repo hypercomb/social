@@ -1665,6 +1665,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "publish-site-command",
+      "title": "Mirror publish:site (read-only deployment Phase 3 assembly)",
+      "run": null,
+      "note": "New creation: scripts/publish-site.ts + publish:site npm script - assembles the xcopy folder (closure via the resolver at root, module package at /content, full visual:website:page tree materialized with resource: css inlined in face copies only). Tiles 1:1 with source under the read-only-deployment collection, marks per vocabulary, notes carry the acceptance proof (523-sig revolucion closure, dumb-server render, flavor-wheel interactive page cold). note-add additive - manual drain.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
     }
   ]
 }
