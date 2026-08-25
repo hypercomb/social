@@ -24,10 +24,19 @@ const loopbackHost = (hostname: string): boolean => {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
 }
 
+// The desktop shell's WebView origin. `*.localhost` resolves to loopback, so
+// the socket is exactly as local as a localhost tab's — but there is no URL
+// bar to carry the opt-in query, so the bridge defaults ON there and an
+// explicit false is the way out.
+const nativeHost = (hostname: string): boolean =>
+  hostname.trim().toLowerCase() === 'tauri.localhost'
+
 /** Pure decision seam used by tests and non-browser hosts. */
 export const localClaudeBridgeConfiguredFor = (config: LocalClaudeBridgeConfig): boolean => {
+  const effective = config.queryValue !== null ? config.queryValue : config.storedValue
+  if (nativeHost(config.hostname)) return effective === null || enabledValue(effective)
   if (!loopbackHost(config.hostname)) return false
-  return enabledValue(config.queryValue !== null ? config.queryValue : config.storedValue)
+  return enabledValue(effective)
 }
 
 /**

@@ -23,6 +23,12 @@ describe('local Claude bridge capability', () => {
     expect(configured('hypercomb.social', 'true', '1')).toBe(false)
   })
 
+  it('is on by default in the native shell, which has no URL bar to opt in with', () => {
+    expect(configured('tauri.localhost')).toBe(true)
+    expect(configured('tauri.localhost', null, 'false')).toBe(false)
+    expect(configured('tauri.localhost', 'false', '1')).toBe(false)
+  })
+
   it('lets an explicit query flag disable a stored opt-in for one tab', () => {
     expect(configured('localhost', 'false', '1')).toBe(false)
     expect(configured('localhost', '', '1')).toBe(false)
