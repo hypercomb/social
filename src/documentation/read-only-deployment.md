@@ -498,14 +498,30 @@ anywhere.
   hands the visitor a hive-link (the adopt path already exists) — off by
   default until decided.
 
-**Phase 5 — self-host from the desktop app**
-- Fold the resolver + website harness into the jwize.com self-host stack:
-  the desktop app (or the relay it runs) serves a published site at the
-  domain root from its own pool, tunnel-fronted. Installer → desktop app →
-  your domain, no third-party server at all.
-- The relay already serves flat `<sig>`; the delta is serving `index.html` +
-  harness + manifest per hosted domain, keyed by the same head signature the
-  resolver would install.
+**Phase 5 — the executable makes anybody a host**
+- The point is not that the developer's machine is close — it is that
+  **anybody who installs the Windows/Mac/Linux executable is there
+  instantly after they point their Cloudflare.** The app takes care of
+  everything: point and click, enter the server address only if needed.
+  Hosting capability ships inside the executable; the only act left to the
+  owner is the one that must be theirs — putting their domain on
+  Cloudflare and pointing it at their machine.
+- Concretely, the app (`hypercomb-client` — the `host` crate is the
+  serving seat): **Host** → choose the creation → the app serves its pool
+  + faces on a local port → **Connect Cloudflare** → the app manages
+  cloudflared (bundled or fetched, browser login, `tunnel create`, config
+  written, `tunnel route dns` — DNS routing is automatic through the
+  tunnel API) → enter the domain → live. Uninstall-clean; the tunnel and
+  config are the app's to tear down.
+- "Enter the server address if needed" = the remote variant: instead of
+  hosting locally, the app syncs a remote shim by signature (the same one
+  verb) for always-on sites.
+- Possibly simpler still for the first taste: a Cloudflare quick tunnel
+  (no account, throwaway URL) so "see my site on the internet" is one
+  click before any domain exists at all.
+- The relay already proves the serving surface (jwize.com); the delta is
+  the shim verb per hosted domain — `index.html` + faces + manifest keyed
+  by the same head signature the resolver installs.
 
 **Mirror obligation**: the read-only deployment is a creation — when built it
 owes its hive mirror (tiles for the parts, collection, pheromones, notes) in
