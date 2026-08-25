@@ -382,6 +382,63 @@ instead of the full essentials package) is a later optimization — the first
 cut ships the full signed package and relies on the surface barrel + readonly
 gate. Signatures make the pruning safe to add later without format changes.
 
+## Hosting recipes — pointing Cloudflare at your folder
+
+The payload to stand up a server is deliberately tiny: the assembled folder
+plus anything that can serve static files. Two recipes, own-machine first
+because it is the way to go — nothing rented, nothing else needed.
+
+### Your own machine behind a Cloudflare Tunnel (recommended)
+
+Exactly the technique already running jwize.com: a local process serves the
+folder, cloudflared gives it your domain. No opened ports, no public IP, no
+hosting bill; Cloudflare terminates TLS and absorbs the edge.
+
+```bash
+# once: install cloudflared and bind it to your Cloudflare account
+cloudflared tunnel login
+cloudflared tunnel create my-site
+```
+
+`~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: my-site
+credentials-file: ~/.cloudflared/<tunnel-id>.json
+ingress:
+  - hostname: your-domain.com
+    service: http://localhost:8080
+  - service: http_status:404
+```
+
+```bash
+# route the DNS name to the tunnel, then run it
+cloudflared tunnel route dns my-site your-domain.com
+cloudflared tunnel run my-site
+```
+
+Serve the folder on the port the ingress names — any static server works
+(the relay does exactly this for jwize.com; `npx serve <folder> -l 8080` or
+nginx are equally fine). When the server shim exists it takes this seat and
+adds the one verb: sync to a signature. Update today = re-run
+`publish:site` into the same folder; the tunnel notices nothing.
+
+### A public server, Cloudflare in front
+
+1. Copy the folder up (`xcopy`, `scp -r`, FTP — the contract).
+2. Serve it statically — stock nginx/Apache with the folder as the root
+   needs zero configuration beyond the directory-index default it already
+   has. Add CORS headers only if OTHER origins' browsers will consume your
+   packages (see resolution notes above).
+3. Point the DNS record at the server in the Cloudflare dashboard
+   (proxied), and caching is free: every sig file is immutable by name, so
+   `Cache-Control: immutable` on `/<sig>` paths is safe forever.
+
+Cloudflare Pages also swallows the folder as-is (`wrangler pages deploy
+<folder>`) when you'd rather have no server at all — but that is a
+convenience, not a requirement; the folder never needs a build step
+anywhere.
+
 ## The plan
 
 **Phase 1 — visitor boot mode** (in `hypercomb-web`)
