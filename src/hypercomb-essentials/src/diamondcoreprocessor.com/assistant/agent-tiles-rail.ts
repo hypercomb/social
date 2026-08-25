@@ -41,21 +41,28 @@
 //                how you FIND a tile, and hiding the walk behind a press
 //                nobody discovers made its ordinary gesture the one thing it
 //                is not for.)
-//   the ›        open the tile's CHATS — a tile is a subject, not a single
-//                thread, so the arrow unfolds the conversations it holds and
-//                lets you pick one (or start another). This is where a
-//                PARENT's own conversation lives, and it always ends with a
-//                fresh one, so nothing lost a home when click stopped
-//                meaning "talk". The pick is sticky: coming back to the tile
-//                reopens the chat you were in.
+//   the chat     TALK ABOUT it — a tile is a subject, not a single thread,
+//   icon         so the icon unfolds every conversation the tile holds AND
+//                puts you in the one you were last in (its first, if you have
+//                never spoken to it). It used to be a thin › that only
+//                showed the list: a glyph that said nothing about talking, on
+//                a press that left the common case — resume where I was —
+//                still needing a second aim at a row. Pressing it again folds
+//                the list shut. This is where a PARENT's own conversation
+//                lives, and the fold always ends with a fresh one, so nothing
+//                lost a home when click stopped meaning "talk". The pick is
+//                sticky: coming back to the tile reopens the chat you were
+//                in.
 //   ctrl-click   CHOOSE it — add the tile to the context the next request
 //                carries. Any number, gathered across any number of levels
 //                (the choice survives walking in and out), because what is
 //                being built is a LIST OF SIGNATURES: content-addressed, so
-//                the same choice composes the same payload every time. The
-//                SAME chord gathers on the hexagons while the chat window is
-//                folded away (see chat-peek.scss), so choosing context is one
-//                gesture whether you are in the list or out in the hive.
+//                the same choice composes the same payload every time. Out in
+//                the HIVE the same gathering is a per-tile ICON, not this
+//                chord (assistant/chat-context-action.drone.ts) — on a
+//                hexagon ctrl-click is already the selection toggle, and one
+//                chord meaning two things by invisible state is the thing
+//                this window was built to kill.
 //   right-click  come back out
 //
 // All of them are pointer gestures, and a list that can only be walked with a
@@ -79,7 +86,8 @@
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   HIVE_PATH, foldTileConversations, listRailConversations, listTileDrafts,
-  newTileConvoId, readConversationSummary, tileConvoId, tilePath, tilePathOf,
+  newTileConvoId, readConversationSummary, setConversationArchived, tileConvoId,
+  tilePath, tilePathOf,
   type TileConversation,
 } from './chat-thread.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
@@ -184,6 +192,12 @@ const HIVE_KEY = ''
 /** Which chat you were last in, per tile. */
 const STICKY_KEY = 'hc:rail-chat'
 
+/** THE CONTROL THAT TALKS — a Material Symbols ligature, two bubbles,
+ *  because what it opens is a tile's conversationS. The shell loads the
+ *  face; the button clips, so where it has not the row shows an empty box
+ *  rather than the ligature's own letters. */
+const CHATS_GLYPH = 'forum'
+
 /** What a dragged row carries. Shared with the chat window's header boxes —
  *  the shell may not import this module, so the CONTRACT is the mime type and
  *  the JSON shape, not a type. */
@@ -273,9 +287,9 @@ const ensureRailStyles = (): void => {
   border-radius:999px;border:1px solid rgba(226,196,140,0.5);color:rgba(226,196,140,0.95);
   font-size:0.66rem;line-height:1.2;}
 .hc-rail-bees[hidden]{display:none;}
-.hc-rail-chev{flex:0 0 auto;color:rgba(216,230,238,0.35);font-size:1.05rem;line-height:1;
+.hc-rail-chats-open{flex:0 0 auto;color:rgba(216,230,238,0.35);font-size:1.05rem;line-height:1;
   padding-right:0.1rem;}
-.hc-rail-chev[hidden]{display:none;}
+.hc-rail-chats-open[hidden]{display:none;}
 .hc-rail-draft{flex:0 0 auto;width:0.42rem;height:0.42rem;margin-right:0.55rem;
   border-radius:999px;background:rgba(226,196,140,0.9);}
 .hc-rail-draft[hidden]{display:none;}
@@ -372,17 +386,33 @@ const ensureRailStyles = (): void => {
 @keyframes hcRailBreath{0%,100%{opacity:0.5;}50%{opacity:1;}}
 .hc-rail-bees:not([hidden]){animation:hcRailBreath 2.6s ease-in-out infinite;}
 
-/* THE ARROW IS A CONTROL. It opens the tile's conversations, so it needs a
-   real hit area and a real focus ring — and it must stop failing contrast:
-   0.35 was 2.76:1 on this ground, 0.44 is 3.69:1. */
-.hc-rail-chev{flex:0 0 auto;width:1.4rem;height:1.7rem;margin-right:0.15rem;
+/* THE WAY INTO A TILE'S CONVERSATIONS. A chat glyph, not a chevron: this is
+   the one control in the row that TALKS, and a disclosure arrow the width of
+   a hairline said none of that — it read as furniture on a row whose left
+   half is already a button. Same box as before (the row's rhythm is not
+   negotiable — never resize one icon), a real hit area, a real focus ring,
+   and contrast that passes: 0.35 was 2.76:1 on this ground, 0.5 is 4.1:1.
+
+   NO ROTATION when it opens. A chevron turning is how an ARROW says
+   "unfolded"; a speech bubble lying on its side says nothing. Open is said
+   in COLOUR — the steel this list already uses for "the one in hand".
+
+   The ligature needs the face the shell loads; the box clips, so a missing
+   one shows nothing rather than the word. */
+.hc-rail-chats-open{flex:0 0 auto;width:1.4rem;height:1.7rem;margin-right:0.15rem;
+  display:grid;place-items:center;overflow:hidden;
   border:0;background:none;cursor:pointer;
-  color:rgba(216,230,238,0.44);font-size:1.05rem;line-height:1;
+  font-family:'Material Symbols Outlined','Material Symbols Rounded';
+  font-weight:400;font-style:normal;letter-spacing:normal;text-transform:none;
+  white-space:nowrap;direction:ltr;-webkit-font-feature-settings:'liga';
+  font-feature-settings:'liga';-webkit-font-smoothing:antialiased;
+  color:rgba(216,230,238,0.5);font-size:1.05rem;line-height:1;
   border-radius:var(--hc-radius-control, 2px);
-  transition:transform 0.14s ease,color 0.14s ease;}
-.hc-rail-chev:hover{color:rgba(238,244,250,0.9);background:rgba(255,255,255,0.06);}
-.hc-rail-chev:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
-.hc-rail-chev[aria-expanded="true"]{transform:rotate(90deg);color:rgba(${STEEL},0.95);}
+  transition:color 0.14s ease,background 0.14s ease;}
+.hc-rail-chats-open:hover{color:rgba(238,244,250,0.95);background:rgba(255,255,255,0.06);}
+.hc-rail-chats-open:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
+.hc-rail-chats-open[aria-expanded="true"]{color:rgba(${STEEL},0.95);
+  background:rgba(${STEEL},0.12);}
 
 /* THE TILE'S CONVERSATIONS, unfolded under its row. A SHORT step in, no rule
    down the side: the fold already says what they belong to, and a line plus a
@@ -407,6 +437,36 @@ const ensureRailStyles = (): void => {
 .hc-rail-chat-meta{flex:0 0 auto;font-family:var(--hc-mono,monospace);
   font-size:0.68rem;color:rgba(216,230,238,0.5);}
 .hc-rail-chat-new{color:rgba(${STEEL},0.9);}
+
+/* A CHAT ROW IS TWO CONTROLS, not one: the name opens it, the mark at the end
+   puts it away. So the row is the box and the name is a button inside it —
+   otherwise archiving would be a button inside a button, which is not a thing
+   the DOM allows and not a thing a screen reader can read out. The "+ New"
+   row and the archive disclosure are still plain buttons wearing the same
+   row styling, which is why the padding lives on the ROW and never on the
+   body. */
+.hc-rail-chat-body{flex:1 1 auto;display:flex;align-items:baseline;gap:0.5rem;
+  min-width:0;padding:0;border:0;background:none;cursor:pointer;
+  text-align:left;font:inherit;color:inherit;}
+.hc-rail-chat-body:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:1px;}
+/* Quiet until the row is under the pointer or something in it has focus —
+   a column of marks down the side of every conversation is a column you have
+   to look past to read the names. Always reachable by keyboard. */
+.hc-rail-chat-put{flex:0 0 auto;width:1.1rem;height:1.1rem;padding:0;border:0;
+  background:none;cursor:pointer;font:inherit;font-size:0.82rem;line-height:1;
+  color:rgba(216,230,238,0.55);border-radius:var(--hc-radius-control, 2px);
+  opacity:0;transition:opacity 0.12s ease,color 0.12s ease;}
+.hc-rail-chat:hover .hc-rail-chat-put,
+.hc-rail-chat-put:focus-visible{opacity:1;}
+.hc-rail-chat-put:hover{color:rgba(${STEEL},0.95);background:rgba(${STEEL},0.16);}
+.hc-rail-chat-put:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:1px;}
+/* PUT AWAY, and it reads that way: dimmer than a live thread, so the section
+   under the disclosure is visibly a different shelf. */
+.hc-rail-chat.filed{color:rgba(238,244,250,0.48);}
+.hc-rail-chat.filed .hc-rail-chat-put{opacity:0.55;}
+.hc-rail-archived{color:rgba(216,230,238,0.5);font-size:0.72rem;
+  font-family:var(--hc-mono,monospace);letter-spacing:0.04em;}
+.hc-rail-archived.on{color:rgba(${STEEL},0.85);}
 
 /* Same defect, same pass: placeholder text needs 4.5:1, not 2.76:1. */
 .hc-rail-find input::placeholder{color:rgba(216,230,238,0.6);}
@@ -481,6 +541,10 @@ export class AgentTilesRail {
    *  arrives, or the keyboard is stranded on a row that no longer exists. */
   #focusFirstRow = false
   #registry: AgentRegistry | undefined
+  /** Folds whose ARCHIVE is showing, by row key. Not persisted: putting a
+   *  conversation away is durable, wanting to look at what you put away is
+   *  a thing you are doing right now. */
+  #archiveOpen = new Set<string>()
   /** Guards stale walks: only the newest load may touch the list. */
   #epoch = 0
   #disposed = false
@@ -952,8 +1016,8 @@ export class AgentTilesRail {
       // So a click on a row that HAS children goes in. A leaf has nowhere to
       // go, so there a click still opens the conversation — the same rule the
       // hive follows, not a second one. Conversations did not lose a home:
-      // the ▸ was always their control and it unfolds them (including a fresh
-      // one) without moving the list.
+      // the chat icon was always their control and it opens them (including a
+      // fresh one) without moving the list.
       main.addEventListener('click', event => {
         if ((event.ctrlKey || event.metaKey) && this.#profile.choose) {
           this.#toggleChosen(wrap, key, row)
@@ -1020,21 +1084,21 @@ export class AgentTilesRail {
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
       })
 
-      // THE ARROW OPENS THE TILE'S CHATS. It is its own control, not part of
-      // the row: pressing it must never change who you are talking to, only
-      // show you what there is to talk in.
-      const chevron = document.createElement('button')
-      chevron.type = 'button'
-      chevron.className = 'hc-rail-chev'
-      chevron.hidden = !this.#profile.chats
-      chevron.textContent = '›'
+      // THE CHAT ICON OPENS THE TILE'S CHATS — AND PUTS YOU IN ONE. It is
+      // its own control, not part of the row: it never walks the list. It
+      // shows what there is to talk in and resumes the thread you left.
+      const chats = document.createElement('button')
+      chats.type = 'button'
+      chats.className = 'hc-rail-chats-open'
+      chats.hidden = !this.#profile.chats
+      chats.textContent = CHATS_GLYPH
       const chatsLabel = this.#t('agent.rail-chats', 'Conversations on this tile')
-      chevron.title = chatsLabel
-      chevron.setAttribute('aria-label', chatsLabel)
-      chevron.setAttribute('aria-expanded', this.#expanded.has(key) ? 'true' : 'false')
-      chevron.addEventListener('click', event => {
+      chats.title = chatsLabel
+      chats.setAttribute('aria-label', chatsLabel)
+      chats.setAttribute('aria-expanded', this.#expanded.has(key) ? 'true' : 'false')
+      chats.addEventListener('click', event => {
         event.stopPropagation()
-        this.#toggleChats(key, row)
+        this.#openChats(key, row)
       })
 
       // ONE BLOCK PER TILE. The conversations are not a sibling of the row
@@ -1045,7 +1109,7 @@ export class AgentTilesRail {
       group.className = 'hc-rail-group'
       group.dataset['key'] = key
       group.classList.toggle('current', current)
-      wrap.append(main, chevron)
+      wrap.append(main, chats)
       group.appendChild(wrap)
       if (this.#profile.chats && this.#expanded.has(key)) group.appendChild(this.#chatsPanel(key, row))
       list.appendChild(group)
@@ -1072,6 +1136,21 @@ export class AgentTilesRail {
     const index = rows.indexOf(from)
     if (index < 0) return
     rows[Math.min(rows.length - 1, Math.max(0, index + delta))]?.querySelector<HTMLElement>('.hc-rail-main')?.focus()
+  }
+
+  /** THE CHAT ICON. Opening a tile's conversations is also ENTERING one —
+   *  the one you were last in, or its first if you have never spoken to it.
+   *  Showing the list and leaving you outside it made the common case (pick
+   *  up where I was) cost a second aim at a row, and there was nothing else
+   *  the press could have meant: you pressed the control that talks.
+   *
+   *  A second press folds the list shut. It does NOT put the conversation
+   *  down — you are still in it; the rail has simply stopped listing the
+   *  tile's other threads. */
+  #openChats(key: string, row: RailRow): void {
+    if (this.#expanded.has(key)) { this.#toggleChats(key, row); return }
+    const path = tilePath(row.segments)
+    this.#enterChat(row, key, this.#stickyChat(path) || tileConvoId(row.segments))
   }
 
   /** Fold a tile's conversations open or shut. ONE AT A TIME: opening one
@@ -1144,19 +1223,19 @@ export class AgentTilesRail {
       this.#enterChat(row, HIVE_KEY, this.#stickyChat(tilePath([])) || tileConvoId([]))
     })
 
-    const chevron = document.createElement('button')
-    chevron.type = 'button'
-    chevron.className = 'hc-rail-chev'
-    chevron.textContent = '›'
-    chevron.title = hint
-    chevron.setAttribute('aria-label', hint)
-    chevron.setAttribute('aria-expanded', this.#expanded.has(HIVE_KEY) ? 'true' : 'false')
-    chevron.addEventListener('click', event => {
+    const chats = document.createElement('button')
+    chats.type = 'button'
+    chats.className = 'hc-rail-chats-open'
+    chats.textContent = CHATS_GLYPH
+    chats.title = hint
+    chats.setAttribute('aria-label', hint)
+    chats.setAttribute('aria-expanded', this.#expanded.has(HIVE_KEY) ? 'true' : 'false')
+    chats.addEventListener('click', event => {
       event.stopPropagation()
-      this.#toggleChats(HIVE_KEY, row)
+      this.#openChats(HIVE_KEY, row)
     })
 
-    wrap.append(main, chevron)
+    wrap.append(main, chats)
     group.appendChild(wrap)
     if (this.#expanded.has(HIVE_KEY)) group.appendChild(this.#chatsPanel(HIVE_KEY, row))
     return group
@@ -1175,13 +1254,23 @@ export class AgentTilesRail {
     const chats = this.#chatsFor(path)
     const open = this.#subject?.convoId ?? this.#stickyChat(path)
 
-    for (const chat of chats) {
-      const item = document.createElement('button')
-      item.type = 'button'
+    // PUT AWAY IS NOT THROWN AWAY. An archived thread keeps every turn; it
+    // just stops being one of the rows you have to read past. So the fold
+    // shows the live ones, and says how many are put away underneath.
+    const live = chats.filter(chat => !chat.archived)
+    const filed = chats.filter(chat => chat.archived)
+
+    const drawChat = (chat: TileConversation): HTMLElement => {
+      const item = document.createElement('div')
       item.className = 'hc-rail-chat'
       item.setAttribute('role', 'listitem')
       item.classList.toggle('current', chat.convoId === open)
       if (chat.unread) item.classList.add('unread')
+      if (chat.archived) item.classList.add('filed')
+
+      const body = document.createElement('button')
+      body.type = 'button'
+      body.className = 'hc-rail-chat-body'
 
       const title = document.createElement('span')
       title.className = 'hc-rail-chat-name'
@@ -1198,12 +1287,55 @@ export class AgentTilesRail {
         ? this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(chat.turns))
         : this.#t('agent.rail-chat-empty', 'empty')
 
-      item.append(title, meta)
-      item.addEventListener('click', event => {
+      body.append(title, meta)
+      body.addEventListener('click', event => {
         event.stopPropagation()
         this.#enterChat(row, key, chat.convoId)
       })
-      panel.appendChild(item)
+
+      // THE ONE CONTROL, BOTH WAYS. Archiving and un-archiving are the same
+      // act with the flag flipped, so they are the same button — no separate
+      // "restore" living somewhere else for you to go and find.
+      const put = document.createElement('button')
+      put.type = 'button'
+      put.className = 'hc-rail-chat-put'
+      put.textContent = chat.archived ? '⤺' : '⤓'
+      const label = chat.archived
+        ? this.#t('agent.rail-chat-unarchive', 'Bring this conversation back')
+        : this.#t('agent.rail-chat-archive', 'Archive this conversation')
+      put.title = label
+      put.setAttribute('aria-label', label)
+      put.addEventListener('click', event => {
+        event.stopPropagation()
+        void this.#setArchived(key, chat, !chat.archived)
+      })
+
+      item.append(body, put)
+      return item
+    }
+
+    for (const chat of live) panel.appendChild(drawChat(chat))
+
+    // WHAT YOU PUT AWAY, and the way back to it — right here under the
+    // conversations it was one of, not in a separate screen. Absent entirely
+    // when nothing is archived: a disclosure for an empty set is furniture.
+    if (filed.length) {
+      const showing = this.#archiveOpen.has(key)
+      const toggle = document.createElement('button')
+      toggle.type = 'button'
+      toggle.className = 'hc-rail-chat hc-rail-archived'
+      toggle.classList.toggle('on', showing)
+      toggle.setAttribute('aria-expanded', showing ? 'true' : 'false')
+      toggle.textContent = this.#t('agent.rail-chat-archived', 'Archived ({count})')
+        .replace('{count}', String(filed.length))
+      toggle.addEventListener('click', event => {
+        event.stopPropagation()
+        if (showing) this.#archiveOpen.delete(key)
+        else this.#archiveOpen.add(key)
+        this.#repaintExpanded()
+      })
+      panel.appendChild(toggle)
+      if (showing) for (const chat of filed) panel.appendChild(drawChat(chat))
     }
 
     const fresh = document.createElement('button')
@@ -1227,6 +1359,32 @@ export class AgentTilesRail {
     return panel
   }
 
+  /** Put a conversation away, or bring it back.
+   *
+   *  The local copy is flipped BEFORE the write and the fold repainted
+   *  immediately: this is a one-press act on a row under the pointer, and a
+   *  press that does nothing until a disk round-trip completes reads as a
+   *  press that did not land. The pool is still the truth — the refresh
+   *  behind it will correct an optimistic flip that failed.
+   *
+   *  Archiving the conversation you are IN leaves you in it. It is still
+   *  open, still readable, still where what you type goes; what changed is
+   *  where it sits in the list, and yanking someone out of a thread they can
+   *  see is not what "put this away" asks for. */
+  async #setArchived(key: string, chat: TileConversation, archived: boolean): Promise<void> {
+    const index = this.#chatList.findIndex(entry => entry.convoId === chat.convoId)
+    if (index >= 0) this.#chatList[index] = { ...this.#chatList[index]!, archived }
+    // Bringing one back with the archive open must not leave the fold showing
+    // a section that is now empty.
+    if (!archived && !this.#chatList.some(entry => entry.archived && entry.path === chat.path)) {
+      this.#archiveOpen.delete(key)
+    }
+    this.#repaintExpanded()
+    await setConversationArchived(chat.convoId, archived)
+    if (this.#disposed) return
+    await this.#refreshChats()
+  }
+
   /** Enter one named conversation on a tile, and remember it as this tile's
    *  chat so coming back resumes it. */
   #enterChat(row: RailRow, key: string, convoId: string): void {
@@ -1238,7 +1396,7 @@ export class AgentTilesRail {
     // ONE FOLD AT A TIME. Entering a conversation shuts every other tile's
     // list: you are in one thread, the rail should show one tile's threads,
     // and a column of half a dozen open folds is a list you have to read
-    // rather than scan. The arrow still opens a tile without entering it.
+    // rather than scan.
     this.#pending.add(convoId)
     this.#expanded.clear()
     this.#expanded.add(key)
@@ -1401,7 +1559,7 @@ export class AgentTilesRail {
     const fresh: TileConversation[] = []
     for (const convoId of this.#pending) {
       if (known.has(convoId) || (tilePathOf(convoId) || HIVE_PATH) !== path) continue
-      fresh.push({ path, convoId, title: '', turns: 0, lastAt: 0, unread: false })
+      fresh.push({ path, convoId, title: '', turns: 0, lastAt: 0, unread: false, archived: false })
     }
     return [...fresh, ...held]
   }

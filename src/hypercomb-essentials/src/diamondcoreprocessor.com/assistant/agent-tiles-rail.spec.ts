@@ -72,7 +72,36 @@ const threadBucket = {
     yield ['b', turn(20, 'assistant', 'a diagram')]
   },
 }
-const threadsPool = { kind: 'directory', async *entries() { yield ['bucket', threadBucket] } }
+
+/** A SECOND conversation on /diagrams that has been PUT AWAY — one turn and
+ *  the archive marker, which is a plain file in the thread's own bucket. */
+const marker = {
+  kind: 'file',
+  async getFile() {
+    return { async text() { return JSON.stringify({ kind: 'chat-archived', convoId: FILED_ID, at: 30 }) } }
+  },
+}
+const FILED_ID = 'chat:tile:/diagrams::filed'
+const filedTurn = (at: number, role: string, text: string) => ({
+  async getFile() {
+    return { async text() { return JSON.stringify({ kind: 'chat-turn', convoId: FILED_ID, role, at, text }) } }
+  },
+  kind: 'file',
+})
+const filedBucket = {
+  kind: 'directory',
+  async *entries() {
+    yield ['a', filedTurn(5, 'user', 'the old thread')]
+    yield ['z', marker]
+  },
+}
+const threadsPool = {
+  kind: 'directory',
+  async *entries() {
+    yield ['bucket', threadBucket]
+    yield ['filed', filedBucket]
+  },
+}
 
 services['@hypercomb.social/Store'] = {
   getResource: async () => null,
@@ -213,15 +242,15 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.current`).length).toBe(1)
   })
 
-  it('the › still opens a PARENT’s own conversations — click no longer can', async () => {
+  it('the chat icon still opens a PARENT’s own conversations — click no longer can', async () => {
     // The one thing the swap could have cost: a tile with children losing
-    // its way into a chat. The arrow is where they live, and it always
-    // offers a fresh one.
-    const chevron = host.querySelector(`${TILE_ROWS} .hc-rail-chev`) as HTMLButtonElement
-    chevron.click()
+    // its way into a chat. The chat icon is where they live, and the fold
+    // always offers a fresh one.
+    const chats = host.querySelector(`${TILE_ROWS} .hc-rail-chats-open`) as HTMLButtonElement
+    chats.click()
     await settle()
 
-    // The list did NOT move — the arrow shows, it does not walk.
+    // The list did NOT move — the icon talks, it does not walk.
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
 
     const fresh = host.querySelector('.hc-rail-chat-new') as HTMLButtonElement
@@ -230,6 +259,73 @@ describe('tiles rail gestures — every row is a conversation', () => {
     await settle()
 
     expect(rail.subject?.name).toBe('pheromone-workflow')
+  })
+
+  it('pressing it PUTS YOU IN the conversation you were last in', async () => {
+    // The press is not a disclosure. A tile with children cannot be entered
+    // by clicking its row, so this control is how you talk to one — and
+    // landing outside the list it just opened made the common case (pick up
+    // where I was) cost a second aim at a row.
+    const chats = () => host.querySelectorAll(`${TILE_ROWS} .hc-rail-chats-open`)[1] as HTMLButtonElement
+    chats().click()
+    await settle()
+
+    expect(entered).toEqual(['diagrams'])
+    expect(rail.subject?.name).toBe('diagrams')
+    // And it is the STICKY one that is lit, not merely listed.
+    expect(host.querySelector('.hc-rail-chat.current')).toBeTruthy()
+
+    // A second press folds the list shut WITHOUT putting the conversation
+    // down: you are still in it, the rail has just stopped listing the rest.
+    chats().click()
+    await settle()
+
+    expect(host.querySelector('.hc-rail-chats')).toBeFalsy()
+    expect(rail.subject?.name).toBe('diagrams')
+  })
+
+  it('an ARCHIVED conversation is out of the fold, behind a count', async () => {
+    // /diagrams holds two threads: one live, one put away. Unfolding shows
+    // the live one and says the other exists — it does not list it, and it
+    // does not pretend it is gone.
+    const chats = host.querySelectorAll(`${TILE_ROWS} .hc-rail-chats-open`)[1] as HTMLButtonElement
+    chats.click()
+    await settle()
+
+    const names = () => [...host.querySelectorAll('.hc-rail-chat-name')].map(n => n.textContent)
+    expect(names()).toEqual(['what is this'])
+
+    const disclosure = host.querySelector('.hc-rail-archived') as HTMLButtonElement
+    expect(disclosure).toBeTruthy()
+    expect(disclosure.textContent).toContain('1')
+
+    disclosure.click()
+    await settle()
+    expect(names()).toEqual(['what is this', 'the old thread'])
+  })
+
+  it('putting one away answers the press at once — and the pool still wins', async () => {
+    const chats = host.querySelectorAll(`${TILE_ROWS} .hc-rail-chats-open`)[1] as HTMLButtonElement
+    chats.click()
+    await settle()
+
+    const names = () => [...host.querySelectorAll('.hc-rail-chat-name')].map(n => n.textContent)
+    expect(names()).toEqual(['what is this'])
+
+    // ONE PRESS, ANSWERED IMMEDIATELY. This is a row under the pointer; a
+    // press that shows nothing until a disk round-trip completes reads as a
+    // press that did not land. So the row leaves the list before the write.
+    const put = host.querySelector('.hc-rail-chat-put') as HTMLButtonElement
+    put.click()
+    expect(names()).toEqual([])
+    expect((host.querySelector('.hc-rail-archived') as HTMLElement).textContent).toContain('2')
+
+    // AND THE POOL IS STILL THE TRUTH. This fixture's pool cannot take the
+    // write, so the refresh behind the optimistic flip puts the thread back.
+    // An optimistic list that kept a lie after a failed write would be worse
+    // than one that never moved.
+    await settle()
+    expect(names()).toEqual(['what is this'])
   })
 
   it('right-click comes back out', async () => {

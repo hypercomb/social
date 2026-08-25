@@ -161,7 +161,61 @@ const COMMAND_HISTORY_MAX = 100
 /** Participant preference: which standing meaning the bar's plain text has —
  *  'tiles' (text lays tiles, the chevron) or 'command' (the line is a slash
  *  register, the '/' sigil). Never hive truth. */
+
+/**
+ * Natural language is read in LOWERCASE. Nothing a participant says carries
+ * meaning in its capitals — sentence case, dictation's auto-capitals and a
+ * shifted first letter are all typing artefacts — while the registers match
+ * on words, so a stray capital simply made the line unreadable. Case-folding
+ * is length-preserving, so the reader's span offsets still line up with the
+ * glyphs on screen.
+ */
+const lowered = (text: string): string => text.toLowerCase()
+
 const STANCE_STORAGE_KEY = 'hc:command-line-stance'
+
+/**
+ * The three standing meanings of a plain line.
+ *
+ *   tiles    a name — what to make, or where to go
+ *   command  a sentence — read by the Common Tongue and executed
+ *   find     a question — the hive is searched, nothing is changed
+ *
+ * Find is the one stance that only READS, which is why its registers spell
+ * REACH rather than action:
+ *
+ *   term     this layer     — the ring you are standing in
+ *   [term]   this branch    — everything under you
+ *   @term    the hive       — everywhere
+ */
+export type Stance = 'tiles' | 'command' | 'find'
+
+/** How long the line must settle before the hive is asked. A read, not a
+ *  keystroke, is what deserves one. */
+const FIND_DEBOUNCE_MS = 120
+
+/** The reaches, in the order they widen — used to label an answer. */
+const REACH_LABEL: Record<'layer' | 'branch' | 'hive', string> = {
+  layer: 'here', branch: 'branch', hive: 'hive',
+}
+
+/**
+ * Read the reach off a find line. The decoration the term carries IS the
+ * reach — nothing, brackets, or an '@' — so widening a search is one
+ * character, typed where you already are, and never a mode to enter.
+ *
+ * An unclosed bracket still reads as a branch search: the answer arrives
+ * while the bracket is open, which is the whole point of typing it first.
+ */
+const reachOf = (raw: string): { reach: 'layer' | 'branch' | 'hive'; query: string } => {
+  const line = raw.trimStart()
+  if (line.startsWith('@')) return { reach: 'hive', query: line.slice(1) }
+  if (line.startsWith('[')) {
+    const close = line.indexOf(']')
+    return { reach: 'branch', query: close < 0 ? line.slice(1) : line.slice(1, close) }
+  }
+  return { reach: 'layer', query: line }
+}
 
 /** Actions whose words must wait for a second Enter when read from prose —
  *  the same law the DESTRUCTIVE_SLASH_RE gives typed /remove. */
@@ -181,8 +235,10 @@ interface UtteranceSpanLike {
 interface SpokenHabitsLike {
   learn(reading: UtteranceReadingLike): void
   phrasings(fragment: string): readonly { phrasing: string; command: string; count: number }[]
+  leadInCompletions(fragment: string): readonly { leadIn: string; command: string; count: number }[]
   useCount(command: string): number
   forgetPhrasing(phrasing: string): boolean
+  forget(leadIn?: string): number
 }
 
 interface UtteranceReadingLike {
@@ -318,6 +374,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const described = known.find(m => m.behaviour.name === p.command)?.behaviour.description
         ?? this.#learnedDescription(p.command)
       map.set(p.phrasing, `${this.#utteranceText('utterance.learned.yours', 'yours')} · ${described}`)
+    }
+    // A discovered WORD has to admit both things about itself: that it runs
+    // nothing on its own, and where it usually goes. Without the first the
+    // row reads as a behaviour and Enter looks broken; without the second it
+    // reads as noise. A census entry of the same name always wins the row —
+    // a real behaviour is never described as filler.
+    for (const w of this.#learnedLeadIns()) {
+      if (map.has(w.leadIn)) continue
+      map.set(w.leadIn, [
+        this.#utteranceText('utterance.learned.yours', 'yours'),
+        `${this.#utteranceText('utterance.learned.word', 'a word — leads into')} ${w.command}`,
+      ].join(' · '))
     }
     return map
   })
@@ -498,6 +566,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (ctx.mode === 'behaviour-args') {
       const p = this.#behaviourParamMatches().find(m => m.name === name)
       return { name, kind: 'member', description: p?.description, icon: 'tune' }
+    }
+
+    // find — the row IS a place, so the detail says where it sits and how
+    // far the search reached to find it.
+    if (ctx.mode === 'find') {
+      const answer = this.#findAnswer()
+      const hit = answer?.hits.find(h => h.label === name)
+      if (!hit || !answer) return null
+      const where = hit.path.length > 1 ? hit.path.slice(0, -1).join(' / ') : REACH_LABEL[answer.reach]
+      return { name: hit.name, kind: 'find', description: where, icon: 'search' }
     }
 
     // '@' feature — name + localized description + behavior icon + overlap count.
@@ -768,6 +846,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') return t?.t('command-line.placeholder.filter') ?? 'filter tiles...'
+    if (this.#stance() === 'find') {
+      return t?.t('command-line.placeholder.find') ?? 'search here · [branch] · @hive'
+    }
     if (ctx.active && ctx.mode === 'slash') return t?.t('command-line.placeholder.slash') ?? 'type a command...'
     return t?.t('command-line.placeholder.default') ?? 'share intent...'
   })
@@ -1183,6 +1264,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // and Escape are handled directly by the shell hooks.
     if (this.#captureMode()) return { active: false }
 
+    // FIND STANCE OWNS ITS WHOLE LINE. Nothing below applies: a question is
+    // not a name, a command, a tag or a selection, and the only grammar it
+    // has is the reach its brackets or '@' declare.
+    if (this.#stance() === 'find') {
+      const raw = this.value()
+      const reach = reachOf(raw)
+      return {
+        active: true,
+        mode: 'find',
+        head: raw.slice(0, raw.length - reach.query.length),
+        raw: reach.query,
+        normalized: reach.query.trim().toLowerCase(),
+        style: 'space',
+      }
+    }
+
     // In command stance the icon carries the slash — re-prefix it here so
     // every register below reads exactly as a typed '/x' line always has.
     const v = this.#toRegister(this.value())
@@ -1383,6 +1480,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active) return []
     if (ctx.mode === 'filter') return []
+
+    // find stance: the hive's answer, best first. The rows are whatever came
+    // back — the service ranks and groups; this list only shows.
+    if (ctx.mode === 'find') {
+      const answer = this.#findAnswer()
+      return answer ? answer.hits.map(h => h.label) : []
+    }
     if (ctx.mode === 'slash') {
       // Detect slash command with args: head matches /command followed by space or bracket
       const cmdArgMatch = ctx.head.match(/^\/(\S+?)[\s\[]/i)
@@ -1409,7 +1513,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // is offered where the dropdown would otherwise be empty.
       const learned = this.#learnedPhrasings().map(p => p.phrasing)
       if (learned.length) return learned
-      return this.#slashMatches().map(m => m.behaviour.name)
+      const census = this.#slashMatches().map(m => m.behaviour.name)
+      // Before the first space the census speaks, and your own words follow
+      // it — never in front of it, and never twice: a word a behaviour
+      // already spells IS that behaviour's row. Strictly additive, so a
+      // participant who has never run a sentence sees exactly what they
+      // always saw.
+      const spelled = new Set(census)
+      const words = this.#learnedLeadIns()
+        .map(w => w.leadIn)
+        .filter(w => !spelled.has(w))
+      return words.length ? [...census, ...words] : census
     }
 
     // '@' feature mode: list registered behaviors (filtered by fragment).
@@ -1994,9 +2108,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // the raw prose straight to the tag/parse pipeline was the "the text
     // just disappears and nothing happens" bug: an unread sentence found
     // no register, cleared the line, and opened nothing.
+    // Dictation is always LOWERCASE: the recognizer capitalizes sentences
+    // and proper nouns on its own, and those capitals are not something the
+    // participant said — they only broke the registers that match on words.
+    // The line clears on RELEASE and nowhere else: the interim preview keeps
+    // showing what is being said, and letting go spends it.
     this.#voiceSubmitUnsub = EffectBus.on<{ text: string }>('voice:submit', ({ text }) => {
-      this.#setShellValue(text, false)
-      this.#submitAsEnter(text)
+      const spoken = text.toLowerCase()
+      this.#submitAsEnter(spoken)
+      // Find stance keeps the line: a question with no answer yet is still
+      // being answered, and a question that found nothing is worth reading
+      // back. Every other stance spends the line on release.
+      if (this.#stance() !== 'find') this.#setShellValue('', false)
     })
 
     // remote bridge submit (Claude CLI, future /transcript) — same path as a
@@ -2219,6 +2342,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  know where the button lives. */
   public onRailMicPress = (): void => { this.#onMobileMicPress() }
   public onRailMicRelease = (): void => { this.#onMobileMicRelease() }
+
   #voiceActiveUnsub?: () => void
   #pushToTalkUnsub?: () => void
   #prefillUnsub?: () => void
@@ -2253,15 +2377,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return get('@hypercomb.social/VoiceInputService') as VoiceInputService | undefined
   }
 
-  readonly startVoice = (event: PointerEvent): void => {
-    ;(event.target as HTMLElement)?.setPointerCapture?.(event.pointerId)
-    this.voiceService?.start()
-  }
-
-  readonly stopVoice = (): void => {
-    this.voiceService?.stop()
-  }
-
   /** Mobile "GO" button: submit the text. Portrait pins the command line
    * so GO never collapses it there (the bar stays ready for the next
    * command); landscape collapses back to the sidebar's keyboard toggle. */
@@ -2280,7 +2395,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  // ── mobile mic state machine ──────────────────────────────
+  // ── mic state machine (one mic, every platform) ───────────
+  // The rail mic sits left of the chat toggle on phone and desktop alike —
+  // one control, beside the box it speaks into, instead of a phone rail
+  // button and a separate flush-right dot that only appeared once
+  // push-to-talk had been switched on (so nobody found it).
   // The mic is a VOICE control only — it NEVER hides the command line.
   // (Hiding on release was the "tap the mic and the command line flashes
   // away" bug: a relaxed tap crossed the hold threshold and the release
@@ -2386,11 +2505,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // creation, the chevron. Sticky across lines and sessions — a participant
   // preference, never hive truth. The line itself never carries the stance:
   // #toRegister() re-prefixes the slash for everything that PARSES.
-  readonly #stance = signal<'tiles' | 'command'>(
-    localStorage.getItem(STANCE_STORAGE_KEY) === 'command' ? 'command' : 'tiles'
+  readonly #stance = signal<Stance>(
+    ((): Stance => {
+      const held = localStorage.getItem(STANCE_STORAGE_KEY)
+      return held === 'command' || held === 'find' ? held : 'tiles'
+    })()
   )
 
-  #setStance(s: 'tiles' | 'command'): void {
+  #setStance(s: Stance): void {
     if (this.#stance() === s) return
     this.#stance.set(s)
     localStorage.setItem(STANCE_STORAGE_KEY, s)
@@ -2405,6 +2527,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * a URL so link intake still catches it. Everything else is a command.
    */
   #toRegister(raw: string): string {
+    // Find stance parses nothing: its whole line is the query, and its three
+    // reaches ARE its registers. Prefixing a slash here would turn a search
+    // for "format" into the format command.
+    if (this.#stance() === 'find') return raw
     if (this.#stance() !== 'command' || this.#captureMode()) return raw
     if (raw.startsWith('/')) return raw
     if (/^[\[~#?>.]/.test(raw)) return raw
@@ -2415,17 +2541,135 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** The sigil the prompt slot wears: the line's own register when it
    *  literally carries one (a recalled '/x' line), else the standing stance. */
-  public readonly stanceSigil = computed<'chevron' | 'slash'>(() => {
+  public readonly stanceSigil = computed<'chevron' | 'slash' | 'question'>(() => {
+    // The stance wears the sigil of the register it stands for, exactly as
+    // command stance wears the slash: '?' has always been the filter's own
+    // character, so find stance is just that register standing up.
+    if (this.#stance() === 'find' && !this.#captureMode()) return 'question'
     if (this.value().startsWith('/')) return 'slash'
     if (this.#stance() === 'command' && !this.#captureMode()) return 'slash'
     return 'chevron'
   })
 
-  /** Clicking the prompt glyph toggles the stance — one click in, one click
-   *  out. The line's text survives the flip; only its meaning changes. */
+  /** Clicking the prompt glyph walks the stances — tiles → command → find →
+   *  tiles. Three clicks is the whole cycle, so any stance is at most two
+   *  clicks from any other. The line's text survives every flip; only its
+   *  meaning changes. */
   public onStanceToggle = (): void => {
-    this.#setStance(this.#stance() === 'command' ? 'tiles' : 'command')
+    const next: Record<Stance, Stance> = { tiles: 'command', command: 'find', find: 'tiles' }
+    this.#setStance(next[this.#stance()])
     this.shell?.focus()
+  }
+
+  // ── find stance: the hive answers a question ────────────────────────────
+  //
+  // The rows come from '@diamondcoreprocessor.com/HiveSearchService', which
+  // reads sig-keyed records out of sign('search:index') — a derived cache the
+  // optimize phase mints. This component never walks anything: it asks, and
+  // it renders what came back.
+
+  /** The answer on screen, with the query it answered so a stale reply from
+   *  a slower reach can never overwrite a newer one. */
+  readonly #findAnswer = signal<{
+    query: string
+    reach: 'layer' | 'branch' | 'hive'
+    base: readonly string[]
+    hits: readonly { label: string; name: string; path: readonly string[] }[]
+    total: number
+    partial: boolean
+  } | null>(null)
+
+  #findToken = 0
+  #findTimer: ReturnType<typeof setTimeout> | null = null
+
+  private get searchService(): {
+    search(query: string, reach: 'layer' | 'branch' | 'hive', limit?: number): Promise<{
+      hits: readonly { name: string; path: readonly string[] }[]
+      total: number
+      partial: boolean
+    }>
+  } | undefined {
+    return get('@diamondcoreprocessor.com/HiveSearchService') as never
+  }
+
+  /**
+   * Ask as the line settles. Debounced because a search is a READ of the
+   * hive and a keystroke is not a reason to do one — the pause is; and every
+   * ask carries a token so the answer to a query the participant has already
+   * moved past is dropped rather than rendered.
+   */
+  readonly #findAsk = effect(() => {
+    const ctx = this.context()
+    const active = ctx.active && ctx.mode === 'find'
+    const query = active ? ctx.normalized : ''
+    const reach = active ? reachOf(this.value()).reach : 'layer'
+
+    if (this.#findTimer) { clearTimeout(this.#findTimer); this.#findTimer = null }
+    if (!query) {
+      this.#findAnswer.set(null)
+      if (this.lastFilterKeyword) {
+        EffectBus.emit('search:filter', { keyword: '' })
+        this.lastFilterKeyword = ''
+      }
+      return
+    }
+
+    // The layer reach IS the old '?' filter, kept: the tiles in front of you
+    // dim to the matches as you type, which is the answer arriving before the
+    // rows do. Wider reaches leave the surface alone — a branch or hive hit
+    // is somewhere else, and dimming here would say nothing about it.
+    const keyword = reach === 'layer' ? this.completions.normalize(query) : ''
+    if (keyword !== this.lastFilterKeyword) {
+      EffectBus.emit('search:filter', { keyword })
+      this.lastFilterKeyword = keyword
+    }
+
+    const token = ++this.#findToken
+    const base = reach === 'hive' ? [] : [...(this.lineage?.explorerSegments?.() ?? [])]
+    this.#findTimer = setTimeout(() => {
+      this.#findTimer = null
+      void this.searchService?.search(query, reach).then(answer => {
+        if (token !== this.#findToken) return
+        this.#findAnswer.set({
+          query, reach, base,
+          hits: answer.hits.map(hit => ({
+            label: hit.path.length > 1 ? hit.path.join(' / ') : hit.name,
+            name: hit.name,
+            path: hit.path,
+          })),
+          total: answer.total,
+          partial: answer.partial,
+        })
+      }).catch(() => { if (token === this.#findToken) this.#findAnswer.set(null) })
+    }, FIND_DEBOUNCE_MS)
+  })
+
+  /** Ask the hive right now and walk to the best answer — the spoken path,
+   *  where there was no settling pause to debounce against. A question that
+   *  finds nothing leaves the line alone, so it can be read back and tried
+   *  again rather than vanishing. */
+  async #findNow(raw: string): Promise<void> {
+    const { reach, query } = reachOf(raw)
+    const asked = query.trim().toLowerCase()
+    if (!asked) return
+    const base = reach === 'hive' ? [] : [...(this.lineage?.explorerSegments?.() ?? [])]
+    const answer = await this.searchService?.search(asked, reach).catch(() => null)
+    const best = answer?.hits[0]
+    if (!best) return
+    this.clear()
+    this.navigation?.goRaw?.([...base, ...best.path])
+  }
+
+  /** Walk to a hit. The row's path is relative to the reach's own root, so
+   *  the base is prepended — a hive hit is absolute, a branch hit hangs off
+   *  where you stand. */
+  #goToHit(label: string): boolean {
+    const answer = this.#findAnswer()
+    const hit = answer?.hits.find(h => h.label === label) ?? answer?.hits[0]
+    if (!answer || !hit) return false
+    this.clear()
+    this.navigation?.goRaw?.([...answer.base, ...hit.path])
+    return true
   }
 
   // ── the utterance reading (Common Tongue: the reader + the marks) ────────
@@ -2507,6 +2751,28 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return this.#spokenHabits()?.phrasings(fragment) ?? []
   })
 
+  /**
+   * The words you lead with, offered while the line is still one word.
+   *
+   * The other half of {@link #learnedPhrasings}: before the first space the
+   * census owns the fragment, so these rows are appended AFTER it and never
+   * displace a behaviour. `op` offers `open` under whatever the catalogue
+   * already had — and accepting it writes plain TEXT, so nothing runs and the
+   * phrasings take over on the space it leaves behind.
+   *
+   * Never on a blank line: Ctrl+Space asks for the catalogue, and filler is
+   * not part of the catalogue.
+   */
+  readonly #learnedLeadIns = computed<readonly { leadIn: string; command: string }[]>(() => {
+    this.#habitsRevision()          // a forgotten word must leave the list at once
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return []
+    if (this.#stance() !== 'command') return []
+    const fragment = ctx.head === '/' ? ctx.raw : ''
+    if (!fragment.trim() || /\s/.test(fragment)) return []
+    return this.#spokenHabits()?.leadInCompletions(fragment) ?? []
+  })
+
   /** The live reading of the current line — null outside command stance, for
    *  exempt registers (sigils, calls, tags, URLs), and during captures. */
   public readonly utteranceReading = computed<UtteranceReadingLike | null>(() => {
@@ -2514,7 +2780,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const raw = this.value()
     if (!raw.trim()) return null
     if (this.#toRegister(raw) === raw) return null   // its own register, not plain language
-    return this.#utteranceReader()?.read(raw, this.#utteranceResolutions()) ?? null
+    return this.#utteranceReader()?.read(lowered(raw), this.#utteranceResolutions()) ?? null
   })
 
   /** Mark segments for the shell overlay: the whole line, split into spans
@@ -2542,6 +2808,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * its second Enter, or the actions executed in word order.
    */
   #commitUtterance(text: string): boolean {
+    text = lowered(text)
     const reading = this.#utteranceReader()?.read(text, this.#utteranceResolutions())
     if (!reading) return false
 
@@ -2648,7 +2915,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // 'run' executes directly — never back through #commitUtterance, which
       // would just ask again. 'cancel' leaves the line exactly as typed.
       if (option.label === 'run') {
-        const reading = this.#utteranceReader()?.read(pending.text, this.#utteranceResolutions())
+        const reading = this.#utteranceReader()?.read(lowered(pending.text), this.#utteranceResolutions())
         if (reading?.actions.length) void this.#executeReading(reading)
       }
       return
@@ -2683,26 +2950,32 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // own their line outright: nothing here runs while one is active.
     if (this.#captureMode()) {
       // fall through to the plain handler below
-    } else if (this.#stance() === 'tiles') {
-      if (v.startsWith('/')) {
-        // The first slash disappears into the icon; typing continues bare.
-        this.#setStance('command')
-        v = v.replace(/^\/+/, '')
-        this.shell?.setValue(v)
-      }
-    } else {
-      if (v === '>') {
-        // '>' walks back out to tile mode; the character is consumed.
-        this.#setStance('tiles')
-        this.clear()
-        return
-      }
-      if (v.startsWith('/')) {
-        // Slashes are not allowed in command stance — the icon already IS
-        // the slash. The character simply never lands.
-        v = v.replace(/^\/+/, '')
-        this.shell?.setValue(v)
-      }
+    } else if (v === '>' && this.#stance() !== 'tiles') {
+      // '>' walks back out to tile mode; the character is consumed.
+      this.#setStance('tiles')
+      this.clear()
+      return
+    } else if (v.startsWith('/') && this.#stance() !== 'command') {
+      // The first slash disappears into the icon; typing continues bare.
+      this.#setStance('command')
+      v = v.replace(/^\/+/, '')
+      this.shell?.setValue(v)
+    } else if (v.startsWith('?') && this.#stance() !== 'find') {
+      // …and the question mark is find's own sigil, exactly the same way.
+      // THREE STANCES, THREE CHARACTERS: '/' commands, '?' asks, '>' walks
+      // back out to tiles. A stance is entered by typing what it means, from
+      // wherever you are — the character never lands in the line, because
+      // the icon is already wearing it. What is left is the bare term, which
+      // is the whole grammar of a find: the word, `[word]` for the branch,
+      // `@word` for the hive.
+      this.#setStance('find')
+      v = v.replace(/^\?+/, '')
+      this.shell?.setValue(v)
+    } else if (v.startsWith('/') && this.#stance() === 'command') {
+      // Slashes are not allowed in command stance — the icon already IS
+      // the slash. The character simply never lands.
+      v = v.replace(/^\/+/, '')
+      this.shell?.setValue(v)
     }
     this.value.set(v)
 
@@ -2788,6 +3061,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         if (this.#spokenHabits()?.forgetPhrasing(row)) {
           // The list is a computed over the store, but the store is not a
           // signal — nudge the line so the dropdown recomputes without it.
+          this.#habitsRevision.update(n => n + 1)
+        }
+        return
+      }
+      // A discovered WORD is prunable on the same key, and pruning it takes
+      // every ending with it — the word is only on offer because those
+      // phrasings exist, so leaving them behind would put it straight back.
+      // Guarded on the census: a behaviour that happens to spell the same
+      // word owns its row, and that row is not yours to edit.
+      if (row && this.#learnedLeadIns().some(w => w.leadIn === row)
+          && !this.#slashMatches().some(m => m.behaviour.name === row)) {
+        e.preventDefault()
+        if ((this.#spokenHabits()?.forget(row) ?? 0) > 0) {
           this.#habitsRevision.update(n => n + 1)
         }
         return
@@ -2958,6 +3244,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#commitCapture(capture, v)
       return
     }
+    // FIND STANCE GOES. Enter on an answer walks to the row the participant
+    // is on (the first, until they arrow), because a question that found the
+    // place has already done its whole job. An unanswered line stays put —
+    // nothing is created, nothing is run, nothing is lost.
+    if (this.#stance() === 'find') {
+      this.#goToHit(this.suggestions()[this.shell?.getActiveIndex() ?? 0] ?? '')
+      return
+    }
     // A pending utterance choice owns Enter: accept the highlighted row.
     if (this.#pendingChoice()) {
       this.#applyPendingChoice(this.shell?.getActiveIndex() ?? 0)
@@ -3106,6 +3400,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const capture = this.#captureMode()
     if (capture) {
       this.#commitCapture(capture, text)
+      return
+    }
+    // A SPOKEN QUESTION IS STILL A QUESTION. In find stance the release
+    // walks to the answer, exactly as Enter does — it must never fall
+    // through to the parser, which would run the words as a command.
+    //
+    // The answer on screen belongs to the line as it was a moment ago, and a
+    // spoken line arrives all at once — so it is used only when it actually
+    // answers THIS text, and otherwise the hive is asked now.
+    if (this.#stance() === 'find') {
+      const asked = reachOf(text).query.trim().toLowerCase()
+      if (this.#findAnswer()?.query === asked) {
+        this.#goToHit(this.suggestions()[this.shell?.getActiveIndex() ?? 0] ?? '')
+        return
+      }
+      this.#setShellValue(text, false)
+      void this.#findNow(text)
       return
     }
     const line = this.#toRegister(text)
@@ -4346,6 +4657,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           // Preset position (after brackets or single arg)
           this.#setShellValue(ctx.head + best, false)
         }
+        return
+      }
+      // A DISCOVERED WORD COMPLETES AS TEXT. `open` is not a behaviour and
+      // must never be filled in as one: the line becomes the word and a
+      // space, nothing is suppressed and nothing is run. The trailing space
+      // is load-bearing twice over — it turns the phrasings on, and
+      // #completeOnEnter reads it as "your ending goes here", so Enter on a
+      // half-said sentence completes the word instead of firing it.
+      // The census keeps the row whenever it spells the same word.
+      if (ctx.head === '/'
+          && this.#learnedLeadIns().some(w => w.leadIn === best)
+          && !this.#slashMatches().some(m => m.behaviour.name === best)) {
+        this.#setShellValue('/' + best + ' ', false)
         return
       }
       // If head is just '/', we're completing the command name itself

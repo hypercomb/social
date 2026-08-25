@@ -9,14 +9,21 @@
 // ArkanoidDrone / BubbleDrone / SolomonDrone.
 //
 // Wiring contract (EffectBus, late-subscriber replay):
-//   emits  `roper:state`  { available: true, active: boolean }
+//   emits  `roper:state`  { available: boolean, active: boolean }
 //   listens `roper:toggle`                  ← header icon click
 //   listens `keymap:invoke` { cmd:'roper.toggle' } ← optional shortcut
+//   listens `behavior:enablement-changed`     ← the Beehaviors roster
+//
+// A game is a BEHAVIOUR in the roster, switched by the kind `game:roper`
+// (games/game-enablement.ts). Off means gone: `available:false` takes the
+// header icon away, `gameDormant` takes the launcher tile, and an overlay
+// that happens to be open closes itself the moment the light goes out.
 //
 // Open state is session-only (NOT persisted): a game overlay re-opening on every
 // reload would be hostile. The toggle drives it explicitly.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+import { isGameDormant, onEnablementChanged } from '../game-enablement.js'
 import { RoperOverlay } from './overlay.js'
 
 export class RoperDrone extends Drone {
@@ -56,20 +63,40 @@ export class RoperDrone extends Drone {
       EffectBus.on<{ cmd?: string }>('keymap:invoke', ({ cmd }) => {
         if (cmd === 'roper.toggle') this.toggle()
       }),
+      // The roster flipped a light. Re-announce (the header icon leaves
+      // when this game goes dormant) and close if it is open — a game
+      // left running above the hive after being switched off is the
+      // contradiction "one switch, one meaning" exists to forbid.
+      onEnablementChanged(() => {
+        if (this.gameDormant) this.close()
+        else this.#emitState()
+      }),
     )
     this.#emitState()
     ;(window as unknown as { __roper?: RoperDrone }).__roper = this
   }
 
   // ── public API ───────────────────────────────────────────
+
+  /** Switched off in the Beehaviors roster (kind `game:roper`). Read by
+   *  the shell's launch group off this bee, so the launcher tile leaves
+   *  with the header icon — the shell never has to know the kind. */
+  public get gameDormant(): boolean { return isGameDormant(this.gameId) }
+
   public isActive(): boolean { return !!this.#overlay?.isMounted() }
 
   public toggle(): boolean {
-    return this.isActive() ? (this.close(), false) : (this.open(), true)
+    if (this.isActive()) { this.close(); return false }
+    this.open()
+    // NOT an unconditional true: open() refuses while the light is out,
+    // and every caller words its message from this answer.
+    return this.isActive()
   }
 
   public open(): void {
-    if (this.isActive()) return
+    // The roster's light is the outer gate: dormant means this game is not
+    // here at all — no header icon, no launcher tile, nothing to open.
+    if (this.gameDormant || this.isActive()) return
     this.#overlay = new RoperOverlay(() => this.close())
     this.#overlay.mount()
     window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'roper' } }))
@@ -85,7 +112,7 @@ export class RoperDrone extends Drone {
   }
 
   #emitState(): void {
-    EffectBus.emit('roper:state', { available: true, active: this.isActive() })
+    EffectBus.emit('roper:state', { available: !this.gameDormant, active: this.isActive() })
   }
 
   protected override dispose = (): void => {

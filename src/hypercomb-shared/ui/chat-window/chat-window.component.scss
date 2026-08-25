@@ -800,16 +800,40 @@ $accent: #7eb6d6;
   white-space: nowrap;
 }
 
-.chat-new {
+// THE TWO ACTS ON THE CONVERSATION IN HAND — put this one away, start
+// another. Neither wears a border: they sit at the end of a row whose only
+// other occupant is a name, and two outlined boxes there read as a toolbar
+// bolted onto a title. The rule between them does the separating instead,
+// because it says they are different KINDS of act (this one is about the
+// thread you are reading; that one leaves it) without drawing two boxes.
+.chat-new,
+.chat-put {
   flex: 0 0 auto;
   @include tw.icon-button;
   background: none;
-  border: 1px solid rgba($accent, 0.3);
-  color: rgba($accent, 0.9);
+  border: none;
   cursor: pointer;
 
   .mat-sym { font-size: 1.05em; }
+}
+
+.chat-new {
+  color: rgba($accent, 0.9);
   &:hover { background: rgba($accent, 0.16); }
+}
+
+.chat-put {
+  color: rgba(255, 255, 255, 0.42);
+  &:hover { color: rgba($accent, 0.95); background: rgba($accent, 0.14); }
+}
+
+.chat-bar-split {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1px;
+  height: 1.1em;
+  margin: 0 0.15em;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .chat-list {
@@ -879,6 +903,55 @@ $accent: #7eb6d6;
   &:hover { color: rgba(255, 140, 140, 0.9); background: rgba(255, 120, 120, 0.12); }
   // Armed: the next press destroys turns, so it stops being a quiet glyph.
   &.armed { color: #fff; background: rgba(226, 75, 74, 0.85); }
+}
+
+// PUT AWAY, NOT THROWN AWAY. The archive control sits BEFORE the delete and
+// wears the neutral colour delete deliberately does not: one of these two
+// buttons is reversible and the other is not, and they should never look like
+// the same kind of act.
+.chat-list-put {
+  flex: 0 0 auto;
+  align-self: center;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.28);
+  padding: 0.3em;
+  cursor: pointer;
+  border-radius: var(--md-shape-xs, 4px);
+
+  .mat-sym { font-size: 1em; }
+  &:hover { color: rgba($accent, 0.95); background: rgba($accent, 0.14); }
+}
+
+// An archived row reads as a different shelf, so the section under the
+// disclosure is visibly not the live list.
+.chat-list-row.filed {
+  .chat-list-name { color: rgba(243, 243, 243, 0.55); }
+  .chat-list-meta { color: rgba(255, 255, 255, 0.3); }
+}
+
+.chat-list-archived {
+  padding: 0.15em 0.35em 0.35em;
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 0.2em;
+    width: 100%;
+    padding: 0.3em 0.4em;
+    background: none;
+    border: none;
+    border-radius: var(--md-shape-xs, 4px);
+    color: rgba(255, 255, 255, 0.42);
+    font: inherit;
+    font-size: 0.68em;
+    text-align: left;
+    cursor: pointer;
+
+    .mat-sym { font-size: 1.1em; }
+    &:hover { color: rgba($accent, 0.9); background: rgba($accent, 0.08); }
+    &.on { color: rgba($accent, 0.9); }
+  }
 }
 
 // ── the conversation ──────────────────────────────────────────────────────

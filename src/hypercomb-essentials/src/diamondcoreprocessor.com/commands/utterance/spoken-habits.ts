@@ -11,6 +11,14 @@
 //
 //   say  "open providers"   →  `providers` runs; "open" was filler
 //   later, type "open "     →  "open providers" is a completion
+//   and   type "op"         →  "open" is a completion — as plain TEXT
+//
+// That last row is the WORD, not a command. The words a participant leads
+// with — open, show, display — are discovered the same way the phrasings
+// are, and offering them back is what lets the sentence be built a word at a
+// time instead of remembered whole. Accepting one writes the word and a
+// space and runs NOTHING; the space is what turns the phrasings on, so the
+// ending arrives on the very next keystroke.
 //
 // ONLY EXECUTION TEACHES. Typing does not. Browsing the catalogue does not. An
 // ambiguity you backed out of does not. A habit is evidence the participant
@@ -88,6 +96,15 @@ export interface HabitPhrasing {
   /** What the dropdown offers, and what the line becomes: `open providers`. */
   readonly phrasing: string
   readonly command: string
+  readonly count: number
+}
+
+export interface LeadInCompletion {
+  /** The discovered word itself, exactly as it is said: `open`, `bring up`. */
+  readonly leadIn: string
+  /** The ending it most often reaches — what the row admits it leads to. */
+  readonly command: string
+  /** Runs across every ending this lead-in has ever carried. */
   readonly count: number
 }
 
@@ -317,6 +334,51 @@ export class SpokenHabits {
       .filter(p => (wantsAll ? p.phrasing.startsWith(q + ' ') || p.phrasing === q : p.phrasing.startsWith(q)))
       .sort((a, b) => b.count - a.count || b.at - a.at || a.phrasing.localeCompare(b.phrasing))
       .map(({ phrasing, command, count }) => ({ phrasing, command, count }))
+  }
+
+  /**
+   * Discovered WORDS beginning with `fragment` — `op` → `open`, `sh` → `show`.
+   *
+   * {@link phrasings} answers once the line has become a sentence; this
+   * answers before it has. A bare fragment is normally a behaviour name being
+   * typed, so these rows are strictly ADDITIVE — the shell offers them after
+   * the census and drops any word a real behaviour already spells — and
+   * accepting one completes AS PLAIN TEXT: the word and a space, nothing run.
+   * The ending then follows from `phrasings()`, which is exactly what the
+   * space turns on. `op` → `open ` → `open providers`.
+   *
+   * A fragment holding a space is a sentence and belongs to `phrasings`; an
+   * empty one is the whole catalogue Ctrl+Space asked for, and your filler is
+   * not part of that. Both answer nothing.
+   */
+  leadInCompletions(fragment: string): readonly LeadInCompletion[] {
+    if (/\s/.test(fragment)) return []
+    const q = collapse(fragment).toLowerCase()
+    if (!q) return []
+
+    // One row per word, however many endings it carries — the row is the
+    // WORD, so its weight is every run that ever went through it and the
+    // ending it names is the one it reaches most.
+    const grouped = new Map<string, SpokenHabit[]>()
+    for (const h of this.#state.habits) {
+      if (!h.leadIn.startsWith(q)) continue
+      const held = grouped.get(h.leadIn)
+      if (held) held.push(h)
+      else grouped.set(h.leadIn, [h])
+    }
+
+    return [...grouped.entries()]
+      .map(([leadIn, held]) => {
+        const best = [...held].sort((a, b) => b.count - a.count || b.at - a.at)[0]
+        return {
+          leadIn,
+          command: best.command,
+          count: held.reduce((n, h) => n + h.count, 0),
+          at: held.reduce((t, h) => Math.max(t, h.at), 0),
+        }
+      })
+      .sort((a, b) => b.count - a.count || b.at - a.at || a.leadIn.localeCompare(b.leadIn))
+      .map(({ leadIn, command, count }) => ({ leadIn, command, count }))
   }
 
   /** How often a behaviour has been run — the ranking weight for the

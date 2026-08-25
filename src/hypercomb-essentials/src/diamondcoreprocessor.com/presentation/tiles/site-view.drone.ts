@@ -23,7 +23,7 @@ import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
-import { HEXAGONS_SURFACE, sameSegments, siteReturnTarget, type SiteSpawn } from './site-return.js'
+import { HEXAGONS_SURFACE, sameSiteSegments, siteReturnTarget, type SiteSpawn } from './site-return.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -215,7 +215,7 @@ export class SiteViewDrone extends Drone {
         const spawn = this.#spawn
         const entry = this.#siteEntrySegments
         if (!spawn || !entry) return
-        if (!sameSegments([...(payload.segments ?? [])], entry)) return
+        if (!sameSiteSegments([...(payload.segments ?? [])], entry)) return
         this.#spawn = { mode: spawn.mode, segments: [...this.#prevSegments] }
       })
       replay = false
@@ -286,7 +286,7 @@ export class SiteViewDrone extends Drone {
 
   readonly #onLineageChange = (): void => {
     const segments = [...(this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? [])]
-    if (!sameSegments(segments, this.#lastSegments)) {
+    if (!sameSiteSegments(segments, this.#lastSegments)) {
       this.#prevSegments = this.#lastSegments
       this.#lastSegments = segments
     }
@@ -345,7 +345,7 @@ export class SiteViewDrone extends Drone {
       this.#restoringSpawn = true
       try { vm?.setMode(target.mode) } finally { this.#restoringSpawn = false }
     }
-    if (sameSegments(target.segments, current)) return
+    if (sameSiteSegments(target.segments, current)) return
     const segments = [...target.segments]
     if (typeof lineage?.explorerReplace === 'function') { lineage.explorerReplace(segments); return }
     ;(window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc

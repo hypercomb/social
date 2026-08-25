@@ -6,6 +6,45 @@ For slash commands (`/help`, `/docs`, `/chat`, etc.), see [slash-behaviour-refer
 
 ---
 
+## Stances — three modes, three characters
+
+The line stands in one of three stances, and the prompt icon wears the sigil of
+the one it is in. **You enter a stance by typing what it means, from wherever
+you are — the character never lands in the line, because the icon is already
+wearing it.**
+
+| Sigil | Stance | The line means |
+|:---:|:---|:---|
+| `chevron_right` | **tiles** | a name — Enter creates, Shift+Enter navigates |
+| `/` | **command** | a command — typed bare (`tree`), the icon is the slash |
+| `?` | **find** | a question — the hive answers, nothing is changed |
+
+Typing `/` stands the command register up, `?` stands find up, and `>` walks
+back out to tiles. The stance is sticky across lines and sessions (a
+participant preference, never hive truth), and clicking the prompt glyph walks
+the same ring: tiles → command → find → tiles.
+
+### Find stance — the term, and its reach
+
+In find stance the whole line is the term. The decoration the term carries IS
+the reach, so widening a search is one character typed where you already are:
+
+| Typed | Reach |
+|:---|:---|
+| `susan` | **here** — this layer; the tiles in front of you dim to the matches as you type |
+| `[susan]` | **branch** — everything beneath where you stand |
+| `@susan` | **hive** — everywhere |
+
+An unclosed `[` already reads as a branch search: the answer arrives while the
+bracket is open, which is the point of typing it first.
+
+The older per-line filter register (`?keyword`, `>?keyword`) still parses — it
+is what the tutorial text spells, and what the "filter" pathway option writes
+back — but a typed `?` now stands find up instead, which is the same register
+standing rather than borrowed for one line.
+
+---
+
 ## Quick reference
 
 | Operation | Syntax | Trigger | Type |
@@ -14,7 +53,7 @@ For slash commands (`/help`, `/docs`, `/chat`, etc.), see [slash-behaviour-refer
 | [create-goto](#create-goto) | `/name` or `/path/to/name` | Enter | built-in |
 | [create-sub-child](#create-sub-child) | `parent/child` | Enter | built-in |
 | [navigate](#navigate) | `name` or `path/to/folder` | Shift+Enter | pluggable |
-| [filter](#filter) | `>?keyword` | type | built-in |
+| [filter](#filter) | `?keyword` (or `>?keyword`) | type | built-in |
 | [open-dcp](#open-dcp) | `#` | Enter | built-in |
 | [go-parent](#go-parent) | `..` or `../..` | Enter | pluggable |
 | [delete-cell](#delete-cell) | `~name` or `~[a,b]` | Enter | pluggable |

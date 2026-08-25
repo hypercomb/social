@@ -11,6 +11,11 @@
 // 0 members → hidden; otherwise clicking it shows the games on the shared
 // aggregator page (MixedGroupBag) — click a game tile to launch.
 //
+// A game is also a BEHAVIOUR in the Beehaviors roster (kind `game:<gameId>`,
+// owned essentials-side by `games/game-enablement.ts`). A switched-off game
+// leaves this group the way a dormant behaviour leaves every other surface —
+// and when the last one goes out, the icon itself goes with it.
+//
 // Shell-level: never imports essentials; resolves games purely by enumerating
 // window.ioc and routes a launch back as `<gameId>:toggle` (the uniform toggle
 // the game drones already listen for). Mirrors websites-group.
@@ -25,6 +30,11 @@ type GameLike = {
   gameId?: unknown
   gameLabel?: unknown
   gameIcon?: unknown
+  /** Switched off in the Beehaviors roster. The bee answers the dormancy
+   *  question itself (the kind is `game:<gameId>`, and essentials owns that
+   *  lens) so the shell never has to learn the spelling — the same way it
+   *  reads the label and the icon off the bee rather than holding a table. */
+  gameDormant?: unknown
 }
 
 type IocLike = {
@@ -49,10 +59,16 @@ class GamesGroup extends LaunchGroupBase {
     ioc()?.onRegister((_key, value) => {
       if ((value as GameLike)?.genotype === 'game') groupRegistry.notifyChanged()
     })
+    // A roster flip changes who is in the group — and when the last lit game
+    // goes out, LaunchGroupBase hides the icon entirely (0 members). Without
+    // this the launcher would keep offering a game that is switched off, and
+    // clicking it would do nothing, which is worse than not being there.
+    EffectBus.on('behavior:enablement-changed', () => groupRegistry.notifyChanged())
   }
 
   /** The live pool of games — every `genotype:'game'` bee in IoC that carries a
-   *  launch descriptor. No roster: a new game module appears here for free. */
+   *  launch descriptor AND whose Beehaviors light is on. No roster: a new game
+   *  module appears here for free, and a switched-off one leaves. */
   override members(): GroupMember[] {
     const c = ioc()
     if (!c) return []
@@ -61,6 +77,8 @@ class GamesGroup extends LaunchGroupBase {
     for (const key of c.list()) {
       const g = c.get(key) as GameLike | undefined
       if (!g || g.genotype !== 'game') continue
+      // Off = gone, the same answer every other dormant behaviour gives.
+      if (g.gameDormant === true) continue
       const gid = typeof g.gameId === 'string' ? g.gameId.trim() : ''
       if (!gid || seen.has(gid)) continue
       seen.add(gid)

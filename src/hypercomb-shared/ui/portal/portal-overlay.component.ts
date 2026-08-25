@@ -320,9 +320,14 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
         const others = (Array.isArray(roster) ? roster : [])
           .filter((r: { id?: string }) => /^[a-f0-9]{64}$/.test(String(r?.id ?? '')) && r.id !== client.id)
           .slice(0, 12)
-          .map((r: { id: string; name?: string; platform?: string; packageSig?: string }) => ({
+          // `s` is the install's OWN last-seen (epoch ms, straight off the
+          // presence record). Without it DCP has to stamp every roster entry
+          // "now" on each handoff, and an install that went quiet months ago
+          // stays indistinguishable from the one you are running right now.
+          .map((r: { id: string; name?: string; platform?: string; packageSig?: string; lastSeen?: number }) => ({
             i: r.id, n: String(r.name ?? '').slice(0, 60), p: String(r.platform ?? '').slice(0, 20),
             ...(typeof r.packageSig === 'string' && /^[a-f0-9]{64}$/.test(r.packageSig) ? { k: r.packageSig } : {}),
+            ...(Number.isFinite(r.lastSeen) && (r.lastSeen as number) > 0 ? { s: r.lastSeen } : {}),
           }))
         if (others.length) url += `&clients=${encodeURIComponent(JSON.stringify(others))}`
       } catch { /* roster unreadable — self still travels */ }

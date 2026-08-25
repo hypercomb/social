@@ -14,8 +14,9 @@
 // earns a bespoke view implementation, that view takes over its frame
 // and this one steps aside.
 
-import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
+import { Drone, EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
+import { defaultViewAt } from '../../diamondcoreprocessor.com/commands/view-default.js'
 import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
 import { rewritePageRefs } from '../../diamondcoreprocessor.com/sharing/decoration-closure.js'
 import { scopeCellPageCss } from '../../diamondcoreprocessor.com/presentation/tiles/cell-page-css-scope.js'
@@ -118,6 +119,21 @@ export class RoomViewDrone extends Drone {
     const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
     const segments = this.#targetSegments ?? [...(lineage?.explorerSegments?.() ?? [])]
     this.#targetSegments = segments
+
+    // A child that has EARNED ITS OWN VIEW takes its frame, and the generic
+    // room steps aside — the promise at the top of this file, kept. It is
+    // data-driven, so keeping it costs nothing per bespoke view: the child's
+    // `view:default` mark names the view, and a new one needs no edit here.
+    // (`hexagons` is not a bespoke view — it is the opt-out — and the wall's
+    // frame explicitly asked for a room, so that case carries on below.)
+    const own = await defaultViewAt(segments)
+    if (gen !== this.#gen || this.#vm()?.mode !== ROOM_VIEW) return
+    if (own && own !== ROOM_VIEW && own !== 'hexagons') {
+      this.#targetSegments = null
+      this.#teardown()
+      EffectBus.emit('view:open-for-tile', { view: own, segments: [...segments] })
+      return
+    }
 
     const site = window.ioc?.get<SiteViewShape>('@diamondcoreprocessor.com/SiteViewDrone')
     const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')

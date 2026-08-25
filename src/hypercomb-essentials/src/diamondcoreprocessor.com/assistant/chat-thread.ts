@@ -61,6 +61,38 @@ type TurnManifest = {
   readonly contentSig: string
 }
 
+// ── ARCHIVING: a conversation put away, not thrown away ──
+//
+// Delete was the only thing you could do with a thread you were finished
+// with, and delete is not what "finished with" means — a conversation you
+// have stopped needing is still a record of what was said, and the only way
+// to get a list you can read was to destroy things. So: archive. The thread
+// keeps every turn; the lists stop showing it until they are asked to.
+//
+// WHERE THE FLAG LIVES. In the conversation's OWN bucket, as one small file —
+// not in an index, and not in localStorage.
+//
+//   • Not an index, because this module has exactly one rule about indexes
+//     and it is that there must not be one (see ConversationSummary): the
+//     bucket describes itself, so an index is a second copy of a fact, free
+//     to drift the first time a write half-lands.
+//   • Not localStorage, because — unlike SEEN, which genuinely IS per device
+//     — "I am finished with this conversation" is a fact about the THREAD.
+//     It should be true on the phone too, and it should survive the browser
+//     forgetting its storage.
+//
+// The marker is named by a CONSTANT rather than by its own content hash. Turn
+// files are content-hashed because turns are append-only; this one is a
+// MUTABLE fact about the thread, so it needs a stable name that setting can
+// overwrite and un-setting can remove. A hashed constant can never collide
+// with a turn file, whose name is the hash of a JSON record.
+const ARCHIVE_MARKER = 'chat-archived'
+
+/** The marker file's name inside a bucket. Derived once, then held. */
+let archiveNamePromise: Promise<string> | null = null
+const archiveName = (): Promise<string> =>
+  (archiveNamePromise ??= sha256(new TextEncoder().encode(ARCHIVE_MARKER).buffer as ArrayBuffer))
+
 /** A parsed bucket file before its text is materialized: either a legacy
  *  inline turn (text present) or a manifest (contentSig present). */
 type RawTurn = {
@@ -69,6 +101,13 @@ type RawTurn = {
   readonly at: number
   readonly text?: string
   readonly contentSig?: string
+}
+
+/** One bucket, read once: its turns and whether it has been put away. Both
+ *  come out of the SAME walk — the flag is a file in the same directory. */
+type BucketRead = {
+  readonly turns: RawTurn[]
+  readonly archived: boolean
 }
 
 /** One conversation, as the chat window lists it. Recovered from the pool —
@@ -82,6 +121,8 @@ export interface ConversationSummary {
   readonly title: string
   readonly turnCount: number
   readonly lastAt: number
+  /** PUT AWAY, not thrown away — see the archive marker below. */
+  readonly archived: boolean
 }
 
 /** Conversations that belong to a PERSON, and so appear in the chat window.
@@ -247,8 +288,9 @@ export const appendTurn = async (
 const readBucketRaw = async (
   bucket: FileSystemDirectoryHandle,
   humanOnly = false,
-): Promise<RawTurn[] | null> => {
+): Promise<BucketRead | null> => {
   const out: RawTurn[] = []
+  let archived = false
   let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
   for await (const [, handle] of entries) {
@@ -256,6 +298,10 @@ const readBucketRaw = async (
     try {
       const file = await (handle as FileSystemFileHandle).getFile()
       const turn = JSON.parse(await file.text()) as RawTurn & { kind?: string }
+      // The archive marker rides in the same directory as the turns, so the
+      // walk that was already reading every file learns the flag for free —
+      // no second pass, no second read per thread.
+      if (turn?.kind === ARCHIVE_MARKER) { archived = true; continue }
       if (turn?.kind !== 'chat-turn' || !turn.convoId) continue
       // Either shape: legacy inline text, or a manifest pointing at it.
       if (typeof turn.text !== 'string' && typeof turn.contentSig !== 'string') continue
@@ -267,7 +313,7 @@ const readBucketRaw = async (
       out.push(turn)
     } catch { /* one unreadable turn must not hide the thread */ }
   }
-  return out.sort((a, b) => a.at - b.at)
+  return { turns: out.sort((a, b) => a.at - b.at), archived }
 }
 
 /** The text behind one raw turn: inline (legacy) or resolved from the content
@@ -310,7 +356,7 @@ export const readTurns = async (convoId: string): Promise<ChatTurn[]> => {
   try {
     const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
     const bucket = await pool.getDirectoryHandle(name, { create: false })
-    const raw = (await readBucketRaw(bucket) ?? []).filter(turn => turn.convoId === id)
+    const raw = ((await readBucketRaw(bucket))?.turns ?? []).filter(turn => turn.convoId === id)
     return await materializeTurns(raw, store!)
   } catch { /* no bucket yet — an empty conversation, not an error */ }
   return []
@@ -363,8 +409,9 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
     for await (const [, handle] of entries) {
       if (handle.kind !== 'directory') continue
       try {
-        const raw = await readBucketRaw(handle as FileSystemDirectoryHandle, true)
-        if (!raw) continue   // a machine bucket, skipped after one read
+        const read = await readBucketRaw(handle as FileSystemDirectoryHandle, true)
+        if (!read) continue   // a machine bucket, skipped after one read
+        const raw = read.turns
         const convoId = raw[0]?.convoId
         if (!convoId) continue
         const lastAt = raw[raw.length - 1]?.at ?? 0
@@ -375,8 +422,13 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
           title: await titleOfRaw(raw, store),
           turnCount: raw.length,
           lastAt,
+          archived: read.archived,
         })
-        if (lastAt > latestAt) { latestAt = lastAt; latestRaw = raw }
+        // AN ARCHIVED THREAD IS NEVER "where you were". `latestTurns` is what
+        // a window opening onto resume will show, and resuming into a
+        // conversation you just put away would undo the act on the next
+        // reload.
+        if (!read.archived && lastAt > latestAt) { latestAt = lastAt; latestRaw = raw }
       } catch { /* one unreadable bucket must not hide the rest of the list */ }
     }
   } catch { /* no pool yet — no conversations, not an error */ }
@@ -418,6 +470,8 @@ export interface TileConversation {
   readonly lastAt: number
   /** The newest turn landed after the last time this thread was opened. */
   readonly unread: boolean
+  /** PUT AWAY — hidden from the lists until they are asked to show it. */
+  readonly archived: boolean
 }
 
 const seenMap = (): Record<string, number> => {
@@ -454,6 +508,7 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
       turns: convo.turnCount,
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
+      archived: convo.archived,
     })
   }
   return out.sort((a, b) => b.lastAt - a.lastAt)
@@ -483,6 +538,7 @@ export const listRailConversations = async (): Promise<TileConversation[]> => {
       turns: convo.turnCount,
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
+      archived: convo.archived,
     })
   }
   return out.sort((a, b) => b.lastAt - a.lastAt)
@@ -501,7 +557,8 @@ export const readConversationSummary = async (convoId: string): Promise<TileConv
   try {
     const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
     const bucket = await pool.getDirectoryHandle(name, { create: false })
-    const raw = (await readBucketRaw(bucket, true) ?? []).filter(turn => turn.convoId === id)
+    const read = await readBucketRaw(bucket, true)
+    const raw = (read?.turns ?? []).filter(turn => turn.convoId === id)
     if (!raw.length) return null
     const lastAt = raw[raw.length - 1]?.at ?? 0
     return {
@@ -511,6 +568,7 @@ export const readConversationSummary = async (convoId: string): Promise<TileConv
       turns: raw.length,
       lastAt,
       unread: lastAt > (seenMap()[id] ?? 0),
+      archived: !!read?.archived,
     }
   } catch { /* no bucket yet — an empty conversation, not an error */ }
   return null
@@ -536,6 +594,7 @@ export const listGlobalConversations = async (): Promise<TileConversation[]> => 
       turns: convo.turnCount,
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
+      archived: convo.archived,
     })
   }
   return out.sort((a, b) => b.lastAt - a.lastAt)
@@ -543,12 +602,18 @@ export const listGlobalConversations = async (): Promise<TileConversation[]> => 
 
 /** What a row has to say about a TILE, folded from all of its conversations:
  *  the deepest thread's turn count is not the point — whether ANY of them is
- *  unread, and how much has been said here in total, is. */
+ *  unread, and how much has been said here in total, is.
+ *
+ *  ARCHIVED THREADS DO NOT COUNT. A row's mark is about the conversations you
+ *  can see; a thread you put away that still made the tile look deep, or that
+ *  kept an unread badge lit on a row whose visible chats you have all read,
+ *  would make archiving something you cannot actually finish doing. */
 export const foldTileConversations = (
   chats: readonly TileConversation[],
 ): Map<string, { turns: number; unread: boolean; chats: number; lastAt: number }> => {
   const byPath = new Map<string, { turns: number; unread: boolean; chats: number; lastAt: number }>()
   for (const chat of chats) {
+    if (chat.archived) continue
     const held = byPath.get(chat.path) ?? { turns: 0, unread: false, chats: 0, lastAt: 0 }
     byPath.set(chat.path, {
       turns: held.turns + chat.turns,
@@ -567,6 +632,49 @@ export const foldTileConversations = (
  *  the content root — they are content-addressed and possibly shared (a note
  *  may carry the same bytes), so their lifecycle belongs to root-resource GC,
  *  never to this delete. */
+/** Put a conversation away, or bring it back. Additive and reversible — the
+ *  turns are untouched either way, which is the whole difference between this
+ *  and {@link deleteConversation}. Returns false only when the bucket cannot
+ *  be reached; setting a flag that is already set is a success, not a no-op
+ *  to report. */
+export const setConversationArchived = async (
+  convoId: string,
+  archived: boolean,
+): Promise<boolean> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return false
+
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return false
+
+  try {
+    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    // `create: true` on the ARCHIVE path only: putting away a conversation
+    // that has no bucket yet (a chat you opened and never spoke in) is a
+    // legitimate act, and it must not mint an empty directory when the act
+    // is UN-archiving.
+    const bucket = await pool.getDirectoryHandle(name, { create: archived })
+    const marker = await archiveName()
+    if (!archived) {
+      try { await bucket.removeEntry(marker) } catch { /* already not archived */ }
+      // Announced from HERE, not from the surface that pressed the button:
+      // several surfaces list the same thread (the rail's fold, the window's
+      // flat list), and only this function knows the write landed.
+      EffectBus.emit('chat:threads-changed', { convoId: id })
+      return true
+    }
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({ kind: ARCHIVE_MARKER, convoId: id, at: Date.now() }),
+    ).buffer as ArrayBuffer
+    const handle = await bucket.getFileHandle(marker, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
+    EffectBus.emit('chat:threads-changed', { convoId: id })
+    return true
+  } catch { return false }
+}
+
 export const deleteConversation = async (convoId: string): Promise<boolean> => {
   const id = String(convoId ?? '').trim()
   if (!id) return false
@@ -703,6 +811,7 @@ export class ChatThreads {
   readonly listConversations = listConversations
   readonly listConversationsWithLatest = listConversationsWithLatest
   readonly deleteConversation = deleteConversation
+  readonly setConversationArchived = setConversationArchived
   readonly newConvoId = newConvoId
   readonly isHumanConversation = isHumanConversation
 }

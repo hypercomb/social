@@ -35,7 +35,7 @@
     [pheromonesLabel]="'tags.panel.open' | t"
     [lockedFlash]="lockedFlash()"
     [lockedLabel]="'command-line.pinned' | t"
-    [showMic]="voiceSupported && isMobile()"
+    [showMic]="voiceSupported"
     [micActive]="voiceActive()"
     [micLabel]="'controls.voice-hold' | t"
     (valueChange)="onShellValueChange($event)"
@@ -70,16 +70,11 @@
        it lives on the control bar (controls-bar 'pools'). -->
   <hc-pinned-entrances></hc-pinned-entrances>
 
-  <!-- Desktop push-to-talk — the opt-in flush-right mic. On mobile the mic is
-       a rail button inside the shell instead (see [showMic] above), so this
-       one stands down there rather than showing a second mic. -->
-  @if (voiceSupported && pushToTalkEnabled() && !isMobile()) {
-    <button class="mic-btn" [class.recording]="voiceActive()"
-      (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
-      [attr.aria-label]="'controls.voice' | t" [title]="'controls.voice-hold' | t">
-      <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
-    </button>
-  }
+  <!-- ONE MIC, and it lives in the rail beside the box it speaks into (see
+       [showMic] above). The flush-right dot that used to sit out here was a
+       second control for the same thing, in a place that said nothing about
+       what it did — and it only appeared once push-to-talk had been turned
+       on, so the feature was invisible until you already knew about it. -->
   <!-- mobile-only GO/submit button: commits text (creating a tile) if any,
        otherwise just collapses the command-line back to hidden. -->
   <button class="mobile-go-btn" type="button" (click)="closeMobileInput()"

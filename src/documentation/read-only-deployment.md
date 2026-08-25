@@ -5,7 +5,7 @@
 **This is the canonical way to publish a hive** — how a participant shares
 their digital content with consumers. Publish a creation as a **read-only
 deployment**: a website on its own domain, running the real runtime and the
-creation's behaviours, that a visitor uses with **zero install**. Nothing
+creation's beehaviors, that a visitor uses with **zero install**. Nothing
 inside that installation is updatable — the installation IS the deployment.
 Updating it means republishing to the server; the next page load has the new
 head. Consumers can post information back to the publisher — but only what
@@ -17,8 +17,36 @@ bar, no hive chrome, no branding, no management console, no editor, no
 install prompt, no DCP. The deployment carries *just enough of the
 application to bin-deploy and run the kiosked experience, whatever it is* —
 the creation defines the experience; the harness only boots the runtime,
-loads the behaviours, and renders. Title, favicon, and theme come from the
-creation, not from the shell.
+loads the beehaviors, and renders. Title, favicon, and theme come from the
+creation, not from the shell. This harness converges with the shim from
+[everything-is-a-beehavior.md](everything-is-a-beehavior.md): everything
+above hypercomb-core arrives as beehaviors in the signed closure — views,
+games, the creation itself — and hosted websites snap into the same shim.
+
+That is the default, not a ceiling. **Nothing stops a creation from
+presenting a hexagon interface — or from connecting back to Hypercomb and
+leading the visitor into actually being in the hive again.** The spectrum
+runs from pure kiosk (no hive visible at all) through hex-rendered sites, up
+to a full gateway: the same engine is underneath either way, so a site that
+wants to be a door into the hive just declares it. What's stripped is the
+management tooling, never the possibility of participation.
+
+The trust boundary sits exactly at that door. **You experience the creation
+as a safe website — no trust decision needed**: nothing of yours is stored
+on the origin, nothing is written, walking away costs nothing. **Adopting it
+— making it run inside hypercomb.io, where your hive lives — is what needs
+community trust**: the one real adopt gesture, code consent, signed
+dependencies, the domain allowlist. The published site is the
+try-before-trust tier; the gate is crossed only when the visitor chooses to
+bring the creation home.
+
+And the presentation isn't one declared mode — it is **any number of
+whatever views you had configured in the publish**. View marks live on the
+branches (the default-view cascade: nearest mark wins), so they ride the
+closure like everything else: a site plays back its configured views exactly
+as they stood at publish time — a website page here, a square-tile deck
+there, hexagons where a layer says so. Nothing extra to invent for
+presentation; the publish already captured it.
 
 **The server setup is a resolver.** The minimum install for a server is a
 tool anybody can use: put in a **signature** and a **domain**, and it
@@ -73,6 +101,16 @@ pool; serving a published site is the same relay surface plus the website
 harness at the domain root. That removes ALL the friction from starting: the
 files are already there, and there is nothing to verify per-visitor — it's
 safe because visitors never store their own data on the site's origin.
+
+**The full circle.** This lands the web back where it started: a
+consumer-owned server — central or not, a cloud box or the desktop app on
+your own computer — serving your own content on your own domain. From the
+outside it is just web serving, one web, plain GETs. The twist is the engine
+it runs on: **hypercomb-core, to be exact** — the zero-dependency primitives
+(signatures, IoC, EffectBus, the drone base) — so every page is
+signature-proven, every folder is a pool, every site is a host, and
+everything served can be experienced safely, shared onward, or adopted into
+a hive.
 
 This also closes the visitor half of the standing update gap: publisher
 republish = every visitor current, because a visitor holds no state that can
@@ -144,8 +182,40 @@ no-store). Republish = new sigs land, `site.json` repoints, done.
    `broker.adopt(head, { layersOnly, silent })`, `seedPreviewHead(segments,
    head)`, navigate to the creation. Permanent preview: no adopt/dismiss
    banner, no exit into an empty hive.
-4. Behaviours run through the one real render path, foreign-script
+4. Beehaviors run through the one real render path, foreign-script
    verification gates intact.
+
+### Every published site is an open host
+
+Because the deployed folder IS the pool, the bin deploy + harness satisfy
+the host requirements automatically — publishing a site makes you a content
+host without doing anything extra. Any participant can go to their installer,
+add the published domain, and consume from it over plain GET requests: flat
+`<sig>` bytes, the manifest, and the **pools of meaning** that shipped with
+the deployment. The pools are open oases of knowledge — publicly readable,
+signature-addressed, drinkable by anyone's installer for adoption, sync, or
+dependency resolution. A published website and a content host are the same
+artifact seen from two sides: a visitor's browser renders it; a
+participant's installer resolves from it.
+
+Publishing, then, is **the language to publish pools of meaning**: what a
+publish names is which pools go out (the creation's branch head plus the
+pools its beehaviors read). A deployment is a published set of pools — the
+vocabulary of the publish command is meanings, not file paths.
+
+**It is the perfect reciprocal format to achieve sharing and installation.**
+One format, two directions: what a publisher shares is byte-for-byte what an
+installer consumes — publish pushes the closure out, resolve pulls it in,
+and the same signed pool sits at both ends. Every install is shareable as it
+stands; every share is installable as it stands. Nothing is converted,
+repackaged, or re-verified between the two — the signature already proved it.
+
+This payoff is exactly why the architecture insists, at all cost, on making
+everything **atomic and generic** — and on using **pheromones to separate
+things where they don't coincide**. Atomic pieces travel in a closure;
+generic machinery runs them anywhere; marks, not code, say what each piece
+is. A capability like this deployment doesn't have to be built so much as
+assembled — the discipline already paid for it.
 
 ### Post-back — the one voluntary door out
 
@@ -157,7 +227,7 @@ no tracking, and never stored on the site's origin — the payload travels to
 the publisher's channel (the feedback transport routed through the
 publisher's host — see [feedback-channel.md](feedback-channel.md) — or a
 creation-declared endpoint) and the visitor's browser keeps nothing. The
-creation's behaviours declare whether a post-back door exists at all; a site
+creation's beehaviors declare whether a post-back door exists at all; a site
 with none is a pure kiosk.
 
 That direction of consent is the point: the publisher shares freely, and
@@ -186,7 +256,7 @@ themselves by registration — a bee that doesn't ship never mounts its UI, and
 a view that needs a surface registers it). The pixi host and router shell are
 structural, not chrome, and stay.
 
-Bee pruning (shipping only render-critical bees + the creation's behaviours
+Bee pruning (shipping only render-critical bees + the creation's beehaviors
 instead of the full essentials package) is a later optimization — the first
 cut ships the full signed package and relies on the surface barrel + readonly
 gate. Signatures make the pruning safe to add later without format changes.
@@ -220,7 +290,7 @@ gate. Signatures make the pruning safe to add later without format changes.
   ../deploy/revolucion`.
 - Acceptance = the xcopy contract: publish (or resolve) → serve the folder
   with the dumbest static server available (defaults, zero config) →
-  Playwright pass (`npm run shot`) proves render + navigation + a behaviour
+  Playwright pass (`npm run shot`) proves render + navigation + a beehavior
   firing, including a hash deep link opened cold. Then: resolve a SECOND
   signature over the same folder and prove the delta property (only new sigs
   written, site now serves the new head).
@@ -250,7 +320,11 @@ the same pass, or a mirror-queue entry naming what is owed.
 1. **OPFS cache vs no-storage**: recommended (and assumed above) OPFS-as-cache
    with silent refresh — it reuses the entire install path and gives visitors
    warm reloads. The alternative (pure network import) forks ScriptPreloader.
-2. **Adopt door on visitor sites** — growth loop vs pure kiosk. Default: off.
+2. **The hive door is per-creation, not policy** — presentation needs NO new
+   vocabulary: the site plays back any number of the views configured in the
+   publish (view marks ride the closure via the default-view cascade). The
+   only declaration left to decide is the participation door — the mark that
+   says "this site leads into the hive".
 3. **Head indirection** — `site.json` baked head (assumed) vs consulting the
    signed hive index at boot. Baked keeps the deployment self-contained and
    offline-proof; the index can be added later for multi-host serving.
@@ -261,7 +335,8 @@ the same pass, or a mirror-queue entry naming what is owed.
    it makes engine upgrades ride the same resolve. First cut ships the
    harness alongside the closure; folding it in is the ratchet to aim for.
 
-Related: [publishing.md](publishing.md) ·
+Related: [everything-is-a-beehavior.md](everything-is-a-beehavior.md) ·
+[publishing.md](publishing.md) ·
 [embedded-sites.md](embedded-sites.md) ·
 [install-push-only.md](install-push-only.md) ·
 [infrastructure.md](infrastructure.md)

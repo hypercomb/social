@@ -1,0 +1,82 @@
+[
+  {
+    "name": "both conversations are in the fold",
+    "ok": true,
+    "detail": "[\"the thread I am finished with\",\"the thread I am still using\"]"
+  },
+  {
+    "name": "every conversation carries an archive control",
+    "ok": true
+  },
+  {
+    "name": "the thread to file was found",
+    "ok": true
+  },
+  {
+    "name": "it left the fold",
+    "ok": true,
+    "detail": "[\"the thread I am still using\"]"
+  },
+  {
+    "name": "and the fold says how many are away",
+    "ok": true,
+    "detail": "Archived (1)"
+  },
+  {
+    "name": "THE TURNS SURVIVE — the thread still reads back whole",
+    "ok": true,
+    "detail": "2 turns"
+  },
+  {
+    "name": "the disclosure opens onto it",
+    "ok": true,
+    "detail": "[\"the thread I am still using\",\"the thread I am finished with\"]"
+  },
+  {
+    "name": "it is STILL away after a reload — the flag is in the thread, not the tab",
+    "ok": true,
+    "detail": "[\"the thread I am still using\"]"
+  },
+  {
+    "name": "an archived row is marked as one",
+    "ok": true
+  },
+  {
+    "name": "the same control brings it back",
+    "ok": true,
+    "detail": "[\"the thread I am finished with\",\"the thread I am still using\"]"
+  },
+  {
+    "name": "the bar carries an archive icon for the chat in hand",
+    "ok": true
+  },
+  {
+    "name": "a rule separates it from the add button",
+    "ok": true
+  },
+  {
+    "name": "neither icon is bordered",
+    "ok": true,
+    "detail": "{\"put\":\"0px\",\"add\":\"0px\"}"
+  },
+  {
+    "name": "the icon reads as ARCHIVE while the thread is live",
+    "ok": true,
+    "detail": "archive"
+  },
+  {
+    "name": "one press files it AND moves on",
+    "ok": true,
+    "detail": "the thread I am finished with → the thread I am still using"
+  },
+  {
+    "name": "it is out of the fold",
+    "ok": true,
+    "detail": "[\"the thread I am still using\"]"
+  },
+  {
+    "name": "no page errors",
+    "ok": true,
+    "detail": ""
+  }
+]

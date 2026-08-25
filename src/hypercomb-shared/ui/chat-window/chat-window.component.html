@@ -308,6 +308,19 @@
           <span class="chat-current-name">{{ activeTitle() || ('chat.untitled' | t) }}</span>
         </button>
       }
+      <!-- ARCHIVE THE CHAT YOU ARE IN. The per-row control in the fold acts on
+           a conversation you are pointing at; this one acts on the one you
+           are READING, which is the common case and had nowhere to be. Same
+           control both directions, like every other archive in the window. -->
+      @if (canArchive() && activeId()) {
+        <button class="chat-put" type="button"
+          (click)="archiveCurrent()"
+          [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
+          [attr.aria-label]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t">
+          <span class="mat-sym" aria-hidden="true">{{ activeArchived() ? 'unarchive' : 'archive' }}</span>
+        </button>
+        <span class="chat-bar-split" aria-hidden="true"></span>
+      }
       <button class="chat-new" type="button" (click)="newChat()"
         [title]="'chat.new' | t" [attr.aria-label]="'chat.new' | t">
         <span class="mat-sym" aria-hidden="true">add</span>
@@ -319,34 +332,73 @@
         @if (roster().length === 0) {
           <li class="chat-list-empty">{{ 'chat.list.empty' | t }}</li>
         }
-        @for (conversation of roster(); track conversation.convoId) {
-          <li class="chat-list-row" [class.on]="conversation.convoId === activeId()">
-            <button class="chat-list-body" type="button" (click)="pick(conversation.convoId)">
-              <!-- A tile chat is named by its TILE, not by its first sentence:
-                   that is what you would look for when coming back to it. -->
-              @if (conversation.tile) {
-                <span class="chat-list-tile" [title]="conversation.tile">{{ conversation.tile }}</span>
-              }
-              <span class="chat-list-name">{{ conversation.title || ('chat.untitled' | t) }}</span>
-              <span class="chat-list-meta">
-                @if (conversation.draft) {
-                  <span class="chat-list-draft">{{ 'chat.list.draft' | t }}</span>
-                }
-                @if (conversation.turnCount) {
-                  {{ 'chat.turns' | t: { count: conversation.turnCount } }}
-                }
-              </span>
+        <!-- WHAT IS LIVE. Archived conversations are whole and readable, they
+             are simply not rows you have to read past to find the one you
+             want; the disclosure under the list is the way to them. -->
+        @for (conversation of liveRoster(); track conversation.convoId) {
+          <ng-container *ngTemplateOutlet="listRow; context: { $implicit: conversation }"></ng-container>
+        }
+
+        <!-- Absent entirely when nothing is archived: a disclosure for an
+             empty set is furniture. -->
+        @if (filedRoster().length) {
+          <li class="chat-list-archived">
+            <button type="button" (click)="toggleArchive()"
+              [class.on]="archiveOpen()"
+              [attr.aria-expanded]="archiveOpen()">
+              <span class="mat-sym" aria-hidden="true">{{ archiveOpen() ? 'expand_more' : 'chevron_right' }}</span>
+              {{ 'chat.archive.section' | t: { count: filedRoster().length } }}
             </button>
-            <!-- Arms on the first press, deletes on the second. -->
-            <button class="chat-list-del" type="button"
-              [class.armed]="armed() === conversation.convoId"
-              (click)="remove(conversation.convoId, $event)"
-              [title]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
-              [attr.aria-label]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
-            ><span class="mat-sym" aria-hidden="true">{{ armed() === conversation.convoId ? 'delete_forever' : 'close' }}</span></button>
           </li>
+          @if (archiveOpen()) {
+            @for (conversation of filedRoster(); track conversation.convoId) {
+              <ng-container *ngTemplateOutlet="listRow; context: { $implicit: conversation }"></ng-container>
+            }
+          }
         }
       </ul>
+
+      <!-- ONE ROW SHAPE for both shelves — a live conversation and an
+           archived one are the same thing in different places, so drawing
+           them from two copies of the markup is how they drift apart. -->
+      <ng-template #listRow let-conversation>
+        <li class="chat-list-row"
+          [class.on]="conversation.convoId === activeId()"
+          [class.filed]="conversation.archived">
+          <button class="chat-list-body" type="button" (click)="pick(conversation.convoId)">
+            <!-- A tile chat is named by its TILE, not by its first sentence:
+                 that is what you would look for when coming back to it. -->
+            @if (conversation.tile) {
+              <span class="chat-list-tile" [title]="conversation.tile">{{ conversation.tile }}</span>
+            }
+            <span class="chat-list-name">{{ conversation.title || ('chat.untitled' | t) }}</span>
+            <span class="chat-list-meta">
+              @if (conversation.draft) {
+                <span class="chat-list-draft">{{ 'chat.list.draft' | t }}</span>
+              }
+              @if (conversation.turnCount) {
+                {{ 'chat.turns' | t: { count: conversation.turnCount } }}
+              }
+            </span>
+          </button>
+          <!-- PUT IT AWAY, or bring it back — the same control both ways, so
+               there is no separate "restore" living somewhere else. -->
+          @if (canArchive()) {
+            <button class="chat-list-put" type="button"
+              (click)="archive(conversation.convoId, !conversation.archived, $event)"
+              [title]="(conversation.archived ? 'chat.archive.restore' : 'chat.archive.put') | t"
+              [attr.aria-label]="(conversation.archived ? 'chat.archive.restore' : 'chat.archive.put') | t"
+            ><span class="mat-sym" aria-hidden="true">{{ conversation.archived ? 'unarchive' : 'archive' }}</span></button>
+          }
+          <!-- Arms on the first press, deletes on the second. -->
+          <button class="chat-list-del" type="button"
+            [class.armed]="armed() === conversation.convoId"
+            (click)="remove(conversation.convoId, $event)"
+            [title]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
+            [attr.aria-label]="(armed() === conversation.convoId ? 'chat.delete.confirm' : 'chat.delete') | t"
+          ><span class="mat-sym" aria-hidden="true">{{ armed() === conversation.convoId ? 'delete_forever' : 'close' }}</span></button>
+        </li>
+      </ng-template>
     }
 
     <!-- The scroller and the pill that rides over its bottom edge — the wrap

@@ -29,6 +29,14 @@ export class RoperQueenBee extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const drone = get('@diamondcoreprocessor.com/RoperDrone') as RoperDrone | undefined
     if (!drone) { this.#log('Roper unavailable'); return }
+    // SWITCHED OFF in the Beehaviors roster. This is the one place a
+    // dormant behaviour ANSWERS instead of simply not being there: a
+    // typed command is a gesture, and swallowing it reads as a broken
+    // game. Say where the light lives, once, and stop.
+    if (drone.gameDormant) {
+      this.#log('Roper is switched off — light it in Beehaviors', '○')
+      return
+    }
     const a = args.trim().toLowerCase()
     if (a === 'on' || a === 'open') { drone.open(); this.#log('Roper — opened', '⟜'); return }
     if (a === 'off' || a === 'close') { drone.close(); this.#log('Roper — closed', '○'); return }

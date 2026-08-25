@@ -124,15 +124,31 @@
   gap: 7px;
 }
 
+/* Client installs — a ROW LIST, not a chip wrap. Each install carries four
+   facts (name, platform, version, last seen) and a chip cannot hold four
+   facts legibly; twenty-seven chips holding one fact each hold none. */
+/* The SECTION owns the column tracks and every row borrows them via subgrid.
+   A per-row grid computes its own widths, so the columns would not line up
+   between rows — which is exactly the raggedness this list exists to fix.
+
+   handle | platform | version | seen | forget
+   Every track is content-sized and the block packs LEFT: a 1fr spacer would
+   pin the time to the far edge and open a ruler of dead space across each
+   row. `fit-content` caps the handle so a 60-character instance name cannot
+   shove the other columns off the row — a plain `minmax(0, 15rem)` will not
+   do, since the maximize-tracks step grows it to the full 15rem whether the
+   names need it or not. */
 .home-clients {
-  display: flex;
+  display: grid;
+  grid-template-columns: fit-content(15rem) auto auto auto auto;
+  justify-content: start;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 4px 0 8px;
+  margin: 4px 0 10px;
 }
 
 .home-clients-title {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -141,16 +157,74 @@
 }
 
 .home-client {
-  display: inline-flex;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   padding: 3px 8px;
   font-size: 11px;
-  border: 1px solid var(--dcp-border);
   border-radius: var(--dcp-radius-sm);
   color: var(--dcp-ink);
+  transition: background-color 120ms ease;
 
-  strong { font-weight: 600; }
+  &:hover { background: var(--dcp-surface-2, rgba(255, 255, 255, 0.05)); }
+
+  /* The install you are managing FROM. A rule on the left rather than a
+     colour swap — it marks the row without shouting over the others. */
+  &.is-self { box-shadow: inset 2px 0 0 var(--dcp-accent); }
+
+  /* Revealed on request: present, clearly past. */
+  &.is-dormant { opacity: 0.5; }
+}
+
+/* Name + the "this client" mark share one cell. */
+.home-client-handle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.home-client-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: text;
+  color: var(--dcp-ink);
+
+  /* The name is editable, and the row says so only when you are on it. */
+  .home-client:hover & { border-bottom-color: var(--dcp-border); }
+}
+
+.home-client-rename {
+  min-width: 0;
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--dcp-accent);
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--dcp-ink);
+  outline: none;
+}
+
+.home-client-self {
+  flex: none;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--dcp-accent);
 }
 
 .home-client-platform {
@@ -165,6 +239,20 @@
   font-size: 9px;
   font-weight: 700;
   color: var(--dcp-accent);
+
+  /* An unresolved package: still tells installs apart, but it is not a
+     version and must not read as one. */
+  &.is-sig {
+    font-weight: 400;
+    color: var(--dcp-ink-3);
+  }
+}
+
+.home-client-seen {
+  justify-self: end;
+  font-size: 10px;
+  color: var(--dcp-ink-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .home-client-forget {
@@ -175,7 +263,42 @@
   color: var(--dcp-ink-3);
   font-size: 11px;
   line-height: 1;
+  /* Resting state carries no × grid — the action arrives with the pointer. */
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+
+  .home-client:hover &,
+  &:focus-visible { opacity: 1; }
   &:hover { color: var(--dcp-ink); }
+}
+
+/* The one line that stands for everything quiet. */
+.home-clients-more {
+  grid-column: 1 / -1;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--dcp-ink-3);
+  &:hover { color: var(--dcp-ink); }
+}
+
+.home-clients-more-mark {
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4px solid currentColor;
+  transition: transform 140ms ease;
+
+  .home-clients-more.is-open & { transform: rotate(180deg); }
 }
 
 .home-revisions {

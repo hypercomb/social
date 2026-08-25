@@ -1,0 +1,66 @@
+[
+  {
+    "name": "the roper bee is registered",
+    "ok": true
+  },
+  {
+    "name": "the pool is showing",
+    "ok": true,
+    "detail": "rows=22"
+  },
+  {
+    "name": "all four games have a row",
+    "ok": true,
+    "detail": "/arkanoid /bubble /roper /solomon"
+  },
+  {
+    "name": "each row carries its command",
+    "ok": true
+  },
+  {
+    "name": "a hive that already had them keeps them LIT",
+    "ok": true,
+    "detail": "/arkanoid=on /bubble=on /roper=on /solomon=on"
+  },
+  {
+    "name": "the bee answers DORMANT",
+    "ok": true
+  },
+  {
+    "name": "its row reads off",
+    "ok": true
+  },
+  {
+    "name": "the other three are untouched",
+    "ok": true
+  },
+  {
+    "name": "open() refuses while dormant",
+    "ok": true
+  },
+  {
+    "name": "toggle() reports the refusal instead of lying",
+    "ok": true
+  },
+  {
+    "name": "it leaves the launcher group",
+    "ok": true
+  },
+  {
+    "name": "re-lighting wakes it",
+    "ok": true
+  },
+  {
+    "name": "and it opens again",
+    "ok": true
+  },
+  {
+    "name": "roper opens while lit",
+    "ok": true
+  },
+  {
+    "name": "switching it off closed the running overlay",
+    "ok": true,
+    "detail": "dormant=true active=false"
+  }
+]

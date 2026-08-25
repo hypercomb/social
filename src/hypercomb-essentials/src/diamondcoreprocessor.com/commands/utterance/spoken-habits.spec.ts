@@ -101,6 +101,61 @@ describe('SpokenHabits', () => {
     expect(second.phrasings('open ').map(p => p.phrasing)).toEqual(['open providers'])
   })
 
+  it('offers a discovered word while the line is still one word', () => {
+    const habits = fresh()
+    habits.learn(read('open providers'))
+    expect(habits.leadInCompletions('op').map(w => w.leadIn)).toEqual(['open'])
+    expect(habits.leadInCompletions('op')[0].command).toBe('providers')
+  })
+
+  it('offers a word typed out in full — the space is still to come', () => {
+    const habits = fresh()
+    habits.learn(read('open providers'))
+    expect(habits.leadInCompletions('open').map(w => w.leadIn)).toEqual(['open'])
+  })
+
+  it('offers one row per word, weighted by every ending it carries', () => {
+    const habits = fresh()
+    habits.learn(read('show providers'))
+    habits.learn(read('show fit'))
+    habits.learn(read('show fit'))
+    const rows = habits.leadInCompletions('sh')
+    expect(rows.map(w => w.leadIn)).toEqual(['show'])
+    expect(rows[0].count).toBe(3)
+    // The row names the ending it reaches most, not the first one learned.
+    expect(rows[0].command).toBe('fit')
+  })
+
+  it('ranks discovered words by how often they were said', () => {
+    const habits = fresh()
+    habits.learn(read('show providers'))
+    habits.learn(read('spotlight the snacks'))   // no action after — teaches nothing
+    habits.learn(read('so providers'))
+    habits.learn(read('so providers'))
+    expect(habits.leadInCompletions('s').map(w => w.leadIn)).toEqual(['so', 'show'])
+  })
+
+  it('says nothing about a word once the line is a sentence', () => {
+    const habits = fresh()
+    habits.learn(read('open providers'))
+    // Past the first space the phrasings answer; a word row there would
+    // offer the lead-in the participant has already finished typing.
+    expect(habits.leadInCompletions('open ')).toEqual([])
+  })
+
+  it('says nothing on a blank line — that is the catalogue, not habit', () => {
+    const habits = fresh()
+    habits.learn(read('open providers'))
+    expect(habits.leadInCompletions('')).toEqual([])
+  })
+
+  it('drops a discovered word when its lead-in is forgotten', () => {
+    const habits = fresh()
+    habits.learn(read('open providers'))
+    habits.forget('open')
+    expect(habits.leadInCompletions('op')).toEqual([])
+  })
+
   it('lists its lead-ins, best first', () => {
     const habits = fresh()
     habits.learn(read('show providers'))

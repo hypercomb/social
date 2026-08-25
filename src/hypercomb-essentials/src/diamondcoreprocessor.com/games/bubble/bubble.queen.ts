@@ -29,6 +29,14 @@ export class BubbleQueenBee extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const drone = get('@diamondcoreprocessor.com/BubbleDrone') as BubbleDrone | undefined
     if (!drone) { this.#log('Bubble Bobble unavailable'); return }
+    // SWITCHED OFF in the Beehaviors roster. This is the one place a
+    // dormant behaviour ANSWERS instead of simply not being there: a
+    // typed command is a gesture, and swallowing it reads as a broken
+    // game. Say where the light lives, once, and stop.
+    if (drone.gameDormant) {
+      this.#log('Bubble Bobble is switched off — light it in Beehaviors', '○')
+      return
+    }
     const a = args.trim().toLowerCase()
 
     if (a === 'on' || a === 'open') { drone.open(); this.#log('Bubble Bobble — opened', '🫧'); return }

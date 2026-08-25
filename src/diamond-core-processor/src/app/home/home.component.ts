@@ -1,6 +1,7 @@
 // diamond-core-processor/src/app/home/home.component.ts
 
 import { Component, computed, effect, ElementRef, inject, OnDestroy, signal, viewChild } from '@angular/core'
+import { NgTemplateOutlet } from '@angular/common'
 import { TreeResolverService, type PackageMeta } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
 import { DcpDomainStorage, LOGICAL_LINEAGE, normalizeDomainKey } from '../core/dcp-domain-storage.service'
@@ -127,17 +128,83 @@ export interface ClientRecord {
 
 const CLIENTS_KEY = 'dcp:clients'
 
+/** The client install that opened this DCP (from `#client=`). Remembered so
+ *  the "this client" mark survives a reload, which drops the hash but not the
+ *  fact of where you came from. */
+const CLIENT_OPENER_KEY = 'dcp:client:opener'
+
+/** Participant-local rename OVERRIDE for a client install, keyed by client id.
+ *  DCP cannot write the install's own `hc:client-name` — different origin, no
+ *  shared storage — so a name typed here is DCP's own handle for that install.
+ *  Same principle as the per-package label override. */
+const CLIENT_NAME_KEY_PREFIX = 'dcp:client-name:'
+
+/** Not seen in this long ⇒ DORMANT. Probably still installed, but not what
+ *  you are managing today, so it waits behind a count instead of padding the
+ *  list with lookalikes. */
+const CLIENT_DORMANT_AFTER = 30 * 24 * 60 * 60 * 1000
+
+/** Past this the install is gone — profile deleted, storage cleared, machine
+ *  retired — and the row is dead bookkeeping. Dropped on read: the registry is
+ *  participant-local and re-learns any client on its next handoff. */
+const CLIENT_DEAD_AFTER = 180 * 24 * 60 * 60 * 1000
+
+/** Epoch ms of a record's last handoff, or 0 when unreadable. */
+function clientSeenAt(record: ClientRecord): number {
+  return Date.parse(record.lastSeen ?? '') || 0
+}
+
+/** Quiet for long enough that it does not belong in the resting list. An
+ *  unreadable timestamp counts as dormant — we cannot claim it is current. */
+function isClientDormant(record: ClientRecord, now = Date.now()): boolean {
+  const seen = clientSeenAt(record)
+  return seen === 0 || now - seen >= CLIENT_DORMANT_AFTER
+}
+
+/** The live registry, newest-first — and a PURGE when anything was dropped,
+ *  so a dead row is gone from storage rather than merely hidden from the
+ *  list (and every later reader re-deciding the same thing). */
 function readClientRegistry(): ClientRecord[] {
+  let parsed: unknown[] = []
   try {
-    const parsed = JSON.parse(localStorage.getItem(CLIENTS_KEY) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((r): r is ClientRecord =>
-      !!r && typeof r === 'object' && /^[a-f0-9]{64}$/.test(String(r.id ?? '')))
+    const raw = JSON.parse(localStorage.getItem(CLIENTS_KEY) ?? '[]')
+    if (Array.isArray(raw)) parsed = raw
   } catch { return [] }
+
+  const now = Date.now()
+  const live = parsed
+    .filter((r): r is ClientRecord =>
+      !!r && typeof r === 'object' && /^[a-f0-9]{64}$/.test(String((r as ClientRecord).id ?? '')))
+    // A record with no readable timestamp cannot be PROVEN dead, so it
+    // survives as dormant instead of being thrown away.
+    .filter(r => { const seen = clientSeenAt(r); return seen === 0 || now - seen < CLIENT_DEAD_AFTER })
+    .sort((a, b) => clientSeenAt(b) - clientSeenAt(a))
+
+  if (live.length !== parsed.length) {
+    writeClientRegistry(live)
+    // The rename overrides outlive their rows otherwise — a handle for an
+    // install nobody can name any more.
+    const kept = new Set(live.map(r => r.id))
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith(CLIENT_NAME_KEY_PREFIX) && !kept.has(key.slice(CLIENT_NAME_KEY_PREFIX.length))) {
+          localStorage.removeItem(key)
+        }
+      }
+    } catch { /* non-fatal — the override is just an unused key */ }
+  }
+  return live
 }
 
 function writeClientRegistry(records: ClientRecord[]): void {
   try { localStorage.setItem(CLIENTS_KEY, JSON.stringify(records)) } catch { /* non-fatal */ }
+}
+
+function readOpenerClientId(): string {
+  try {
+    const id = (localStorage.getItem(CLIENT_OPENER_KEY) ?? '').trim().toLowerCase()
+    return /^[a-f0-9]{64}$/.test(id) ? id : ''
+  } catch { return '' }
 }
 
 /** Section precedence for the cross-section revision collapse — LOWEST WINS.
@@ -165,7 +232,7 @@ export interface DomainGroup {
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, RevisionListComponent, DcpCommandLineComponent, LayerEditorComponent, DcpTranslatePipe],
+  imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, RevisionListComponent, DcpCommandLineComponent, LayerEditorComponent, DcpTranslatePipe, NgTemplateOutlet],
   templateUrl: './home.component.html',
   // Two sheets, deliberately: the list is its own surface, and the
   // per-sheet style budget is measured one sheet at a time.
@@ -333,6 +400,46 @@ export class HomeComponent implements OnDestroy {
   // the same handoff names a package (`upgrade=`), that becomes the client's
   // last-known package — resolved to its `generation` for display.
   readonly clients = signal<ClientRecord[]>(readClientRegistry())
+
+  // The install you are managing FROM. Marked in the list so the row that is
+  // you is never one of a dozen lookalikes named "edge".
+  readonly openerClientId = signal<string>(readOpenerClientId())
+
+  // Everything but the install you are on waits behind a count. Showing more
+  // rows than the current one does not help you manage anything — it just
+  // restates that browsers have opened DCP before.
+  readonly othersShown = signal(false)
+
+  // Reactivity trigger for the participant-local client-name overrides —
+  // clientName() reads localStorage synchronously. Same pattern as the
+  // per-package label override.
+  readonly #clientNameVersion = signal(0)
+
+  // The client id whose name is being edited inline, or null when none is.
+  readonly editingClientId = signal<string | null>(null)
+  readonly clientNameInput = viewChild<ElementRef<HTMLInputElement>>('clientNameInput')
+
+  /** The one install the resting list shows: the one you are managing FROM.
+   *  With no opener known — DCP opened directly, no `#client=` — the most
+   *  recent one stands in, since that is the install you were last on. */
+  readonly currentClient = computed(() => {
+    const opener = this.openerClientId()
+    const records = this.clients()
+    return records.find(r => r.id === opener) ?? records[0] ?? null
+  })
+
+  /** Every other install, newest-first. Held behind a count until asked for:
+   *  they are real, but they are not what you came here to do. */
+  readonly otherClients = computed(() => {
+    const current = this.currentClient()
+    return this.clients().filter(r => r.id !== current?.id)
+  })
+
+  /** Quiet long enough to be probably-gone — dimmed inside the reveal so the
+   *  ones worth acting on stand out from the ones worth forgetting. */
+  isClientDormant(record: ClientRecord): boolean {
+    return isClientDormant(record)
+  }
 
   // ── Feature-STAGING pre-tick ──────────────────────────────────────────
   // The hive's "show features" panel lets the participant stage features as
@@ -800,6 +907,12 @@ export class HomeComponent implements OnDestroy {
     // author's to set; the field offers the current handle pre-selected).
     effect(() => {
       const el = this.labelInput()?.nativeElement
+      if (el) { el.focus(); el.select() }
+    })
+
+    // Same for the client rename — click the name, type over it, Enter.
+    effect(() => {
+      const el = this.clientNameInput()?.nativeElement
       if (el) { el.focus(); el.select() }
     })
 
@@ -1271,6 +1384,11 @@ export class HomeComponent implements OnDestroy {
       const platform = (params.get('clientPlatform') ?? '').trim().slice(0, 20)
       const pkg = (params.get('upgrade') ?? '').trim().toLowerCase()
 
+      // Whoever opened us is "this client" from here on — including across a
+      // reload that drops the hash.
+      this.openerClientId.set(id)
+      try { localStorage.setItem(CLIENT_OPENER_KEY, id) } catch { /* non-fatal */ }
+
       let records = this.clients().filter(r => r.id !== id)
       const prior = this.clients().find(r => r.id === id)
       records.unshift({
@@ -1293,16 +1411,26 @@ export class HomeComponent implements OnDestroy {
           const otherPrior = records.find(x => x.id === otherId)
           records = records.filter(x => x.id !== otherId)
           const otherPkg = String(r?.k ?? '').trim().toLowerCase()
+          // The roster carries each install's OWN last-seen (`s`, epoch ms).
+          // Without it a long-quiet install would land stamped "now" on every
+          // handoff and never go dormant — the registry would fill up with
+          // installs that only LOOK current. Fall back to what we already
+          // knew, and only to now when this client is genuinely new to us.
+          const otherSeen = Number(r?.s)
+          const otherSeenAt = Number.isFinite(otherSeen) && otherSeen > 0
+            ? new Date(otherSeen).toISOString()
+            : otherPrior?.lastSeen ?? new Date().toISOString()
           records.push({
             id: otherId,
             name: String(r?.n ?? '').trim().slice(0, 60) || otherPrior?.name || otherId.slice(0, 10),
             platform: String(r?.p ?? '').trim().slice(0, 20) || otherPrior?.platform || 'web',
             packageSig: /^[a-f0-9]{64}$/.test(otherPkg) ? otherPkg : otherPrior?.packageSig,
-            lastSeen: otherPrior?.lastSeen ?? new Date().toISOString(),
+            lastSeen: otherSeenAt,
           })
         }
       } catch { /* malformed roster → opener alone still lands */ }
 
+      records.sort((a, b) => clientSeenAt(b) - clientSeenAt(a))
       this.clients.set(records)
       writeClientRegistry(records)
     } catch { /* malformed hash → silent */ }
@@ -1316,12 +1444,95 @@ export class HomeComponent implements OnDestroy {
     return section?.generation ? `v${section.generation}` : ''
   }
 
+  /** What the version column shows. A vN when the package resolves; otherwise
+   *  the sig prefix, which still tells two installs apart — the old blank
+   *  said nothing at all and made every row look identical. */
+  clientVersionLabel(record: ClientRecord): string {
+    const version = this.clientVersion(record)
+    if (version) return version
+    if (record.packageSig) return record.packageSig.slice(0, 8)
+    return ''
+  }
+
+  /** True when the version column is a raw sig prefix rather than a vN — the
+   *  template renders it muted + mono so it never reads as a version. */
+  clientVersionIsSig(record: ClientRecord): boolean {
+    return !this.clientVersion(record) && !!record.packageSig
+  }
+
+  /** DCP's handle for an install: the participant's local rename if they set
+   *  one, else the name the install announced (its instance / browser name). */
+  clientName(record: ClientRecord): string {
+    this.#clientNameVersion()
+    try {
+      const override = (localStorage.getItem(CLIENT_NAME_KEY_PREFIX + record.id) ?? '').trim()
+      if (override) return override
+    } catch { /* fall through to the announced name */ }
+    return record.name || record.id.slice(0, 10)
+  }
+
+  /** True when this row is the install that opened DCP — the one you are
+   *  managing from. */
+  isOpenerClient(record: ClientRecord): boolean {
+    return record.id === this.openerClientId()
+  }
+
+  /** "2 days ago" in the participant's locale. Intl does the plural and the
+   *  wording for all fourteen catalogs, so no per-unit keys are needed. */
+  clientSeenLabel(record: ClientRecord): string {
+    const seen = clientSeenAt(record)
+    if (!seen) return ''
+    const i18n = (window as unknown as { ioc?: { get(k: string): unknown } }).ioc?.get(I18N_IOC_KEY) as I18nProvider | undefined
+    const locale = i18n?.locale || 'en'
+    const elapsed = Date.now() - seen
+    const units: [Intl.RelativeTimeFormatUnit, number][] = [
+      ['year', 365 * 24 * 3600e3], ['month', 30 * 24 * 3600e3], ['week', 7 * 24 * 3600e3],
+      ['day', 24 * 3600e3], ['hour', 3600e3], ['minute', 60e3],
+    ]
+    try {
+      const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+      for (const [unit, ms] of units) {
+        if (elapsed >= ms) return format.format(-Math.floor(elapsed / ms), unit)
+      }
+      return format.format(0, 'second')
+    } catch { return '' }
+  }
+
+  /** Open the inline rename on a client row. */
+  beginClientRename(record: ClientRecord): void {
+    this.editingClientId.set(record.id)
+  }
+
+  /** Commit DCP's local handle for an install. Empty restores the announced
+   *  name — the override is a decoration over the record, never a rewrite of
+   *  it (the install keeps announcing whatever it calls itself). */
+  commitClientRename(record: ClientRecord, value: string): void {
+    const trimmed = (value ?? '').trim().slice(0, 60)
+    try {
+      if (trimmed && trimmed !== record.name) localStorage.setItem(CLIENT_NAME_KEY_PREFIX + record.id, trimmed)
+      else localStorage.removeItem(CLIENT_NAME_KEY_PREFIX + record.id)
+    } catch { /* non-fatal — the typed name just does not persist */ }
+    this.#clientNameVersion.update(v => v + 1)
+    this.editingClientId.set(null)
+  }
+
+  cancelClientRename(): void {
+    this.editingClientId.set(null)
+  }
+
+  /** Reveal / re-hide every install other than the one you are on. */
+  toggleOtherClients(): void {
+    this.othersShown.update(shown => !shown)
+  }
+
   /** Drop a client from the registry (an uninstalled or renamed-away
    *  install). Registry is bookkeeping only — nothing else references it. */
   forgetClient(record: ClientRecord): void {
     const records = this.clients().filter(r => r.id !== record.id)
     this.clients.set(records)
     writeClientRegistry(records)
+    try { localStorage.removeItem(CLIENT_NAME_KEY_PREFIX + record.id) } catch { /* non-fatal */ }
+    if (this.editingClientId() === record.id) this.editingClientId.set(null)
   }
 
   /** Read `#stage=<sig,sig,…>` from the URL hash — the hive's "show features"

@@ -51,50 +51,6 @@
   }
 }
 
-// ── mic button (right edge, flush inside header-bar) ──────
-
-.mic-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-left: 1.5px solid color-mix(in srgb, var(--md-primary) 40%, transparent);
-  border-radius: 0;
-  color: var(--md-on-surface-var);
-  cursor: pointer;
-  user-select: none;
-  touch-action: none;
-  transition: color var(--md-dur-medium) var(--md-easing-standard),
-              background var(--md-dur-medium) var(--md-easing-standard);
-
-  &:hover {
-    color: var(--md-on-surface-strong);
-  }
-
-  &.recording {
-    color: #ff4444;
-    background: rgba(255, 68, 68, 0.08);
-
-    .mic-dot {
-      animation: mic-pulse 1.2s ease-in-out infinite;
-    }
-  }
-}
-
-.mic-dot {
-  font-size: 12px;
-  line-height: 1;
-}
-
-@keyframes mic-pulse {
-  0%, 100% { opacity: 0.6; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.2); }
-}
-
 // ── mobile GO / submit button (right of the text box on phone) ──
 // Hidden on desktop / tablet. On phone, it submits the current text
 // (creating a tile) or collapses the command line when empty.

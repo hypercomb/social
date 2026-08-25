@@ -160,21 +160,78 @@
          browser, each native instance: separate storage worlds, separately
          versioned). Identity arrives via the handoff hash; the version is
          the client's last-reported package resolved to its generation. -->
-    @if (advancedView() && clients().length) {
-      <section class="home-clients" aria-label="Client installs">
-        <span class="home-clients-title">Clients</span>
-        @for (client of clients(); track client.id) {
-          <span class="home-client" [title]="client.id">
-            <strong>{{ client.name }}</strong>
-            <span class="home-client-platform">{{ client.platform }}</span>
-            @if (clientVersion(client)) {
-              <span class="home-client-version">{{ clientVersion(client) }}</span>
-            }
-            <button type="button" class="home-client-forget"
-              (click)="forgetClient(client)" title="Forget this client">×</button>
-          </span>
+    <!-- Rows, not chips: a row carries name / platform / version / last-seen
+         and stays scannable; a chip wrap of lookalikes does not. And at rest
+         it shows ONE row — the install you are managing from. More rows than
+         that answer no question you came here with; they only restate that
+         browsers have opened DCP before. The rest is one click away. -->
+    @if (advancedView() && currentClient(); as current) {
+      <section class="home-clients" [attr.aria-label]="'dcp.clients' | t">
+        <h3 class="home-clients-title">{{ 'dcp.clients' | t }}</h3>
+
+        <ng-container *ngTemplateOutlet="clientRow; context: { $implicit: current }" />
+
+        @if (otherClients().length) {
+          <button type="button" class="home-clients-more"
+            [class.is-open]="othersShown()"
+            (click)="toggleOtherClients()"
+            [attr.aria-expanded]="othersShown()">
+            <span class="home-clients-more-mark" aria-hidden="true"></span>
+            {{ (othersShown() ? 'dcp.clients-others-hide' : 'dcp.clients-others')
+               | t: { count: otherClients().length } }}
+          </button>
+        }
+        @if (othersShown()) {
+          @for (client of otherClients(); track client.id) {
+            <ng-container *ngTemplateOutlet="clientRow; context: { $implicit: client }" />
+          }
         }
       </section>
+
+      <!-- One row shape throughout. Dormancy only DIMS a row — inside the
+           reveal it separates the installs worth acting on from the ones
+           worth forgetting. -->
+      <ng-template #clientRow let-client>
+        <div class="home-client" [class.is-self]="isOpenerClient(client)"
+          [class.is-dormant]="isClientDormant(client)" [title]="client.id">
+
+          <!-- Every row emits the SAME cells — a skipped one would slide the
+               rest of the row into the wrong column and the list would go
+               ragged again. The "this client" mark rides INSIDE the name cell
+               rather than claiming a column of its own: only one row ever
+               carries it, and an empty column across every other row is a
+               river of dead space. -->
+          <span class="home-client-handle">
+            @if (editingClientId() === client.id) {
+              <input #clientNameInput class="home-client-rename" type="text"
+                [value]="clientName(client)" maxlength="60"
+                [attr.aria-label]="'dcp.clients-rename' | t"
+                (keydown.enter)="commitClientRename(client, clientNameInput.value)"
+                (keydown.escape)="cancelClientRename()"
+                (blur)="commitClientRename(client, clientNameInput.value)" />
+            } @else {
+              <button type="button" class="home-client-name"
+                (click)="beginClientRename(client)" [attr.title]="'dcp.clients-rename' | t">
+                {{ clientName(client) }}
+              </button>
+            }
+            @if (isOpenerClient(client)) {
+              <span class="home-client-self">{{ 'dcp.clients-this' | t }}</span>
+            }
+          </span>
+
+          <span class="home-client-platform">{{ client.platform }}</span>
+
+          <span class="home-client-version"
+            [class.is-sig]="clientVersionIsSig(client)">{{ clientVersionLabel(client) }}</span>
+
+          <span class="home-client-seen">{{ clientSeenLabel(client) }}</span>
+
+          <button type="button" class="home-client-forget"
+            (click)="forgetClient(client)" [attr.title]="'dcp.clients-forget' | t"
+            [attr.aria-label]="'dcp.clients-forget' | t">×</button>
+        </div>
+      </ng-template>
     }
 
     <!-- First-run orientation — the visible tier of the explanation that

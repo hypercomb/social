@@ -135,6 +135,27 @@ $bp-phone-max: 599px;
   color: var(--cmd-fg);
 }
 
+.prompt-question {
+  // The find stance's sigil — a literal '?', the same typed character the
+  // filter register has always used, in the same terminal font as the '/'
+  // it sits beside. The glyph IS the announcement: plain text here is a
+  // QUESTION, not a name and not a command.
+  font-family: var(--terminal-font);
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--cmd-fg);
+}
+
+// Find stance: a cooler cast than command's honey, because what the line
+// does here is READ the hive rather than change it. Nothing is destructive
+// in this stance, and the box says so before a character is typed.
+.command-shell.stance-find {
+  background: color-mix(in srgb, var(--cmd-accent, #57c8ec) 10%, transparent);
+
+  .command-input { caret-color: var(--cmd-accent, #57c8ec); }
+  .prompt-question { color: var(--cmd-accent, #57c8ec); }
+}
+
 // Command stance: the whole box shifts hue so the standing meaning of plain
 // text is readable before a character is typed — the mode is worn, not menu'd.
 // The TEXT is not blanket-colored: filler stays plain and only the words the

@@ -1,0 +1,43 @@
+[
+  {
+    "name": "the icon is NOT offered while the window is up",
+    "ok": true
+  },
+  {
+    "name": "the window is folded away",
+    "ok": true
+  },
+  {
+    "name": "the icon is offered on the tiles while folded away",
+    "ok": true
+  },
+  {
+    "name": "the shelf starts empty",
+    "ok": true,
+    "detail": "[]"
+  },
+  {
+    "name": "pressing a tile puts it on the shelf",
+    "ok": true,
+    "detail": "[\"context-target\"]"
+  },
+  {
+    "name": "and it carries a SIGNATURE — without one it contributes nothing",
+    "ok": true,
+    "detail": "[\"06de59956a0c1badd1f236ea3a6d2a237dabd6f01a710b60fdab23ababb10484\"]"
+  },
+  {
+    "name": "pressing it again takes it back off",
+    "ok": true,
+    "detail": "[]"
+  },
+  {
+    "name": "unfolding takes the icon off the tiles again",
+    "ok": true
+  },
+  {
+    "name": "no page errors",
+    "ok": true,
+    "detail": ""
+  }
+]

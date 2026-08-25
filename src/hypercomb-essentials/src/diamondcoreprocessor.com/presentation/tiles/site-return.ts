@@ -35,7 +35,7 @@ export interface SiteSpawn {
 export const HEXAGONS_SURFACE = 'hexagons'
 
 /** Same path? Segment-wise, order-sensitive. */
-export function sameSegments(a: readonly string[], b: readonly string[]): boolean {
+export function sameSiteSegments(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((seg, i) => seg === b[i])
 }
 

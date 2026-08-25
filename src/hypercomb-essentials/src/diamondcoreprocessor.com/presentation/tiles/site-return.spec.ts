@@ -6,7 +6,7 @@
 // staring at the raw grid.
 
 import { describe, expect, it } from 'vitest'
-import { HEXAGONS_SURFACE, sameSegments, siteReturnTarget } from './site-return.js'
+import { HEXAGONS_SURFACE, sameSiteSegments, siteReturnTarget } from './site-return.js'
 
 describe('siteReturnTarget', () => {
 
@@ -54,11 +54,11 @@ describe('siteReturnTarget', () => {
   })
 })
 
-describe('sameSegments', () => {
+describe('sameSiteSegments', () => {
   it('is order-sensitive and length-sensitive', () => {
-    expect(sameSegments(['a', 'b'], ['a', 'b'])).toBe(true)
-    expect(sameSegments(['a', 'b'], ['b', 'a'])).toBe(false)
-    expect(sameSegments(['a'], ['a', 'b'])).toBe(false)
-    expect(sameSegments([], [])).toBe(true)
+    expect(sameSiteSegments(['a', 'b'], ['a', 'b'])).toBe(true)
+    expect(sameSiteSegments(['a', 'b'], ['b', 'a'])).toBe(false)
+    expect(sameSiteSegments(['a'], ['a', 'b'])).toBe(false)
+    expect(sameSiteSegments([], [])).toBe(true)
   })
 })

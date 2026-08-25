@@ -46,6 +46,16 @@ type StoreShape = {
 
 const STICKY_LIMIT = 5
 
+/** A stored pin fraction, held to where a corner of the note is still
+ *  grabbable inside a box of `span` px. `out` is how far past the near edge
+ *  the note may hang, `keep` how much must stay inside the far one. Returns
+ *  a fraction, so the caller stays in percentages of the box and never
+ *  converts back to viewport pixels. */
+function clampFraction(fraction: number, span: number, out: number, keep: number): number {
+  const size = Math.max(1, span)
+  return Math.min(Math.max(-out / size, fraction), Math.max(0, (size - keep) / size))
+}
+
 /** Smallest a sticky may be dragged to — below this the title has nowhere to
  *  live and the grip starts to eat the note. */
 const STICKY_MIN = { w: 84, h: 64 }
@@ -117,11 +127,6 @@ export class PostitViewDrone extends Drone {
       // (and stayed missing after it was switched back on) until some unrelated
       // pass happened to reconcile.
       this.onEffect(ENABLEMENT_CHANGED, this.#change)
-      // A toolwindow opening or closing changes the free area. The docked
-      // column reads `--hc-inset-*` in CSS and reflows on its own, but a
-      // PINNED note is fixed at absolute pixels and would sit under the
-      // panel — reconcile so it re-clamps into whatever room is left.
-      this.onEffect('viewport:inset', this.#change)
       // WHO HAS THE SURFACE, asked of the one registry that knows. This used
       // to read `chat:window-state` — the chat window by name — which was
       // right about the only cover that existed and wrong in two ways since:
@@ -198,20 +203,13 @@ export class PostitViewDrone extends Drone {
     }
   }
 
-  /** The room a fixed note may sit in — the viewport minus what the docked
-   *  toolwindows reserve (`--hc-inset-*`, shared/core/viewport-inset-vars). */
-  #freeArea(): { left: number; top: number; right: number; bottom: number } {
-    const read = (name: string): number => {
-      const raw = getComputedStyle(document.documentElement).getPropertyValue(name)
-      const value = parseFloat(raw)
-      return Number.isFinite(value) ? value : 0
-    }
-    return {
-      left: read('--hc-inset-left'),
-      top: read('--hc-inset-top'),
-      right: window.innerWidth - read('--hc-inset-right'),
-      bottom: window.innerHeight - read('--hc-inset-bottom'),
-    }
+  /** The sticky box's own geometry. Every position on this surface — the
+   *  docked column's flow spot and a pinned note's fractions alike — is
+   *  measured INSIDE this box, so the box is the only thing that has to
+   *  know where the free area is. */
+  #boxSize(): { w: number; h: number } {
+    const rect = this.#stickies?.getBoundingClientRect()
+    return { w: rect?.width ?? window.innerWidth, h: rect?.height ?? window.innerHeight }
   }
 
   #vm(): ViewModeShape | undefined {
@@ -358,15 +356,14 @@ export class PostitViewDrone extends Drone {
       const pin = cell.payload?.pin
       if (pin && Number.isFinite(pin.x) && Number.isFinite(pin.y)) {
         note.classList.add('postit-pinned')
-        const w = window.innerWidth, h = window.innerHeight
-        // The rescue clamp keeps a grabbable corner inside the FREE area,
-        // not the raw viewport — with a toolwindow open, the last 400px of
-        // glass belong to the panel, and a note kept "in reach" there is
-        // under it. The stored fractions never change: reserving room is a
-        // render-side clamp, so closing the panel restores the drop spot.
-        const free = this.#freeArea()
-        note.style.left = `${Math.min(Math.max(free.left - 112, pin.x * w), Math.max(free.left, free.right - 24))}px`
-        note.style.top = `${Math.min(Math.max(free.top - 56, pin.y * h), Math.max(free.top, free.bottom - 24))}px`
+        // A PIN IS A FRACTION OF THE BOX — percentages, absolute inside the
+        // host. Nothing here knows about toolwindows: the box is already the
+        // free area, so a panel coming in from the left moves the note the
+        // same way it moves the tiles, with no listener and no second sum.
+        // The only clamp is a rescue: keep a grabbable corner in reach.
+        const box = this.#boxSize()
+        note.style.left = `${clampFraction(pin.x, box.w, 112, 24) * 100}%`
+        note.style.top = `${clampFraction(pin.y, box.h, 56, 24) * 100}%`
       } else {
         note.classList.remove('postit-pinned')
         note.style.left = ''
@@ -401,14 +398,13 @@ export class PostitViewDrone extends Drone {
     note.addEventListener('pointerdown', down => {
       if (down.pointerType === 'mouse' && down.button !== 0) return
       this.#justDragged = false
-      // The note's LAYOUT position, transform-free: a docked note reads its
-      // flex spot through offsetLeft/Top (a bounding rect is the tilted
-      // box's AABB — a few px off), a pinned one reads its own left/top.
+      // The note's LAYOUT position, transform-free and BOX-RELATIVE:
+      // offsetLeft/Top against the host (its offsetParent, positioned) reads
+      // the docked note's flex spot and the pinned note's own percentage
+      // alike — a bounding rect would be the tilted box's AABB, a few px off.
       // The drop lands at base + pointer delta, exactly under the hand.
-      const pinned = note.classList.contains('postit-pinned')
-      const hostRect = note.parentElement?.getBoundingClientRect()
-      const baseLeft = pinned ? parseFloat(note.style.left || '0') : (hostRect?.x ?? 0) + note.offsetLeft
-      const baseTop = pinned ? parseFloat(note.style.top || '0') : (hostRect?.y ?? 0) + note.offsetTop
+      const baseLeft = note.offsetLeft
+      const baseTop = note.offsetTop
       const sx = down.clientX, sy = down.clientY
       let dx = 0, dy = 0
       let moved = false
@@ -452,8 +448,9 @@ export class PostitViewDrone extends Drone {
         const left = baseLeft + dx, top = baseTop + dy
         note.classList.add('postit-settling')
         note.classList.add('postit-pinned')
-        note.style.left = `${left}px`
-        note.style.top = `${top}px`
+        const box = this.#boxSize()
+        note.style.left = `${(left / Math.max(1, box.w)) * 100}%`
+        note.style.top = `${(top / Math.max(1, box.h)) * 100}%`
         note.style.transform = ''
         note.classList.remove('postit-dragging')
         // rAF is the right moment, but a hidden/throttled tab never fires it
@@ -533,7 +530,10 @@ export class PostitViewDrone extends Drone {
    *  sticky already pinned. On a failed write, reconcile snaps it back to
    *  the last committed truth rather than leaving a lie on screen. */
   async #persistPin(cell: { path: string[] }, left: number, top: number): Promise<void> {
-    const w = window.innerWidth, h = window.innerHeight
+    // `left`/`top` are already box coordinates — the drop is stored as the
+    // fraction of the box it landed in, which is what the render side reads
+    // back. Room reserved by a toolwindow never enters the arithmetic.
+    const { w, h } = this.#boxSize()
     // A collapsed viewport (hidden tab, mid-rotation) would mint a garbage
     // fraction and teleport the note on the next real render — drop the
     // write and let reconcile snap back to the last committed spot.
@@ -730,9 +730,9 @@ export class PostitViewDrone extends Drone {
 // _header-size.scss); left adds --hc-controls-left, the side-docked control
 // bar's edge reservation, so the dock clears the bar.
 const STICKY_CSS = `
-.hc-postit-stickies{position:fixed;left:calc(0.9rem + var(--hc-controls-left,0px) + var(--hc-inset-left,0px) + env(safe-area-inset-left,0px));top:calc(var(--hc-header-anchor,3.5rem) + 1rem);z-index:100005;display:flex;flex-direction:column;gap:.75rem;pointer-events:none}
+.hc-postit-stickies{position:fixed;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);top:var(--hc-inset-top,0px);bottom:var(--hc-inset-bottom,0px);z-index:100005;display:flex;flex-direction:column;align-items:flex-start;gap:.75rem;pointer-events:none;padding:calc(var(--hc-header-anchor,3.5rem) + 1rem) 0 0 calc(0.9rem + var(--hc-controls-left,0px) + env(safe-area-inset-left,0px))}
 .postit-sticky{position:relative;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;box-sizing:border-box;width:7.4rem;aspect-ratio:1/.94;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:#4a3f0f;transform:rotate(var(--postit-tilt,-2deg)) translateZ(0);transition:transform .14s ease;font-family:'Segoe Print','Comic Sans MS',cursive,system-ui}
-.postit-sticky.postit-pinned{position:fixed;margin:0}
+.postit-sticky.postit-pinned{position:absolute;margin:0}
 .postit-sticky.postit-settling{transition:none}
 .postit-sticky[style*="height"]{aspect-ratio:auto}
 /* The sheet UNDER the top one — a pale second note peeking out bottom-right,

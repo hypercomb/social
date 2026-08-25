@@ -16,7 +16,10 @@
 // that, plus the window releasing its `view:active` claim while folded (see
 // chat-window.component.ts `#claimSurface`), is the whole mechanism. The hive
 // navigates with its OWN grammar while peeking: an ordinary click walks in,
-// ctrl-click gathers onto the shelf. There is no second grammar to learn.
+// and nothing about that changes. Gathering a tile onto the shelf is its own
+// per-tile icon (assistant/chat-context-action.drone.ts), NOT a chord —
+// ctrl-click on a hexagon already means toggle-the-selection, and the wand on
+// an unadopted tile.
 //
 // Frost goes on a ::before, never on the bars themselves: `backdrop-filter`
 // makes the element a containing block for fixed descendants, and the header

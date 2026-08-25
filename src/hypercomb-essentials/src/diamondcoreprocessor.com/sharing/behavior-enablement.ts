@@ -183,6 +183,62 @@ export function seedGlobalOnKinds(census: readonly string[]): boolean {
   return true
 }
 
+/** Cohorts whose lights have already been decided — so no cohort seed can
+ *  ever run twice and undo a deliberate switch-off. The single entry `'*'`
+ *  means THIS HIVE STARTED DARK: every cohort, past and future, counts as
+ *  decided, because a hive that opened with nothing lit must never have a
+ *  light appear behind the participant. */
+export const SEEDED_COHORTS_KEY = 'hc:behavior-seeded'
+
+const DARK_START = '*'
+
+/** Light a COHORT of kinds once, on a hive that already has an on-list.
+ *
+ *  The census seed above answers "this hive predates the roster". This one
+ *  answers the case after it: behaviour that ALREADY WORKED, hive-wide, and
+ *  is only now being put behind a switch. Games are the first — they ran
+ *  from `/roper` and the launcher long before the roster knew the word, so
+ *  arriving OFF like a new module's kind would read as four games silently
+ *  breaking, which is the one failure mode the roster keeps re-teaching.
+ *
+ *  Three no-ops, and they are the whole design:
+ *   • no on-list yet — the census seed is about to cover these kinds anyway;
+ *     record the cohort and leave.
+ *   • cohort already recorded — the participant has had their say.
+ *   • `'*'` recorded — a fresh install that opened dark stays dark.
+ *
+ *  Returns true only when it actually lit something. */
+export function seedCohortOn(cohort: string, kinds: readonly string[]): boolean {
+  wire()
+  const name = String(cohort ?? '').trim()
+  if (!name) return false
+  const done = new Set(readStringArray(SEEDED_COHORTS_KEY))
+  if (done.has(DARK_START) || done.has(name)) return false
+
+  const record = (): void => {
+    try { localStorage.setItem(SEEDED_COHORTS_KEY, JSON.stringify([...done, name])) }
+    catch { /* private-browsing */ }
+  }
+
+  const on = readGlobalOnKinds()
+  if (!on) { record(); return false }
+
+  const fresh = [...new Set(kinds.map(k => String(k ?? '').trim()).filter(Boolean))]
+    .filter(k => !on.has(k))
+  record()
+  if (fresh.length === 0) return false
+
+  try { localStorage.setItem(GLOBAL_ON_KEY, JSON.stringify([...on, ...fresh])) }
+  catch { return false }
+  // The off-list mirror must lose them too, or the swarm would go on
+  // broadcasting as withheld what is now lit (one switch, one meaning).
+  const off = readStringArray(GLOBAL_OFF_KEY).filter(k => !fresh.includes(k))
+  try { localStorage.setItem(GLOBAL_OFF_KEY, JSON.stringify(off)) } catch { /* private-browsing */ }
+  dropCaches()
+  EffectBus.emit(ENABLEMENT_CHANGED, { cohort: name, seeded: fresh.length })
+  return true
+}
+
 /** The legacy/mirror off set — kinds explicitly turned off. Still the truth
  *  until the on-list is seeded; afterwards kept only because the swarm's
  *  withheld wire (kind 30208) needs an enumerable list. */

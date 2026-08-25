@@ -16,6 +16,9 @@
 //      and hands back the newest thread fully materialized
 //   5. deleteConversation drops the bucket and leaves the text resource —
 //      content-addressed bytes may be shared; their lifecycle is GC's
+//   6. ARCHIVING is additive and reversible: a marker file in the thread's
+//      OWN bucket, every turn untouched, and the list still reports the
+//      thread — it is the surfaces that hide it, not the pool that forgets it
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
@@ -256,6 +259,68 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(latestTurns.map(t => t.text)).toEqual(['second thread question', 'second thread answer'])
     // 2 title resolves (one per thread) + 2 for materializing the newest.
     expect(store.resourceReads - before).toBe(4)
+  })
+
+  it('archiving is a marker in the thread’s own bucket, and every turn survives', async () => {
+    await mod.appendTurn('chat:filed', 'user', 'a question worth keeping')
+    await mod.appendTurn('chat:filed', 'assistant', 'an answer worth keeping')
+    const bucketName = await sha256Hex(new TextEncoder().encode('chat:filed'))
+    const before = pool.dirs.get(bucketName)!.files.size
+
+    expect(await mod.setConversationArchived('chat:filed', true)).toBe(true)
+
+    // ONE more file — the marker — and not one turn fewer. Archiving is the
+    // opposite of deleting and the bucket has to show that.
+    expect(pool.dirs.get(bucketName)!.files.size).toBe(before + 1)
+    expect((await mod.readTurns('chat:filed')).map(t => t.text))
+      .toEqual(['a question worth keeping', 'an answer worth keeping'])
+  })
+
+  it('the list still reports an archived thread — flagged, never dropped', async () => {
+    await mod.appendTurn('chat:filed', 'user', 'put me away')
+    await mod.appendTurn('chat:live', 'user', 'keep me out')
+    await mod.setConversationArchived('chat:filed', true)
+
+    const { conversations } = await mod.listConversationsWithLatest()
+    const byId = new Map(conversations.map(c => [c.convoId, c]))
+    // The pool never forgets a thread; hiding it is the surface's job, and a
+    // list that dropped it would leave no way to bring it back.
+    expect(byId.get('chat:filed')?.archived).toBe(true)
+    expect(byId.get('chat:live')?.archived).toBe(false)
+    expect(byId.get('chat:filed')?.turnCount).toBe(1)
+  })
+
+  it('an archived thread is never what a window resumes into', async () => {
+    await mod.appendTurn('chat:older', 'user', 'the older thread')
+    await new Promise(r => setTimeout(r, 5))
+    await mod.appendTurn('chat:newest', 'user', 'the newest thread')
+    await mod.setConversationArchived('chat:newest', true)
+
+    // Newest by time, but put away — resuming into it would undo the act on
+    // the next reload, so `latestTurns` is the newest LIVE thread.
+    const { latestTurns } = await mod.listConversationsWithLatest()
+    expect(latestTurns.map(t => t.text)).toEqual(['the older thread'])
+  })
+
+  it('un-archiving removes the marker and mints nothing', async () => {
+    await mod.appendTurn('chat:filed', 'user', 'back again')
+    const bucketName = await sha256Hex(new TextEncoder().encode('chat:filed'))
+    const before = pool.dirs.get(bucketName)!.files.size
+
+    await mod.setConversationArchived('chat:filed', true)
+    expect(await mod.setConversationArchived('chat:filed', false)).toBe(true)
+
+    expect(pool.dirs.get(bucketName)!.files.size).toBe(before)
+    const { conversations } = await mod.listConversationsWithLatest()
+    expect(conversations.find(c => c.convoId === 'chat:filed')?.archived).toBe(false)
+  })
+
+  it('un-archiving a thread that has no bucket does not mint one', async () => {
+    // A chat opened and never spoken in. The act is a no-op, and it must not
+    // leave an empty directory behind as a souvenir.
+    await mod.setConversationArchived('chat:never-spoken', false)
+    const bucketName = await sha256Hex(new TextEncoder().encode('chat:never-spoken'))
+    expect(pool.dirs.has(bucketName)).toBe(false)
   })
 
   it('deleteConversation drops the bucket and leaves the text resource', async () => {

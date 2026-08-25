@@ -18,6 +18,9 @@
 //     on-list hasn't been seeded, and kept written as a MIRROR afterwards
 //     (kinds explicitly turned off) because the swarm's withheld wire
 //     (kind 30208) needs an enumerable list to broadcast.
+//   • `hc:behavior-seeded` — the cohort ledger: which groups of kinds have
+//     already had their lights decided, so no seed runs twice. `'*'` means
+//     the hive STARTED DARK and no cohort may ever light itself here.
 //   • `hc:behavior-wake` — { "/path": [kinds] } local ON exceptions. A wake
 //     covers its subtree; it outranks a global off (and a publisher's
 //     withheld mark) at that tile. Never touched by the global flip, so
@@ -28,6 +31,10 @@ import { EffectBus, normalizeCell } from '@hypercomb/core'
 export const GLOBAL_ON_KEY = 'hc:behavior-global-on'
 export const GLOBAL_OFF_KEY = 'hc:behavior-global-off'
 export const WAKE_KEY = 'hc:behavior-wake'
+/** Cohorts whose lights have been decided (essentials owns the seeding —
+ *  this side only stamps `'*'` for a dark start). Agreed by key, like the
+ *  rest of this lens. */
+export const SEEDED_COHORTS_KEY = 'hc:behavior-seeded'
 export const ENABLEMENT_CHANGED = 'behavior:enablement-changed'
 
 /** Canonical absolute path — every segment normalized; MUST match the
@@ -59,12 +66,22 @@ export function hasGlobalOnList(): boolean {
  *  could light everything. Writing the list here is what makes that seed a
  *  no-op for the rest of this hive's life.
  *
+ *  It also stamps the cohort ledger `'*'` — DARK START. A cohort seed
+ *  (essentials' `seedCohortOn`) lights behaviour that already worked
+ *  hive-wide before the roster learned to switch it, so that it doesn't
+ *  read as breaking; a hive that opened with NOTHING lit has no such past,
+ *  and the stamp is what stops a light appearing in it behind the
+ *  participant's back — now, and for every cohort that comes later.
+ *
  *  No-op once the list exists — an existing hive keeps exactly the lights it
  *  had, and re-running a cold install never darkens it. No change event: the
  *  bus has no subscribers this early, and the first read is the truth. */
 export function seedDarkOnFreshInstall(): boolean {
   if (hasGlobalOnList()) return false
-  try { localStorage.setItem(GLOBAL_ON_KEY, '[]') } catch { return false }
+  try {
+    localStorage.setItem(GLOBAL_ON_KEY, '[]')
+    localStorage.setItem(SEEDED_COHORTS_KEY, JSON.stringify(['*']))
+  } catch { return false }
   return true
 }
 

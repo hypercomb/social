@@ -54,6 +54,9 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // `revolucion-welcome` is retired (renamed to `square-tile-view`
   // 2026-08-23) — tombstone for older builds that persisted it.
   'square-tile-view', 'revolucion-welcome', 'revolucion-room',
+  // The lounge takes the whole surface — a three.js room painted from the
+  // tile's own `visual:lounge:room` record, with no hexagons under it.
+  'lounge',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells

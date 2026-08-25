@@ -77,11 +77,12 @@ import { viewSourceScopeAt } from '../../commands/view-source-scope.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import {
   isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds,
-  readGlobalOnKinds, seedGlobalOnKinds,
+  readGlobalOnKinds, seedGlobalOnKinds, seedCohortOn,
   bindingAt, bindingsFor, isWithdrawnByBinding, allBindings,
   behaviorPath, bindBehaviorTo, unbindBehavior, type BehaviorBinding,
 } from '../../sharing/behavior-enablement.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
+import { gameCensus, gameKinds, GAME_COHORT } from '../../games/game-enablement.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
@@ -538,8 +539,8 @@ export class ShowFeaturesDrone extends Drone {
     // dormant everywhere AND withheld from every swarm (one switch, one
     // meaning). Opened pre-swarm from the WORLD stage / join selector, and
     // any time from the panel header. This drone owns the census (registry
-    // + CAPABILITIES + lit/off kinds whose module isn't here — those must
-    // stay listed or they could never be flipped again).
+    // + CAPABILITIES + GAMES + lit/off kinds whose module isn't here — those
+    // must stay listed or they could never be flipped again).
     this.onEffect('features:roster-open', () => { this.#emitRoster() })
 
     // Seed the opt-in on-list once the whole module graph has registered —
@@ -554,18 +555,33 @@ export class ShowFeaturesDrone extends Drone {
    *  wrote the list EMPTY at cold install (`seedDarkOnFreshInstall`), so a
    *  fresh hive starts DARK and this is a no-op. From then on the on-list is the truth — a kind it
    *  doesn't name (a new module, a foreign decoration) arrives OFF until
-   *  it is lit in the pool. */
+   *  it is lit in the pool.
+   *
+   *  Then the COHORT seed, which is the other half: behaviour that already
+   *  worked hive-wide before the roster could switch it (games) is lit once
+   *  on a hive that has an on-list, so putting a switch on something never
+   *  reads as turning it off. Both are idempotent; both are refused on a
+   *  hive that started dark. */
   #seedEnablement(): void {
-    if (readGlobalOnKinds()) return
     const bees = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)?.all?.() ?? []
     if (bees.length === 0) return   // registry not up yet — the next caller seeds
-    seedGlobalOnKinds([
-      ...bees.map(b => b.decorationKind),
-      ...Object.keys(CAPABILITIES),
-      // Bound kinds are ON — binding scopes a behaviour, it never switches
-      // it off — so a binding made ahead of its module must stay lit.
-      ...Object.keys(allBindings()),
-    ])
+    if (!readGlobalOnKinds()) {
+      seedGlobalOnKinds([
+        ...bees.map(b => b.decorationKind),
+        ...Object.keys(CAPABILITIES),
+        ...gameKinds(),
+        // Bound kinds are ON — binding scopes a behaviour, it never switches
+        // it off — so a binding made ahead of its module must stay lit.
+        ...Object.keys(allBindings()),
+      ])
+    }
+    // Games ran hive-wide long before the roster could switch them, so on a
+    // hive that already has an on-list they are lit ONCE rather than arriving
+    // dark like a kind nobody has ever seen — the difference between adding a
+    // switch and breaking four games. Idempotent, and refused outright on a
+    // hive that started dark. (Runs after the census seed, so on a fresh
+    // legacy hive it finds them already lit and only records the cohort.)
+    seedCohortOn(GAME_COHORT, gameKinds())
   }
 
   /** Build + emit the global roster. Sync — the census is in-memory. */
@@ -620,6 +636,31 @@ export class ShowFeaturesDrone extends Drone {
         on: !isKindGloballyOff(kind),
         used: countLabelsWithKind(kind),
         ...boundOf(kind),
+      })
+    }
+    // GAMES — the behaviours that mark nothing. A game is a `genotype:'game'`
+    // bee with a full-screen overlay and no tile, so it can never reach the
+    // per-tile list; the pool is the whole of its presence, and this row is
+    // the one switch that reaches its header icon, its launcher tile and its
+    // `/<id>` command at once. Self-described (label/icon/sentence come off
+    // the bee), so a community game lands here with no edit.
+    for (const game of gameCensus()) {
+      if (seen.has(game.kind)) continue
+      seen.add(game.kind)
+      rows.push({
+        view: game.id,
+        icon: game.icon,
+        kind: game.kind,
+        label: game.label,
+        description: game.description,
+        category: 'game',
+        slashCommand: '/' + game.id,
+        on: !isKindGloballyOff(game.kind),
+        // Nothing carries a game, so the badge would always read zero — and
+        // zero next to a lit row says "unused" about something that is only
+        // ever used by being played.
+        used: 0,
+        ...boundOf(game.kind),
       })
     }
     // Kinds nobody here declares but that carry a record — lit or explicitly

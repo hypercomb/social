@@ -4062,6 +4062,64 @@ async function main(): Promise<void> {
     console.log(`[site] ${route} → html ${htmlSig.slice(0, 12)}… deco ${String(deco.data.sig).slice(0, 12)}…${deco.data.unchanged ? ' (unchanged)' : ''}`)
   }
 
+  // 2b. THE ROOM AS A TILE — what makes the lounge ATOMIC.
+  //
+  // Until now the room existed only as HTML inside this site, so the only
+  // door was the site itself: walking to the lounge meant walking the
+  // WEBSITE to a page about the lounge. The same bundle we just minted is
+  // now also carried by the LOUNGE CELL, as a `visual:lounge:room` record
+  // naming that signature and the art to hang. The tile IS the room.
+  //
+  // The page keeps its own frame — the concierge, El Mercado, the wheel
+  // plate, the walk-in overlay — because a room in a reading column beside
+  // a concierge is a different purpose than the room by itself. Both mount
+  // the SAME bundle sig, because both are handed it from right here: one
+  // logical piece, two frames, no divergence possible.
+  const loungeSegments = ['revolucion', 'lounge']
+  const roomArt: Record<string, string> = {}
+  for (const key of ['lounge', 'cigars', 'journal', 'flavor-wheel', 'humidor', 'community']) {
+    const sig = art[key]
+    if (sig) roomArt[key] = sig
+  }
+  const room = await send({
+    op: 'decoration-add',
+    segments: loungeSegments,
+    kind: 'visual:lounge:room',
+    appliesTo: loungeSegments,
+    // NO createdAt, for the same reason the pages carry none: identical
+    // content must mint an identical record, or every rebuild moves the
+    // branch head for a no-op.
+    payload: {
+      version: 1,
+      bundleSig: loungeSig,
+      ...(Object.keys(roomArt).length ? { art: roomArt } : {}),
+      label: 'The Cigar Lounge',
+      icon: 'chair',
+    },
+    mark: 'persistent',
+    replaceKind: true,
+  })
+  if (!room.ok) { console.error(`[site] lounge room record FAIL: ${room.error}`); process.exit(1) }
+  console.log(`[site] /revolucion/lounge room → bundle ${loungeSig.slice(0, 12)}…, ${Object.keys(roomArt).length} frames hung${room.data.unchanged ? ' (unchanged)' : ''}`)
+
+  // 2c. THE ARRIVAL FACE — the lounge cell OPENS AS the room.
+  //
+  // The record above only makes the room AVAILABLE at the tile. This is what
+  // makes walking in BE walking in: `view:default` is a fact about the place,
+  // so it is undoable, it rides the layer commit, and a peer who adopts the
+  // tile arrives in the room the way we arranged it.
+  const face = await send({
+    op: 'decoration-add',
+    segments: loungeSegments,
+    kind: 'view:default',
+    appliesTo: loungeSegments,
+    payload: { view: 'lounge' },
+    mark: 'persistent',
+    replaceKind: true,
+  })
+  if (!face.ok) { console.error(`[site] lounge arrival face FAIL: ${face.error}`); process.exit(1) }
+  console.log(`[site] /revolucion/lounge opens as → lounge${face.data.unchanged ? ' (unchanged)' : ''}`)
+
   // 3. Verify by read-back: decorations slot holds a visual:website:page
   //    record with our htmlSig, and the HTML bytes round-trip.
   let pass = 0, fail = 0
@@ -4084,6 +4142,30 @@ async function main(): Promise<void> {
     else { fail++; console.error(`[verify] FAIL ${w.path} — decoration:${found} html:${roundTrip}`) }
   }
   console.log(`[site] verify: ${pass}/${written.length} pages confirmed, ${fail} failed`)
+
+  // 3b. Verify the ROOM by read-back too — a build log line is not proof a
+  //     bridge write landed (the lesson of the pass that "deployed" three
+  //     months of work into a preview server and nowhere else). Read the
+  //     lounge cell's decorations and confirm both records are actually
+  //     there, naming the bundle we just minted.
+  {
+    const layer = await send({ op: 'layer-at', segments: loungeSegments })
+    const decoSigs: string[] = Array.isArray(layer?.data?.decorations) ? layer.data.decorations : []
+    let roomOk = false, faceOk = false
+    for (const sig of decoSigs) {
+      const res = await send({ op: 'get-resource', sig })
+      if (!res.ok) continue
+      try {
+        const rec = JSON.parse(res.data.text)
+        if (rec.kind === 'visual:lounge:room' && rec.payload?.bundleSig === loungeSig) roomOk = true
+        if (rec.kind === 'view:default' && rec.payload?.view === 'lounge') faceOk = true
+      } catch { /* not JSON */ }
+    }
+    console.log(roomOk && faceOk
+      ? '[site] verify: the lounge tile IS the room, and opens as it'
+      : `[site] verify FAIL — room:${roomOk} opensAs:${faceOk}`)
+    if (!(roomOk && faceOk)) fail++
+  }
 
   // One build revision for the whole pass (documentation/build-revisions.md)
   const rev = await send({ op: 'build-record', segments: ['revolucion'], label: 'revolucion site build' })

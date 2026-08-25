@@ -1569,17 +1569,90 @@
     {
       "id": "chat-peek",
       "title": "Chat window PEEK + the rail's click grammar",
-      "run": null,
+      "run": "npx tsx scripts/mirror-chat-window.ts",
       "note": "One themed card on the behaviors mirror: (1) PEEK — the chat window folds its reading half away (transcript, rail, conversation bar) and floats only the header shelf and the composer over the LIVE hive; it releases the owner-counted view:active claim while folded, which is what makes the hexagons clickable and brings back every chrome that hides for a view. Ctrl-click on the hive gathers onto the shelf, the same chord the rail uses. Escape unfolds before it closes. (2) THE RAIL'S CLICK GOES IN — a row with children opens on an ordinary click, a leaf still opens its conversation, hold-to-enter is retired, and a parent's own conversations live under the chevron. (3) SURFACE OWNERSHIP — the chat window now enters view:active on open, and the post-it stickies read the registry instead of the chat window by name. Tiles: chat-peek.scss, chat-window.component.ts, agent-tiles-rail.ts, postit-view.drone.ts, collection-empty-prompt.drone.ts, drive-chat-peek.cjs.",
-      "unattended": false,
       "created": "2026-08-25",
-      "status": "pending"
+      "status": "done",
+      "completed": "2026-08-25"
     },
     {
       "id": "tree-exit-spawn",
       "title": "Coming out of the tree lands on the view + page you stepped in from",
       "run": null,
       "note": "Same family as the pending site-exit-spawn entry — mirror them together under the behaviors/navigation collection. Part tiles: view-spawn.ts (the general rule + the view:spawn effect), the emit in visual-bee-icons.ts dispatchEnterAction, TreeViewDrone's spawn latch + #returnToSpawn + the spawn drop in #navigate, drive-tree-exit-spawn.cjs, documentation/stepping-into-a-view.md. Notes: a stepped-into view is a takeover not a walk; the icon's walk to the branch entrance is what has to be undone; the record travels on EffectBus because module state is per-bee-bundle; surface restored before place; travel outranks the way back in; no record (typed / toggle / arrival face) means stay put. Mark parts with the declared part pheromone. MANUAL: note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "find-stance-search",
+      "title": "Mirror the find stance: tiles for the three reaches, the index record, the optimize-phase minting bee, plus the collection that gathers them",
+      "run": null,
+      "note": "Parts: hive-search.ts (record + ranking + grouping), hive-search.service.ts (reader, three reaches, vocabulary), search-index.drone.ts (optimize-phase minting), command-line find stance (? sigil, term / [term] / @term). Pheromones: mark each tile for what it is; notes carry the reach ladder and the merkle-composition rule (a child record is spliced whole because its sig did not change).",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "dcp-client-registry-legibility",
+      "title": "Mirror the DCP client-registry rework — the resting list is ONE row, the install you are on",
+      "run": null,
+      "note": "Tiles 1:1 with the source resources touched, gathered by a collection:\nhome.component.ts (registry model: clientSeenAt/isClientDormant, opener identity, 180d dead-row purge that also drops orphaned name overrides, DCP-local rename override);\nhome.component.html (one row at rest + the others-disclosure + inline rename; every row emits the SAME cells or the columns go ragged);\nhome.component.scss (the SECTION owns the column tracks, rows borrow via subgrid; fit-content caps the handle because minmax(0,15rem) is grown to full width by the maximize-tracks step);\nportal-overlay.component.ts (roster now carries each install lastSeen as s — without it every entry was stamped now on each handoff and nothing could ever go dormant);\ni18n catalogs (dcp.clients* x14).\n\nPheromones: mark each part for what it IS (registry-model / view / style / handoff / catalog) so render and behaviour resolve from the mark.\n\nThe WHY the notes must carry: 27 lookalike chips, because the display name is a browser brand (edge/chrome), the only distinguishing field was hidden in a title tooltip, the version rendered as NOTHING when the package would not resolve, and nothing ever pruned. Jaime pushed twice — first why show old rows by default, then why show more rows than the very latest — and the answer both times was that we should not: the resting list is now the install you are managing FROM, everything else behind a count.\n\nNOT safely re-runnable: note-add is additive.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "done",
+      "completed": "2026-08-25"
+    },
+    {
+      "id": "chat-archive",
+      "title": "Archive a conversation — put away, not thrown away",
+      "run": "npx tsx scripts/mirror-chat-window.ts",
+      "note": "One themed card on the behaviors mirror. ARCHIVE: delete was the only thing you could do with a conversation you were finished with, and it is the wrong verb — you are done needing the thread, not done having said it. The flag is a marker FILE IN THE THREAD'S OWN BUCKET (sign('threads') pool), never an index and never localStorage: the bucket already describes itself, and 'I am finished with this' is a fact about the thread, not about this device, so it travels and survives storage being cleared. Named by a constant, not by content hash, because unlike a turn it is mutable. The list still REPORTS an archived thread — hiding it is the surface's job; a list that dropped it would leave no way back. An archived thread is never what a window resumes into, and its turns no longer count toward its tile's row mark. One control both directions in the rail's fold and in the window's flat list, behind an 'Archived (n)' disclosure. Tiles: chat-thread.ts (setConversationArchived, ARCHIVE_MARKER, BucketRead, foldTileConversations), agent-tiles-rail.ts, chat-window.component.{ts,html,scss}, drive-chat-archive.cjs, chat-thread-shape.spec.ts.",
+      "created": "2026-08-25",
+      "status": "done",
+      "completed": "2026-08-25"
+    },
+    {
+      "id": "chat-archive-in-hand",
+      "title": "Archive the chat you are IN — the bar icon",
+      "run": "npx tsx scripts/mirror-chat-window.ts",
+      "note": "Extends the chat-archive card. The per-row control in the fold acts on a conversation you are POINTING at; this one acts on the one you are READING, which is the common case. It sits in the bar above the transcript, left of the + with a hairline rule between them, and NEITHER icon wears a border — two outlined boxes at the end of a row holding a name read as a toolbar bolted onto a title; the rule says they are different kinds of act without drawing boxes. Filing from here MOVES ON to the next live thread (or a fresh chat when that was the last) — the one place staying put would be wrong, because a press that files the thread and leaves it on screen looks like a press that did nothing. Un-filing stays put. setConversationArchived now announces chat:threads-changed itself, so every surface listing the thread hears it. Tiles: chat-window.component.{ts,html,scss} (.chat-put, .chat-bar-split, archiveCurrent, activeArchived), chat-thread.ts.",
+      "created": "2026-08-25",
+      "status": "done",
+      "completed": "2026-08-25"
+    },
+    {
+      "id": "atomic-lounge-behaviour",
+      "title": "The lounge is a BEHAVIOUR — the tile carries the room, the site page is one frame of it",
+      "run": null,
+      "note": "Built this pass, no mirror run (needs a considered pass on a live bridge, and note-add is additive so this must NOT re-run). Owed under behaviors/views: a themed card for the 'lounge' view behaviour (glyph 'chair', ground = view-blue), with one part tile per source file marked 'part' — lounge-room.ts (THE ATOM: mountLoungeRoom + the visual:lounge:room record; the only code that knows how to bring a room up, so every frame borrows it), lounge-view.drone.ts (the bare frame — the room with the whole screen and two chips of chrome), lounge.queen.ts (/lounge + the visual-bee registration; NOT replacesTileRender, because on the parent's grid the hexagon IS the door). Notes to write: (1) WHY it was not atomic — /revolucion/lounge carried view:default='website', so walking in opened the WEBSITE at that cell and the room was a page the site routed to; the fix is one record flip plus a behaviour that can receive it. (2) ONE LOGICAL PIECE, MANY FRAMES — the record names the bundle by signature, so the tile's room and the page's room are the same bytes; divergence lives in the frame (concierge + El Mercado + wheel plate on the page, bare room in the view), never in the room. (3) A SECOND ROOM is a second bundleSig on a second tile — the behaviour says nothing about cigars. Also: note on the welcome threshold's room-view cell that it now STEPS ASIDE for a child's own view:default (data-driven, no per-view edit). Files: hypercomb-essentials/src/revolucionstyle.com/lounge/*, revolucionstyle.com/welcome/room-view.drone.ts, scripts/intel-build-revolucion-site.ts (steps 2b/2c), scripts/bridge/_lounge-atomize.cjs.",
+      "created": "2026-08-25",
+      "status": "pending",
+      "unattended": false
+    },
+    {
+      "id": "chat-context-icon",
+      "title": "Point and click a tile onto the request",
+      "run": "npx tsx scripts/mirror-chat-window.ts",
+      "note": "Extends the chat-peek card. Folding the window away lets you FIND the tiles a request should carry; this is the affordance for putting them ON the shelf, because the one gesture the canvas already owns (drag) is a PAN. A tile icon appears on every hexagon while the window is folded away and is unregistered when it comes back — an add-to-the-request button on a surface with no request behind it does nothing, and actionsForTile also feeds the close-up and the brief. WHY AN ICON NOT A DRAG HANDLE: a pan-locked drag costs a MODE paid per tile (press, hold, cross, release), and gathering context is a repeated discrete act — the cheap repeatable gesture wins. WHY NOT CTRL-CLICK: the chord already means selection/wand on a hexagon. Same control both directions — a tile already on the shelf wears the icon LIT (steel, the chat window's colour) and pressing it takes the tile off. The SIGNATURE is resolved through levelRoster, the list the rail/notes/command line all read, so the sig matches what a drag off the rail would carry. Tiles: chat-context-action.drone.ts (NEW), chat-window.component.ts (chat:peek, chat:add-context, toggleContext), side-effects.ts, drive-chat-context-icon.cjs.",
+      "created": "2026-08-25",
+      "status": "done",
+      "completed": "2026-08-25"
+    },
+    {
+      "id": "discovered-words-complete-as-text",
+      "title": "Common Tongue: the words you lead with are offered back, and complete as plain TEXT",
+      "run": null,
+      "note": "Extends the spoken-habits card on the behaviors mirror. Habits already answered once the line had become a sentence ('open ' -> 'open providers'); nothing answered BEFORE the first space, so a participant who could not remember the whole phrasing got no help starting it. Now the discovered lead-ins themselves are rows: 'op' offers 'open', 'sh' offers 'show'. THE ROW IS A WORD, NOT A COMMAND - accepting it writes the word and a SPACE and runs nothing, and that space is load-bearing twice: it turns phrasings() on so the ending arrives on the next keystroke, and #completeOnEnter reads a trailing space as 'your ending goes here' so Enter completes instead of firing. STRICTLY ADDITIVE: the census speaks first and a word a behaviour already spells IS that behaviour's row (deduped, and the census wins the description and the Shift+Delete guard). Never on a blank line - Ctrl+Space asks for the catalogue and filler is not part of it. Shift+Delete on a word forgets it whole, endings included, because the word is only on offer because those phrasings exist. Part tiles 1:1: spoken-habits.ts (leadInCompletions + LeadInCompletion), command-line.component.ts (#learnedLeadIns, the suggestions append, the text-accept branch, the prune guard, slashDescriptionMap 'yours - a word - leads into <command>'), spoken-habits.spec.ts. New i18n key owed by all 14 catalogs: utterance.learned.word.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "everything-is-a-beehavior-plan",
+      "title": "Mirror the shrink plan: everything-is-a-beehavior campaign collection — one tile per phase (0-5), notes carrying the chip lists + hard knots, pheromones marking phase status",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md. note-add is additive, so manual.",
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"

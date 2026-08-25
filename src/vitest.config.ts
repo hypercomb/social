@@ -15,6 +15,11 @@ export default defineConfig({
       '@hypercomb/core': src('./hypercomb-core/src/index.ts'),
       '@hypercomb/essentials': src('./hypercomb-essentials/src/index.ts'),
       '@hypercomb/shared/core': src('./hypercomb-shared/core'),
+      // Deep UI imports resolve too — the shell reaches past the barrel for
+      // single lenses (`ui/features-viewer/behavior-enablement`), and without
+      // this the spec that covers such a file can't even LOAD, which reads as
+      // one red file of unknown cause rather than a missing alias.
+      '@hypercomb/shared/ui': src('./hypercomb-shared/ui'),
       '@hypercomb/shared': src('./hypercomb-shared/index.ts'),
       '@hypercomb/sdk': src('./hypercomb-sdk/src/index.ts'),
     },

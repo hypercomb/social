@@ -319,7 +319,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    * the line is a register of commands). The parent owns the stance machine;
    * the shell only dresses for it, exactly as it does for armed/subject.
    */
-  readonly promptSigil = input<'chevron' | 'slash'>('chevron')
+  readonly promptSigil = input<'chevron' | 'slash' | 'question'>('chevron')
 
   /**
    * The utterance reading, as render segments covering the ENTIRE input text

@@ -93,6 +93,7 @@
 // imports essentials.
 
 import { Component, ElementRef, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core'
+import { NgTemplateOutlet } from '@angular/common'
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import {
   CLAUDE_BRIDGE_ENABLED_STORAGE_KEY,
@@ -124,6 +125,9 @@ type ConversationSummary = {
   readonly title: string
   readonly turnCount: number
   readonly lastAt: number
+  /** PUT AWAY — kept whole, taken out of the list. Optional because an older
+   *  essentials build has no archive at all, and there every thread is live. */
+  readonly archived?: boolean
 }
 
 /** The threads module, reached through IoC — shell may never import essentials. */
@@ -135,6 +139,10 @@ type ChatThreadsLike = {
    *  read, so opening never re-reads the bucket the list walk just read. */
   listConversationsWithLatest?(): Promise<{ conversations: ConversationSummary[]; latestTurns: ChatTurn[] }>
   deleteConversation(convoId: string): Promise<boolean>
+  /** Put a conversation away, or bring it back. Absent on an older essentials
+   *  build — the control is hidden rather than dead when it is (see
+   *  `canArchive`). */
+  setConversationArchived?(convoId: string, archived: boolean): Promise<boolean>
   newConvoId(): string
   /** A tile's conversation id, derived from its path — every tile has one,
    *  dormant until something lands in it. Absent on an older essentials
@@ -374,7 +382,7 @@ type ModeRegistryLike = {
 @Component({
   selector: 'hc-chat-window',
   standalone: true,
-  imports: [TranslatePipe, HcDockedPanelDirective],
+  imports: [NgTemplateOutlet, TranslatePipe, HcDockedPanelDirective],
   templateUrl: './chat-window.component.html',
   // TWO SHEETS, in source order. Angular's `anyComponentStyle` budget is
   // measured per compiled stylesheet and one output is emitted per `styleUrls`
@@ -400,9 +408,25 @@ export class ChatWindowComponent implements OnDestroy {
   readonly visible = signal(rememberedChatVisibility(this.bridgeConfigured()))
 
   /** Parked while the hive is covered and brought back intact — the thread is
-   *  durable, but the scroll position and the half-typed message are not. */
-  readonly session = signalSession(this.visible, open =>
-    EffectBus.emit('chat:window-state', { open }))
+   *  durable, but the scroll position and the half-typed message are not.
+   *
+   *  PARKING IS THE SHELL TAKING THE WINDOW OFF SCREEN, and everything the
+   *  fold turned on OUT IN THE HIVE has to go with it. `announce` fires only
+   *  on park/unpark (open/close emit `chat:window-state` themselves), which
+   *  makes this the one seam where that can be said once:
+   *
+   *    • the tile icon comes off. A parked window keeps `peeking` true — that
+   *      is the whole point of parking — so without this the hexagons went on
+   *      offering "add to the request" for a shelf that was not on screen,
+   *      which is exactly the thing chat-context-action.drone.ts exists to
+   *      prevent.
+   *    • the `view:active` claim follows the SCREEN, not the intent: a parked
+   *      window covers nothing, so it must not go on claiming the surface. */
+  readonly session = signalSession(this.visible, open => {
+    EffectBus.emit('chat:window-state', { open })
+    this.#claimSurface(open && !this.peeking())
+    this.#announcePeek()
+  })
 
   readonly conversations = signal<readonly ConversationSummary[]>([])
   readonly activeId = signal('')
@@ -675,6 +699,22 @@ export class ChatWindowComponent implements OnDestroy {
     EffectBus.emit('context:active-set', { paths })
   }
 
+  /** ON OR OFF, from a press out in the hive. The tile icon that raises this
+   *  is the SAME control both directions — pressing a tile that is already on
+   *  the shelf takes it off — because a lit icon you cannot un-press is an
+   *  icon you have to come back to the window to undo. */
+  toggleContext(tile: DroppedTile): void {
+    const segments = tile.path.split('/').filter(Boolean)
+    const key = tile.path.startsWith('/') ? tile.path : '/' + segments.join('/')
+    if (this.references().some(held => held.key === key)) {
+      this.references.set(this.references().filter(held => held.key !== key))
+      this.#announceSet()
+      void this.#refreshContextThumbs()
+      return
+    }
+    this.addContext(tile)
+  }
+
   /** The × — take it off the shelf and out of the request. Deliberately NOT
    *  a restore: dragging it back is how you say "not now, but keep it".
    *  The tile itself is untouched either way. */
@@ -886,6 +926,7 @@ export class ChatWindowComponent implements OnDestroy {
       turnCount: convo.turnCount,
       lastAt: convo.lastAt,
       draft: '',
+      archived: !!convo.archived,
     }))
 
     const known = new Set(rows.map(row => row.convoId))
@@ -905,10 +946,88 @@ export class ChatWindowComponent implements OnDestroy {
         turnCount: 0,
         lastAt: 0,
         draft: held.text,
+        archived: false,
       })
     }
     return rows.sort((a, b) => b.lastAt - a.lastAt)
   })
+
+  /** The list as it is READ — everything that has not been put away. */
+  readonly liveRoster = computed(() => this.roster().filter(row => !row.archived))
+
+  /** And what has been. Shown only when asked for; see `archiveOpen`. */
+  readonly filedRoster = computed(() => this.roster().filter(row => row.archived))
+
+  /** Is the archive showing in this window's flat list? Not persisted:
+   *  putting a conversation away is durable, wanting to look at what you put
+   *  away is something you are doing right now. */
+  readonly archiveOpen = signal(false)
+
+  /** PUT AWAY, NOT THROWN AWAY. Delete was the only thing you could do with a
+   *  conversation you were finished with, and it is the wrong verb for the
+   *  common case: you are done needing the thread, not done having said it.
+   *  Archiving keeps every turn and takes the row out of the list.
+   *
+   *  Same button both ways — un-archiving is this act with the flag flipped,
+   *  so there is no separate "restore" somewhere else to go and find. The
+   *  list is updated optimistically because this is a one-press act on a row
+   *  under the pointer; the refresh behind it corrects a write that failed.
+   *
+   *  Archiving the conversation you are IN leaves you in it: it is still
+   *  open, still readable, still where what you type goes. What changed is
+   *  where it sits in the list. */
+  async archive(convoId: string, archived: boolean, event?: MouseEvent): Promise<void> {
+    event?.stopPropagation()
+    // A row half-way through arming a DELETE must not silently keep that
+    // arming after a different button was pressed.
+    this.armed.set('')
+    this.conversations.update(list => list.map(convo =>
+      convo.convoId === convoId ? { ...convo, archived } : convo))
+    if (!archived && !this.filedRoster().length) this.archiveOpen.set(false)
+    await this.#threads()?.setConversationArchived?.(convoId, archived)
+    await this.#refreshList()
+  }
+
+  toggleArchive(): void { this.archiveOpen.update(open => !open) }
+
+  /** Is the conversation in hand put away? A fresh chat that has never been
+   *  listed is not — nothing has been said in it to file. */
+  readonly activeArchived = computed(() =>
+    !!this.conversations().find(convo => convo.convoId === this.activeId())?.archived)
+
+  /** ARCHIVE THE ONE YOU ARE READING. The per-row control in the list acts on
+   *  a conversation you are pointing at; this acts on the one in hand, which
+   *  is the common case — you finish with a thread while you are in it.
+   *
+   *  And then it MOVES ON. This is the one place where staying put would be
+   *  wrong: a press that files the conversation and leaves it on screen looks
+   *  like a press that did nothing. So the window lands on the next live
+   *  thread, or on a fresh chat when that was the last one — the same thing
+   *  deleting does, for the same reason.
+   *
+   *  Bringing one BACK does stay put: you navigated into it deliberately and
+   *  being thrown somewhere else for un-filing it is not what the press asks
+   *  for. */
+  async archiveCurrent(): Promise<void> {
+    const convoId = this.activeId()
+    if (!convoId) return
+    const filing = !this.activeArchived()
+    await this.archive(convoId, filing)
+    if (!filing) return
+
+    const next = this.conversations().find(convo => !convo.archived && convo.convoId !== convoId)
+    if (next) { await this.#load(next.convoId); await this.#restoreDraft(); this.#focus() }
+    else this.newChat()
+  }
+
+  /** Does the loaded essentials build know how to archive? A control that
+   *  cannot do anything is worse than one that is not there.
+   *
+   *  A method rather than a signal on purpose: the module registers itself
+   *  whenever it lands, so the honest answer is "ask at read time". Writing a
+   *  signal from `#threads()` — which the roster computed calls — would be a
+   *  write inside a computed, which Angular rightly refuses. */
+  canArchive(): boolean { return !!this.#threads()?.setConversationArchived }
 
   /** Deleting a thread destroys turns that cannot be dragged back, so the
    *  button ARMS on the first press and deletes on the second. A confirm
@@ -1108,9 +1227,12 @@ export class ChatWindowComponent implements OnDestroy {
   // So: peek. The transcript, the rail and the conversation bar fold away and
   // the panel stops taking pointer events, leaving the header (the shelf) and
   // the footer (the input) floating over the LIVE hive. Navigation is the
-  // hive's own — ordinary clicks walk, ctrl-click gathers onto the shelf —
+  // hive's own — an ordinary click walks in, and nothing about that changes,
   // because a second navigation grammar over the same hexagons is a second
-  // thing to learn for no gain.
+  // thing to learn for no gain. Putting a tile ON the shelf is a per-tile icon
+  // that arrives with the fold (assistant/chat-context-action.drone.ts); it
+  // could not be a chord, because ctrl-click on a hexagon is already the
+  // selection toggle.
   //
   // Peek is a state of the OPEN window, not a second shape: the conversation,
   // the draft and the shelf are all still there, and unfolding returns to
@@ -1124,7 +1246,16 @@ export class ChatWindowComponent implements OnDestroy {
     // Folding away closes the things that only make sense over a transcript.
     if (next) { this.clipboardOpen.set(false); this.listOpen.set(false) }
     this.#claimSurface(!next)
+    this.#announcePeek()
     if (!next) this.#focus()
+  }
+
+  /** WHO IS GATHERING. The hexagons grow a per-tile "add to the request"
+   *  icon while the window is folded away and lose it again when it comes
+   *  back (assistant/chat-context-action.drone.ts) — an affordance for a
+   *  shelf nobody can see would be an affordance for nothing. */
+  #announcePeek(): void {
+    EffectBus.emit('chat:peek', { peeking: this.visible() && this.peeking() })
   }
 
   /** THE SURFACE IS OWNED, and the owner is counted (ModeRegistry). A full
@@ -1231,6 +1362,19 @@ export class ChatWindowComponent implements OnDestroy {
       if (now) bring(now)
       else registry?.whenReady?.(key, value => bring(value as TilesRailFactoryLike))
     })
+
+    // A TILE PRESSED OUT IN THE HIVE. The hexagons carry the icon while the
+    // window is folded away; the window owns the shelf, so the press arrives
+    // here as a plain reference rather than the canvas reaching into it.
+    this.#cleanups.push(EffectBus.on<DroppedTile>(
+      'chat:add-context', payload => {
+        if (!payload?.path && !payload?.sig) return
+        this.toggleContext({
+          name: String(payload.name ?? ''),
+          path: String(payload.path ?? ''),
+          sig: String(payload.sig ?? ''),
+        })
+      }))
 
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
@@ -1576,6 +1720,7 @@ export class ChatWindowComponent implements OnDestroy {
     // Reopening always lands on the conversation, never folded away.
     this.peeking.set(false)
     this.#claimSurface(true)
+    this.#announcePeek()
     // Announce symmetrically with close() — the controls-bar launcher light
     // (and anything else watching) reads this state.
     EffectBus.emit('chat:window-state', { open: true })
@@ -1612,7 +1757,10 @@ export class ChatWindowComponent implements OnDestroy {
       // survive a close/reopen. (Guarding on turns.length here silently threw
       // that new chat away and landed back in the previous thread.)
       if (this.activeId()) return
-      const recent = conversations[0]
+      // AN ARCHIVED THREAD IS NEVER "where you were" — resuming into one
+      // would undo the act on the next reload. `latestTurns` skips them for
+      // the same reason, so the two agree about which thread this is.
+      const recent = conversations.find(convo => !convo.archived)
       if (recent) {
         this.activeId.set(recent.convoId)
         this.model.set(this.#rememberedModel(recent.convoId))
@@ -1629,7 +1777,7 @@ export class ChatWindowComponent implements OnDestroy {
     await this.#refreshList()
     this.#grandfather()
     if (this.activeId()) return
-    const recent = this.conversations()[0]
+    const recent = this.conversations().find(convo => !convo.archived)
     if (recent) await this.#load(recent.convoId)
     else this.newChat(false)
   }
@@ -1640,6 +1788,7 @@ export class ChatWindowComponent implements OnDestroy {
     rememberChatVisibility(false)
     this.peeking.set(false)
     this.#claimSurface(false)
+    this.#announcePeek()
     this.listOpen.set(false)
     this.armed.set('')
     // Closing the window is a real close: the sidebar's trail and subject go
@@ -1894,7 +2043,8 @@ export class ChatWindowComponent implements OnDestroy {
     await threads.deleteConversation(convoId)
     await this.#refreshList()
     if (this.activeId() === convoId) {
-      const next = this.conversations()[0]
+      // Never land in something that was put away — the same rule resume follows.
+      const next = this.conversations().find(convo => !convo.archived)
       if (next) { await this.#load(next.convoId); await this.#restoreDraft() }
       else this.newChat()
     }
