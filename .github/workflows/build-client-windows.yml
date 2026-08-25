@@ -14,8 +14,15 @@ on:
   workflow_dispatch:
   push:
     branches: [development, main]
+    # The frontend is baked into the binary at compile time, so frontend
+    # source IS client source — a shell/module change with no rebuild leaves
+    # the shipped exe silently stale (248 commits deep, once).
     paths:
       - 'src/hypercomb-client/**'
+      - 'src/hypercomb-core/**'
+      - 'src/hypercomb-essentials/**'
+      - 'src/hypercomb-shared/**'
+      - 'src/hypercomb-web/**'
       - '.github/workflows/build-client-windows.yml'
 
 concurrency:
