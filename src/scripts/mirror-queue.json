@@ -2137,6 +2137,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase3-shell-surface-host",
+      "title": "Mirror the Phase 3 shell-surface host unbinding",
+      "run": null,
+      "note": "hc-shell-surfaces is now a framework-free light-DOM custom element, and ShellSurfaceRegistry is element-only. The obsolete Angular component shape, @angular/core Type import, ViewContainerRef.createComponent path and ShellSurfacesComponent retired after the registry-fed panel census reached zero component registrations. Preserve the existing shell-surfaces architecture parts and update their source pointers rather than minting duplicates: registrations still reconcile keyed by name, DOM order still follows order ascending, survivors are moved rather than recreated, relocated/portaled nodes are not dragged back, and remove(name) tears the surface down. Both app shells now side-effect import shell-surfaces.element. An exact unit test and the live shrink gate prove add/order/stable-identity/remove; all functional checks pass, with only the already-known direct-dev-port @resource proxy 404s. Manual: note-add is additive and would double-land.",
+      "commit": "6318277d9",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
