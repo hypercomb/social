@@ -2077,6 +2077,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase3-small-chrome",
+      "title": "Mirror the Phase 3 small chrome unbinding",
+      "run": null,
+      "note": "The first Phase 3 slice converts mesh-header, sync-indicator, and upgrade-indicator from Angular components into framework-free custom elements in place. Web and dev now mount plain tags with no meshPublic/meshToggled bindings. Mesh membership arrives on mesh:public-changed; the safe private -> review -> host cycle stays inside the element; leaving exits through the existing mesh.togglePublic runtime command. Sync retains overlapping producer lanes, adoption priority, stale cleanup, and its completion flash. Upgrade retains update:available/update:status plus the hypercomb:apply-update and portal:open window contracts. The live gate now proves all three event contracts. Update existing behavior tiles and source pointers rather than creating duplicates. Manual: note-add is additive and would double-land.",
+      "commit": "dc5eb17c9",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
