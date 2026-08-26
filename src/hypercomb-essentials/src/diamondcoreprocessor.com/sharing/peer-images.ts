@@ -114,6 +114,30 @@ const candidatesFrom = (
   return [...byImage.values()]
 }
 
+/** Union candidate projections without losing publisher provenance. Root
+ * variants come first; a current-lineage witness is a compatibility source
+ * for participants that have not yet promoted that name to their root. */
+const mergeCandidates = (
+  ...bags: (readonly PeerImageCandidate[])[]
+): readonly PeerImageCandidate[] => {
+  const merged = new Map<string, PeerImageCandidate>()
+  for (const bag of bags) {
+    for (const candidate of bag) {
+      const key = candidateKey(candidate.props)
+      const existing = merged.get(key)
+      if (!existing) {
+        merged.set(key, { ...candidate, peers: [...candidate.peers] })
+        continue
+      }
+      const peers = existing.peers as { pubkey: string; label: string }[]
+      for (const peer of candidate.peers) {
+        if (!peers.some(p => p.pubkey === peer.pubkey)) peers.push(peer)
+      }
+    }
+  }
+  return [...merged.values()]
+}
+
 /**
  * Every distinct image the swarm is offering for `label` at the live
  * signature, freshest publisher first (the order `peerTilesAtSig` walks).
@@ -149,7 +173,16 @@ export const canonicalPeerImageCandidates = async (
     const rootSig = await drone.composeSigForSegments([])
     if (!rootSig) return []
     await drone.primePeerTilesAt?.(rootSig, { force: true })
-    return candidatesFrom(name, drone.peerTilesAtSig(rootSig), drone.labelFor)
+    const canonical = candidatesFrom(name, drone.peerTilesAtSig(rootSig), drone.labelFor)
+    // Compatibility witness: before every participant has migrated to the
+    // root standard, a peer may still publish the only copy of an image at the
+    // lineage currently in view. Pasting a local twin must not make that image
+    // disappear from the chooser. It joins the fixed-name view as a candidate;
+    // it never becomes the participant's selected root head automatically.
+    const live = drone.peerTilesAtCurrentSig
+      ? candidatesFrom(name, drone.peerTilesAtCurrentSig(), drone.labelFor)
+      : []
+    return mergeCandidates(canonical, live)
   } catch { return [] }
 }
 

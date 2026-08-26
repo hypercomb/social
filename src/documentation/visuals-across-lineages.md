@@ -247,9 +247,12 @@ per-lineage copies of anything.
   reference service retains every imported same-name layer as a
   `canonical:variant` member of the fixed-name root pool. The Image Hive probes
   peer variants at the canonical root (not the current lineage), shows distinct
-  images with publisher provenance, and writes an explicit pick to the
-  participant root default. A materialized `imagePool` array remains optional;
-  it is not the source of truth.
+  images with publisher provenance, unions live-lineage witnesses for migration
+  compatibility, and writes an explicit pick to the participant root default.
+  The swarm tile-source carries `imageSig` into same-name participant stacks,
+  so pasting a local twin cannot repaint a peer variant with the pasted image.
+  A materialized `imagePool` array remains optional; it is not the source of
+  truth.
 
 ## Guardrails
 

@@ -123,7 +123,9 @@ describe('peer image candidates', () => {
     const found = await canonicalPeerImageCandidates('tile')
     expect(calls[0]).toEqual([])
     expect(calls[1]).toEqual({ sig: 'f'.repeat(64), force: true })
-    expect(found.map(candidate => candidate.previewSig)).toEqual([POINT])
+    // Root is authoritative, but the live-lineage image remains visible as a
+    // compatibility candidate. A newly pasted local twin must not stomp it.
+    expect(found.map(candidate => candidate.previewSig)).toEqual([POINT, OTHER])
     expect(found[0].peers).toEqual([{ pubkey: 'root-peer', label: 'root publisher' }])
   })
 

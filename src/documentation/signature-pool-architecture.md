@@ -109,6 +109,15 @@ are fetched only for preview/selection and verified by signature. Choosing an
 image is one normal, undoable root revision; every ordinary reference inherits
 the new default dynamically.
 
+Pasting or adopting a same-name item is **arrival, not selection**. In a live
+swarm it adds the participant's local head to the existing participant stack;
+every peer head and its `imageSig` remain independently addressable. The
+current-lineage peer projection is also unioned into the Image Hive as a
+compatibility witness while older participants migrate to canonical roots.
+Nothing on paste writes another participant's head, and nothing automatically
+changes an existing local root default. Only the explicit image-choice gesture
+does.
+
 A lineage may need a special face because its contextual meaning differs. The
 standard reserves that as an **appearance-local visual decoration/override**,
 explicitly attached to that reference leaf. No separate writer/UI for this
