@@ -1,4 +1,5 @@
-// hypercomb-shared/core/trust-service.ts
+// trust-service.ts (moved down from hypercomb-shared in the
+// everything-is-a-beehavior Phase 1 — contract in core trust.types.ts)
 //
 // Trust gate for activating adopted code. The doctrine:
 //
@@ -20,21 +21,14 @@
 // Community-trusted domains skip the prompt entirely — the operator has
 // already vouched for them.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, TRUST_SERVICE_KEY, type TrustDecision, type TrustCheckRequest, type TrustProvider } from '@hypercomb/core'
 
 const COMMUNITY_KEY = 'hc:community:domains'
 
-export type TrustDecision = {
-  allow: boolean
-  addToCommunity: boolean
-}
+// Canonical TrustDecision / TrustCheckRequest live in core (trust.types.ts).
+export type { TrustDecision, TrustCheckRequest } from '@hypercomb/core'
 
-export type TrustCheckRequest = {
-  domains: string[]
-  onResult: (decision: TrustDecision) => void
-}
-
-export class TrustService extends EventTarget {
+export class TrustService extends EventTarget implements TrustProvider {
 
   /** Read the operator's trusted-community domain list (JSON array in
    *  localStorage). Returns a Set of normalized hosts. */
@@ -130,4 +124,12 @@ export class TrustService extends EventTarget {
   }
 }
 
-register('@hypercomb.social/TrustService', new TrustService())
+export const trustService = new TrustService()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureTrustServiceRegistered = (): void => {
+  if (!window.ioc?.has?.(TRUST_SERVICE_KEY)) {
+    window.ioc?.register?.(TRUST_SERVICE_KEY, trustService)
+  }
+}
+ensureTrustServiceRegistered()

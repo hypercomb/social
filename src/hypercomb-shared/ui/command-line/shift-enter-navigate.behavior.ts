@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/command-line/shift-enter-navigate.behavior.ts
 
 import type { CommandLineBehavior } from './command-line-behavior'
-import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
+import type { CompletionUtility } from '@hypercomb/core'
 import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
 

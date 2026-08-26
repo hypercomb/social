@@ -2,7 +2,7 @@
 // hypercomb-web/src/bootstrap/bootstrap-history.ts
 
 import { EffectBus } from '@hypercomb/core'
-import { CompletionUtility } from './completion-utility'
+import { CompletionUtility } from '@hypercomb/core'
 
 type BootstrapStep = {
   index: number

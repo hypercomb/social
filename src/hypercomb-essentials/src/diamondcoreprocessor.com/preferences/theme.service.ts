@@ -1,4 +1,6 @@
-// hypercomb-shared/core/theme.service.ts
+// theme.service.ts (moved down from hypercomb-shared in the
+// everything-is-a-beehavior Phase 1 — its contract, ThemeProvider +
+// THEME_IOC_KEY, always lived in core)
 //
 // Runtime theming service. Extends EventTarget so Angular components can bridge
 // to signals via fromRuntime(). Bees/queens resolve via window.ioc.get(THEME_IOC_KEY).
@@ -137,4 +139,12 @@ export class ThemeService extends EventTarget implements ThemeProvider {
   }
 }
 
-register(THEME_IOC_KEY, new ThemeService())
+export const themeService = new ThemeService()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureThemeServiceRegistered = (): void => {
+  if (!window.ioc?.has?.(THEME_IOC_KEY)) {
+    window.ioc?.register?.(THEME_IOC_KEY, themeService)
+  }
+}
+ensureThemeServiceRegistered()

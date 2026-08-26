@@ -3,7 +3,6 @@ import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
-import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
 import { buildRevisionName } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
@@ -304,7 +303,9 @@ export class App implements AfterViewInit {
         if (c.startsWith('hc-view-')) document.body.classList.remove(c)
       }
       document.body.classList.add(`hc-view-${m}`)
-      if (isTransientMode(m)) document.body.classList.add('hc-view-covered')
+      const vm = (window as unknown as { ioc?: { get?: <T>(k: string) => T | undefined } })
+        .ioc?.get?.<{ isTransient?: (mode: string) => boolean }>('@hypercomb.social/ViewMode')
+      if (vm?.isTransient?.(m)) document.body.classList.add('hc-view-covered')
     })
 
     console.log('[app] initialized')

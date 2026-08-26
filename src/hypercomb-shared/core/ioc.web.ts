@@ -1,6 +1,6 @@
 // hypercomb-shared/core/ioc.web.ts
 
-import { ensureIconProviderRegistryRegistered } from '@hypercomb/core'
+import { ensureIconProviderRegistryRegistered, ensureCompletionUtilityRegistered } from '@hypercomb/core'
 
 const instances = new Map<string, unknown>()
 const listeners: Array<(key: string, value: unknown) => void> = []
@@ -124,4 +124,5 @@ if (!window.ioc) {
   // nothing (the llm-provider-registry lesson). Re-assert them into the map
   // that every bee will actually see.
   ensureIconProviderRegistryRegistered()
+  ensureCompletionUtilityRegistered()
 }

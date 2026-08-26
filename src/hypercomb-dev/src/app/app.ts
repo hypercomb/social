@@ -5,7 +5,7 @@ import {
   type HexOrientation,
 } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
-import { CommandLineComponent, isTransientMode } from '@hypercomb/shared';
+import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent, SyncIndicatorComponent, UpgradeIndicatorComponent } from '@hypercomb/shared/ui';
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
@@ -136,7 +136,8 @@ export class App implements AfterViewInit {
         if (c.startsWith('hc-view-')) document.body.classList.remove(c)
       }
       document.body.classList.add(`hc-view-${m}`)
-      if (isTransientMode(m)) document.body.classList.add('hc-view-covered')
+      const vm = window.ioc?.get?.<{ isTransient?: (mode: string) => boolean }>('@hypercomb.social/ViewMode')
+      if (vm?.isTransient?.(m)) document.body.classList.add('hc-view-covered')
     })
 
     // ─── Return to the hive on adopt complete ──────────────────────────

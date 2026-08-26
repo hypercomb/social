@@ -1,7 +1,7 @@
 // hypercomb-shared/core/navigation.ts
 
 import { hypercomb } from '@hypercomb/core'
-import { CompletionUtility } from '../core/completion-utility'
+import { CompletionUtility } from '@hypercomb/core'
 
 // global get/register/list available via ioc.web.ts
 

@@ -8,6 +8,8 @@ import './tag-registry.js'
 // The launch-group cluster (registry, mixed bag, aggregation layer, built-in
 // groups) rides this bundle too — launch-groups pulls the whole chain.
 import '../groups/launch-groups.js'
+import './view-mode.service.js'
+import './resource-completion.service.js'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'

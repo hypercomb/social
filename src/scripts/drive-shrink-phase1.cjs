@@ -51,6 +51,11 @@ const MOVED_KEYS = [
   '@hypercomb.social/GroupLauncher',
   '@hypercomb.social/AggregationLayer',
   '@hypercomb.social/IconProviderRegistry',  // now a CORE primitive
+  '@hypercomb.social/CompletionUtility',     // now a CORE utility
+  '@hypercomb.social/ViewMode',
+  '@hypercomb.social/Theme',
+  '@hypercomb.social/TrustService',
+  '@hypercomb.social/ResourceCompletionService',
 ]
 
 /** Value-announce effects that must sit in last-value replay after boot. */

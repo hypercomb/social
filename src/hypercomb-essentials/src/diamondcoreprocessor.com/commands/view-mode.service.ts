@@ -1,4 +1,7 @@
-// hypercomb-shared/core/view-mode.service.ts
+// view-mode.service.ts (moved down from hypercomb-shared in the
+// everything-is-a-beehavior Phase 1 — contract in core view-mode.types.ts;
+// living beside the visual-bee registry now, the TRANSIENT_MODES list could
+// be DERIVED from registered views instead of hand-maintained — follow-up).
 //
 // ViewMode — the active presentation surface. Mutually exclusive,
 // open-ended: any drone or component can activate when the mode matches
@@ -19,9 +22,10 @@
 // Persistence: in-memory for fast reads + localStorage for refresh
 // survival. Default 'hexagons'.
 
-/** A view-mode is just a string — unlimited modes, mutual exclusion by
- *  "only one is active." Concrete modes are conventional, not enforced. */
-export type ViewMode = string
+import { VIEW_MODE_KEY, type ViewMode, type ViewModeProvider } from '@hypercomb/core'
+
+// Canonical ViewMode type lives in core; re-exported for module-side users.
+export type { ViewMode } from '@hypercomb/core'
 
 const STORAGE_KEY = 'hc:view-mode'
 const DEFAULT_MODE: ViewMode = 'hexagons'
@@ -68,7 +72,7 @@ export function isTransientMode(mode: ViewMode): boolean {
   return TRANSIENT_MODES.has(mode)
 }
 
-export class ViewModeService extends EventTarget {
+export class ViewModeService extends EventTarget implements ViewModeProvider {
   #mode: ViewMode
   #previous: ViewMode
 
@@ -132,6 +136,10 @@ export class ViewModeService extends EventTarget {
     this.dispatchEvent(new CustomEvent('change', { detail: { mode: cleaned, previous: this.#previous } }))
   }
 
+  /** Instance-side transient check — the shells key body.hc-view-covered on
+   *  this, so no shell carries a copy of the set. */
+  isTransient(mode: ViewMode): boolean { return isTransientMode(mode) }
+
   /** Convenience toggle between two modes (default: hexagons ⇄ website). */
   toggle(a: ViewMode = 'hexagons', b: ViewMode = 'website'): ViewMode {
     const next = this.#mode === a ? b : a
@@ -140,5 +148,12 @@ export class ViewModeService extends EventTarget {
   }
 }
 
-// Self-register at module load — same pattern as Lineage / Store / SecretStore.
-register('@hypercomb.social/ViewMode', new ViewModeService())
+export const viewModeService = new ViewModeService()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureViewModeRegistered = (): void => {
+  if (!window.ioc?.has?.(VIEW_MODE_KEY)) {
+    window.ioc?.register?.(VIEW_MODE_KEY, viewModeService)
+  }
+}
+ensureViewModeRegistered()

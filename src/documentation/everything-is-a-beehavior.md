@@ -244,10 +244,16 @@ events; the census ratchet line is deleted in the same commit.
   kernel seam). `proximity-registry` RE-SCOPED: import-wired
   into runtime-initializer's warm handler and never IoC-registered — it
   moves with the boot machinery (Phase 4), not as census debt.
-- [ ] Services: `theme.service`, `view-mode.service`, `trust-service`,
-  `usage-tracker`, `movement.service`, `voice-input.service`,
-  `cell-suggestion.provider` + `completion-utility` +
-  `resource-completion.service` + `suggestion-provider`, `icon-edit.service`
+- [ ] Services: ~~`theme.service`~~ ✓ (→ `preferences/`),
+  ~~`view-mode.service`~~ ✓ (→ `commands/` beside the visual-bee registry;
+  `isTransientMode` became a PROVIDER METHOD so no shell carries the
+  transient set — both shells now ask the instance), ~~`trust-service`~~ ✓
+  (→ `sharing/`), ~~`completion-utility`~~ ✓ (pure normalize — went to CORE,
+  kernel-seam re-assert), ~~`resource-completion.service`~~ ✓ (→
+  `commands/`); STILL OWED: `usage-tracker`, `movement.service`,
+  `voice-input.service`, `cell-suggestion.provider` + `suggestion-provider`,
+  `icon-edit.service` (the controls-bar/command-line announce cluster —
+  fromRuntime bindings + a static `VoiceInputService.supported()` to unpick)
 - [ ] `navigation.ts` (275)
 - [ ] Heavyweights: `lineage.ts` (485 — 184 call sites but key-addressed, so
   it is a move, not a refactor; its `synchronize` listener moves with it).

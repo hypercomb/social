@@ -13,7 +13,7 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import type { TrustCheckRequest, TrustDecision } from '../../core/trust-service'
+import type { TrustCheckRequest, TrustDecision } from '@hypercomb/core'
 
 @Component({
   selector: 'hc-trust-prompt',

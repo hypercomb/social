@@ -1,4 +1,4 @@
-// hypercomb-shared/core/theme.service.spec.ts
+// diamondcoreprocessor.com/preferences/theme.service.spec.ts (moved with the service)
 //
 // Guards the one drift the hive cannot notice on its own. An embedded website
 // page writes `<html data-theme>` DIRECTLY — its pre-paint script and its

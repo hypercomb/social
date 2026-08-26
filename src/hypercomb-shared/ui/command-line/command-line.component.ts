@@ -9,7 +9,7 @@ import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
-import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
+import type { CompletionUtility, CompletionContext } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 // Folder-based tag persistence retired. TagOp type is local-only now.
 type TagOp = { label: string; tag: string; color?: string; remove: boolean }
@@ -4997,7 +4997,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return 'operation'
   }
 
-  #parseSelectContext(v: string): import('@hypercomb/shared/core/completion-utility').CompletionContext {
+  #parseSelectContext(v: string): import('@hypercomb/core').CompletionContext {
     const bracketOpen = v.indexOf('[')
     const bracketClose = v.indexOf(']')
     const phase = this.#deriveSelectPhase(v)
