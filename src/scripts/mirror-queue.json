@@ -1728,6 +1728,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-icon-provider-registry-to-core",
+      "title": "Mirror Phase 1: tile-icon-provider-registry promoted to CORE (kernel primitive; both shell boot anchors deleted; ioc.web re-asserts kernel registries) — tile on the shrink-campaign collection",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

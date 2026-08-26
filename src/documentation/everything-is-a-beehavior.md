@@ -235,9 +235,13 @@ events; the census ratchet line is deleted in the same commit.
   `websites-pool`~~ ✓ (the whole launch-group cluster → `groups/` as ONE
   pass, ten files; contracts in core group-launcher.types.ts; registry
   announces `groups:changed`, aggregation layer registers as
-  `@hypercomb.social/AggregationLayer`); `tile-icon-provider-registry`
-  (boot-anchored in web `core-adapter.ts` and dev `main.ts` — remove both
-  anchors in the same pass). `proximity-registry` RE-SCOPED: import-wired
+  `@hypercomb.social/AggregationLayer`); ~~`tile-icon-provider-registry`~~ ✓
+  — went to CORE (providers add() at construction with plain lookups, so it
+  must precede every bee in every order: a kernel primitive beside
+  pool-registry). Both shell boot anchors deleted; `ioc.web` re-asserts
+  kernel registries right after installing the map (core can evaluate before
+  the map exists — the llm-provider-registry lesson, now handled at the
+  kernel seam). `proximity-registry` RE-SCOPED: import-wired
   into runtime-initializer's warm handler and never IoC-registered — it
   moves with the boot machinery (Phase 4), not as census debt.
 - [ ] Services: `theme.service`, `view-mode.service`, `trust-service`,

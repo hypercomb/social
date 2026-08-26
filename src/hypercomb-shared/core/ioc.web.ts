@@ -1,5 +1,7 @@
 // hypercomb-shared/core/ioc.web.ts
 
+import { ensureIconProviderRegistryRegistered } from '@hypercomb/core'
+
 const instances = new Map<string, unknown>()
 const listeners: Array<(key: string, value: unknown) => void> = []
 const pendingReady = new Map<string, Set<(value: unknown) => void>>()
@@ -116,4 +118,10 @@ if (!window.ioc) {
   ;(window as any).list = window.ioc.list
 
   console.log('[hypercomb] ioc installed')
+
+  // Kernel registries live in core, whose modules may have evaluated BEFORE
+  // this map existed — their module-scope registrations then landed on
+  // nothing (the llm-provider-registry lesson). Re-assert them into the map
+  // that every bee will actually see.
+  ensureIconProviderRegistryRegistered()
 }

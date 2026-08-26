@@ -1,6 +1,13 @@
-// hypercomb-shared/core/tile-icon-provider-registry.ts
+// tile-icon-provider-registry.ts
 //
-// Shell-side registry for tile-overlay icons contributed by individual drones.
+// Registry for tile-overlay icons contributed by individual drones.
+//
+// Moved to CORE in the everything-is-a-beehavior Phase 1: providers call
+// add() at CONSTRUCTION time with a plain (not whenReady) lookup, so the
+// registry must exist before ANY bee in ANY load order — which is the
+// definition of a kernel primitive (pool-registry and edge-registry are its
+// siblings). Core loads before every module in both shells, so the old shell
+// boot anchors (web core-adapter's `_` array, dev main's `void`) are gone.
 //
 // Pattern: a drone that wants to show a tile icon does NOT touch the
 // presentation layer. It calls IconProviderRegistry.add() at construction
@@ -92,4 +99,18 @@ export class IconProviderRegistry extends EventTarget {
   }
 }
 
-register('@hypercomb.social/IconProviderRegistry', new IconProviderRegistry())
+export const ICON_PROVIDER_REGISTRY_KEY = '@hypercomb.social/IconProviderRegistry'
+
+export const iconProviderRegistry = new IconProviderRegistry()
+
+/** Register into the live IoC map when one exists (core also runs in node
+ *  contexts — CLI, SDK — where there is no window and no ioc). */
+export const ensureIconProviderRegistryRegistered = (): void => {
+  const ioc = (globalThis as unknown as {
+    ioc?: { has?: (k: string) => boolean; register?: (k: string, v: unknown) => void }
+  }).ioc
+  if (!ioc?.has?.(ICON_PROVIDER_REGISTRY_KEY)) {
+    ioc?.register?.(ICON_PROVIDER_REGISTRY_KEY, iconProviderRegistry)
+  }
+}
+ensureIconProviderRegistryRegistered()

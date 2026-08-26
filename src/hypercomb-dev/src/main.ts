@@ -49,7 +49,6 @@ import { Store } from '@hypercomb/shared'
 import {
   initializeRuntime,
   DroneRegistry,
-  IconProviderRegistry,
   protectOriginStorage,
 } from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
@@ -60,7 +59,6 @@ import { App } from './app/app'
 // keep this as a value-use so the module can't be elided
 void Store
 void DroneRegistry
-void IconProviderRegistry
 
 /**
  * Register the same service worker prod uses. It serves
