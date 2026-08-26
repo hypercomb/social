@@ -227,7 +227,7 @@ events; the census ratchet line is deleted in the same commit.
   existing `portals:recent-changed`). One deliberate exception:
   `pinned-entrances.store` goes with Phase 2 (never IoC-registered, one
   component consumer — store + component move together as a custom element).
-- [ ] Registries: ~~`bouquet-registry`~~ ✓, ~~`name-registry`~~ ✓,
+- [x] Registries — ALL ACCOUNTED FOR: ~~`bouquet-registry`~~ ✓, ~~`name-registry`~~ ✓,
   ~~`tag-registry`~~ ✓ (all three → `commands/`, ride slash-behaviour.drone;
   tag-registry now warms ITSELF on module load — the shell's ngAfterViewInit
   warm call is gone, and `tags:registry` replay fills the intellisense),
