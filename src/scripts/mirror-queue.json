@@ -2087,6 +2087,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase3-edit-actions",
+      "title": "Mirror the Phase 3 edit-actions unbinding",
+      "run": null,
+      "note": "hc-edit-actions is now a framework-free custom element with no app-template visibility binding. It subscribes directly to history:cursor-changed, selection:changed, render:set-orientation, view:active, and feedback:panel-state; clicks retain the existing keymap:invoke, controls:action, and feedback:toggle contracts. The merge/save path still promotes the rewound layer, reloads the cursor, drains the push queue, and asks the sentinel bridge to save a branch when available. Update the existing edit-actions behavior/source pointer rather than minting a duplicate. Manual: note-add is additive and would double-land.",
+      "commit": "2226682bd",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
