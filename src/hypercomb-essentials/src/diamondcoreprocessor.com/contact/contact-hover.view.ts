@@ -21,9 +21,8 @@
 // book, and an × that detaches that one card from the tile.
 //
 // THE PIN STACK CAME WITH IT. The Angular component composed
-// `PinnableHoverBase` (shared/ui/pinnable) — an @Directive, and `pinnable` is
-// still on the Phase 2 "gate first" list, so there is no framework-free
-// primitive to lean on yet. The stack THIS surface uses is inlined below, with
+// the former `PinnableHoverBase` Angular directive. The base is now retired;
+// the stack THIS surface uses remains inlined below, with
 // the subclass's overrides folded in as constants rather than overridable
 // getters (the pheromone-tiles.view.ts precedent, which inlined the same base):
 //

@@ -212,6 +212,42 @@ async function main() {
   check('converted chrome: pinned entrance adds and drag-off removes at the same level',
     pinRoundTrip.added && pinRoundTrip.removed, JSON.stringify(pinRoundTrip))
 
+  const hintRoundTrip = await page.evaluate(() => {
+    const hint = document.querySelector('hc-hint-bar')
+    if (!hint) return { defined: false, mounted: false, rendered: false, picked: '' }
+    const previous = {
+      items: hint.items,
+      filter: hint.filter,
+      chosen: hint.chosen,
+      colorMap: hint.colorMap,
+    }
+    let picked = ''
+    hint.addEventListener('pick', event => { picked = event.detail }, { once: true })
+    hint.items = ['glacier', 'ember']
+    hint.filter = 'gl'
+    hint.chosen = new Set(['ember'])
+    hint.colorMap = new Map([['glacier', 'rgb(1, 2, 3)']])
+    const buttons = [...hint.querySelectorAll('button')]
+    const rendered = buttons.length === 2
+      && buttons[0].classList.contains('hint-matched')
+      && !!buttons[0].querySelector('.hint-dot')
+      && buttons[1].classList.contains('hint-chosen')
+    buttons[0]?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    hint.items = previous.items
+    hint.filter = previous.filter
+    hint.chosen = previous.chosen
+    hint.colorMap = previous.colorMap
+    return {
+      defined: !!customElements.get('hc-hint-bar'),
+      mounted: true,
+      rendered,
+      picked,
+    }
+  })
+  check('converted chrome: hint-bar property binding and pick event round-trip',
+    hintRoundTrip.defined && hintRoundTrip.mounted && hintRoundTrip.rendered && hintRoundTrip.picked === 'glacier',
+    JSON.stringify(hintRoundTrip))
+
   // host-panel is deliberately native-only. Its module must still define the
   // custom element in the web build, but the registry gate must keep it out of
   // the DOM when Tauri is absent.

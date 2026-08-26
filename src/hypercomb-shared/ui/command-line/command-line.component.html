@@ -95,5 +95,5 @@
   [filter]="hintFilter()"
   [chosen]="hintChosen()"
   [colorMap]="accentColorMap()"
-  (pick)="onHintPick($event)"
+  (pick)="onHintPick($any($event).detail)"
 />

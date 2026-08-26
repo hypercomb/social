@@ -19,8 +19,8 @@
 // pills, its category, and what it's used for. Nothing else.
 //
 // THE BASE CAME WITH IT. The Angular component was three lines of subclass
-// over `PinnableHoverBase` — an @Directive that cannot cross into module land
-// (no Angular imports, ever). So the base's stack is inlined here, in the ONE
+// over the former `PinnableHoverBase` Angular directive. The retired base's
+// stack is inlined here, in the ONE
 // shape this feature actually uses:
 //
 //   • ns 'action', position store `hc:action-card-pins-pos`, panel width 300

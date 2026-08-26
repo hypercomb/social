@@ -16,9 +16,9 @@
 // essentials. A primitive both kits need is what core is for. No imports
 // at all, so it costs either bundle nothing but its bytes.
 //
-// Second instance of this shape: file-icons.ts moved down for exactly the
-// same reason one batch earlier. The tell is that the build breaks on the
-// STAYING component's import, never on the port.
+// This remains the live instance of the two-consumer rule. The earlier
+// file-icons example moved back beside files-viewer once its second consumer
+// proved unreachable and retired.
 
 // everything-is-a-beehavior Phase 2 pass that turned the notes reader into a
 // framework-free custom element. Byte-identical logic; only the header

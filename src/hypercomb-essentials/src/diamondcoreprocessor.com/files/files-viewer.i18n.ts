@@ -5,14 +5,6 @@
 // panel registers them under the 'app' namespace at load, so every key
 // resolves exactly as before. The spec beside this file is the drift check.
 //
-// SHARED, and therefore DUPLICATED rather than moved — these keys are also
-// rendered by something that stays in the shell, so they are carried here
-// AND left where they were. A surface must carry everything it renders,
-// and so must the one that did not move; registerTranslations merges, so
-// the duplicate composes harmlessly:
-//   files.close
-//   files.empty
-
 export const FILES_VIEWER_TRANSLATIONS: Record<string, Record<string, string>> = {
   "ar": {
     "files.all": "الكل",

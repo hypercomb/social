@@ -70,13 +70,12 @@ import {
 } from '@hypercomb/core'
 import { DockedPanelElement } from '../panels/docked-panel.element.js'
 import { FILES_VIEWER_TRANSLATIONS } from './files-viewer.i18n.js'
-// The type taxonomy lives in CORE, not beside this panel: file-teaser is
-// still an Angular component in shared and renders the same table, and shared
-// may never import essentials. A primitive both kits need belongs to core.
+// The teaser's dead shell contract retired, so this table is local again:
+// one consumer means one owner beside the view that renders it.
 import {
   categorize, typeMeta, TYPE_META, TYPE_ORDER,
   type FileTypeKey, type FileTypeMeta,
-} from '@hypercomb/core'
+} from './file-icons.js'
 
 const SURFACE_NAME = 'hc-files-viewer'
 
@@ -146,7 +145,7 @@ const REACH_HINT: Record<Reach, string> = {
 }
 
 /** English fallbacks for the OTHER runtime-built key — a type's `labelKey`,
- *  read out of TYPE_META, so eleven `files.type.*` keys reach `t()` from two
+ *  read out of TYPE_META, so eleven `files.type.*` keys reach `t()` from the
  *  call sites (the filter chip's tooltip, the row icon's aria-label) with no
  *  literal anywhere for a harvest to find. The wording is en.json's, not
  *  `meta.short`: "Documents", not "DOC". */

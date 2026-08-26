@@ -4,10 +4,6 @@
 // module-carried catalog must not inherit that. This pins the exact key set
 // and its presence in every locale.
 //
-// `files.close` and `files.empty` are SHARED with file-teaser, which stays in
-// the shell — so they are carried here AND left there. A surface must carry
-// everything it renders, and so must the one that did not move.
-//
 // The eleven `files.type.*` keys are not rendered by the view at all: they sit
 // in file-icons.ts as a table of `labelKey`s and the view resolves
 // `t(icon.labelKey)`. A key does not have to appear inside a t() call in the

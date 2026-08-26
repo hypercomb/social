@@ -23,11 +23,10 @@
 // the press meant for the hive — so the pin moved onto the card.
 //
 // THE PIN STACK CAME WITH IT. The Angular component composed
-// `PinnableHoverBase` (shared/ui/pinnable) — the hover-peek → click-to-pin →
-// drag stack the contact card also uses. That base is an Angular `@Directive`
-// in shared and `pinnable` is still on the Phase 2 "gate first" list, so there
-// is no framework-free primitive to lean on yet: the stack this ONE surface
-// actually uses is inlined below, with the base's own settings folded in as
+// the former `PinnableHoverBase` Angular directive — the hover-peek →
+// click-to-pin → drag stack the contact card also uses. The base is now
+// retired; the stack this ONE surface actually uses is inlined below, with
+// the base's own settings folded in as
 // constants rather than overridable getters —
 //
 //   ns              'pheromone'              → the four effect names

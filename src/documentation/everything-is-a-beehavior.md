@@ -305,7 +305,7 @@ from essentials in the same order band, done. The working proof is
 (672 LOC, zero Angular, registry `element:` shape), and 47 essentials files
 already build imperative DOM — the muscle exists.
 
-- [ ] **Gate first: framework-free panel primitives.** `docked-panel` (2,324),
+- [x] **Gate first: framework-free panel primitives.** `docked-panel` (2,324),
   `pinnable`, `dock-inset`, `hint-bar`, `icon`, `widget-zoom` are Angular
   components every panel leans on. Build custom-element equivalents that
   preserve the docked-panel contracts (sole writer of `--hc-panel-scale`,
@@ -316,9 +316,10 @@ already build imperative DOM — the muscle exists.
   an element, read a persisted scale and follow one effect. Now
   `attachWidgetZoom(el, id, anchor)` in core/panels; the Angular directive
   is the thin adapter over it, so both kits zoom through the SAME code and
-  the same persisted scale for the whole transition). Still Angular:
-  `pinnable`, `hint-bar`, `icon`.
-  Nothing else in this phase moves until this lands. Findings so far: the
+  the same persisted scale for the whole transition), ~~`hint-bar`~~ ✓ (now a
+  framework-free custom element embedded by command-line). ~~`pinnable`~~ and
+  ~~`icon`~~ retired after reachability proved their final consumers had
+  already moved or disappeared. Gate complete. Findings so far: the
   panel SUPPORT MODEL (panel-groups, panel-settings, dock-lanes,
   window-session/rule) is already pure TS — it moves to core so the Angular
   directive and the new element share ONE model during the transition (the
@@ -464,7 +465,7 @@ condition; do not re-derive it. And where Angular used `@if`, the element
 must genuinely leave the DOM (detach the node, keep the reference) — a
 surface that is merely `display:none` still answers `querySelector`, which
 is a DOM contract the feature's own acceptance driver may assert on.
-- [ ] Utility band: ~~`toast`~~, ~~`confirm-dialog`~~, ~~`trust-prompt`~~,
+- [x] Utility band: ~~`toast`~~, ~~`confirm-dialog`~~, ~~`trust-prompt`~~,
   ~~`action-card`~~ (→ `commands/`, beside its own drone),
   ~~`camera-capture`~~ (→ `editor/`, beside the image-drop drone — the other
   way a picture reaches a tile), ~~`format-painter`~~ (→ `editor/`, beside
@@ -472,26 +473,27 @@ is a DOM contract the feature's own acceptance driver may assert on.
   `presentation/tiles/`, beside the override store it writes through),
   ~~`shortcut-sheet`~~ (→ `commands/`, beside its own drone),
   ~~`activity-log`~~ (→ `history/`, the domain that owns what happened),
-  ~~`layer-cycle-strip`~~, `command-palette`,
+  ~~`layer-cycle-strip`~~, ~~`command-palette`~~,
   ~~`context-window`~~ (→ `commands/`, beside the queen that opens it — the
   first DOCKED panel of the campaign, on `DockedPanelElement`)
-- [ ] Viewer band: `files-viewer`, `observe-viewer`, `notes-viewer`,
+- [x] Viewer band: ~~`files-viewer`~~, ~~`observe-viewer`~~, ~~`notes-viewer`~~,
   ~~`youtube-viewer`~~ (→ `link/`, beside the link action that opens it),
-  `docs-overlay`, `pools-of-meaning` (NOT registry-fed — routed, with a
-  `pools-icon` sub-component; a different shape of conversion),
+  ~~`docs-overlay`~~, ~~`pools-of-meaning`~~ (its hover-card and `pools-icon`
+  lost their last mount when the controls-bar `/sets` entrance replaced them),
   ~~`pheromone-tiles`~~ (→ `pheromones/`, beside its own drone),
-  `example-hives`, ~~`presence-banner`~~ (→ `sharing/`, beside the drone
-  publishing the presence it names), `contact-card` (two registered
-  surfaces), `mesh-modal`, `rewind-window`, `atomizer-bar` (two registered
-  surfaces), `workflow-designer`
-- [ ] Heavy band — one campaign each: `clipboard-panel` (1,103), `portal`
-  (1,047), `publish-panel` (1,033), `tile-editor` (1,719), `feedback-viewer`
-  (1,920), `history-viewer` (2,274), `tags-viewer` (2,569), ~~`features-viewer`~~
-  (3,860), `aggregate-index` (3,942), ~~`chat-window`~~ (5,245), ~~`notes-strip`~~
+  ~~`example-hives`~~, ~~`presence-banner`~~ (→ `sharing/`, beside the drone
+  publishing the presence it names), ~~`contact-card`~~ (two registered
+  surfaces), ~~`mesh-modal`~~, ~~`rewind-window`~~, ~~`atomizer-bar`~~ (two
+  registered surfaces), ~~`workflow-designer`~~
+- [x] Heavy band — one campaign each: ~~`clipboard-panel`~~ (1,103), ~~`portal`~~
+  (1,047), ~~`publish-panel`~~ (1,033), ~~`tile-editor`~~ (1,719), ~~`feedback-viewer`~~
+  (1,920), ~~`history-viewer`~~ (2,274), ~~`tags-viewer`~~ (2,569), ~~`features-viewer`~~
+  (3,860), ~~`aggregate-index`~~ (3,942), ~~`chat-window`~~ (5,245), ~~`notes-strip`~~
   (7,672). The formerly omitted ~~`host-panel`~~ moved in the same final
   registry-fed batch. The shell-surfaces barrel is now empty: 42 → 0.
-- [ ] Non-barrel stragglers: `file-explorer` (1,137), ~~`pinned-entrances`~~
-  (513; now module-owned and embedded in command-line), `file-teaser` (223).
+- [x] Non-barrel stragglers: ~~`file-explorer`~~ (1,137; unreachable export),
+  ~~`pinned-entrances`~~ (513; now module-owned and embedded in command-line),
+  ~~`file-teaser`~~ (223; never mounted, and its request bus had no producer).
   ~~`history-component`~~ (54) was unreachable orphan code — no import, route,
   template tag or barrel export — and retired rather than preserving a dead UI.
 

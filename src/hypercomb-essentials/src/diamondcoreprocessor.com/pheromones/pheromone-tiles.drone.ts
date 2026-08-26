@@ -30,8 +30,8 @@
 //
 //   PEEK / REMOVE — hovering a pheromone-bearing tile shows the tile's keywords
 //     as a small draggable card of coloured chips, each with an ×. The card
-//     composes the shared hover-pin stack (`pheromone:*`, PinnableHoverBase)
-//     exactly like contact cards, and carries its OWN pin control. It used to be
+//     carries the same inlined hover-pin stack as contact cards and its OWN
+//     pin control. It used to be
 //     pinned by an on-tile `pheromones` icon on the hover band; the band no
 //     longer shows while this window is open (TileOverlayDrone stands it down —
 //     it covered this card and ate the press), so that icon had nowhere left to
@@ -423,7 +423,7 @@ export class PheromoneTilesDrone extends Drone {
    *  down on tile-exit therefore made it impossible to click a chip: it
    *  vanished on the way there. So leaving a tile does NOT dismiss it. Only a
    *  DIFFERENT pheromone-bearing tile replaces it; leaving the card itself is
-   *  what dismisses it (PinnableHoverBase's peek-leave), which is the gesture
+   *  what dismisses it (the card's peek-leave), which is the gesture
    *  that actually means "done with this". */
   #onHover(label: string | null): void {
     if (!this.#canHover()) { this.#hideHover(); return }
