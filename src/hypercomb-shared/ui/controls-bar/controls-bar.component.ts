@@ -33,7 +33,12 @@ import {
   type ZoneValueChange,
 } from '@hypercomb/core'
 import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
-import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
+import {
+  RECENT_PORTALS_KEY,
+  RECENT_PORTALS_CHANGED,
+  type RecentPortal,
+  type RecentPortalsProvider,
+} from '@hypercomb/core'
 import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
 import { isWindowShowing } from '../window-session'
 import { showHiveRoot } from '../../core/home-root'
@@ -1401,6 +1406,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#iconOverrideUnsub = EffectBus.on(ICON_OVERRIDE_CHANGED, this.#onIconOverride)
     this.#roomChangedUnsub = EffectBus.on<ZoneValueChange>(ROOM_CHANGED, ({ value }) => this.#room$.set(value ?? ''))
     this.#secretChangedUnsub = EffectBus.on<ZoneValueChange>(SECRET_CHANGED, ({ value }) => this.#secret$.set(value ?? ''))
+    this.#portalsChangedUnsub = EffectBus.on(RECENT_PORTALS_CHANGED, () => this.#portalsRev.update(v => v + 1))
 
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
@@ -1839,6 +1845,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#iconOverrideUnsub?.()
     this.#roomChangedUnsub?.()
     this.#secretChangedUnsub?.()
+    this.#portalsChangedUnsub?.()
     this.#clearIconPress()
     this.#detachListDrag()   // in case we're torn down mid drag-scroll
     if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)
@@ -1901,20 +1908,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // second one is a decision. The root is never stranded: the leading
   // breadcrumb crumb goes there, and it is the last row of that menu.
 
-  private get recentPortals(): RecentPortalsStore | undefined {
-    return get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
+  private get recentPortals(): RecentPortalsProvider | undefined {
+    return get(RECENT_PORTALS_KEY) as RecentPortalsProvider | undefined
   }
 
-  #portals$ = fromRuntime(
-    get('@hypercomb.social/RecentPortalsStore') as EventTarget,
-    () => this.recentPortals?.value ?? [],
-  )
+  // Instance-free reactivity: the store (essentials, tiles bundle) announces
+  // on EffectBus at construction and on every change — the rev re-triggers
+  // computeds that read the lazily resolved instance.
+  readonly #portalsRev = signal(0)
+  #portalsChangedUnsub: (() => void) | null = null
 
   /** The portal Home flies to — the one MARKED as home in the Portals
    *  toolwindow, or `undefined` while none is marked (Home means the hive root
    *  then, exactly as it always did). Never inferred from where you have been. */
   readonly homePortal = computed<RecentPortal | undefined>(
-    () => { this.#portals$(); return this.recentPortals?.home },
+    () => { this.#portalsRev(); return this.recentPortals?.home },
   )
 
   readonly isPinnedPortal = (entry: RecentPortal): boolean =>

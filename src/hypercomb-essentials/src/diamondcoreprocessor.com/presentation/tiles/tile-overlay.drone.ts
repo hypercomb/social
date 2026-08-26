@@ -3,6 +3,9 @@ import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18n
 import { Application, Container, Graphics, Point, Sprite, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { iconOverrides, ensureIconOverridesRegistered } from './icon-overrides.store.js'
+// The recent-portals store rides this bundle (its walk signal,
+// tile:navigate-reference, is emitted here) — ONE importer, dup-inlining rule.
+import './recent-portals.store.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'

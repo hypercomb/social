@@ -1692,6 +1692,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-recent-portals-down",
+      "title": "Mirror Phase 1 final leaf: recent-portals (HOME + the walked-portals list) moved to essentials presentation/tiles beside its emitter — tile on the shrink-campaign collection; leaf-store chip COMPLETE",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

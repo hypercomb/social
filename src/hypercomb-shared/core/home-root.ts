@@ -34,7 +34,7 @@
 // row calls it right before navigating — and it lapses the moment you walk
 // anywhere else, so the next arrival at `/` is home again.
 
-import type { RecentPortalsStore } from './recent-portals.store'
+import { RECENT_PORTALS_KEY, type RecentPortalsProvider } from '@hypercomb/core'
 
 /** True while the participant has deliberately asked for the bare root. Held
  *  rather than one-shot, so acting AT the root — anything that re-reads the
@@ -54,7 +54,7 @@ export const homeSubstituted = (address: readonly string[]): readonly string[] =
   if (address.length > 0) { holdingRoot = false; return address }
   if (holdingRoot) return address
 
-  const home = (get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined)?.home
+  const home = (get(RECENT_PORTALS_KEY) as RecentPortalsProvider | undefined)?.home
   // No home marked — the root means the root, exactly as it always did. A home
   // pointing AT the root is already satisfied and must not recurse.
   if (!home || home.segments.length === 0) return address

@@ -30,7 +30,7 @@
 import { ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import type { RecentPortalsStore } from '../../core/recent-portals.store'
+import { RECENT_PORTALS_KEY, type RecentPortalsProvider } from '@hypercomb/core'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
@@ -681,8 +681,8 @@ export class AggregateIndexComponent implements OnDestroy {
   // the mechanism would work anywhere, but a home that is a tag row or a search
   // hit is not a place you meant to keep.
 
-  private get portals(): RecentPortalsStore | undefined {
-    return get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
+  private get portals(): RecentPortalsProvider | undefined {
+    return get(RECENT_PORTALS_KEY) as RecentPortalsProvider | undefined
   }
 
   /** Whether this view's rows can be pinned as home. */

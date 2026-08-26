@@ -209,16 +209,18 @@ shared consumers switch to lazy `window.ioc?.get?.(KEY)` with the author
 default as fallback, and instance-free EffectBus subscriptions for change
 events; the census ratchet line is deleted in the same commit.
 
-- [ ] Leaf stores: ~~`icon-overrides.store`~~ ✓, ~~`room-store`~~ ✓,
-  ~~`secret-store`~~ ✓ (took the loopback dev-secret seed with it — boot
-  path shrank), ~~`secret-strength`~~ ✓, ~~`saved-locations-store`~~ ✓
-  (mesh quartet → `sharing/`, announced on EffectBus: `mesh:room-changed` /
+- [x] Leaf stores — ALL DOWN: ~~`icon-overrides.store`~~, ~~`room-store`~~,
+  ~~`secret-store`~~ (took the loopback dev-secret seed with it — boot path
+  shrank), ~~`secret-strength`~~, ~~`saved-locations-store`~~ (mesh quartet
+  → `sharing/`, announced on EffectBus: `mesh:room-changed` /
   `mesh:secret-changed` / `mesh:saved-locations-changed`),
-  ~~`note-marks.store`~~ ✓ (→ `notes/`, announces `notes:marks-changed`),
-  ~~`icon-pick`~~ ✓ (pure EffectBus sugar over core's own contract — went to
-  CORE, so modules share the helper), `recent-portals.store`,
-  `pinned-entrances.store` (deferred to Phase 2: never IoC-registered, one
-  component consumer — store + component move together as a custom element)
+  ~~`note-marks.store`~~ (→ `notes/`, announces `notes:marks-changed`),
+  ~~`icon-pick`~~ (pure EffectBus sugar over core's own contract — went to
+  CORE, so modules share the helper), ~~`recent-portals.store`~~ (→
+  `presentation/tiles/` beside its walk-signal emitter; rev-trigger via the
+  existing `portals:recent-changed`). One deliberate exception:
+  `pinned-entrances.store` goes with Phase 2 (never IoC-registered, one
+  component consumer — store + component move together as a custom element).
 - [ ] Registries: `tag-registry`, `bouquet-registry`, `name-registry`,
   `group-registry` + the group sources (`websites-group`, `help-group`,
   `games-group`, `launch-group*`), `tile-icon-provider-registry`,

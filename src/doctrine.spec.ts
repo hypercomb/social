@@ -241,7 +241,6 @@ describe('doctrine ratchets', () => {
       '@hypercomb.social/Navigation (hypercomb-shared/core/navigation.ts)',
       '@hypercomb.social/OpfsInstallFileSource (hypercomb-shared/core/layer-install-sources/opfs-install-file.source.ts)',
       '@hypercomb.social/OpfsTreeLogger (hypercomb-shared/core/tree-logger.ts)',
-      '@hypercomb.social/RecentPortalsStore (hypercomb-shared/core/recent-portals.store.ts)',
       '@hypercomb.social/RegistrySnapshot (hypercomb-shared/core/registry-snapshot.ts)',
       '@hypercomb.social/ResourceCompletionService (hypercomb-shared/core/resource-completion.service.ts)',
       '@hypercomb.social/ResourceMessageHandler (hypercomb-shared/core/resource-message-handler.ts)',

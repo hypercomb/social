@@ -1,6 +1,4 @@
-// hypercomb-shared/core/recent-portals.store.ts
-//
-// HOME, and the portals you have walked through.
+// recent-portals.store.ts — HOME, and the portals you have walked through.
 //
 // A portal is a reference tile: clicking it travels to another lineage. The
 // hive root stops being the place you keep landing back on and becomes what it
@@ -28,8 +26,18 @@
 // Jumping to one of those TRAVELS, it does not re-home — that is what the mark
 // is for. The hive root is always the last row, and the leading breadcrumb crumb
 // still goes there directly, so marking a portal never strands the root.
+//
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1,
+// beside the portal click's emitter (tile-overlay). Contract in core
+// (recent-portals.types.ts).
 
-import { EffectBus } from '@hypercomb/core'
+import {
+  EffectBus,
+  RECENT_PORTALS_KEY,
+  RECENT_PORTALS_CHANGED,
+  type RecentPortal,
+  type RecentPortalsProvider,
+} from '@hypercomb/core'
 
 const KEY = 'hc:recent-portals'
 /** The pinned home, if one has been chosen. Its own key — see #writePin. */
@@ -40,18 +48,9 @@ const PIN_KEY = 'hc:home-portal'
  *  down the tree is no slower than reading it. */
 const CAP = 8
 
-export interface RecentPortal {
-  /** The portal tile's name — what was clicked, and what the menu shows. */
-  readonly label: string
-  /** Where it led. `[]` is the hive root. */
-  readonly segments: readonly string[]
-  /** Epoch ms of the last walk through it. */
-  readonly at: number
-}
-
 const pathKey = (segments: readonly string[]): string => segments.join('/')
 
-export class RecentPortalsStore extends EventTarget {
+export class RecentPortalsStore extends EventTarget implements RecentPortalsProvider {
 
   #value: readonly RecentPortal[]
 
@@ -99,6 +98,7 @@ export class RecentPortalsStore extends EventTarget {
         this.record(payload.label ?? '', payload.target)
       },
     )
+    EffectBus.emit(RECENT_PORTALS_CHANGED, { count: this.#value.length })
   }
 
   /** Remember a portal walk. Re-walking one moves it to the front rather than
@@ -166,7 +166,7 @@ export class RecentPortalsStore extends EventTarget {
     this.#write(this.#value)
     this.#writePin(this.#pinned)
     this.dispatchEvent(new Event('change'))
-    EffectBus.emit('portals:recent-changed', { count: this.#value.length })
+    EffectBus.emit(RECENT_PORTALS_CHANGED, { count: this.#value.length })
   }
 
   #read = (): readonly RecentPortal[] => {
@@ -220,4 +220,12 @@ export class RecentPortalsStore extends EventTarget {
   }
 }
 
-register('@hypercomb.social/RecentPortalsStore', new RecentPortalsStore())
+export const recentPortalsStore = new RecentPortalsStore()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureRecentPortalsRegistered = (): void => {
+  if (!window.ioc?.has?.(RECENT_PORTALS_KEY)) {
+    window.ioc?.register?.(RECENT_PORTALS_KEY, recentPortalsStore)
+  }
+}
+ensureRecentPortalsRegistered()
