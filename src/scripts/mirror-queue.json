@@ -1791,6 +1791,24 @@
       "note": "The chat toggle moves off the controls bar's left rail onto the command line (command-shell.component.html chat-toggle-btn + its .on filled-glyph rule), and the keymap swaps two bare letters: 'a' now opens the assistant (chat.toggle, GLOBAL layer), and the arrangement cycle moved to 'l'/'L' (sequence.cycle/cyclePrev). Tiles 1:1 with source (+ default-keymap.spec.ts), notes carrying: (1) WHY THE BAR WAS THE WRONG HOME — that rail is how-you-SEE (fit, zoom, pin, fullscreen, orientation) and talking is not one of those; the control belongs on the box you type the question into, and the command-shell already had the wiring (chatPanelOpen/chatLabel/chatToggle) with nothing drawing it. (2) BARE LETTERS ARE THE SCARCEST THING IN THE KEYMAP — the quick-menu binding already notes c/x/a/b/k/p were taken; 'a' went to the assistant because it is what you reach for mid-thought, while the arrangement cycle is a view you set once and leave. (3) ONE WAY IN — the key dispatches through keymap:invoke and the chat window translates chat.toggle into the SAME branch as chat:toggle, so shortcut, icon and palette cannot drift apart. (4) NO SECOND OPENER LEFT BEHIND — the 'chat' registry entry, its left-rail exclusion, its isActive case, the #chatOpen signal, the chat:window-state subscription and the .rail-chat stylesheet all went with it; a customizable entry on a bar that no longer owns the act would be an opener in a place that says nothing about what it does. New i18n key in all 14 catalogs: keymap.chat; help-group lists chat.toggle as 'Assistant' under Beyond. note-add is additive — manual drain only.",
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "resting-bee-press-opens-the-talk",
+      "title": "Resting bee — a read-only log, and the way to the conversations",
+      "run": null,
+      "note": "A resting bee had no work-registry record, so agent:open returned in silence. The registry now has a RESTING LANE (rest/resting/find/isResting) beside the work lane — never in list(), so the stall watchdog never sees it — and the bee drone publishes its derivation there. The agent panel opens on either lane. A resting bee's panel is READ-ONLY: no composer, no stop, never full screen. It reads at rest / model / last spoken, the tile, what it is about, and THE LOG — the conversation's blurb (chat-blurb.ts: line + points + how far it read), which the orchestrator's sweep keeps current and which it can come past and read. The corner button, where a working agent has full screen, opens that tile's conversations (mat-sym 'forum' → chat:open). Mirror: note on the agent-bee behaviour tile in the behaviors mirror, write-if-absent. LOOK PASS: the bee's tooltip is three clipped lines — TILE NAME in white (the one bright thing), vendor·model in steel beside it, the state under it, the destination under that; the panel says the tile the same way (white chip) so the thing you pointed at and the thing you are reading are one thing. Head gained a hairline and stacks name over vendor (tier dropped when the name already says it); sections got their own rule; labels recede.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "dev-shell-closes-the-adopt-banner",
+      "title": "The dev shell finishes what it starts — the adopt banner gets a terminal status",
+      "run": null,
+      "note": "portal-overlay.component.ts:794 lights the header banner (phase:'applying', 'Adopting packages and website…') on every DCP accept, and ONLY a terminal update:status puts it out. Both terminal emits lived in hypercomb-web/src/main.ts, reached from that file's actions:available listener — and hypercomb-dev had NO actions:available listener at all. So on the dev shell the banner came on and no code in the shell could ever turn it off: dead text in the header, and because busy() gates the available-update branch the indicator could not announce another update until reload. The fold itself was always fine (SwarmAdoptDrone folds and answers with fold:receipt); nothing reported that it had. Dev now closes the ONE leg it has — it has no package leg, because dev imports its drones directly instead of installing into OPFS — subscribing to fold:receipt before the first await (a small fold can land immediately), completing straight away when contentChanges is 0, and reporting 'error' on the 60s timeout or an unavailable count. Mirror: note on the adopt/installer behaviour tile, write-if-absent. THE GENERAL SHAPE WORTH KEEPING: a shared component that turns a state ON must not assume the shell that turns it OFF exists — web owned both halves of a signal that shared code emits for both shells, and the shell without the other half showed a banner that could never end. note-add is additive — manual drain only.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
