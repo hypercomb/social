@@ -56,6 +56,11 @@ export interface LoungeRoomPayload {
   readonly label?: string
   /** This room's own glyph on the toggle strip. */
   readonly icon?: string
+  /** Which room the bundle boots into when it can build more than one —
+   *  the lounge bundle knows 'lounge' (default) and 'bar' (EL BAR, the shop).
+   *  A second room can be a second bundleSig OR the same bundle told to
+   *  stand a different world up; the record decides. */
+  readonly room?: string
 }
 
 /** The camera chips a frame offers when the record names none. The order is
@@ -118,6 +123,7 @@ interface LoungeConfig {
   fallback: string
   controls?: string
   art?: Record<string, string>
+  room?: string
 }
 
 type LoungeApi = {
@@ -169,9 +175,11 @@ export function mountLoungeRoom(host: HTMLElement, payload: LoungeRoomPayload): 
   const stage = document.createElement('div')
   stage.id = id
   stage.setAttribute('role', 'img')
-  stage.setAttribute('aria-label',
-    'A three-dimensional cigar lounge: a fire in the hearth, leather wingbacks, ' +
-    'framed art on the walls, a humidor cabinet, and a cigar going in the ashtray')
+  stage.setAttribute('aria-label', payload.room === 'bar'
+    ? 'A three-dimensional bar: a long counter with brass rail and stools, ' +
+      'shelves of bottles before a mirror, and a display case of goods for sale'
+    : 'A three-dimensional cigar lounge: a fire in the hearth, leather wingbacks, ' +
+      'framed art on the walls, a humidor cabinet, and a cigar going in the ashtray')
   stage.style.cssText = 'position:absolute;inset:0;overflow:hidden'
   // Without this the hive's wheel-zoom handler preventDefaults every wheel
   // event over the canvas and the room cannot be dollied.
@@ -202,6 +210,7 @@ export function mountLoungeRoom(host: HTMLElement, payload: LoungeRoomPayload): 
     mount: `#${id}`,
     fallback: `#${id}-fallback`,
     ...(Object.keys(art).length ? { art } : {}),
+    ...(payload.room ? { room: payload.room } : {}),
   }
 
   const script = document.createElement('script')

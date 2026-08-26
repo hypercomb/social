@@ -1742,6 +1742,14 @@
       "note": "scripts/mirror-behaviors-repair.ts shipped 2026-08-25 with no tile of its own. Owed: a cell beside the mirror toolchain (behaviors/appearance/behaviors-theme is the sibling) explaining write-if-absent repair — read state first, add only what is missing, never rewrite a children array (that is what ate the 81-part spread), appliesTo:[] so 74 tiles share ONE mark record. Also record the erosion itself: 15/74 tiles held their mark+note before the pass, 74/74 after. No mirror script written yet.",
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "el-bar-shop-room",
+      "title": "EL BAR — the shop room behind the lounge's bar picture (mirror pass, manual: note-add is additive)",
+      "run": null,
+      "note": "The bar beehavior: /revolucion/bar carries visual:lounge:room {room:'bar'} — same bundle, second world (atomic-target doctrine). The lounge's gallery wall hangs a clickable EL BAR print (pick 'bar') that walks you into the shop; the bar hangs a lounge print back. Displays derive from SHOP_ITEMS (store-items.ts: SALE + UPGRADE_ITEMS with 'of' targets + BAR_ITEMS); the buy plate spends the embers ledger; a lit upgrade stands where its base prop stood. Mirror owed: part tiles for scripts/lounge3d/lounge-3d.ts (buildBar), scripts/lounge3d/store-items.ts, hypercomb-essentials/src/revolucionstyle.com/lounge/lounge-room.ts (room passthrough), scripts/drive-el-bar.cjs (harness); a collection under behaviors; pheromone marks + notes. ALSO OWED: rerun 'npx tsx scripts/intel-build-revolucion-site.ts' (bridge write timed out — renderer down — so the new pages + /revolucion/bar records are NOT on the hive yet).",
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

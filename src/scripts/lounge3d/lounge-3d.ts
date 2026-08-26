@@ -36,13 +36,16 @@ import {
   dartCall, drawSideBet, legCall, quirkCalls, smokeCall, tallyFans, tallyOf,
   turnCall, type CallSpec,
 } from './darts-house.js'
-import { SLOT } from './store-items.js'
+import { SHOP_ITEMS, SLOT, type StoreItem } from './store-items.js'
 
 interface LoungeConfig {
   mount?: string
   fallback?: string
   controls?: string
   art?: Record<string, string | undefined>
+  /** which room to boot into: 'lounge' (default) or 'bar'. The bar is EL BAR
+   *  — the shop room the lounge's bar-door picture walks into. */
+  room?: string
 }
 
 declare global {
@@ -60,6 +63,17 @@ declare global {
       frame: () => void
       /** Current camera + orbit target, for tuning the presets above. */
       pose: () => { pos: number[]; target: number[] }
+      /** Walk through a door print: dispose the room you are in and build the
+       *  one you clicked. Fires `lounge3d:room` on the host when the new room
+       *  is standing. */
+      enterRoom: (name: string) => void
+      /** Which room is up right now — 'lounge' or 'bar'. */
+      roomName: () => string
+      /** EL BAR only: repaint a shop display's price card as YOURS (or back).
+       *  The ledger lives on the page; the room just wears its verdicts. */
+      setOwned: (id: string, owned: boolean) => void
+      /** EL BAR only: the embers balance chalked behind the counter. */
+      setPurse: (balance: number) => void
       ready: Promise<boolean>
     }
   }
@@ -572,6 +586,128 @@ const artMap: ArtPainter = (ctx, w, h) => {
 // pinned clickable picker on the right wall. Duplicates read as a bug.
 const ART_PAINTERS: ArtPainter[] = [artCigarBand, artLeaf, artPoster, artMap]
 
+// ─── the two door prints ──────────────────────────────────────────────────
+// A room's door to the OTHER room is a picture of it: the lounge hangs a
+// painting of the bar, the bar hangs a painting of the lounge, and clicking
+// either one walks you through. Symmetric on purpose — the way back is the
+// same gesture as the way in.
+
+const artBarDoor: ArtPainter = (ctx, w, h) => {
+  // the bar at night — back-bar glow, bottle rows, a brass rail
+  const sky = ctx.createLinearGradient(0, 0, 0, h)
+  sky.addColorStop(0, '#140c14')
+  sky.addColorStop(0.55, '#241423')
+  sky.addColorStop(1, '#170e12')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, w, h)
+  // warm glow behind the shelves
+  const glow = ctx.createRadialGradient(w / 2, h * 0.4, 8, w / 2, h * 0.4, w * 0.62)
+  glow.addColorStop(0, 'rgba(224,181,120,.5)')
+  glow.addColorStop(1, 'rgba(224,181,120,0)')
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, w, h)
+  // shelf lines + bottles
+  const shelfYs = [0.3, 0.46]
+  for (const sy of shelfYs) {
+    ctx.fillStyle = '#3a2417'
+    ctx.fillRect(w * 0.14, h * sy, w * 0.72, h * 0.014)
+    for (let i = 0; i < 9; i++) {
+      const bx = w * (0.17 + i * 0.075)
+      const bh = h * (0.075 + ((i * 7) % 3) * 0.014)
+      const tone = ['#7a4a22', '#4a5a3a', '#6a3040', '#8a6a2a'][i % 4]
+      ctx.fillStyle = tone
+      ctx.fillRect(bx, h * sy - bh, w * 0.028, bh)
+      ctx.fillRect(bx + w * 0.009, h * sy - bh - h * 0.022, w * 0.01, h * 0.022)
+      ctx.fillStyle = 'rgba(240,230,214,.35)'
+      ctx.fillRect(bx + w * 0.004, h * sy - bh + h * 0.008, w * 0.006, bh * 0.55)
+    }
+  }
+  // counter + rail
+  ctx.fillStyle = '#241610'
+  ctx.fillRect(w * 0.08, h * 0.62, w * 0.84, h * 0.2)
+  ctx.fillStyle = '#3a2417'
+  ctx.fillRect(w * 0.08, h * 0.6, w * 0.84, h * 0.028)
+  ctx.strokeStyle = '#c8975a'
+  ctx.lineWidth = Math.max(2, w * 0.012)
+  ctx.beginPath()
+  ctx.moveTo(w * 0.1, h * 0.86)
+  ctx.lineTo(w * 0.9, h * 0.86)
+  ctx.stroke()
+  // three pendant lamps
+  for (const px of [0.28, 0.5, 0.72]) {
+    ctx.strokeStyle = '#241610'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(w * px, 0)
+    ctx.lineTo(w * px, h * 0.12)
+    ctx.stroke()
+    ctx.fillStyle = '#c8975a'
+    ctx.beginPath()
+    ctx.moveTo(w * px - w * 0.035, h * 0.17)
+    ctx.lineTo(w * px + w * 0.035, h * 0.17)
+    ctx.lineTo(w * px + w * 0.014, h * 0.115)
+    ctx.lineTo(w * px - w * 0.014, h * 0.115)
+    ctx.closePath()
+    ctx.fill()
+    const pg = ctx.createRadialGradient(w * px, h * 0.19, 1, w * px, h * 0.19, w * 0.07)
+    pg.addColorStop(0, 'rgba(255,214,150,.8)')
+    pg.addColorStop(1, 'rgba(255,214,150,0)')
+    ctx.fillStyle = pg
+    ctx.fillRect(w * px - w * 0.07, h * 0.12, w * 0.14, h * 0.14)
+  }
+  ctx.fillStyle = '#e0b578'
+  ctx.textAlign = 'center'
+  ctx.font = `600 ${Math.round(h * 0.075)}px Georgia, serif`
+  ctx.fillText('EL BAR', w / 2, h * 0.955)
+}
+
+const artLoungeDoor: ArtPainter = (ctx, w, h) => {
+  // the lounge from the doorway — hearth lit, two wingbacks in silhouette
+  const room = ctx.createLinearGradient(0, 0, 0, h)
+  room.addColorStop(0, '#1c1424')
+  room.addColorStop(1, '#140e18')
+  ctx.fillStyle = room
+  ctx.fillRect(0, 0, w, h)
+  // the fire and its glow
+  const fx = w / 2, fy = h * 0.58
+  const fg = ctx.createRadialGradient(fx, fy, 4, fx, fy, w * 0.5)
+  fg.addColorStop(0, 'rgba(255,170,90,.75)')
+  fg.addColorStop(0.4, 'rgba(179,84,47,.3)')
+  fg.addColorStop(1, 'rgba(179,84,47,0)')
+  ctx.fillStyle = fg
+  ctx.fillRect(0, 0, w, h)
+  ctx.fillStyle = '#241610'
+  ctx.fillRect(fx - w * 0.2, h * 0.34, w * 0.4, h * 0.04)  // mantel
+  ctx.fillRect(fx - w * 0.2, h * 0.38, w * 0.045, h * 0.34)
+  ctx.fillRect(fx + w * 0.155, h * 0.38, w * 0.045, h * 0.34)
+  const fire = ctx.createLinearGradient(0, fy + h * 0.1, 0, fy - h * 0.08)
+  fire.addColorStop(0, '#b3542f')
+  fire.addColorStop(1, '#ffd9a0')
+  ctx.fillStyle = fire
+  ctx.beginPath()
+  ctx.moveTo(fx - w * 0.09, fy + h * 0.12)
+  ctx.quadraticCurveTo(fx - w * 0.1, fy - h * 0.02, fx, fy - h * 0.1)
+  ctx.quadraticCurveTo(fx + w * 0.1, fy - h * 0.02, fx + w * 0.09, fy + h * 0.12)
+  ctx.closePath()
+  ctx.fill()
+  // wingbacks, in silhouette, facing the fire
+  ctx.fillStyle = '#171017'
+  for (const s of [-1, 1]) {
+    const cx = fx + s * w * 0.3
+    ctx.beginPath()
+    ctx.moveTo(cx - w * 0.09, h * 0.9)
+    ctx.lineTo(cx - w * 0.09, h * 0.52)
+    ctx.quadraticCurveTo(cx, h * 0.42, cx + w * 0.09, h * 0.52)
+    ctx.lineTo(cx + w * 0.09, h * 0.9)
+    ctx.closePath()
+    ctx.fill()
+  }
+  ctx.fillStyle = '#e0b578'
+  ctx.textAlign = 'center'
+  ctx.font = `600 ${Math.round(h * 0.07)}px Georgia, serif`
+  ctx.fillText('THE LOUNGE', w / 2, h * 0.965)
+}
+
 // ─── the dartboard face (painted, true ring geometry) ─────────────────────
 // The painter and the SCORER share one set of ring fractions, and they live
 // in darts-rules.ts — the rules of the game are testable on their own (see
@@ -694,7 +830,24 @@ export interface Room {
      *  harness's way in; the skill lives in beginAim/release. */
     throwAt: (x: number, y: number) => boolean
   }
+  /** EL BAR only: repaint a display's price card owned/for-sale. */
+  setOwned?: (id: string, owned: boolean) => void
+  /** EL BAR only: chalk the embers balance behind the counter. */
+  setPurse?: (balance: number) => void
   dispose: () => void
+}
+
+/** The no-game: EL BAR has no oche, but the boot's pointer handlers speak to
+ *  `room.darts` unconditionally, so a bar answers with a dart interface that
+ *  refuses everything. */
+const NO_DARTS: Room['darts'] = {
+  beginAim: () => false,
+  moveAim: () => { /* no board to aim at */ },
+  release: () => null,
+  cancel: () => { /* nothing in flight */ },
+  view: () => { /* no match lighting */ },
+  state: () => ({}),
+  throwAt: () => false,
 }
 
 function buildRoom(art: Record<string, string | undefined>): Room {
@@ -1009,7 +1162,10 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   // second picture of it, in clear view beside the humidor.
   hangFrame(1.0, 1.3, -HALF_W + 0.09, 1.85, -1.9, Math.PI / 2, true)
   hangFrame(0.86, 0.86, -HALF_W + 0.09, 1.75, -0.55, Math.PI / 2, true)
-  hangFrame(0.72, 0.9, -HALF_W + 0.09, 1.8, 2.2, Math.PI / 2, false)
+  // EL BAR hangs at the end of the gallery wall — and OPENS when clicked:
+  // the picture is the door, the click walks you through it into the shop.
+  hangFrame(0.72, 0.9, -HALF_W + 0.09, 1.8, 2.2, Math.PI / 2, false,
+    { painter: artBarDoor, pick: 'bar' })
   hangFrame(1.15, 1.4, -2.55, 1.95, -HALF_D + 0.08, 0, true)
   hangFrame(1.15, 1.4, 2.55, 1.95, -HALF_D + 0.08, 0, true)
   // (the mantel no longer carries a print — the looking glass hangs there,
@@ -2141,6 +2297,185 @@ function buildRoom(art: Record<string, string | undefined>): Room {
     chairs.add(cyl(0.03, 0.03, 0.06, 6, brassMat, lx, 0.03, lz))
   }
 
+  // ── finer things — the upgrades EL BAR sells ───────────────────────────
+  // Every prop in the room is an atomic target: a finer version of it can
+  // stand exactly where it stands. These groups boot INVISIBLE; the page's
+  // decorate list switches an upgrade on when the ledger says it is owned,
+  // and switches the prop it replaces off in the same pass. The room never
+  // reads the purse — it just wears the verdicts, same as the sale props.
+
+  // the chesterfields — deep-buttoned oxblood where the wingbacks stood
+  const chesterfields = new THREE.Group()
+  chesterfields.visible = false
+  scene.add(slot(SLOT.chesterfields, chesterfields))
+  const oxblood = std({ color: 0x571e1c, roughness: 0.55, metalness: 0.05 })
+  const oxbloodDeep = std({ color: 0x3d1412, roughness: 0.62 })
+  const chesterfield = (x: number, z: number, ry: number): void => {
+    const g = new THREE.Group()
+    g.position.set(x, 0, z)
+    g.rotation.y = ry
+    g.add(box(0.94, 0.2, 0.9, oxblood, 0, 0.42, 0, 0.06))
+    const seat = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.6, 4, 10), oxblood)
+    seat.rotation.z = Math.PI / 2
+    seat.position.set(0, 0.56, 0.04)
+    seat.castShadow = true
+    g.add(seat)
+    // the low buttoned back — a chesterfield's back is a wall of tufting
+    const back = box(0.94, 0.78, 0.2, oxblood, 0, 0.82, -0.36, 0.09)
+    back.rotation.x = -0.06
+    g.add(back)
+    // deep-buttoning: brass-dimple spheres in a diamond grid
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 4 - (row % 2); col++) {
+        const bx = (col - (3 - (row % 2)) / 2) * 0.2
+        const by = 0.62 + row * 0.17
+        const btn = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 8), oxbloodDeep)
+        btn.position.set(bx, by, -0.255 - row * 0.012)
+        g.add(btn)
+      }
+    }
+    // rolled arms, fatter than a wingback's
+    for (const s of [-1, 1]) {
+      const roll = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.66, 4, 10), oxblood)
+      roll.rotation.x = Math.PI / 2
+      roll.position.set(s * 0.41, 0.72, 0.0)
+      roll.castShadow = true
+      g.add(roll)
+      const scroll = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), oxbloodDeep)
+      scroll.position.set(s * 0.41, 0.72, 0.36)
+      g.add(scroll)
+    }
+    // turned brass feet
+    for (const [fx, fz] of [[-0.4, 0.36], [0.4, 0.36], [-0.4, -0.36], [0.4, -0.36]]) {
+      g.add(cyl(0.035, 0.05, 0.14, 10, brassMat, fx, 0.07, fz))
+    }
+    chesterfields.add(g)
+  }
+  chesterfield(-1.5, 1.15, 0.42)
+  chesterfield(1.5, 1.15, -0.42)
+
+  // the Isfahan — a finer knot on the same floor
+  const finerRug = new THREE.Mesh(
+    new THREE.PlaneGeometry(5.6, 4),
+    std({
+      map: track(paint(768, 576, (ctx, w, h) => {
+        ctx.fillStyle = '#1d2440'   // indigo field
+        ctx.fillRect(0, 0, w, h)
+        const band = (inset: number, color: string, lw: number) => {
+          ctx.strokeStyle = color
+          ctx.lineWidth = lw
+          ctx.strokeRect(inset, inset * 0.75, w - inset * 2, h - inset * 1.5)
+        }
+        band(16, '#e8ddc4', 12)
+        band(38, '#c8975a', 4)
+        band(52, '#5b1f21', 10)
+        band(70, '#e8ddc4', 2)
+        // ivory medallion with a lobed edge
+        ctx.save()
+        ctx.translate(w / 2, h / 2)
+        ctx.fillStyle = '#e8ddc4'
+        ctx.beginPath()
+        for (let i = 0; i <= 48; i++) {
+          const a = (i / 48) * Math.PI * 2
+          const r = 1 + 0.08 * Math.sin(a * 12)
+          const px = Math.cos(a) * w * 0.2 * r
+          const py = Math.sin(a) * h * 0.26 * r
+          if (i === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.fill()
+        ctx.strokeStyle = '#5b1f21'
+        ctx.lineWidth = 3
+        ctx.stroke()
+        // vinework radiating through the field
+        ctx.strokeStyle = 'rgba(200,151,90,.55)'
+        ctx.lineWidth = 2
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2
+          ctx.beginPath()
+          ctx.moveTo(Math.cos(a) * w * 0.22, Math.sin(a) * h * 0.28)
+          ctx.quadraticCurveTo(
+            Math.cos(a + 0.3) * w * 0.33, Math.sin(a + 0.3) * h * 0.4,
+            Math.cos(a) * w * 0.42, Math.sin(a) * h * 0.52)
+          ctx.stroke()
+          ctx.fillStyle = i % 2 ? '#b3542f' : '#c8975a'
+          ctx.beginPath()
+          ctx.ellipse(Math.cos(a) * w * 0.42, Math.sin(a) * h * 0.52, 7, 10, a, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        // centre boss
+        ctx.fillStyle = '#5b1f21'
+        ctx.beginPath()
+        ctx.ellipse(0, 0, w * 0.055, h * 0.07, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      })),
+      roughness: 1,
+    }),
+  )
+  finerRug.rotation.x = -Math.PI / 2
+  finerRug.position.set(0, 0.013, 0.6)
+  finerRug.receiveShadow = true
+  finerRug.visible = false
+  scene.add(slot(SLOT.finerRug, finerRug))
+
+  // the stained-glass lamp — the same corner, lit like a jewel box
+  const tiffany = new THREE.Group()
+  tiffany.position.set(-2.75, 0, 0.35)
+  tiffany.visible = false
+  scene.add(slot(SLOT.tiffanyLamp, tiffany))
+  const bronze = std({ color: 0x5a4128, roughness: 0.45, metalness: 0.7 })
+  tiffany.add(cyl(0.2, 0.26, 0.05, 20, bronze, 0, 0.025, 0))
+  tiffany.add(cyl(0.026, 0.04, 1.5, 12, bronze, 0, 0.8, 0))
+  const shadeGlass = std({
+    map: track(paint(256, 128, (ctx, w, h) => {
+      // leaded panels in ember, moss and amber
+      const tones = ['#b3542f', '#2f4a35', '#c8975a', '#6a3040', '#8a6a2a']
+      const cols = 10
+      for (let i = 0; i < cols; i++) {
+        ctx.fillStyle = tones[i % tones.length]
+        ctx.fillRect((i * w) / cols, 0, w / cols + 1, h)
+      }
+      ctx.strokeStyle = '#241610'
+      ctx.lineWidth = 4
+      for (let i = 0; i <= cols; i++) {
+        ctx.beginPath()
+        ctx.moveTo((i * w) / cols, 0)
+        ctx.lineTo((i * w) / cols, h)
+        ctx.stroke()
+      }
+      for (const y of [0.35, 0.7]) {
+        ctx.beginPath()
+        ctx.moveTo(0, h * y)
+        ctx.lineTo(w, h * y)
+        ctx.stroke()
+      }
+    })),
+    emissive: 0xffb060,
+    emissiveIntensity: 0.55,
+    roughness: 0.7,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.96,
+  })
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
+    shadeGlass,
+  )
+  dome.position.y = 1.52
+  tiffany.add(dome)
+  tiffany.add(new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 10), bronze))
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 10), bronze)
+  finial.position.y = 1.84
+  tiffany.add(finial)
+  const jewelLight = new THREE.PointLight(0xff9d5c, 9, 5.5, 2)
+  jewelLight.position.set(0, 1.42, 0)
+  tiffany.add(jewelLight)
+  const mossLight = new THREE.PointLight(0x9dc98a, 2.4, 3.5, 2)
+  mossLight.position.set(0, 1.58, 0)
+  tiffany.add(mossLight)
+
   // ── side table + the accessories that live on it ───────────────────────
   const tables = new THREE.Group()
   scene.add(slot('slot-tables', tables))
@@ -3015,7 +3350,692 @@ function buildRoom(art: Record<string, string | undefined>): Room {
   }
 }
 
+// ─── EL BAR — the shop room ───────────────────────────────────────────────
+//
+// The cigar shop for virtual items. Everything on these shelves is a real
+// prop somewhere — a furnishing for the lounge, a finer version of one it
+// already has, or a fitting for the bar itself — displayed as a miniature on
+// a pedestal with a chalked price card. Click a display and the page opens
+// its buy plate; the purse is the same embers ledger the oche pays into.
+// The room never reads the ledger: the page tells it what is owned
+// (`setOwned`) and what the purse holds (`setPurse`), and it wears both.
+
+const BAR = { w: 9, h: 3.3, d: 7 } as const
+const BAR_HALF_W = BAR.w / 2
+const BAR_HALF_D = BAR.d / 2
+
+function buildBar(): Room {
+  const scene = new THREE.Scene()
+  scene.background = new THREE.Color(0x0d0912)
+  scene.fog = new THREE.Fog(0x140f1a, 8, 20)
+
+  const disposables: Array<{ dispose: () => void }> = []
+  const track = <T extends { dispose: () => void }>(x: T): T => {
+    disposables.push(x)
+    return x
+  }
+  const slots = new Map<string, THREE.Object3D[]>()
+  const slot = (id: string, obj: THREE.Object3D): THREE.Object3D => {
+    const list = slots.get(id)
+    if (list) list.push(obj)
+    else slots.set(id, [obj])
+    return obj
+  }
+  const pickables: THREE.Object3D[] = []
+
+  const woodMat = std({ map: track(tiled(floorTexture(), 1, 1)), roughness: 0.78, metalness: 0.05 })
+  const darkWood = std({ color: C.woodDark, roughness: 0.65, metalness: 0.08 })
+  const trimWood = std({ color: C.wood, roughness: 0.55, metalness: 0.12 })
+  const brassMat = std({ color: C.brass, roughness: 0.28, metalness: 0.85 })
+  const brassGlow = std({ color: C.brassBright, emissive: C.brassBright, emissiveIntensity: 0.35, roughness: 0.3, metalness: 0.7 })
+  const leatherMat = std({ map: track(leatherTexture()), roughness: 0.62, metalness: 0.04 })
+
+  // ── shell ──────────────────────────────────────────────────────────────
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(BAR.w, BAR.d), woodMat)
+  floor.rotation.x = -Math.PI / 2
+  floor.receiveShadow = true
+  scene.add(floor)
+  const wallMat = std({ map: track(wallTexture()), roughness: 0.95, side: THREE.FrontSide })
+  const mkWall = (w: number, x: number, z: number, ry: number): void => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, BAR.h), wallMat)
+    m.position.set(x, BAR.h / 2, z)
+    m.rotation.y = ry
+    m.receiveShadow = true
+    scene.add(m)
+  }
+  mkWall(BAR.w, 0, -BAR_HALF_D, 0)
+  mkWall(BAR.d, -BAR_HALF_W, 0, Math.PI / 2)
+  mkWall(BAR.d, BAR_HALF_W, 0, -Math.PI / 2)
+  mkWall(BAR.w, 0, BAR_HALF_D, Math.PI)
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(BAR.w, BAR.d), std({ color: C.ceiling, roughness: 1 }))
+  ceiling.rotation.x = Math.PI / 2
+  ceiling.position.y = BAR.h
+  scene.add(ceiling)
+  for (let i = -2; i <= 2; i++) {
+    scene.add(box(BAR.w, 0.14, 0.2, darkWood, 0, BAR.h - 0.07, i * 1.4))
+  }
+  const baseboard = (w: number, x: number, z: number, ry: number): void => {
+    const m = box(w, 0.16, 0.07, trimWood, x, 0.08, z)
+    m.rotation.y = ry
+    scene.add(m)
+  }
+  baseboard(BAR.w, 0, -BAR_HALF_D + 0.035, 0)
+  baseboard(BAR.d, -BAR_HALF_W + 0.035, 0, Math.PI / 2)
+  baseboard(BAR.d, BAR_HALF_W - 0.035, 0, Math.PI / 2)
+
+  // the lounge's old rug, retired to the bar floor (the Isfahan's blurb
+  // promised it would be loved differently — here it is, being loved)
+  const oldRug = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 2.3), std({ map: track(rugTexture()), roughness: 1 }))
+  oldRug.rotation.x = -Math.PI / 2
+  oldRug.position.set(-0.4, 0.012, 0.9)
+  oldRug.receiveShadow = true
+  scene.add(oldRug)
+
+  // ── lighting ───────────────────────────────────────────────────────────
+  scene.add(new THREE.HemisphereLight(0x6a5878, 0x2a1c22, 1.0))
+  const fill = new THREE.PointLight(0xe0b578, 10, 16, 2)
+  fill.position.set(0, BAR.h - 0.5, 1.4)
+  scene.add(fill)
+  // three pendants over the counter
+  const pendantShades: THREE.MeshStandardMaterial[] = []
+  for (const px of [-2.1, 0, 2.1]) {
+    const p = new THREE.Group()
+    p.position.set(px, BAR.h, -1.7)
+    scene.add(p)
+    p.add(cyl(0.012, 0.012, 0.75, 6, darkWood, 0, -0.37, 0))
+    const shadeMat = std({
+      color: 0xc8975a, emissive: 0xffbe72, emissiveIntensity: 0.8,
+      roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide,
+    })
+    pendantShades.push(shadeMat)
+    p.add(cyl(0.16, 0.055, 0.16, 14, shadeMat, 0, -0.8, 0))
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 8),
+      std({ color: 0xf6e2b8, emissive: 0xffc98a, emissiveIntensity: 2.4, roughness: 0.6 }))
+    bulb.position.y = -0.86
+    p.add(bulb)
+    const light = new THREE.PointLight(0xffc98a, 9, 7, 2)
+    light.position.y = -0.9
+    p.add(light)
+  }
+
+  // ── the counter ────────────────────────────────────────────────────────
+  const counter = new THREE.Group()
+  counter.position.set(0, 0, -2.0)
+  scene.add(counter)
+  counter.add(box(6.6, 1.08, 0.66, darkWood, 0, 0.54, 0, 0.02))
+  // panelling on the public face
+  for (let i = 0; i < 6; i++) {
+    counter.add(box(0.86, 0.72, 0.03, trimWood, -2.75 + i * 1.1, 0.5, 0.345, 0.01))
+  }
+  counter.add(box(6.9, 0.06, 0.86, trimWood, 0, 1.11, 0, 0.01))
+  // brass foot rail on turned posts
+  const rail = cyl(0.022, 0.022, 6.4, 10, brassMat, 0, 0.22, 0.52)
+  rail.rotation.z = Math.PI / 2
+  counter.add(rail)
+  for (const rx of [-2.9, -1.45, 0, 1.45, 2.9]) {
+    counter.add(cyl(0.014, 0.018, 0.22, 8, brassMat, rx, 0.11, 0.52))
+  }
+  // three stools
+  for (const sx of [-1.7, 0, 1.7]) {
+    const st = new THREE.Group()
+    st.position.set(sx, 0, -1.15)
+    scene.add(st)
+    st.add(cyl(0.19, 0.19, 0.07, 16, leatherMat, 0, 0.72, 0))
+    st.add(cyl(0.03, 0.04, 0.68, 10, darkWood, 0, 0.36, 0))
+    st.add(cyl(0.16, 0.2, 0.04, 12, darkWood, 0, 0.02, 0))
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.012, 6, 18), brassMat)
+    ring.rotation.x = Math.PI / 2
+    ring.position.y = 0.24
+    st.add(ring)
+  }
+
+  // ── the back-bar: mirror, shelves, bottles ─────────────────────────────
+  const backBar = new THREE.Group()
+  backBar.position.set(0, 0, -BAR_HALF_D + 0.02)
+  scene.add(backBar)
+  backBar.add(box(6.8, 0.92, 0.44, darkWood, 0, 0.46, 0.24, 0.02))
+  backBar.add(box(6.9, 0.05, 0.5, trimWood, 0, 0.94, 0.25, 0.01))
+  // the glass — a plain sheet until the gilt mirror is bought
+  const mirror = new THREE.Mesh(
+    new THREE.PlaneGeometry(6.2, 1.85),
+    std({ color: 0x4a505c, roughness: 0.06, metalness: 0.92 }),
+  )
+  mirror.position.set(0, 1.95, 0.06)
+  backBar.add(mirror)
+  // shelves in front of the glass, and the bottles that live on them
+  const bottleTones = [0x7a4a22, 0x4a5a3a, 0x6a3040, 0x8a6a2a, 0x3a4a6a, 0x5b1f21]
+  const br = rng(47)
+  for (const [sy, count] of [[1.35, 13], [1.85, 11], [2.35, 12]] as const) {
+    backBar.add(box(6.4, 0.045, 0.3, trimWood, 0, sy, 0.28, 0.008))
+    for (let i = 0; i < count; i++) {
+      const bx = -2.9 + (i * 5.8) / (count - 1) + (br() - 0.5) * 0.12
+      const bh = 0.26 + br() * 0.14
+      const tone = bottleTones[Math.floor(br() * bottleTones.length)]
+      const glass = std({ color: tone, roughness: 0.18, transparent: true, opacity: 0.88 })
+      backBar.add(cyl(0.038, 0.042, bh, 10, glass, bx, sy + bh / 2 + 0.025, 0.28))
+      backBar.add(cyl(0.011, 0.013, 0.08, 8, glass, bx, sy + bh + 0.065, 0.28))
+      backBar.add(cyl(0.013, 0.013, 0.025, 8, brassMat, bx, sy + bh + 0.11, 0.28))
+    }
+  }
+  // a soft glow washing up the bottles from the counter ledge
+  const shelfGlow = new THREE.PointLight(0xffd9a0, 5, 4.5, 2)
+  shelfGlow.position.set(0, 1.15, 0.5)
+  backBar.add(shelfGlow)
+
+  // EL BAR, in brass letters on a painted board above the glass
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.6, 0.44),
+    std({
+      map: track(paint(768, 128, (ctx, w, h) => {
+        ctx.fillStyle = '#171017'
+        ctx.fillRect(0, 0, w, h)
+        ctx.strokeStyle = '#c8975a'
+        ctx.lineWidth = 6
+        ctx.strokeRect(8, 8, w - 16, h - 16)
+        ctx.fillStyle = '#e0b578'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.font = `600 ${Math.round(h * 0.52)}px Georgia, serif`
+        ctx.fillText('E L   B A R', w / 2, h * 0.54)
+      })),
+      roughness: 0.6,
+    }),
+  )
+  sign.position.set(0, 3.0, 0.08)
+  backBar.add(sign)
+  const signLight = new THREE.PointLight(0xffd9a0, 4, 3, 2)
+  signLight.position.set(0, 2.75, 0.5)
+  backBar.add(signLight)
+
+  // ── the purse, chalked ─────────────────────────────────────────────────
+  // The board the page keeps honest: setPurse repaints it whenever the
+  // ledger moves, so what you can afford is written where the prices are.
+  let purseChalk = 0
+  const purseCanvas = document.createElement('canvas')
+  purseCanvas.width = 256
+  purseCanvas.height = 192
+  const purseTexture = track(new THREE.CanvasTexture(purseCanvas))
+  purseTexture.colorSpace = THREE.SRGBColorSpace
+  const paintPurse = (): void => {
+    const ctx = purseCanvas.getContext('2d')
+    if (!ctx) return
+    const { width: w, height: h } = purseCanvas
+    ctx.fillStyle = '#1c1a1e'
+    ctx.fillRect(0, 0, w, h)
+    ctx.strokeStyle = '#3a2417'
+    ctx.lineWidth = 10
+    ctx.strokeRect(5, 5, w - 10, h - 10)
+    ctx.fillStyle = 'rgba(240,230,214,.92)'
+    ctx.textAlign = 'center'
+    ctx.font = `500 ${Math.round(h * 0.14)}px Georgia, serif`
+    ctx.fillText('THE PURSE', w / 2, h * 0.28)
+    ctx.font = `700 ${Math.round(h * 0.3)}px Georgia, serif`
+    ctx.fillStyle = '#e0b578'
+    ctx.fillText(String(purseChalk), w / 2, h * 0.62)
+    ctx.font = `italic ${Math.round(h * 0.11)}px Georgia, serif`
+    ctx.fillStyle = 'rgba(240,230,214,.6)'
+    ctx.fillText('embers · earned in the lounge', w / 2, h * 0.84)
+    purseTexture.needsUpdate = true
+  }
+  paintPurse()
+  const purseBoard = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.72, 0.54),
+    std({ map: purseTexture, roughness: 0.9 }),
+  )
+  purseBoard.position.set(2.95, 2.86, -BAR_HALF_D + 0.1)
+  scene.add(purseBoard)
+
+  // ── the way back: the lounge, framed and clickable ─────────────────────
+  const doorFrame = new THREE.Group()
+  doorFrame.position.set(-BAR_HALF_W + 0.09, 1.8, 0.2)
+  doorFrame.rotation.y = Math.PI / 2
+  scene.add(doorFrame)
+  const doorW = 1.15, doorH = 1.45
+  const doorCanvas = new THREE.Mesh(
+    new THREE.PlaneGeometry(doorW - 0.16, doorH - 0.16),
+    std({ map: track(paint(Math.round(doorW * 320), Math.round(doorH * 320), artLoungeDoor)), roughness: 0.85 }),
+  )
+  doorCanvas.position.z = 0.031
+  doorCanvas.userData.pick = 'lounge'
+  pickables.push(doorCanvas)
+  doorFrame.add(doorCanvas)
+  const doorBar = 0.08
+  const doorFrameMat = std({ color: C.brass, roughness: 0.42, metalness: 0.6 })
+  doorFrame.add(box(doorW, doorBar, 0.07, doorFrameMat, 0, doorH / 2 - doorBar / 2, 0.02))
+  doorFrame.add(box(doorW, doorBar, 0.07, doorFrameMat, 0, -doorH / 2 + doorBar / 2, 0.02))
+  doorFrame.add(box(doorBar, doorH - doorBar * 2, 0.07, doorFrameMat, -doorW / 2 + doorBar / 2, 0, 0.02))
+  doorFrame.add(box(doorBar, doorH - doorBar * 2, 0.07, doorFrameMat, doorW / 2 - doorBar / 2, 0, 0.02))
+  doorFrame.add(box(doorW - 0.14, doorH - 0.14, 0.02, std({ color: 0x0e0a12, roughness: 1 }), 0, 0, 0.01))
+  const doorHood = cyl(0.045, 0.055, 0.22, 10, brassGlow, 0, doorH / 2 + 0.11, 0.15)
+  doorHood.rotation.z = Math.PI / 2
+  doorFrame.add(doorHood)
+  const doorSpot = new THREE.PointLight(0xffd9a0, 3.6, 2.6, 2)
+  doorSpot.position.set(0, doorH / 2 - 0.02, 0.28)
+  doorFrame.add(doorSpot)
+  const doorHalo = new THREE.Mesh(
+    new THREE.PlaneGeometry(doorW + 0.5, doorH + 0.5),
+    new THREE.MeshBasicMaterial({
+      map: track(softDot()), color: 0xe0b578, transparent: true,
+      opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  )
+  doorHalo.position.z = -0.006
+  doorFrame.add(doorHalo)
+
+  // ── the shelves of goods — one display per catalogue entry ─────────────
+  // The displays are DERIVED from SHOP_ITEMS, so a thing the catalogue does
+  // not sell cannot appear on a shelf and a thing it sells cannot be missed.
+  // Each is a miniature of the prop on a pedestal with a painted price card;
+  // the pick id is `shop:<id>` and the page owns what happens next.
+
+  const cardRepaints = new Map<string, (owned: boolean) => void>()
+  const displayLightTargets: THREE.Object3D[] = []
+
+  const priceCard = (item: StoreItem): { mesh: THREE.Mesh; repaint: (owned: boolean) => void } => {
+    const cv = document.createElement('canvas')
+    cv.width = 256
+    cv.height = 168
+    const tex = track(new THREE.CanvasTexture(cv))
+    tex.colorSpace = THREE.SRGBColorSpace
+    const draw = (owned: boolean): void => {
+      const ctx = cv.getContext('2d')
+      if (!ctx) return
+      const { width: w, height: h } = cv
+      ctx.fillStyle = '#efe4cd'
+      ctx.fillRect(0, 0, w, h)
+      ctx.strokeStyle = owned ? '#c8975a' : '#8a6a4a'
+      ctx.lineWidth = 5
+      ctx.strokeRect(6, 6, w - 12, h - 12)
+      ctx.fillStyle = '#2c1e0f'
+      ctx.textAlign = 'center'
+      // the label, wrapped by hand onto at most two lines
+      const words = item.label.split(' ')
+      const lines: string[] = []
+      let line = ''
+      for (const word of words) {
+        const test = line ? line + ' ' + word : word
+        if (test.length > 14 && line) { lines.push(line); line = word }
+        else line = test
+      }
+      if (line) lines.push(line)
+      ctx.font = `600 ${Math.round(h * 0.155)}px Georgia, serif`
+      lines.slice(0, 2).forEach((l, i) => ctx.fillText(l, w / 2, h * (0.3 + i * 0.19)))
+      if (owned) {
+        ctx.fillStyle = '#8c6a1a'
+        ctx.font = `700 ${Math.round(h * 0.2)}px Georgia, serif`
+        ctx.fillText('YOURS', w / 2, h * 0.82)
+      } else {
+        // the ember glyph + the price
+        ctx.save()
+        ctx.translate(w / 2 - String(item.price).length * h * 0.075 - h * 0.1, h * 0.76)
+        ctx.fillStyle = '#b3542f'
+        ctx.beginPath()
+        const r = h * 0.085
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 - Math.PI / 2
+          if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r)
+          else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r)
+        }
+        ctx.closePath()
+        ctx.fill()
+        ctx.restore()
+        ctx.fillStyle = '#5b3a1a'
+        ctx.font = `700 ${Math.round(h * 0.21)}px Georgia, serif`
+        ctx.fillText(String(item.price), w / 2 + h * 0.08, h * 0.83)
+      }
+      tex.needsUpdate = true
+    }
+    draw(false)
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.223), std({ map: tex, roughness: 0.9 }))
+    return { mesh, repaint: draw }
+  }
+
+  /** Miniatures — one small sculpture per catalogue id, box-and-cylinder
+   *  like everything else in the room. An id with no miniature gets the
+   *  parcel: brown paper, string, contents a surprise — which is also what
+   *  a NEW catalogue entry looks like before anyone builds its token. */
+  const miniature = (id: string): THREE.Group => {
+    const g = new THREE.Group()
+    const s = 0.21 // the scale most tokens are built at
+    switch (id) {
+      case SLOT.cart: {
+        g.add(box(2.2 * s, 0.12 * s, 1.2 * s, brassMat, 0, 1.4 * s, 0))
+        g.add(box(2.2 * s, 0.12 * s, 1.2 * s, brassMat, 0, 0.6 * s, 0))
+        for (const [wx, wz] of [[-1, 0.5], [1, 0.5], [-1, -0.5], [1, -0.5]]) {
+          const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.3 * s, 0.07 * s, 6, 14), brassMat)
+          wheel.position.set(wx * s, 0.3 * s, wz * s)
+          wheel.rotation.y = Math.PI / 2
+          g.add(wheel)
+        }
+        for (let i = 0; i < 3; i++) {
+          g.add(cyl(0.12 * s, 0.14 * s, 0.7 * s, 8,
+            std({ color: bottleTones[i], roughness: 0.2, transparent: true, opacity: 0.9 }),
+            (i - 1) * 0.55 * s, 1.85 * s, 0))
+        }
+        break
+      }
+      case SLOT.chess: {
+        g.add(cyl(0.9 * s, 0.9 * s, 0.12 * s, 12, darkWood, 0, 1.1 * s, 0))
+        g.add(cyl(0.14 * s, 0.2 * s, 1.0 * s, 8, darkWood, 0, 0.55 * s, 0))
+        const boardTex = track(paint(64, 64, (ctx) => {
+          for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+            ctx.fillStyle = (x + y) % 2 ? '#2c1e0f' : '#e8ddc4'
+            ctx.fillRect(x * 16, y * 16, 16, 16)
+          }
+        }))
+        const boardTop = new THREE.Mesh(new THREE.PlaneGeometry(1.15 * s, 1.15 * s), std({ map: boardTex, roughness: 0.7 }))
+        boardTop.rotation.x = -Math.PI / 2
+        boardTop.position.y = 1.17 * s
+        g.add(boardTop)
+        break
+      }
+      case SLOT.globe: {
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.62 * s, 14, 10),
+          std({ color: 0x8a6a2a, roughness: 0.5, metalness: 0.2 }))
+        sphere.position.y = 1.5 * s
+        sphere.rotation.z = 0.4
+        g.add(sphere)
+        const meridian = new THREE.Mesh(new THREE.TorusGeometry(0.7 * s, 0.045 * s, 6, 20), brassMat)
+        meridian.position.y = 1.5 * s
+        meridian.rotation.y = Math.PI / 2
+        meridian.rotation.z = 0.4
+        g.add(meridian)
+        g.add(cyl(0.5 * s, 0.6 * s, 0.1 * s, 10, darkWood, 0, 0.05 * s, 0))
+        g.add(cyl(0.06 * s, 0.08 * s, 0.75 * s, 8, darkWood, 0, 0.5 * s, 0))
+        break
+      }
+      case SLOT.victrola: {
+        g.add(box(1.1 * s, 0.9 * s, 1.1 * s, trimWood, 0, 0.45 * s, 0, 0.02 * s))
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.55 * s, 1.0 * s, 12, 1, true), brassGlow)
+        horn.position.set(0.15 * s, 1.6 * s, -0.1 * s)
+        horn.rotation.z = -0.7
+        g.add(horn)
+        break
+      }
+      case SLOT.bands: {
+        const bandsTex = track(paint(96, 128, (ctx, w, h) => {
+          ctx.fillStyle = '#171017'
+          ctx.fillRect(0, 0, w, h)
+          const tones = ['#c8975a', '#5b1f21', '#2f4a35', '#8a6a2a']
+          for (let row = 0; row < 4; row++) for (let col = 0; col < 3; col++) {
+            ctx.fillStyle = tones[(row + col) % tones.length]
+            ctx.beginPath()
+            ctx.ellipse(16 + col * 32, 18 + row * 30, 11, 7, 0, 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }))
+        const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.85 * s * 1.6, 1.15 * s * 1.6), std({ map: bandsTex, roughness: 0.8 }))
+        plate.position.y = 1.1 * s
+        g.add(plate)
+        g.add(box(1.5 * s, 2.0 * s, 0.06 * s, brassMat, 0, 1.1 * s, -0.05 * s))
+        break
+      }
+      case SLOT.chesterfields: {
+        const mini = std({ color: 0x571e1c, roughness: 0.55 })
+        g.add(box(1.6 * s, 0.4 * s, 0.9 * s, mini, 0, 0.5 * s, 0, 0.06 * s))
+        g.add(box(1.6 * s, 0.8 * s, 0.25 * s, mini, 0, 1.0 * s, -0.35 * s, 0.08 * s))
+        for (const side of [-1, 1]) {
+          const roll = new THREE.Mesh(new THREE.CapsuleGeometry(0.18 * s, 0.6 * s, 4, 8), mini)
+          roll.rotation.x = Math.PI / 2
+          roll.position.set(side * 0.75 * s, 0.85 * s, 0)
+          g.add(roll)
+        }
+        break
+      }
+      case SLOT.finerRug: {
+        // a rolled rug, leaning — the way a rug shop actually shows them
+        const rollTex = track(paint(96, 96, (ctx, w, h) => {
+          ctx.fillStyle = '#1d2440'
+          ctx.fillRect(0, 0, w, h)
+          ctx.strokeStyle = '#e8ddc4'
+          ctx.lineWidth = 5
+          for (let r = 8; r < 48; r += 12) {
+            ctx.beginPath()
+            ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+        }))
+        const roll = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.3 * s, 0.3 * s, 2.4 * s, 14),
+          [std({ color: 0x1d2440, roughness: 0.9 }), std({ map: rollTex, roughness: 0.9 }), std({ map: rollTex, roughness: 0.9 })],
+        )
+        roll.position.y = 1.1 * s
+        roll.rotation.z = 0.5
+        g.add(roll)
+        break
+      }
+      case SLOT.tiffanyLamp: {
+        g.add(cyl(0.4 * s, 0.5 * s, 0.1 * s, 12, std({ color: 0x5a4128, roughness: 0.45, metalness: 0.7 }), 0, 0.05 * s, 0))
+        g.add(cyl(0.06 * s, 0.09 * s, 1.5 * s, 8, std({ color: 0x5a4128, roughness: 0.45, metalness: 0.7 }), 0, 0.8 * s, 0))
+        const dome = new THREE.Mesh(
+          new THREE.SphereGeometry(0.55 * s, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.52),
+          std({ color: 0xb3542f, emissive: 0xff9d5c, emissiveIntensity: 0.7, roughness: 0.7, side: THREE.DoubleSide }),
+        )
+        dome.position.y = 1.55 * s
+        g.add(dome)
+        break
+      }
+      case SLOT.barEngines: {
+        g.add(box(1.8 * s, 0.25 * s, 0.8 * s, darkWood, 0, 0.12 * s, 0))
+        for (let i = 0; i < 3; i++) {
+          g.add(cyl(0.09 * s, 0.11 * s, 1.1 * s, 8, brassMat, (i - 1) * 0.55 * s, 0.8 * s, 0))
+          g.add(cyl(0.14 * s, 0.14 * s, 0.35 * s, 8,
+            std({ color: 0xe8ddc4, roughness: 0.4 }), (i - 1) * 0.55 * s, 1.5 * s, 0))
+        }
+        break
+      }
+      case SLOT.barMirror: {
+        const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.5 * s, 1.9 * s),
+          std({ color: 0x6a7482, roughness: 0.06, metalness: 0.92 }))
+        glass.position.y = 1.2 * s
+        g.add(glass)
+        g.add(box(1.8 * s, 2.2 * s, 0.08 * s, brassGlow, 0, 1.2 * s, -0.03 * s))
+        break
+      }
+      case SLOT.barPiano: {
+        g.add(box(1.9 * s, 1.7 * s, 0.7 * s, std({ color: 0x2c1a10, roughness: 0.4 }), 0, 0.85 * s, 0, 0.03 * s))
+        const keysTex = track(paint(128, 24, (ctx, w, h) => {
+          ctx.fillStyle = '#e8ddc4'
+          ctx.fillRect(0, 0, w, h)
+          ctx.fillStyle = '#171017'
+          for (let i = 0; i < 14; i++) {
+            if (i % 7 === 2 || i % 7 === 6) continue
+            ctx.fillRect(i * 9 + 6, 0, 4, h * 0.6)
+          }
+        }))
+        const keys = new THREE.Mesh(new THREE.PlaneGeometry(1.6 * s, 0.24 * s), std({ map: keysTex, roughness: 0.5 }))
+        keys.position.set(0, 0.95 * s, 0.37 * s)
+        keys.rotation.x = -0.5
+        g.add(keys)
+        for (const side of [-1, 1]) {
+          g.add(cyl(0.05 * s, 0.05 * s, 0.3 * s, 6, brassGlow, side * 0.6 * s, 1.55 * s, 0.34 * s))
+        }
+        break
+      }
+      default: {
+        // the parcel — brown paper and string for whatever the catalogue
+        // learns to sell next
+        g.add(box(0.9 * s, 0.7 * s, 0.7 * s, std({ color: 0x8a6a4a, roughness: 0.9 }), 0, 0.35 * s, 0, 0.02 * s))
+        g.add(box(0.94 * s, 0.09 * s, 0.74 * s, std({ color: 0x5b1f21, roughness: 0.8 }), 0, 0.35 * s, 0))
+        g.add(box(0.09 * s, 0.74 * s, 0.74 * s, std({ color: 0x5b1f21, roughness: 0.8 }), 0, 0.35 * s, 0))
+      }
+    }
+    return g
+  }
+
+  // Two tiers along the right wall — a display case the length of the room.
+  const caseWall = new THREE.Group()
+  caseWall.position.set(BAR_HALF_W - 0.36, 0, 0)
+  caseWall.rotation.y = -Math.PI / 2
+  scene.add(caseWall)
+  // the case itself: uprights + two long shelves
+  caseWall.add(box(6.0, 0.05, 0.6, trimWood, 0, 0.86, 0, 0.01))
+  caseWall.add(box(6.0, 0.05, 0.6, trimWood, 0, 1.72, 0, 0.01))
+  for (const ux of [-2.95, -1.0, 1.0, 2.95]) {
+    caseWall.add(box(0.07, 1.78, 0.55, darkWood, ux, 0.89, 0))
+  }
+  caseWall.add(box(6.0, 0.1, 0.62, darkWood, 0, 0.04, 0))
+
+  const perTier = Math.ceil(SHOP_ITEMS.length / 2)
+  SHOP_ITEMS.forEach((item, index) => {
+    const tier = index < perTier ? 0 : 1
+    const across = tier === 0 ? perTier : SHOP_ITEMS.length - perTier
+    const at = tier === 0 ? index : index - perTier
+    const x = -2.5 + (across > 1 ? (at * 5.0) / (across - 1) : 2.5)
+    const y = tier === 0 ? 0.885 : 1.745
+    const display = new THREE.Group()
+    display.position.set(x, y, 0.02)
+    caseWall.add(display)
+    display.add(miniature(item.id))
+    const card = priceCard(item)
+    card.mesh.position.set(0, 0.115, 0.34)
+    card.mesh.rotation.x = -0.28
+    display.add(card.mesh)
+    cardRepaints.set(item.id, card.repaint)
+    // the hit target: one generous invisible plane over the whole display —
+    // a miniature's thin parts are no place to aim a click
+    const hit = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.62, 0.8),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    )
+    hit.position.set(0, 0.36, 0.28)
+    hit.userData.pick = 'shop:' + item.id
+    display.add(hit)
+    pickables.push(hit)
+    displayLightTargets.push(display)
+  })
+  // two brass case lights washing the tiers
+  for (const lx of [-1.5, 1.5]) {
+    const caseLight = new THREE.PointLight(0xffd9a0, 4.5, 3.4, 2)
+    caseLight.position.set(lx, 2.15, 0.6)
+    caseWall.add(caseLight)
+  }
+
+  // ── the bar's own goods, full size, dark until owned ───────────────────
+  // slot-bar-engines: three tall handles standing on the counter
+  const engines = new THREE.Group()
+  engines.position.set(1.9, 1.14, -2.0)
+  engines.visible = false
+  scene.add(slot(SLOT.barEngines, engines))
+  engines.add(box(1.15, 0.06, 0.4, darkWood, 0, 0.03, 0))
+  engines.add(box(1.05, 0.03, 0.24, brassMat, 0, 0.065, 0.02))
+  for (let i = 0; i < 3; i++) {
+    engines.add(cyl(0.035, 0.045, 0.42, 10, brassMat, (i - 1) * 0.34, 0.28, 0))
+    engines.add(cyl(0.05, 0.055, 0.2, 10, std({ color: 0xe8ddc4, roughness: 0.35 }), (i - 1) * 0.34, 0.58, 0))
+    engines.add(cyl(0.06, 0.02, 0.03, 10, brassMat, (i - 1) * 0.34, 0.1, 0.14))
+  }
+  // slot-bar-mirror: the gilt frame around the back-bar glass, and a warmer
+  // sheet inside it — the same wall, twice as pleased with itself
+  const gilt = new THREE.Group()
+  gilt.visible = false
+  scene.add(slot(SLOT.barMirror, gilt))
+  const giltMirror = new THREE.Mesh(
+    new THREE.PlaneGeometry(6.2, 1.85),
+    std({ color: 0x8a7a58, roughness: 0.04, metalness: 0.95 }),
+  )
+  giltMirror.position.set(0, 1.95, -BAR_HALF_D + 0.085)
+  gilt.add(giltMirror)
+  const giltBar = std({ color: C.brassBright, roughness: 0.35, metalness: 0.75 })
+  gilt.add(box(6.5, 0.14, 0.09, giltBar, 0, 2.95, -BAR_HALF_D + 0.09))
+  gilt.add(box(6.5, 0.14, 0.09, giltBar, 0, 0.98, -BAR_HALF_D + 0.09))
+  gilt.add(box(0.14, 2.1, 0.09, giltBar, -3.18, 1.96, -BAR_HALF_D + 0.09))
+  gilt.add(box(0.14, 2.1, 0.09, giltBar, 3.18, 1.96, -BAR_HALF_D + 0.09))
+  for (const cx of [-3.18, 3.18]) {
+    const rosette = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), giltBar)
+    rosette.position.set(cx, 2.95, -BAR_HALF_D + 0.1)
+    gilt.add(rosette)
+  }
+  const giltGlow = new THREE.PointLight(0xffe0b0, 3.5, 5, 2)
+  giltGlow.position.set(0, 2.1, -BAR_HALF_D + 0.7)
+  gilt.add(giltGlow)
+  // slot-bar-piano: the upright against the front wall, candles lit
+  const piano = new THREE.Group()
+  piano.position.set(2.6, 0, BAR_HALF_D - 0.45)
+  piano.rotation.y = Math.PI
+  piano.visible = false
+  scene.add(slot(SLOT.barPiano, piano))
+  const walnut = std({ color: 0x2c1a10, roughness: 0.35, metalness: 0.1 })
+  piano.add(box(1.5, 1.32, 0.5, walnut, 0, 0.66, 0, 0.02))
+  const keybedTex = track(paint(256, 40, (ctx, w, h) => {
+    ctx.fillStyle = '#e8ddc4'
+    ctx.fillRect(0, 0, w, h)
+    ctx.fillStyle = '#171017'
+    for (let i = 0; i < 28; i++) {
+      if (i % 7 === 2 || i % 7 === 6) continue
+      ctx.fillRect(i * 9 + 5, 0, 5, h * 0.62)
+    }
+  }))
+  const keybed = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.16), std({ map: keybedTex, roughness: 0.5 }))
+  keybed.position.set(0, 0.98, 0.3)
+  keybed.rotation.x = -0.6
+  piano.add(keybed)
+  piano.add(box(1.34, 0.05, 0.28, walnut, 0, 0.9, 0.3))
+  for (const side of [-1, 1]) {
+    piano.add(cyl(0.028, 0.034, 0.14, 8, brassMat, side * 0.5, 1.42, 0.24))
+    const flame = new THREE.Mesh(
+      new THREE.SphereGeometry(0.018, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd08a, transparent: true, opacity: 0.9 }),
+    )
+    flame.position.set(side * 0.5, 1.53, 0.24)
+    flame.scale.y = 1.9
+    piano.add(flame)
+    const candleLight = new THREE.PointLight(0xffb060, 1.1, 1.8, 2)
+    candleLight.position.set(side * 0.5, 1.55, 0.3)
+    piano.add(candleLight)
+  }
+  // a bench to go with it
+  piano.add(box(0.7, 0.08, 0.32, walnut, 0, 0.46, 0.75))
+  for (const [bx, bz] of [[-0.3, 0.63], [0.3, 0.63], [-0.3, 0.87], [0.3, 0.87]]) {
+    piano.add(cyl(0.025, 0.03, 0.42, 6, walnut, bx, 0.21, bz))
+  }
+
+  // ── breath ─────────────────────────────────────────────────────────────
+  const tick = (t: number, _dt: number): void => {
+    // the pendants breathe almost imperceptibly — a bar is warmer than a
+    // showroom because its light is not entirely still
+    for (let i = 0; i < pendantShades.length; i++) {
+      pendantShades[i].emissiveIntensity = 0.8 + Math.sin(t * 1.3 + i * 2.1) * 0.08
+    }
+  }
+
+  const dispose = (): void => {
+    for (const d of disposables) d.dispose()
+    scene.traverse(o => {
+      const mesh = o as THREE.Mesh
+      if (mesh.geometry) mesh.geometry.dispose()
+      const mat = mesh.material
+      if (Array.isArray(mat)) mat.forEach(m => m.dispose())
+      else if (mat) (mat as THREE.Material).dispose()
+    })
+  }
+
+  return {
+    scene, slots, pickables,
+    attachCamera: () => { /* nothing in the bar billboards */ },
+    tick, dispose,
+    darts: NO_DARTS,
+    setOwned: (id, owned) => cardRepaints.get(id)?.(owned),
+    setPurse: (balance) => {
+      if (balance === purseChalk) return
+      purseChalk = balance
+      paintPurse()
+    },
+  }
+}
+
 // ─── camera presets ───────────────────────────────────────────────────────
+
+const BAR_VIEWS: Record<string, { pos: [number, number, number]; target: [number, number, number] }> = {
+  // standing just inside, the counter and the glass ahead of you
+  room: { pos: [0.3, 1.7, 2.7], target: [0, 1.35, -2.8] },
+  // leaning on the counter — bottles, mirror, the purse chalked on the
+  // right, and the beer engines in frame once they are bought
+  counter: { pos: [-0.5, 1.62, 0.4], target: [0.9, 1.35, -3.4] },
+  // square to the display case, both tiers readable end to end
+  shelves: { pos: [0.35, 1.42, 0.1], target: [4.1, 1.3, 0.1] },
+  // the way back — the lounge, framed
+  lounge: { pos: [-1.7, 1.65, 0.25], target: [-4.4, 1.8, 0.2] },
+}
 
 const VIEWS: Record<string, { pos: [number, number, number]; target: [number, number, number] }> = {
   room: { pos: [0.4, 1.75, 4.35], target: [0, 1.15, -1.6] },
@@ -3063,13 +4083,22 @@ function boot(): boolean {
   canvas.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;cursor:grab'
   host.appendChild(canvas)
 
-  const room = buildRoom(cfg.art ?? {})
+  // Which room this stage boots into. `room` is a LET: walking through a
+  // door print disposes the room you are in and stands the other one up in
+  // the same renderer — every handler below reads `room` at call time, so
+  // the swap is one assignment.
+  let roomName = cfg.room === 'bar' ? 'bar' : 'lounge'
+  const buildNamed = (name: string): Room =>
+    name === 'bar' ? buildBar() : buildRoom(cfg.art ?? {})
+  const viewsOf = (name: string): typeof VIEWS => (name === 'bar' ? BAR_VIEWS : VIEWS)
+  let room = buildNamed(roomName)
+  let views = viewsOf(roomName)
   const camera = new THREE.PerspectiveCamera(52, 16 / 10, 0.1, 60)
   room.attachCamera(camera)
-  camera.position.set(...VIEWS.room.pos)
+  camera.position.set(...views.room.pos)
 
   const controls = new OrbitControls(camera, canvas)
-  controls.target.set(...VIEWS.room.target)
+  controls.target.set(...views.room.target)
   controls.enableDamping = true
   controls.dampingFactor = 0.06
   controls.enablePan = false
@@ -3178,7 +4207,7 @@ function boot(): boolean {
   // camera tween for the preset views
   let tween: { from: THREE.Vector3; to: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t: number } | null = null
   const view = (name: string): void => {
-    const v = VIEWS[name]
+    const v = views[name]
     if (!v) return
     room.darts.view(name)
     tween = {
@@ -3188,6 +4217,27 @@ function boot(): boolean {
       toT: new THREE.Vector3(...v.target),
       t: 0,
     }
+  }
+
+  // ── walking through a door print ───────────────────────────────────────
+  // The lounge hangs a picture of the bar; the bar hangs a picture of the
+  // lounge. Clicking either one lands here: the standing room is disposed,
+  // the other is built into the SAME renderer, and the camera arrives at the
+  // new room's own default. The page hears `lounge3d:room` and re-applies
+  // whatever it knows — decor switches, owned displays, the purse.
+  const enterRoom = (name: string): void => {
+    const next = name === 'bar' ? 'bar' : 'lounge'
+    if (next === roomName) return
+    room.dispose()
+    roomName = next
+    room = buildNamed(next)
+    room.attachCamera(camera)
+    views = viewsOf(next)
+    tween = null
+    camera.position.set(...views.room.pos)
+    controls.target.set(...views.room.target)
+    controls.update()
+    host.dispatchEvent(new CustomEvent('lounge3d:room', { detail: { room: next }, bubbles: true }))
   }
 
   const clock = new THREE.Clock()
@@ -3243,11 +4293,17 @@ function boot(): boolean {
     },
     view,
     frame: () => frame(1 / 60),
-    oche: { state: room.darts.state, throwAt: room.darts.throwAt },
+    // the oche reads `room` at call time so a walk to the bar and back
+    // doesn't strand the harness on a disposed board
+    oche: { state: () => room.darts.state(), throwAt: (x, y) => room.darts.throwAt(x, y) },
     pose: () => ({
       pos: camera.position.toArray().map(n => +n.toFixed(2)),
       target: controls.target.toArray().map(n => +n.toFixed(2)),
     }),
+    enterRoom,
+    roomName: () => roomName,
+    setOwned: (id, owned) => room.setOwned?.(id, owned),
+    setPurse: balance => room.setPurse?.(balance),
     ready: Promise.resolve(true),
   }
   host.dataset.ready = '1'

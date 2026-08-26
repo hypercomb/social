@@ -19,7 +19,7 @@
 // content returns unchanged:true. Safe to re-run after editing page copy.
 
 import WebSocket from 'ws'
-import { EARN_OF, EARN_RULES, EMBERS_JS, HOUSE_ITEMS, OCHE_NOTE, SALE_ITEMS, STORE_ITEMS } from './lounge3d/store-items.js'
+import { BAR_ITEMS, EARN_OF, EARN_RULES, EMBERS_JS, HOUSE_ITEMS, OCHE_NOTE, SALE_ITEMS, SHOP_ITEMS, STORE_ITEMS, UPGRADE_OF } from './lounge3d/store-items.js'
 
 const BRIDGE_PORT = 2401
 const TIMEOUT = 60_000
@@ -3545,6 +3545,13 @@ function buildPages(
     // 0 and toggles; everything from El Mercado stays dark until the ledger
     // says it is yours, and unlocks from this list if you can afford it.
     var SLOTS = ${JSON.stringify(STORE_ITEMS.map(i => ({ id: i.id, label: i.label, price: i.price })))};
+    // upgrade id -> the slot it REPLACES when lit. Everything in the room is
+    // an atomic target: the finer version stands where the old one stood, so
+    // the old one steps aside while the upgrade is on.
+    var UP_OF = ${JSON.stringify(UPGRADE_OF)};
+    // EL BAR's own fittings — owned means standing, there is no toggle yet
+    var BAR_GOODS = ${JSON.stringify(BAR_ITEMS.map(i => i.id))};
+    var SHOP_IDS = ${JSON.stringify(SHOP_ITEMS.map(i => i.id))};
     var KEY = 'rev:lounge:decor';
     var E = window.RevEmbers;
     var on = {};
@@ -3559,13 +3566,37 @@ function buildPages(
     }
     seed();
     function lit(s){ return mine(s) && !!on[s.id]; }
+    function shows(s){
+      // a slot with a lit upgrade steps aside for it
+      if (!lit(s)) return false;
+      for (var up in UP_OF) {
+        if (UP_OF[up] !== s.id) continue;
+        for (var j = 0; j < SLOTS.length; j++)
+          if (SLOTS[j].id === up && lit(SLOTS[j])) return false;
+      }
+      return true;
+    }
+    function paintBar(){
+      // EL BAR wears the ledger's verdicts: price cards flip to YOURS, the
+      // bar's own fittings stand up, and the purse is chalked by the glass
+      var R = window.RevLounge3D;
+      if (!R || !R.roomName || R.roomName() !== 'bar') return;
+      for (var i = 0; i < SHOP_IDS.length; i++)
+        R.setOwned(SHOP_IDS[i], !!(E && E.owned(SHOP_IDS[i])));
+      for (var b = 0; b < BAR_GOODS.length; b++)
+        R.setSlot(BAR_GOODS[b], !!(E && E.owned(BAR_GOODS[b])));
+      R.setPurse(E ? E.balance() : 0);
+    }
     function paintScene(){
+      var R = window.RevLounge3D;
+      if (R && R.roomName && R.roomName() === 'bar') { paintBar(); return; }
       SLOTS.forEach(function(s){
         // a slot may have overlay pieces outside its group (data-slot),
         // e.g. the hearth glow painted above the rug — hide both together
+        var vis = shows(s);
         var nodes = document.querySelectorAll('#' + s.id + ', [data-slot="' + s.id + '"]');
-        for (var i = 0; i < nodes.length; i++) nodes[i].style.display = lit(s) ? '' : 'none';
-        if (window.RevLounge3D) window.RevLounge3D.setSlot(s.id, lit(s));
+        for (var i = 0; i < nodes.length; i++) nodes[i].style.display = vis ? '' : 'none';
+        if (R) R.setSlot(s.id, vis);
       });
     }
     function apply(){
@@ -3624,6 +3655,8 @@ function buildPages(
     window.__loungeSlots = SLOTS;
     // the room boots on idle — re-apply the saved switches once it is up
     document.addEventListener('lounge3d:ready', paintScene);
+    // walking through a door print rebuilds the world — dress the new one
+    document.addEventListener('lounge3d:room', paintScene);
 
     // Belt and braces: if the room never reports ready (no WebGL, or the
     // bundle resource didn't resolve at all), show the drawn lounge instead
@@ -3710,6 +3743,124 @@ function buildPages(
     });
   })();
   </script>
+  <script>
+  (function(){
+    // ── EL BAR — the picture is the door, the displays are the shop ────
+    // The bar print at the end of the gallery wall walks you into the shop
+    // room; the lounge print behind its counter walks you back. A display
+    // case click opens this buy plate; the purse is the same embers ledger
+    // everything else pays into, and the ledger is the only truth — the
+    // plate just reads it, writes one buy entry, and lets embers:change
+    // repaint every consumer at once.
+    var SHOP = ${JSON.stringify(SHOP_ITEMS)};
+    var BASE_LABELS = ${JSON.stringify(Object.fromEntries(STORE_ITEMS.map(i => [i.id, i.label])))};
+    var byId = {};
+    for (var i = 0; i < SHOP.length; i++) byId[SHOP[i].id] = SHOP[i];
+    var E = window.RevEmbers;
+    var plate = null, plateItem = null;
+
+    function flash(){
+      var purse = document.querySelector('.purse');
+      if (!purse) return;
+      purse.classList.remove('paid'); void purse.offsetWidth; purse.classList.add('paid');
+    }
+    function closePlate(){
+      if (!plate) return;
+      if (plate.parentNode) plate.parentNode.removeChild(plate);
+      plate = null; plateItem = null;
+    }
+    function paintPlate(){
+      if (!plate || !plateItem) return;
+      var bal = E ? E.balance() : 0;
+      var mine = !!(E && E.owned(plateItem.id));
+      var balanceLine = plate.querySelector('[data-bar-balance]');
+      if (balanceLine) balanceLine.textContent = bal + ' embers in the purse';
+      var btn = plate.querySelector('[data-bar-take]');
+      if (!btn) return;
+      if (mine){
+        btn.disabled = true;
+        btn.textContent = 'Yours' + (plateItem.room === 'bar' ? ' \\u2014 standing in the bar' : ' \\u2014 in the lounge');
+      } else if (bal < plateItem.price){
+        btn.disabled = true;
+        btn.textContent = (plateItem.price - bal) + ' more to go \\u2014 the oche pays';
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Take it \\u2014 ' + plateItem.price + ' embers';
+      }
+    }
+    function openPlate(id){
+      var item = byId[id];
+      if (!item) return;
+      closePlate();
+      plateItem = item;
+      plate = document.createElement('div');
+      plate.style.cssText = 'position:fixed;inset:0;z-index:10500;display:flex;' +
+        'align-items:center;justify-content:center;background:rgba(13,9,18,.55)';
+      var card = document.createElement('div');
+      card.style.cssText = 'max-width:22rem;width:calc(100% - 3rem);background:linear-gradient(165deg,#1b1520,#241c2b);' +
+        'border:1px solid #c8975a;border-radius:3px;padding:1.6rem 1.7rem 1.5rem;color:#f0e6d6;' +
+        'font:15px/1.55 Georgia,serif;box-shadow:0 26px 70px rgba(0,0,0,.6)';
+      var kicker = item.group === 'finer things' ? 'a finer version'
+        : item.room === 'bar' ? 'for the bar' : 'for the lounge';
+      var html = '<p style="margin:0 0 .4rem;font-size:.68rem;letter-spacing:.24em;' +
+        'text-transform:uppercase;color:#c8975a">' + kicker + '</p>' +
+        '<h3 style="margin:0 0 .7rem;font-size:1.3rem;color:#e0b578">' + item.label + '</h3>' +
+        '<p style="margin:0 0 .9rem;color:#cfc4b2">' + item.blurb + '</p>';
+      if (item.of && BASE_LABELS[item.of]) {
+        html += '<p style="margin:0 0 .9rem;font-size:.85rem;color:#8a8090;font-style:italic">' +
+          'Stands where ' + BASE_LABELS[item.of].toLowerCase() + ' stood \\u2014 they step aside, they stay yours.</p>';
+      }
+      html += '<p data-bar-balance style="margin:0 0 1rem;font-size:.85rem;color:#8a8090"></p>' +
+        '<div style="display:flex;gap:.8rem;align-items:center">' +
+        '<button type="button" data-bar-take style="flex:1;padding:.65rem 1rem;border:1px solid #c8975a;' +
+        'background:transparent;color:#e0b578;font:inherit;font-size:.8rem;letter-spacing:.16em;' +
+        'text-transform:uppercase;cursor:pointer;border-radius:2px"></button>' +
+        '<button type="button" data-bar-close style="padding:.65rem .9rem;border:1px solid #3a3040;' +
+        'background:transparent;color:#8a8090;font:inherit;font-size:.8rem;cursor:pointer;border-radius:2px">' +
+        'Leave it</button></div>';
+      card.innerHTML = html;
+      plate.appendChild(card);
+      plate.addEventListener('click', function(e){ if (e.target === plate) closePlate(); });
+      card.querySelector('[data-bar-close]').addEventListener('click', closePlate);
+      card.querySelector('[data-bar-take]').addEventListener('click', function(){
+        if (!E || E.buy(item.id, item.price, item.label) !== 'bought') return;
+        // a lounge good arrives switched ON where it lives; bar fittings and
+        // price cards repaint themselves off the embers:change this raised
+        if (item.room !== 'bar' && window.__loungeSetSlot) window.__loungeSetSlot(item.id, true);
+        flash();
+        paintPlate();
+      });
+      document.body.appendChild(plate);
+      paintPlate();
+    }
+
+    document.addEventListener('lounge3d:pick', function(e){
+      var id = e.detail && e.detail.id;
+      if (!id) return;
+      var R = window.RevLounge3D;
+      if (id === 'bar'){
+        // the picture is the door: fill the screen, then walk through it
+        if (window.__loungeWalkIn) window.__loungeWalkIn();
+        if (R && R.enterRoom) R.enterRoom('bar');
+        return;
+      }
+      if (id === 'lounge'){
+        closePlate();
+        if (R && R.enterRoom) R.enterRoom('lounge');
+        return;
+      }
+      if (id.indexOf('shop:') === 0) openPlate(id.slice(5));
+    });
+    window.addEventListener('embers:change', function(){ paintPlate(); });
+    // window-capture so this outruns the page's own Escape handling — an
+    // open plate swallows the key instead of walking you out of the room
+    window.addEventListener('keydown', function(e){
+      if (e.key !== 'Escape' || !plate) return;
+      e.stopPropagation();
+      closePlate();
+    }, true);
+  })();
+  </script>
   ${CONCIERGE_JS}`)
 
   // ── El Mercado — the storefront ──────────────────────────────────────
@@ -3717,7 +3868,7 @@ function buildPages(
   // against the ledger at read time: owned, affordable, or short. Buying is
   // a ledger entry, nothing more — there is no cart, no checkout, no rail.
 
-  const shelfOf = (group: string): string => SALE_ITEMS.filter(i => i.group === group).map(i => `
+  const shelfOf = (group: string): string => SHOP_ITEMS.filter(i => i.group === group).map(i => `
         <article class="good" data-good="${i.id}" data-price="${i.price}">
           <div class="price"><i aria-hidden="true"></i>${i.price}</div>
           <h3>${i.label}</h3>
@@ -3777,8 +3928,24 @@ function buildPages(
       <div class="rule"><p class="kicker">the wall</p></div>
       <div class="shelf">${shelfOf('the wall')}
       </div>
-      <p class="muted">Everything you buy appears in the lounge's Decorate list, switched
-      on. Switch it off any time — it stays yours.</p>
+
+      <div class="rule"><p class="kicker">finer things</p></div>
+      <h2>Everything is <i>replaceable</i>.</h2>
+      <p>Every prop in the room is an atomic target — any of them can be swapped for a
+      finer version of itself. These stand exactly where the thing they replace stood;
+      the old one stays yours, switched off, in case you miss it.</p>
+      <div class="shelf">${shelfOf('finer things')}
+      </div>
+
+      <div class="rule"><p class="kicker">for the bar</p></div>
+      <h2>Fittings for <i>EL BAR</i>.</h2>
+      <p>The shop itself is a room — walk into it through the bar picture at the end of
+      the lounge's gallery wall. These furnish the bar, not the lounge.</p>
+      <div class="shelf">${shelfOf('for the bar')}
+      </div>
+      <p class="muted">Everything you buy appears in its room, switched on — lounge goods
+      in the lounge's Decorate list, bar fittings in EL BAR. Switch a thing off any
+      time — it stays yours.</p>
     </section>
 
     <section class="section">
@@ -4120,6 +4287,54 @@ async function main(): Promise<void> {
   if (!face.ok) { console.error(`[site] lounge arrival face FAIL: ${face.error}`); process.exit(1) }
   console.log(`[site] /revolucion/lounge opens as → lounge${face.data.unchanged ? ' (unchanged)' : ''}`)
 
+  // 2d. EL BAR AS A TILE — a second room is a second record, not a second
+  // behaviour. `/revolucion/bar` carries the SAME bundle told to stand the
+  // bar up (`room: 'bar'`), so the shop can be walked into from the hive
+  // exactly the way the lounge can — and from inside the lounge, the bar
+  // print at the end of the gallery wall is the door. The atomic-target
+  // doctrine, applied to a whole room: nothing in the behaviour says
+  // "lounge", the record decides which world stands up.
+  const barSegments = ['revolucion', 'bar']
+  {
+    const parent = await send({ op: 'layer-at', segments: ['revolucion'] })
+    const siblings: string[] = Array.isArray(parent?.data?.children) ? parent.data.children : []
+    if (!siblings.includes('bar')) {
+      const made = await send({ op: 'add', cells: ['bar'], segments: ['revolucion'] })
+      if (!made.ok) { console.error(`[site] bar cell FAIL: ${made.error}`); process.exit(1) }
+      console.log('[site] /revolucion/bar minted')
+    }
+  }
+  const barRoom = await send({
+    op: 'decoration-add',
+    segments: barSegments,
+    kind: 'visual:lounge:room',
+    appliesTo: barSegments,
+    // NO createdAt — identical content must mint an identical record.
+    payload: {
+      version: 1,
+      bundleSig: loungeSig,
+      room: 'bar',
+      views: ['room', 'counter', 'shelves', 'lounge'],
+      label: 'El Bar',
+      icon: 'local_bar',
+    },
+    mark: 'persistent',
+    replaceKind: true,
+  })
+  if (!barRoom.ok) { console.error(`[site] bar room record FAIL: ${barRoom.error}`); process.exit(1) }
+  console.log(`[site] /revolucion/bar room → bundle ${loungeSig.slice(0, 12)}… (room: bar)${barRoom.data.unchanged ? ' (unchanged)' : ''}`)
+  const barFace = await send({
+    op: 'decoration-add',
+    segments: barSegments,
+    kind: 'view:default',
+    appliesTo: barSegments,
+    payload: { view: 'lounge' },
+    mark: 'persistent',
+    replaceKind: true,
+  })
+  if (!barFace.ok) { console.error(`[site] bar arrival face FAIL: ${barFace.error}`); process.exit(1) }
+  console.log(`[site] /revolucion/bar opens as → the bar${barFace.data.unchanged ? ' (unchanged)' : ''}`)
+
   // 3. Verify by read-back: decorations slot holds a visual:website:page
   //    record with our htmlSig, and the HTML bytes round-trip.
   let pass = 0, fail = 0
@@ -4165,6 +4380,28 @@ async function main(): Promise<void> {
       ? '[site] verify: the lounge tile IS the room, and opens as it'
       : `[site] verify FAIL — room:${roomOk} opensAs:${faceOk}`)
     if (!(roomOk && faceOk)) fail++
+  }
+
+  // 3c. Verify EL BAR the same way — the bar cell's record names the same
+  //     bundle with `room: 'bar'`, and the tile opens as the room.
+  {
+    const layer = await send({ op: 'layer-at', segments: barSegments })
+    const decoSigs: string[] = Array.isArray(layer?.data?.decorations) ? layer.data.decorations : []
+    let barOk = false, barFaceOk = false
+    for (const sig of decoSigs) {
+      const res = await send({ op: 'get-resource', sig })
+      if (!res.ok) continue
+      try {
+        const rec = JSON.parse(res.data.text)
+        if (rec.kind === 'visual:lounge:room' && rec.payload?.bundleSig === loungeSig
+          && rec.payload?.room === 'bar') barOk = true
+        if (rec.kind === 'view:default' && rec.payload?.view === 'lounge') barFaceOk = true
+      } catch { /* not JSON */ }
+    }
+    console.log(barOk && barFaceOk
+      ? '[site] verify: the bar tile IS the shop, and opens as it'
+      : `[site] verify FAIL — bar:${barOk} opensAs:${barFaceOk}`)
+    if (!(barOk && barFaceOk)) fail++
   }
 
   // One build revision for the whole pass (documentation/build-revisions.md)
