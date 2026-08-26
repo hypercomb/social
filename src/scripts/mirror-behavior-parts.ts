@@ -264,13 +264,21 @@ async function main(): Promise<void> {
     console.error(`[parts] ABORT: cannot read "${ROOT_KEY}" (${inf.error}). Open the app with ?claudeBridge=1 and ensure the mirror is built.`)
     process.exit(1)
   }
-  const existingChildren = new Map<string, string[]>()
-  const walk = (node: any, path: string[]): void => {
-    const kids = Array.isArray(node?.children) ? node.children : []
-    existingChildren.set(path.join('/'), kids.map((k: any) => String(k?.name ?? '')).filter(Boolean))
-    for (const k of kids) if (k?.name) walk(k, [...path, String(k.name)])
+  // Read a cell's children AT ITS OWN PATH, and refuse to answer unless the
+  // two readers agree. A single deep `inflate` of the whole mirror UNDER-
+  // REPORTS children on freshly-written subtrees — merging into a short read
+  // and writing it back is what silently ate part cells before (audited
+  // 2026-08-25: 81 parts down to 32). `layer-at` returns child SIGS, `inflate`
+  // returns NAMES; when the counts disagree we cannot see the whole array, so
+  // we never rewrite it.
+  const readChildren = async (segments: string[]): Promise<string[] | null> => {
+    const one = await sendRetry({ op: 'inflate', segments })
+    const seal = one?.data?.builds?.[0]?.seal ?? one?.data
+    const names = ((seal?.children ?? []) as any[]).map(k => String(k?.name ?? '')).filter(Boolean)
+    const layer = await sendRetry({ op: 'layer-at', segments })
+    const sigs = (layer?.data?.children ?? []) as unknown[]
+    return sigs.length === names.length ? names : null
   }
-  walk(inf.data, [ROOT_KEY])
 
   const totalParts = SPREADS.reduce((n, s) => n + s.parts.length, 0)
   console.log(`[parts] plan: ${SPREADS.length} behaviours, ${totalParts} part tiles (1:1 with source files)`)
@@ -281,7 +289,12 @@ async function main(): Promise<void> {
   for (const s of SPREADS) {
     const behaviorSeg = [ROOT_KEY, norm(s.collection), norm(s.behavior)]
     const behaviorPath = behaviorSeg.join('/')
-    const have = existingChildren.get(behaviorPath) ?? []
+    const have = await readChildren(behaviorSeg)
+    if (have === null) {
+      console.log(`[parts] SKIP ${behaviorPath} — readers disagree on its children; refusing to rewrite a list we cannot fully see`)
+      failStruct += s.parts.length
+      continue
+    }
     const wanted = s.parts.map(([file]) => norm(file.split('/').pop()!.replace(/\.ts$/, '')))
     const merged = [...have, ...wanted.filter(w => !have.includes(w))]
 
