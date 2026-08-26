@@ -8,17 +8,17 @@ import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
 import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
-import { EditActionsComponent } from "@hypercomb/shared/ui/edit-actions/edit-actions.component"
 import { ShellSurfacesComponent } from "@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component"
 import { TranslatePipe } from "@hypercomb/shared/core/i18n.pipe"
 import '@hypercomb/shared/ui/mesh-header/mesh-header.element'
 import '@hypercomb/shared/ui/sync-indicator/sync-indicator.element'
 import '@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.element'
+import '@hypercomb/shared/ui/edit-actions/edit-actions.element'
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, TranslatePipe, ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent],
+  imports: [RouterOutlet, Header, TranslatePipe, ControlsBarComponent, ShellSurfacesComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './app.html',
   styleUrl: './app.scss'

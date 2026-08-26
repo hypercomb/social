@@ -512,7 +512,7 @@ tag becomes an ordinary element surface.
 
 - [x] Small chrome: ~~`mesh-header`~~ (201), ~~`sync-indicator`~~ (377),
   ~~`upgrade-indicator`~~ (374)
-- [ ] `edit-actions` (460)
+- [x] ~~`edit-actions`~~ (460)
 - [ ] `controls-bar` (5,851) — the edge-reservation layout box that panels
   anchor to must survive the rewrite intact
 - [ ] Pure-TS window plumbing moves down as-is: `tool-windows.ts` (the Escape

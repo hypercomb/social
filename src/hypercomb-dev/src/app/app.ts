@@ -6,11 +6,12 @@ import {
 } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
-import { ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShellSurfacesComponent } from '@hypercomb/shared/ui';
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
 import '@hypercomb/shared/ui/mesh-header/mesh-header.element'
 import '@hypercomb/shared/ui/sync-indicator/sync-indicator.element'
 import '@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.element'
+import '@hypercomb/shared/ui/edit-actions/edit-actions.element'
 
 // One import boots the full essentials module graph — every drone, queen,
 // worker, input, view, and atomizer self-registers in window.ioc.
@@ -20,7 +21,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, EditActionsComponent, RouterOutlet, CommandLineComponent, ShellSurfacesComponent],
+  imports: [ControlsBarComponent, RouterOutlet, CommandLineComponent, ShellSurfacesComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'

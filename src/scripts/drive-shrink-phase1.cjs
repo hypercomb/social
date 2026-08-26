@@ -291,6 +291,39 @@ async function main() {
     smallChrome.defined && smallChrome.mounted && smallChrome.mesh && smallChrome.sync && smallChrome.upgrade,
     JSON.stringify(smallChrome))
 
+  const editActions = await page.evaluate(() => {
+    const bus = window.__hypercombEffectBus
+    const element = document.querySelector('hc-edit-actions')
+    if (!bus || !element) return { defined: false, mounted: false, history: false, selection: false, view: false }
+    const previous = {
+      history: bus.lastValue?.get?.('history:cursor-changed'),
+      selection: bus.lastValue?.get?.('selection:changed'),
+      view: bus.lastValue?.get?.('view:active'),
+    }
+    const hasGlyph = glyph => [...element.querySelectorAll('.mat-sym')].some(node => node.textContent === glyph)
+
+    bus.emit('history:cursor-changed', { position: 2, total: 4, rewound: true })
+    const history = hasGlyph('redo') && !!element.querySelector('.ea-save')
+    bus.emit('history:cursor-changed', { position: 4, total: 4, rewound: false })
+    bus.emit('selection:changed', { selected: ['gate-a', 'gate-b'] })
+    const selection = hasGlyph('content_cut') && hasGlyph('content_copy') && hasGlyph('delete')
+    bus.emit('view:active', { active: true })
+    const hidden = element.querySelector('.edit-actions')?.style.display === 'none'
+    bus.emit('view:active', { active: false })
+    const restored = element.querySelector('.edit-actions')?.style.display !== 'none'
+
+    bus.emit('history:cursor-changed', previous.history ?? { position: 0, total: 0, rewound: false })
+    bus.emit('selection:changed', previous.selection ?? { selected: [] })
+    bus.emit('view:active', previous.view ?? { active: false })
+    return {
+      defined: !!customElements.get('hc-edit-actions'), mounted: true,
+      history, selection, view: hidden && restored,
+    }
+  })
+  check('converted chrome: edit-actions follows history, selection and view effects',
+    editActions.defined && editActions.mounted && editActions.history && editActions.selection && editActions.view,
+    JSON.stringify(editActions))
+
   // host-panel is deliberately native-only. Its module must still define the
   // custom element in the web build, but the registry gate must keep it out of
   // the DOM when Tauri is absent.

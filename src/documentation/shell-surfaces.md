@@ -112,8 +112,8 @@ Note: a surface may relocate itself after mount (history-viewer portals to
 
 ## What stays in the templates
 
-Only bound or structural chrome: the header bar (command line / app-header,
-upgrade + sync indicators, mesh header), `router-outlet`, the Pixi host div,
-`hc-controls-bar` + `hc-edit-actions` (live `meshPublic`/`viewActive()`
-bindings), and web's install prompt. The doctrine ratchet's allowlist is the
-exact inventory; it may only shrink.
+Only structural chrome: the header bar (command line / app-header plus the
+framework-free upgrade, sync and mesh elements), `router-outlet`, the Pixi
+host div, framework-free `hc-edit-actions`, `hc-controls-bar` (still carrying
+live `meshPublic`/`viewActive()` bindings), and web's install prompt. The
+doctrine ratchet's allowlist is the exact inventory; it may only shrink.

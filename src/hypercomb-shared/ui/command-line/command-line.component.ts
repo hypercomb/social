@@ -967,7 +967,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly chatPanelOpen = this.#chatPanelOpen.asReadonly()
 
   // (The feedback toggle moved to the bottom-right document cluster —
-  //  edit-actions.component — taking the forum glyph and the
+  //  edit-actions element — taking the forum glyph and the
   //  `feedback:toggle` / `feedback:panel-state` wiring with it.)
 
   // ── pheromones button ─────────────────────────────────
