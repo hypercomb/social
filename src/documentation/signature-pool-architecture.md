@@ -4,7 +4,7 @@ Status: implemented standard, 2026-08-25.
 
 ## The invariant
 
-A fixed item name identifies one canonical root lineage:
+A fixed **identity name** identifies one canonical root lineage:
 
 ```text
 people  ->  /people  ->  sign(lineageKey(['people']))
@@ -14,6 +14,13 @@ How the item was discovered is provenance, not identity. An item found at
 `/research/contacts/people`, adopted from a swarm, loaded from a package, or
 selected from a Portal is promoted to the same `/people` root. New references
 never retain the discovery route.
+
+The identity name is the raw lineage address/pool key. It is not necessarily
+the text painted on the tile. Edit mode's name field writes a localized
+`title` decoration; one participant may therefore see `/people` as “People”,
+another as “Collaborators”, and a Japanese reader as “人々”. They still share
+the single `people` identity pool and stack by that fixed key. Editing display
+text never moves a lineage, renames a bag, splits a pool, or rewrites a peer.
 
 Every lineage appearance is therefore a leaf pointing to the matching root:
 
@@ -52,9 +59,16 @@ root bag. Identical content found through several routes dedupes to one atomic
 member; genuinely different content survives beside it. Discovery lineage is
 provenance, never identity.
 
+The layer signature is deliberately the unit—not an image signature and not a
+selected subset of fields. Two variants under one identity may differ in every
+property and slot: image, index, background, border, tags, links, display-title
+decorations, notes, files, children, behaviors, and future content. The live
+swarm carries a sanitized property/title projection for immediate rendering;
+`layerSig` remains the complete atomic candidate and merkle-closure handle.
+
 This is the precise reading of **Pool of Meaning**:
 
-- fixed name = one pool address;
+- fixed identity name = one pool address (never the editable display title);
 - layer signature = one atomic candidate meaning;
 - max history marker = this participant's current choice/default;
 - resource signatures = immutable bytes used by candidates;
@@ -109,10 +123,14 @@ are fetched only for preview/selection and verified by signature. Choosing an
 image is one normal, undoable root revision; every ordinary reference inherits
 the new default dynamically.
 
-Pasting or adopting a same-name item is **arrival, not selection**. In a live
-swarm it adds the participant's local head to the existing participant stack;
-every peer head and its `imageSig` remain independently addressable. The
-current-lineage peer projection is also unioned into the Image Hive as a
+Pasting or adopting a same-identity item is **arrival, not selection**. In a
+live swarm it adds the participant's local head to the existing participant
+stack; every peer head, complete sanitized property projection, localized
+display titles, `imageSig`, and backing `layerSig` remain independently
+addressable. Rolling a stack chooses one participant's coherent variant; it
+must never combine their image with somebody else's border, tags, link, title,
+or other properties. The current-lineage peer projection is also unioned into
+the Image Hive as a
 compatibility witness while older participants migrate to canonical roots.
 Nothing on paste writes another participant's head, and nothing automatically
 changes an existing local root default. Only the explicit image-choice gesture
@@ -144,11 +162,13 @@ pool's identity or inventory.
 
 ## Homonyms
 
-Same spelling is intentionally one name pool while variants are plausibly
+The stable identity spelling intentionally selects one name pool while variants are plausibly
 different contextual readings of the same named thing. Truly unrelated
-homonyms must be disambiguated at naming/import time (a more specific fixed
-name or an explicit namespace). A portal must never guess that two unrelated
-things are equivalent merely because their display labels collide.
+homonyms must be disambiguated at identity/import time (a more specific fixed
+identity name or an explicit namespace). Editable display labels do not choose
+or merge pools: two unrelated identities may display the same text, and two
+variants in one pool may display different text. A portal must resolve the
+stable identity key, never guess from what happens to be painted today.
 
 ## Hiding is appearance-scoped
 

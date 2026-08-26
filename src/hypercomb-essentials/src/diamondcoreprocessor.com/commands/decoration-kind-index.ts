@@ -526,6 +526,15 @@ export function titleForSegments(segments: readonly string[], locale: string): s
   return titleByKey.get(locationKey(segments))?.[locale] ?? ''
 }
 
+/** Every localized display title carried by one tile. This is the swarm
+ * projection seam: a remote participant may read the same fixed identity
+ * under entirely different editable text, so publishing only the raw address
+ * would collapse a meaningful part of their variant. Returns a fresh object
+ * so no caller can mutate the synchronous decoration index. */
+export function titlesForSegments(segments: readonly string[]): Readonly<Record<string, string>> {
+  return { ...(titleByKey.get(locationKey(segments)) ?? {}) }
+}
+
 /** Decoration kind carrying THE LAYER'S DEFAULT VIEW: payload `{ view: 'postit' }`.
  *
  *  "When you come to this layer, this is the view that opens." One per layer —

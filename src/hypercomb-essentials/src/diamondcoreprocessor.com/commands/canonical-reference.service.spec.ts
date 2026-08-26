@@ -100,7 +100,11 @@ describe('CanonicalReferenceService', () => {
       name: 'friend', notes: ['2'.repeat(64)],
     })
     const peopleSig = await history.commitLayer(hex('unused-people'), {
-      name: 'people', notes: ['1'.repeat(64)], children: [friendSig],
+      name: 'people',
+      notes: ['1'.repeat(64)],
+      children: [friendSig],
+      properties: ['3'.repeat(64)],
+      decorations: ['4'.repeat(64)], // includes mutable display-title state
     })
     const nestSig = await history.commitLayer(hex('unused-nest'), { name: 'nest', children: [peopleSig] })
     const setsSig = await history.commitLayer(await history.sign({ explorerSegments: () => ['sets'] }), {
@@ -159,6 +163,15 @@ describe('CanonicalReferenceService', () => {
     const names = await Promise.all((hive?.children ?? []).map(async sig => (await history.getLayerBySig(sig))?.name))
     expect(names).toContain('people')
     expect(pooled.some(entry => (entry.record as { kind?: string }).kind === 'canonical:variant')).toBe(true)
+    const sourceCandidate = pooled
+      .map(entry => entry.record as { kind?: string; payload?: { layerSig?: string } })
+      .find(record => (history.content.get(record.payload?.layerSig ?? '')?.notes as string[] | undefined)?.[0] === '1'.repeat(64))
+    expect(history.content.get(sourceCandidate?.payload?.layerSig ?? '')).toMatchObject({
+      name: 'people',
+      properties: ['3'.repeat(64)],
+      decorations: ['4'.repeat(64)],
+      children: [expect.any(String)],
+    })
   })
 
   it('places a lineage leaf that points only at the fixed-name root', async () => {

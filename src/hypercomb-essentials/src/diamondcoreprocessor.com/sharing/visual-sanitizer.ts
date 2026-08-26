@@ -22,8 +22,11 @@
 //   - `index`        : finite non-negative integer (slot position)
 //   - `imageSig`     : 64-char lowercase hex (resource pointer)
 //   - `small`        : { image?: sig, ... }  (substrate variants)
-//   - `flat`         : { small?: { image?: sig } }
+//   - `large`        : { image?: sig, x/y/scale?: finite number }
+//   - `flat`         : { small?: { image?: sig }, large?: transform }
 //   - `point`        : { image?: sig }
+//   - `background`   : { color: six-digit hex }
+//   - `border`       : { color: six-digit hex }
 //   - `accent`       : short identifier-shaped string (preset name)
 //   - `tags`         : array of short identifier-shaped strings
 //   - `link`         : http(s) URL or root-relative path (NO javascript:,
@@ -41,6 +44,9 @@
 //                      never personally navigated into them. "Signatures
 //                      are streamed so you can add them" — this is that
 //                      stream.
+//   - `titles`       : locale -> bounded inert display text. This is a
+//                      presentation projection only; the raw `name` remains
+//                      the stable identity/pool key.
 //
 // What's stripped on adopt (in addition to swarm-only metadata):
 //   - session-only keys, paired-channel-era markers, the publisher's
@@ -57,6 +63,9 @@ const URL_SAFE_RE = /^(https?:\/\/|\/)[\w\-._~:/?#\[\]@!$&'()*+,;=%]{0,2048}$/
 const MAX_TAGS = 32
 const MAX_TAG_LEN = 64
 const MAX_LINK_LEN = 2048
+const MAX_TITLES = 32
+const MAX_TITLE_LEN = 256
+const COLOR_RE = /^#?[0-9a-fA-F]{6}$/
 
 /** Coerce to non-negative finite integer; null on rejection. */
 function asNonNegativeInt(v: unknown): number | null {
@@ -117,11 +126,55 @@ function asImageContainer(v: unknown): { image: string } | null {
   return img ? { image: img } : null
 }
 
-/** Nested `flat: { small: { image: sig } }` shape. */
-function asFlatContainer(v: unknown): { small: { image: string } } | null {
+type ImageTransform = { image?: string; x?: number; y?: number; scale?: number }
+
+/** Large/orientation transform. Every number is finite and bounded so a peer
+ * cannot feed infinities or absurd values into canvas math. */
+function asImageTransform(v: unknown): ImageTransform | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null
-  const small = asImageContainer((v as Record<string, unknown>)['small'])
-  return small ? { small } : null
+  const raw = v as Record<string, unknown>
+  const out: ImageTransform = {}
+  const image = asSig(raw['image'])
+  if (image) out.image = image
+  for (const key of ['x', 'y', 'scale'] as const) {
+    const value = raw[key]
+    if (typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000) out[key] = value
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+/** Nested `flat` shape, preserving both its baked small and its editor
+ * transform while rejecting every unknown key. */
+function asFlatContainer(v: unknown): { small?: { image: string }; large?: ImageTransform } | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const raw = v as Record<string, unknown>
+  const out: { small?: { image: string }; large?: ImageTransform } = {}
+  const small = asImageContainer(raw['small'])
+  if (small) out.small = small
+  const large = asImageTransform(raw['large'])
+  if (large) out.large = large
+  return Object.keys(out).length > 0 ? out : null
+}
+
+function asColorContainer(v: unknown): { color: string } | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const color = (v as Record<string, unknown>)['color']
+  return typeof color === 'string' && COLOR_RE.test(color) ? { color } : null
+}
+
+function asTitles(v: unknown): Readonly<Record<string, string>> | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const out: Record<string, string> = {}
+  for (const [rawLocale, rawText] of Object.entries(v as Record<string, unknown>)) {
+    if (Object.keys(out).length >= MAX_TITLES) break
+    const locale = rawLocale.trim()
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(locale)) continue
+    if (typeof rawText !== 'string') continue
+    const text = rawText.trim()
+    if (!text || text.length > MAX_TITLE_LEN || /[\x00-\x1f\x7f]/.test(text)) continue
+    out[locale] = text
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /** Whitelist sanitizer. Walks the input once, copies only validated
@@ -141,11 +194,20 @@ export function sanitizeVisualProperties(
   const small = asImageContainer(input['small'])
   if (small) out['small'] = small
 
+  const large = asImageTransform(input['large'])
+  if (large) out['large'] = large
+
   const flat = asFlatContainer(input['flat'])
   if (flat) out['flat'] = flat
 
   const point = asImageContainer(input['point'])
   if (point) out['point'] = point
+
+  const background = asColorContainer(input['background'])
+  if (background) out['background'] = background
+
+  const border = asColorContainer(input['border'])
+  if (border) out['border'] = border
 
   const accent = asIdent(input['accent'])
   if (accent) out['accent'] = accent
@@ -157,6 +219,8 @@ export function sanitizeVisualProperties(
   if (link) out['link'] = link
 
   if (typeof input['hideText'] === 'boolean') out['hideText'] = input['hideText']
+  if (typeof input['participant'] === 'boolean') out['participant'] = input['participant']
+  if (typeof input['substrate'] === 'boolean') out['substrate'] = input['substrate']
 
   const thread = asSig(input['thread'])
   if (thread) out['thread'] = thread
@@ -169,6 +233,9 @@ export function sanitizeVisualProperties(
 
   const layerSig = asSig(input['layerSig'])
   if (layerSig) out['layerSig'] = layerSig
+
+  const titles = asTitles(input['titles'])
+  if (titles) out['titles'] = titles
 
   // Swarm invite junction — bundle sig of a `swarm:invite` decoration on the
   // publisher's tile. Inert pointer; observers fetch + confirm only on click.

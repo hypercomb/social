@@ -249,8 +249,13 @@ per-lineage copies of anything.
   peer variants at the canonical root (not the current lineage), shows distinct
   images with publisher provenance, unions live-lineage witnesses for migration
   compatibility, and writes an explicit pick to the participant root default.
-  The swarm tile-source carries `imageSig` into same-name participant stacks,
-  so pasting a local twin cannot repaint a peer variant with the pasted image.
+  The participant stack is now a whole-variant projection: the swarm
+  tile-source carries the backing `layerSig`, every admitted 0000 property,
+  and the participant's localized editable titles—not only `imageSig` and
+  `index`. The stable raw name remains the stack/pool identity. Rolling selects
+  one coherent participant projection, so a pasted local twin cannot repaint a
+  peer variant or leak its border, tags, link, hide-text state, or display label
+  into that peer's version.
   A materialized `imagePool` array remains optional; it is not the source of
   truth.
 

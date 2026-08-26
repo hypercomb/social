@@ -209,8 +209,9 @@ const VISIT_RETRY_DELAY_MS = 2_500
  *  already holding the slot still wins: the ordinary collision demotion
  *  in #orderByIndexPinned applies unchanged. */
 const VISIT_PROP_KEYS = [
-  'imageSig', 'small', 'flat', 'point', 'accent', 'tags', 'link',
-  'hideText', 'thread', 'contentSig', 'stopReason', 'index',
+  'imageSig', 'small', 'large', 'flat', 'point', 'background', 'border',
+  'accent', 'tags', 'link', 'hideText', 'participant', 'substrate',
+  'thread', 'contentSig', 'stopReason', 'index',
 ] as const
 
 export class SwarmAdoptDrone extends Drone {
@@ -692,6 +693,13 @@ export class SwarmAdoptDrone extends Drone {
       this.#scheduleVisitRetry(retrySrc ?? { segments, parentSegments, name, entry })
       return false
     }
+    // `name` is the stable address/pool identity. The editor's rename field
+    // writes localized title decorations, which are equally part of the
+    // participant's variant but must never be smuggled into 0000 properties
+    // or used as the fold key. Apply that projection only after the identity
+    // has landed; a full branch pull already carries the canonical decoration
+    // slot, while this one-level lightweight fold needs the explicit bridge.
+    await this.#applyWireTitles(segments, entry)
     this.#visitStage('landed', { name, at: [...segments] })
 
     if (SIG_RE.test(layerSig)) {
@@ -806,6 +814,22 @@ export class SwarmAdoptDrone extends Drone {
       ?? swarm.subscribedTiles?.().find(matches)
       ?? swarm.peerTilesAtCurrentSig().find(p => p.name === label)
       ?? null) as Record<string, unknown> | null
+  }
+
+  #applyWireTitles = async (
+    segments: readonly string[],
+    entry: Readonly<Record<string, unknown>>,
+  ): Promise<void> => {
+    const raw = entry['titles']
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
+    const decorations = this.#ioc()?.get?.('@diamondcoreprocessor.com/DecorationService') as
+      | { setTitle?: (at: readonly string[], text: string, locale?: string) => Promise<unknown> }
+      | undefined
+    if (!decorations?.setTitle) return
+    for (const [locale, text] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof text !== 'string' || !text.trim()) continue
+      try { await decorations.setTitle(segments, text, locale) } catch { /* title never blocks content adoption */ }
+    }
   }
 
   /** The current explorer path — where a picked page tile folds. */

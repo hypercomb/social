@@ -41,7 +41,23 @@ export interface StackVariant {
    *  one. Rolling onto a participant adopts their indices, so you see
    *  their ARRANGEMENT and not yours with their pictures in it. */
   readonly index?: number
+  /** Complete sanitized live property projection for this participant. The
+   *  immutable `layerSig` remains the atomic candidate of record. */
+  readonly properties?: Readonly<Record<string, unknown>>
+  /** Locale-specific display titles. These may differ per participant while
+   *  every variant remains grouped by the fixed identity name. */
+  readonly titles?: Readonly<Record<string, string>>
+  readonly layerSig?: string
 }
+
+/** How one participant's variant reads in a locale. Display text is a
+ * property of the variant; the fallback identity is deliberately supplied by
+ * the caller and never replaced in the stack's map key. */
+export const variantTitle = (
+  variant: StackVariant | undefined,
+  locale: string,
+  fallback: string,
+): string => variant?.titles?.[locale]?.trim() || fallback
 
 /** Empty stack — shared so `stackFor` never allocates on a miss. */
 const NO_VARIANTS: readonly StackVariant[] = []
