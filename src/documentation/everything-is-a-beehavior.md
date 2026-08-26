@@ -198,6 +198,12 @@ sites** — essentials' 217 `Store` lookups and 184 `Lineage` lookups don't
 care where the implementation loaded from. Order: leaves first, heavyweights
 last.
 
+**The live gate**: `node scripts/drive-shrink-phase1.cjs --url
+http://localhost:4350` (the worktree's dev server) — proves every moved key
+registers, every value-announce replays, the loopback secret seed and
+note-marks pool seed work from module land, and the console stays clean.
+Extend its MOVED_KEYS / ANNOUNCED lists with every chip.
+
 **The proven move pattern** (established by `icon-overrides`, first down):
 contract → `hypercomb-core/src/core/<name>.types.ts` (interface + IoC KEY +
 effect-name constants); implementation → essentials beside its heaviest
