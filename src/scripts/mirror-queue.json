@@ -2057,6 +2057,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-p2-pinned-entrances",
+      "title": "Mirror the embedded pinned-entrances migration and orphan history retirement",
+      "run": null,
+      "note": "Pinned entrances moved from hypercomb-shared Angular UI into a framework-free Essentials custom element embedded by command-line. Mirror the pinned-entrances view, local store, two-key i18n catalog, and the proximity registry that moved down to core; update the existing source pointers rather than minting duplicates. Record that the old history-component was unreachable orphan code and retired, while the live Essentials history-viewer remains. Manual: note-add is additive and would double-land.",
+      "commit": "5e5b1ebcc",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
