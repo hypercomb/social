@@ -4,6 +4,7 @@ import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercom
 // imports them (two importers would inline two instances; ioc is first-wins).
 import './name-registry.js'
 import './bouquet-registry.js'
+import './tag-registry.js'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'

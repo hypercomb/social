@@ -1,4 +1,10 @@
-// hypercomb-shared/core/tag-registry.ts
+// tag-registry.ts
+//
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1 —
+// rides the commands bundle (slash-behaviour.drone is the ONE importer).
+// Consumers keep reaching it via IoC ('@hypercomb.social/TagRegistry') and
+// hear it on EffectBus ('tags:registry', emitted at load + every save).
+//
 // Master tag list — content-addressed resource (sig-named file at the
 // flat OPFS root, via Store.putResource), with the current sig pointer
 // kept as the `tags-master` record in the sign('registry') pool. The
@@ -191,7 +197,24 @@ export class TagRegistry extends EventTarget {
   }
 }
 
-register('@hypercomb.social/TagRegistry', new TagRegistry())
+export const tagRegistry = new TagRegistry()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureTagRegistryRegistered = (): void => {
+  if (!window.ioc?.has?.('@hypercomb.social/TagRegistry')) {
+    window.ioc?.register?.('@hypercomb.social/TagRegistry', tagRegistry)
+  }
+}
+ensureTagRegistryRegistered()
+
+// Warm the master list as soon as the module loads, so `:` intellisense and
+// tag colors are ready without any shell involvement. This replaces the warm
+// the command line used to fire in ngAfterViewInit — which, now that the
+// registry loads with this bundle, could run before the registry exists and
+// silently warm nothing. The 'tags:registry' announce at the end of the load
+// is what fills every reactive reader (last-value replay covers chrome that
+// mounted first).
+void tagRegistry.ensureLoaded()
 
 // ── the `tags` command object ────────────────────────────────────────
 //

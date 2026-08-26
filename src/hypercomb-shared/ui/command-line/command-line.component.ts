@@ -700,13 +700,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
     () => this.cellProvider.suggestions()
   )
-  /** Reactive master tag-name list. Bridged so tag intellisense re-reads the
-   *  list the moment the (async) registry load finishes — not only after the
-   *  first tag mutation. Loaded on boot in ngAfterViewInit. */
-  private readonly tagNames$ = fromRuntime(
-    get('@hypercomb.social/TagRegistry') as EventTarget,
-    () => (get('@hypercomb.social/TagRegistry') as { names?: string[] } | undefined)?.names ?? [],
-  )
+  /** Reactive master tag-name list. Instance-free: the registry (essentials,
+   *  commands bundle) warms itself on load and announces 'tags:registry' at
+   *  load + every save — last-value replay fills this even when the line
+   *  mounts first. */
+  private readonly tagNames$ = signal<string[]>([])
+  #tagNamesUnsub: (() => void) | null = null
 
   // pluggable behaviors — validated at construction, no overlapping operations.
   //
@@ -1907,10 +1906,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public ngAfterViewInit(): void {
     this.shell?.focus()
 
-    // Warm the master tag list so `:` shows every tag immediately — even on a
-    // tile that has none (the registry is otherwise loaded lazily, only on the
-    // first tag mutation). The reactive tagNames$ bridge picks up the load.
-    void (get('@hypercomb.social/TagRegistry') as { ensureLoaded?: () => Promise<void> } | undefined)?.ensureLoaded?.()
+    // The registry warms itself when its module loads; this subscription (with
+    // last-value replay) is all the line needs for `:` to show every tag.
+    this.#tagNamesUnsub = EffectBus.on<{ tags?: Record<string, unknown> }>('tags:registry', (p) => {
+      this.tagNames$.set(Object.keys(p?.tags ?? {}))
+    })
 
     window.ioc.register('@hypercomb.social/CommandLineBehaviors', this.behaviorReference)
 
@@ -2452,6 +2452,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   public ngOnDestroy(): void {
+    this.#tagNamesUnsub?.()
     this.#prefillUnsub?.()
     this.#commandFocusUnsub?.()
     this.#enterModeUnsub?.()

@@ -247,7 +247,6 @@ describe('doctrine ratchets', () => {
       '@hypercomb.social/ScriptPreloader (hypercomb-shared/core/script-preloader.ts)',
       '@hypercomb.social/ServerInitializer (hypercomb-shared/core/initializers/server-initializer.service.ts)',
       '@hypercomb.social/Store (hypercomb-shared/core/store.ts)',
-      '@hypercomb.social/TagRegistry (hypercomb-shared/core/tag-registry.ts)',
       '@hypercomb.social/TrustService (hypercomb-shared/core/trust-service.ts)',
       '@hypercomb.social/UsageTracker (hypercomb-shared/core/usage-tracker.ts)',
       '@hypercomb.social/ViewMode (hypercomb-shared/core/view-mode.service.ts)',

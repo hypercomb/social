@@ -1710,6 +1710,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-tag-registry-down",
+      "title": "Mirror Phase 1: tag-registry moved to essentials commands/ (self-warming, tags:registry replay feeds intellisense) — tile on the shrink-campaign collection",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
