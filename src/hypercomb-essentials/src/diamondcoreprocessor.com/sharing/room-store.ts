@@ -1,10 +1,16 @@
-// hypercomb-shared/core/room-store.ts
-// Shared room state — single localStorage key, readable by UI and initializers.
-// On first access, captures any subdomain-derived room from the URL.
+// room-store.ts — shared room state, single localStorage key. On first
+// access, captures any subdomain-derived room from the URL.
+//
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1:
+// the contract lives in core (mesh-zone.types.ts); shells reach the instance
+// through IoC only to write, and hear values on EffectBus (announced at
+// construction + every change — replay makes late chrome safe).
+
+import { EffectBus, ROOM_STORE_KEY, ROOM_CHANGED, type ZoneValueStore } from '@hypercomb/core'
 
 const KEY = 'hc:room'
 
-export class RoomStore extends EventTarget {
+export class RoomStore extends EventTarget implements ZoneValueStore {
 
   #value: string
 
@@ -19,6 +25,7 @@ export class RoomStore extends EventTarget {
       const extracted = RoomStore.extractSubdomain()
       if (extracted) this.set(extracted)
     }
+    EffectBus.emit(ROOM_CHANGED, { value: this.#value })
   }
 
   public set = (room: string): void => {
@@ -26,6 +33,7 @@ export class RoomStore extends EventTarget {
     this.#value = clean
     this.#write(clean)
     this.dispatchEvent(new Event('change'))
+    EffectBus.emit(ROOM_CHANGED, { value: clean })
   }
 
   public clear = (): void => {
@@ -71,4 +79,12 @@ export class RoomStore extends EventTarget {
   }
 }
 
-register('@hypercomb.social/RoomStore', new RoomStore())
+export const roomStore = new RoomStore()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureRoomStoreRegistered = (): void => {
+  if (!window.ioc?.has?.(ROOM_STORE_KEY)) {
+    window.ioc?.register?.(ROOM_STORE_KEY, roomStore)
+  }
+}
+ensureRoomStoreRegistered()

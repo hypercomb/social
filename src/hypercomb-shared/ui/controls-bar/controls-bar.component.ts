@@ -19,14 +19,24 @@ import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
-import { EffectBus, consumePointerGesture, ICON_OVERRIDES_KEY, ICON_OVERRIDE_CHANGED, type IconOverridesProvider } from '@hypercomb/core'
+import {
+  EffectBus,
+  consumePointerGesture,
+  ICON_OVERRIDES_KEY,
+  ICON_OVERRIDE_CHANGED,
+  ROOM_STORE_KEY,
+  SECRET_STORE_KEY,
+  ROOM_CHANGED,
+  SECRET_CHANGED,
+  type IconOverridesProvider,
+  type ZoneValueStore,
+  type ZoneValueChange,
+} from '@hypercomb/core'
 import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
 import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
 import { isWindowShowing } from '../window-session'
 import { showHiveRoot } from '../../core/home-root'
-import type { RoomStore } from '../../core/room-store'
-import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from '@hypercomb/core'
@@ -231,11 +241,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   private get pixiHost(): any {
     return get('@diamondcoreprocessor.com/PixiHostWorker')
   }
-  private get roomStore(): RoomStore | undefined {
-    return get('@hypercomb.social/RoomStore') as RoomStore | undefined
+  private get roomStore(): ZoneValueStore | undefined {
+    return get(ROOM_STORE_KEY) as ZoneValueStore | undefined
   }
-  private get secretStore(): SecretStore | undefined {
-    return get('@hypercomb.social/SecretStore') as SecretStore | undefined
+  private get secretStore(): ZoneValueStore | undefined {
+    return get(SECRET_STORE_KEY) as ZoneValueStore | undefined
   }
   private get gate(): any {
     return get('@diamondcoreprocessor.com/InputGate')
@@ -252,14 +262,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #titleTick = signal(0)
   #titleTickUnsub: (() => void) | null = null
   #localeTickUnsub: (() => void) | null = null
-  #room$ = fromRuntime(
-    get('@hypercomb.social/RoomStore') as EventTarget,
-    () => this.roomStore?.value ?? '',
-  )
-  #secret$ = fromRuntime(
-    get('@hypercomb.social/SecretStore') as EventTarget,
-    () => this.secretStore?.value ?? '',
-  )
+  // Instance-free: the stores (essentials, sharing module) announce values on
+  // EffectBus at construction and on every change — replay covers chrome that
+  // mounts before the module loads.
+  readonly #room$ = signal('')
+  readonly #secret$ = signal('')
+  #roomChangedUnsub: (() => void) | null = null
+  #secretChangedUnsub: (() => void) | null = null
   #locale$ = fromRuntime(
     get('@hypercomb.social/I18n') as EventTarget | undefined,
     () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
@@ -1390,6 +1399,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // Instance-free: reskins broadcast on EffectBus, so the bar needs no
     // handle on the store (which now loads with the presentation module).
     this.#iconOverrideUnsub = EffectBus.on(ICON_OVERRIDE_CHANGED, this.#onIconOverride)
+    this.#roomChangedUnsub = EffectBus.on<ZoneValueChange>(ROOM_CHANGED, ({ value }) => this.#room$.set(value ?? ''))
+    this.#secretChangedUnsub = EffectBus.on<ZoneValueChange>(SECRET_CHANGED, ({ value }) => this.#secret$.set(value ?? ''))
 
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
@@ -1826,6 +1837,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#titleTickUnsub?.()
     this.#localeTickUnsub?.()
     this.#iconOverrideUnsub?.()
+    this.#roomChangedUnsub?.()
+    this.#secretChangedUnsub?.()
     this.#clearIconPress()
     this.#detachListDrag()   // in case we're torn down mid drag-scroll
     if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)

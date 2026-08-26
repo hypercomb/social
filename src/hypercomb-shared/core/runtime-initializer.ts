@@ -135,15 +135,9 @@ const _runInitializeRuntime = async (
       localStorage.setItem('hc:beta-relay-seeded', '1')
     }
 
-    // ── location secret (dev-build default) ──
-    // On loopback, seed the room secret so two localhost tabs land in the same
-    // swarm room without typing it. Respects an explicit clear; never touches
-    // a real origin.
-    if (isLoopback) {
-      const cleared = (() => { try { return localStorage.getItem('hc:secret-cleared') === '1' } catch { return false } })()
-      const secretStore = get('@hypercomb.social/SecretStore') as { value: string; set: (s: string) => void } | undefined
-      if (secretStore && !secretStore.value && !cleared) secretStore.set(DEV_DEFAULT_SECRET)
-    }
+    // (The loopback dev-secret seed moved into SecretStore itself —
+    // essentials sharing/secret-store.ts — it belongs to the store, not
+    // the boot path.)
   } catch { /* private mode — readers handle the empty case */ }
 
   if (logOpfs) {

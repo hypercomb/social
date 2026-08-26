@@ -1674,6 +1674,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "phase1-mesh-quartet-down",
+      "title": "Mirror Phase 1 mesh quartet: room-store, secret-store, secret-strength, saved-locations-store moved to essentials sharing/ — tiles on the shrink-campaign collection, note carrying the EffectBus value-announce contract + the loopback seed relocation",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

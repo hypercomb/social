@@ -5,6 +5,12 @@
 // origins seed the loopback dev relay instead; hc:nostrmesh:use-live-relay
 // ('1'/'0') and hc:nostrmesh:relays override.
 import { Drone } from '@hypercomb/core'
+// Zone credential/preference stores ride the mesh bundle — exactly ONE entry
+// imports them (two importers would inline two instances; ioc is first-wins).
+import './room-store.js'
+import './secret-store.js'
+import './secret-strength.js'
+import './saved-locations-store.js'
 
 const LOCAL_RELAY = 'ws://localhost:7777'
 // Live bootstrap relay.

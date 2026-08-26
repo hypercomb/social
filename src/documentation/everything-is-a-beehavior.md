@@ -209,9 +209,12 @@ shared consumers switch to lazy `window.ioc?.get?.(KEY)` with the author
 default as fallback, and instance-free EffectBus subscriptions for change
 events; the census ratchet line is deleted in the same commit.
 
-- [ ] Leaf stores: ~~`icon-overrides.store`~~ ✓, `note-marks.store`,
-  `recent-portals.store`, `pinned-entrances.store`, `saved-locations-store`,
-  `room-store`, `secret-store`, `secret-strength`, `icon-pick`
+- [ ] Leaf stores: ~~`icon-overrides.store`~~ ✓, ~~`room-store`~~ ✓,
+  ~~`secret-store`~~ ✓ (took the loopback dev-secret seed with it — boot
+  path shrank), ~~`secret-strength`~~ ✓, ~~`saved-locations-store`~~ ✓
+  (mesh quartet → `sharing/`, announced on EffectBus: `mesh:room-changed` /
+  `mesh:secret-changed` / `mesh:saved-locations-changed`), `note-marks.store`,
+  `recent-portals.store`, `pinned-entrances.store`, `icon-pick`
 - [ ] Registries: `tag-registry`, `bouquet-registry`, `name-registry`,
   `group-registry` + the group sources (`websites-group`, `help-group`,
   `games-group`, `launch-group*`), `tile-icon-provider-registry`,

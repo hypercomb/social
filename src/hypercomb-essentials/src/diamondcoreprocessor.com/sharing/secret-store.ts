@@ -1,11 +1,25 @@
-// hypercomb-shared/core/secret-store.ts
-// Shared secret state — single localStorage key, readable by UI and initializers.
-// On first access, captures any subdomain-derived secret from the URL.
+// secret-store.ts — shared secret state, single localStorage key. On first
+// access, captures any subdomain-derived secret from the URL; on loopback,
+// seeds the dev default so two localhost tabs land in the same swarm room
+// without typing it (moved here from runtime-initializer — it belongs to the
+// store, not the boot path). Respects an explicit clear; never touches a
+// real origin.
+//
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1:
+// the contract lives in core (mesh-zone.types.ts); shells reach the instance
+// through IoC only to write, and hear values on EffectBus (announced at
+// construction + every change — replay makes late chrome safe).
+
+import { EffectBus, SECRET_STORE_KEY, SECRET_CHANGED, type ZoneValueStore } from '@hypercomb/core'
 
 const KEY = 'hc:secret'
 const CLEARED_KEY = 'hc:secret-cleared'
+const DEV_DEFAULT_SECRET = 'downtown'
 
-export class SecretStore extends EventTarget {
+const isLoopback = (): boolean =>
+  /^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(window.location.origin)
+
+export class SecretStore extends EventTarget implements ZoneValueStore {
 
   #value: string
 
@@ -20,6 +34,12 @@ export class SecretStore extends EventTarget {
       const extracted = SecretStore.extractSubdomain()
       if (extracted) this.set(extracted)
     }
+
+    // loopback dev default — see header
+    if (!this.#value && !this.#wasCleared() && isLoopback()) {
+      this.set(DEV_DEFAULT_SECRET)
+    }
+    EffectBus.emit(SECRET_CHANGED, { value: this.#value })
   }
 
   public set = (secret: string): void => {
@@ -31,6 +51,7 @@ export class SecretStore extends EventTarget {
       else localStorage.setItem(CLEARED_KEY, '1')
     } catch { /* ignore */ }
     this.dispatchEvent(new Event('change'))
+    EffectBus.emit(SECRET_CHANGED, { value: clean })
   }
 
   public clear = (): void => {
@@ -80,4 +101,12 @@ export class SecretStore extends EventTarget {
   }
 }
 
-register('@hypercomb.social/SecretStore', new SecretStore())
+export const secretStore = new SecretStore()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureSecretStoreRegistered = (): void => {
+  if (!window.ioc?.has?.(SECRET_STORE_KEY)) {
+    window.ioc?.register?.(SECRET_STORE_KEY, secretStore)
+  }
+}
+ensureSecretStoreRegistered()

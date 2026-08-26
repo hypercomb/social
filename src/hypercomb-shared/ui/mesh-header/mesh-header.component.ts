@@ -1,9 +1,6 @@
 import { Component, EventEmitter, Input, Output, computed, signal, type OnInit, type OnDestroy, type OnChanges, type SimpleChanges } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, SECRET_CHANGED, SECRET_STRENGTH_KEY, type SecretStrengthProvider, type ZoneValueChange } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { fromRuntime } from '../../core/from-runtime'
-import type { SecretStore } from '../../core/secret-store'
-import type { SecretStrengthProvider } from '../../core/secret-strength'
 
 /** Stages of the single share toggle. Ordered: the preview is on from WORLD up. */
 const STAGE_PRIVATE = 0
@@ -79,10 +76,11 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     return 'controls.stage-private'
   }
 
-  #secret$ = fromRuntime(
-    get('@hypercomb.social/SecretStore') as EventTarget | undefined,
-    () => (get('@hypercomb.social/SecretStore') as SecretStore | undefined)?.value ?? '',
-  )
+  // Instance-free: the store (essentials, sharing module) announces its value
+  // on EffectBus at construction and on every change — replay covers chrome
+  // that mounts before the module loads.
+  readonly #secret$ = signal('')
+  #unsubSecret: (() => void) | null = null
 
   // While the mesh-modal is editing, it broadcasts the draft so the header
   // shield can preview the strength in real time. Null = no active draft;
@@ -96,13 +94,16 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     const draft = this.#draft()
     const secret = (draft !== null ? draft : this.#secret$()).trim()
     if (!secret) return 'rgba(245, 245, 245, 0.45)'
-    const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
+    const provider = get(SECRET_STRENGTH_KEY) as SecretStrengthProvider | undefined
     const score = provider?.evaluate(secret) ?? 0.5
     const hue = Math.round(score * 130)
     return `hsl(${hue}, 70%, 50%)`
   })
 
   ngOnInit(): void {
+    this.#unsubSecret = EffectBus.on<ZoneValueChange>(SECRET_CHANGED, ({ value }) => {
+      this.#secret$.set(value ?? '')
+    })
     this.#unsubDraft = EffectBus.on<{ secret: string | null }>('mesh:secret-draft', ({ secret }) => {
       this.#draft.set(secret)
     })
@@ -142,6 +143,7 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   ngOnDestroy(): void {
+    this.#unsubSecret?.()
     this.#unsubDraft?.()
     this.#unsubStepBack?.()
     this.#unsubModal?.()

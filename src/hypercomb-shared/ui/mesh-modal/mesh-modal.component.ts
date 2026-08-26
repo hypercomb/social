@@ -5,14 +5,20 @@
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
-import { fromRuntime } from '../../core/from-runtime'
+import {
+  EffectBus,
+  ROOM_STORE_KEY,
+  SECRET_STORE_KEY,
+  SECRET_STRENGTH_KEY,
+  SAVED_LOCATIONS_KEY,
+  SAVED_LOCATIONS_CHANGED,
+  type ZoneValueStore,
+  type SecretStrengthProvider,
+  type SavedLocationsProvider,
+  type SavedLocationsChange,
+} from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
-import type { RoomStore } from '../../core/room-store'
-import type { SecretStore } from '../../core/secret-store'
-import type { SecretStrengthProvider } from '../../core/secret-strength'
-import type { SavedLocationsStore } from '../../core/saved-locations-store'
 import { encodeAddress } from '../../core/address-record'
 
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
@@ -60,30 +66,31 @@ export class MeshModalComponent implements OnInit, OnDestroy {
    *  privacy-review step (mesh-header reads `hc:skip-privacy-review`). */
   readonly skipReview = signal(false)
 
-  readonly savedLocations = fromRuntime(
-    get('@hypercomb.social/SavedLocationsStore') as EventTarget | undefined,
-    () => this.#savedStore?.value ?? [],
-  )
+  // Instance-free: the store (essentials, sharing module) announces its value
+  // on EffectBus at construction and on every change — replay covers chrome
+  // that mounts before the module loads.
+  readonly savedLocations = signal<ReadonlyArray<string>>([])
+  #unsubSaved: (() => void) | null = null
 
   readonly secretInputType = computed(() => this.secretVisible() ? 'text' : 'password')
 
   readonly shieldColor = computed(() => {
     const secret = this.secretDraft().trim()
     if (!secret) return 'rgba(245, 245, 245, 0.45)'
-    const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
+    const provider = get(SECRET_STRENGTH_KEY) as SecretStrengthProvider | undefined
     const score = provider?.evaluate(secret) ?? 0.5
     const hue = Math.round(score * 130)
     return `hsl(${hue}, 70%, 50%)`
   })
 
-  get #roomStore(): RoomStore | undefined {
-    return get('@hypercomb.social/RoomStore') as RoomStore | undefined
+  get #roomStore(): ZoneValueStore | undefined {
+    return get(ROOM_STORE_KEY) as ZoneValueStore | undefined
   }
-  get #secretStore(): SecretStore | undefined {
-    return get('@hypercomb.social/SecretStore') as SecretStore | undefined
+  get #secretStore(): ZoneValueStore | undefined {
+    return get(SECRET_STORE_KEY) as ZoneValueStore | undefined
   }
-  get #savedStore(): SavedLocationsStore | undefined {
-    return get('@hypercomb.social/SavedLocationsStore') as SavedLocationsStore | undefined
+  get #savedStore(): SavedLocationsProvider | undefined {
+    return get(SAVED_LOCATIONS_KEY) as SavedLocationsProvider | undefined
   }
   #readHost = (): string => {
     try { return normalizeHost(localStorage.getItem(SELF_DOMAIN_KEY) ?? '') }
@@ -98,6 +105,9 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.#unsubSaved = EffectBus.on<SavedLocationsChange>(SAVED_LOCATIONS_CHANGED, ({ value }) => {
+      this.savedLocations.set(value ?? [])
+    })
     this.#unsubOpen = EffectBus.on<{ join?: boolean }>('mesh:open-modal', (payload) => {
       this.joinMode.set(!!payload?.join)
       const initialSecret = this.#secretStore?.value ?? ''
@@ -137,6 +147,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.#unsubSaved?.()
     this.#unsubOpen?.()
     this.#unsubClose?.()
     this.#unsubEscape?.()
