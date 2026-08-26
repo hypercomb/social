@@ -37,6 +37,9 @@
 // data + a pinnable shell component, all over EffectBus. No shared import.
 
 import { Drone, EffectBus, formatChord, I18N_IOC_KEY, type I18nProvider, type KeyBinding } from '@hypercomb/core'
+// The card rides its own drone — the two halves of one surface.
+// ONE importer: dup-inlining rule.
+import './action-card.view.js'
 import { launchKeyForLabel } from './decoration-kind-index.js'
 import type { SlashBehaviour } from './slash-behaviour.provider.js'
 

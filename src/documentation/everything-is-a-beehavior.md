@@ -397,6 +397,36 @@ lifts a key out of the shell catalogs, the surface MUST register the
 replacement: the confirm dialog's two default labels were extracted and never
 re-registered, which would have un-translated both buttons in all 14 locales.
 
+**THE HARVEST IS NOT THE AUTHORITY — THE RECONCILIATION IS.** Keys are found
+in the Angular original by pattern (`'key' | t`, `t('key')`), and a pattern
+can only see a key spelled next to its use. It cannot see a key CHOSEN AT
+RUNTIME: `p.public ? 'activity.mesh-public' : 'activity.mesh-private'`, or
+`(kind === 'gesture' ? 'action.hover.gesture' : 'action.hover.shortcut') | t`
+— four keys in one batch, invisible to every regex, and each one would have
+been left in the shell catalogs while its surface walked away. So after the
+ports land, **diff what each view actually passes to `t()` against what its
+catalog carries, in both directions**: rendered-but-not-carried draws the raw
+key, and carried-but-not-rendered is dead weight the drift spec would make
+permanent. The scripts are in the session scratchpad
+(`harvest-…` → `extract-…` → `reconcile-…`); the reconcile step is the one
+that must pass, and it is what caught all four. Earlier the same class cost
+us `viewer.watchOnYouTube` to a lowercase-only character class — a harvest
+fails quietly, and only a comparison against real usage is loud.
+
+**A key TWO surfaces render belongs in BOTH catalogs.** `shortcuts.chord-sep`
+— the separator between the keys of a chord — is rendered by the shortcut
+sheet and by the action card. "One catalog per surface" is not a claim that
+every key has exactly one owner; it is a rule that **a surface must carry
+everything it renders**, so that loading it alone is enough. Duplicating the
+entry is therefore correct, and safe: `registerTranslations` merges with
+`Object.assign` rather than replacing, which is also why thirteen panels can
+all register under `app` without clobbering each other. The tempting
+alternative — leave the shared key in the shell catalogs — is the failure
+mode this campaign is trying to end: it resolves because the SHELL happens to
+be loaded, not because the module carries it, and it stops resolving the day
+the surface is loaded anywhere else. Each drift spec names the shared key and
+says which sibling it is shared with.
+
 **The other trap the adversarial pass caught: PRESERVE THE PREDICATE'S
 POLARITY.** `visible = count > 0` is not the same as `if (count <= 0) hide`
 — both are false for `NaN`, so the negated form falls THROUGH and paints
@@ -406,17 +436,25 @@ must genuinely leave the DOM (detach the node, keep the reference) — a
 surface that is merely `display:none` still answers `querySelector`, which
 is a DOM contract the feature's own acceptance driver may assert on.
 - [ ] Utility band: ~~`toast`~~, ~~`confirm-dialog`~~, ~~`trust-prompt`~~,
-  `action-card`, `camera-capture`, ~~`format-painter`~~ (→ `editor/`, beside
+  ~~`action-card`~~ (→ `commands/`, beside its own drone),
+  ~~`camera-capture`~~ (→ `editor/`, beside the image-drop drone — the other
+  way a picture reaches a tile), ~~`format-painter`~~ (→ `editor/`, beside
   the drone whose visual properties it copies), ~~`icon-picker`~~ (→
   `presentation/tiles/`, beside the override store it writes through),
-  `shortcut-sheet`, `activity-log`, ~~`layer-cycle-strip`~~,
-  `command-palette`, `context-window`
+  ~~`shortcut-sheet`~~ (→ `commands/`, beside its own drone),
+  ~~`activity-log`~~ (→ `history/`, the domain that owns what happened),
+  ~~`layer-cycle-strip`~~, `command-palette`,
+  ~~`context-window`~~ (→ `commands/`, beside the queen that opens it — the
+  first DOCKED panel of the campaign, on `DockedPanelElement`)
 - [ ] Viewer band: `files-viewer`, `observe-viewer`, `notes-viewer`,
   ~~`youtube-viewer`~~ (→ `link/`, beside the link action that opens it),
-  `docs-overlay`, `pools-of-meaning`, `pheromone-tiles`, `example-hives`,
-  ~~`presence-banner`~~ (→ `sharing/`, beside the drone publishing the
-  presence it names), `contact-card`, `mesh-modal`, `rewind-window`,
-  `atomizer-bar`, `workflow-designer`
+  `docs-overlay`, `pools-of-meaning` (NOT registry-fed — routed, with a
+  `pools-icon` sub-component; a different shape of conversion),
+  ~~`pheromone-tiles`~~ (→ `pheromones/`, beside its own drone),
+  `example-hives`, ~~`presence-banner`~~ (→ `sharing/`, beside the drone
+  publishing the presence it names), `contact-card` (two registered
+  surfaces), `mesh-modal`, `rewind-window`, `atomizer-bar` (two registered
+  surfaces), `workflow-designer`
 - [ ] Heavy band — one campaign each: `clipboard-panel` (1,103), `portal`
   (1,047), `publish-panel` (1,033), `tile-editor` (1,719), `feedback-viewer`
   (1,920), `history-viewer` (2,274), `tags-viewer` (2,569), `features-viewer`

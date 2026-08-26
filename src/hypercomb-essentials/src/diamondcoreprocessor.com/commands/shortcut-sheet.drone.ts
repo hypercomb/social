@@ -4,6 +4,9 @@
 // and keyboard shortcuts — all auto-generated from runtime introspection so
 // the sheet never drifts from the code.
 import { EffectBus, type KeyBinding } from '@hypercomb/core'
+// The sheet rides its own drone — the two halves of one surface.
+// ONE importer: dup-inlining rule.
+import './shortcut-sheet.view.js'
 import type { SlashBehaviour } from './slash-behaviour.provider.js'
 import type { InputGate } from '../navigation/input-gate.service.js'
 

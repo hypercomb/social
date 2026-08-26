@@ -19,6 +19,9 @@
 //
 // This drone is kept as a side-effect anchor only.
 import './history.service.js'
+// The activity feed rides the recorder: history owns what happened, and the
+// feed is how a participant reads it back. ONE importer: dup-inlining rule.
+import './activity-log.view.js'
 import './history-cursor.service.js'
 
 export class HistoryRecorder {

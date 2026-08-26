@@ -143,6 +143,9 @@ async function main() {
     'hc-layer-cycle-strip',
     // The viewer batch.
     'hc-icon-picker', 'hc-format-painter', 'hc-youtube-viewer', 'hc-presence-banner',
+    // The utility batch.
+    'hc-camera-capture', 'hc-activity-log', 'hc-pheromone-tiles', 'hc-action-card',
+    'hc-shortcut-sheet', 'hc-context-window',
   ]
   let mounted = []
   for (let i = 0; i < 60; i++) {
@@ -575,6 +578,87 @@ async function main() {
       return { name, mounted: !!el, empty: el ? el.children.length === 0 : false }
     }))
   for (const s of idle) {
+    check(`converted panel: ${s.name} mounts and idles empty`, s.mounted && s.empty,
+      `mounted=${s.mounted} empty=${s.empty}`)
+  }
+
+  // 9g-viii. activity-log: driven through a real event. `cell:added` is one of
+  //          the six feeds it listens to, and it is the one with no side
+  //          effect on the hive — the drone that WOULD have added a cell is
+  //          not involved, the panel is just told one was. Proves the row
+  //          renders, localizes, and carries the undo affordance the original
+  //          attached to this specific feed.
+  const activity = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    if (!bus) return { ok: false, reason: 'EffectBus not reachable from the page' }
+    const el = document.querySelector('hc-activity-log')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+
+    const before = el.querySelectorAll('.activity-entry').length
+    bus.emit('cell:added', { cell: 'gate-probe-tile' })
+    await new Promise(r => setTimeout(r, 400))
+
+    // TWO ROWS IS CORRECT HERE, AND IS NOT THIS PORT'S DOING. `cell:added`
+    // is emitted a second time by layer-committer.drone with
+    // `fromCascade: true` once the layer commits, and the feed has never
+    // filtered that flag — the Angular original's handler was byte-identical
+    // (verified against git HEAD). So the assertion is that a row APPEARED
+    // and reads correctly, never that exactly one did; pinning the count
+    // would pin a pre-existing product bug as if it were the contract.
+    const rows = el.querySelectorAll('.activity-entry')
+    const text = rows.length ? (rows[rows.length - 1].textContent ?? '') : ''
+    // The row names the cell, and its label resolved rather than printing the
+    // raw key — the unregistered-catalog failure the split can cause.
+    const named = text.includes('gate-probe-tile')
+    const localized = text.length > 0 && !text.includes('activity.')
+    return { ok: rows.length > before && named && localized,
+      before, after: rows.length, named, localized, text: text.slice(0, 70) }
+  })
+  check('converted panel: activity-log renders a feed entry, names the cell, localizes',
+    activity.ok,
+    activity.reason ?? `before=${activity.before} after=${activity.after} ` +
+      `named=${activity.named} localized=${activity.localized} text="${activity.text}"`)
+
+  // 9g-ix. shortcut-sheet: opened through its state effect with empty command
+  //        lists — a real render path (it has an empty-state string) that needs
+  //        no keymap fixture. Closing it again proves @if-means-detach.
+  const sheet = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    if (!bus) return { ok: false, reason: 'EffectBus not reachable from the page' }
+    const el = document.querySelector('hc-shortcut-sheet')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+
+    bus.emit('shortcut-sheet:state',
+      { open: true, slashCommands: [], commandLineOps: [], sections: [] })
+    await new Promise(r => setTimeout(r, 400))
+    const opened = el.children.length > 0
+    const text = el.textContent ?? ''
+    const localized = text.length > 0 && !text.includes('shortcuts.')
+
+    bus.emit('shortcut-sheet:state',
+      { open: false, slashCommands: [], commandLineOps: [], sections: [] })
+    await new Promise(r => setTimeout(r, 300))
+    const closed = el.children.length === 0
+
+    return { ok: opened && localized && closed, opened, localized, closed,
+      text: text.slice(0, 60) }
+  })
+  check('converted panel: shortcut-sheet opens on its state effect, localizes, detaches',
+    sheet.ok,
+    sheet.reason ?? `opened=${sheet.opened} localized=${sheet.localized} ` +
+      `closed=${sheet.closed} text="${sheet.text}"`)
+
+  // 9g-x. The rest of the utility batch needs state the gate cannot honestly
+  //       manufacture — a camera device, a hovered tile with pheromones, a
+  //       hovered behaviour, an assistant context walk. Idling EMPTY is the
+  //       real contract at rest, and their catalogs are covered by drift specs.
+  const utilIdle = await page.evaluate(() =>
+    ['hc-camera-capture', 'hc-pheromone-tiles', 'hc-action-card', 'hc-context-window']
+      .map(name => {
+        const el = document.querySelector(name)
+        return { name, mounted: !!el, empty: el ? el.children.length === 0 : false }
+      }))
+  for (const s of utilIdle) {
     check(`converted panel: ${s.name} mounts and idles empty`, s.mounted && s.empty,
       `mounted=${s.mounted} empty=${s.empty}`)
   }

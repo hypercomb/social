@@ -9,6 +9,10 @@
 //                  user types a cell name and presses Enter to commit.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+// The camera rides the drone that already brings an image to a tile —
+// dropping a file and taking a photo are the same errand. ONE importer:
+// dup-inlining rule.
+import './camera-capture.view.js'
 import { extractDroppedUrl } from '../link/link-drop-destination.js'
 import { isImageUrl } from '../link/photo.js'
 import type { TileEditorService } from './tile-editor.service.js'

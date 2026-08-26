@@ -44,6 +44,9 @@
 // documentation/pheromones.md); the write path is DecorationService's tag API.
 
 import { Drone, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+// The pins ride their own drone — the two halves of one surface.
+// ONE importer: dup-inlining rule.
+import './pheromone-tiles.view.js'
 import { tagsForLabel } from '../commands/decoration-kind-index.js'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }

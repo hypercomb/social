@@ -19,6 +19,10 @@
 // re-resolves anyway, so the two could disagree about an empty list.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+// The context window rides the queen that owns `context:window-open` —
+// the surface and the state that drives it ship together.
+// ONE importer: dup-inlining rule.
+import './context-window.view.js'
 
 const get = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: <U>(k: string) => U | undefined } }).ioc?.get?.<T>(key)
