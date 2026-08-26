@@ -8,7 +8,13 @@
 //      write, or resolve bytes; a malformed sig is dropped, never followed.
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { hasPeerImages, imagePropsOf, peerImageCandidates, previewSigOf } from './peer-images.js'
+import {
+  canonicalPeerImageCandidates,
+  hasPeerImages,
+  imagePropsOf,
+  peerImageCandidates,
+  previewSigOf,
+} from './peer-images.js'
 
 const POINT = 'a'.repeat(64)
 const FLAT = 'b'.repeat(64)
@@ -91,6 +97,41 @@ describe('peer image candidates', () => {
       get: () => ({ peerTilesAtCurrentSig: () => { throw new Error('mesh down') } }),
     }
     expect(peerImageCandidates('tile')).toEqual([])
+  })
+
+  it('opens the fixed-name image pool at the hive root, not the current lineage', async () => {
+    const calls: unknown[] = []
+    let rootTiles: Visual[] = []
+    ;(window as unknown as { ioc: unknown }).ioc = {
+      get: () => ({
+        peerTilesAtCurrentSig: () => [
+          { name: 'tile', peerPubkey: 'lineage-peer', small: { image: OTHER } },
+        ],
+        composeSigForSegments: async (segments: readonly string[]) => {
+          calls.push([...segments])
+          return 'f'.repeat(64)
+        },
+        primePeerTilesAt: async (sig: string, opts?: { force?: boolean }) => {
+          calls.push({ sig, force: opts?.force })
+          rootTiles = [{ name: 'tile', peerPubkey: 'root-peer', small: { image: POINT } }]
+        },
+        peerTilesAtSig: () => rootTiles,
+        labelFor: (pk: string) => pk === 'root-peer' ? 'root publisher' : '',
+      }),
+    }
+
+    const found = await canonicalPeerImageCandidates('tile')
+    expect(calls[0]).toEqual([])
+    expect(calls[1]).toEqual({ sig: 'f'.repeat(64), force: true })
+    expect(found.map(candidate => candidate.previewSig)).toEqual([POINT])
+    expect(found[0].peers).toEqual([{ pubkey: 'root-peer', label: 'root publisher' }])
+  })
+
+  it('falls back to the live signature on an older swarm implementation', async () => {
+    stubSwarm([{ name: 'tile', peerPubkey: 'p1', small: { image: POINT } }])
+    await expect(canonicalPeerImageCandidates('tile')).resolves.toMatchObject([
+      { previewSig: POINT },
+    ])
   })
 
   it('prefers the point-top thumbnail for preview, then flat, then the bare pointer', () => {

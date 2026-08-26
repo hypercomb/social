@@ -302,10 +302,9 @@ The reference vocabulary, weakest binding to strongest:
 
 ### Portals is the reference editor (Jaime, 2026-07-29)
 
-Portals indexes references to arbitrary named tiles. It is not a collection
-browser: a tile with no children is just as eligible as a branch. A Portals row
-therefore represents a target, and may own several **named filtered references**
-to that same target:
+Portals indexes fixed-name canonical roots. A tile with no children is just as
+eligible as a branch. A Portals row represents `/<name>` and may own several
+**filtered appearances** of that same target:
 
 ```text
 Howard
@@ -314,11 +313,12 @@ Howard
   Photos     → Howard + requires(photo)
 ```
 
-These are live views, not copies and not versions of the target's bytes. Each
-hexagon stores a reference identity:
+These are live views, not copies and not versions of the target's bytes. The
+arbitrary lineage where an item was discovered is promoted to `/<fixed-name>`
+and then discarded from the reference identity. Each hexagon stores:
 
 ```text
-{ display name, targetSegments, targetSig?, requiredMarks }
+{ fixed name, targetSegments: [fixed name], targetSig, requiredMarks }
 ```
 
 Clicking the row's Edit action does two coordinated things:

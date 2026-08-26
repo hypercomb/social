@@ -141,16 +141,18 @@ written by exactly one kind of author: the derive-on-miss read path.
 ## The image-pool idea (multiple candidate images)
 
 The historical idea — a tile choosing its image from a pool of candidates —
-needs **no separate mechanism** under this design. A candidate set is a
-content shape, not a storage system:
+needs **no separate byte store** under this design. Candidate layers live in
+the fixed-name hybrid root pool as `canonical:variant` records; every image
+inside them remains an ordinary content signature. An optional materialized
+list on a selected layer is only a projection/cache of that truth:
 
 ```
 properties → { image: <chosenSig>, imagePool: [<sig>, <sig>, …] }
 ```
 
-- The pool of candidates rides the layer (merkle-shared, adopted, undone like
-  everything else). Choosing = a normal property edit = a new layer sig, so
-  the choice history is the lineage itself.
+- Candidate membership rides the fixed-name root pool (merkle-shared and
+  content-addressed). Choosing = a normal root property edit = a new layer sig,
+  so the participant's choice history is the root lineage itself.
 - The background-themes rule generalizes: a *theme* is a group of pictures; a
   forced pick never touches custom images. Same shape here — the substrate
   may propose from `imagePool`, never overwrite an explicit `image`.
@@ -158,10 +160,9 @@ properties → { image: <chosenSig>, imagePool: [<sig>, <sig>, …] }
   can hold a different chosen image from the *same shared candidate pool* —
   the candidates dedupe in the content pool; only the choice differs.
 
-What is **not** needed: a per-lineage picture pool, a candidates registry, or
-any new pool of meaning. (If a shared candidate set ever wants a pool home,
-it is one colon-named meaning — e.g. `sign('pictures:pool')` — holding
-content-addressed candidate-set records. Not required for this design.)
+What is **not** needed: a per-lineage picture pool, a second candidates
+registry, or any new pool of meaning. The fixed name is already the candidate
+pool home; the flat content pool remains the home of the bytes.
 
 ## Why not per-lineage pools
 
@@ -242,13 +243,19 @@ per-lineage copies of anything.
   the single recompute all paths funnel through. Composite keys stay
   available as the escalation if a future surface needs simultaneous
   multi-lineage paint of one label.
-- **Phase D — candidate pools** (`imagePool`) when a feature wants it; the
-  shape is reserved above so nothing in A–C has to move.
+- **Phase D — candidate pools. Partially built 2026-08-26.** The canonical
+  reference service retains every imported same-name layer as a
+  `canonical:variant` member of the fixed-name root pool. The Image Hive probes
+  peer variants at the canonical root (not the current lineage), shows distinct
+  images with publisher provenance, and writes an explicit pick to the
+  participant root default. A materialized `imagePool` array remains optional;
+  it is not the source of truth.
 
 ## Guardrails
 
-- No new pool of meaning is minted by this design; if Phase D ever wants
-  one, it carries a colon (`pictures:pool`) per `known-location-pools.md`.
+- No new pool of meaning is minted by this design. The already-required
+  fixed-name root is a deliberate hybrid bag/pool: history markers choose its
+  head and signature-keyed candidate members retain its alternatives.
 - No derived record keyed by name/path/position — layer sig or content sig
   only. The legacy location-keyed index is a read-fallback that drains; no
   new writes target it.

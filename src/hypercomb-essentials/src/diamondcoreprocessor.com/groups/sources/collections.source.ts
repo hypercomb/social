@@ -11,15 +11,15 @@
 //
 // MANAGE:
 //   • add — the participant selects tiles on the canvas and presses Add; each
-//     becomes a REFERENCE under `sets/` pointing at where it already lives.
+//     is promoted to its fixed-name root and gains a REFERENCE under `sets/`.
 //   • move — the same selection, filed away instead: the tiles LEAVE the page
 //     they were on and become children of the collection you are standing in.
 //     Add and move are the two readings of "put this in there" and the panel
 //     offers both side by side; add is an appearance, move is custody.
 //   • create — the + beside the panel's search field. This ADDS a way in rather
 //     than replacing add: you have somewhere to gather things before you have
-//     the things, and the tile it makes is PARENTLESS — a root at `/<name>`,
-//     under nothing, which is exactly what a collection is. The index then
+//     the things. It makes the canonical root at `/<name>` and links it into
+//     the hive-root complement. The index then
 //     holds an ordinary reference to it, the same shape `add` writes, so a
 //     created collection and an adopted one are indistinguishable afterwards.
 //   • rename — NOT a mutation. A cell is immutable + content-addressed, so this
@@ -31,7 +31,12 @@
 // Every write goes through an IoC-resolved service at CALL TIME (the sanctioned
 // route the command line uses), never by import — see aggregate-source.ts.
 
-import { EffectBus, hypercomb, isPoolAddress } from '@hypercomb/core'
+import {
+  CANONICAL_REFERENCE_SERVICE_KEY,
+  EffectBus,
+  hypercomb,
+  type CanonicalReferenceService,
+} from '@hypercomb/core'
 import {
   registerAggregateSource,
   type AddedRows, type AggregateItem, type AggregateSource, type StagedEntry,
@@ -43,11 +48,6 @@ const TAG_KIND = 'tag'
 const TITLE_KIND = 'title'
 const REFERENCE_KIND = 'reference'
 const SIG = /^[0-9a-f]{64}$/
-
-/** Canonical child-layer slots, in resolution precedence. Mirrors CHILD_SLOTS
- *  (history/layer-placement.ts) — a string list, not an import: the slot names
- *  are protocol, and spelling them keeps this source free of another bee. */
-const CHILD_SLOTS = ['cells', 'layers', 'children'] as const
 
 type HistoryLike = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
@@ -275,11 +275,10 @@ class CollectionsSource implements AggregateSource {
   /** Add already-existing tiles to the index — the gesture that makes "any tile
    *  can be a collection" real.
    *
-   *  Each becomes a REFERENCE under `sets/` pointing at where it already lives.
-   *  Nothing is moved, copied or converted: the tile stays exactly where it is
-   *  and simply gains an appearance here. That is why depth doesn't matter and
-   *  why a tile with no children qualifies — an empty collection is a page with
-   *  nothing in it yet.
+   *  Each is promoted (without copying resource bytes) to the matching
+   *  fixed-name root, then becomes a REFERENCE under `sets/`. The selected tile
+   *  stays where it is and gains a canonical root plus an active appearance.
+   *  That is why depth doesn't matter and why a childless tile qualifies.
    *
    *  ONE pulse for the whole batch, at the end. The references are independent
    *  writes but they are a single gesture, and a pulse repaints the entire hive —
@@ -295,10 +294,9 @@ class CollectionsSource implements AggregateSource {
       if (!entry.segments.length) continue                       // the hive root is not a member
       if (!into && this.#entries.some(e => e.name === entry.label)) continue   // already indexed
       if (segmentsEqual(entry.segments, parent)) continue        // never reference yourself
-      EffectBus.emit('cell:added', { cell: entry.label, segments: parent, viaUpdate: true })
       const name = await dropReferenceTile(
         { key: entry.label, label: entry.label, segments: entry.segments }, parent)
-      if (name) written.push({ key: name, label: name, segments: entry.segments })
+      if (name) written.push({ key: name, label: name, segments: [name] })
     }
     if (!written.length) return
     await new hypercomb().act()
@@ -348,148 +346,25 @@ class CollectionsSource implements AggregateSource {
     }
   }
 
-  /** Make — or LINK — a collection from a typed name: the + on the search field.
+  /** Make a collection from a typed fixed name.
    *
-   *  ── SAME NAME = SAME TILE ────────────────────────────────────────────────
-   *  One name names one tile; that convention is what lets folders be SHARED
-   *  and filtered by pheromones instead of copied. So the + resolves the name
-   *  against the hive FIRST: if a tile already answers to it anywhere in the
-   *  tree, the row simply references THAT tile, wherever it lives — nothing is
-   *  minted, nothing changes, walking in lands on its real children. (Before
-   *  this, the + always resolved to the top-level `/<name>`: typing the name of
-   *  a NESTED folder minted a fresh empty root beside it and the row opened
-   *  onto nothing.)
-   *
-   *  Only when nothing answers to the name does it mint, and then exactly as
-   *  before — two writes, in this order:
-   *    1. the ROOT itself — one marker in `sign([name])`'s own bag, so `/<name>`
-   *       is a real place with a head rather than a path nothing has ever
-   *       written to. It is PARENTLESS by construction: a single-segment
-   *       location has no parent to be a child of.
-   *    2. a reference to it under `sets/`, through the SAME dropReferenceTile
-   *       every other way into this index uses — so nothing downstream can tell
-   *       a created collection from an adopted one.
-   *
-   *  A name already in the index is a no-op: the row you asked for is there. */
+   *  One name names one canonical root. The canonical service creates or
+   *  reuses `/<name>`, guarantees it appears in the hive-root complement, and
+   *  writes an ordinary reference activation under `sets/`. A name already in
+   *  the index is a no-op. */
   async create(name: string): Promise<AddedRows> {
     const cell = name.trim()
     if (!cell || this.#entries.some(e => e.name === cell)) return
-    const h = history()
-    if (!h?.sign || !h.commitLayer) return
-
-    // Link an existing tile before ever considering a mint. Shallowest match
-    // wins — the BFS returns the first, which is the one the participant sees.
-    let target = await this.#findByName(cell)
-
-    if (!target) {
-      const rootSig = await h.sign({ explorerSegments: () => [cell] }).catch(() => '')
-      if (!rootSig) return
-      // A bare-word pool of meaning shares this exact address (see
-      // pool-bag-collision.spec in essentials) — committing here would write
-      // history markers INTO the pool. Refuse; throwing keeps the typing in
-      // the field rather than clearing it over a silent no-op.
-      if (await isPoolAddress(rootSig)) {
-        throw new Error(`"${cell}" is a pool address — it can never be a collection`)
-      }
-      // Don't overwrite a root that already exists — /<name> may be a detached
-      // page the participant already has (created here, later removed from the
-      // index); this only needs to guarantee it EXISTS. COLD is not ABSENT: a
-      // head that merely hasn't warmed yet must not be buried under a bare
-      // {name} snapshot — that is how a collection "vanishes". Throw so the
-      // typing survives for a retry.
-      const stats: { cold?: boolean } = {}
-      const existing = await h.currentLayerAt(rootSig, stats).catch(() => null)
-      if (!existing && stats.cold) throw new Error('history is still warming — try again')
-      if (!existing) await h.commitLayer(rootSig, { name: cell })
-      target = [cell]
-    }
-
-    EffectBus.emit('cell:added', { cell, segments: [SETS], viaUpdate: true })
-    const added = await dropReferenceTile({ key: cell, label: cell, segments: target }, [SETS])
+    const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
+    const added = await references?.place({
+      name: cell,
+      sourceSegments: null,
+      parentSegments: [SETS],
+    })
     if (!added) return
     await new hypercomb().act()
     await this.#syncCursorToHead()
-    return [{ key: added, label: added, segments: target }]
-  }
-
-  /** WHERE a tile answering to `cell` already lives, or null.
-   *
-   *  Ring-by-ring walk from the hive root over head layers — manifest-first
-   *  (one sign('manifests') read inlines a whole ring segment; only trusted
-   *  complete-or-absent), byte reads per child otherwise. Breadth-first so the
-   *  shallowest bearer of the name answers — the one on screen most often —
-   *  and the walk stops at the first hit.
-   *
-   *  `sets/` itself is skipped whole: its children are references NAMED LIKE
-   *  their targets, so descending would resolve the name to the index entry
-   *  instead of the tile it points at. Budgeted; an unfinished walk returns
-   *  null and create() falls back to minting — exactly the old behaviour. */
-  async #findByName(cell: string): Promise<readonly string[] | null> {
-    const h = history()
-    if (!h?.sign || !h.getLayerBySig) return null
-    const s = store()
-    const rootSig = await h.sign({ explorerSegments: () => [] }).catch(() => '')
-    if (!rootSig) return null
-    const root = await h.currentLayerAt(rootSig).catch(() => null)
-    if (!root) return null
-
-    const MAX_NODES = 4000
-    let read = 0
-    const seen = new Set<string>()
-    type Hop = { layer: Record<string, unknown>; segments: readonly string[] }
-    let ring: Hop[] = [{ layer: root, segments: [] }]
-
-    while (ring.length > 0) {
-      const next: Hop[] = []
-      for (const hop of ring) {
-        const sigs = await this.#childSigsOf(hop.layer, s)
-        if (!sigs.length) continue
-        // Manifest first — only truth when it covers every declared child.
-        const inlined = new Map<string, Record<string, unknown>>()
-        const manifest = await h.childrenManifestFor?.(hop.layer).catch(() => null)
-        if (manifest && manifest.length === sigs.length) {
-          for (const e of manifest) inlined.set(String(e.sig), e.layer as Record<string, unknown>)
-        }
-        for (const sig of sigs) {
-          if (seen.has(sig)) continue
-          seen.add(sig)
-          if (++read > MAX_NODES) return null
-          const child = inlined.get(sig) ?? await h.getLayerBySig(sig).catch(() => null)
-          const nm = child?.['name']
-          if (!child || typeof nm !== 'string' || !nm.length) continue
-          if (hop.segments.length === 0 && nm === SETS) continue   // the index, not a tile
-          if (nm === cell) return [...hop.segments, nm]
-          next.push({ layer: child, segments: [...hop.segments, nm] })
-        }
-      }
-      ring = next
-    }
-    return null
-  }
-
-  /** A layer's declared child sigs across the canonical slots; a slot may hold
-   *  the array inline OR a sig pointing at a JSON array resource — both shapes
-   *  are live in the wild (mirrors resolveChildSigs in essentials tree-walk). */
-  async #childSigsOf(
-    layer: Record<string, unknown>,
-    s: StoreLike | undefined,
-  ): Promise<string[]> {
-    for (const slot of CHILD_SLOTS) {
-      const value = layer[slot]
-      if (Array.isArray(value) && value.length > 0) {
-        return value.map(v => String(v)).filter(v => SIG.test(v))
-      }
-      if (typeof value === 'string' && SIG.test(value)) {
-        try {
-          const blob = await s?.getResource(value)
-          if (!blob) return []
-          const parsed = JSON.parse(await blob.text()) as unknown
-          if (Array.isArray(parsed)) return parsed.map(v => String(v)).filter(v => SIG.test(v))
-        } catch { /* malformed pointer — childless */ }
-        return []
-      }
-    }
-    return []
+    return [{ key: added, label: added, segments: [added] }]
   }
 
   async remove(item: AggregateItem): Promise<void> {

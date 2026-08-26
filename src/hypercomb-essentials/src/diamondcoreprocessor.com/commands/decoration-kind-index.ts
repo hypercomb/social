@@ -224,9 +224,10 @@ export function tagSigFor(
 /** Decoration kind that marks a launcher tile. */
 export const LAUNCH_DECORATION_KIND = 'launch:target'
 
-/** Decoration kind that marks a REFERENCE tile — a live pointer to another
- *  lineage. Its payload is `{ targetSegments: string[] }`. Clicking the tile
- *  portals to that location. See reference.drone.ts / reference.queen.ts. */
+/** Decoration kind that marks a REFERENCE tile — a live appearance of one
+ *  fixed-name canonical root. Its payload carries `targetSegments: [name]`
+ *  plus the matching root lineage signature. Clicking the tile portals to that
+ *  root. Legacy arbitrary routes remain readable. */
 export const REFERENCE_DECORATION_KIND = 'reference'
 
 // ── Context sub-index (what a tile's questions should also see) ───────
@@ -247,9 +248,10 @@ export const REFERENCE_DECORATION_KIND = 'reference'
 // it, and is still true next month. Same idea at two lifetimes, so they are two
 // records rather than one with a flag.
 //
-// The payload is a reference's payload (`targetSegments` + `targetSig`) because
-// it IS the same act at heart: a live pointer at another place, resolved at read
-// time, never a copy. What differs is what reading it means.
+// The payload is a reference's canonical-root payload (`targetSegments` +
+// `targetSig`) because it IS the same act at heart: a live appearance of one
+// fixed-name root, resolved at read time, never a copy. What differs is what
+// reading it means.
 
 /** Decoration kind attaching a place as context for questions about this tile. */
 export const CONTEXT_DECORATION_KIND = 'context'

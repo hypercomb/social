@@ -1,16 +1,18 @@
 // diamondcoreprocessor.com/sharing/image-choice.drone.ts
 //
-// THE IMAGE HIVE — every picture the room is carrying for one tile, laid out
-// as ordinary tiles. Click one and it becomes your tile's picture.
+// THE IMAGE HIVE — every picture the room is carrying for one fixed-name pool,
+// laid out as ordinary tiles. Click one and it becomes your root default.
 //
-// In a swarm everybody brings their own image for the same tile. Clicking the
-// images icon replaces the mesh with a hive of those pictures: yours in the
-// middle slot, then one tile per distinct picture any participant is
-// publishing here, each wearing the name of who is offering it. They are laid
+// In a swarm everybody brings their own image for the same root name. Clicking
+// the images icon from ANY lineage appearance replaces the mesh with a hive of
+// those pictures: yours in the middle slot, then one tile per distinct picture
+// any participant publishes at the canonical root, each wearing the name of
+// who is offering it. They are laid
 // out on the SAME axial matrix a real layer uses, at full size, so the choice
 // looks like the hive it came from — not like a dialog over it.
 //
-//   CLICK a tile → that picture becomes yours. One revision, undoable.
+//   CLICK a tile → that picture becomes your /<name> default. One revision,
+//                  undoable; ordinary references inherit it.
 //   ESC / empty  → everything snaps back. Nothing was written.
 //
 // The hive is hidden through `render:set-hive-visible`, the same takeover
@@ -27,7 +29,15 @@
 // guarantee, before anything is written). A picture nobody can serve never
 // becomes your tile — it paints as a labelled hex that refuses to be picked.
 
-import { Drone, I18N_IOC_KEY, RESOURCE_URL_PREFIX, consumePointerGesture, type I18nProvider } from '@hypercomb/core'
+import {
+  CANONICAL_REFERENCE_SERVICE_KEY,
+  Drone,
+  I18N_IOC_KEY,
+  RESOURCE_URL_PREFIX,
+  consumePointerGesture,
+  type CanonicalReferenceService,
+  type I18nProvider,
+} from '@hypercomb/core'
 import { Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import {
@@ -36,7 +46,7 @@ import {
   readTilePropsIndex,
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
-import { peerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
+import { canonicalPeerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 
 type Axial = { q: number; r: number }
 
@@ -343,7 +353,8 @@ export class ImageChoiceDrone extends Drone {
     if (mine && minePreview) {
       entries.push({ props: mine, previewSig: minePreview, who: this.#t('images.yours', 'yours'), mine: true })
     }
-    const offered = peerImageCandidates(label)
+    const offered = await canonicalPeerImageCandidates(label)
+    if (token !== this.#buildToken) return
     for (const candidate of offered) {
       if (entries.length >= MAX_CHOICES) break
       // A peer carrying exactly the picture you already wear folds into YOUR
@@ -390,9 +401,9 @@ export class ImageChoiceDrone extends Drone {
   }
 
   /** The image pointers already on the participant's own tile, read from the
-   *  canonical properties slot (the layer) with the participant-local index as
-   *  the fallback — the same two stores, in the same order, the renderer uses,
-   *  so "yours" is whatever you can actually see on the tile. */
+   *  canonical ROOT properties slot with the selected lineage as a legacy
+   *  fallback. A reference appearance and `/<name>` therefore agree on what
+   *  "yours" means. */
   async #myImageProps(label: string): Promise<PeerImageProps | undefined> {
     const pointers = (props: Record<string, unknown> | null): PeerImageProps | undefined => {
       if (!props) return undefined
@@ -409,8 +420,10 @@ export class ImageChoiceDrone extends Drone {
     }
 
     try {
-      const canonical = pointers(await readTilePropertiesAt(this.#segments, label))
+      const canonical = pointers(await readTilePropertiesAt([], label))
       if (canonical) return canonical
+      const legacyLocal = pointers(await readTilePropertiesAt(this.#segments, label))
+      if (legacyLocal) return legacyLocal
       const key = await cellLocationSig(this.#segments, label)
       const sig = readTilePropsIndex()[key] ?? readTilePropsIndex()[label]
       if (!sig) return undefined
@@ -447,18 +460,16 @@ export class ImageChoiceDrone extends Drone {
 
   /**
    * Wear this picture. Pulls every pointer's bytes first — a picture nobody
-   * can serve must not become your tile — then writes ONE revision carrying
-   * the new pointers, drops the old full-size original (a peer publishes hex
-   * thumbnails only, so keeping it would leave the lightbox showing a picture
-   * the tile no longer wears) and the substrate default mark (a picture you
-   * chose on purpose is not filler), and re-points the participant-local
-   * index at the canonical sig so the tile repaints at once.
+   * can serve must not become your tile — then writes ONE revision on the
+   * canonical root carrying the new pointers. It drops the old full-size
+   * original (a peer publishes hex thumbnails only, so keeping it would leave
+   * the lightbox showing a picture the tile no longer wears) and the substrate
+   * default mark (a picture you chose on purpose is not filler).
    */
   async #apply(choice: Choice): Promise<void> {
     if (this.#applying) return
     this.#applying = true
     const label = this.#label
-    const segments = [...this.#segments]
     try {
       const sigs = [choice.props.small?.image, choice.props.flat?.small.image, choice.props.point?.image, choice.props.imageSig]
         .filter((s): s is string => typeof s === 'string')
@@ -468,7 +479,19 @@ export class ImageChoiceDrone extends Drone {
         return
       }
 
-      const existing = await readTilePropertiesAt(segments, label)
+      // The click may originate on any lineage appearance. Ensure the fixed
+      // root exists, then dress THAT root so every reference inherits one
+      // participant-chosen default. A lineage-local face is a separate,
+      // explicit decoration contract and is never implied by this gesture.
+      const referenceService = window.ioc.get<CanonicalReferenceService>(CANONICAL_REFERENCE_SERVICE_KEY)
+      // Choosing is not an import operation, so it must not register the
+      // clicked reference layer itself as another semantic variant.
+      const root = await referenceService?.ensureRoot(label, null)
+      if (referenceService && !root) throw new Error(`canonical root unavailable for ${label}`)
+      const rootName = root?.name ?? label
+      const rootParentSegments: string[] = []
+
+      const existing = await readTilePropertiesAt(rootParentSegments, rootName)
       const updates: Record<string, unknown> = {
         small: choice.props.small,
         flat: choice.props.flat,
@@ -483,9 +506,9 @@ export class ImageChoiceDrone extends Drone {
       // The props index follows via the central layer-keyed seed inside
       // writeTilePropertiesAt — no location write (Phase C sweep,
       // visuals-across-lineages.md).
-      await writeTilePropertiesAt(segments, label, updates)
+      await writeTilePropertiesAt(rootParentSegments, rootName, updates)
 
-      this.emitEffect('tile:saved', { cell: label, segments })
+      this.emitEffect('tile:saved', { cell: rootName, segments: rootParentSegments })
     } catch (err) {
       console.warn('[image-choice] apply failed', err)
       this.emitEffect('toast:show', { type: 'warning', message: this.#t('images.failed', 'That picture could not be fetched — nothing changed.') })

@@ -16,6 +16,11 @@
 // order and omission rules must have one owner.
 
 export const CANONICAL_REFERENCE_KIND = 'reference'
+/** A candidate meaning retained inside the fixed-name root pool. The root's
+ * history markers still select one current head; these records preserve every
+ * other same-name layer as an addressable alternative instead of overwriting
+ * it or throwing it away. */
+export const CANONICAL_VARIANT_KIND = 'canonical:variant'
 
 /** IoC seam implemented by essentials. Shared can place canonical references
  * without importing a module implementation. */
@@ -78,6 +83,31 @@ export const buildCanonicalReferenceRecord = (
     appliesTo: [],
     payload,
     ...(refs.length ? { refs } : {}),
+  }
+}
+
+export interface CanonicalVariantRecordOptions {
+  /** Fixed pool/root name. */
+  name: string
+  /** Immutable layer signature of this candidate meaning. */
+  layerSig: string
+}
+
+/** Build the deterministic membership record stored in the hybrid `/<name>`
+ * signature bag. Provenance is deliberately outside content identity: the
+ * same layer discovered through two routes remains one atomic candidate.
+ * `refs` makes the candidate's merkle closure explicit to generic sharing and
+ * archive walkers. */
+export const buildCanonicalVariantRecord = (
+  opts: CanonicalVariantRecordOptions,
+): Record<string, unknown> | null => {
+  const name = canonicalReferenceName(opts.name)
+  if (!name || !SIG_RE.test(opts.layerSig)) return null
+  return {
+    kind: CANONICAL_VARIANT_KIND,
+    name,
+    payload: { layerSig: opts.layerSig },
+    refs: [opts.layerSig],
   }
 }
 

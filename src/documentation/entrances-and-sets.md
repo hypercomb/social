@@ -1,9 +1,8 @@
 # entrances and reference sets (pools of meaning)
 
-> **status: design — not built (as of 2026-07-03).** Captures the agreed model
-> from the design session: entrances as chosen share roots, reference sets as
-> lineage pools under a reserved `sets/` prefix, the Pools of Meaning board,
-> tagging notes, and scope-filtered views. No code ships this yet.
+> **status: partially implemented.** Reference sets, the Pools of Meaning
+> board, live portal references, and the canonical fixed-name root grammar are
+> built. Entrances, note tagging, and scope-filtered views remain design work.
 
 ## related
 
@@ -71,7 +70,8 @@ registered thing — a lineage path in the participant's own tree, mechanically
 identical to any page in the hive. Nothing to resolve over the network, no
 mesh or host involvement, no new identity primitive: the mesh never sees a set
 unless an entrance is deliberately opened on it. The references inside are
-also just locations (`targetSegments`).
+appearances of canonical fixed-name roots; see
+[signature-pool-architecture.md](signature-pool-architecture.md).
 
 There is no migration and no new pool type. A set rooted at `sets/music` gets
 its own sigbag the moment a layer is committed there; that sigbag's max marker
@@ -83,13 +83,13 @@ entrance into your information.
   pages are recognised by string prefix. `sets/` is that convention: set
   chrome, reference-aware behaviour, excluded from publish.
 - **A reference is a tile.** A reference item is an ordinary cell whose layer
-  carries a dedicated `reference` slot: `{ targetSegments }`. Rendering stays
+  carries a dedicated `reference` decoration. Rendering stays
   100% normal (it's a real cell), with an indicator that it is a reference.
-  No content is duplicated — the target's content stays where it lives.
-- **Live pointer semantics.** `targetSegments` is a path, so a reference always
-  resolves to the target lineage's *current* head — "still working with the
-  same information." A sig-pinned (frozen) reference is a possible later
-  variant, not part of this design.
+  No content is duplicated: the fixed name resolves to `/<name>`.
+- **Live pointer semantics.** Every new reference stores the one-segment root
+  route plus that root's lineage signature. It always resolves the canonical
+  root's current head. The arbitrary route used to discover the item is never
+  identity and is not retained.
 
 ### the privacy invariant
 
@@ -120,9 +120,10 @@ The board is just a page — the uniform paradigm, no aggregate machinery:
    creation at the `sets/` lineage.
 4. **Entering a set manages it.** References render as tiles; add, remove,
    reorder, tag with the ordinary tools.
-5. **Adding a reference** uses the add flow with a **select operation**: the
-   add window gains a picker mode — browse the hive, choose a cell, and the
-   chosen cell's segments become the new reference tile's `reference` slot.
+5. **Adding a reference** uses the add flow with a **select operation**: browse
+   the inventory/bags, choose a cell, and its fixed name is activated in the
+   current lineage. If needed, the selected subtree is first promoted to the
+   matching root; the discovery path is then discarded.
 6. **Clicking a reference tile is a portal** — navigate into the target
    (precedent: tile-borne `swarm:invite` portals). Shift+click back-nav and
    ctrl+click selection keep their global meanings.
@@ -183,9 +184,11 @@ patch. The UI word stays plain ("scope").
 
 ## non-goals
 
-- No new storage primitive, no migration — sets are ordinary lineages.
+- No new storage primitive or eager migration — sets are ordinary lineages;
+  legacy path references migrate lazily when edited.
 - No eager materialised pools or inverse indexes (deferred, evidence-triggered).
-- No sig-pinned (frozen) references in v1 — live path pointers only.
+- No content-sig-pinned (frozen) references — `targetSig` is a live lineage
+  address, and the fixed-name root route is its readable spelling.
 - Entrances do not change the adopt side — publisher-side feature only.
 
 ## proposed glossary additions (on implementation)
@@ -198,6 +201,6 @@ patch. The UI word stays plain ("scope").
 - **reference set** (user-facing: **set**, board: **Pools of Meaning**) — a
   lineage pool under `sets/` whose members are reference tiles; referenceable
   by the keeper, never intrinsically shared.
-- **reference** — a tile whose layer carries a `reference` slot
-  (`{ targetSegments }`); a live pointer to another lineage, rendered normally,
+- **reference** — a tile carrying a `reference` decoration whose fixed name
+  points to the matching canonical root lineage; rendered normally and
   navigated as a portal.

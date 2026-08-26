@@ -430,6 +430,18 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual, [], 'inline referent-field comparison')
   })
 
+  it('reference records are minted only through the canonical root grammar', () => {
+    // A reference leaf never owns an arbitrary discovery route. Its fixed name
+    // derives one root path, and core/canonical-reference.ts owns the bytes.
+    // Writers call CanonicalReferenceService; hand-assembling a `{kind:
+    // 'reference'}` record would bypass root promotion and let two same-named
+    // appearances drift again. Empty allowlist: use the core builder/service.
+    const actual = filesMatching(
+      /kind\s*:\s*(?:REFERENCE_DECORATION_KIND|REFERENCE_KIND|['"`]reference['"`])\s*,\s*appliesTo\s*:/,
+    )
+    assertRatchet(actual, [], 'direct reference-record assembly')
+  })
+
   it('no NEW bare-word pool meaning — a new pool meaning must carry a colon', () => {
     // Pools of meaning and lineage sigbags share ONE flat OPFS root
     // namespace:

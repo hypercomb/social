@@ -1,12 +1,11 @@
 // diamondcoreprocessor.com/sharing/tile-images.drone.ts
 //
-// The IMAGES icon on the tile — "somebody else here has a picture for this."
+// The IMAGES icon on the tile — explore this fixed name's shared image pool.
 //
-// Registers one overlay affordance that appears on a tile you HOLD exactly
-// when a participant in the room is publishing an image for that same tile,
-// and opens the image hive (image-choice.view) when it is clicked. No swarm,
-// no peers, or nobody carrying a picture for this tile → no icon, ever: the
-// affordance is evidence of an actual choice, not a permanent button.
+// Registers one overlay affordance on every tile you HOLD and opens the Image
+// Hive when clicked. Visibility cannot depend on peers at the CURRENT lineage:
+// the chooser intentionally probes the canonical root only after the explicit
+// gesture, and a portal appearance must have the same door as `/<name>`.
 //
 // Held tiles only (`private` = your hive, `public-own` = your tile with the
 // mesh open). A peer-only tile is not yours to dress — the verb there is
@@ -14,7 +13,6 @@
 
 import { Drone } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext } from '../presentation/tiles/tile-overlay.drone.js'
-import { hasPeerImages } from './peer-images.js'
 
 // collections — Material Icons Filled. A stack of pictures: several versions
 // of one thing, which is exactly what the room is offering.
@@ -30,7 +28,7 @@ const descriptor = (profile: 'private' | 'public-own'): OverlayActionDescriptor 
   y: -7,
   hoverTint: 0xa8d8ff,
   profile,
-  visibleWhen: (ctx: OverlayTileContext) => hasPeerImages(ctx.label),
+  visibleWhen: (_ctx: OverlayTileContext) => true,
   labelKey: 'action.images',
   descriptionKey: 'action.images.description',
 })
@@ -63,8 +61,8 @@ export class TileImagesDrone extends Drone {
       if (payload?.action !== 'images') return
       const label = String(payload.label ?? '').trim()
       if (!label) return
-      // The tile's PARENT path — the picker addresses the cell the same way
-      // every writer does (parent segments + name).
+      // Preserve the clicked appearance for navigation/legacy promotion. The
+      // picker resolves candidates and writes the chosen default at /<name>.
       const segments = window.ioc.get<{ explorerSegments?: () => readonly string[] }>(
         '@hypercomb.social/Lineage',
       )?.explorerSegments?.() ?? []

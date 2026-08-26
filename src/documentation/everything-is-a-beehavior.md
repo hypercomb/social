@@ -125,6 +125,19 @@ enters via a props fold; third-party provider specs arrive held) stated as
 onboarding policy. Joining a community is what relaxes the default, and only
 deliberately.
 
+**Portal resources have one root (landed 2026-08-25).** Portals,
+`/reference`, and aggregate drops now share the fixed-name root
+grammar in
+[signature-pool-architecture.md](signature-pool-architecture.md). Content may
+arrive from any lineage or package, but enabling/adding it first ensures the
+complete subtree exists at `/<name>` and in the hive-root complement; the
+chosen hive/lineage receives only a reference activation pointing back to that
+root. The behavior store and future package browsers must use this same service
+at their add boundary. This is the storage half of "packages arrive dormant":
+availability is the canonical root inventory, activation is ordinary
+participant layer truth, and hiding one appearance never mutates the canonical
+item or its other appearances.
+
 The walk-in itself is new work (its own pass, not yet built):
 
 - [ ] The hand-off: an "add to hypercomb" gesture on a hosting domain →

@@ -1,20 +1,15 @@
 // diamondcoreprocessor.com/sharing/images.queen.ts
 //
-// /images — open the wall of pictures the room is carrying for a tile.
+// /images — open the canonical name pool's wall of pictures.
 //
 //   /images            — the selected tile
 //   /images <tile>     — that tile
 //
-// The same wall the tile's images icon opens. It exists as a behaviour because
-// that icon is EVIDENCE-BASED: it appears on a tile you hold exactly when a
-// participant is publishing a picture for it, and vanishes the moment nobody
-// is. That is right for an icon and wrong as the only door — a room where the
-// pictures are arriving in bursts leaves you hunting for an affordance that
-// blinks. Typing the word always works, and says plainly when there is nothing
-// to choose from rather than showing nothing at all.
+// The same wall the tile's images icon opens. Both doors resolve the fixed name
+// at the hive root, so their result is independent of the current lineage.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { peerImageCandidates } from './peer-images.js'
+import { canonicalPeerImageCandidates } from './peer-images.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
@@ -41,7 +36,7 @@ export class ImagesQueenBee extends QueenBee {
     const label = args.trim().toLowerCase() || this.#selected()
     if (!label) { this.#log('name a tile, or select one first'); return }
 
-    const offered = peerImageCandidates(label)
+    const offered = await canonicalPeerImageCandidates(label)
     if (offered.length === 0) {
       this.#log(`nobody in the room is offering a picture for "${label}"`)
       return

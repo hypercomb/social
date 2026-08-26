@@ -25,12 +25,18 @@
 //                                  tile a member.
 //
 // MODULE-LEVEL (moved out of hypercomb-shared with the index panel it serves,
-// everything-is-a-beehavior Phase 2): every write still goes through an
-// IoC-resolved service at CALL TIME rather than an import — bee load order is
-// not a dependency graph, and the decoration record stays composed here to the
-// same shape `reference.queen.ts` writes.
+// everything-is-a-beehavior Phase 2): every reference write goes through the
+// IoC-resolved canonical-reference service at CALL TIME. Bee load order is not
+// a dependency graph; core owns the protocol and this behavior owns the layer
+// transaction.
 
-import { EffectBus, hypercomb } from '@hypercomb/core'
+import {
+  CANONICAL_REFERENCE_SERVICE_KEY,
+  EffectBus,
+  canonicalReferenceName,
+  hypercomb,
+  type CanonicalReferenceService,
+} from '@hypercomb/core'
 import type { AggregateItem } from './aggregate-source.js'
 
 /** The `drop:target` payload emitted by tile-overlay.drone while dragging. */
@@ -43,49 +49,25 @@ export interface DropTarget {
   hasImage: boolean
 }
 
-/** Mirrors REFERENCE_DECORATION_KIND (commands/decoration-kind-index.ts). A
- *  string constant, not an import: the kind is PROTOCOL — what a record says it
- *  is — so spelling it keeps this module free of another bee's file. */
-const REFERENCE_KIND = 'reference'
 const TAG_KIND = 'tag'
 /** Mirrors CONTEXT_DECORATION_KIND — a place whose material belongs in any
  *  language-model request made about the tile carrying it. */
 const CONTEXT_KIND = 'context'
 
-const BACKSLASH = String.fromCharCode(92)
-
 /** Names become path segments — drop separators and control characters
  *  (mirrors the UNSAFE_CELL_NAME guard in essentials). */
-export const safeCellName = (raw: string): string =>
-  [...(raw ?? '')].filter(ch => ch !== '/' && ch !== BACKSLASH && ch.charCodeAt(0) > 31).join('').trim()
+export const safeCellName = canonicalReferenceName
 
 const ioc = (): { get(k: string): unknown } | undefined =>
   (globalThis as { ioc?: { get(k: string): unknown } }).ioc
 
 type StoreLike = { putResource(blob: Blob, options?: { emit?: boolean }): Promise<string> }
-type HistoryLike = {
-  sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
-  currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
-  commitLayer(locationSig: string, layer: Record<string, unknown>): Promise<string>
-}
-type CommitterLike = {
-  commitChildrenDeltas?: (
-    segments: readonly string[],
-    deltas: { appends?: readonly string[] },
-  ) => Promise<unknown>
-}
-
-/** A reference's payload.
+/** A live-pointer payload (reference or context).
  *
- *  The target is carried TWICE because the two answer different questions:
- *  `targetSegments` is the ROUTE (a sequence of steps, resolved live, so the
- *  reference always lands on the target's current head) and `targetSig` is the
- *  IDENTITY — the target's LINEAGE signature, i.e. its bag address, NEVER a
- *  content hash. A content hash would freeze the reference into a copy that
- *  stops tracking the moment the target changes, which is the one failure this
- *  whole model exists to prevent. A route can be re-walked but can never serve
- *  as a name: it breaks on a rename or rehome, and being path-only is what puts
- *  a reference outside the layer closure.
+ *  New writes carry the target twice in two compatible spellings:
+ *  `targetSegments` is exactly `[fixedName]`; `targetSig` is the matching root
+ *  LINEAGE/bag address, never a content hash. Discovery paths are promoted to
+ *  that root and discarded.
  *
  *  `requiredMarks` carries the pheromones this reference FILTERS its target by
  *  ("People, but only family"). Deliberately NOT stored as tag decorations: tags
@@ -99,9 +81,8 @@ type CommitterLike = {
  *  portals — and the decoration index expands it and unions it with
  *  `requiredMarks` at read time.
  *
- *  Every field but `targetSegments` is optional, and absent means exactly the
- *  shape `/reference` has always written — so existing references are untouched
- *  and every reader must tolerate their absence. */
+ *  Legacy readers still tolerate an absent targetSig and arbitrary deep routes;
+ *  every new write goes through the canonical service. */
 export interface ReferencePayload {
   targetSegments: string[]
   targetSig?: string
@@ -110,7 +91,8 @@ export interface ReferencePayload {
 }
 
 /**
- * Mint a reference tile at `parentSegments/<name>` pointing at `item.segments`.
+ * Promote `item.segments` to `/<fixed-name>`, then mint a reference tile at
+ * `parentSegments/<fixed-name>` pointing at that root.
  *
  * `appliesTo: []` is deliberate and matches `reference.queen.ts`: it makes the
  * decoration content-addressed by its payload alone, so two references to the
@@ -136,43 +118,20 @@ export const dropReferenceTile = async (
   parentSegments: readonly string[],
   requiredMarks?: readonly string[],
 ): Promise<string | null> => {
-  const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
-  const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
-  const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as CommitterLike | undefined
-  if (!store?.putResource || !history?.sign || !committer?.commitChildrenDeltas) return null
+  const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
+  if (!references?.place) return null
 
-  const name = safeCellName(item.label)
+  // Display titles are not identity. The item's own last path segment is its
+  // fixed name; only fall back to the label for synthetic rows with no route.
+  const name = safeCellName(item.segments[item.segments.length - 1] ?? item.label)
   if (!name) return null
-
-  const payload: ReferencePayload = { targetSegments: [...item.segments] }
-  // Sorted, deduped, blanks dropped, and OMITTED when empty. This is a contract,
-  // not formatting: the record is content-addressed, so two references demanding
-  // the same things in a different order would otherwise mint different sigs and
-  // stop deduplicating, and an emptied demand has to be byte-identical to a
-  // reference that never carried one. `buildReferencePayload` in
-  // requires.queen.ts is the same rule, deliberately not imported: folding the
-  // two together needs the builder promoted to core, where both can reach it
-  // without one bee importing another.
-  const marks = [...new Set((requiredMarks ?? []).map(m => String(m ?? '').trim()).filter(Boolean))].sort()
-  if (marks.length) payload.requiredMarks = marks
-
   try {
-    // The target's LINEAGE signature — its bag address, resolved the same way
-    // every location is. Never a content hash: that would be a copy.
-    const targetSig = await history.sign({ explorerSegments: () => [...item.segments] })
-    if (targetSig) payload.targetSig = targetSig
-
-    const record = { kind: REFERENCE_KIND, appliesTo: [] as string[], payload }
-    const decorationSig = await store.putResource(
-      new Blob([JSON.stringify(record)], { type: 'application/json' }))
-
-    const childSegments = [...parentSegments, name]
-    const childSig = await history.sign({ explorerSegments: () => childSegments })
-    const childMarkerSig = await history.commitLayer(childSig, { name, decorations: [decorationSig] })
-    EffectBus.emit('decorations:changed', { segments: childSegments, op: 'append', sig: decorationSig })
-
-    await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
-    return name
+    return await references.place({
+      name,
+      sourceSegments: item.segments,
+      parentSegments,
+      requiredMarks,
+    })
   } catch {
     return null
   }
@@ -214,14 +173,17 @@ export const dropContextOnTile = async (
   tileSegments: readonly string[],
 ): Promise<boolean> => {
   const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
-  const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
   if (!store?.putResource || !item.segments.length) return false
 
-  const payload: ReferencePayload = { targetSegments: [...item.segments] }
+  const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
+  const name = safeCellName(item.segments[item.segments.length - 1] ?? item.label)
+  if (!references?.ensureRoot || !name) return false
   try {
-    if (history?.sign) {
-      const targetSig = await history.sign({ explorerSegments: () => [...item.segments] })
-      if (targetSig) payload.targetSig = targetSig
+    const root = await references.ensureRoot(name, item.segments)
+    if (!root) return false
+    const payload: ReferencePayload = {
+      targetSegments: [...root.segments],
+      targetSig: root.targetSig,
     }
     // appliesTo:[] so the same place attached to two tiles dedups to ONE sig —
     // the same economy every other decoration here gets.
@@ -244,11 +206,11 @@ export const dropContextOnTile = async (
         withSummaries?: (branches: readonly unknown[]) => Promise<string[]>
       } | undefined
       if (tileContext?.resolve) {
-        const branches = await tileContext.resolve([...item.segments])
+        const branches = await tileContext.resolve([...root.segments])
         // Through the IoC seam, never by path: TileContext is another BEE, and
         // a bee that may not be installed at all must be asked for, not
-        // imported — an import would inline a second copy of it into this
-        // bundle and pin its load order to ours.
+        // imported. Resolve the promoted canonical root, not the pre-promotion
+        // lineage appearance.
         if (Array.isArray(branches) && branches.length > 0) {
           await tileContext.withSummaries?.(branches)
         }

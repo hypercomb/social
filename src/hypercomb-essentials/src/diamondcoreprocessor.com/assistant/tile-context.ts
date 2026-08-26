@@ -3,11 +3,12 @@
 // THE TILE'S CONTEXT — the branches whose material belongs in AI requests made
 // about this tile, and what they RESOLVE TO.
 //
-// A `context` decoration stores a branch: `targetSegments` (the route) plus
-// `targetSig` (the LINEAGE address — the bag, not a content hash). That is a
-// pointer at a branch's current head, which is the whole point: the material an
-// answer draws on has to be what is there NOW, not a snapshot taken on the day
-// somebody dragged a portal onto a tile.
+// A `context` decoration stores a canonical branch: `targetSegments` is the
+// one-segment fixed-name root route and `targetSig` is that root's LINEAGE
+// address — the bag, not a content hash. That is a pointer at the branch's
+// current head, which is the whole point: the material an answer draws on has
+// to be what is there NOW, not a snapshot taken on the day somebody dragged a
+// portal onto a tile. Legacy arbitrary routes remain readable.
 //
 // But a lineage address is not something a language model can read. The gap
 // between "this branch matters here" and "these are the bytes" is what this
