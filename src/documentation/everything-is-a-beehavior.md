@@ -510,8 +510,8 @@ The EffectBus window events behind them already exist (`mesh:public-changed`,
 `actions:available`, …) — convert bindings to event subscriptions and each
 tag becomes an ordinary element surface.
 
-- [ ] Small chrome: `mesh-header` (201), `sync-indicator` (377),
-  `upgrade-indicator` (374)
+- [x] Small chrome: ~~`mesh-header`~~ (201), ~~`sync-indicator`~~ (377),
+  ~~`upgrade-indicator`~~ (374)
 - [ ] `edit-actions` (460)
 - [ ] `controls-bar` (5,851) — the edge-reservation layout box that panels
   anchor to must survive the rewrite intact

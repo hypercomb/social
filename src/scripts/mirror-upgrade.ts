@@ -52,7 +52,7 @@ const PARTS: Part[] = [
   {
     name: 'upgrade-pill',
     note: 'The header indicator. Writes the revision name the moment an update is announced, then offers the three choices — Adopt, Save, Discard. Adopt dispatches `hypercomb:apply-update` with the name and the package; it never opens the installer.',
-    source: `${SHARED}/ui/upgrade-indicator/upgrade-indicator.component.ts`,
+    source: `${SHARED}/ui/upgrade-indicator/upgrade-indicator.element.ts`,
   },
   {
     name: 'revision-name',

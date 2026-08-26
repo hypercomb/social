@@ -238,7 +238,7 @@ a `*-view.drone.ts` renderer + (if it needs Angular chrome) `registerShellSurfac
 
 ### 3.6 The three-stage icon, per-tile scope, swarm join
 
-- **Three-stage icon (global)**: `hypercomb-shared/ui/mesh-header/mesh-header.component.ts`
+- **Three-stage icon (global)**: `hypercomb-shared/ui/mesh-header/mesh-header.element.ts`
   — one glyph cycling `STAGE_PRIVATE` (lock) → `STAGE_WORLD` (public; the prep stage:
   canvas dims unshared tiles, per-tile scope controls appear) → `STAGE_HOST` (hub;
   opens the join modal via `mesh:open-modal {join:true}`). In a swarm it reads

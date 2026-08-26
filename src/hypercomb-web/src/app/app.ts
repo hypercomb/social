@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
+import { AfterViewInit, Component, computed, CUSTOM_ELEMENTS_SCHEMA, effect, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
@@ -9,16 +9,17 @@ import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
 import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
 import { EditActionsComponent } from "@hypercomb/shared/ui/edit-actions/edit-actions.component"
-import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
 import { ShellSurfacesComponent } from "@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component"
-import { SyncIndicatorComponent } from "@hypercomb/shared/ui/sync-indicator/sync-indicator.component"
-import { UpgradeIndicatorComponent } from "@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.component"
 import { TranslatePipe } from "@hypercomb/shared/core/i18n.pipe"
+import '@hypercomb/shared/ui/mesh-header/mesh-header.element'
+import '@hypercomb/shared/ui/sync-indicator/sync-indicator.element'
+import '@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.element'
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, TranslatePipe, MeshHeaderComponent, ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent, SyncIndicatorComponent, UpgradeIndicatorComponent],
+  imports: [RouterOutlet, Header, TranslatePipe, ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

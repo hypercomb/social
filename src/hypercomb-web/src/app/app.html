@@ -1,7 +1,7 @@
 @if(showHeader){
 <div class="header-bar" [class.input-open]="inputOpen()" [style.visibility]="(viewActive() || viewMode() === 'website') ? 'hidden' : null">
   <app-header></app-header>
-  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-mesh-header>
+  <hc-mesh-header></hc-mesh-header>
 </div>
 }
 <router-outlet></router-outlet>

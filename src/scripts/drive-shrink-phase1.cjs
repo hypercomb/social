@@ -248,6 +248,49 @@ async function main() {
     hintRoundTrip.defined && hintRoundTrip.mounted && hintRoundTrip.rendered && hintRoundTrip.picked === 'glacier',
     JSON.stringify(hintRoundTrip))
 
+  const smallChrome = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    const mesh = document.querySelector('hc-mesh-header')
+    const sync = document.querySelector('hc-sync-indicator')
+    const upgrade = document.querySelector('hc-upgrade-indicator')
+    if (!bus || !mesh || !sync || !upgrade) {
+      return { defined: false, mounted: false, mesh: false, sync: false, upgrade: false }
+    }
+
+    bus.emit('mesh:public-changed', { public: false })
+    mesh.querySelector('button')?.click()
+    const meshReview = mesh.querySelector('.mat-sym')?.textContent === 'public'
+      && localStorage.getItem('hc:world-mode') === '1'
+    bus.emit('mesh:modal-open', { open: false, cancelled: true })
+    const meshReset = mesh.querySelector('.mat-sym')?.textContent === 'lock'
+
+    bus.emit('install:sync', { active: true, source: 'gate-probe', current: 2, total: 4 })
+    const syncLive = sync.textContent?.includes('2')
+      && sync.querySelector('.sync-fill')?.style.width === '50%'
+    bus.emit('install:sync', { active: false, source: 'gate-probe' })
+
+    bus.emit('update:available', {
+      available: true, packageSig: 'gate-probe', newCount: 2, newBees: ['one', 'two'],
+    })
+    upgrade.querySelector('.status-button')?.click()
+    const upgradeLive = !!upgrade.querySelector('input')
+      && upgrade.querySelectorAll('.upgrade-act').length === 4
+    bus.emit('update:available', { available: false, packageSig: 'gate-probe' })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    return {
+      defined: ['hc-mesh-header', 'hc-sync-indicator', 'hc-upgrade-indicator']
+        .every(name => !!customElements.get(name)),
+      mounted: true,
+      mesh: meshReview && meshReset,
+      sync: !!syncLive,
+      upgrade: upgradeLive,
+    }
+  })
+  check('converted chrome: mesh, sync and upgrade elements keep their live event contracts',
+    smallChrome.defined && smallChrome.mounted && smallChrome.mesh && smallChrome.sync && smallChrome.upgrade,
+    JSON.stringify(smallChrome))
+
   // host-panel is deliberately native-only. Its module must still define the
   // custom element in the web build, but the registry gate must keep it out of
   // the DOM when Tauri is absent.
