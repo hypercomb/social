@@ -2018,6 +2018,16 @@
       "note": "Three parts to mirror under behaviors/assistant (chat): (1) host-stream.ts — the module-scope run that stores the turn whether or not a window is alive; (2) chat-thread.ts stream checkpoints (sign('chat:streams')) — the partial written down while it arrives and filed on the next boot; (3) chat-window #recoverWaits — the wait/clock/Stop/bee/tile-busy rebuilt from pending kind:'ask' mode:'chat' records after a reload. One collection, one part tile per source file, marked part; note on each explaining what it protects. Needs a live renderer on the bridge.",
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-p2-cold-band",
+      "title": "shrink Phase 2 cold band — observe-viewer, files-viewer, example-hives, mesh-modal, rewind-window, docs-overlay, feedback-viewer",
+      "run": null,
+      "note": "Seven Angular panels converted to framework-free custom elements and moved into essentials beside their owning bees (sharing x4, files, history, commands). Three are DOCKED (DockedPanelElement). file-icons.ts went DOWN TO CORE because file-teaser still renders the same table from shared. Mirror: one tile per view + sibling i18n catalog + drift spec, gathered into the everything-is-a-beehavior collection, mark each 'part'; note the three tooling holes found (runtime stem ending in a hyphen, a key reached through a shared table, a plural variant that looks like an orphan). Manual: note-add is additive and would double-land.",
+      "commit": "b7377a6d0",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
