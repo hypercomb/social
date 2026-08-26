@@ -1,21 +1,20 @@
-// hypercomb-shared/ui/command-line/command-line.component.scss
+// hypercomb-shared/ui/command-line/command-line.element.scss
 //
 // Tiles command-line wrapper — borderless flex child of header-bar.
 // The header-bar owns the border/shadow; children just fill it.
 
-:host {
+hc-command-line {
   display: flex;
   align-items: stretch;
   flex: 1;
   min-width: 0;
   overflow: hidden;
-}
 
 // Mobile collapsed state — the controls-bar's input toggle icon hides
 // the command line entirely so it stops eating screen real estate.
 // `display: none` removes it from the header flex layout, letting the
 // remaining items (mesh-header) reflow to fill the bar.
-:host(.mobile-hidden) {
+&.mobile-hidden {
   display: none;
 }
 
@@ -25,16 +24,16 @@
 // a note" affordance. Same token, same semantic — content becomes a
 // note rather than a chrome state.
 
-:host(.note-intent) ::ng-deep .command-input {
+&.note-intent .command-input {
   color: var(--md-secondary);
   caret-color: var(--md-secondary);
 }
 
-:host(.note-intent) ::ng-deep .command-input::placeholder {
+&.note-intent .command-input::placeholder {
   color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
 }
 
-:host(.note-intent) ::ng-deep .ghost {
+&.note-intent .ghost {
   color: color-mix(in srgb, var(--md-secondary) 35%, transparent);
 }
 
@@ -93,7 +92,7 @@
 // as the icon rail above it.
 // Keep the portrait rows stable while the soft keyboard changes viewport height.
 @media (max-width: 599px) and (orientation: portrait) {
-  :host {
+  & {
     height: auto;
     overflow: visible;
   }
@@ -145,3 +144,4 @@
 // button, which mounts and unmounts with the site. The shell no longer
 // paints a second chip in the same corner — it stacked on top of the
 // drone's button and collided with the bottom-right document actions.
+}

@@ -1,18 +1,17 @@
-// hypercomb-shared/ui/command-line/command-line.component.ts
+// Framework-free command-line controller custom element.
 
-import { AfterViewInit, Component, computed, CUSTOM_ELEMENTS_SCHEMA, effect, ElementRef, signal, ViewChild, type OnDestroy } from '@angular/core'
 import '../command-shell/command-shell.element'
 import type { CommandShellElement } from '../command-shell/command-shell.element'
 import '../hint-bar/hint-bar.element'
+import type { HintBarElement } from '../hint-bar/hint-bar.element'
 import type { Lineage } from '@hypercomb/core'
 import type { Navigation } from '@hypercomb/core'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/core'
-import { fromRuntime } from '../../core/from-runtime'
 // Folder-based tag persistence retired. TagOp type is local-only now.
 type TagOp = { label: string; tag: string; color?: string; remove: boolean }
 import {
-  EffectBus, hypercomb, type I18nProvider,
+  EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider,
   commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
   parseBehaviourCall, behaviourCallCursor, BehaviourCallError,
   type BehaviourCall, type CallValue,
@@ -20,7 +19,6 @@ import {
   voiceInputSupported,
   type CellSuggestionSource, type MovementProvider, type VoiceInputProvider,
 } from '@hypercomb/core'
-import { TranslatePipe } from '../../core/i18n.pipe'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BracketBehavior } from './bracket.behavior'
@@ -32,6 +30,112 @@ import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp } from './select-ops'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
+
+type ReadSignal<T> = () => T
+type StateSignal<T> = ReadSignal<T> & {
+  set(value: T): void
+  update(update: (value: T) => T): void
+  asReadonly(): ReadSignal<T>
+}
+type ReactiveEffect = { destroy(): void }
+type ReactiveSubscriber = {
+  readonly deps: Set<Set<ReactiveSubscriber>>
+  schedule(): void
+}
+
+let activeSubscriber: ReactiveSubscriber | null = null
+
+class ReactiveEffectImpl implements ReactiveEffect, ReactiveSubscriber {
+  readonly deps = new Set<Set<ReactiveSubscriber>>()
+  #queued = false
+  #destroyed = false
+
+  constructor(readonly callback: () => void) {}
+
+  run(): void {
+    if (this.#destroyed) return
+    this.#queued = false
+    for (const dep of this.deps) dep.delete(this)
+    this.deps.clear()
+    const previous = activeSubscriber
+    activeSubscriber = this
+    try { this.callback() } finally { activeSubscriber = previous }
+  }
+
+  schedule(): void {
+    if (this.#queued || this.#destroyed) return
+    this.#queued = true
+    queueMicrotask(() => this.run())
+  }
+
+  destroy(): void {
+    this.#destroyed = true
+    for (const dep of this.deps) dep.delete(this)
+    this.deps.clear()
+  }
+}
+
+class ReactiveComputed<T> implements ReactiveSubscriber {
+  readonly deps = new Set<Set<ReactiveSubscriber>>()
+  readonly subscribers = new Set<ReactiveSubscriber>()
+  #dirty = true
+  #value!: T
+
+  constructor(readonly callback: () => T) {}
+
+  read = (): T => {
+    if (activeSubscriber) {
+      this.subscribers.add(activeSubscriber)
+      activeSubscriber.deps.add(this.subscribers)
+    }
+    if (!this.#dirty) return this.#value
+    for (const dep of this.deps) dep.delete(this)
+    this.deps.clear()
+    const previous = activeSubscriber
+    activeSubscriber = this
+    try {
+      this.#value = this.callback()
+      this.#dirty = false
+      return this.#value
+    } finally {
+      activeSubscriber = previous
+    }
+  }
+
+  schedule(): void {
+    if (this.#dirty) return
+    this.#dirty = true
+    for (const subscriber of [...this.subscribers]) subscriber.schedule()
+  }
+}
+
+function signal<T>(initial: T): StateSignal<T> {
+  let value = initial
+  const subscribers = new Set<ReactiveSubscriber>()
+  const read = (() => {
+    if (activeSubscriber) {
+      subscribers.add(activeSubscriber)
+      activeSubscriber.deps.add(subscribers)
+    }
+    return value
+  }) as StateSignal<T>
+  read.set = (next: T): void => {
+    if (Object.is(value, next)) return
+    value = next
+    for (const subscriber of [...subscribers]) subscriber.schedule()
+  }
+  read.update = (update: (current: T) => T): void => read.set(update(value))
+  read.asReadonly = (): ReadSignal<T> => read
+  return read
+}
+
+function computed<T>(read: () => T): ReadSignal<T> { return new ReactiveComputed(read).read }
+
+function effect(callback: () => void): ReactiveEffect {
+  const runner = new ReactiveEffectImpl(callback)
+  runner.run()
+  return runner
+}
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
   { behaviour: { name: 'remove', description: 'remove selected tiles', descriptionKey: 'slash.remove-builtin' }, provider: null },
@@ -259,24 +363,16 @@ function loadCommandHistory(): string[] {
   } catch { return [] }
 }
 
-@Component({
-  selector: 'hc-command-line',
-  standalone: true,
-  imports: [TranslatePipe],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
-  templateUrl: './command-line.component.html',
-  styleUrls: ['./command-line.component.scss'],
-  host: {
-    '[class.mobile-hidden]': 'mobileHidden()',
-    '[class.note-intent]': 'noteIntent()',
-  },
-})
-export class CommandLineComponent implements AfterViewInit, OnDestroy {
+export class CommandLineElement extends HTMLElement {
+  #connected = false
+  #wrapperElement: HTMLDivElement | null = null
+  #shellElement: CommandShellElement | null = null
+  #hintElement: HintBarElement | null = null
+  #reactiveEffects: ReactiveEffect[] = []
+  #i18nTarget: (I18nProvider & EventTarget) | null = null
+  readonly #i18nTick = signal(0)
 
-  @ViewChild('shell', { read: ElementRef })
-  private shellRef?: ElementRef<CommandShellElement>
-
-  private get shell(): CommandShellElement | undefined { return this.shellRef?.nativeElement }
+  private get shell(): CommandShellElement | undefined { return this.#shellElement ?? undefined }
 
   private readonly shellState = signal({ activeIndex: 0, suppressed: false })
 
@@ -696,15 +792,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return { command, fragment, fullArgs }
   }
 
-  // Bridge EventTarget-based services to Angular Signals for reactivity
-  private readonly resourceCount$ = fromRuntime(
-    get('@hypercomb.social/ScriptPreloader') as EventTarget,
-    () => this.preloader.resourceCount
-  )
-  private readonly actionNames$ = fromRuntime(
-    get('@hypercomb.social/ScriptPreloader') as EventTarget,
-    () => this.preloader.actionNames
-  )
+  // Bridge the EventTarget-based preloader into this element's local signals.
+  private readonly resourceCount$ = signal(this.preloader.resourceCount)
+  private readonly actionNames$ = signal(this.preloader.actionNames)
+  readonly #onPreloaderChange = (): void => {
+    this.resourceCount$.set(this.preloader.resourceCount)
+    this.actionNames$.set(this.preloader.actionNames)
+  }
   // Instance-free: the cell provider (essentials, commands bundle) announces
   // after every refresh; replay fills this even when the line mounts first.
   private readonly cellNames$ = signal<readonly string[]>([])
@@ -787,7 +881,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public get behaviorReference(): readonly CommandLineBehaviorMeta[] {
     return [
       ...this.#behaviors,
-      ...CommandLineComponent.builtinBehaviors
+      ...CommandLineElement.builtinBehaviors
     ]
   }
 
@@ -841,6 +935,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return get('@hypercomb.social/I18n') as I18nProvider | undefined
   }
 
+  readonly #onI18nChange = (): void => this.#i18nTick.update(value => value + 1)
+
+  #connectI18n(): void {
+    const connect = (provider: I18nProvider): void => {
+      if (!this.#connected) return
+      this.#i18nTarget?.removeEventListener('change', this.#onI18nChange)
+      this.#i18nTarget = provider as I18nProvider & EventTarget
+      this.#i18nTarget.addEventListener('change', this.#onI18nChange)
+      this.#onI18nChange()
+    }
+    const current = window.ioc?.get?.<I18nProvider>(I18N_IOC_KEY)
+    if (current) connect(current)
+    else window.ioc?.whenReady?.<I18nProvider>(I18N_IOC_KEY, connect)
+  }
+
   public readonly placeholder = computed<string>(() => {
     const t = this.#i18n
     if (this.locked()) return t?.t('command-line.placeholder.locked') ?? 'enter cell name...'
@@ -890,11 +999,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   onCaretPresence(present: boolean): void { this.#caretInLine.set(present) }
 
   /** Tell the hive when the line is being written in. The overlay cannot see
-   *  Angular state, so the state travels as an effect (sticky, so a drone that
+   *  controller state, so the state travels as an effect (sticky, so a drone that
    *  registers later still learns the current answer). */
-  readonly #composingBroadcast = effect(() => {
+  readonly #broadcastComposing = (): void => {
     EffectBus.emit('command:composing', { composing: this.#composing() })
-  })
+  }
 
   // ── status indicators ─────────────────────────────────
 
@@ -1022,6 +1131,146 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   public constructor() {
+    super()
+  }
+
+  connectedCallback(): void {
+    if (this.#connected) return
+    this.#connected = true
+    this.#mountDom()
+    this.#connectController()
+    this.#connectRuntime()
+    this.#connectI18n()
+    this.#reactiveEffects = [
+      effect(this.#broadcastComposing),
+      effect(this.#runFindAsk),
+      effect(this.#runPathSideEffects),
+      effect(() => this.#syncView()),
+    ]
+  }
+
+  disconnectedCallback(): void {
+    if (!this.#connected) return
+    this.#connected = false
+    for (const reactiveEffect of this.#reactiveEffects) reactiveEffect.destroy()
+    this.#reactiveEffects = []
+    this.#i18nTarget?.removeEventListener('change', this.#onI18nChange)
+    this.#i18nTarget = null
+    this.#disconnectRuntime()
+    EffectBus.emit('command:composing', { composing: false })
+  }
+
+  #mountDom(): void {
+    if (this.#wrapperElement && this.#shellElement && this.#hintElement) return
+
+    const wrapper = document.createElement('div')
+    wrapper.className = 'command-line-wrapper'
+    const shell = document.createElement('hc-command-shell') as CommandShellElement
+    const pinnedEntrances = document.createElement('hc-pinned-entrances')
+    const go = document.createElement('button')
+    go.className = 'mobile-go-btn'
+    go.type = 'button'
+    const goIcon = document.createElement('span')
+    goIcon.className = 'mat-sym'
+    goIcon.setAttribute('aria-hidden', 'true')
+    goIcon.textContent = 'arrow_forward'
+    go.appendChild(goIcon)
+    go.addEventListener('click', this.closeMobileInput)
+    wrapper.append(shell, pinnedEntrances, go)
+
+    const hint = document.createElement('hc-hint-bar') as HintBarElement
+    hint.addEventListener('pick', event => this.onHintPick((event as CustomEvent<string>).detail))
+
+    const detail = <T>(event: Event): T => (event as CustomEvent<T>).detail
+    shell.addEventListener('caretPresence', event => this.onCaretPresence(detail<boolean>(event)))
+    shell.addEventListener('stateChange', event => this.onShellStateChange(detail<{ activeIndex: number; suppressed: boolean }>(event)))
+    shell.addEventListener('promptSigilToggle', this.onStanceToggle)
+    shell.addEventListener('valueChange', event => this.onShellValueChange(detail<string>(event)))
+    shell.addEventListener('commit', event => this.onShellCommit(detail<string>(event)))
+    shell.addEventListener('completionAccepted', event => this.onShellCompletionAccepted(detail<string>(event)))
+    shell.addEventListener('completionAcceptRequested', event => this.onShellAcceptRequested(detail<number>(event)))
+    shell.addEventListener('shellKeydown', event => this.onShellKeydown(detail<KeyboardEvent>(event)))
+    shell.addEventListener('indicatorDismiss', event => this.onIndicatorDismiss(detail<string>(event)))
+    shell.addEventListener('indicatorActivate', event => this.onIndicatorActivate(detail<string>(event)))
+    shell.addEventListener('armedResourceDismiss', this.onArmedResourceDismiss)
+    shell.addEventListener('subjectDismiss', this.onSubjectDismiss)
+    shell.addEventListener('openForSubscribersToggle', () => this.onOpenForSubscribersToggle())
+    shell.addEventListener('viewToggle', event => this.onViewToggle(detail<{ view: string; disable: boolean }>(event)))
+    shell.addEventListener('viewDefault', event => this.onViewDefault(detail<{ view: string }>(event)))
+    shell.addEventListener('featuresToggle', () => this.onFeaturesToggle())
+    shell.addEventListener('chatToggle', () => this.onChatToggle())
+    shell.addEventListener('notesToggle', () => this.onNotesToggle())
+    shell.addEventListener('pheromonesToggle', () => this.onPheromonesToggle())
+    shell.addEventListener('micPress', this.onRailMicPress)
+    shell.addEventListener('micRelease', this.onRailMicRelease)
+
+    this.#wrapperElement = wrapper
+    this.#shellElement = shell
+    this.#hintElement = hint
+    this.replaceChildren(wrapper, hint)
+  }
+
+  #syncView(): void {
+    this.#i18nTick()
+    this.classList.toggle('mobile-hidden', this.mobileHidden())
+    this.classList.toggle('note-intent', this.noteIntent())
+
+    const wrapper = this.#wrapperElement
+    if (wrapper) wrapper.style.visibility = this.touchDragging() || this.viewActive() ? 'hidden' : ''
+
+    const shell = this.shell
+    if (shell) {
+      shell.suggestions = this.suggestions()
+      shell.placeholder = this.placeholder()
+      shell.ghostValue = this.ghostValue()
+      shell.hoverEcho = this.hoverEcho()
+      shell.showSuggestions = this.showCompletions()
+      shell.typedPrefix = this.completionTypedPrefix()
+      shell.descriptionMap = this.descriptionMap()
+      shell.activeDetail = this.activeDetail()
+      shell.colorMap = this.dropdownColorMap()
+      shell.wideSwatches = this.wideSwatches()
+      shell.indicators = this.activeIndicators()
+      shell.armedResource = this.armedResource()
+      shell.promptSigil = this.stanceSigil()
+      shell.readingMarks = this.readingMarks()
+      shell.subject = this.commandSubject()
+      shell.showOpenForSubscribersToggle = this.showOpenForSubscribersToggle()
+      shell.openForSubscribers = this.openForSubscribers()
+      shell.openForSubscribersLabel = this.#t('command-line.open-for-subscribers')
+      shell.viewToggles = this.isMobile() ? [] : this.viewToggles()
+      shell.featuresPanelOpen = this.featuresPanelOpen()
+      shell.featuresLabel = this.#t('features.viewer.title')
+      shell.chatPanelOpen = this.chatPanelOpen()
+      shell.chatLabel = this.#t('chat.title')
+      shell.notesPanelOpen = this.notesPanelOpen()
+      shell.notesLabel = this.#t('annotations.title')
+      shell.pheromoneScopeIcon = this.pheromoneScopeIcon()
+      shell.pheromonePanelOpen = this.pheromonePanelOpen()
+      shell.pheromonesLabel = this.#t('tags.panel.open')
+      shell.lockedFlash = this.lockedFlash()
+      shell.lockedLabel = this.#t('command-line.pinned')
+      shell.showMic = this.voiceSupported
+      shell.micActive = this.voiceActive()
+      shell.micLabel = this.#t('controls.voice-hold')
+    }
+
+    if (this.#hintElement) {
+      this.#hintElement.items = this.hintItems()
+      this.#hintElement.filter = this.hintFilter()
+      this.#hintElement.chosen = this.hintChosen()
+      this.#hintElement.colorMap = this.accentColorMap()
+    }
+    const go = wrapper?.querySelector<HTMLButtonElement>('.mobile-go-btn')
+    if (go) go.setAttribute('aria-label', this.#t('command-line.go'))
+  }
+
+  #t(key: string): string {
+    const translated = this.#i18n?.t(key)
+    return translated && translated !== key ? translated : key
+  }
+
+  #connectController(): void {
     console.log('[command-line] initialized with url segments:', this.navigation.segments())
 
     // Listen for indicator registration/removal
@@ -1726,7 +1975,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // In preset phase, show all 5 presets
     const inBrackets = ctx.head.includes('[') && !ctx.head.includes(']')
     if (inBrackets) return []   // tags phase — hint bar not needed
-    return CommandLineComponent.ACCENT_PRESETS
+    return CommandLineElement.ACCENT_PRESETS
   })
 
   /** Current filter for the hint bar — typed fragment. */
@@ -1747,7 +1996,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active || ctx.mode !== 'slash') return new Map()
     const isAccent = ctx.head.match(/^\/(accent|ac)[\s\[]/i)
     if (!isAccent) return new Map()
-    return CommandLineComponent.ACCENT_COLOR_MAP
+    return CommandLineElement.ACCENT_COLOR_MAP
   })
 
   /**
@@ -1912,8 +2161,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // lifecycle
   // -------------------------------------------------
 
-  public ngAfterViewInit(): void {
+  #connectRuntime(): void {
     this.shell?.focus()
+    this.#onPreloaderChange()
+    this.preloader.addEventListener('change', this.#onPreloaderChange)
 
     // The registry warms itself when its module loads; this subscription (with
     // last-value replay) is all the line needs for `:` to show every tag.
@@ -2482,7 +2733,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  public ngOnDestroy(): void {
+  #disconnectRuntime(): void {
+    this.preloader.removeEventListener('change', this.#onPreloaderChange)
     this.#tagNamesUnsub?.()
     this.#cellNamesUnsub?.()
     this.#prefillUnsub?.()
@@ -2516,10 +2768,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       clearTimeout(this.#lockedFlashTimer)
       this.#lockedFlashTimer = null
     }
+    if (this.#findTimer) {
+      clearTimeout(this.#findTimer)
+      this.#findTimer = null
+    }
+    this.#findToken++
     for (const unsub of this.#indicatorUnsubs) unsub()
+    this.#indicatorUnsubs = []
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
     this.#mobileQuery?.removeEventListener('change', this.#mobileQueryHandler)
+    this.#mobileQuery = null
   }
 
   // template helpers removed — now owned by CommandShellElement
@@ -2631,7 +2890,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * ask carries a token so the answer to a query the participant has already
    * moved past is dropped rather than rendered.
    */
-  readonly #findAsk = effect(() => {
+  readonly #runFindAsk = (): void => {
     const ctx = this.context()
     const active = ctx.active && ctx.mode === 'find'
     const query = active ? ctx.normalized : ''
@@ -2675,7 +2934,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         })
       }).catch(() => { if (token === this.#findToken) this.#findAnswer.set(null) })
     }, FIND_DEBOUNCE_MS)
-  })
+  }
 
   /** Ask the hive right now and walk to the best answer — the spoken path,
    *  where there was no settling pause to debounce against. A question that
@@ -5266,7 +5525,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * Everything the completion machinery needs to know about WHERE the input
    * is pointing, parsed fresh from `value()` on every read. Pure — no signal
    * writes, no provider calls, no tag loads; the side effects live in
-   * `#pathSideEffects` below so this can be read from computeds (ghost text,
+   * `#runPathSideEffects` below so this can be read from computeds (ghost text,
    * suggestions) and from the Tab accept handler with identical results.
    */
   readonly #pathContext = computed<PathContext>(() => this.#parsePath(this.value()))
@@ -5277,7 +5536,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * mode. Driven by the derived context, so it fires for EVERY value change
    * regardless of which code path produced it.
    */
-  readonly #pathSideEffects = effect(() => {
+  readonly #runPathSideEffects = (): void => {
     const ctx = this.#pathContext()
     this.cellProvider?.query(ctx.subPath)
     if (ctx.tagLabel) {
@@ -5289,7 +5548,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#bracketCellLabel = ''
       this.#bracketCellTags.set(new Set())
     }
-  })
+  }
 
   #parsePath(rawValue: string): PathContext {
     const raw = rawValue.trim()
@@ -5379,7 +5638,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 }
 
-/** Where the command-line input is pointing — see CommandLineComponent#pathContext. */
+if (typeof customElements !== 'undefined' && !customElements.get('hc-command-line')) {
+  customElements.define('hc-command-line', CommandLineElement)
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'hc-command-line': CommandLineElement
+  }
+}
+
+/** Where the command-line input is pointing — see CommandLineElement#pathContext. */
 type PathContext = {
   bracketPhase: 'none' | 'items' | 'path'
   colonBracket: boolean

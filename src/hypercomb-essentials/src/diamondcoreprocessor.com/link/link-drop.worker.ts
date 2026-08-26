@@ -337,7 +337,7 @@ export class LinkDropWorker extends Worker {
   /**
    * Fill the armed slot with what the card turned out to hold: the picture
    * (stored as content-addressed resources) and the default name. The tile is
-   * created on Enter by CommandLineComponent.
+   * created on Enter by CommandLineElement.
    */
   async #armLink(
     url: string,

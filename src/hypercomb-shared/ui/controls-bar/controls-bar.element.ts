@@ -2862,7 +2862,7 @@ export class ControlsBarElement extends HTMLElement {
   // words it dictates land in that text box, so the control belongs beside it,
   // and the bar slot it freed went to fit ("centre the screen"). The
   // `mobile:mic:press` / `:release` state machine it drove is unchanged; the
-  // command line now emits it directly. See command-line.component.
+  // command line now emits it directly. See command-line.element.
 
   // ── utility actions (emit effects for drones) ─────────
 

@@ -5,8 +5,8 @@ import {
   type HexOrientation,
 } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
-import { CommandLineComponent } from '@hypercomb/shared';
 import { ShellSurfacesComponent } from '@hypercomb/shared/ui';
+import '@hypercomb/shared/ui/command-line/command-line.element'
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
 import '@hypercomb/shared/ui/mesh-header/mesh-header.element'
 import '@hypercomb/shared/ui/sync-indicator/sync-indicator.element'
@@ -22,7 +22,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, CommandLineComponent, ShellSurfacesComponent],
+  imports: [RouterOutlet, ShellSurfacesComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'

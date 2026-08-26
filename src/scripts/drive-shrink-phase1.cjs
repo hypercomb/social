@@ -407,6 +407,36 @@ async function main() {
       && commandShell.value === 'a' && commandShell.requested === 1,
     JSON.stringify(commandShell))
 
+  const commandLine = await page.evaluate(async () => {
+    const line = document.querySelector('hc-command-line')
+    const shell = line?.querySelector('hc-command-shell')
+    const bus = window.__hypercombEffectBus
+    if (!line || !shell || !bus) return { defined: !!customElements.get('hc-command-line'), mounted: false }
+    const previousNotes = bus.lastValue?.get?.('notes:panel-state')
+    bus.emit('notes:panel-state', { open: true })
+    bus.emit('mobile:input-visible', { visible: false, mobile: true, focus: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const notes = shell.notesPanelOpen === true
+      && shell.querySelector('.notes-toggle-btn')?.classList.contains('on') === true
+    const hidden = line.classList.contains('mobile-hidden')
+    bus.emit('notes:panel-state', previousNotes ?? { open: false })
+    bus.emit('mobile:input-visible', { visible: true, mobile: true, focus: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    return {
+      defined: customElements.get('hc-command-line') === line.constructor,
+      mounted: true,
+      ownedDom: line.firstElementChild?.classList.contains('command-line-wrapper') === true
+        && !!line.querySelector(':scope > hc-hint-bar')
+        && !!line.querySelector('hc-pinned-entrances'),
+      notes,
+      visibility: hidden && !line.classList.contains('mobile-hidden'),
+    }
+  })
+  check('converted chrome: command-line owns lifecycle, DOM and shell property contracts',
+    commandLine.defined && commandLine.mounted && commandLine.ownedDom
+      && commandLine.notes && commandLine.visibility,
+    JSON.stringify(commandLine))
+
   // host-panel is deliberately native-only. Its module must still define the
   // custom element in the web build, but the registry gate must keep it out of
   // the DOM when Tauri is absent.

@@ -117,7 +117,7 @@ const BEHAVIOURS: Behaviour[] = [
       ['command-line', [
         'What the rail is wired to. Passes the microphone down to the shell only on a phone, and stands the older flush-right one down there so there are never two. The dictation machine underneath is untouched — the button moved, the behaviour did not.',
         '',
-        `source: ${S}/ui/command-line/command-line.component.html, .ts, .scss`,
+        `source: ${S}/ui/command-line/command-line.element.ts, .element.scss`,
       ].join('\n')],
       ['header-bar-styles', [
         'The bar the prompt lives in. It can GROW now: with the icons on a second row the header is taller, so its height became a floor rather than a ceiling, and everything anchored below it follows the measured bottom edge automatically. The row\'s box, glyph and gap are set once here, for every icon on it — the rail never resizes one button, it resizes all of them or none.',

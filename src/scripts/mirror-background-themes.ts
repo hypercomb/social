@@ -127,7 +127,7 @@ const PARTS: { key: string; note: string }[] = [
     note: [
       'Which swatch belongs to which suggestion. The command line already carried a colour map for the dropdown — accent presets, and each tag drawn in its own colour. While the line is completing /background it asks the theme service for a swatch per suggestion instead, and raises a flag saying these values are whole pictures rather than single colours. The service is reached through the IoC key, never an import: shared may never depend on a module, so when the drone is absent the map is empty and the dropdown falls back to plain rows.',
       '',
-      `source: ${S}/command-line/command-line.component.ts`,
+      `source: ${S}/command-line/command-line.element.ts`,
     ].join('\n'),
   },
   {

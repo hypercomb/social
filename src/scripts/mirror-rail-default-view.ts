@@ -174,7 +174,7 @@ const DEFAULT_VIEW_PARTS: Part[] = [
    'the button and its three gestures — one rail button per available view; a modifier press emits `viewDefault` and latches, so the mouseup that follows does not ALSO toggle the view; the long press keeps the disable it always had; `.is-default` and the translated title expose the standing mark'],
   ['hypercomb-shared/ui/command-shell/command-shell.element.scss',
    'the ring — the violet accent as an inset ring, halo and filled glyph, written so the standing mark never flickers with the pointer and survives the lit state'],
-  ['hypercomb-shared/ui/command-line/command-line.component.ts',
+  ['hypercomb-shared/ui/command-line/command-line.element.ts',
    'the intent — states the gesture at the location the participant is standing on, and reads the strip it already holds to decide whether this is a SET or a CLEAR'],
   ['scripts/drive-rail-default-view.cjs',
    'the proof — walks a live shell: the mark is a RECORD (a reload lands on the view), it still reads back on the hexagons, a plain click still enters, and ctrl-click again clears it'],

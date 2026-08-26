@@ -521,11 +521,12 @@ tag becomes an ordinary element surface.
   twin moved to core in the Phase 2 gate. The remaining `RuntimeMediator` was
   retired: its sole caller was the already-retired OPFS explorer, while the
   live web boot path is `ensureInstall` + `DependencyLoader.load()`.
-- [ ] `command-line` + ~~`command-shell`~~ (9,117 combined) — the presentational
-  shell is now a light-DOM custom element with property/CustomEvent boundaries,
-  focus and selection APIs, keyboard completion navigation, and the view/tool
-  rail intact. The Angular `command-line` controller remains; it also owns
-  `CommandLineBehaviors` and the atomizer target and is the final large rewrite.
+- [x] ~~`command-line` + `command-shell`~~ (9,117 combined) — both are now
+  light-DOM custom elements. The controller keeps the existing behavior engine,
+  IoC seams and atomizer target, but owns its lifecycle, reactive state, DOM and
+  shell property/CustomEvent wiring without Angular. Focus and selection APIs,
+  keyboard completion navigation, mobile visibility and the view/tool rail stay
+  intact.
 - [ ] Web's install prompt — folds into the Phase 4 installer story
 - [ ] End of phase: both `app.html` files contain `<hc-shell-surfaces>` and
   nothing else; the "structural chrome" ratchet allowlist reaches zero.

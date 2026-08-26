@@ -278,7 +278,7 @@ interface CommandLineBehavior {
 }
 ```
 
-Pluggable behaviours are registered in `CommandLineComponent.#behaviors` and evaluated first-match-wins. Built-in behaviours are hardcoded in `onKeyDown` and listed in `CommandLineComponent.builtinBehaviors` for self-documentation. All metadata is introspectable at runtime via `CommandLineComponent.behaviorReference`.
+Pluggable behaviours are registered in `CommandLineElement.#behaviors` and evaluated first-match-wins. Built-in behaviours are hardcoded in `onKeyDown` and listed in `CommandLineElement.builtinBehaviors` for self-documentation. All metadata is introspectable at runtime via `CommandLineElement.behaviorReference`.
 
 ### Resolution order
 
@@ -303,6 +303,6 @@ event so Shift-gated behaviours can match.
 ## Adding a new behaviour
 
 1. Create `your-behavior.behavior.ts` implementing `CommandLineBehavior` with all metadata fields.
-2. Import and add it to the `#behaviors` array in `CommandLineComponent`.
+2. Import and add it to the `#behaviors` array in `CommandLineElement`.
 3. Position determines priority — more specific behaviours should come first.
 4. Behaviour metadata automatically surfaces in this reference and in runtime introspection.

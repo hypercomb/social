@@ -1509,7 +1509,7 @@ button:focus:not(:focus-visible) {
 // Fullscreen toggle — lit while the document is fullscreen, the same cold
 // steel the rest of the mobile chrome uses. (The mic that used to live on
 // this bar is now inside the command line; its recording visual moved with
-// it — see command-line.component.scss.)
+// it — see command-line.element.scss.)
 .pill-stage.mobile .fullscreen-btn.active {
   color: rgba(126, 182, 214, 0.95);
   background: rgba(126, 182, 214, 0.14);

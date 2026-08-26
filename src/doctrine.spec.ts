@@ -217,7 +217,7 @@ describe('doctrine ratchets', () => {
     assertRatchet([...new Set(found)].sort(), [
       '@hypercomb.social/AppRoutes (hypercomb-dev/src/app/app.routes.ts)',
       '@hypercomb.social/BootstrapHistory (hypercomb-shared/core/bootstrap-history.ts)',
-      '@hypercomb.social/CommandLineBehaviors (hypercomb-shared/ui/command-line/command-line.component.ts)',
+      '@hypercomb.social/CommandLineBehaviors (hypercomb-shared/ui/command-line/command-line.element.ts)',
       '@hypercomb.social/DependencyLoader (hypercomb-shared/core/dependency-loader.ts)',
       '@hypercomb.social/DevLayerSource (hypercomb-shared/core/layer-install-sources/dev-layer.source.ts)',
       '@hypercomb.social/DirectoryWalker (hypercomb-shared/core/directory-walker.ts)',

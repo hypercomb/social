@@ -33,6 +33,6 @@ export function registerCommandLineTarget(): void {
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => registerCommandLineTarget())
 } else {
-  // DOM already loaded — wait one frame for Angular to render
+  // DOM already loaded — wait one frame for the custom element to render
   requestAnimationFrame(() => registerCommandLineTarget())
 }
