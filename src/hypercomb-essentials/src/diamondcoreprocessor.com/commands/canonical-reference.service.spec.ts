@@ -133,7 +133,7 @@ describe('CanonicalReferenceService', () => {
       getPool: async () => ({
         getFileHandle: async (sig: string) => ({
           createWritable: async () => {
-            let bytes = new Uint8Array()
+            let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array()
             return {
               write: async (value: BufferSource) => {
                 bytes = value instanceof Uint8Array ? value : new Uint8Array(value as ArrayBuffer)
@@ -174,10 +174,10 @@ describe('CanonicalReferenceService', () => {
     })
   })
 
-  it('places a lineage leaf that points only at the fixed-name root', async () => {
+  it('places a lineage leaf with the original details and fixed-name root identity', async () => {
     const service = new CanonicalReferenceServiceImpl()
     await expect(service.place({
-      name: 'people', sourceSegments: ['nest', 'people'], parentSegments: ['sets'],
+      name: 'people', sourceSegments: ['nest', 'people'], parentSegments: ['project'],
     })).resolves.toBe('people')
     expect(written).toHaveLength(1)
     expect(written[0]).toMatchObject({
@@ -185,6 +185,79 @@ describe('CanonicalReferenceService', () => {
       payload: { targetSegments: ['people'] },
     })
     expect(JSON.stringify(written[0])).not.toContain('nest')
+    const appearance = await history.currentLayerAt(
+      await history.sign({ explorerSegments: () => ['project', 'people'] }),
+    )
+    expect(appearance).toMatchObject({
+      name: 'people',
+      notes: ['1'.repeat(64)],
+      properties: ['3'.repeat(64)],
+      decorations: expect.arrayContaining(['4'.repeat(64), expect.any(String)]),
+    })
+    // Structure stays behind the root pointer. The activation snapshots its
+    // atomic details but navigation still enters the canonical lineage.
+    expect(appearance).not.toHaveProperty('children')
+  })
+
+  it('keeps a Portal default-authoring row slim and explicitly marked', async () => {
+    const service = new CanonicalReferenceServiceImpl()
+    await expect(service.place({
+      name: 'people',
+      sourceSegments: ['nest', 'people'],
+      parentSegments: ['sets'],
+      editsRootDefault: true,
+    })).resolves.toBe('people')
+
+    expect(written[0]).toMatchObject({
+      kind: 'reference',
+      payload: { targetSegments: ['people'], editsRootDefault: true },
+    })
+    const portal = await history.currentLayerAt(
+      await history.sign({ explorerSegments: () => ['sets', 'people'] }),
+    )
+    expect(portal).toEqual({ name: 'people', decorations: [expect.any(String)] })
+  })
+
+  it('does not repaint an existing jaime appearance when another jaime is added', async () => {
+    const service = new CanonicalReferenceServiceImpl()
+    await expect(service.ensureRoot('jaime', null)).resolves.toMatchObject({ name: 'jaime' })
+
+    const rootLocation = await history.sign({ explorerSegments: () => ['jaime'] })
+    const hiveLocation = await history.sign({ explorerSegments: () => [] })
+    const setRootImage = async (propertiesSig: string): Promise<void> => {
+      const markerSig = await history.commitLayer(rootLocation, {
+        name: 'jaime', properties: [propertiesSig],
+      })
+      const hive = await history.currentLayerAt(hiveLocation) ?? { name: '', children: [] }
+      const survivors: string[] = []
+      for (const sig of hive.children ?? []) {
+        if ((await history.getLayerBySig(sig))?.name !== 'jaime') survivors.push(sig)
+      }
+      await history.commitLayer(hiveLocation, {
+        ...hive, children: [...survivors, markerSig],
+      })
+    }
+
+    const portraitOfJaime = 'a'.repeat(64)
+    const otherJaimeImage = 'b'.repeat(64)
+    await setRootImage(portraitOfJaime)
+    await expect(service.place({
+      name: 'jaime', sourceSegments: ['jaime'], parentSegments: ['friends'],
+    })).resolves.toBe('jaime')
+
+    await setRootImage(otherJaimeImage)
+    await expect(service.place({
+      name: 'jaime', sourceSegments: ['jaime'], parentSegments: ['team'],
+    })).resolves.toBe('jaime')
+
+    const friendsJaime = await history.currentLayerAt(
+      await history.sign({ explorerSegments: () => ['friends', 'jaime'] }),
+    )
+    const teamJaime = await history.currentLayerAt(
+      await history.sign({ explorerSegments: () => ['team', 'jaime'] }),
+    )
+    expect(friendsJaime?.properties).toEqual([portraitOfJaime])
+    expect(teamJaime?.properties).toEqual([otherJaimeImage])
   })
 
   it('keeps the chosen root authoritative and retains later discoveries as variants', async () => {

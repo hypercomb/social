@@ -91,11 +91,19 @@ function putResource(record: unknown): string {
 const tagSig = (name: string) =>
   putResource({ kind: 'tag', appliesTo: [], payload: { name } })
 
-const referenceSig = (targetSegments: string[], targetSig?: string) =>
+const referenceSig = (
+  targetSegments: string[],
+  targetSig?: string,
+  editsRootDefault = false,
+) =>
   putResource({
     kind: 'reference',
     appliesTo: [],
-    payload: targetSig ? { targetSegments, targetSig } : { targetSegments },
+    payload: {
+      targetSegments,
+      ...(targetSig ? { targetSig } : {}),
+      ...(editsRootDefault ? { editsRootDefault: true } : {}),
+    },
   })
 
 /** A reference that demands something of what it shows. Written RAW (unsorted,
@@ -195,6 +203,27 @@ describe('decoration index — location is the identity', () => {
     expect(index.referenceTargetForLabel('people')).toEqual(['relatives'])
   })
 
+  it('routes only an explicitly marked Portal row to the root default', async () => {
+    await decorate(['portal-inventory', 'jaime'], referenceSig(['jaime'], undefined, true))
+    await decorate(['friends', 'jaime'], referenceSig(['jaime']))
+
+    goTo('portal-inventory')
+    await vi.waitFor(() =>
+      expect(index.referenceEditsRootDefaultForLabel('jaime')).toBe(true))
+
+    goTo('friends')
+    await vi.waitFor(() =>
+      expect(index.referenceEditsRootDefaultForLabel('jaime')).toBe(false))
+  })
+
+  it('keeps pre-marker references in the legacy sets Portal authoring surface', async () => {
+    await decorate(['sets', 'legacy-jaime'], referenceSig(['legacy-jaime']))
+
+    goTo('sets')
+    await vi.waitFor(() =>
+      expect(index.referenceEditsRootDefaultForLabel('legacy-jaime')).toBe(true))
+  })
+
   it('removes a tag from the cell it was removed from, and only that one', async () => {
     // A tag resource is content-addressed, so BOTH cells hold the same sig.
     // The removal event's segments are the only thing distinguishing them.
@@ -274,33 +303,33 @@ describe('decoration index — location is the identity', () => {
       expect(index.hasDecorationKind('page', 'website')).toBe(false))
   })
 
-  // ── Reference FACE: resolve THROUGH the pointer ─────────────────────────
+  // ── Portal default FACE: resolve THROUGH the pointer ────────────────────
   //
-  // A reference cell's layer is a pointer with no `properties`, so rendered
-  // from its own layer it is a blank named tile — a collection of references
-  // paints as a page of empty hexagons. The face has to come from the target,
-  // read at paint time, so one item looks like itself everywhere it appears.
+  // A marked Portal inventory row is intentionally a slim live pointer. It
+  // wears the root default it edits. Ordinary activations carry their own
+  // pinned properties and never enter this dynamic fallback.
 
-  it('wears its target’s picture, not its own (which it has none of)', async () => {
+  it('gives the marked Portal row its target’s current picture', async () => {
     layerImages.set('friends/rosa', 'a'.repeat(64))
-    await decorate(['gathering', 'rosa'], referenceSig(['friends', 'rosa']))
+    await decorate(['gathering', 'rosa'], referenceSig(['friends', 'rosa'], undefined, true))
 
     goTo('gathering')
     await vi.waitFor(() => expect(index.referenceFaceForLabel('rosa')).toBe('a'.repeat(64)))
   })
 
-  it('gives every place the SAME face, from one shared record', async () => {
-    // The point of the whole model: two collections holding the same person
-    // resolve one target, so an edit at the canonical reaches both. Keyed by
-    // the TARGET's location, never by the referring cell.
+  it('does not dynamically repaint ordinary same-name activations from the root', async () => {
     layerImages.set('friends/mira', 'b'.repeat(64))
     await decorate(['inner', 'mira'], referenceSig(['friends', 'mira']))
     await decorate(['outer', 'mira'], referenceSig(['friends', 'mira']))
 
     goTo('inner')
-    await vi.waitFor(() => expect(index.referenceFaceForLabel('mira')).toBe('b'.repeat(64)))
+    await vi.waitFor(() =>
+      expect(index.referenceTargetForLabel('mira')).toEqual(['friends', 'mira']))
+    expect(index.referenceFaceForLabel('mira')).toBe('')
     goTo('outer')
-    expect(index.referenceFaceForLabel('mira')).toBe('b'.repeat(64))
+    await vi.waitFor(() =>
+      expect(index.referenceTargetForLabel('mira')).toEqual(['friends', 'mira']))
+    expect(index.referenceFaceForLabel('mira')).toBe('')
   })
 
   it('carries the target’s identity alongside the route — and tolerates its absence', async () => {

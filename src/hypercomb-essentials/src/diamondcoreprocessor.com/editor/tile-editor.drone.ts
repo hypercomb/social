@@ -8,7 +8,7 @@ import './tile-editor.view.js'
 // visual properties this drone edits. ONE importer: dup-inlining rule.
 import './format-painter.view.js'
 import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
-import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
@@ -112,7 +112,7 @@ export class TileEditorDrone {
     const target = portalEditTarget(
       appearanceParent,
       cell,
-      referenceTargetForLabel(cell),
+      referenceEditsRootDefaultForLabel(cell) ? referenceTargetForLabel(cell) : null,
     )
     const parentSegments = target.parentSegments
     const targetCell = target.cell

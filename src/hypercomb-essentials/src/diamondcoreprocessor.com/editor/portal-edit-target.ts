@@ -1,6 +1,6 @@
-// Portal content edits are default-selection edits. A reference appearance
-// keeps its own layout/address, but the details shown in the editor come from
-// (and are written back to) the canonical target it names.
+// Portal INVENTORY content edits are default-selection edits. The caller only
+// supplies a referenceTarget for a record explicitly marked editsRootDefault;
+// ordinary reference appearances edit their own pinned details in place.
 
 export interface PortalEditTarget {
   /** Complete location of the content-bearing tile. */
@@ -13,10 +13,11 @@ export interface PortalEditTarget {
   readonly throughPortal: boolean
 }
 
-/** Resolve one content-edit address. `referenceTarget` comes from the
- * decoration index; null means the clicked tile is an ordinary local tile.
- * Empty legacy targets cannot name an item, so they safely fall back to the
- * appearance instead of redirecting a write onto the hive root. */
+/** Resolve one content-edit address. `referenceTarget` is the canonical target
+ * of an explicitly marked Portal inventory row; null means an ordinary local
+ * tile OR lineage activation. Empty legacy targets cannot name an item, so
+ * they safely fall back to the appearance instead of redirecting a write onto
+ * the hive root. */
 export const portalEditTarget = (
   appearanceParent: readonly string[],
   appearanceCell: string,

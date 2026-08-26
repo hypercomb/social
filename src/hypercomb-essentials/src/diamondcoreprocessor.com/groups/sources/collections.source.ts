@@ -20,7 +20,8 @@
 //     than replacing add: you have somewhere to gather things before you have
 //     the things. It makes the canonical root at `/<name>` and links it into
 //     the hive-root complement. The index then
-//     holds an ordinary reference to it, the same shape `add` writes, so a
+//     holds a marked Portal default-authoring reference, the same shape `add`
+//     writes into the index, so a
 //     created collection and an adopted one are indistinguishable afterwards.
 //   • rename — NOT a mutation. A cell is immutable + content-addressed, so this
 //     RE-HOMES the same child sigs under a new root (no byte copy) and swaps the
@@ -295,7 +296,11 @@ class CollectionsSource implements AggregateSource {
       if (!into && this.#entries.some(e => e.name === entry.label)) continue   // already indexed
       if (segmentsEqual(entry.segments, parent)) continue        // never reference yourself
       const name = await dropReferenceTile(
-        { key: entry.label, label: entry.label, segments: entry.segments }, parent)
+        { key: entry.label, label: entry.label, segments: entry.segments },
+        parent,
+        undefined,
+        !into,
+      )
       if (name) written.push({ key: name, label: name, segments: [name] })
     }
     if (!written.length) return
@@ -350,8 +355,8 @@ class CollectionsSource implements AggregateSource {
    *
    *  One name names one canonical root. The canonical service creates or
    *  reuses `/<name>`, guarantees it appears in the hive-root complement, and
-   *  writes an ordinary reference activation under `sets/`. A name already in
-   *  the index is a no-op. */
+   *  writes a marked default-authoring reference under `sets/`. A name already
+   *  in the index is a no-op. */
   async create(name: string): Promise<AddedRows> {
     const cell = name.trim()
     if (!cell || this.#entries.some(e => e.name === cell)) return
@@ -360,6 +365,10 @@ class CollectionsSource implements AggregateSource {
       name: cell,
       sourceSegments: null,
       parentSegments: [SETS],
+      // The Portals index is the one place where editing a reference means
+      // "make this my default for future uses". References activated inside
+      // ordinary lineages keep their own selected details.
+      editsRootDefault: true,
     })
     if (!added) return
     await new hypercomb().act()

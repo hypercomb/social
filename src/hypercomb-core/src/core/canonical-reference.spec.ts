@@ -25,6 +25,13 @@ describe('canonical portal reference grammar', () => {
     expect(payload).toEqual({ targetSegments: ['people'], targetSig: SIG })
   })
 
+  it('marks only an explicit Portal row as a root-default editor', () => {
+    expect(buildCanonicalReferencePayload({ name: 'jaime' }))
+      .toEqual({ targetSegments: ['jaime'] })
+    expect(buildCanonicalReferencePayload({ name: 'jaime', editsRootDefault: true }))
+      .toEqual({ targetSegments: ['jaime'], editsRootDefault: true })
+  })
+
   it('normalizes demands so identical meaning mints identical bytes', () => {
     expect(normalizeReferenceMarks(['work', 'family', 'work', ''])).toEqual(['family', 'work'])
     const a = buildCanonicalReferenceRecord({

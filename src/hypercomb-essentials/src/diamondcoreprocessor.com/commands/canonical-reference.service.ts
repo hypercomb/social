@@ -2,10 +2,12 @@
 //
 // The one write door for Portals. A source may be discovered anywhere, but its
 // fixed name promotes it into one canonical root bag. Every lineage appearance
-// minted afterwards is a small reference decoration to that root.
+// points to that root and pins the selected detail signatures; the marked
+// Portal inventory row stays a slim future-default authoring pointer.
 
 import {
   CANONICAL_REFERENCE_SERVICE_KEY,
+  CHILD_SLOTS,
   EffectBus,
   buildCanonicalReferenceRecord,
   buildCanonicalVariantRecord,
@@ -206,6 +208,7 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
       targetSig: root.targetSig,
       requiredMarks: options.requiredMarks,
       requiredBouquet: options.requiredBouquet,
+      editsRootDefault: options.editsRootDefault,
     })
     const decorationSig = await store.putResource(
       new Blob([JSON.stringify(record)], { type: 'application/json' }),
@@ -216,10 +219,33 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
       domain: lineage?.domain,
       explorerSegments: () => childSegments,
     })
-    const childMarkerSig = await history.commitLayer(childLocationSig, {
-      name,
-      decorations: [decorationSig],
-    })
+    // An ordinary activation takes a SNAPSHOT OF THE CURRENT ROOT DETAILS.
+    // It shares the exact same resource/decorations/notes signatures, so no
+    // bytes are copied, but its appearance head is independent: creating or
+    // editing `/team/jaime` can never repaint `/friends/jaime`. The reference
+    // still points at the fixed root pool for identity/navigation.
+    //
+    // The Portal inventory row is the exception. It is the explicit default-
+    // authoring surface, so it remains a slim live pointer and its editor is
+    // routed to the root. Changing that root seeds FUTURE activations only.
+    let childLayer: PlacementLayer = { name, decorations: [decorationSig] }
+    if (options.editsRootDefault !== true) {
+      const rootLayer = await resolveLayerAt(history, lineage?.domain, root.segments)
+      if (!rootLayer) return null
+      const details: PlacementLayer = { name }
+      for (const [slot, value] of Object.entries(rootLayer)) {
+        if (slot === 'name' || (CHILD_SLOTS as readonly string[]).includes(slot)) continue
+        details[slot] = value
+      }
+      const inheritedDecorations = Array.isArray(details.decorations)
+        ? details.decorations.filter((sig): sig is string => typeof sig === 'string')
+        : []
+      childLayer = {
+        ...details,
+        decorations: [...new Set([...inheritedDecorations, decorationSig])],
+      }
+    }
+    const childMarkerSig = await history.commitLayer(childLocationSig, childLayer)
     await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
 
     EffectBus.emit('decorations:changed', {

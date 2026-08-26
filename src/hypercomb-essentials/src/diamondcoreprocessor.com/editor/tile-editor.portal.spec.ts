@@ -10,6 +10,7 @@ const tileProperties = vi.hoisted(() => ({
   readLegacy: vi.fn(),
 }))
 const referenceTarget = vi.hoisted(() => vi.fn())
+const editsRootDefault = vi.hoisted(() => vi.fn())
 
 vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
@@ -30,6 +31,7 @@ vi.mock('./tile-properties.js', () => ({
 }))
 vi.mock('../commands/decoration-kind-index.js', () => ({
   referenceTargetForLabel: referenceTarget,
+  referenceEditsRootDefaultForLabel: editsRootDefault,
 }))
 
 import { EffectBus } from '@hypercomb/core'
@@ -54,6 +56,7 @@ describe('TileEditorDrone Portal defaults', () => {
     const open = vi.fn()
     services.set('@diamondcoreprocessor.com/TileEditorService', { open })
     referenceTarget.mockReturnValue(['people'])
+    editsRootDefault.mockReturnValue(true)
     tileProperties.read.mockResolvedValue({ border: { color: '#336699' } })
 
     EffectBus.emit('tile:action', {
@@ -67,6 +70,27 @@ describe('TileEditorDrone Portal defaults', () => {
       { border: { color: '#336699' } },
       null,
       ['people'],
+    )
+  })
+
+  it('keeps an ordinary same-name activation on its own lineage variant', async () => {
+    const open = vi.fn()
+    services.set('@diamondcoreprocessor.com/TileEditorService', { open })
+    referenceTarget.mockReturnValue(['people'])
+    editsRootDefault.mockReturnValue(false)
+    tileProperties.read.mockResolvedValue({ small: { image: 'a'.repeat(64) } })
+
+    EffectBus.emit('tile:action', {
+      action: 'edit', label: 'people', q: 0, r: 0, index: 0,
+    })
+
+    await vi.waitFor(() => expect(open).toHaveBeenCalled())
+    expect(tileProperties.read).toHaveBeenCalledWith(['sets', 'family'], 'people')
+    expect(open).toHaveBeenCalledWith(
+      'people',
+      { small: { image: 'a'.repeat(64) } },
+      null,
+      ['sets', 'family', 'people'],
     )
   })
 

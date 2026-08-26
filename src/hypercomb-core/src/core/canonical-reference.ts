@@ -55,6 +55,10 @@ export interface CanonicalReferencePayloadOptions {
   targetSig?: string
   requiredMarks?: readonly string[]
   requiredBouquet?: string
+  /** This appearance is the Portal's default-authoring surface. Its editor
+   * writes the canonical root for future activations. Ordinary appearances
+   * omit this and keep their own selected variant/details. */
+  editsRootDefault?: boolean
 }
 
 /** Assemble a reference payload in the one deterministic field order. */
@@ -69,6 +73,7 @@ export const buildCanonicalReferencePayload = (
   if (opts.requiredBouquet && SIG_RE.test(opts.requiredBouquet)) {
     payload['requiredBouquet'] = opts.requiredBouquet
   }
+  if (opts.editsRootDefault === true) payload['editsRootDefault'] = true
   return payload
 }
 
@@ -126,6 +131,8 @@ export interface PlaceCanonicalReferenceOptions {
   parentSegments: readonly string[]
   requiredMarks?: readonly string[]
   requiredBouquet?: string
+  /** Portal inventory/editor row, not an ordinary lineage activation. */
+  editsRootDefault?: boolean
 }
 
 export interface CanonicalReferenceService {
