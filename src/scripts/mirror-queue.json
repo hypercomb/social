@@ -2117,6 +2117,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase3-command-shell",
+      "title": "Mirror the Phase 3 command-shell unbinding",
+      "run": null,
+      "note": "hc-command-shell is now a framework-free light-DOM custom element. Preserve and update the existing command-shell/source parts rather than minting duplicates: the input/ghost/reading layers, fixed caret-anchored intellisense with active detail, prompt cargo/subject/stance slot, status indicators, view and standing-tool rail, mic press/release, long-press view disable and ctrl/cmd default-view gesture. Its parent boundary is now properties plus bubbling CustomEvents, with an explicit stateChange seam keeping command-line's Angular computeds reactive until command-line itself moves. The shell keeps focus/selection and the controller methods setValue/clear/focus/blur/select/suppress. Old Angular template/component files retired; globally emitted SCSS is scoped under hc-command-shell. Live shrink gate proves DOM input normalization, completion navigation and events. Manual: note-add is additive and would double-land.",
+      "commit": "800112337",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
