@@ -41,10 +41,11 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+pub mod mirror;
 pub mod serve;
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use hypercomb_protocol::{bag_addr, LayerSig, Marker, PoolRegistry, Sig};
 use hypercomb_store::{
@@ -53,6 +54,8 @@ use hypercomb_store::{
     Collected, ContentStore, RedbStore,
 };
 use serde::{Deserialize, Serialize};
+
+pub use mirror::{BusyGuard, Mirror, HIVE_TRANSFER_RUNNING};
 
 /// One entry in a shimmed directory listing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -110,9 +113,13 @@ pub struct Head {
 /// (which mutates on derive) more than the store.
 #[derive(Debug)]
 pub struct Host {
-    store: RedbStore,
+    /// Shared so the mirror's worker thread can read it without borrowing the
+    /// `Host` that Tauri owns. `redb` handles its own transaction isolation,
+    /// so concurrent readers are its problem, not ours.
+    store: Arc<RedbStore>,
     registry: Mutex<PoolRegistry>,
     root: PathBuf,
+    mirror: Mirror,
 }
 
 impl Host {
@@ -121,11 +128,28 @@ impl Host {
     /// Performs no scan — see `hypercomb_store`. Boot maps one file.
     pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
         let root = dir.as_ref().to_path_buf();
+        let store = Arc::new(RedbStore::open(&root)?);
         Ok(Self {
-            store: RedbStore::open(&root)?,
+            mirror: Mirror::new(Arc::clone(&store)),
+            store,
             registry: Mutex::new(PoolRegistry::new()),
             root,
         })
+    }
+
+    /// Point the continuous mirror at a folder, or `None` to disarm it.
+    ///
+    /// From here on every commit is exported to that folder and every external
+    /// change to it is drained back in. The launch-time full export still runs
+    /// and still belongs: it catches up whatever changed while this hive was
+    /// closed, which no watcher can see.
+    pub fn set_backup_target(&self, target: Option<PathBuf>) {
+        self.mirror.arm(target);
+    }
+
+    /// The continuous mirror, for callers that need to nudge it directly.
+    pub fn mirror(&self) -> &Mirror {
+        &self.mirror
     }
 
     /// Where this hive lives.
@@ -142,7 +166,9 @@ impl Host {
     /// Idempotent: identical content yields an identical signature, so a
     /// re-put is free and there is never anything to merge.
     pub fn put(&self, bytes: &[u8]) -> Result<String> {
-        Ok(self.store.put(bytes)?.to_hex())
+        let sig = self.store.put(bytes)?;
+        self.mirror.touched_content(sig);
+        Ok(sig.to_hex())
     }
 
     /// Read content by signature.
@@ -183,7 +209,10 @@ impl Host {
     /// written.
     pub fn append(&self, segments: &[String], layer: &str) -> Result<u32> {
         let layer = LayerSig::from_sig(parse_sig(layer)?);
-        Ok(self.store.append(bag_addr(segments), &Marker::pointer(layer))?)
+        let bag = bag_addr(segments);
+        let index = self.store.append(bag, &Marker::pointer(layer))?;
+        self.mirror.touched_bag(bag);
+        Ok(index)
     }
 
     /// Every revision at a location, oldest first.
@@ -215,7 +244,9 @@ impl Host {
 
     pub fn pool_put(&self, meaning: &str, key: &str, bytes: &[u8]) -> Result<()> {
         let pool = self.registry.lock().expect("registry lock").address(meaning);
-        Ok(self.store.pool_put(pool, key, bytes)?)
+        self.store.pool_put(pool, key, bytes)?;
+        self.mirror.touched_pool(pool);
+        Ok(())
     }
 
     pub fn pool_get(&self, meaning: &str, key: &str) -> Result<Option<Vec<u8>>> {
@@ -342,6 +373,7 @@ impl Host {
                 // side effect of a write. The occupied lookup is O(bag) but is
                 // paid only on collision; the ordinary write is one insert.
                 if self.store.put_marker_at(bag, index, &marker)? {
+                    self.mirror.touched_bag(bag);
                     return Ok(());
                 }
                 let occupant = self
@@ -358,11 +390,12 @@ impl Host {
                     ))),
                 }
             }
-            None => Ok(self.store.pool_put(
-                hypercomb_protocol::PoolAddr::from_sig(parsed),
-                name,
-                bytes,
-            )?),
+            None => {
+                let pool = hypercomb_protocol::PoolAddr::from_sig(parsed);
+                self.store.pool_put(pool, name, bytes)?;
+                self.mirror.touched_pool(pool);
+                Ok(())
+            }
         }
     }
 
@@ -404,7 +437,7 @@ impl Host {
     ///
     /// Never automatic. This is a manual or idle-time operation.
     pub fn collect(&self) -> Result<Collected> {
-        Ok(gc(&self.store)?)
+        Ok(gc(&*self.store)?)
     }
 
     // -----------------------------------------------------------------
@@ -417,7 +450,7 @@ impl Host {
     /// children's history followed by name, skip-if-exists throughout. Pools
     /// stay home (clipboard and caches are device-local by design).
     pub fn export_root(&self, segments: &[String], target: impl AsRef<Path>) -> Result<Transfer> {
-        Ok(hypercomb_store::interchange::export_root(&self.store, segments, target)?)
+        Ok(hypercomb_store::interchange::export_root(&*self.store, segments, target)?)
     }
 
     /// Restore a hive from a folder in the interchange form.
@@ -426,7 +459,7 @@ impl Host {
     /// markers merge with the highest winning, pool members merge by name.
     /// Idempotent — restoring the same folder twice imports nothing.
     pub fn restore(&self, source: impl AsRef<Path>) -> Result<Transfer> {
-        Ok(restore(&self.store, source)?)
+        Ok(restore(&*self.store, source)?)
     }
 
     /// Export this hive to a folder in the interchange form. Writes into the
@@ -438,7 +471,7 @@ impl Host {
     /// when the question is "can I get my hive back". Everything the hive holds
     /// travels here: unreachable roots, every pool of meaning, every revision.
     pub fn export(&self, target: impl AsRef<Path>) -> Result<Transfer> {
-        Ok(export(&self.store, target)?)
+        Ok(export(&*self.store, target)?)
     }
 
     /// Read a backup folder back and confirm it holds this hive whole.
@@ -446,7 +479,7 @@ impl Host {
     /// Costs one pass over the folder. Run it at the end of a backup, so the
     /// answer is known before it is needed.
     pub fn verify_backup(&self, target: impl AsRef<Path>) -> Result<Verification> {
-        Ok(verify(&self.store, target)?)
+        Ok(verify(&*self.store, target)?)
     }
 }
 
@@ -460,6 +493,123 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let host = Host::open(dir.path().join("hive")).unwrap();
         (dir, host)
+    }
+
+    /// Poll until `check` holds, or give up.
+    ///
+    /// The mirror is a debounced worker behind a real OS watcher, so "how long
+    /// does this take" has no fixed answer — it is a quiescence delay plus
+    /// whatever the platform's file notification costs. Polling to a deadline
+    /// keeps the test honest about what it is waiting for instead of encoding
+    /// one machine's timing as a `sleep`.
+    fn until(what: &str, mut check: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while std::time::Instant::now() < deadline {
+            if check() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    #[test]
+    fn a_commit_reaches_the_folder_without_being_asked() {
+        let (dir, host) = host();
+        let folder = dir.path().join("backup");
+        std::fs::create_dir_all(&folder).unwrap();
+        host.set_backup_target(Some(folder.clone()));
+
+        // No menu, no launch, no export call. Just a commit.
+        let sig = host.put(b"a thought worth keeping").unwrap();
+        let layer = host
+            .put(Layer::empty("mirrored").canonical_json().as_bytes())
+            .unwrap();
+        host.append(&["mirrored".into()], &layer).unwrap();
+
+        until("the content to reach the folder", || folder.join(&sig).is_file());
+        until("the marker to reach the folder", || {
+            folder.join(host.bag_address(&["mirrored".into()])).join("00000000").is_file()
+        });
+        assert_eq!(
+            std::fs::read(folder.join(&sig)).unwrap(),
+            b"a thought worth keeping",
+            "the mirrored bytes must be the committed bytes"
+        );
+    }
+
+    #[test]
+    fn a_file_dropped_in_the_folder_reaches_the_hive() {
+        let (dir, host) = host();
+        let folder = dir.path().join("backup");
+        std::fs::create_dir_all(&folder).unwrap();
+        host.set_backup_target(Some(folder.clone()));
+
+        // What the OTHER side would leave behind: content at its own name.
+        // Written by nobody this process knows about.
+        let bytes = b"written by the other side";
+        let sig = hypercomb_protocol::sign(bytes).to_hex();
+        std::fs::write(folder.join(&sig), bytes).unwrap();
+
+        until("the hive to adopt the dropped file", || host.has(&sig).unwrap());
+        assert_eq!(
+            host.get(&sig).unwrap().as_deref(),
+            Some(&bytes[..]),
+            "adopting must bring the bytes, not just the name"
+        );
+    }
+
+    #[test]
+    fn the_mirror_does_not_chase_its_own_echo() {
+        let (dir, host) = host();
+        let folder = dir.path().join("backup");
+        std::fs::create_dir_all(&folder).unwrap();
+        host.set_backup_target(Some(folder.clone()));
+
+        let sig = host.put(b"round and round").unwrap();
+        until("the first mirror pass", || folder.join(&sig).is_file());
+
+        // Our own export produced filesystem events. If those were treated as
+        // an external change, the watcher would restore, the restore would
+        // commit, and the commit would export — forever. Settling is the
+        // assertion: after the loop would have had many chances to run, the
+        // folder holds exactly what it should and nothing more.
+        std::thread::sleep(std::time::Duration::from_millis(1_500));
+        let entries: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.ends_with(".hcpart"))
+            .collect();
+        assert_eq!(entries, vec![sig], "the folder must hold one file, not a pile of echoes");
+    }
+
+    #[test]
+    fn nothing_is_mirrored_until_a_folder_is_chosen() {
+        let (dir, host) = host();
+        let folder = dir.path().join("backup");
+        std::fs::create_dir_all(&folder).unwrap();
+
+        // Committed BEFORE the folder was chosen.
+        let earlier = host.put(b"before").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        assert!(
+            !folder.join(&earlier).exists(),
+            "an unarmed mirror must not write anywhere"
+        );
+
+        // Arming does not retroactively export — that is the launch backup's
+        // job, and it is why the launch backup still exists.
+        host.set_backup_target(Some(folder.clone()));
+        let later = host.put(b"after").unwrap();
+        until("the later commit to mirror", || folder.join(&later).is_file());
+        assert!(
+            !folder.join(&earlier).exists(),
+            "arming mirrors what happens NEXT; catching up is export()'s job"
+        );
+        // ...and export() is what closes that gap.
+        host.export(&folder).unwrap();
+        assert!(folder.join(&earlier).is_file(), "the full export catches up the rest");
     }
 
     #[test]

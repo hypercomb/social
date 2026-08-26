@@ -91,9 +91,40 @@ megabytes.
 It is a **poll** because a browser tab cannot watch a directory: the page must
 be open, the handle came from a user gesture, and the File System Access API
 emits no change events. The web side is therefore pull-on-open and
-push-on-commit. The native client — a real process that *can* watch — is where
-a true watcher belongs, and it does not have one yet (`notify` is not a
-dependency; export is top-up-on-launch rather than on-commit).
+push-on-commit.
+
+## The native client: a real watcher
+
+The desktop side is a process, not a tab, so it does not have to poll — and
+does not. `hypercomb-client/crates/host/src/mirror.rs` holds both halves:
+
+**Outbound, on commit.** Every mutation through `Host` (`put`, `append`,
+`pool_put`, and the shim's `raw_dir_put`, which is how the shell actually
+writes) marks what it touched. A debounced worker then exports exactly that
+via `export_selective` — never the full `export`, which stats every signature
+in the hive and on Windows pays an on-access antivirus trip per record. The
+debounce matters: one tile edit writes a layer, a marker and often a rendition,
+so flushing on the first change would mirror the same bag three times.
+
+**Inbound, on change.** `notify` watches the target directory and a real
+external change drains straight in through `restore`. Both directions take the
+same process-wide transfer lock as the menu and the launch backup, so a mirror
+flush can never race a backup a person just asked for.
+
+**The echo.** Our own writes come back as filesystem events, and left alone
+that is a loop — export wakes the watcher, the watcher restores, the restore
+commits, the commit exports. Every path the mirror writes is recorded and the
+watcher claims it back exactly once, so only somebody else's change survives to
+wake the worker. Events are filtered to signature-shaped paths first, which
+also disposes of `.hcpart` temp files, the backup receipt, READMEs and whatever
+the operating system drops into a folder it is syncing — with no list of names
+to keep up to date.
+
+**Launch still matters.** Arming the mirror does not retroactively export, and
+a watcher cannot see what happened while the app was closed. So the launch-time
+full export stays, and arming also schedules one inbound pass for the same
+reason in the other direction. Between them they close the gap the continuous
+path cannot.
 
 ## Divergence: detected and quarantined, not resolved
 
@@ -145,11 +176,24 @@ draining legacy `__x__` directories) copy across but are ignored by `restore`;
 the records inside them travel anyway, because hard-copy resolves every
 referenced signature and writes it sig-named at the root.
 
+## Known: deletion does not travel
+
+Union merge has no tombstones. A record deleted on one side while the folder
+still holds it is **restored** on the next inbound pass. This was always true
+of the Restore menu item; making the drain continuous makes the resurrection
+continuous too, which is a real change in how often it can bite.
+
+Content is unaffected — removing content is already a no-op by design, since a
+layer is atomic and removing a tile appends a new layer rather than deleting an
+old one. It reaches markers removed by an explicit revision delete, and pool
+members. Fixing it needs tombstones in the interchange form, which is a
+protocol decision and deliberately not taken as a side effect of building a
+mirror.
+
 Still owed:
 
 1. The 2026-08-20 folder-sync fixes are **source only, not deployed** — the
-   live web hive still crashes on every press, so none of this is reachable in
-   production yet.
-2. A watcher and export-on-commit in the native client, so the desktop half is
-   as continuous as the web half.
-3. A conflict rule — lease or rebase — to turn quarantine into resolution.
+   live web hive still crashes on every press, so the web half is not reachable
+   in production yet.
+2. A conflict rule — lease or rebase — to turn quarantine into resolution.
+3. Tombstones, if deletion should propagate.

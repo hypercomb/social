@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 hypercomb-protocol.workspace = true
 hypercomb-store.workspace = true
+notify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

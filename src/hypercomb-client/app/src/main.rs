@@ -20,9 +20,8 @@
 #![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use hypercomb_host::{Head, Host, HostError};
+use hypercomb_host::{BusyGuard, Head, Host, HostError};
 use tauri::{Manager, State};
 
 mod hosting;
@@ -379,26 +378,10 @@ const RENDERER_DIAGNOSTICS: &str = r#"
 // happened, and only one of them may run at a time.
 // ---------------------------------------------------------------------------
 
-/// One backup or restore at a time, process-wide.
-///
-/// Two exports into one folder would each write temp files for the same paths
-/// and each report a count that is not the whole story; a restore racing an
-/// export would read a folder being written underneath it. The menu can be
-/// clicked twice before the first dialog appears, and the launch backup starts
-/// on its own — so the guard is not defensive, it is reachable.
-static HIVE_TRANSFER_RUNNING: AtomicBool = AtomicBool::new(false);
-
-/// Clears [`HIVE_TRANSFER_RUNNING`] however the transfer ends — a cancelled
-/// picker and an early `return` included. A flag released only on the happy
-/// path is a flag that eventually stays set and disables the menu for the rest
-/// of the session.
-struct BusyGuard;
-
-impl Drop for BusyGuard {
-    fn drop(&mut self) {
-        HIVE_TRANSFER_RUNNING.store(false, Ordering::SeqCst);
-    }
-}
+// The one-transfer-at-a-time guard moved into `hypercomb_host::mirror`, which
+// is where the third claimant lives: the continuous mirror fires on every
+// commit, so the menu, the launch backup and the mirror all have to contend
+// for the same folder through the same lock.
 
 /// Where the remembered backup folder is written down.
 ///
@@ -609,6 +592,13 @@ fn main() {
 
                 let remembered = read_backup_target(&dir);
 
+                // ARM THE CONTINUOUS MIRROR. From here every commit exports to
+                // this folder and every external change to it drains back in.
+                // The launch backup below still runs and still earns its place:
+                // it catches up whatever moved while this hive was closed,
+                // which no watcher can see.
+                app.state::<Host>().set_backup_target(remembered.clone());
+
                 let backup = MenuItemBuilder::with_id("hive-backup", "Back Up Hive…").build(app)?;
                 let backup_again = MenuItemBuilder::with_id("hive-backup-again", "Back Up Again")
                     .enabled(remembered.is_some())
@@ -667,10 +657,7 @@ fn main() {
                             );
                             return;
                         }
-                        if HIVE_TRANSFER_RUNNING.swap(true, Ordering::SeqCst) {
-                            return;
-                        }
-                        let _busy = BusyGuard;
+                        let Some(_busy) = BusyGuard::take() else { return };
                         match handle.state::<Host>().export(&target) {
                             Ok(moved) => {
                                 eprintln!(
@@ -714,6 +701,9 @@ fn main() {
 
                         if id == "hive-forget-backup" {
                             forget_backup_target(&hive_dir);
+                            // Stop mirroring too, or "stop backing up" would
+                            // keep writing to the folder it just disowned.
+                            app.state::<Host>().set_backup_target(None);
                             let _ = backup_again.set_enabled(false);
                             let _ = forget.set_enabled(false);
                             app.dialog()
@@ -728,15 +718,14 @@ fn main() {
 
                         // Two transfers at once would walk the same paths with
                         // two sets of temp files and report two half-truths.
-                        if HIVE_TRANSFER_RUNNING.swap(true, Ordering::SeqCst) {
+                        let Some(_busy) = BusyGuard::take() else {
                             app.dialog()
                                 .message("A backup or restore is already running.\n\nWait for it to finish, then try again.")
                                 .kind(MessageDialogKind::Warning)
                                 .title("Hive")
                                 .blocking_show();
                             return;
-                        }
-                        let _busy = BusyGuard;
+                        };
 
                         // "Back Up Again" reuses the remembered folder and asks
                         // nothing; everything else opens the picker.
@@ -835,6 +824,9 @@ fn main() {
                             Ok(moved) => {
                                 let checked = host.verify_backup(&path);
                                 write_backup_target(&hive_dir, &path);
+                                // A folder chosen now is a folder to keep in
+                                // step from now on.
+                                host.set_backup_target(Some(path.clone()));
                                 let _ = backup_again.set_enabled(true);
                                 let _ = forget.set_enabled(true);
 
