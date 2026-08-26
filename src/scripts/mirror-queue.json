@@ -1982,6 +1982,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "activity-feed-transitions",
+      "title": "activity feed announces transitions, not deliveries",
+      "run": null,
+      "note": "The feed was double-logging every cell add/remove because the post-commit reconcile re-announces what the gesture already announced. Mirror: note on the activity-log tile explaining that cell:added/cell:removed are STATE ASSERTIONS and that subscribers owe idempotence; mark the trap 'a wildcard read but never consumed poisons its key'. Manual: note-add is additive and would double-land.",
+      "commit": "b2676686c",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
