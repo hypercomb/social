@@ -26,6 +26,9 @@
 //            `decorations:changed`.
 
 import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
+// The files panel rides the drone that owns 'files:open' and puts the files
+// there in the first place. ONE importer: dup-inlining rule.
+import './files-viewer.view.js'
 import { writeAttachment, listAttachments, removeAttachment, FILES_ATTACHMENT_KIND, type AttachmentPayload } from './files-attachment.js'
 import { hasDecorationKind } from '../commands/decoration-kind-index.js'
 import { armImageBlob, storeImageResources } from '../editor/arm-resource.js'

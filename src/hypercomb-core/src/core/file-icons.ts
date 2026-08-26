@@ -1,10 +1,25 @@
-// hypercomb-shared/ui/files-viewer/file-icons.ts
+// hypercomb-core/src/core/file-icons.ts
 //
 // File-type taxonomy for the files viewer: maps a filename/mime to a
 // coarse category, each with a short type badge and an accent colour.
-// Lives in shared (presentation) — the panel can't import essentials —
-// and is derived purely from name/mime, so no `type` needs to ride the
-// payload. Drives both the per-row type icon and the top filter chips.
+// Drives both the per-row type icon and the top filter chips.
+//
+// IT LANDED IN CORE, not beside the panel, because it has TWO consumers and
+// they live on opposite sides of the dependency rule: the converted
+// files-viewer element in essentials, and file-teaser, which is still an
+// Angular component in shared — and shared may never import essentials. A
+// primitive both kits need is exactly what core is for. Pure data plus two
+// pure functions, no imports at all, so it costs either bundle nothing but
+// its bytes.
+//
+// Consequence for the catalog split: the eleven `files.type.*` keys this
+// table names are rendered through it by BOTH consumers, so they are carried
+// by the files-viewer catalog AND left in the shell for file-teaser. A key
+// two surfaces render belongs to both.
+//
+// The classification is derived from name/mime ALONE, deliberately: no `type`
+// rides the `files:open` payload, so the drone never has to agree with the
+// panel about what a file is, and a taxonomy change needs no re-gather.
 
 export type FileTypeKey =
   | 'pdf' | 'doc' | 'sheet' | 'slides'

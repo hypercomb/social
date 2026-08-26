@@ -1,5 +1,12 @@
 // Pure projection of the feedback inbox's durable retirement records.
 //
+// MOVED HERE with the feedback viewer (everything-is-a-beehavior Phase 2):
+// the panel it serves is now a framework-free custom element in this bundle,
+// and its one collaborator has to travel with it or the module would import
+// from shared. Byte-for-byte the same projection — pure TS, zero imports, so
+// the move is a relocation and not a rewrite. The spec that guards it is the
+// orchestrator's to move.
+//
 // The feedback channel is add-only: removing a source record locally does not
 // prevent the relay from replaying the same bytes. These ledgers are therefore
 // the authority for whether a replayed row is still open.

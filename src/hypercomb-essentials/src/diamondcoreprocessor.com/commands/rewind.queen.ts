@@ -1,6 +1,10 @@
 // diamondcoreprocessor.com/commands/rewind.queen.ts
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
+// The rewind scrubber rides the queen that owns 'rewind:open'. The FILE
+// lives in history/ (the domain that owns what happened); the IMPORTER is
+// here, with the door that opens it. ONE importer: dup-inlining rule.
+import '../history/rewind-window.view.js'
 
 /**
  * /rewind — toggle the visual undo picker.

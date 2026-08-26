@@ -1,5 +1,11 @@
 // The behaviors deck, silhouetted — the shape behind the opening page.
 //
+// MOVED DOWN from hypercomb-shared/ui/example-hives/ in the
+// everything-is-a-beehavior Phase 2 conversion: it is pure data with no
+// framework surface at all, so it travels with the view it draws
+// (example-hives.view.ts, right beside this file) instead of staying in the
+// shell. Byte-for-byte the same geometry — only the home changed.
+//
 // The first-boot welcome used to float over a void: a fresh install has an
 // empty hive, so there is nothing behind the card and the wash shades
 // nothing out. This draws what the FIRST SCREEN of /behaviors actually looks

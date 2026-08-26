@@ -146,6 +146,9 @@ async function main() {
     // The utility batch.
     'hc-camera-capture', 'hc-activity-log', 'hc-pheromone-tiles', 'hc-action-card',
     'hc-shortcut-sheet', 'hc-context-window',
+    // The cold band.
+    'hc-observe-viewer', 'hc-files-viewer', 'hc-example-hives-offer', 'hc-mesh-modal',
+    'hc-rewind-window', 'hc-docs-overlay', 'hc-feedback-viewer',
   ]
   let mounted = []
   for (let i = 0; i < 60; i++) {

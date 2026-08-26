@@ -13,7 +13,10 @@
 import { Component } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { PinnableHoverBase } from '../pinnable/pinnable-hover.base'
-import { TYPE_META, TYPE_ORDER, categorize, type FileTypeKey } from '../files-viewer/file-icons'
+// The taxonomy moved to CORE when files-viewer became a framework-free
+// element: this component and that element render the same table, and shared
+// may never import essentials, so the primitive went down rather than sideways.
+import { TYPE_META, TYPE_ORDER, categorize, type FileTypeKey } from '@hypercomb/core'
 
 export interface FileTeaserData {
   segments: string[]

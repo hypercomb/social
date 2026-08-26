@@ -19,6 +19,10 @@
 // neither knows nor bypasses it.
 
 import { Worker, get } from '@hypercomb/core'
+// The first-boot offer rides the worker that owns 'examples:offer' — the
+// surface and the thing it offers ship together.
+// ONE importer: dup-inlining rule.
+import './example-hives.view.js'
 import { resolveLayerAt, childNamesOfStrict } from '../history/layer-placement.js'
 
 const STORE_KEY = '@hypercomb.social/Store'

@@ -29,6 +29,9 @@
 // filters them out (see swarm.drone.ts).
 
 import { Drone, EffectBus } from '@hypercomb/core'
+// The feedback viewer rides the drone that owns 'feedback:toggle' and the
+// channel it reads. ONE importer: dup-inlining rule.
+import './feedback-viewer.view.js'
 import type { ToastRequest } from '../commands/toast.drone.js'
 
 // New NIP-33 parameterized-replaceable kinds (30206-30209 are free; 30210+ used

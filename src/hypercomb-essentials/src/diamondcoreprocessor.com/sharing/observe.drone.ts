@@ -17,6 +17,9 @@
 // observe:close).
 
 import { Drone } from '@hypercomb/core'
+// The observation panel rides the drone that owns the read-model it draws —
+// two halves of one surface. ONE importer: dup-inlining rule.
+import './observe-viewer.view.js'
 import {
   observeDataPoints,
   readObservationFilter,

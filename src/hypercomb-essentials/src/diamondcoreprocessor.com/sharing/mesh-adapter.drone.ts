@@ -1,5 +1,9 @@
 // diamondcoreprocessor.com/core/communication/mesh-adapter.drone.ts
 import { Drone, type Effect } from '@hypercomb/core'
+// The mesh dialog rides the mesh adapter: nothing in essentials opens it
+// (the shell does), so it goes with the bee that owns the room it edits.
+// ONE importer: dup-inlining rule.
+import './mesh-modal.view.js'
 
 type NostrRelay = string
 

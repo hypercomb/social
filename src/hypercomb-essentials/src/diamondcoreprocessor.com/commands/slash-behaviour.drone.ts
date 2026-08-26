@@ -1,5 +1,8 @@
 // diamondcoreprocessor.com/ui/slash-behaviour/slash-behaviour.drone.ts
 import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+// The documentation overlay rides the drone that owns 'docs:open'.
+// ONE importer: dup-inlining rule.
+import './docs-overlay.view.js'
 // The name + bouquet registries ride the commands bundle — exactly ONE entry
 // imports them (two importers would inline two instances; ioc is first-wins).
 import './name-registry.js'
