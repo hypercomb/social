@@ -21,9 +21,17 @@
 // Consumers resolve this via window.ioc.get(USAGE_IOC_KEY) and use the
 // UsageRanker contract from @hypercomb/core; absence collapses to un-ranked.
 
+// (moved down from hypercomb-shared in the everything-is-a-beehavior
+// Phase 1 — its contract, UsageRanker + USAGE_IOC_KEY, always lived in core)
 import type { UsageRanker } from '@hypercomb/core'
-import type { Lineage } from './lineage'
-import type { Store } from './store'
+
+/** The slices of Lineage / Store this needs — reached through IoC. */
+type LineageLike = EventTarget & { currentSig(): Promise<string> }
+type StoreLike = {
+  getPool(meaning: string): Promise<unknown>
+  putPoolDoc(pool: unknown, bytes: ArrayBuffer, subkey: string): Promise<unknown>
+  getPoolDoc(pool: unknown, subkey: string): Promise<ArrayBuffer | null | undefined>
+}
 
 // Pool meaning carries a colon so it can never collide with a location's
 // lineage bag (lineageKey folds every non-alphanumeric to '-', so a ':' is
@@ -54,7 +62,7 @@ export class UsageTracker extends EventTarget implements UsageRanker {
   #pending = new Map<string, UsageRecord>()   // write-ahead deltas not yet in the pool doc
   #currentSig = ''
   #enteredAt = 0                 // Date.now() when the current timer started; 0 = paused
-  #store: Store | undefined
+  #store: StoreLike | undefined
   #persistTimer: ReturnType<typeof setTimeout> | null = null
   #loaded = false                // gate persist until the initial load has merged
 
@@ -67,11 +75,11 @@ export class UsageTracker extends EventTarget implements UsageRanker {
     // Resolve deps via IoC — robust to barrel order. Both register in the
     // shared/core barrel; whenReady fires immediately if already present.
     window.ioc?.whenReady?.('@hypercomb.social/Store', (s: unknown) => {
-      this.#store = s as Store
+      this.#store = s as StoreLike
       void this.#load()
     })
     window.ioc?.whenReady?.('@hypercomb.social/Lineage', (lin: unknown) => {
-      const lineage = lin as Lineage
+      const lineage = lin as LineageLike
       lineage.addEventListener('change', () => { void this.#onChange(lineage) })
       void this.#onChange(lineage)   // stamp the boot location
     })
@@ -125,7 +133,7 @@ export class UsageTracker extends EventTarget implements UsageRanker {
   }
 
   // ── dwell timing ────────────────────────────────────────────────────
-  async #onChange(lineage: Lineage): Promise<void> {
+  async #onChange(lineage: LineageLike): Promise<void> {
     let sig = ''
     try { sig = await lineage.currentSig() } catch { return }
     if (!SIG_RE.test(sig) || sig === this.#currentSig) return
@@ -297,4 +305,12 @@ export class UsageTracker extends EventTarget implements UsageRanker {
   }
 }
 
-register('@hypercomb.social/UsageTracker', new UsageTracker())
+export const usageTracker = new UsageTracker()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureUsageTrackerRegistered = (): void => {
+  if (!window.ioc?.has?.('@hypercomb.social/UsageTracker')) {
+    window.ioc?.register?.('@hypercomb.social/UsageTracker', usageTracker)
+  }
+}
+ensureUsageTrackerRegistered()

@@ -11,7 +11,6 @@ import {
   bridgeProviders,
   I18N,
   LINEAGE,
-  MOVEMENT,
   NAVIGATION,
   RESOURCE_MSG_HANDLER,
   SCRIPT_PRELOADER,
@@ -20,7 +19,6 @@ import {
 export const sharedProviders = bridgeProviders([
   I18N,
   LINEAGE,
-  MOVEMENT,
   NAVIGATION,
   RESOURCE_MSG_HANDLER,
   SCRIPT_PRELOADER,

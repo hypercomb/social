@@ -24,15 +24,29 @@
 // calls query(['abc']) and we resolve from the layer for `parentSegments
 // + ['abc']` instead of the current level.
 
-import { levelRoster, type RosterHistory, type RosterRow, type RosterStore } from '@hypercomb/core'
-import type { Lineage } from './lineage'
-import type { SuggestionProvider } from './suggestion-provider'
+// (moved down from hypercomb-shared in the everything-is-a-beehavior
+// Phase 1 — contract in core suggestion.types.ts; announces
+// CELL_SUGGESTIONS_CHANGED after every refresh so the command line
+// re-reads instance-free)
+import {
+  EffectBus,
+  levelRoster,
+  CELL_SUGGESTION_KEY,
+  CELL_SUGGESTIONS_CHANGED,
+  type RosterHistory,
+  type RosterRow,
+  type RosterStore,
+  type CellSuggestionSource,
+} from '@hypercomb/core'
 
-export class CellSuggestionProvider extends EventTarget implements SuggestionProvider {
+/** The slice of Lineage this needs — reached through IoC, never an import. */
+type LineageLike = EventTarget & { explorerSegments?: () => string[] }
+
+export class CellSuggestionProvider extends EventTarget implements CellSuggestionSource {
 
   readonly providerName = 'cells'
 
-  private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
+  private get lineage(): LineageLike { return window.ioc?.get?.('@hypercomb.social/Lineage') as LineageLike }
   private get history(): RosterHistory | undefined {
     return get('@diamondcoreprocessor.com/HistoryService') as RosterHistory | undefined
   }
@@ -121,6 +135,7 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
     this.#rows = rows
     this.#names = sorted
     this.dispatchEvent(new CustomEvent('change'))
+    EffectBus.emit(CELL_SUGGESTIONS_CHANGED, { count: this.#names.length })
   }
 
   #sameSigs = (next: readonly RosterRow[]): boolean => {
@@ -150,4 +165,12 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
   }
 }
 
-register('@hypercomb.social/CellSuggestionProvider', new CellSuggestionProvider())
+export const cellSuggestionProvider = new CellSuggestionProvider()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureCellSuggestionRegistered = (): void => {
+  if (!window.ioc?.has?.(CELL_SUGGESTION_KEY)) {
+    window.ioc?.register?.(CELL_SUGGESTION_KEY, cellSuggestionProvider)
+  }
+}
+ensureCellSuggestionRegistered()

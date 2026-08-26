@@ -9,11 +9,9 @@
 import type { Provider } from '@angular/core'
 import { LocalizationService } from './i18n.service'
 import { Lineage } from './lineage'
-import { MovementService } from './movement.service'
 import { Navigation } from './navigation'
 import { ResourceMessageHandler } from './resource-message-handler'
 import { ScriptPreloader } from './script-preloader'
-import { CellSuggestionProvider } from './cell-suggestion.provider'
 
 // -------------------------------------------------
 // token type (lightweight, no core dependency)
@@ -34,11 +32,9 @@ function token<T>(key: string, ngType: any): SharedToken<T> {
 
 export const I18N = token<LocalizationService>('@hypercomb.social/I18n', LocalizationService)
 export const LINEAGE = token<Lineage>('@hypercomb.social/Lineage', Lineage)
-export const MOVEMENT = token<MovementService>('@hypercomb.social/MovementService', MovementService)
 export const NAVIGATION = token<Navigation>('@hypercomb.social/Navigation', Navigation)
 export const RESOURCE_MSG_HANDLER = token<ResourceMessageHandler>('@hypercomb.social/ResourceMessageHandler', ResourceMessageHandler)
 export const SCRIPT_PRELOADER = token<ScriptPreloader>('@hypercomb.social/ScriptPreloader', ScriptPreloader)
-export const CELL_SUGGESTION = token<CellSuggestionProvider>('@hypercomb.social/CellSuggestionProvider', CellSuggestionProvider)
 
 // -------------------------------------------------
 // Angular bridge helper

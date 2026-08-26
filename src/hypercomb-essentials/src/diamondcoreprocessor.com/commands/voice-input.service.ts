@@ -1,11 +1,12 @@
-// hypercomb-shared/core/voice-input.service.ts
+// voice-input.service.ts (moved down from hypercomb-shared in the
+// everything-is-a-beehavior Phase 1 — contract in core voice-input.types.ts)
 // Speech recognition via Web Speech API.
 // Emits EffectBus events: voice:interim, voice:final, voice:active, voice:error
 // Activated via /voice slash behaviour, mic button in controls bar, or mic button in command line.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, VOICE_INPUT_KEY, voiceInputSupported, type VoiceInputProvider } from '@hypercomb/core'
 
-export class VoiceInputService extends EventTarget {
+export class VoiceInputService extends EventTarget implements VoiceInputProvider {
 
   #recognition: any = null
   #active = false
@@ -14,12 +15,7 @@ export class VoiceInputService extends EventTarget {
   #carriedText = ''
   #wantActive = false
 
-  static supported(): boolean {
-    return !!(
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition
-    )
-  }
+  static supported(): boolean { return voiceInputSupported() }
 
   get active(): boolean { return this.#active }
 
@@ -148,5 +144,12 @@ export class VoiceInputService extends EventTarget {
   }
 }
 
-const _voiceInput = new VoiceInputService()
-window.ioc.register('@hypercomb.social/VoiceInputService', _voiceInput)
+export const voiceInputService = new VoiceInputService()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureVoiceInputRegistered = (): void => {
+  if (!window.ioc?.has?.(VOICE_INPUT_KEY)) {
+    window.ioc?.register?.(VOICE_INPUT_KEY, voiceInputService)
+  }
+}
+ensureVoiceInputRegistered()

@@ -6,6 +6,7 @@ import { iconOverrides, ensureIconOverridesRegistered } from './icon-overrides.s
 // The recent-portals store rides this bundle (its walk signal,
 // tile:navigate-reference, is emitted here) — ONE importer, dup-inlining rule.
 import './recent-portals.store.js'
+import './usage-tracker.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'

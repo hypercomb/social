@@ -18,10 +18,16 @@ import {
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
-import type { MovementService } from '../../core/movement.service'
 import {
   EffectBus,
   consumePointerGesture,
+  iconEditMode,
+  LONG_PRESS_MS,
+  voiceInputSupported,
+  MOVEMENT_SERVICE_KEY,
+  MOVEMENT_CHANGED,
+  type MovementProvider,
+  type VoiceInputProvider,
   ICON_OVERRIDES_KEY,
   ICON_OVERRIDE_CHANGED,
   ROOM_STORE_KEY,
@@ -32,7 +38,6 @@ import {
   type ZoneValueStore,
   type ZoneValueChange,
 } from '@hypercomb/core'
-import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import {
   RECENT_PORTALS_KEY,
   RECENT_PORTALS_CHANGED,
@@ -43,7 +48,6 @@ import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
 import { isWindowShowing } from '../window-session'
 import { showHiveRoot } from '../../core/home-root'
 import type { InstallMonitor } from '../../core/install-monitor'
-import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from '@hypercomb/core'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
@@ -237,8 +241,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   private get navigation(): Navigation {
     return get('@hypercomb.social/Navigation') as Navigation
   }
-  private get movement(): MovementService {
-    return get('@hypercomb.social/MovementService') as MovementService
+  private get movement(): MovementProvider | undefined {
+    return get(MOVEMENT_SERVICE_KEY) as MovementProvider | undefined
   }
   private get zoom(): any {
     return get('@diamondcoreprocessor.com/ZoomDrone')
@@ -258,10 +262,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── reactive state ──────────────────────────────────────
 
-  #moved$ = fromRuntime(
-    get('@hypercomb.social/MovementService') as EventTarget,
-    () => this.movement.moved,
-  )
+  // Instance-free: movement (essentials, navigation bundle) announces every
+  // committed navigation on EffectBus with replay.
+  readonly #moved$ = signal(0)
+  #movedUnsub: (() => void) | null = null
   /** Bumped when a title lands or the locale changes, so the breadcrumb
    *  re-resolves. The index it reads is a plain Map, not reactive. */
   #titleTick = signal(0)
@@ -1331,7 +1335,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
-  readonly voiceSupported = VoiceInputService.supported()
+  readonly voiceSupported = voiceInputSupported()
   readonly atomizeTarget = this.#atomizeTarget.asReadonly()
   readonly atomizeStrategy = this.#atomizeStrategy.asReadonly()
   readonly atomizeAtomCount = this.#atomizeAtomCount.asReadonly()
@@ -1407,6 +1411,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#roomChangedUnsub = EffectBus.on<ZoneValueChange>(ROOM_CHANGED, ({ value }) => this.#room$.set(value ?? ''))
     this.#secretChangedUnsub = EffectBus.on<ZoneValueChange>(SECRET_CHANGED, ({ value }) => this.#secret$.set(value ?? ''))
     this.#portalsChangedUnsub = EffectBus.on(RECENT_PORTALS_CHANGED, () => this.#portalsRev.update(v => v + 1))
+    this.#movedUnsub = EffectBus.on<{ moved?: number }>(MOVEMENT_CHANGED, (p) => this.#moved$.set(p?.moved ?? 0))
 
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
@@ -1846,6 +1851,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#roomChangedUnsub?.()
     this.#secretChangedUnsub?.()
     this.#portalsChangedUnsub?.()
+    this.#movedUnsub?.()
     this.#clearIconPress()
     this.#detachListDrag()   // in case we're torn down mid drag-scroll
     if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)
@@ -1858,7 +1864,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly goBack = (): void => {
     performance.mark('hypercomb:back:trigger')
-    void this.movement.back()
+    void this.movement?.back()
   }
 
   // Mobile back button fires on pointerdown to save the press duration (~50–150ms)
@@ -2743,8 +2749,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── push-to-talk (mobile mic button) ─────────────────────
 
-  private get voiceService(): VoiceInputService | undefined {
-    return get('@hypercomb.social/VoiceInputService') as VoiceInputService | undefined
+  private get voiceService(): VoiceInputProvider | undefined {
+    return get('@hypercomb.social/VoiceInputService') as VoiceInputProvider | undefined
   }
 
   /** Pointerdown on mic: start recording. */

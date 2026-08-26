@@ -1,5 +1,7 @@
 // diamondcoreprocessor.com/input/pan/panning.drone.ts
 import { Drone, EffectBus } from '@hypercomb/core'
+// The movement counter rides the navigation bundle — ONE importer only.
+import '../movement.service.js'
 import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../zoom/zoom.drone.js'
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'

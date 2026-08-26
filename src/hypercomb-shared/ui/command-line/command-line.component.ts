@@ -5,10 +5,8 @@ import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
 import type { Lineage } from '../../core/lineage'
-import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '../../core/script-preloader'
-import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 // Folder-based tag persistence retired. TagOp type is local-only now.
@@ -18,9 +16,11 @@ import {
   commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
   parseBehaviourCall, behaviourCallCursor, BehaviourCallError,
   type BehaviourCall, type CallValue,
+  CELL_SUGGESTION_KEY, CELL_SUGGESTIONS_CHANGED, MOVEMENT_SERVICE_KEY,
+  voiceInputSupported,
+  type CellSuggestionSource, type MovementProvider, type VoiceInputProvider,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BracketBehavior } from './bracket.behavior'
@@ -279,10 +279,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // registered at module load time, available globally via get()
   private get completions(): CompletionUtility { return get('@hypercomb.social/CompletionUtility') as CompletionUtility }
   private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
-  private get movement(): MovementService { return get('@hypercomb.social/MovementService') as MovementService }
+  private get movement(): MovementProvider | undefined { return get(MOVEMENT_SERVICE_KEY) as MovementProvider | undefined }
   private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
   private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
-  private get cellProvider(): CellSuggestionProvider { return get('@hypercomb.social/CellSuggestionProvider') as CellSuggestionProvider }
+  private get cellProvider(): CellSuggestionSource | undefined { return get(CELL_SUGGESTION_KEY) as CellSuggestionSource | undefined }
 
   private readonly value = signal('')
 
@@ -696,10 +696,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/ScriptPreloader') as EventTarget,
     () => this.preloader.actionNames
   )
-  private readonly cellNames$ = fromRuntime(
-    get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
-    () => this.cellProvider.suggestions()
-  )
+  // Instance-free: the cell provider (essentials, commands bundle) announces
+  // after every refresh; replay fills this even when the line mounts first.
+  private readonly cellNames$ = signal<readonly string[]>([])
+  #cellNamesUnsub: (() => void) | null = null
   /** Reactive master tag-name list. Instance-free: the registry (essentials,
    *  commands bundle) warms itself on load and announces 'tags:registry' at
    *  load + every save — last-value replay fills this even when the line
@@ -1911,6 +1911,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#tagNamesUnsub = EffectBus.on<{ tags?: Record<string, unknown> }>('tags:registry', (p) => {
       this.tagNames$.set(Object.keys(p?.tags ?? {}))
     })
+    this.#cellNamesUnsub = EffectBus.on(CELL_SUGGESTIONS_CHANGED, () => {
+      this.cellNames$.set(this.cellProvider?.suggestions() ?? [])
+    })
 
     window.ioc.register('@hypercomb.social/CommandLineBehaviors', this.behaviorReference)
 
@@ -2320,7 +2323,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #askAnsweredUnsub?: () => void
   /** Asks currently in flight — the pending pill shows while > 0. */
   #pendingAsks = 0
-  readonly voiceSupported = VoiceInputService.supported()
+  readonly voiceSupported = voiceInputSupported()
   readonly pushToTalkEnabled = signal(localStorage.getItem('hc:push-to-talk') === 'true')
 
   /** Phone-shaped viewport (narrow OR short — a phone on its side is wide and
@@ -2373,8 +2376,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // ── voice input (push-to-hold mic button) ────────────
 
-  private get voiceService(): VoiceInputService | undefined {
-    return get('@hypercomb.social/VoiceInputService') as VoiceInputService | undefined
+  private get voiceService(): VoiceInputProvider | undefined {
+    return get('@hypercomb.social/VoiceInputService') as VoiceInputProvider | undefined
   }
 
   /** Mobile "GO" button: submit the text. Portrait pins the command line
@@ -2453,6 +2456,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   public ngOnDestroy(): void {
     this.#tagNamesUnsub?.()
+    this.#cellNamesUnsub?.()
     this.#prefillUnsub?.()
     this.#commandFocusUnsub?.()
     this.#enterModeUnsub?.()
@@ -5173,7 +5177,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
             const target = [...this.#selectOriginalSegments, ...segments]
             this.navigation.replaceRaw(target)
             // Update cell suggestion provider for autocomplete at target
-            this.cellProvider.query(segments)
+            this.cellProvider?.query(segments)
           }
         }
       }
@@ -5247,7 +5251,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    */
   readonly #pathSideEffects = effect(() => {
     const ctx = this.#pathContext()
-    this.cellProvider.query(ctx.subPath)
+    this.cellProvider?.query(ctx.subPath)
     if (ctx.tagLabel) {
       if (ctx.tagLabel !== this.#bracketCellLabel) {
         this.#bracketCellLabel = ctx.tagLabel

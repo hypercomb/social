@@ -56,6 +56,11 @@ const MOVED_KEYS = [
   '@hypercomb.social/Theme',
   '@hypercomb.social/TrustService',
   '@hypercomb.social/ResourceCompletionService',
+  '@hypercomb.social/MovementService',
+  '@hypercomb.social/VoiceInputService',
+  '@hypercomb.social/CellSuggestionProvider',
+  '@hypercomb.social/IconEditMode',       // now a CORE mode
+  '@hypercomb.social/UsageTracker',
 ]
 
 /** Value-announce effects that must sit in last-value replay after boot. */
@@ -67,6 +72,7 @@ const ANNOUNCED = [
   'tags:registry',        // the self-warm's announce
   'notes:marks-changed',  // lands after the Store pool read settles
   'groups:changed',       // the built-in groups registering
+  'movement:changed',     // the navigation-commit counter
 ]
 
 async function main() {

@@ -1,17 +1,21 @@
-// hypercomb-shared/core/movement.service.ts
+// movement.service.ts (moved down from hypercomb-shared in the
+// everything-is-a-beehavior Phase 1 — contract in core movement.types.ts;
+// rides the navigation bundle via panning.drone). Announces every committed
+// navigation on EffectBus so chrome re-renders instance-free.
 
-import type { Navigation } from './navigation'
+import { EffectBus, MOVEMENT_SERVICE_KEY, MOVEMENT_CHANGED, type MovementProvider } from '@hypercomb/core'
 
-// global get/register/list available via ioc.web.ts
+/** The slice of Navigation this needs — reached through IoC, never an import. */
+type NavigationLike = { segmentsRaw(): string[]; goRaw(segments: string[]): void }
 
-export class MovementService extends EventTarget {
+export class MovementService extends EventTarget implements MovementProvider {
 
   // increments after navigation intent is committed
   #moved = 0
 
   public get moved(): number { return this.#moved }
 
-  private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
+  private get navigation(): NavigationLike { return window.ioc?.get?.('@hypercomb.social/Navigation') as NavigationLike }
 
   // prevents overlapping commits
   private committing: Promise<void> | null = null
@@ -84,6 +88,7 @@ export class MovementService extends EventTarget {
     // stale breadcrumb labels between URL update and next microtask
     this.#moved = this.#moved + 1
     this.dispatchEvent(new CustomEvent('change'))
+    EffectBus.emit(MOVEMENT_CHANGED, { moved: this.#moved })
 
     const pending = this.waiters
     this.waiters = []
@@ -97,4 +102,13 @@ export class MovementService extends EventTarget {
   }
 }
 
-register('@hypercomb.social/MovementService', new MovementService())
+export const movementService = new MovementService()
+EffectBus.emit(MOVEMENT_CHANGED, { moved: movementService.moved })
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureMovementServiceRegistered = (): void => {
+  if (!window.ioc?.has?.(MOVEMENT_SERVICE_KEY)) {
+    window.ioc?.register?.(MOVEMENT_SERVICE_KEY, movementService)
+  }
+}
+ensureMovementServiceRegistered()

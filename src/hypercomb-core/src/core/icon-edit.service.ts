@@ -1,4 +1,7 @@
-// hypercomb-shared/core/icon-edit.service.ts
+// icon-edit.service.ts (moved to CORE in the everything-is-a-beehavior
+// Phase 1 — it completes the core icon-protocol family beside
+// icon-pick.types / icon-pick-request / icon-overrides.types, and chrome
+// value-imports its singleton, so the kernel is where it must live).
 //
 // IconEditMode — the global "reskin" mode for the universal icon protocol.
 // Long-pressing any participating icon enters it; every opted-in icon then
@@ -9,8 +12,8 @@
 // and Pixi surfaces react uniformly; `icon:pick-request { id }` asks the picker
 // to open for a specific element. Registered at `@hypercomb.social/IconEditMode`.
 
-import { EffectBus } from '@hypercomb/core'
-import { requestIconPick } from '@hypercomb/core'
+import { EffectBus } from '../effect-bus.js'
+import { requestIconPick } from './icon-pick-request.js'
 
 export const LONG_PRESS_MS = 5000
 
@@ -58,8 +61,20 @@ export class IconEditMode extends EventTarget {
   }
 }
 
+export const ICON_EDIT_MODE_KEY = '@hypercomb.social/IconEditMode'
+
 export const iconEditMode = new IconEditMode()
-register('@hypercomb.social/IconEditMode', iconEditMode)
+
+/** Register into the live IoC map when one exists (core also runs in node). */
+export const ensureIconEditModeRegistered = (): void => {
+  const ioc = (globalThis as unknown as {
+    ioc?: { has?: (k: string) => boolean; register?: (k: string, v: unknown) => void }
+  }).ioc
+  if (!ioc?.has?.(ICON_EDIT_MODE_KEY)) {
+    ioc?.register?.(ICON_EDIT_MODE_KEY, iconEditMode)
+  }
+}
+ensureIconEditModeRegistered()
 
 /**
  * Wire long-press → enter edit mode on a DOM element. Returns a disposer.

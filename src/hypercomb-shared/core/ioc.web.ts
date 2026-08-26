@@ -1,6 +1,6 @@
 // hypercomb-shared/core/ioc.web.ts
 
-import { ensureIconProviderRegistryRegistered, ensureCompletionUtilityRegistered } from '@hypercomb/core'
+import { ensureIconProviderRegistryRegistered, ensureCompletionUtilityRegistered, ensureIconEditModeRegistered } from '@hypercomb/core'
 
 const instances = new Map<string, unknown>()
 const listeners: Array<(key: string, value: unknown) => void> = []
@@ -125,4 +125,5 @@ if (!window.ioc) {
   // that every bee will actually see.
   ensureIconProviderRegistryRegistered()
   ensureCompletionUtilityRegistered()
+  ensureIconEditModeRegistered()
 }
