@@ -859,6 +859,110 @@ export const saveTileDraft = async (path: string, text: string): Promise<boolean
   return !!ok
 }
 
+// ── in-flight answers ────────────────────────────────────
+//
+// AN ANSWER MID-ARRIVAL IS NOT NOTHING. The shallow tier streams over HTTP:
+// the words arrive a chunk at a time and only become a turn when the last one
+// lands. Anything that ends the page before that — a reload, a crash, closing
+// the tab — used to take the whole answer with it, including the half the
+// participant had already read.
+//
+// So the accumulating text is CHECKPOINTED here while it streams, and the
+// checkpoint is cleared the moment the real turn is stored. On the next boot
+// a checkpoint that outlived its stream is exactly one thing: an answer that
+// was interrupted. It is appended as the turn it was becoming, so the words
+// the host really did say survive the interruption.
+//
+// Same shape as the drafts doc above (one pool doc, small transient text) and
+// for the same reason: both readers want the whole set, and neither is truth
+// anybody composes against — the TURN is the truth, this is the thing that
+// makes sure the turn gets written.
+
+/** Pool holding partial answers still arriving. Colon-scoped: a bare `chat`
+ *  would collide with any tile slugged "chat". */
+export const STREAMS_POOL = 'chat:streams'
+
+export interface ChatStream {
+  readonly kind: 'chat-stream'
+  readonly convoId: string
+  readonly text: string
+  readonly at: number
+}
+
+const streamsDoc = async (): Promise<Record<string, ChatStream>> => {
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(STREAMS_POOL)
+  if (!pool || !store?.getPoolDoc) return {}
+  try {
+    const bytes = await store.getPoolDoc(pool)
+    if (!bytes) return {}
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: Record<string, ChatStream> = {}
+    for (const [convoId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const rec = value as Partial<ChatStream>
+      if (typeof rec?.text !== 'string' || !rec.text) continue
+      out[convoId] = { kind: 'chat-stream', convoId, text: rec.text, at: Number(rec.at) || 0 }
+    }
+    return out
+  } catch { return {} }
+}
+
+const writeStreams = async (map: Record<string, ChatStream>): Promise<boolean> => {
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(STREAMS_POOL)
+  if (!pool || !store?.putPoolDoc) return false
+  const bytes = new TextEncoder().encode(JSON.stringify(map)).buffer as ArrayBuffer
+  return !!(await store.putPoolDoc(pool, bytes))
+}
+
+/** Checkpoint the text one answer has produced so far. Empty text forgets the
+ *  checkpoint — which is what completion does, once the turn is stored. */
+export const saveStreamCheckpoint = async (convoId: string, text: string): Promise<boolean> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return false
+  const body = String(text ?? '')
+  const map = await streamsDoc()
+  if (body) map[id] = { kind: 'chat-stream', convoId: id, text: body, at: Date.now() }
+  else if (id in map) delete map[id]
+  else return true
+  return writeStreams(map)
+}
+
+/** Every checkpoint left behind, newest first. At boot this is the list of
+ *  answers that were still arriving when the page went away. */
+export const listStreamCheckpoints = async (): Promise<ChatStream[]> =>
+  Object.values(await streamsDoc()).sort((a, b) => b.at - a.at)
+
+/**
+ * Turn every abandoned checkpoint into the turn it was becoming.
+ *
+ * Called on boot. Each partial is appended to its own thread and only then
+ * forgotten — a checkpoint whose turn could not be stored is KEPT, so the
+ * next boot tries again rather than dropping the words for good.
+ *
+ * `live` names conversations whose answer is still streaming in THIS page, so
+ * a recovery pass running beside an active stream cannot file it early.
+ */
+export const recoverStreamCheckpoints = async (
+  live: ReadonlySet<string> = new Set(),
+): Promise<number> => {
+  const map = await streamsDoc()
+  const entries = Object.values(map).filter(record => !live.has(record.convoId))
+  if (!entries.length) return 0
+
+  let recovered = 0
+  for (const record of entries) {
+    const stored = await appendTurn(record.convoId, 'assistant', record.text)
+    if (!stored) continue
+    delete map[record.convoId]
+    recovered++
+    EffectBus.emit('chat:threads-changed', { convoId: record.convoId })
+  }
+  if (recovered) await writeStreams(map)
+  return recovered
+}
+
 // ── IoC surface ─────────────────────────────────────────
 //
 // The chat window is shell UI (hypercomb-shared), which may never import a
@@ -878,6 +982,9 @@ export class ChatThreads {
   readonly listTileDrafts = listTileDrafts
   readonly readTileDraft = readTileDraft
   readonly saveTileDraft = saveTileDraft
+  readonly saveStreamCheckpoint = saveStreamCheckpoint
+  readonly listStreamCheckpoints = listStreamCheckpoints
+  readonly recoverStreamCheckpoints = recoverStreamCheckpoints
   readonly readTurns = readTurns
   readonly deliverTurn = deliverTurn
   readonly listConversations = listConversations
