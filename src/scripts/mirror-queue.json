@@ -1747,7 +1747,15 @@
       "id": "el-bar-shop-room",
       "title": "EL BAR — the shop room behind the lounge's bar picture (mirror pass, manual: note-add is additive)",
       "run": null,
-      "note": "The bar beehavior: /revolucion/bar carries visual:lounge:room {room:'bar'} — same bundle, second world (atomic-target doctrine). The lounge's gallery wall hangs a clickable EL BAR print (pick 'bar') that walks you into the shop; the bar hangs a lounge print back. Displays derive from SHOP_ITEMS (store-items.ts: SALE + UPGRADE_ITEMS with 'of' targets + BAR_ITEMS); the buy plate spends the embers ledger; a lit upgrade stands where its base prop stood. Mirror owed: part tiles for scripts/lounge3d/lounge-3d.ts (buildBar), scripts/lounge3d/store-items.ts, hypercomb-essentials/src/revolucionstyle.com/lounge/lounge-room.ts (room passthrough), scripts/drive-el-bar.cjs (harness); a collection under behaviors; pheromone marks + notes. ALSO OWED: rerun 'npx tsx scripts/intel-build-revolucion-site.ts' (bridge write timed out — renderer down — so the new pages + /revolucion/bar records are NOT on the hive yet).",
+      "note": "The bar beehavior: /revolucion/bar carries visual:lounge:room {room:'bar'} — same bundle, second world (atomic-target doctrine). The lounge's gallery wall hangs a clickable EL BAR print (pick 'bar') that walks you into the shop; the bar hangs a lounge print back. Displays derive from SHOP_ITEMS (store-items.ts: SALE + UPGRADE_ITEMS with 'of' targets + BAR_ITEMS); the buy plate spends the embers ledger; a lit upgrade stands where its base prop stood. Mirror owed: part tiles for scripts/lounge3d/lounge-3d.ts (buildBar), scripts/lounge3d/store-items.ts, hypercomb-essentials/src/revolucionstyle.com/lounge/lounge-room.ts (room passthrough), scripts/drive-el-bar.cjs (harness); a collection under behaviors; pheromone marks + notes. (Site build rerun 2026-08-25: pages + bar records LANDED and verified, seal f888f9e961e7 — only the mirror tiles remain owed.)",
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "rail-hive-line-details",
+      "title": "Mirror the hive line: the row above every level carries the same chat details as the tiles under it",
+      "run": null,
+      "note": "Extends the rail reversal pass (see rail-line-talks-arrow-walks). #hiveGroup in agent-tiles-rail.ts now builds .hc-rail-threads and .hc-rail-bees into the hive's row, so a question asked about the whole hive is visible on the surface after it is sent; #paintStatus already resolved its state (HIVE_KEY is the root's key, so keySegments gives [] and tilePath gives HIVE_PATH) and simply had no slots to write into. Its trailing chat icon is GONE and its line carries the second-press fold, exactly like a tile row — the hive has no INSIDE, so it is the one row that carries no arrow, which is the same grammar rather than a second one. Dead code removed with it: CHATS_GLYPH, #openChats, and the whole .hc-rail-chats-open stylesheet. Also: .hc-rail-hive .hc-rail-row.live::before takes full-strength amber, because the hive's tick is ALREADY amber at rest (it is the hive) and live has to be told apart from it by more than colour. Tiles 1:1 with source, notes carrying the above. note-add is additive — manual drain only.",
       "created": "2026-08-26",
       "status": "pending"
     }
