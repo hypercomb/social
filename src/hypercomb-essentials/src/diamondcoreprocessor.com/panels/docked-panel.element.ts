@@ -241,7 +241,26 @@ export abstract class DockedPanelElement extends HTMLElement implements PanelGro
   }
 
   // ── lifecycle ────────────────────────────────────────────────────────
+  //
+  // A registry-fed element is MOUNTED once and stays in the DOM (the
+  // shell-surfaces host never recreates survivors), while the Angular panels
+  // it replaces existed only while open (`@if`). So the base splits DOM
+  // presence from ENGAGEMENT: activate() is everything the directive did on
+  // init (render, lane, session, group), deactivate() is its destroy — and a
+  // panel that opens and closes calls them from its own open/close verbs.
+  // `autoActivate` keeps the mounted-equals-open behaviour for panels that
+  // are created on demand.
+  protected autoActivate = true
+
   connectedCallback(): void {
+    if (this.autoActivate) this.activate()
+  }
+
+  disconnectedCallback(): void {
+    this.deactivate()
+  }
+
+  protected activate(): void {
     if (this.#connected) return
     this.#connected = true
     local.add(this)
@@ -282,7 +301,7 @@ export abstract class DockedPanelElement extends HTMLElement implements PanelGro
     this.#installInset()
   }
 
-  disconnectedCallback(): void {
+  protected deactivate(): void {
     if (!this.#connected) return
     this.#connected = false
     local.delete(this)
@@ -298,6 +317,13 @@ export abstract class DockedPanelElement extends HTMLElement implements PanelGro
     this.#grip?.removeEventListener('pointerdown', this.#onDown)
     this.#gearBtn?.removeEventListener('click', this.#onGearClick)
     this.#teardownInset()
+    // Rebuild-on-open: clearing here is what lets activate() call
+    // renderPanel() again without duplicating chrome — the same lifecycle the
+    // Angular `@if` gave the panels this class replaces.
+    this.replaceChildren()
+    this.#grip = null
+    this.#line = null
+    this.#gearBtn = null
   }
 
   // ── pairing ──────────────────────────────────────────────────────────

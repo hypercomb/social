@@ -2270,13 +2270,6 @@
   "tags.list.namespaces.title": "タイルの種類",
   "tags.list.namespaces.hint": "ビヘイビアがタイルに付ける「これは何か」の印。名前ごとに自動でまとまります — 自分で集めるものではありません。",
   "tags.namespace.toggle": "{name} の印を表示",
-  "sequences.title": "タイルの配置",
-  "sequences.close": "閉じる",
-  "sequences.intro": "既存のタイルの並び順と、新しいタイルや貼り付けたタイルが次に配置される場所を選びます。",
-  "sequences.selected": "選択中",
-  "sequences.use": "使う",
-  "sequences.new": "新しい名前付き配置",
-  "sequences.aria": "タイルの配置",
   "mesh-modal.needs-location": "参加するには場所が必要です",
   "mesh-modal.needs-secret": "参加するには秘密鍵が必要です",
   "command-line.placeholder.find": "ここを検索 · [ブランチ] · @ハイブ"

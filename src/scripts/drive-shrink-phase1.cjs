@@ -158,7 +158,34 @@ async function main() {
     window.ioc?.get?.('@hypercomb.social/SecretStrengthProvider')?.evaluate?.('correct-horse-battery') ?? -1)
   check('secret-strength: default provider evaluates', strength > 0 && strength <= 1, String(strength))
 
-  // 7. No non-environmental console errors.
+  // 7. THE FIRST CONVERTED PANEL: the Sequences surface is a custom element
+  //    from the sequence module now — registered in the shell-surface
+  //    registry, opened by its effect, docking with a width and a scale.
+  const panel = await page.evaluate(async () => {
+    const el = document.querySelector('hc-sequence-viewer')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    window.__hypercombEffectBus?.emit?.('sequence:view-open', {})
+    await new Promise(r => setTimeout(r, 300))
+    const open = el.classList.contains('open')
+    const width = el.offsetWidth
+    const scale = el.style.getPropertyValue('--hc-panel-scale')
+    window.__hypercombEffectBus?.emit?.('sequence:view-close', {})
+    await new Promise(r => setTimeout(r, 100))
+    const closed = !el.classList.contains('open')
+    return { ok: open && width >= 280 && !!scale && closed, open, width, scale, closed }
+  })
+  check('converted panel: sequence-viewer opens, docks, scales, closes', panel.ok,
+    panel.reason ?? `open=${panel.open} width=${panel.width} scale=${panel.scale} closed=${panel.closed}`)
+
+  // 8. Its strings ride the module — a key the shell catalogs no longer
+  //    carry must still resolve through registerTranslations.
+  const i18n = await page.evaluate(() => {
+    const svc = window.ioc?.get?.('@hypercomb.social/I18n')
+    return svc?.t?.('sequences.title') ?? ''
+  })
+  check('converted panel: module-carried i18n resolves', !!i18n && i18n !== 'sequences.title', i18n)
+
+  // 9. No non-environmental console errors.
   check('console: no errors', errors.length === 0, errors.slice(0, 3).join(' | '))
 
   await browser.close()

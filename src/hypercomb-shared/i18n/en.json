@@ -2291,13 +2291,6 @@
   "swarm.sample.hint": "Tap the tiles you want",
   "swarm.sample.keep": "Keep {count}",
   "swarm.sample.done": "Done",
-  "sequences.title": "Tile arrangements",
-  "sequences.close": "Close",
-  "sequences.intro": "Choose where existing tiles are arranged and where new or pasted tiles land next.",
-  "sequences.selected": "Selected",
-  "sequences.use": "Use",
-  "sequences.new": "New named arrangement",
-  "sequences.aria": "Tile arrangements",
   "mesh-modal.needs-location": "a location is needed to join",
   "mesh-modal.needs-secret": "a secret is needed to join",
   "command-line.placeholder.find": "search here · [branch] · @hive"

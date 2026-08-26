@@ -316,8 +316,13 @@ already build imperative DOM — the muscle exists.
   invariant (live panels never recreated) is unique — special case, never
   generalized. A panel that "needs" more than this is rendering too much
   in DOM and should draw from state like the hive does.
-- [ ] Prove the pattern on the small ones: `website-nav` (67),
-  `sequence-viewer` (120), `sensitivity-bar` (136), `landing-badge` (186),
+- [ ] Prove the pattern on the small ones: ~~`sequence-viewer`~~ ✓ — THE
+  FIRST PANEL OUT (`sequence/sequence-viewer.view.ts` on
+  DockedPanelElement; same surface name/order/effects/width key; its 7
+  i18n keys extracted from ALL 14 shell catalogs into
+  `sequence-viewer.i18n.ts`, registered under 'app', with the drift-check
+  spec beside it — the catalog split's first slice and its template),
+  `website-nav` (67), `sensitivity-bar` (136), `landing-badge` (186),
   `preview-banner` (191)
 - [ ] Utility band: `toast`, `confirm-dialog`, `trust-prompt`, `action-card`,
   `camera-capture`, `format-painter`, `icon-picker`, `shortcut-sheet`,

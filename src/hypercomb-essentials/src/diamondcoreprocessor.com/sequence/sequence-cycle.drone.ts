@@ -35,6 +35,9 @@
 // stale pre-arrange rectangle (mirrors AutoFitFirstAddDrone's deferred fit).
 
 import { Drone, hypercomb } from '@hypercomb/core'
+// The Sequences panel rides this bundle — the first Angular panel converted
+// to a custom element (ONE importer; dup-inlining rule).
+import './sequence-viewer.view.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import { writeTilePropertiesAt } from '../editor/tile-properties.js'
 import {

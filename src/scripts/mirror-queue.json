@@ -1935,6 +1935,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase2-first-panel-sequence-viewer",
+      "title": "Mirror Phase 2 step C: sequence-viewer is THE FIRST ANGULAR PANEL OUT — custom element on DockedPanelElement in the sequence module, strings carried with it (14 locales + drift spec) — tiles on the shrink-campaign collection",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 2. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
