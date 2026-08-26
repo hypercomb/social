@@ -1,0 +1,213 @@
+name: Build Client (Linux)
+
+# There is no Linux box in the development loop, so this workflow IS the
+# Linux port — the only place the client gets compiled against WebKitGTK,
+# conformance-tested, and bundled. Treat a red run here exactly as you would
+# a local build failure.
+#
+# It does not deploy anything. The .deb, .rpm and .AppImage land as run
+# artifacts, to be downloaded and installed on a real Linux machine.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [development, main]
+    paths:
+      - 'src/hypercomb-client/**'
+      - '.github/workflows/build-client-linux.yml'
+
+concurrency:
+  group: client-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build and test the Linux client
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Use Node 24.14.1
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+          cache: 'npm'
+          cache-dependency-path: src/package-lock.json
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Tauri v2 on Linux builds against the system WebKitGTK — these are the
+      # documented build dependencies, plus xvfb for the headless smoke test.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            xvfb
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/hypercomb-client/target
+          key: hc-client-linux-${{ hashFiles('src/hypercomb-client/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            hc-client-linux-${{ hashFiles('src/hypercomb-client/Cargo.lock') }}-
+            hc-client-linux-
+
+      # ── The native side, first ────────────────────────────────────────────
+      #
+      # Library crates only — `tauri::generate_context!()` reads frontendDist
+      # at compile time, so the app crate cannot build before the bake. The
+      # conformance vectors are the contract with the web shell; agreement
+      # here is the finding worth having before ten minutes of Angular.
+      - name: Conformance and unit tests
+        working-directory: src/hypercomb-client
+        run: cargo test --release -p hypercomb-protocol -p hypercomb-store -p hypercomb-host
+
+      - name: Lint the library crates
+        working-directory: src/hypercomb-client
+        run: |
+          cargo clippy --release --all-targets \
+            -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -- -D warnings
+
+      # ── The frontend the window actually shows ────────────────────────────
+
+      - name: Install workspace dependencies
+        working-directory: src
+        run: npm install
+
+      - name: Build hypercomb-core
+        working-directory: src
+        run: npm run build:core
+
+      - name: Build essentials modules
+        working-directory: src
+        run: npm run build:essentials
+
+      - name: Build the vendored runtimes
+        working-directory: src/hypercomb-web
+        run: npm run runtime
+
+      - name: Build hypercomb-web
+        working-directory: src
+        run: npm run build:web
+
+      - name: Bake the client frontend
+        working-directory: src
+        run: node hypercomb-client/scripts/bake-frontend.mjs
+
+      - name: Verify the baked frontend
+        working-directory: src/hypercomb-client/app/frontend
+        run: |
+          set -euo pipefail
+          test -f index.html || { echo "MISSING index.html"; exit 1; }
+          grep -q '"importmap"' index.html || { echo "import map was not baked in"; exit 1; }
+          test -f content/manifest.json || { echo "MISSING content/manifest.json"; exit 1; }
+          SIGS=$(find content -maxdepth 1 -type f -name '????????????????????????????????????????????????????????????????' | wc -l)
+          echo "OK: import map baked; $SIGS flat content files."
+          test "$SIGS" -gt 0 || { echo "no content shipped"; exit 1; }
+
+      - name: Lint the app crate
+        working-directory: src/hypercomb-client
+        run: cargo clippy --release --all-targets -p hypercomb-client -- -D warnings
+
+      # ── Bundle ────────────────────────────────────────────────────────────
+      #
+      # Run from `app/`, the directory holding BOTH tauri.conf.json and the
+      # crate's Cargo.toml — that is also where the CLI finds the platform
+      # overlay (tauri.linux.conf.json: deb + rpm + appimage) to merge.
+      - name: Build the app bundle
+        id: bundle
+        working-directory: src/hypercomb-client/app
+        run: npx --yes @tauri-apps/cli@^2 build
+
+      - name: Report what was produced
+        if: always()
+        working-directory: src/hypercomb-client
+        run: |
+          find target -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) | sed 's/^/  /' || true
+
+      # ── Does it actually BOOT? ────────────────────────────────────────────
+      #
+      # Same bar as macOS: reach Angular first paint, read the milestone
+      # trace (RENDERER_DIAGNOSTICS). WebKitGTK is a third engine — the baked
+      # import map was motivated by WebView2 and confirmed on WKWebView; this
+      # is where GTK gets its say. xvfb provides the display a runner lacks.
+      # Non-blocking until a green run proves the step itself is sound.
+      - name: Smoke test — launch and confirm first paint
+        id: smoke
+        continue-on-error: true
+        working-directory: src/hypercomb-client
+        run: |
+          set -uo pipefail
+          BIN=$(find target/release -maxdepth 1 -type f -executable -name 'hypercomb-client' | head -1)
+          test -n "$BIN" || { echo "no binary was built"; exit 1; }
+          echo "launching $BIN under xvfb"
+
+          LOG="$HOME/.local/share/io.hypercomb.client/hive/renderer.log"
+          rm -f "$LOG"
+
+          xvfb-run --auto-servernum "$BIN" > launch-stdout.txt 2>&1 &
+          PID=$!
+
+          PAINTED=""
+          for i in $(seq 1 60); do
+            if [ -f "$LOG" ] && grep -q "Angular first paint" "$LOG"; then PAINTED=yes; break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "process exited early"; break; fi
+            sleep 5
+          done
+
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+
+          echo "───────── renderer.log ─────────"
+          cat "$LOG" 2>/dev/null || echo "(no renderer log was written)"
+          echo "───────── stdout ─────────"
+          cat launch-stdout.txt || true
+          echo "──────────────────────────"
+
+          if [ -z "$PAINTED" ]; then
+            echo "DID NOT REACH FIRST PAINT — the milestone trace above shows how far it got."
+            exit 1
+          fi
+          echo "PASS: the Linux client booted to Angular first paint."
+
+      - name: Upload the client
+        if: always() && steps.bundle.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypercomb-client-linux-x64
+          path: |
+            src/hypercomb-client/target/**/release/bundle/deb/*.deb
+            src/hypercomb-client/target/**/release/bundle/rpm/*.rpm
+            src/hypercomb-client/target/**/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+      - name: Upload renderer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderer-log-linux
+          path: /home/runner/.local/share/io.hypercomb.client/**/renderer.log
+          if-no-files-found: ignore
+
+      - name: Summarise
+        if: always()
+        run: |
+          if [ "${{ steps.smoke.outcome }}" = "success" ]; then
+            echo "### Linux client: booted to first paint" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Linux client: BUILT, but did not confirm first paint" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The bundle is attached as an artifact. Check the smoke-test step's" >> $GITHUB_STEP_SUMMARY
+            echo "milestone trace to see how far boot got before it stalled." >> $GITHUB_STEP_SUMMARY
+          fi
