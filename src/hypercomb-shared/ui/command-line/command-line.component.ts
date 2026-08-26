@@ -1,7 +1,8 @@
 // hypercomb-shared/ui/command-line/command-line.component.ts
 
-import { AfterViewInit, Component, computed, CUSTOM_ELEMENTS_SCHEMA, effect, signal, ViewChild, type OnDestroy } from '@angular/core'
-import { CommandShellComponent } from '../command-shell/command-shell.component'
+import { AfterViewInit, Component, computed, CUSTOM_ELEMENTS_SCHEMA, effect, ElementRef, signal, ViewChild, type OnDestroy } from '@angular/core'
+import '../command-shell/command-shell.element'
+import type { CommandShellElement } from '../command-shell/command-shell.element'
 import '../hint-bar/hint-bar.element'
 import type { Lineage } from '@hypercomb/core'
 import type { Navigation } from '@hypercomb/core'
@@ -261,7 +262,7 @@ function loadCommandHistory(): string[] {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent, TranslatePipe],
+  imports: [TranslatePipe],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss'],
@@ -272,8 +273,16 @@ function loadCommandHistory(): string[] {
 })
 export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
-  @ViewChild('shell')
-  private shell!: CommandShellComponent
+  @ViewChild('shell', { read: ElementRef })
+  private shellRef?: ElementRef<CommandShellElement>
+
+  private get shell(): CommandShellElement | undefined { return this.shellRef?.nativeElement }
+
+  private readonly shellState = signal({ activeIndex: 0, suppressed: false })
+
+  public onShellStateChange(state: { activeIndex: number; suppressed: boolean }): void {
+    this.shellState.set(state)
+  }
 
   // Resolve via IoC container (not Angular DI) — these are shared services
   // registered at module load time, available globally via get()
@@ -530,7 +539,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly activeDetail = computed<{
     name: string; kind?: string; description?: string; icon?: string; count?: number; options?: readonly string[]
   } | null>(() => {
-    if (this.shell?.suppressed()) return null
+    if (this.shellState().suppressed) return null
     // An utterance choice carries its whole story in the rows — a detail pane
     // computed from the ORDINARY registers would describe the wrong thing.
     if (this.#pendingChoice()) return null
@@ -538,7 +547,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active) return null
     const list = this.suggestions()
     if (!list.length) return null
-    const idx = this.shell?.activeIndex() ?? 0
+    const idx = this.shellState().activeIndex
     const name = list[Math.max(0, Math.min(idx, list.length - 1))]
     if (!name) return null
 
@@ -1453,7 +1462,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public readonly suggestions = computed<readonly string[]>(() => {
-    if (this.shell?.suppressed()) return []
+    if (this.shellState().suppressed) return []
 
     // A pending utterance choice OWNS the dropdown: the claimants of an
     // ambiguous word, or the three pathways for a sentence nothing matched.
@@ -1831,7 +1840,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active) return ''
 
     const list = this.suggestions()
-    const best = list[this.shell?.activeIndex() ?? 0] ?? list[0]
+    const best = list[this.shellState().activeIndex] ?? list[0]
     if (!best) return ''
 
     const subPath = this.cellSubPath()
@@ -2513,7 +2522,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#mobileQuery?.removeEventListener('change', this.#mobileQueryHandler)
   }
 
-  // template helpers removed — now owned by CommandShellComponent
+  // template helpers removed — now owned by CommandShellElement
 
   // -------------------------------------------------
   // input handling
@@ -3336,7 +3345,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active) return raw
 
-    const index = this.shell?.activeIndex() ?? 0
+    const index = this.shellState().activeIndex
     const best = list[index] ?? list[0]
     if (!best) return raw
 
@@ -3361,7 +3370,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // here" — never run a parameterised command with the argument missing.
     if (/[\s,]$/.test(completed)) return null
 
-    if (this.shell?.suppressed()) return completed
+    if (this.shellState().suppressed) return completed
 
     if (ctx.mode === 'slash' && ctx.head !== '/' && !DESTRUCTIVE_SLASH_RE.test(ctx.head)) {
       return completed

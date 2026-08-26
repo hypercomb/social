@@ -8,6 +8,7 @@
 @use '../../hypercomb-shared/styles/canvas-suppress' as *;
 @use '../../hypercomb-shared/styles/header-size';
 @use '../../hypercomb-shared/ui/controls-bar/controls-bar.element';
+@use '../../hypercomb-shared/ui/command-shell/command-shell.element';
 
 // The shape ladder's :root block, emitted ONCE per shell. It is a mixin so it
 // never lands inside the 22 component sheets that reach the same file for its

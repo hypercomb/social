@@ -33,7 +33,7 @@
   // ── the icon rail's metrics ────────────────────────────
   // One box, one glyph size, one gap for EVERY icon on the right of the
   // header — the command-shell's behaviour toggles and standing tools
-  // (command-shell.component.scss `.rail-btn`) and the pinned-entrance
+  // (command-shell.element.scss `.rail-btn`) and the pinned-entrance
   // quick links that follow them, which live in a separate component and
   // would otherwise drift. Anything new that lands on this rail reads
   // these; it never picks its own numbers.

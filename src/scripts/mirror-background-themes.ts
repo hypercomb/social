@@ -135,7 +135,7 @@ const PARTS: { key: string; note: string }[] = [
     note: [
       'The chip. The same element that draws a tag\'s colour dot draws the theme swatch — it is given a CSS background, so a gradient stack or an image works exactly where a single colour did. Only the shape changes with the flag: a picture needs to be landscape and framed with a hairline, or a dark theme has no edge against a dark dropdown. A suggestion with no swatch (off) renders no chip at all rather than an empty box.',
       '',
-      `source: ${S}/command-shell/command-shell.component.scss`,
+      `source: ${S}/command-shell/command-shell.element.scss`,
     ].join('\n'),
   },
 ]

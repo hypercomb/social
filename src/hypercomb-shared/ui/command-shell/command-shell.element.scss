@@ -1,11 +1,14 @@
-// hypercomb-shared/ui/command-shell/command-shell.component.scss
+// hypercomb-shared/ui/command-shell/command-shell.element.scss
 //
 // Shared dark command shell — fixed height, same on all screen sizes.
 // Mobile styling is the source of truth.
 
 $bp-phone-max: 599px;
 
-:host {
+// The element renders in light DOM so Angular and framework-free parents share
+// one styling boundary. Keep every former component rule scoped to the tag.
+hc-command-shell {
+& {
   display: flex;
   align-items: stretch;
   flex: 1;
@@ -978,7 +981,7 @@ $default-face: #c8b8ff;
 // Orientation is intentional: the soft keyboard can make a portrait viewport
 // shorter than 450px, but the icon rail must remain below the text.
 @media (max-width: $bp-phone-max) and (orientation: portrait) {
-  :host {
+  & {
     flex: 0 0 100%;
     width: 100%;
     min-width: 100%;
@@ -1050,4 +1053,5 @@ $default-face: #c8b8ff;
   // The whole strip claims the horizontal drag so scrolling the icons never
   // pans the hive underneath it.
   .shell-actions { touch-action: pan-x; }
+}
 }

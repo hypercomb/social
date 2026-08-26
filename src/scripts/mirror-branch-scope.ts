@@ -117,7 +117,7 @@ const PARTS: Part[] = [
    'the tree declaring itself a view — icon, label, and `scope: \'branch\'`, so a marked branch gets an entrance instead of the slash command being the only way in'],
   ['hypercomb-essentials/src/diamondcoreprocessor.com/commands/website.queen.ts',
    'the site declaring the scope it always had — the reach that used to be hardcoded to the website view is now the site asking for it, on the same footing as everything else'],
-  ['hypercomb-shared/ui/command-shell/command-shell.component.html',
+  ['hypercomb-shared/ui/command-shell/command-shell.element.ts',
    'the rail — draws whatever the walk offers, one button per available view; it has never known what any of them are'],
 ]
 

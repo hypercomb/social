@@ -112,7 +112,7 @@ const BEHAVIOURS: Behaviour[] = [
       ['command-shell', [
         'The prompt, and the rail beside it. The microphone joined the rail as one more standing tool — same box, same gap, same baseline as notes and pheromones, red only while it is listening, because "is this thing recording me" must never be a guess. In portrait the whole rail breaks onto a line of its own beneath the text box and scrolls sideways rather than wrapping; the shell reports the press and the command line owns what dictation does with it.',
         '',
-        `source: ${S}/ui/command-shell/command-shell.component.html, .ts, .scss`,
+        `source: ${S}/ui/command-shell/command-shell.element.ts, .scss`,
       ].join('\n')],
       ['command-line', [
         'What the rail is wired to. Passes the microphone down to the shell only on a phone, and stands the older flush-right one down there so there are never two. The dictation machine underneath is untouched — the button moved, the behaviour did not.',

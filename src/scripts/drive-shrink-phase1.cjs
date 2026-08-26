@@ -368,6 +368,45 @@ async function main() {
     controlsBar.defined && controlsBar.mounted && controlsBar.mesh && controlsBar.view && controlsBar.tags,
     JSON.stringify(controlsBar))
 
+  const commandShell = await page.evaluate(async () => {
+    const mounted = document.querySelector('hc-command-line hc-command-shell')
+    const previousFocus = document.activeElement
+    const fixture = document.createElement('div')
+    fixture.style.cssText = 'position:fixed;left:-10000px;top:0'
+    const shell = document.createElement('hc-command-shell')
+    fixture.appendChild(shell)
+    document.body.appendChild(fixture)
+    shell.suggestions = ['amber', 'apiary']
+    shell.typedPrefix = 'a'
+    shell.showSuggestions = true
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const values = []
+    const requested = []
+    shell.addEventListener('valueChange', event => values.push(event.detail))
+    shell.addEventListener('completionAcceptRequested', event => requested.push(event.detail))
+    const input = shell.querySelector('.command-input')
+    if (input) {
+      input.value = '  a'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    }
+    const rendered = shell.querySelectorAll('.command-results li').length === 2
+      && shell.querySelector('.command-results li.active')?.textContent?.includes('apiary')
+    const api = typeof shell.setValue === 'function' && typeof shell.selectRange === 'function'
+      && typeof shell.suppress === 'function'
+    fixture.remove()
+    previousFocus?.focus?.()
+    return {
+      defined: !!customElements.get('hc-command-shell'), mounted: !!mounted,
+      rendered: !!rendered, api, value: values[0], requested: requested[0],
+    }
+  })
+  check('converted chrome: command-shell owns DOM input, completion and CustomEvent contracts',
+    commandShell.defined && commandShell.mounted && commandShell.rendered && commandShell.api
+      && commandShell.value === 'a' && commandShell.requested === 1,
+    JSON.stringify(commandShell))
+
   // host-panel is deliberately native-only. Its module must still define the
   // custom element in the web build, but the registry gate must keep it out of
   // the DOM when Tauri is absent.
