@@ -33,6 +33,10 @@
 // back as intents (publish:run, publish:unpublish, publish:expand, …).
 
 import { Drone, EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+// The publish panel rides the drone that owns 'publish:render' — the
+// progress it draws is that drone's to report. ONE importer:
+// dup-inlining rule.
+import './publish-panel.view.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { publishVerdict, type PublishIndexState, type PublishRowState } from './publish-verdict.js'

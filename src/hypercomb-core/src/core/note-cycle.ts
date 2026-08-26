@@ -1,14 +1,29 @@
-// hypercomb-shared/ui/notes-viewer/note-cycle.ts
+// hypercomb-core/src/core/note-cycle.ts
 //
-// The two pure decisions behind the notes reader, kept out of the component
-// so they can be tested without an Angular harness (repo idiom — see
-// presentation/tiles/wave-layout.ts).
+// The two pure decisions behind the notes reader, kept out of the view so
+// they can be tested without a DOM (repo idiom — see note-tree.ts beside it).
 //
 //   flattenHierarchy — a root note plus its descendants, depth-first. This
 //                      IS the reading order, and the order prev/next walks.
 //   stepIndex        — where prev/next lands. It WRAPS at both ends: the
 //                      cycle has no first and no last, so running off one
 //                      end is how you arrive at the other.
+//
+// IT LANDED IN CORE, not beside the notes viewer, because TWO surfaces
+// read it and they sit on opposite sides of the dependency rule: the
+// converted notes-viewer element in essentials, and notes-strip, which is
+// still an Angular component in shared — and shared may never import
+// essentials. A primitive both kits need is what core is for. No imports
+// at all, so it costs either bundle nothing but its bytes.
+//
+// Second instance of this shape: file-icons.ts moved down for exactly the
+// same reason one batch earlier. The tell is that the build breaks on the
+// STAYING component's import, never on the port.
+
+// everything-is-a-beehavior Phase 2 pass that turned the notes reader into a
+// framework-free custom element. Byte-identical logic; only the header
+// comment names the new home. The shared copy stays until notes-strip (which
+// imports `stepIndex` for its own reading pane) converts too.
 
 /** The shape flattening needs. Deliberately structural — the reader's Note
  *  and the service's Note both satisfy it, and neither has to be imported. */

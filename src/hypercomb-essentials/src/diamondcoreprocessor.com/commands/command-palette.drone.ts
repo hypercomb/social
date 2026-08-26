@@ -1,5 +1,8 @@
 // diamondcoreprocessor.com/ui/command-palette.drone.ts
 import { EffectBus, type KeyBinding } from '@hypercomb/core'
+// The palette rides its own drone — the two halves of one surface.
+// ONE importer: dup-inlining rule.
+import './command-palette.view.js'
 
 export interface PaletteItem {
   id: string

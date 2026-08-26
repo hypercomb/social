@@ -1,5 +1,9 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
+// The editor surface rides its own drone — and, unusually, is driven by
+// that drone's SERVICES rather than by effects, so the two are already
+// one thing. ONE importer: dup-inlining rule.
+import './tile-editor.view.js'
 // The format painter rides the editor bundle — it copies and applies the
 // visual properties this drone edits. ONE importer: dup-inlining rule.
 import './format-painter.view.js'

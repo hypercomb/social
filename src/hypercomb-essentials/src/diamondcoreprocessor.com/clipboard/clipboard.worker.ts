@@ -1,5 +1,8 @@
 // diamondcoreprocessor.com/core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
+// The clipboard panel rides the worker that owns 'clipboard:panel' and
+// holds what it shows. ONE importer: dup-inlining rule.
+import './clipboard-panel.view.js'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
 import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
 import { seedLayerKeyedEntries } from '../editor/tile-properties.js'

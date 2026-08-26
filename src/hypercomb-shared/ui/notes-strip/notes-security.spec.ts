@@ -109,9 +109,26 @@ const FORBIDDEN_PATTERNS: readonly { name: string; re: RegExp; why: string }[] =
 /** File extensions we scan. */
 const SCANNABLE_EXTS: readonly string[] = ['.ts', '.html', '.scss']
 
-/** Files that the material-symbols check should skip — only .ts files
- *  must avoid the string; .scss may legitimately reference it. */
-const MATERIAL_SYMBOLS_TS_ONLY = (file: string): boolean => file.endsWith('.ts')
+/** Files the material-symbols check applies to.
+ *
+ *  ONLY .ts — .scss may legitimately reference the font.
+ *
+ *  …AND NOT A CONVERTED `.view.ts`. This rule is about ICON ARCHITECTURE, not
+ *  security: it exists so a notes component does not hand-assemble icon markup
+ *  in TypeScript when its Angular TEMPLATE could name the ligature declaratively.
+ *  A framework-free custom element has no template — the original notes-viewer
+ *  named seven ligatures in its .html and none in its .ts, and the conversion
+ *  necessarily moves them into code. Keeping the rule there would forbid the
+ *  only spelling available.
+ *
+ *  The SECURITY rules above are deliberately NOT narrowed: innerHTML,
+ *  outerHTML, insertAdjacentHTML, bypassSecurityTrust, execCommand and
+ *  contenteditable all still apply to every scanned file, converted views
+ *  included. That is the property that matters — a ligature reaches the DOM
+ *  through `textContent`, which cannot parse markup, and the guards that would
+ *  catch it arriving any other way are untouched. */
+const MATERIAL_SYMBOLS_TS_ONLY = (file: string): boolean =>
+  file.endsWith('.ts') && !file.endsWith('.view.ts')
 
 function listFiles(dir: string): string[] {
   if (!existsSync(dir)) return []
@@ -188,5 +205,26 @@ describe('notes feature — HTML escape safety', () => {
       expect.fail(message)
     }
     expect(violations).toEqual([])
+  })
+
+  // THE PRICE OF THE .view.ts EXEMPTION, PAID EXPLICITLY.
+  //
+  // The material-symbols rule skips converted views because they have no
+  // template to name a ligature in. That exemption is only defensible while
+  // the ligature reaches the DOM through textContent — which cannot parse
+  // markup — so this pins exactly that, rather than trusting it. Any converted
+  // notes view that starts assembling icon markup as a string fails here even
+  // though the architecture rule no longer looks at it.
+  it('converted notes views set icon text, never markup', () => {
+    const views = scanRoots.flatMap(listFiles).filter(f => f.endsWith('.view.ts'))
+    expect(views.length, 'no converted notes view found — has the path moved?')
+      .toBeGreaterThan(0)
+    for (const file of views) {
+      const text = readFileSync(file, 'utf8')
+      expect(/\binnerHTML\s*=/.test(text), `${file} assigns innerHTML`).toBe(false)
+      expect(/\bouterHTML\s*=/.test(text), `${file} assigns outerHTML`).toBe(false)
+      expect(/\binsertAdjacentHTML\b/.test(text), `${file} uses insertAdjacentHTML`).toBe(false)
+      expect(text.includes('textContent'), `${file} never sets textContent`).toBe(true)
+    }
   })
 })

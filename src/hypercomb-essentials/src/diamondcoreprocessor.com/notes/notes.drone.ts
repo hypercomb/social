@@ -30,6 +30,9 @@
 // propagates to root via the standard merkle cascade.
 
 import { EffectBus } from '@hypercomb/core'
+// The notes viewer rides the drone that owns 'notes:open' and the notes
+// themselves. ONE importer: dup-inlining rule.
+import './notes-viewer.view.js'
 // The mark palette rides the notes bundle — exactly ONE entry imports it
 // (two importers would inline two instances; ioc is first-wins).
 import './note-marks.store.js'

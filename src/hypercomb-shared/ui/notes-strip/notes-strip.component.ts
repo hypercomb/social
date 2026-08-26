@@ -32,7 +32,7 @@ import {
 import { ensureViewportInsetVars } from '@hypercomb/core'
 // The reading cycle's wrap arithmetic — shared with the standalone reader so
 // prev/next behave identically wherever notes are read.
-import { stepIndex } from '../notes-viewer/note-cycle'
+import { stepIndex } from '@hypercomb/core'
 
 // Correlation token for this window's requests to the shared icon chooser
 // (see core/icon-pick.ts). The chooser also serves the tile-icon override

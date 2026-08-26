@@ -149,6 +149,9 @@ async function main() {
     // The cold band.
     'hc-observe-viewer', 'hc-files-viewer', 'hc-example-hives-offer', 'hc-mesh-modal',
     'hc-rewind-window', 'hc-docs-overlay', 'hc-feedback-viewer',
+    // The mid band.
+    'hc-command-palette', 'hc-publish-panel', 'hc-notes-viewer', 'hc-clipboard-panel',
+    'hc-workflow-designer', 'hc-tile-editor',
   ]
   let mounted = []
   for (let i = 0; i < 60; i++) {

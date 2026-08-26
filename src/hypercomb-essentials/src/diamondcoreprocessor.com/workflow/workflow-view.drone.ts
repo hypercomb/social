@@ -37,6 +37,9 @@
 // hexagon: the panel reads the element under the release point.
 
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+// The designer rides the drone that owns 'workflow:view-open' and the run
+// state it draws. ONE importer: dup-inlining rule.
+import './workflow-designer.view.js'
 import type { WorkflowState, WorkflowStateStep } from './workflow-author.drone.js'
 import type { WorkflowRunState } from './workflow-runner.drone.js'
 
