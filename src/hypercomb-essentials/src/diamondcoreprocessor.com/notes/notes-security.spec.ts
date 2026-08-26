@@ -29,14 +29,12 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// Resolve repo-relative paths from this spec's location. We climb out
-// of `hypercomb-shared/ui/notes-strip/` to `src/`, then walk into each
-// notes-* dir under hypercomb-shared/ui/ and the notes module under
-// hypercomb-essentials/src/diamondcoreprocessor.com/.
-const SRC = resolve(__dirname, '..', '..', '..')
+// Resolve repo-relative paths from this spec's location. We climb out of
+// `hypercomb-essentials/src/diamondcoreprocessor.com/notes/` to `src/`, then
+// scan the remaining shell notes viewer and this module.
+const SRC = resolve(__dirname, '..', '..', '..', '..')
 
 const SCAN_ROOTS: readonly string[] = [
-  join(SRC, 'hypercomb-shared', 'ui', 'notes-strip'),
   join(SRC, 'hypercomb-shared', 'ui', 'notes-viewer'),
   join(SRC, 'hypercomb-essentials', 'src', 'diamondcoreprocessor.com', 'notes'),
 ]

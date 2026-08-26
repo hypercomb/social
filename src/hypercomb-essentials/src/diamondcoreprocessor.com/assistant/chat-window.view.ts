@@ -2576,7 +2576,7 @@ export class ChatWindowElement extends DockedPanelElement {
     del.title = delLabel
     del.setAttribute('aria-label', delLabel)
     del.append(sym(armed ? 'delete_forever' : 'close'))
-    del.addEventListener('click', event => { void this.remove(row.convoId, event) })
+    del.addEventListener('click', event => { void this.removeConversation(row.convoId, event) })
     item.append(del)
     return item
   }
@@ -3674,7 +3674,7 @@ export class ChatWindowElement extends DockedPanelElement {
   }
 
   /** First press arms, second deletes. */
-  async remove(convoId: string, event: MouseEvent): Promise<void> {
+  async removeConversation(convoId: string, event: MouseEvent): Promise<void> {
     event.stopPropagation()
     if (this.#armed !== convoId) { this.#armed = convoId; this.#render(); return }
     this.#armed = ''

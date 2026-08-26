@@ -486,9 +486,10 @@ is a DOM contract the feature's own acceptance driver may assert on.
   surfaces), `workflow-designer`
 - [ ] Heavy band — one campaign each: `clipboard-panel` (1,103), `portal`
   (1,047), `publish-panel` (1,033), `tile-editor` (1,719), `feedback-viewer`
-  (1,920), `history-viewer` (2,274), `tags-viewer` (2,569), `features-viewer`
-  (3,860), `aggregate-index` (3,942), `chat-window` (5,245), `notes-strip`
-  (7,672)
+  (1,920), `history-viewer` (2,274), `tags-viewer` (2,569), ~~`features-viewer`~~
+  (3,860), `aggregate-index` (3,942), ~~`chat-window`~~ (5,245), ~~`notes-strip`~~
+  (7,672). The formerly omitted ~~`host-panel`~~ moved in the same final
+  registry-fed batch. The shell-surfaces barrel is now empty: 42 → 0.
 - [ ] Non-barrel stragglers: `file-explorer` (1,137), `pinned-entrances`
   (513), `file-teaser` (223), `history-component` (54)
 

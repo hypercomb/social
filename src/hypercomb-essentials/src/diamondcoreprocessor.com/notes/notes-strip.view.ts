@@ -77,8 +77,8 @@
 // this panel owns, never a class, because two buttons in one strip share one.
 //
 // NO HTML EVER REACHES THE DOM. notes-security.spec.ts is a ratchet over this
-// folder: no innerHTML / outerHTML / insertAdjacentHTML / execCommand /
-// contenteditable, and a note's text arrives through `textContent` — which
+// folder: no HTML-parsing or legacy rich-text DOM APIs, and a note's text
+// arrives through `textContent` — which
 // cannot parse markup — exactly as Angular's `{{ }}` did.
 //
 // Its strings ship WITH it (notes-strip.i18n.ts, extracted from all 14 shell
@@ -2595,7 +2595,7 @@ export class NotesStripElement extends DockedPanelElement {
     }
     menu.appendChild(item(`kebab-delete:${note.id}`, 'delete',
       t('notes.delete', 'delete note'),
-      (e) => { this.remove(note.id, e); this.closeKebab() }, true))
+      (e) => { this.removeNote(note.id, e); this.closeKebab() }, true))
     return menu
   }
 
@@ -2906,7 +2906,7 @@ export class NotesStripElement extends DockedPanelElement {
       const glyph = sym('close')
       glyph.style.fontSize = '14px'
       del.appendChild(glyph)
-      del.addEventListener('click', (e) => this.remove(note.id, e))
+      del.addEventListener('click', (e) => this.removeNote(note.id, e))
       row.appendChild(del)
     }
     return row
@@ -3627,7 +3627,7 @@ export class NotesStripElement extends DockedPanelElement {
       return
     }
     this.disarmListDelete()
-    this.remove(root.id, event ?? new Event('click'))
+    this.removeNote(root.id, event ?? new Event('click'))
     // The list under this one takes its place — the pane is never left pointing
     // at something that isn't there.
     this.#listPathIdx = []
@@ -4644,7 +4644,7 @@ export class NotesStripElement extends DockedPanelElement {
   /** Delete a single note. Optimistic like `commitForm`: the row vanishes on
    *  click; the drone's tree rewrite + cascade + `notes:changed` re-read is the
    *  authoritative reconcile. */
-  remove(noteId: string, event: Event): void {
+  removeNote(noteId: string, event: Event): void {
     event.stopPropagation()
     const cell = this.cell()
     if (!cell || !noteId) return

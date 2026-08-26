@@ -10,7 +10,7 @@
 
 import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
-import { seedDarkOnFreshInstall } from '@hypercomb/shared/ui/features-viewer/behavior-enablement'
+import { seedDarkOnFreshInstall } from '@hypercomb/shared/core/behavior-fresh-install'
 import type { SentinelBridge } from './sentinel-bridge'
 
 export type BootStatus =

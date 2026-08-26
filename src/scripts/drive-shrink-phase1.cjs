@@ -159,6 +159,8 @@ async function main() {
     'hc-aggregate-index', 'hc-tags-viewer', 'hc-history-viewer',
     'hc-contact-form', 'hc-contact-hover',
     'hc-atomizer-bar', 'hc-atomizer-sidebar', 'hc-portal-overlay',
+    // The final four registry-fed panels.
+    'hc-chat-window', 'hc-notes-strip', 'hc-features-viewer',
   ]
   let mounted = []
   for (let i = 0; i < 60; i++) {
@@ -170,6 +172,18 @@ async function main() {
   check('boot: every converted surface mounted', mounted.length === SURFACES.length,
     `${mounted.length}/${SURFACES.length}` +
     (mounted.length === SURFACES.length ? '' : ` — missing ${SURFACES.filter(s => !mounted.includes(s)).join(', ')}`))
+
+  // host-panel is deliberately native-only. Its module must still define the
+  // custom element in the web build, but the registry gate must keep it out of
+  // the DOM when Tauri is absent.
+  const hostGate = await page.evaluate(() => ({
+    defined: !!customElements.get('host-panel'),
+    mounted: !!document.querySelector('host-panel'),
+    native: '__TAURI__' in window,
+  }))
+  check('converted panel: host-panel is defined but native-gated on web',
+    hostGate.defined && !hostGate.native && !hostGate.mounted,
+    `defined=${hostGate.defined} native=${hostGate.native} mounted=${hostGate.mounted}`)
 
   // 1. Every moved key answers.
   for (const key of MOVED_KEYS) {

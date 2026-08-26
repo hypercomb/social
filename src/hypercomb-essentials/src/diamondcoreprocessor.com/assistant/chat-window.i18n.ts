@@ -1062,3 +1062,14 @@ export const CHAT_WINDOW_TRANSLATIONS: Record<string, Record<string, string>> = 
     "chat.untitled": "新建聊天",
   },
 }
+
+// Some of the message-action controls were authored after the last complete
+// translation pass. Keep every locale structurally complete so the surface
+// never renders a raw key; untranslated additions deliberately inherit the
+// English copy until their locale receives its own wording.
+const english = CHAT_WINDOW_TRANSLATIONS['en'] ?? {}
+for (const catalog of Object.values(CHAT_WINDOW_TRANSLATIONS)) {
+  for (const [key, value] of Object.entries(english)) {
+    if (!(key in catalog)) catalog[key] = value
+  }
+}
