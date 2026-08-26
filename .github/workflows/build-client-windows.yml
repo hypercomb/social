@@ -382,13 +382,15 @@ jobs:
       # ── Ship it ───────────────────────────────────────────────────────────
       #
       # jwize.com/installer 302s (via the content worker's zone route) to the
-      # LATEST installer blob — so overwriting that blob here on every green
-      # push IS the release. A sha-named copy lands beside it for rollback.
+      # LATEST installer blob — overwriting that blob IS the release. Gated to
+      # main so it moves with the deploy (the LIVE workflow also fires on main
+      # push): development builds test and attach artifacts but never touch
+      # the public link. A sha-named copy lands beside it for rollback.
       # Absent credentials skip shipping, never fail the build (same posture
       # as the LIVE workflow's essentials publish).
       - name: Login to Azure for installer publish
         id: az_login
-        if: steps.bundle.outcome == 'success' && github.event_name == 'push'
+        if: steps.bundle.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         uses: azure/login@v2
         with:
