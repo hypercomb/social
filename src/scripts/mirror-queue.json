@@ -1972,6 +1972,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-p2-utility-batch",
+      "title": "shrink Phase 2 utility batch — camera-capture, activity-log, pheromone-tiles, action-card, shortcut-sheet, context-window",
+      "run": null,
+      "note": "Six Angular panels converted to framework-free custom elements and moved into essentials beside their owning bees (editor, history, pheromones, commands x3). Mirror: one tile per view + its sibling i18n catalog + drift spec, gathered into the everything-is-a-beehavior collection; mark each 'part'. context-window is the first DOCKED conversion (DockedPanelElement) — worth its own note. Manual: note-add is additive and would double-land.",
+      "commit": "95ba1ff7e",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
