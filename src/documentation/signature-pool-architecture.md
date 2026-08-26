@@ -99,6 +99,27 @@ The active set is ordinary layer truth. It is not a parallel database or a
 second pool format: a name is active in a lineage exactly when that lineage's
 children contain its reference leaf.
 
+## A Portal edit chooses the participant's root default
+
+A Portal is deliberately more than a read-only reference browser. Opening edit
+mode on a Portal item resolves its canonical target **before** any details are
+read. The editor therefore starts with the selected root candidate's original
+properties and localized title, not with an empty reference leaf. Saving an
+override writes one new, undoable revision at `/<fixed-name>` and makes that
+revision the participant's default for future uses.
+
+The original candidate is not mutated or discarded: its immutable `layerSig`
+remains in the name pool and history. Unoverridden references—existing or
+future—read the new root default dynamically. Portal placement details remain
+appearance-scoped: slot index, hide state, gate/filter requirements, and the
+fact that the reference is active in that lineage never leak into the root.
+
+This routing applies to the complete content edit surface: image, transforms,
+background, border, link, hide-text state, resource attachment, format paint,
+and localized display title. An appearance-only override must be an explicit
+reference decoration; ordinary Portal edit mode always means “use this as my
+default next time.”
+
 ## Images and other shared resources
 
 Images are ordinary immutable resource signatures, so the byte pool remains
@@ -133,8 +154,9 @@ or other properties. The current-lineage peer projection is also unioned into
 the Image Hive as a
 compatibility witness while older participants migrate to canonical roots.
 Nothing on paste writes another participant's head, and nothing automatically
-changes an existing local root default. Only the explicit image-choice gesture
-does.
+changes an existing local root default. Only an explicit root-default gesture
+does: choosing an Image Hive candidate or saving overrides from Portal edit
+mode.
 
 A lineage may need a special face because its contextual meaning differs. The
 standard reserves that as an **appearance-local visual decoration/override**,

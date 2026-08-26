@@ -256,6 +256,11 @@ per-lineage copies of anything.
   one coherent participant projection, so a pasted local twin cannot repaint a
   peer variant or leak its border, tags, link, hide-text state, or display label
   into that peer's version.
+  Portal edit mode is the deliberate default-selection seam: it reads the
+  original details from the canonical target, then writes the participant's
+  complete override back to that root for future unoverridden uses. The Portal
+  row's index, visibility and gate/filter decorations remain local to the
+  appearance.
   A materialized `imagePool` array remains optional; it is not the source of
   truth.
 

@@ -599,6 +599,8 @@ export class TileEditorElement extends HTMLElement {
 
   /** Segments of the cell being edited: where we are, plus its name. */
   #cellSegments(): string[] {
+    const target = this.#editor()?.targetSegments ?? []
+    if (target.length > 0) return [...target]
     const lineage = window.ioc?.get?.(LINEAGE) as LineageLike | undefined
     const cell = this.#cell()
     if (!cell) return []
