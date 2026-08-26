@@ -17,7 +17,7 @@ import {
 } from '@angular/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import type { Navigation } from '../../core/navigation'
+import type { Navigation } from '@hypercomb/core'
 import {
   EffectBus,
   consumePointerGesture,

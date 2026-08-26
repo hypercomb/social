@@ -61,6 +61,7 @@ const MOVED_KEYS = [
   '@hypercomb.social/CellSuggestionProvider',
   '@hypercomb.social/IconEditMode',       // now a CORE mode
   '@hypercomb.social/UsageTracker',
+  '@hypercomb.social/Navigation',   // now a CORE primitive
 ]
 
 /** Value-announce effects that must sit in last-value replay after boot. */
@@ -84,6 +85,9 @@ async function main() {
     const text = msg.text()
     // Headless has no GPU: the Pixi shader/context throws are environmental.
     if (/WebGL|shader|pixi|GPU|framebuffer/i.test(text)) return
+    // Pixi's shader-error logger (logProgramError) console.errors an EMPTY
+    // string headless — un-filterable by text, same environmental class.
+    if (!text.trim()) return
     // hypercomb-dev's index.html loads an OPTIONAL local env.js; a checkout
     // without one 404s (and Chrome adds a MIME refusal) — pre-existing noise.
     if (/env\.js|404 \(Not Found\)/i.test(text)) return

@@ -3,7 +3,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { homeSubstituted } from './home-root'
-import type { Navigation } from './navigation'
+import type { Navigation } from '@hypercomb/core'
 import type { Store } from './store'
 
 // global get/register/list available via ioc.web.ts

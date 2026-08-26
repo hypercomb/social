@@ -1,6 +1,6 @@
 // hypercomb-shared/core/ioc.web.ts
 
-import { ensureIconProviderRegistryRegistered, ensureCompletionUtilityRegistered, ensureIconEditModeRegistered } from '@hypercomb/core'
+import { ensureIconProviderRegistryRegistered, ensureCompletionUtilityRegistered, ensureIconEditModeRegistered, ensureNavigationRegistered } from '@hypercomb/core'
 
 const instances = new Map<string, unknown>()
 const listeners: Array<(key: string, value: unknown) => void> = []
@@ -126,4 +126,5 @@ if (!window.ioc) {
   ensureIconProviderRegistryRegistered()
   ensureCompletionUtilityRegistered()
   ensureIconEditModeRegistered()
+  ensureNavigationRegistered()
 }

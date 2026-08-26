@@ -1,9 +1,12 @@
-// hypercomb-shared/core/navigation.ts
+// navigation.ts — URL address handling: segments, selections, history.
+//
+// Moved to CORE in the everything-is-a-beehavior Phase 1: it imports only
+// core (it even extends the processor class), and boot-side consumers
+// (lineage, runtime-initializer) read it lazily during first paint — so it
+// must exist before everything, which is the kernel's definition.
 
-import { hypercomb } from '@hypercomb/core'
-import { CompletionUtility } from '@hypercomb/core'
-
-// global get/register/list available via ioc.web.ts
+import { hypercomb } from './hypercomb.js'
+import { completionUtility } from './completion-utility.js'
 
 type SelectionDetail = {
   selected: string[]
@@ -11,7 +14,6 @@ type SelectionDetail = {
 
 export class Navigation extends hypercomb {
 
-  private get completions(): CompletionUtility { return get('@hypercomb.social/CompletionUtility') as CompletionUtility }
   private listening = false
 
   // ----------------------------------
@@ -269,8 +271,21 @@ export class Navigation extends hypercomb {
   private readonly cleanSegment = (s: string): string => {
     const decoded = this.safeDecode((s ?? '').trim())
     const noSlashes = decoded.replace(/[\/\\]+/g, ' ')
-    return this.completions.normalize(noSlashes)
+    return completionUtility.normalize(noSlashes)
   }
 }
 
-register('@hypercomb.social/Navigation', new Navigation())
+export const NAVIGATION_KEY = '@hypercomb.social/Navigation'
+
+export const navigation = new Navigation()
+
+/** Register into the live IoC map when one exists (core also runs in node). */
+export const ensureNavigationRegistered = (): void => {
+  const ioc = (globalThis as unknown as {
+    ioc?: { has?: (k: string) => boolean; register?: (k: string, v: unknown) => void }
+  }).ioc
+  if (!ioc?.has?.(NAVIGATION_KEY)) {
+    ioc?.register?.(NAVIGATION_KEY, navigation)
+  }
+}
+ensureNavigationRegistered()

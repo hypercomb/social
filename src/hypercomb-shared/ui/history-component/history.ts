@@ -2,7 +2,7 @@
 
 import { Component } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { Navigation } from '../../core/navigation'
+import { Navigation } from '@hypercomb/core'
 
 @Component({
   selector: 'hc-history',

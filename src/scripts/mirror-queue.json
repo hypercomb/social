@@ -1755,6 +1755,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-navigation-to-core",
+      "title": "Mirror Phase 1: navigation promoted to CORE (URL address primitive; fourth kernel-seam re-assert; NAVIGATION DI token retired) — tile on the shrink-campaign collection",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

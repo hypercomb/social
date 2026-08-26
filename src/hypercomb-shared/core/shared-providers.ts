@@ -11,7 +11,6 @@ import {
   bridgeProviders,
   I18N,
   LINEAGE,
-  NAVIGATION,
   RESOURCE_MSG_HANDLER,
   SCRIPT_PRELOADER,
 } from './tokens'
@@ -19,7 +18,6 @@ import {
 export const sharedProviders = bridgeProviders([
   I18N,
   LINEAGE,
-  NAVIGATION,
   RESOURCE_MSG_HANDLER,
   SCRIPT_PRELOADER,
 ])

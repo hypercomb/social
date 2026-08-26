@@ -230,7 +230,6 @@ describe('doctrine ratchets', () => {
       '@hypercomb.social/LayerInstaller (hypercomb-shared/core/layer-installer.ts)',
       '@hypercomb.social/LayerService (hypercomb-web/src/app/layer-service.ts)',
       '@hypercomb.social/Lineage (hypercomb-shared/core/lineage.ts)',
-      '@hypercomb.social/Navigation (hypercomb-shared/core/navigation.ts)',
       '@hypercomb.social/OpfsInstallFileSource (hypercomb-shared/core/layer-install-sources/opfs-install-file.source.ts)',
       '@hypercomb.social/OpfsTreeLogger (hypercomb-shared/core/tree-logger.ts)',
       '@hypercomb.social/RegistrySnapshot (hypercomb-shared/core/registry-snapshot.ts)',

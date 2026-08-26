@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/command-line/go-parent.behavior.ts
 
 import type { CommandLineBehavior } from './command-line-behavior'
-import type { Navigation } from '../../core/navigation'
+import type { Navigation } from '@hypercomb/core'
 
 /**
  * Enter with `..` prefix → navigate up N levels, optionally forward.

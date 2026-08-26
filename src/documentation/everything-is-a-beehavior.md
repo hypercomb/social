@@ -258,7 +258,10 @@ events; the census ratchet line is deleted in the same commit.
   `cells:suggestions-changed`), ~~`icon-edit.service`~~ ✓ (→ CORE —
   completes the icon-protocol family), ~~`usage-tracker`~~ ✓ (→
   `presentation/tiles/` beside its ranker consumer).
-- [ ] `navigation.ts` (275)
+- [x] `navigation.ts` — went to CORE (imports only core, extends the
+  processor class, and boot-side lineage reads it lazily during first paint:
+  it must precede everything, which is the kernel's definition). Fourth
+  kernel-seam re-assert; the NAVIGATION DI token retired uninjected.
 - [ ] Heavyweights: `lineage.ts` (485 — 184 call sites but key-addressed, so
   it is a move, not a refactor; its `synchronize` listener moves with it).
   ~~`aggregation-layer`~~ ✓ and ~~`mixed-group-bag`~~ ✓ went with the group
