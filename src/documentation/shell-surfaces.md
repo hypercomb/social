@@ -9,7 +9,7 @@ contributes itself through the `ShellSurfaceRegistry`.
 ```
 hypercomb-shared/core/shell-surface-registry.ts    ← registry + registerShellSurface()
 hypercomb-shared/ui/shell-surfaces/
-  shell-surfaces.component.ts                      ← the ONE host (keyed reconciler)
+  shell-surfaces.element.ts                        ← the ONE host (keyed reconciler)
   shell-surfaces.barrel.ts                         ← the ONE list (side-effect imports)
 ```
 
@@ -23,42 +23,37 @@ drift is structurally impossible, and the doctrine ratchet
 (`doctrine.spec.ts`, "shell templates mount only structural chrome") fails the
 suite if anyone reintroduces a template tag.
 
-## The two surface shapes
+## The surface shape
 
 ```typescript
 export type ShellSurface = {
-  name: string             // unique key — by convention the tag/selector
-  owner?: string           // IoC key of the contributor, introspection only
-  component?: Type<unknown> // SHELL shape: standalone Angular component class
-  element?: string          // MODULE shape: custom-element tag name
-  order?: number            // mount order (ascending) — the only DOM/stacking lever
+  name: string        // unique key — by convention the tag/selector
+  owner?: string      // IoC key of the contributor, introspection only
+  element: string     // custom-element tag name
+  order?: number      // mount order (ascending) — the only DOM/stacking lever
 }
 ```
 
-Exactly one of `component | element` per surface (`add()` warns and ignores
-otherwise; duplicate names are ignored the same way).
-
-**`component`** is for code that already lives in shared/web/dev — Angular
-chrome. **`element`** is the module-side shape and the externalization path:
-a drone defines a framework-free custom element (`customElements.define`) in
-its own bundle and registers only the tag. No Angular import, no shared
-import — the dependency direction (modules → core only) holds.
+Every surface is a framework-free custom element. The former Angular
+`component` shape retired after the final shared panel moved; the registry and
+host no longer import Angular. A drone defines the element in its own bundle
+and registers only the tag. No Angular import or shared import is needed, so
+the dependency direction (modules → core only) holds.
 
 ## Registering
 
-**Shell-side (shared/ui component)** — module scope, directly after the
-`@Component` class, so importing the module IS the registration:
+Register at module scope directly after defining the custom element, so
+importing the module is the registration:
 
 ```typescript
 import { registerShellSurface } from '../../core/shell-surface-registry'
 
-@Component({ selector: 'hc-notes-strip', ... })
-export class NotesStripComponent { ... }
+customElements.define('hc-notes-strip', NotesStripElement)
 
 registerShellSurface({
   name: 'hc-notes-strip',
-  owner: '@hypercomb.shared/NotesStripComponent',
-  component: NotesStripComponent,
+  owner: '@example.com/NotesDrone',
+  element: 'hc-notes-strip',
   order: 10,
 })
 ```
@@ -66,7 +61,7 @@ registerShellSurface({
 Then add the side-effect import to `shell-surfaces.barrel.ts` — never a tag to
 an `app.html`.
 
-**Module-side (drone)** — resolve the registry via IoC and register a tag:
+An independently loaded module can instead resolve the registry via IoC:
 
 ```typescript
 window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry) => {
@@ -102,10 +97,9 @@ authoritative list):
   hot-installs or tears down;
 - DOM order always equals registry order — nodes are *moved*, not rebuilt,
   when position changes;
-- `component` surfaces render via `ViewContainerRef.createComponent`;
-  `element` surfaces via `document.createElement`. Both end up as ordinary
-  children of the host and position themselves (fixed/absolute) exactly as
-  when they were direct children of `app-root`.
+- surfaces mount through `document.createElement` and become ordinary children
+  of the host, positioning themselves exactly as when they were direct children
+  of `app-root`.
 
 Note: a surface may relocate itself after mount (history-viewer portals to
 `document.body`) — counting host children finds it absent by design.

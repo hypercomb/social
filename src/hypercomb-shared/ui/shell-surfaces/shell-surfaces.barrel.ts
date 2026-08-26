@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts
 //
 // The ONE list of registry-fed shell surfaces. Each side-effect import runs the
-// component's module-scope registerShellSurface(), so the surface contributes
+// element's module-scope registerShellSurface(), so the surface contributes
 // itself just by being listed here. Add a surface to this barrel — never add an
 // <hc-*> tag to a shell's app.html again.
 //

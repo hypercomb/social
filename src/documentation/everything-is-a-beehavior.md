@@ -521,6 +521,10 @@ tag becomes an ordinary element surface.
   twin moved to core in the Phase 2 gate. The remaining `RuntimeMediator` was
   retired: its sole caller was the already-retired OPFS explorer, while the
   live web boot path is `ensureInstall` + `DependencyLoader.load()`.
+- [x] ~~`shell-surfaces` host + registry component shape~~ — the keyed host is
+  now a light-DOM custom element, and the registry is element-only. The last
+  Angular `Type` / `ViewContainerRef.createComponent` seam retired because no
+  component-shaped registrations remain.
 - [x] ~~`command-line` + `command-shell`~~ (9,117 combined) — both are now
   light-DOM custom elements. The controller keeps the existing behavior engine,
   IoC seams and atomizer target, but owns its lifecycle, reactive state, DOM and

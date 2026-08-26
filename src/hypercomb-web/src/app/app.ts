@@ -7,7 +7,7 @@ import { buildRevisionName } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
-import { ShellSurfacesComponent } from "@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component"
+import '@hypercomb/shared/ui/shell-surfaces/shell-surfaces.element'
 import { TranslatePipe } from "@hypercomb/shared/core/i18n.pipe"
 import '@hypercomb/shared/ui/mesh-header/mesh-header.element'
 import '@hypercomb/shared/ui/sync-indicator/sync-indicator.element'
@@ -18,7 +18,7 @@ import '@hypercomb/shared/ui/controls-bar/controls-bar.element'
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, TranslatePipe, ShellSurfacesComponent],
+  imports: [RouterOutlet, Header, TranslatePipe],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './app.html',
   styleUrl: './app.scss'

@@ -420,7 +420,7 @@ The web shell's OPFS root holds two zones with different ownership:
 
 ## Web/Dev shell parity — registry-fed surfaces
 
-Shell-level UI is **registry-fed** (see `src/documentation/shell-surfaces.md`). Both `app.html` files mount a single `<hc-shell-surfaces>` host; every panel/strip/overlay/viewer self-registers via `registerShellSurface()` (module scope, after the `@Component` class) and is listed once in `hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts`. Drones contribute surfaces as framework-free custom elements via IoC (`@hypercomb.social/ShellSurfaceRegistry`, `element:` shape) — never an Angular import.
+Shell-level UI is **registry-fed** (see `src/documentation/shell-surfaces.md`). Both `app.html` files mount a single `<hc-shell-surfaces>` custom-element host; every panel/strip/overlay/viewer defines a custom element and self-registers via `registerShellSurface()` at module scope. Drones can also contribute through IoC (`@hypercomb.social/ShellSurfaceRegistry`, `element:` shape) — never an Angular import.
 
 **Never add an `<hc-*>` tag to either `app.html`** — a doctrine ratchet (`doctrine.spec.ts`) fails the suite if you do. Add a registration + barrel import instead. `order` on the registration is the only DOM/stacking-order lever. Only bound/structural chrome remains template-mounted (header bar, router-outlet, pixi-host, controls-bar, edit-actions, web's install prompt); THAT set must still be kept in sync manually across the two templates, and its ratchet allowlist may only shrink.
 

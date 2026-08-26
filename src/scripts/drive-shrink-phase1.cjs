@@ -173,6 +173,38 @@ async function main() {
     `${mounted.length}/${SURFACES.length}` +
     (mounted.length === SURFACES.length ? '' : ` — missing ${SURFACES.filter(s => !mounted.includes(s)).join(', ')}`))
 
+  const surfaceHost = await page.evaluate(async () => {
+    const host = document.querySelector('hc-shell-surfaces')
+    const registry = window.ioc?.get?.('@hypercomb.social/ShellSurfaceRegistry')
+    const firstName = 'hc-gate-surface-first'
+    const secondName = 'hc-gate-surface-second'
+    if (!host || !registry) return { defined: !!customElements.get('hc-shell-surfaces'), mounted: false }
+    if (!customElements.get(firstName)) customElements.define(firstName, class extends HTMLElement {})
+    if (!customElements.get(secondName)) customElements.define(secondName, class extends HTMLElement {})
+    registry.add({ name: firstName, element: firstName, order: 10001 })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const survivor = host.querySelector(firstName)
+    registry.add({ name: secondName, element: secondName, order: 10000 })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const children = [...host.children]
+    const ordered = children.indexOf(host.querySelector(secondName)) < children.indexOf(survivor)
+    const stable = host.querySelector(firstName) === survivor
+    registry.remove(firstName)
+    registry.remove(secondName)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    return {
+      defined: customElements.get('hc-shell-surfaces') === host.constructor,
+      mounted: true,
+      ordered,
+      stable,
+      removed: !host.querySelector(firstName) && !host.querySelector(secondName),
+    }
+  })
+  check('converted chrome: shell-surfaces reconciles element registrations without recreating survivors',
+    surfaceHost.defined && surfaceHost.mounted && surfaceHost.ordered
+      && surfaceHost.stable && surfaceHost.removed,
+    JSON.stringify(surfaceHost))
+
   const pinRail = await page.evaluate(() => ({
     defined: !!customElements.get('hc-pinned-entrances'),
     mounted: !!document.querySelector('hc-pinned-entrances'),
