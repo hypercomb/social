@@ -109,6 +109,7 @@ import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../clipboard-thumbs'
 import { hivePathSegments, renderChatMarkdown } from './chat-markdown'
+import { liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
 
 type TurnRole = 'user' | 'assistant'
 
@@ -157,6 +158,15 @@ type ChatThreadsLike = {
   markConversationSeen?(convoId: string, at?: number): void
   /** Every held draft, so the roster can list what has no turns yet. */
   listTileDrafts?(): Promise<ReadonlyArray<{ path: string; text: string }>>
+  /** IN-FLIGHT ANSWERS, written down while they arrive. A streamed answer is
+   *  only a turn once its last chunk lands, so the partial is checkpointed as
+   *  it accumulates and recovered on the next boot — otherwise a reload
+   *  mid-answer takes the whole thing, including the half already read.
+   *  Absent on an older essentials build: then the run is still durable
+   *  against everything except the page going away. */
+  saveStreamCheckpoint?(convoId: string, text: string): Promise<boolean>
+  listStreamCheckpoints?(): Promise<ReadonlyArray<{ convoId: string; text: string; at: number }>>
+  recoverStreamCheckpoints?(live?: ReadonlySet<string>): Promise<number>
 }
 
 type QueenLike = {
@@ -227,6 +237,11 @@ type NavigationLike = { goRaw?(segments: readonly string[]): void }
 type StoreLike = {
   removeOptimization?(signature: string): Promise<boolean>
   putOptimization?(blob: Blob): Promise<string>
+  /** THE DURABLE INBOX, read back. A queued question is a record in the
+   *  optimization pool; reading them is how a reloaded window learns which of
+   *  its conversations are still waiting on an answer. */
+  listOptimizations?(): Promise<string[]>
+  getOptimization?(signature: string): Promise<Blob | null>
   /** Content in, signature out — the same address a layer or a note gets.
    *  An image dropped into a question is content like any other. */
   putResource?(blob: Blob): Promise<string>
@@ -297,6 +312,15 @@ const TRANSCRIPT_TURNS = 12
  *  that a hand leaving the keyboard has already been saved. */
 const DRAFT_HOLD_MS = 500
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
+
+/** How far back a pending ask record may reach and still be shown as waiting.
+ *  Matches the agent registry's give-up window: past it nobody is coming, and
+ *  a clock still ticking would be a lie rather than a reassurance. */
+const RECOVER_MAX_AGE_MS = 45 * 60_000
+
+/** How much of the durable inbox a recovery pass reads. Same bound the
+ *  registry's own seed uses. */
+const RECOVER_SCAN_LIMIT = 400
 const CHAT_VISIBLE_STORAGE_KEY = 'hc:chat-visible'
 
 /** How close to the bottom still counts as reading the newest turn. Below it,
@@ -1291,9 +1315,6 @@ export class ChatWindowComponent implements OnDestroy {
   #cleanups: (() => void)[] = []
   #elapsedTimer: ReturnType<typeof setInterval> | null = null
 
-  /** The live fetch behind a host-tier answer, so Stop has something to pull. */
-  #abort: AbortController | null = null
-
   #onSync = (): void => { if (this.visible()) this.#refreshContext() }
   #onRailQuery = (event: MediaQueryListEvent): void => { this.railVisible.set(event.matches) }
   #onStorage = (event: StorageEvent): void => {
@@ -1426,6 +1447,15 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ convoId: string; text: string }>(
       'ask:chat-reply', payload => this.#onReply(payload)))
 
+    // THE SHALLOW TIER'S OWN LANE. Its run outlives this component
+    // (host-stream.ts), so the answer reaches the window the same way the
+    // bridge's does: as an announcement about a conversation, not as the
+    // return value of a call this instance happens to be awaiting.
+    this.#cleanups.push(EffectBus.on<{ convoId?: string; text?: string }>(
+      'chat:host-chunk', payload => this.#onHostChunk(payload)))
+    this.#cleanups.push(EffectBus.on<{ convoId?: string; text?: string; outcome?: string }>(
+      'chat:host-done', payload => this.#onHostDone(payload)))
+
     this.#cleanups.push(EffectBus.on<{ connected?: boolean }>(
       'bridge:status', payload => {
         this.bridgeConfigured.set(isLocalClaudeBridgeConfigured())
@@ -1482,6 +1512,12 @@ export class ChatWindowComponent implements OnDestroy {
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: () => void) => void } }).ioc
       ?.whenReady?.('@diamondcoreprocessor.com/ChatThreads', () => {
         if (this.enabled() && this.visible() && this.turns().length === 0 && !this.waiting()) void this.#resume()
+        // WHETHER OR NOT THE WINDOW IS OPEN. A question left out over a reload
+        // is marked on its TILE as much as in here, and the rail's thinking
+        // mark is the only sign of it for someone who has the panel folded
+        // away. So the pass runs on the threads module arriving, not on the
+        // window being looked at.
+        void this.#recoverWaits()
       })
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: (value: unknown) => void) => void } }).ioc
       ?.whenReady?.(HOST_AI_IOC_KEY, value => {
@@ -1500,7 +1536,11 @@ export class ChatWindowComponent implements OnDestroy {
     this.#railQuery = null
     if (this.#retryTimer) clearInterval(this.#retryTimer)
     this.#stopClock()
-    this.#abort?.abort()
+    // A DESTROY IS NOT A STOP. This used to abort the host's stream, so
+    // folding the panel away — or any surface swap that rebuilds this
+    // component — threw away an answer mid-arrival, unstored. The run lives in
+    // host-stream.ts precisely so it can carry on without a window; only the
+    // participant pressing Stop calls it back.
     this.#rail?.dispose()
     this.#rail = null
     this.#thumbToken++
@@ -1526,6 +1566,114 @@ export class ChatWindowComponent implements OnDestroy {
   // active one. It is also what lets the list mark a tile as thinking: the
   // same record is announced on the bus, keyed by the tile's path.
 
+  // ── A QUESTION SURVIVES THE PAGE ────────────────────────────────────
+  //
+  // THE ASK WAS ALWAYS DURABLE; THE WAITING WAS NOT.
+  //
+  // A bridge question is a record in the optimization pool and its answer is
+  // written to the thread by the worker, with or without a window open — that
+  // half was never in doubt. What died on every reload was everything that
+  // SAID SO: `#outstanding` is in-memory, so a refresh mid-question came back
+  // with no clock, no Stop, no Withdraw handle, and no thinking mark on
+  // the tile. The question was still out there and the hive showed nothing at
+  // all happening — which reads, to the person who asked, exactly like the
+  // question having been dropped.
+  //
+  // So the wait is REBUILT FROM THE RECORD. The pool is the truth about what is
+  // outstanding; this is the window catching up to it.
+
+  #recovered = false
+
+  /**
+   * Put back every wait the page interruption took away.
+   *
+   * Two sources, because the two tiers are interrupted differently:
+   *
+   *   the pool     a bridge ask still marked pending — the answer is coming,
+   *                so the clock and Stop come back and the tile is
+   *                marked as thinking again
+   *   checkpoints  a host answer that was mid-stream — its connection cannot
+   *                outlive the page, so what IS recoverable is the text, filed
+   *                as the turn it was becoming (chat-thread.ts)
+   *
+   * Idempotent and cheap to miss: everything it restores is a re-derivation of
+   * something already on disk.
+   */
+  async #recoverWaits(): Promise<void> {
+    if (this.#recovered) return
+    this.#recovered = true
+
+    // The interrupted host answers first: they are turns, and a turn wants to
+    // be on the thread before the list is walked for it.
+    try {
+      const recovered = await this.#threads()?.recoverStreamCheckpoints?.(liveHostConvos())
+      if (recovered) {
+        void this.#refreshList()
+        if (this.activeId()) void this.#load(this.activeId())
+      }
+    } catch { /* the checkpoint stays on disk; the next boot tries again */ }
+
+    const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
+    if (!store?.listOptimizations || !store?.getOptimization) return
+
+    let sigs: string[] = []
+    try { sigs = await store.listOptimizations() } catch { return }
+
+    // A withdrawn ask leaves a tombstone naming the record it retired. Read
+    // them in the same pass, or a question the participant already called back
+    // comes home wearing a clock.
+    const stopped = new Set<string>()
+    const pending: Array<{ sig: string; convoId: string; askedAt: number; prompt: string; model: string }> = []
+
+    for (const sig of sigs.slice(0, RECOVER_SCAN_LIMIT)) {
+      let record: {
+        kind?: string
+        payload?: {
+          mode?: string
+          askSig?: string
+          status?: string
+          convoId?: string
+          askedAt?: number
+          prompt?: string
+          model?: string
+        }
+      } | undefined
+      try {
+        const blob = await store.getOptimization(sig)
+        if (!blob) continue
+        record = JSON.parse(await blob.text())
+      } catch { continue }
+      if (record?.kind !== 'ask') continue
+      const payload = record.payload ?? {}
+      const mode = String(payload.mode ?? '')
+      if (mode === 'stop') { stopped.add(String(payload.askSig ?? '')); continue }
+      if (mode !== 'chat') continue
+      if (String(payload.status ?? 'pending') !== 'pending') continue
+      const convoId = String(payload.convoId ?? '')
+      if (!convoId) continue
+      pending.push({
+        sig,
+        convoId,
+        askedAt: Number(payload.askedAt) || 0,
+        prompt: String(payload.prompt ?? ''),
+        model: String(payload.model ?? ''),
+      })
+    }
+
+    const now = Date.now()
+    for (const ask of pending) {
+      if (stopped.has(ask.sig)) continue
+      // A wait this window already knows about outranks the record: it was
+      // started here, this session, and its sig is already on it.
+      if (this.#outstanding.has(ask.convoId)) continue
+      if (!ask.askedAt || now - ask.askedAt > RECOVER_MAX_AGE_MS) continue
+
+      this.#outstanding.set(ask.convoId, { sig: ask.sig, askedAt: ask.askedAt })
+      this.#announceBusy(ask.convoId, true)
+      if (ask.convoId === this.activeId()) this.#syncWait(ask.convoId)
+    }
+  }
+
   #startWait(convoId: string): void {
     this.#outstanding.set(convoId, { sig: '', askedAt: Date.now() })
     this.#announceBusy(convoId, true)
@@ -1548,6 +1696,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (!out) {
       this.waiting.set(false)
       this.hostStreaming.set(false)
+      this.streaming.set('')
       this.pendingSig.set('')
       this.elapsed.set(0)
       return
@@ -1555,6 +1704,9 @@ export class ChatWindowComponent implements OnDestroy {
     this.waiting.set(true)
     this.askedAt.set(out.askedAt)
     this.pendingSig.set(out.sig)
+    // A HOST ANSWER STILL ARRIVING ON THIS THREAD. The run kept the text while
+    // the window was elsewhere; arriving is where it gets picked back up.
+    this.#attachHostRun(convoId)
     this.elapsed.set(Math.max(0, Math.round((Date.now() - out.askedAt) / 1000)))
     this.#elapsedTimer = setInterval(() => {
       if (!this.waiting()) { this.#stopClock(); return }
@@ -1588,8 +1740,9 @@ export class ChatWindowComponent implements OnDestroy {
    */
   async stop(): Promise<void> {
     if (this.hostStreaming()) {
-      this.#abort?.abort()
-      // #askHost's abort branch stores the partial and ends the wait.
+      // The run keeps whatever had already arrived and stores it — stopping is
+      // not discarding. Its `chat:host-done` ends the wait.
+      stopHostRun(this.activeId())
       return
     }
     await this.withdraw()
@@ -2190,19 +2343,15 @@ export class ChatWindowComponent implements OnDestroy {
     // question is QUEUED there: its durable record can be picked up when a
     // session connects. Without that bridge, host failure is reported now.
     if (!this.bridgeUp()) {
+      // THE ENDING IS NOT THIS CALL'S RETURN VALUE. `chat:host-done` paints,
+      // stores and counts it (`#onHostDone`), because the run outlives this
+      // component and its answer must land whether or not anybody is still
+      // awaiting here. What comes back is only the ROUTING decision.
       const outcome = await this.#askHost(convoId, message)
-      if (outcome === 'answered') {
-        // TWO turns landed (the question and the streamed answer) — the count
-        // matters only if the participant switched threads mid-stream.
-        if (!this.#bumpList(convoId, 2)) void this.#refreshList()
-        return
-      }
+      if (outcome === 'answered') return
       // STOPPED BY THE PARTICIPANT. Handing a question they just called back
       // to the durable bridge queue would be the opposite of what Stop means.
-      if (outcome === 'aborted') {
-        if (!this.#bumpList(convoId, 2)) void this.#refreshList()
-        return
-      }
+      if (outcome === 'aborted') return
     }
 
     // A participant-host failure is retryable, but without a configured local
@@ -2247,10 +2396,15 @@ export class ChatWindowComponent implements OnDestroy {
    *   'declined'  the host cannot answer — fall through to the bridge queue
    *   'aborted'   the PARTICIPANT stopped it — never re-queue a recalled ask
    *
-   * `host-ai.service.ts` has always accepted an AbortSignal and nothing ever
-   * passed one; this is that wire. A partial answer is KEPT on abort: the host
-   * really did say those words, and throwing them away punishes the person for
-   * stopping a stream they had already read half of.
+   * THE RUN IS NOT THIS COMPONENT'S. It lives in `host-stream.ts`, at module
+   * scope, keyed by conversation — because a streamed answer must survive
+   * everything short of the page itself going away, and this window is one of
+   * the things that can end without the question having been answered. The
+   * loop stores the turn itself; what is left here is the painting.
+   *
+   * A partial answer is KEPT on abort: the host really did say those words,
+   * and throwing them away punishes the person for stopping a stream they had
+   * already read half of.
    *
    * The text is accumulated whatever the participant does next: they may switch
    * conversations mid-stream, and the answer still belongs to the thread that
@@ -2272,51 +2426,78 @@ export class ChatWindowComponent implements OnDestroy {
     const about = this.#chosenTargets()
     const question = about.length ? `${message}\n\n(About: ${about.join(', ')})` : message
 
-    const controller = new AbortController()
-    this.#abort = controller
-    this.hostStreaming.set(true)
+    if (convoId === this.activeId()) this.hostStreaming.set(true)
 
-    let full = ''
-    let aborted = false
-    try {
-      const options = { signal: controller.signal, ...(contextSigs.length ? { contextSigs } : {}) }
-      for await (const chunk of host.ask(question, options)) {
-        full += chunk
-        if (this.activeId() !== convoId) continue
-        this.streaming.set(full)
+    // The threads module is resolved ONCE and handed to the run, because the
+    // run may still be going when this window is not: it must not have to come
+    // back through a component to find somewhere to put the answer.
+    const threads = this.#threads()
+    return startHostRun(convoId, question, host as { ask?: HostAsk }, {
+      appendTurn: (id, role, text) => threads?.appendTurn(id, role as 'user' | 'assistant', text) ?? Promise.resolve(false),
+      saveStreamCheckpoint: (id, text) => threads?.saveStreamCheckpoint?.(id, text) ?? Promise.resolve(false),
+    }, { contextSigs })
+  }
+
+  /** A chunk landed. Only the conversation on screen is painted — the text
+   *  itself is accumulated in the run, not here, so switching away and back
+   *  finds the answer exactly as far along as it really is. */
+  #onHostChunk(payload?: { convoId?: string; text?: string }): void {
+    const convoId = String(payload?.convoId ?? '')
+    if (!convoId || convoId !== this.activeId()) return
+    this.hostStreaming.set(true)
+    this.streaming.set(String(payload?.text ?? ''))
+    this.#scrollDown()
+  }
+
+  /**
+   * A host answer finished — stored by the run before this fired.
+   *
+   * Every ending comes through here, including the ones that used to be
+   * unreachable from a destroyed component: the wait ends, the bee is retired,
+   * and the turn is painted if this window is still on that thread. A window
+   * that has since moved on paints nothing and re-reads the list instead; a
+   * window that was rebuilt mid-stream re-attached on arrival and is holding
+   * the same conversation, so it takes the same branch as the one that asked.
+   */
+  #onHostDone(payload?: { convoId?: string; text?: string; outcome?: string }): void {
+    const convoId = String(payload?.convoId ?? '')
+    if (!convoId) return
+    const text = String(payload?.text ?? '')
+    const outcome = String(payload?.outcome ?? '')
+
+    if (convoId === this.activeId()) {
+      this.streaming.set('')
+      this.hostStreaming.set(false)
+    }
+
+    // DECLINED IS NOT AN ENDING. The host could not take the question, and
+    // `send()` is still standing there deciding whether the durable bridge
+    // queue gets it — ending the wait here would blink the indicator off
+    // under a question that is about to be asked again.
+    if (outcome === 'declined' && !text.trim()) return
+
+    if (text.trim()) {
+      if (convoId === this.activeId()) {
+        this.turns.update(list => [...list, {
+          kind: 'chat-turn', convoId, role: 'assistant', text, at: Date.now(),
+        }])
+        this.#threads()?.markConversationSeen?.(convoId, Date.now())
         this.#scrollDown()
       }
-    } catch {
-      // No signer, no AI on that host, no network — or the participant pressed
-      // Stop, which arrives here as the fetch's own abort.
-      aborted = controller.signal.aborted
-      if (!aborted) {
-        this.streaming.set('')
-        this.hostStreaming.set(false)
-        this.#abort = null
-        return 'declined'
-      }
-    } finally {
-      if (this.#abort === controller) this.#abort = null
+      if (!this.#bumpList(convoId, 2)) void this.#refreshList()
+      EffectBus.emit('chat:threads-changed', { convoId })
     }
+    this.#endWait(convoId)
+  }
 
-    this.streaming.set('')
-    this.hostStreaming.set(false)
-
-    if (!full.trim()) {
-      if (aborted) this.#endWait()
-      return aborted ? 'aborted' : 'declined'
-    }
-
-    await this.#threads()?.appendTurn(convoId, 'assistant', full)
-    if (this.activeId() === convoId) {
-      this.turns.update(list => [...list, {
-        kind: 'chat-turn', convoId, role: 'assistant', text: full, at: Date.now(),
-      }])
-      this.#endWait()
-      this.#scrollDown()
-    }
-    return aborted ? 'aborted' : 'answered'
+  /** Re-attach to an answer still arriving on the conversation being shown.
+   *  A window rebuilt mid-stream (folded away and back, a surface swap, a
+   *  route change) finds the partial where the run kept it. */
+  #attachHostRun(convoId: string): void {
+    const live = liveHostRun(convoId)
+    if (!live) return
+    this.hostStreaming.set(true)
+    this.streaming.set(live.text)
   }
 
   #onReply(payload?: { convoId?: string; text?: string }): void {
