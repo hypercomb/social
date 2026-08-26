@@ -1926,6 +1926,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase2-docked-panel-element",
+      "title": "Mirror Phase 2 gate step B: DockedPanelElement — the framework-free docked panel base in essentials panels/, transplanted from the directive on the shared core model; cross-kit popover coordination via PANEL_SETTINGS_OPENED",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 2 gate. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

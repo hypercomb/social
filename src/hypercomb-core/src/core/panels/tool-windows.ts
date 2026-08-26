@@ -47,12 +47,14 @@ import { focusedWindow } from './window-session.js'
 
 // INVERSION (the move to core): the popover dismisser used to be imported
 // from the Angular docked-panel directive — a policy file reaching into
-// chrome. Now whichever docked-panel implementation is live (the Angular
-// directive today, the custom-element kit as panels convert) REGISTERS its
-// dismisser here. Both may register; the last writer wins, and both point at
-// the same "at most one popover is open" fact.
-let popoverDismisser: (() => boolean) | null = null
-export function setPopoverDismisser(fn: (() => boolean) | null): void { popoverDismisser = fn }
+// chrome. Now every live docked-panel implementation (the Angular directive
+// serving un-converted panels, the custom-element kit as panels convert)
+// REGISTERS its dismisser here; Escape's popover rung asks each in turn.
+const popoverDismissers = new Set<() => boolean>()
+export function addPopoverDismisser(fn: () => boolean): () => void {
+  popoverDismissers.add(fn)
+  return () => { popoverDismissers.delete(fn) }
+}
 
 /** The IoC contract. Kept structural so essentials can type it without
  *  importing shared. */
@@ -65,12 +67,18 @@ export interface ToolWindowsApi {
 
 export const TOOL_WINDOWS_IOC_KEY = '@hypercomb.social/ToolWindows'
 
+/** Transient EffectBus announce: a settings popover opened in SOME docked-
+ *  panel implementation ({ owner: panel id }). Every implementation closes
+ *  its own popovers on hearing another owner — one popover at a time across
+ *  the whole docked column, whichever kit drew it. */
+export const PANEL_SETTINGS_OPENED = 'panel:settings-opened'
+
 const api: ToolWindowsApi = {
   dismissFocused(): boolean {
     // Innermost first — a popover belongs to a window, so it backs out before
     // the window does. It is checked without consulting focus because it IS the
     // focused thing whenever it is open (the popover takes focus on open).
-    if (popoverDismisser?.()) return true
+    for (const dismiss of popoverDismissers) if (dismiss()) return true
     return focusedWindow()?.session.dismiss?.() === true
   },
 

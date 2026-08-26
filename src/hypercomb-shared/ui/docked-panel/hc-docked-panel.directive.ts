@@ -93,7 +93,7 @@ import { holdWindow, type WindowSession } from '@hypercomb/core'
 
 // The one-window rule — opening a tool window puts the others away, with the
 // pheromone palette the single surface allowed to stay beside one.
-import { holdToolWindow, setPopoverDismisser } from '@hypercomb/core'
+import { holdToolWindow, addPopoverDismisser, PANEL_SETTINGS_OPENED } from '@hypercomb/core'
 
 const t = (key: string, fallback: string, params?: Record<string, unknown>): string => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
@@ -832,8 +832,10 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Pan
     event.preventDefault()
     event.stopPropagation()
     if (this.#popover) { this.#closePopover(); return }
-    // One settings popover at a time across the whole docked column.
+    // One settings popover at a time across the whole docked column — and
+    // across implementations (the element kit hears this and closes its own).
     for (const panel of live) panel.#closePopover()
+    EffectBus.emitTransient(PANEL_SETTINGS_OPENED, { owner: this.id })
     this.#openPopover()
   }
 
@@ -1317,7 +1319,14 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Pan
   }
 }
 
-// The Escape cascade's popover rung (tool-windows, now in core) asks whoever
-// is the live docked-panel implementation. While the Angular directive serves
-// the un-converted panels, that is us.
-setPopoverDismisser(dismissOpenPopover)
+// The Escape cascade's popover rung (tool-windows, now in core) asks every
+// live docked-panel implementation. While the Angular directive serves the
+// un-converted panels, this is ours.
+addPopoverDismisser(dismissOpenPopover)
+
+// One settings popover at a time ACROSS IMPLEMENTATIONS: the element kit
+// announces on EffectBus when a popover opens there; close ours. (Our own
+// opens already close ours via the `live` set, and announce for the kit.)
+EffectBus.on<{ owner?: string }>(PANEL_SETTINGS_OPENED, ({ owner }) => {
+  for (const panel of live) if (panel.id !== owner) panel.dismissPopover()
+})

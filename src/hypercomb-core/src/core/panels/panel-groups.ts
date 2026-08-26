@@ -203,6 +203,11 @@ export interface PanelGroupMember {
   readonly group: string
   attrs(): GroupAttrs
   adopt(attrs: GroupAttrs): void
+  /** Optional identity, so a mate's membership hint can NAME its group
+   *  fellows across implementations (the `members` set is the one shared
+   *  census; a member that stays anonymous simply isn't listed). */
+  readonly memberId?: string
+  memberLabel?(): string
 }
 
 /** Steel hairline — the cold/clean chrome convention shared with the header /
