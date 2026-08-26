@@ -1,4 +1,9 @@
-// hypercomb-shared/core/aggregation-layer.ts
+// aggregation-layer.ts
+//
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1 —
+// rides the commands bundle with the rest of the group cluster. The
+// shell-reachable surface registers as AGGREGATION_LAYER_KEY (contract in
+// core group-launcher.types.ts); shells resolve it lazily.
 //
 // Membership of a curated launch group (the Websites menu, and any menu like
 // it) as a LAYER — not a bespoke pool. Design: documentation/aggregation-
@@ -26,7 +31,7 @@
 // Shell-level: every essentials service resolves through the ambient global
 // `get` (ioc.web) at call time. Never imports essentials.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, AGGREGATION_LAYER_KEY, type AggregationMember, type AggregationLayerProvider } from '@hypercomb/core'
 
 const LAUNCH_KIND = 'launch:target'
 const SIG = /^[0-9a-f]{64}$/
@@ -63,16 +68,8 @@ const norm = (segments: readonly string[]): string[] =>
 
 const pathKey = (segments: readonly string[]): string => norm(segments).join('/')
 
-/** One resolved member of a group's menu — decoded from a launcher child. */
-export interface AggregationMember {
-  /** The launcher child's marker sig — the entry's identity in [g]'s children. */
-  childSig: string
-  /** The launcher cell's label (its child-location leaf under [g]). */
-  label: string
-  /** Reference to the member's real root in the hive tree. */
-  segments: string[]
-  icon: string
-}
+// Canonical member shape lives in core (group-launcher.types.ts).
+export type { AggregationMember } from '@hypercomb/core'
 
 const domainOf = (): (() => string) | undefined => get<LineageLike>(LINEAGE_KEY)?.domain
 
@@ -279,3 +276,18 @@ export async function disableAggregation(
   EffectBus.emit('aggregation:changed', { groupId, segments: norm(segments), op: 'disable' })
   return true
 }
+
+export const aggregationLayer: AggregationLayerProvider = {
+  enableAggregation,
+  disableAggregation,
+  listAggregation,
+  listAggregationAtCursor,
+}
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureAggregationLayerRegistered = (): void => {
+  if (!window.ioc?.has?.(AGGREGATION_LAYER_KEY)) {
+    window.ioc?.register?.(AGGREGATION_LAYER_KEY, aggregationLayer)
+  }
+}
+ensureAggregationLayerRegistered()

@@ -225,7 +225,6 @@ describe('doctrine ratchets', () => {
       '@hypercomb.social/DirectoryWalker (hypercomb-shared/core/directory-walker.ts)',
       '@hypercomb.social/DomainLayerSource (hypercomb-shared/core/layer-install-sources/domain-layer.source.ts)',
       '@hypercomb.social/DroneRegistry (hypercomb-shared/core/drone-registry.ts)',
-      '@hypercomb.social/GroupLauncher (hypercomb-shared/core/group-registry.ts)',
       '@hypercomb.social/HeaderSizeQueenBee (hypercomb-shared/core/header-size.ts)',
       '@hypercomb.social/I18n (hypercomb-shared/core/i18n.service.ts)',
       '@hypercomb.social/IconEditMode (hypercomb-shared/core/icon-edit.service.ts)',

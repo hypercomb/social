@@ -48,6 +48,8 @@ const MOVED_KEYS = [
   '@hypercomb.social/TagRegistry',
   '@hypercomb.social/NameRegistry',
   '@hypercomb.social/BouquetRegistry',
+  '@hypercomb.social/GroupLauncher',
+  '@hypercomb.social/AggregationLayer',
 ]
 
 /** Value-announce effects that must sit in last-value replay after boot. */
@@ -58,6 +60,7 @@ const ANNOUNCED = [
   'portals:recent-changed',
   'tags:registry',        // the self-warm's announce
   'notes:marks-changed',  // lands after the Store pool read settles
+  'groups:changed',       // the built-in groups registering
 ]
 
 async function main() {

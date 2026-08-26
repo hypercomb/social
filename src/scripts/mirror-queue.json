@@ -1719,6 +1719,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-group-cluster-down",
+      "title": "Mirror Phase 1 group cluster: launch groups, mixed bag, aggregation layer, built-in groups (websites/help/games) + websites-pool moved to essentials groups/ as ONE pass — tiles on the shrink-campaign collection, note carrying the groups:changed + AggregationLayer contracts",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

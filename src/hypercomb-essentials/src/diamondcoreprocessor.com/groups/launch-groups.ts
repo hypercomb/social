@@ -1,4 +1,4 @@
-// hypercomb-shared/core/launch-groups.ts
+// diamondcoreprocessor.com/groups/launch-groups.ts (moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1)
 //
 // Side-effect barrel: registers the built-in launch groups with the
 // GroupRegistry. Importing this module IS the registration.
@@ -11,6 +11,6 @@
 // the registrations live here and not in a component: the top chrome surfaces
 // an entrance only when the participant explicitly drags one up from a tile.
 
-import './websites-group'   // registers the websites group
-import './games-group'      // registers the games group
-import './help-group'       // registers the help group
+import './websites-group.js'   // registers the websites group
+import './games-group.js'      // registers the games group
+import './help-group.js'       // registers the help group

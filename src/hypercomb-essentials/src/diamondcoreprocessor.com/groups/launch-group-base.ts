@@ -1,4 +1,4 @@
-// hypercomb-shared/core/launch-group-base.ts
+// diamondcoreprocessor.com/groups/launch-group-base.ts (moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1)
 //
 // LaunchGroupBase — the shared shape of a launch group. ONE-STATE
 // (2026-07-03): opening a member just activates it. The old close-watch /
@@ -10,7 +10,7 @@
 //   activate(m) — how a member opens (navigate + view mode flip, effect
 //                 toggle, overlay mount, …)
 
-import type { GroupMember, LaunchGroup } from './group-registry'
+import type { GroupMember, LaunchGroup } from './group-registry.js'
 
 export abstract class LaunchGroupBase implements LaunchGroup {
   abstract readonly id: string

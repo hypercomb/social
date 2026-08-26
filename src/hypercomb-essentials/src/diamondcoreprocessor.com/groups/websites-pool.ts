@@ -1,4 +1,4 @@
-// hypercomb-shared/core/websites-pool.ts
+// diamondcoreprocessor.com/groups/websites-pool.ts (moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1)
 //
 // The sign('websites:menu') pool — now ONLY the websites menu's one-time
 // seed sentinel.

@@ -1,4 +1,4 @@
-// hypercomb-shared/core/websites-group.ts
+// diamondcoreprocessor.com/groups/websites-group.ts (moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1)
 //
 // The "websites" launch group — surfaces the participant's registered sites
 // as group members. Membership is the AGGREGATION LAYER (aggregation-layer.ts
@@ -22,10 +22,10 @@
 // through window.ioc at call time (never imports essentials).
 
 import { EffectBus } from '@hypercomb/core'
-import { enableAggregation, listAggregation } from './aggregation-layer'
-import { groupRegistry, type GroupMember } from './group-registry'
-import { LaunchGroupBase } from './launch-group-base'
-import { isSeeded, markSeeded } from './websites-pool'
+import { enableAggregation, listAggregation } from './aggregation-layer.js'
+import { groupRegistry, type GroupMember } from './group-registry.js'
+import { LaunchGroupBase } from './launch-group-base.js'
+import { isSeeded, markSeeded } from './websites-pool.js'
 
 const SIG = /^[0-9a-f]{64}$/
 const PAGE_KIND = 'visual:website:page'

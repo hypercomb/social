@@ -1,4 +1,4 @@
-// hypercomb-shared/core/help-group.ts
+// diamondcoreprocessor.com/groups/help-group.ts (moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1)
 //
 // The "help" launch group — a PROGRESSIVE TUTORIAL laid out as tiles.
 //
@@ -26,8 +26,8 @@
 // doesn't get a tile; whenReady re-renders once the keymap arrives.
 
 import { EffectBus, groupSignature, type KeyBinding } from '@hypercomb/core'
-import { groupRegistry, type GroupMember } from './group-registry'
-import { LaunchGroupBase } from './launch-group-base'
+import { groupRegistry, type GroupMember } from './group-registry.js'
+import { LaunchGroupBase } from './launch-group-base.js'
 
 /** The classic /help reference sheet, as one tile ahead of the course. Tapping
  *  it toggles the overlay via the same keymap command `/` and /help use —

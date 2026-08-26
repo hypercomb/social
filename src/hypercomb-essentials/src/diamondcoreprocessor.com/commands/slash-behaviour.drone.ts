@@ -5,6 +5,9 @@ import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercom
 import './name-registry.js'
 import './bouquet-registry.js'
 import './tag-registry.js'
+// The launch-group cluster (registry, mixed bag, aggregation layer, built-in
+// groups) rides this bundle too — launch-groups pulls the whole chain.
+import '../groups/launch-groups.js'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'

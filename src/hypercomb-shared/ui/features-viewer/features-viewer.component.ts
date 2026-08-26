@@ -36,7 +36,19 @@ import { PHONE_QUERY } from '../breakpoints'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
 import { setKindGlobalOn, ENABLEMENT_CHANGED } from './behavior-enablement'
-import { enableAggregation, disableAggregation, listAggregation } from '../../core/aggregation-layer'
+import { AGGREGATION_LAYER_KEY, type AggregationLayerProvider } from '@hypercomb/core'
+
+// The aggregation layer lives in essentials now (groups/) — resolve lazily;
+// these shims keep the call sites reading exactly as before and answer the
+// empty case when the module has not loaded yet.
+const aggregationLayer = (): AggregationLayerProvider | undefined =>
+  window.ioc?.get?.(AGGREGATION_LAYER_KEY) as AggregationLayerProvider | undefined
+const enableAggregation: AggregationLayerProvider['enableAggregation'] = (g, s, m) =>
+  aggregationLayer()?.enableAggregation(g, s, m) ?? Promise.resolve(null)
+const disableAggregation: AggregationLayerProvider['disableAggregation'] = (g, s) =>
+  aggregationLayer()?.disableAggregation(g, s) ?? Promise.resolve(false)
+const listAggregation: AggregationLayerProvider['listAggregation'] = (g) =>
+  aggregationLayer()?.listAggregation(g) ?? Promise.resolve([])
 
 /** How long a row treats another press as THE SAME PRESS. See #isRepeatPress:
  *  a switch nobody saw move gets pressed again, and without this the second

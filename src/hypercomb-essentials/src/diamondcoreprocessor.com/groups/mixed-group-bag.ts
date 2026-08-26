@@ -1,4 +1,4 @@
-// hypercomb-shared/core/mixed-group-bag.ts
+// diamondcoreprocessor.com/groups/mixed-group-bag.ts (moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1)
 //
 // MixedGroupBag — each launch group's page lives at its OWN single-segment
 // ROOT location named by the group id: /games, /websites, /help.
@@ -37,8 +37,8 @@
 // time. Never imports essentials.
 
 import { EffectBus } from '@hypercomb/core'
-import { memberAtLauncherCell } from './aggregation-layer'
-import type { GroupMember, LaunchGroup, GroupRegistry } from './group-registry'
+import { memberAtLauncherCell } from './aggregation-layer.js'
+import type { GroupMember, LaunchGroup, GroupRegistry } from './group-registry.js'
 
 const LAUNCH_KIND = 'launch:target'
 const SIG = /^[0-9a-f]{64}$/

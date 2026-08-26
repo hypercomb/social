@@ -1,4 +1,4 @@
-// hypercomb-shared/core/games-group.ts
+// diamondcoreprocessor.com/groups/games-group.ts (moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1)
 //
 // The "games" launch group — surfaces every arcade game as ONE meaning-icon in
 // the command line. Games are META RESOURCES: each is a signed `genotype:'game'`
@@ -21,8 +21,8 @@
 // the game drones already listen for). Mirrors websites-group.
 
 import { EffectBus } from '@hypercomb/core'
-import { groupRegistry, type GroupMember } from './group-registry'
-import { LaunchGroupBase } from './launch-group-base'
+import { groupRegistry, type GroupMember } from './group-registry.js'
+import { LaunchGroupBase } from './launch-group-base.js'
 
 /** The self-describing surface a `genotype:'game'` bee exposes for the launcher. */
 type GameLike = {

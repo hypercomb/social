@@ -231,9 +231,11 @@ events; the census ratchet line is deleted in the same commit.
   ~~`tag-registry`~~ ✓ (all three → `commands/`, ride slash-behaviour.drone;
   tag-registry now warms ITSELF on module load — the shell's ngAfterViewInit
   warm call is gone, and `tags:registry` replay fills the intellisense),
-  `group-registry` + the group sources
-  (`websites-group`, `help-group`, `games-group`, `launch-group*`) — moves
-  WITH `mixed-group-bag`, one cluster; `tile-icon-provider-registry`
+  ~~`group-registry` + sources + `mixed-group-bag` + `aggregation-layer` +
+  `websites-pool`~~ ✓ (the whole launch-group cluster → `groups/` as ONE
+  pass, ten files; contracts in core group-launcher.types.ts; registry
+  announces `groups:changed`, aggregation layer registers as
+  `@hypercomb.social/AggregationLayer`); `tile-icon-provider-registry`
   (boot-anchored in web `core-adapter.ts` and dev `main.ts` — remove both
   anchors in the same pass). `proximity-registry` RE-SCOPED: import-wired
   into runtime-initializer's warm handler and never IoC-registered — it
@@ -244,8 +246,9 @@ events; the census ratchet line is deleted in the same commit.
   `resource-completion.service` + `suggestion-provider`, `icon-edit.service`
 - [ ] `navigation.ts` (275)
 - [ ] Heavyweights: `lineage.ts` (485 — 184 call sites but key-addressed, so
-  it is a move, not a refactor; its `synchronize` listener moves with it),
-  `aggregation-layer` (281), `mixed-group-bag` (551)
+  it is a move, not a refactor; its `synchronize` listener moves with it).
+  ~~`aggregation-layer`~~ ✓ and ~~`mixed-group-bag`~~ ✓ went with the group
+  cluster above.
 - [ ] i18n: `i18n.service` down + split the 2.2 MB en/ja catalogs along
   module lines via `registerTranslations` (each module carries its own
   strings — the community-module pattern, applied to ourselves)

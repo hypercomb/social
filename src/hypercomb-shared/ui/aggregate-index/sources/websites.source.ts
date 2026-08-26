@@ -21,8 +21,25 @@
 // Shell-level: resolves services through window.ioc at call time; never imports
 // essentials.
 
-import { disableAggregation, listAggregationAtCursor } from '../../../core/aggregation-layer'
-import { groupRegistry } from '../../../core/group-registry'
+import {
+  EffectBus,
+  AGGREGATION_LAYER_KEY,
+  GROUP_LAUNCHER_KEY,
+  GROUPS_CHANGED,
+  type AggregationLayerProvider,
+  type GroupLauncherProvider,
+} from '@hypercomb/core'
+
+// The group cluster lives in essentials now (groups/) — resolve lazily; the
+// shims keep call sites unchanged and answer the empty case gracefully.
+const aggregationLayer = (): AggregationLayerProvider | undefined =>
+  window.ioc?.get?.(AGGREGATION_LAYER_KEY) as AggregationLayerProvider | undefined
+const disableAggregation: AggregationLayerProvider['disableAggregation'] = (g, s) =>
+  aggregationLayer()?.disableAggregation(g, s) ?? Promise.resolve(false)
+const listAggregationAtCursor: AggregationLayerProvider['listAggregationAtCursor'] = (g) =>
+  aggregationLayer()?.listAggregationAtCursor(g) ?? Promise.resolve([])
+const groupLauncher = (): GroupLauncherProvider | undefined =>
+  window.ioc?.get?.(GROUP_LAUNCHER_KEY) as GroupLauncherProvider | undefined
 import {
   registerAggregateSource,
   type AggregateItem, type AggregateSource, type AggregateVersion,
@@ -88,7 +105,10 @@ class WebsitesSource implements AggregateSource {
   readonly icon = 'language'
   readonly titleKey = 'website-landing.title'
   readonly activeAt = [WEBSITES] as const
-  readonly changed = groupRegistry
+  /** Instance-free change relay: the registry (essentials) announces on
+   *  EffectBus with replay; the index subscribes to this EventTarget as it
+   *  always did. Wired at module scope below. */
+  readonly changed = new EventTarget()
 
   readonly #images = new Map<string, string>()
   #imageRequested = new Set<string>()
@@ -114,7 +134,7 @@ class WebsitesSource implements AggregateSource {
   /** Open EXACTLY as a launcher tile did — the group owns the navigate + website
    *  mode flip, so routing stays in one place. */
   open(item: AggregateItem): void {
-    groupRegistry.get(WEBSITES)?.open({
+    groupLauncher()?.get(WEBSITES)?.open({
       key: item.key,
       label: item.label,
       segments: [...item.segments],
@@ -335,4 +355,8 @@ class WebsitesSource implements AggregateSource {
   }
 }
 
-registerAggregateSource(new WebsitesSource())
+const websitesSource = new WebsitesSource()
+EffectBus.on(GROUPS_CHANGED, () => {
+  websitesSource.changed.dispatchEvent(new CustomEvent('change'))
+})
+registerAggregateSource(websitesSource)

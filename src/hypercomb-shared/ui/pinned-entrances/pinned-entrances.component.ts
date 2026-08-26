@@ -44,10 +44,20 @@
 import { Component, ElementRef, OnDestroy, inject, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { groupRegistry, type GroupMember, type LaunchGroup } from '../../core/group-registry'
+import {
+  GROUP_LAUNCHER_KEY,
+  GROUPS_CHANGED,
+  type GroupLauncherProvider,
+  type GroupMember,
+  type LaunchGroup,
+} from '@hypercomb/core'
+
+/** The launcher registry lives in essentials now (groups/) — resolve lazily;
+ *  GROUPS_CHANGED (replayed) drives re-renders instance-free. */
+const groupLauncher = (): GroupLauncherProvider | undefined =>
+  window.ioc?.get?.(GROUP_LAUNCHER_KEY) as GroupLauncherProvider | undefined
 import { pinnedEntrances, type PinnedEntrance } from '../../core/pinned-entrances.store'
 import { registerProximityProvider } from '../../core/proximity-registry'
-import '../../core/launch-groups'   // side-effect: registers the built-in groups
 
 type PinView = {
   groupId: string
@@ -130,7 +140,9 @@ export class PinnedEntrancesComponent implements OnDestroy {
   #jump: { groupId: string; from: readonly string[]; pin: PinView; arrived: boolean } | null = null
 
   constructor() {
-    groupRegistry.addEventListener('change', this.#onChange)
+    // built-in groups register when the commands bundle loads; replay fires
+    // the first refresh even when this rail mounted first.
+    this.#unsubs.push(EffectBus.on(GROUPS_CHANGED, () => this.#onChange()))
     pinnedEntrances.addEventListener('change', this.#onChange)
     // The pins on THIS level are the only launch-group destinations that are
     // one tap away, so they are what the shell's nav-driven warmer pre-warms.
@@ -164,7 +176,6 @@ export class PinnedEntrancesComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
-    groupRegistry.removeEventListener('change', this.#onChange)
     pinnedEntrances.removeEventListener('change', this.#onChange)
     this.#lineage?.removeEventListener('change', this.#onChange)
     this.#bees?.removeEventListener('change', this.#onChange)
@@ -255,7 +266,7 @@ export class PinnedEntrancesComponent implements OnDestroy {
     // Standing on the page this pin opened: the click is the way BACK, whether
     // or not a modifier is held. Nothing else on the rail leaves a group page.
     if (pin.atAggregate) { this.#returnFromAggregate(); return }
-    const group = groupRegistry.get(pin.groupId)
+    const group = groupLauncher()?.get(pin.groupId)
     if (!group) return
     // Ctrl/Cmd+click = the owning group's aggregate page, when it has one to
     // show. Without one the modifier click degrades to the plain open — a
@@ -264,7 +275,7 @@ export class PinnedEntrancesComponent implements OnDestroy {
       // Remember the trip BEFORE navigating: `show` moves the lineage, and
       // from there we can no longer tell where we came from.
       this.#jump = { groupId: group.id, from: this.#segments(), pin, arrived: false }
-      groupRegistry.show(group.id)
+      groupLauncher()?.show(group.id)
       return
     }
     const member = pin.member
@@ -285,7 +296,7 @@ export class PinnedEntrancesComponent implements OnDestroy {
   /** Hover intent: warm the owning group's aggregate page so a Ctrl+click
    *  lands fast (read-only, non-navigating; no-op without a page). */
   onPinEnter(pin: PinView): void {
-    if (pin.hasAggregate) groupRegistry.prewarmGroup(pin.groupId)
+    if (pin.hasAggregate) groupLauncher()?.prewarmGroup(pin.groupId)
   }
 
   #segments(): readonly string[] {
@@ -351,7 +362,7 @@ export class PinnedEntrancesComponent implements OnDestroy {
       // Before that it is pending; after that, leaving the page ends it. A
       // pending jump that never lands (nav refused, group empty) is dropped as
       // soon as the participant goes anywhere other than where they started.
-      if (groupRegistry.currentId() === jump.groupId) jump.arrived = true
+      if (groupLauncher()?.currentId() === jump.groupId) jump.arrived = true
       else if (jump.arrived || hereKey !== jump.from.join('/')) this.#jump = null
     }
 
@@ -360,7 +371,7 @@ export class PinnedEntrancesComponent implements OnDestroy {
       root: this.#rootOf(pin, this.#memberFor(pin)),
     }))
     const views: PinView[] = entries.map(({ level, pin }) => {
-      const group: LaunchGroup | undefined = groupRegistry.get(pin.groupId)
+      const group: LaunchGroup | undefined = groupLauncher()?.get(pin.groupId)
       const member = this.#memberFor(pin)
       return {
         groupId: pin.groupId,
@@ -379,7 +390,7 @@ export class PinnedEntrancesComponent implements OnDestroy {
     // rail keeps the origin level's own pins.
     const active = this.#jump?.arrived ? this.#jump : null
     if (active) {
-      const group = groupRegistry.get(active.groupId)
+      const group = groupLauncher()?.get(active.groupId)
       views.unshift({
         ...active.pin,
         icon: group?.icon || active.pin.icon,
@@ -392,6 +403,6 @@ export class PinnedEntrancesComponent implements OnDestroy {
   }
 
   #memberFor(pin: PinnedEntrance): GroupMember | null {
-    return groupRegistry.get(pin.groupId)?.members().find(m => m.key === pin.memberKey) ?? null
+    return groupLauncher()?.get(pin.groupId)?.members().find(m => m.key === pin.memberKey) ?? null
   }
 }
