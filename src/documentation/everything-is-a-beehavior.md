@@ -397,6 +397,35 @@ lifts a key out of the shell catalogs, the surface MUST register the
 replacement: the confirm dialog's two default labels were extracted and never
 re-registered, which would have un-translated both buttons in all 14 locales.
 
+**AN EFFECT THAT IS A STATE ASSERTION NEEDS AN IDEMPOTENT SUBSCRIBER.**
+`cell:added` / `cell:removed` are delivered at least twice for one gesture —
+the gesture's eager emit, then the commit's post-commit reconcile
+re-announcing the same difference. Twenty-six of twenty-eight subscribers
+absorb the repeat for free because their handler is a set write or a cache
+poke; the house convention is idempotence AT THE SUBSCRIBER, not filtering at
+the source. The activity feed was the one subscriber that APPENDS TO A
+LEDGER, which is the shape the convention does not cover, so it double-logged
+every add and remove — halving a ten-entry feed to five real actions.
+
+Two lessons, both bought expensively:
+
+**Filtering the flag is the wrong fix, and it is the one that suggests
+itself.** `fromCascade` is not noise — it is the reconcile channel, and for
+write paths that eager-emit nothing at all (adopting a swarm hive, an
+aggregation layer's children write, a group bag's membership) it is the ONLY
+announcement there is. Filtering it trades a duplicate row for a MISSING one,
+and silences the mutation ROLLBACK that tells a participant their add did not
+stick. Verify a flag's meaning before filtering it: `viaUpdate` is not a
+quieter `fromCascade`, it means commit OWNERSHIP.
+
+**A wildcard that is READ but never CONSUMED poisons its key.** The first
+version matched an unnamed payload against any known place but only ever
+wrote back to the wildcard slot, so one segment-less `removed` left the
+feed permanently deaf to that name — a second tile of the same name could
+then be deleted with no row and therefore no undo. Read-without-consume is
+the trap; a wildcard must be resolved onto the real address the moment
+something names it.
+
 **THE HARVEST IS NOT THE AUTHORITY — THE RECONCILIATION IS.** Keys are found
 in the Angular original by pattern (`'key' | t`, `t('key')`), and a pattern
 can only see a key spelled next to its use. It cannot see a key CHOSEN AT

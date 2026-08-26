@@ -582,42 +582,61 @@ async function main() {
       `mounted=${s.mounted} empty=${s.empty}`)
   }
 
-  // 9g-viii. activity-log: driven through a real event. `cell:added` is one of
-  //          the six feeds it listens to, and it is the one with no side
-  //          effect on the hive — the drone that WOULD have added a cell is
-  //          not involved, the panel is just told one was. Proves the row
-  //          renders, localizes, and carries the undo affordance the original
-  //          attached to this specific feed.
+  // 9g-viii. activity-log: driven through a real event, and asserting the feed
+  //          is IDEMPOTENT — one transition for one cell produces exactly ONE
+  //          row however many times the effect is delivered.
+  //
+  //          WHY A COUNT AND NOT `after > before`. `cell:added` is a STATE
+  //          ASSERTION, delivered at least twice for one gesture: the eager
+  //          emit, then the commit's post-commit reconcile re-announcing the
+  //          same difference. The feed used to append both. This check now
+  //          counts the deliveries ITSELF and prints them, so a PASS cannot be
+  //          an accident of only one emit having arrived.
+  //
+  //          WHAT IT DOES NOT PROVE: that a REAL create emits twice. A
+  //          synthetic emit is FLAG-LESS, so the committer's own listener
+  //          accepts it and the echo comes from `#commit`'s reconcile; a real
+  //          create carries `viaUpdate`, the listener refuses it, and the echo
+  //          comes from `#importTree`'s. Different route, same shape. The real
+  //          gestures are covered by scripts/probe-cascade-trace.cjs, which
+  //          drives the command line — keep it, and re-run it if this ever
+  //          reports `deliveries=1`, because that would mean this check has
+  //          gone vacuous (nothing left to collapse).
   const activity = await page.evaluate(async () => {
     const bus = window.__hypercombEffectBus
     if (!bus) return { ok: false, reason: 'EffectBus not reachable from the page' }
     const el = document.querySelector('hc-activity-log')
     if (!el) return { ok: false, reason: 'element not mounted by the registry' }
 
+    let deliveries = 0
+    const off = bus.on('cell:added', p => { if (p && p.cell === 'gate-probe-tile') deliveries++ })
+
     const before = el.querySelectorAll('.activity-entry').length
     bus.emit('cell:added', { cell: 'gate-probe-tile' })
-    await new Promise(r => setTimeout(r, 400))
+    // Long enough for the commit to drain and its reconcile to echo. The old
+    // 400ms was SHORTER than that round trip, which is one reason the count
+    // here was nondeterministic and the duplication went unnoticed.
+    await new Promise(r => setTimeout(r, 2500))
+    off?.()
 
-    // TWO ROWS IS CORRECT HERE, AND IS NOT THIS PORT'S DOING. `cell:added`
-    // is emitted a second time by layer-committer.drone with
-    // `fromCascade: true` once the layer commits, and the feed has never
-    // filtered that flag — the Angular original's handler was byte-identical
-    // (verified against git HEAD). So the assertion is that a row APPEARED
-    // and reads correctly, never that exactly one did; pinning the count
-    // would pin a pre-existing product bug as if it were the contract.
-    const rows = el.querySelectorAll('.activity-entry')
-    const text = rows.length ? (rows[rows.length - 1].textContent ?? '') : ''
-    // The row names the cell, and its label resolved rather than printing the
-    // raw key — the unregistered-catalog failure the split can cause.
-    const named = text.includes('gate-probe-tile')
+    const rows = [...el.querySelectorAll('.activity-entry')]
+    // Rows NAMING THIS CELL, never the panel's total — an unrelated line
+    // drifting into the feed must not be able to mask a regression here.
+    const mine = rows.filter(r => (r.textContent ?? '').includes('gate-probe-tile'))
+    const text = mine.length ? (mine[0].textContent ?? '') : ''
+    const undoable = mine.length === 1 && !!mine[0].querySelector('.entry-revert')
     const localized = text.length > 0 && !text.includes('activity.')
-    return { ok: rows.length > before && named && localized,
-      before, after: rows.length, named, localized, text: text.slice(0, 70) }
+    return {
+      ok: mine.length === 1 && undoable && localized && deliveries >= 1,
+      before, after: rows.length, deliveries, mineCount: mine.length,
+      undoable, localized, text: text.slice(0, 70),
+    }
   })
-  check('converted panel: activity-log renders a feed entry, names the cell, localizes',
+  check('converted panel: activity-log renders ONE row per transition however often the effect lands, and keeps the undo',
     activity.ok,
-    activity.reason ?? `before=${activity.before} after=${activity.after} ` +
-      `named=${activity.named} localized=${activity.localized} text="${activity.text}"`)
+    activity.reason ?? `deliveries=${activity.deliveries} rows-naming-the-cell=` +
+      `${activity.mineCount} (EXPECT 1) undoable=${activity.undoable} ` +
+      `localized=${activity.localized} text="${activity.text}"`)
 
   // 9g-ix. shortcut-sheet: opened through its state effect with empty command
   //        lists — a real render path (it has an empty-state string) that needs

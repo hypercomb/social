@@ -80,6 +80,30 @@ const FADE_MS = 200
  *  means the OLDEST line falls off, which is the whole point of a feed. */
 const MAX_ENTRIES = 10
 
+/** How many cell names the transition map remembers. Bounded because the map
+ *  is keyed by NAME and a long session touches many; 64 is far past the ten
+ *  the feed can show, so an eviction can never resurrect a duplicate that is
+ *  still on screen. Oldest key evicted first. */
+const ANNOUNCED_CAP = 64
+
+/** The place key for a payload that named no `segments` at all. It cannot
+ *  collide with a real address: `\0` never appears in a segment. */
+const ANY_PLACE = '\u0000?'
+
+/** Segments to a comparable place key, or `null` when the payload named no
+ *  place at all.
+ *
+ *  `[]` is a REAL address — the hive root — not an absence, so it yields `''`,
+ *  and only a missing or non-array `segments` yields `null`. That distinction
+ *  is load-bearing: several emitters omit `segments` entirely while the
+ *  post-commit echo of the same fact carries the address the committer bound
+ *  at enqueue, and the two still have to recognise each other. */
+function placeKey(segments: unknown): string | null {
+  return Array.isArray(segments)
+    ? segments.map(s => String(s ?? '')).join('\u0000')
+    : null
+}
+
 // Effects hidden from the activity log. Add effect names here to suppress
 // them. Copied verbatim, including its one member: the mesh subscription
 // below is written out in full and then suppressed by this set, so deleting
@@ -246,6 +270,33 @@ export class ActivityLogElement extends HTMLElement {
    *  diffed. */
   #rows = new Map<number, Row>()
 
+  /** cell name → place → the direction last ANNOUNCED there.
+   *
+   *  `cell:added` / `cell:removed` are STATE ASSERTIONS, not events. One
+   *  participant gesture delivers each of them at least twice: the gesture's
+   *  own eager emit, and then the commit's post-commit reconcile, which diffs
+   *  the parent's children in name space and re-announces the difference
+   *  (layer-committer.drone.ts :944/:947, :1302/:1306, :1338/:1341). A nested
+   *  create delivers four for one Enter, one pair per level.
+   *
+   *  Every other subscriber absorbs the repeat for free because its handler is
+   *  a set write or a cache poke — the house convention, stated out loud at
+   *  layer-committer.drone.ts:309-311. This handler APPENDS TO A LEDGER, which
+   *  is the one shape idempotence does not come free for, so it is bought
+   *  here: a delivery is news only when it CHANGES the direction last
+   *  announced for that cell at that place.
+   *
+   *  NOT a flag filter. `fromCascade` is the sole announcement for write paths
+   *  that eager-emit nothing at all — adopting a swarm hive, an aggregation
+   *  layer's children write, a group bag's membership — so suppressing it
+   *  would trade a duplicate row for a missing one. Keyed on (cell, place)
+   *  rather than on cell alone because a drag-move emits `removed` at the
+   *  source and `added` at the target for the SAME name, and it emits them
+   *  AFTER its commits — cascade first, gesture second, the opposite order
+   *  from a create. A direction map collapses each pair correctly whichever
+   *  half arrives first, which a time window would not. */
+  #announced = new Map<string, Map<string, 'added' | 'removed'>>()
+
   connectedCallback(): void {
     installCss()
     this.#build()
@@ -255,8 +306,11 @@ export class ActivityLogElement extends HTMLElement {
 
     this.#offs.push(
       // ── cell added ───────────────────────────────────────────────────
-      EffectBus.on<{ cell: string }>('cell:added', p => {
+      EffectBus.on<{ cell: string; segments?: readonly unknown[] }>('cell:added', p => {
         if (!this.#ready || !p?.cell || HIDDEN.has('cell:added')) return
+        // The gesture's emit wins the row (it arrives first and carries the
+        // undo closure); the commit's echo of the same fact is not news.
+        if (!this.#isNews(p.cell, p.segments, 'added')) return
         const msg = t('activity.added', 'added "{cell}"', { cell: p.cell })
         // Inside a revert, the echo gets no undo arrow of its own.
         if (this.#reverting) { this.#addEntry('+', msg); return }
@@ -264,8 +318,9 @@ export class ActivityLogElement extends HTMLElement {
       }),
 
       // ── cell removed ─────────────────────────────────────────────────
-      EffectBus.on<{ cell: string }>('cell:removed', p => {
+      EffectBus.on<{ cell: string; segments?: readonly unknown[] }>('cell:removed', p => {
         if (!this.#ready || !p?.cell || HIDDEN.has('cell:removed')) return
+        if (!this.#isNews(p.cell, p.segments, 'removed')) return
         const msg = t('activity.removed', 'removed "{cell}"', { cell: p.cell })
         if (this.#reverting) { this.#addEntry('−', msg); return }
         this.#addEntry('−', msg, () => this.#revertRemove(p.cell))
@@ -352,6 +407,10 @@ export class ActivityLogElement extends HTMLElement {
     for (const entry of this.#entries) entry.timer = null
     this.#entries = []
     this.#rows.clear()
+    // A remount re-arms #ready and replays nothing, so the feed starts empty —
+    // the transition memory has to start empty with it, or the first real
+    // gesture after a remount could be mistaken for a repeat.
+    this.#announced.clear()
     this.#panel?.remove()
     this.#panel = null
     this.replaceChildren()
@@ -370,6 +429,80 @@ export class ActivityLogElement extends HTMLElement {
   }
 
   // ── state ────────────────────────────────────────────────────────────
+  /** Is this delivery NEWS, or the same fact said twice?
+   *
+   *  Returns true and records the direction when the assertion changes what
+   *  the feed last said about this cell in this place; false when it merely
+   *  repeats it. A cell that is added, removed, then added again is three
+   *  transitions and three rows — only the redundant re-assertion is dropped,
+   *  and re-asserting a direction is precisely what carries no information
+   *  (nothing can be added twice without being removed in between).
+   *
+   *  A payload with no `segments` matches ANY known place for the same cell,
+   *  in either order: the eager emit and its echo frequently disagree about
+   *  whether the address is named, and treating "unnamed" as a distinct place
+   *  would let exactly those pairs through as duplicates.
+   *
+   *  THE WILDCARD IS PAIR-SCOPED, and that is load-bearing. It absorbs the ONE
+   *  echo of an unnamed assertion and is consumed the moment a named delivery
+   *  resolves it. A version that only READ it went permanently deaf: an
+   *  unnamed `removed` left the wildcard set for the rest of the session, so a
+   *  genuine second tile of the same name could be deleted with no row at all
+   *  — and therefore no undo, on the one operation where the undo matters
+   *  most. Read-without-consume is the trap here.
+   *
+   *  RESIDUAL, stated rather than hidden: two unnamed assertions of the same
+   *  direction for the same name still collapse into one row. That case is
+   *  undecidable by construction — an unnamed payload does not say which tile
+   *  it means, so "the echo of the first" and "a second tile of the same name"
+   *  are the same bytes. The wrong choice in the other direction is a
+   *  guaranteed double row on every gesture, so this errs toward one line. */
+  #isNews(cell: string, segments: unknown, dir: 'added' | 'removed'): boolean {
+    const place = placeKey(segments)
+    let places = this.#announced.get(cell)
+
+    if (places) {
+      if (place === null) {
+        // An unnamed delivery cannot say WHICH place it means, so it matches
+        // any of them. It does not resolve anything either — there is nothing
+        // to resolve it to — so the record stands as it is.
+        for (const last of places.values()) if (last === dir) return false
+      } else {
+        // A NAMED delivery RESOLVES a pending unnamed one. The wildcard must
+        // be consumed here, not merely read: an earlier version only read it,
+        // so an unnamed assertion left `ANY_PLACE` set forever and every later
+        // named delivery of that direction matched it and was swallowed —
+        // measured, the feed went permanently deaf to the name and a second
+        // tile of the same name could be deleted with no row and therefore no
+        // undo. Deleting it first bounds the wildcard's reach to exactly the
+        // ONE echo it exists to absorb.
+        const wildcard = places.get(ANY_PLACE)
+        places.delete(ANY_PLACE)
+        if (places.get(place) === dir || wildcard === dir) {
+          // Write the real address through before returning, so the pair is
+          // recorded where it actually happened. An exact-place match is NOT
+          // consumed — a gesture may be reconciled more than once, and every
+          // repeat of a direction already announced there is still redundant.
+          places.set(place, dir)
+          return false
+        }
+      }
+    } else {
+      // Bounded: keyed by NAME, and a long session touches many. Evicting the
+      // oldest can never resurrect a duplicate that is still on screen, since
+      // the cap is far past the ten entries the feed can hold.
+      if (this.#announced.size >= ANNOUNCED_CAP) {
+        const oldest = this.#announced.keys().next().value
+        if (oldest !== undefined) this.#announced.delete(oldest)
+      }
+      places = new Map()
+      this.#announced.set(cell, places)
+    }
+
+    places.set(place ?? ANY_PLACE, dir)
+    return true
+  }
+
   #addEntry(icon: string, message: string, revert?: () => Promise<void>): void {
     const id = this.#nextId++
     const timer = this.#arm(() => this.dismiss(id), TIMEOUT_S * 1000)
