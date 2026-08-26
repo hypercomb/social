@@ -44,7 +44,7 @@ import { bootstrapApplication } from '@angular/platform-browser'
 import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
 import { installScaleProbe } from '@hypercomb/shared/core/packed-store-scale-probe'
-import { SignatureStore } from '@hypercomb/core'
+import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import {
   initializeRuntime,
@@ -122,6 +122,55 @@ const main = async (): Promise<void> => {
   ;(window as any).__hcBoot('ensureSwControl done')
   await initializeRuntime()
   ;(window as any).__hcBoot('initializeRuntime done')
+
+  // ── the accepted install reports that it FINISHED ────────────────────
+  // portal-overlay lights the header banner ("Adopting packages and
+  // website…") the moment an accept lands, and only a terminal
+  // `update:status` puts it out. Production's counterpart lives in
+  // hypercomb-web/src/main.ts, which owns TWO legs — the content fold and
+  // a package resync into OPFS. The dev shell imports its drones directly,
+  // so it has no package leg at all, and it had no listener either: the
+  // banner came on and nothing in this shell could ever turn it off. It sat
+  // there as dead text, and because `busy()` gates the available-update
+  // branch, the indicator could not announce another update until reload.
+  //
+  // So dev closes the ONE leg it actually has. SwarmAdoptDrone receives the
+  // same window event and answers with `fold:receipt`; subscribe before the
+  // first await, because a small fold can land immediately. No content to
+  // fold means nothing to wait for — the accept is already complete.
+  window.addEventListener('actions:available', event => {
+    const detail = (event as CustomEvent<{ contentChanges?: number; transactionId?: string }>).detail
+    const expectedContentChanges = Math.max(0, Number(detail?.contentChanges ?? 0))
+    const transactionId = String(detail?.transactionId ?? '')
+    if (expectedContentChanges <= 0) {
+      EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
+      return
+    }
+    let unsub: (() => void) | null = null
+    const timer = window.setTimeout(() => {
+      unsub?.()
+      console.error('[hypercomb-dev] content adoption did not finish in time')
+      EffectBus.emit('update:status', {
+        phase: 'error',
+        message: 'Update incomplete — your restore point is safe',
+      })
+    }, 60_000)
+    unsub = EffectBus.on<{ unavailable?: number; transactionId?: string }>('fold:receipt', receipt => {
+      if (transactionId && receipt?.transactionId !== transactionId) return
+      window.clearTimeout(timer)
+      unsub?.()
+      const unavailable = receipt?.unavailable ?? 0
+      if (unavailable > 0) {
+        console.error(`[hypercomb-dev] ${unavailable} adopted item(s) are still unavailable`)
+        EffectBus.emit('update:status', {
+          phase: 'error',
+          message: 'Update incomplete — your restore point is safe',
+        })
+      } else {
+        EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
+      }
+    })
+  })
 
   await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done')
