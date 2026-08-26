@@ -25,6 +25,9 @@
 // drops it (same rule as the whole FEEDBACK_* family).
 
 import { Drone, EffectBus, SignatureService, getClientIdentity } from '@hypercomb/core'
+// The presence banner rides the drone that publishes the presence it
+// names. ONE importer: dup-inlining rule.
+import './presence-banner.view.js'
 
 export const CLIENT_PRESENCE_KIND = 30207
 

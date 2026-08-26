@@ -29,7 +29,7 @@ import {
   type NoteMarksChange,
   type NoteMarksProvider,
 } from '@hypercomb/core'
-import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
+import { ensureViewportInsetVars } from '@hypercomb/core'
 // The reading cycle's wrap arithmetic — shared with the standalone reader so
 // prev/next behave identically wherever notes are read.
 import { stepIndex } from '../notes-viewer/note-cycle'

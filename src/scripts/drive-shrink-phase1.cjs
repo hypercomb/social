@@ -141,6 +141,8 @@ async function main() {
     'hc-sequence-viewer', 'hc-website-nav', 'hc-sensitivity-bar', 'hc-landing-badge',
     'hc-preview-banner', 'hc-toast', 'hc-confirm-dialog', 'hc-trust-prompt',
     'hc-layer-cycle-strip',
+    // The viewer batch.
+    'hc-icon-picker', 'hc-format-painter', 'hc-youtube-viewer', 'hc-presence-banner',
   ]
   let mounted = []
   for (let i = 0; i < 60; i++) {
@@ -485,6 +487,97 @@ async function main() {
   })
   check('converted panel: layer-cycle-strip mounts and idles empty with no peers', strip.ok,
     strip.reason ?? `empty=${strip.empty} unpainted=${strip.unpainted}`)
+
+  // 9g-v. icon-picker: DRIVEN, not just mounted. Borrow mode (`store: false`)
+  //        writes no override, so the gate can open the real chooser against
+  //        the participant's own hive without touching their data. The
+  //        roundtrip proves three things a mount check cannot: the request
+  //        contract still opens it, the catalog RESOLVES (an unregistered
+  //        catalog renders the raw key — the confirm-dialog blocker), and
+  //        Escape settles the request exactly once and detaches the panel.
+  const picker = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    if (!bus) return { ok: false, reason: 'EffectBus not reachable from the page' }
+    const el = document.querySelector('hc-icon-picker')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+
+    const settled = []
+    const off = bus.on('icon:pick-result', r => { settled.push(r) })
+    bus.emit('icon:pick-request', { id: 'gate-probe', token: 'gate', store: false })
+    await new Promise(r => setTimeout(r, 400))
+
+    const title = el.querySelector('.ip-title')?.textContent?.trim() ?? ''
+    const search = el.querySelector('.ip-search')?.getAttribute('placeholder') ?? ''
+    const opened = el.children.length > 0
+    const hexes = el.querySelectorAll('.ip-hex').length
+    // A key that never resolved comes back as the key itself.
+    const localized = title.length > 0 && !title.startsWith('icon-picker.')
+      && search.length > 0 && !search.startsWith('icon-picker.')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(r => setTimeout(r, 300))
+    off?.()
+    const closed = el.children.length === 0
+
+    return {
+      ok: opened && hexes > 0 && localized && closed && settled.length === 1
+        && settled[0]?.name === null && settled[0]?.token === 'gate',
+      opened, hexes, localized, title, search, closed, settled: settled.length,
+      name: settled[0]?.name === null ? 'null' : String(settled[0]?.name),
+    }
+  })
+  check('converted panel: icon-picker opens on the request contract, paints icons, localizes',
+    picker.ok === true || (picker.opened && picker.hexes > 0 && picker.localized),
+    picker.reason ?? `opened=${picker.opened} hexes=${picker.hexes} ` +
+      `localized=${picker.localized} title="${picker.title}"`)
+  check('converted panel: icon-picker settles its request once on Escape and detaches',
+    picker.ok === true,
+    picker.reason ?? `closed=${picker.closed} settled=${picker.settled} name=${picker.name}`)
+
+  // 9g-vi. format-painter: driven through `format:state`, the one event that
+  //        opens it. Entries are empty, which is a REAL render path (the
+  //        panel has an empty-state string) and needs no editor session — so
+  //        this asserts the extracted catalog resolves without touching a
+  //        tile. Closing it again proves the @if-means-detach contract.
+  const painter = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    if (!bus) return { ok: false, reason: 'EffectBus not reachable from the page' }
+    const el = document.querySelector('hc-format-painter')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+
+    bus.emit('format:state', { open: true, sourceCell: 'gate-probe', entries: [] })
+    await new Promise(r => setTimeout(r, 350))
+    const opened = el.children.length > 0
+    const text = el.textContent ?? ''
+    const localized = text.length > 0 && !text.includes('format-painter.')
+
+    bus.emit('format:state', { open: false, sourceCell: null, entries: [] })
+    await new Promise(r => setTimeout(r, 300))
+    const closed = el.children.length === 0
+
+    return { ok: opened && localized && closed, opened, localized, closed,
+      text: text.slice(0, 60) }
+  })
+  check('converted panel: format-painter opens on format:state, localizes, detaches on close',
+    painter.ok,
+    painter.reason ?? `opened=${painter.opened} localized=${painter.localized} ` +
+      `closed=${painter.closed} text="${painter.text}"`)
+
+  // 9g-vii. youtube-viewer and presence-banner both need state the gate has
+  //         no honest way to manufacture — a video link opened on a tile, and
+  //         a swarm with actual peers. Asserting they idle EMPTY is the real
+  //         contract at rest (@if-means-detach), and their catalogs are
+  //         covered by drift specs. Driving them would mean faking a peer
+  //         list, which tests the fake.
+  const idle = await page.evaluate(() => ['hc-youtube-viewer', 'hc-presence-banner']
+    .map(name => {
+      const el = document.querySelector(name)
+      return { name, mounted: !!el, empty: el ? el.children.length === 0 : false }
+    }))
+  for (const s of idle) {
+    check(`converted panel: ${s.name} mounts and idles empty`, s.mounted && s.empty,
+      `mounted=${s.mounted} empty=${s.empty}`)
+  }
 
   // 10. No non-environmental console errors, and nothing the APP asked for
   //     came back missing.

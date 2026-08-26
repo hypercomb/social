@@ -1,4 +1,6 @@
-// hypercomb-shared/ui/icon-picker/material-icon-names.ts
+// material-icon-names.ts — moved down beside its consumer in the
+// everything-is-a-beehavior Phase 2 (pure data travels with the surface that
+// reads it; the icon chooser is the only reader there has ever been).
 //
 // Curated set of Material Symbols (Outlined) ligature names for the icon-hive
 // picker. The font itself is loaded from Google Fonts (see index.html); there

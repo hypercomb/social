@@ -1,5 +1,9 @@
 // diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
 import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
+// The icon chooser rides the tiles bundle, beside the override store it
+// writes through — the icon protocol now lives entirely outside the shell.
+// ONE importer: dup-inlining rule.
+import './icon-picker.view.js'
 import { Application, Container, Graphics, Point, Sprite, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { iconOverrides, ensureIconOverridesRegistered } from './icon-overrides.store.js'

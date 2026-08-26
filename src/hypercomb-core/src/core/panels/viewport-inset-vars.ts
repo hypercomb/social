@@ -16,7 +16,7 @@
 // bootstrap (edit-actions is template-mounted), so it is listening before any
 // panel can open. Shell UI — EffectBus string contract only, no essentials import.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus } from '../../effect-bus.js'
 
 type Side = 'left' | 'right' | 'top' | 'bottom'
 const SIDES: readonly Side[] = ['left', 'right', 'top', 'bottom']

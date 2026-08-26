@@ -357,6 +357,19 @@ two exits. Strings written once at build time need a `#relabel()` that
 re-resolves them (rows re-resolve theirs on every rebuild). Found by the
 adversarial pass, and it had already slipped into the first conversion.
 
+**`keydown.escape` IS NOT `event.key === 'Escape'`.** Angular's
+KeyEventsPlugin composes a binding name from the pressed modifiers, so
+`@HostListener('document:keydown.escape')` matched ONLY an unmodified press —
+Ctrl-Escape produced `control.escape` and fell straight through. The obvious
+port (`if (event.key !== 'Escape') return`) therefore fires on chords the
+original ignored, quietly taking a shortcut away from whoever owns it. A
+panel ported from that binding must guard
+`event.ctrlKey || event.altKey || event.shiftKey || event.metaKey`. **Check
+the ORIGINAL's spelling before adding the guard**: a component that bound a
+raw `document.addEventListener('keydown', …)` never had those semantics, and
+adding the guard there would itself be the regression. Of the thirteen panels
+converted so far exactly one — `youtube-viewer` — used the HostListener form.
+
 **BUILD EVERY APP IN `build:all`, NOT JUST THE TWO SHELLS.** `diamond-core-
 processor` and `hypercomb-avatars` are Angular apps of their own that import
 from `hypercomb-shared` — DCP mounted `<hc-trust-prompt>` and imported the
@@ -392,13 +405,18 @@ condition; do not re-derive it. And where Angular used `@if`, the element
 must genuinely leave the DOM (detach the node, keep the reference) — a
 surface that is merely `display:none` still answers `querySelector`, which
 is a DOM contract the feature's own acceptance driver may assert on.
-- [ ] Utility band: `toast`, `confirm-dialog`, `trust-prompt`, `action-card`,
-  `camera-capture`, `format-painter`, `icon-picker`, `shortcut-sheet`,
-  `activity-log`, `layer-cycle-strip`, `command-palette`, `context-window`
+- [ ] Utility band: ~~`toast`~~, ~~`confirm-dialog`~~, ~~`trust-prompt`~~,
+  `action-card`, `camera-capture`, ~~`format-painter`~~ (→ `editor/`, beside
+  the drone whose visual properties it copies), ~~`icon-picker`~~ (→
+  `presentation/tiles/`, beside the override store it writes through),
+  `shortcut-sheet`, `activity-log`, ~~`layer-cycle-strip`~~,
+  `command-palette`, `context-window`
 - [ ] Viewer band: `files-viewer`, `observe-viewer`, `notes-viewer`,
-  `youtube-viewer`, `docs-overlay`, `pools-of-meaning`, `pheromone-tiles`,
-  `example-hives`, `presence-banner`, `contact-card`, `mesh-modal`,
-  `rewind-window`, `atomizer-bar`, `workflow-designer`
+  ~~`youtube-viewer`~~ (→ `link/`, beside the link action that opens it),
+  `docs-overlay`, `pools-of-meaning`, `pheromone-tiles`, `example-hives`,
+  ~~`presence-banner`~~ (→ `sharing/`, beside the drone publishing the
+  presence it names), `contact-card`, `mesh-modal`, `rewind-window`,
+  `atomizer-bar`, `workflow-designer`
 - [ ] Heavy band — one campaign each: `clipboard-panel` (1,103), `portal`
   (1,047), `publish-panel` (1,033), `tile-editor` (1,719), `feedback-viewer`
   (1,920), `history-viewer` (2,274), `tags-viewer` (2,569), `features-viewer`

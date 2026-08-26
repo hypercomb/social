@@ -1,5 +1,8 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
+// The format painter rides the editor bundle — it copies and applies the
+// visual properties this drone edits. ONE importer: dup-inlining rule.
+import './format-painter.view.js'
 import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'

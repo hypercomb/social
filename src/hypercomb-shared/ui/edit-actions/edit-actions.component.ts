@@ -36,7 +36,7 @@
 import { Component, type OnDestroy, type OnInit, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
+import { ensureViewportInsetVars } from '@hypercomb/core'
 
 /** Runtime service locator — shared must never statically import essentials,
  *  so cross-service resolution goes through window.ioc at call time. */
