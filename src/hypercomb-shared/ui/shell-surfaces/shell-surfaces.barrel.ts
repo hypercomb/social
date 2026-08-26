@@ -11,22 +11,12 @@
 // The floating vertical selection menu that used to lead this list is RETIRED —
 // selection flows into each behavior's own tool window now
 // (documentation/selection-tool-windows.md).
-import '../history-viewer/history-viewer.component'
 import '../notes-strip/notes-strip.component'
 // ONE index panel for every aggregate — Collections, Websites, and anything
 // that registers a source. The per-aggregate landings it replaced (
 // `website-landing/`, `collections-landing/`) were deleted 2026-08-06; an aggregate now
 // declares a source and inherits the panel's chrome AND its drag-to-create-
 // meaning. See aggregate-index/aggregate-source.ts.
-import '../aggregate-index/aggregate-index.component'
-import '../aggregate-index/sources/collections.source'
-import '../aggregate-index/sources/websites.source'
 import '../chat-window/chat-window.component'
 import '../features-viewer/features-viewer.component'
-import '../tags-viewer/tags-viewer.component'
-import '../contact-card/contact-form.component'
-import '../contact-card/contact-hover.component'
-import '../portal/portal-overlay.component'
-import '../atomizer-bar/atomizer-bar.component'
-import '../atomizer-bar/atomizer-sidebar.component'
 import '../host-panel/host-panel.component'

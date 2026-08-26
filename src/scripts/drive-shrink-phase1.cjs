@@ -152,6 +152,13 @@ async function main() {
     // The mid band.
     'hc-command-palette', 'hc-publish-panel', 'hc-notes-viewer', 'hc-clipboard-panel',
     'hc-workflow-designer', 'hc-tile-editor',
+    // The heavy band. Two Angular folders produced TWO surfaces each here
+    // (contact-form/-hover, atomizer-bar/-sidebar) — they register separately
+    // with different orders, so the shell stacks them separately and both must
+    // mount.
+    'hc-aggregate-index', 'hc-tags-viewer', 'hc-history-viewer',
+    'hc-contact-form', 'hc-contact-hover',
+    'hc-atomizer-bar', 'hc-atomizer-sidebar', 'hc-portal-overlay',
   ]
   let mounted = []
   for (let i = 0; i < 60; i++) {

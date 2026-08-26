@@ -12,6 +12,11 @@
 // intents — the controls-bar pools button is the one that does both.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+// The aggregate index rides the queen that owns 'aggregate:view-open'.
+// The FILE lives in groups/ (the domain that owns aggregation); the
+// IMPORTER is here, with the door that opens it.
+// ONE importer: dup-inlining rule.
+import '../groups/aggregate-index.view.js'
 
 export class CollectionsViewQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'

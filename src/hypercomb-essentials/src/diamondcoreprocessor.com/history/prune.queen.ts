@@ -21,6 +21,9 @@
 // have clicked.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+// The history viewer rides the queen that owns 'history:view-open' and
+// the prune mode it paints. ONE importer: dup-inlining rule.
+import './history-viewer.view.js'
 import type { PruneService } from './prune.service.js'
 
 export class PruneQueenBee extends QueenBee {

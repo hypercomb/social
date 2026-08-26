@@ -27,6 +27,10 @@
 // the contract is the EffectBus payload + the data attribute.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+// The portal overlay rides the drone that owns 'portal-carry:drag-start'
+// — the drag and the surface that draws it are one thing.
+// ONE importer: dup-inlining rule.
+import './portal-overlay.view.js'
 
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const ACTION_NAME = 'portal-carry'

@@ -21,6 +21,11 @@
 // heartbeat and resolves services from IoC lazily.
 
 import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
+import './contact-hover.view.js'
+// Both contact surfaces ride the contact drone. TWO surfaces, ONE bee —
+// the dup-inlining rule is about the bundle, not the surface count, and
+// these two ship together.
+import './contact-form.view.js'
 import {
   writeContact,
   listContacts,

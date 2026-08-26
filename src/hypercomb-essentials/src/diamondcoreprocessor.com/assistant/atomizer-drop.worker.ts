@@ -6,6 +6,10 @@
 // and emits the result for the property sidebar to display.
 
 import { Bee, BeeState, EffectBus } from '@hypercomb/core'
+import './atomizer-sidebar.view.js'
+// Both atomizer surfaces ride the worker that owns the drop they are the
+// visible half of. TWO surfaces, ONE bee.
+import './atomizer-bar.view.js'
 import type { Atomizer, AtomizableTarget, AtomizerProperty } from '@hypercomb/core'
 import { ATOMIZER_IOC_PREFIX, ATOMIZABLE_TARGET_PREFIX } from '@hypercomb/core'
 

@@ -5,6 +5,10 @@
 // fires the open effect, keeping the essentials/shell boundary clean.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+// The tags viewer rides the queen that owns 'tags:view-open'. The FILE
+// lives in pheromones/ — tags ARE pheromones, and pheromone-tiles.view
+// is already its neighbour. ONE importer: dup-inlining rule.
+import '../pheromones/tags-viewer.view.js'
 
 export class TagsViewQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
