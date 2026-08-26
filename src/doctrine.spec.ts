@@ -259,7 +259,6 @@ describe('doctrine ratchets', () => {
       '@hypercomb/SignatureStore (hypercomb-web/src/setup/ensure-install.ts)',
       'BEE_RESOLVER_KEY (hypercomb-dev/src/app/app.config.ts)',
       'BEE_RESOLVER_KEY (hypercomb-web/src/app.config.ts)',
-      'NOTE_MARKS_IOC_KEY (hypercomb-shared/core/note-marks.store.ts)',
       'SHELL_SURFACE_REGISTRY_KEY (hypercomb-shared/core/shell-surface-registry.ts)',
       'THEME_IOC_KEY (hypercomb-shared/core/theme.service.ts)',
       'TOOL_WINDOWS_IOC_KEY (hypercomb-shared/ui/tool-windows.ts)',

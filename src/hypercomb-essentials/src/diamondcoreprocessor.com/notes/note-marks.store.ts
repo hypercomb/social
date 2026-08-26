@@ -1,72 +1,45 @@
-// hypercomb-shared/core/note-marks.store.ts
-//
-// THE NOTE MARK PALETTE — the user's own set of icons, and what each one
-// MEANS.
-//
-// A mark is `{ icon, name, role }`: a Material icon name, the meaning the
-// user gave it ("Decision", "Risk", "Step"), and the role that meaning plays
-// in a notes tree. The ROLE LIVES ON THE MARK, not on the note: renaming or
-// re-roling an icon restyles every note that carries it, which is the whole
-// point of "give an icon meaning".
-//
-// THE THREE ROLES ARE TWO KINDS. `heading` (a section break) and `list` (an
-// item under one) are both CONSTRAINED — a row in either role says one thing
-// and says it in a line. `prose` is the unconstrained role: the longer form,
-// a paragraph elaborating the point it hangs under.
-//
-// That split is the vocabulary the notes tree is built on. A note documents
-// ONE thing, individually — never a relationship between things, which is
-// what pheromones and references are for. A constrained row is therefore a
-// POINT (the structure of a document), and a prose row is a NOTE (its body).
-// The user says "point" and "note"; the code says `heading`/`list` and
-// `prose`, the same way users say tiles and the code says cells.
-//
-// Consequence: nothing hardcodes which icons are points. A view that wants
-// only the structure filters on `roleOf(icon) !== 'prose'`, and the user can
-// re-role any icon at any time to change what their document's outline is.
+// note-marks.store.ts — THE NOTE MARK PALETTE: the user's own set of icons,
+// and what each one MEANS. Renaming or re-roling an icon restyles every note
+// that carries it — that is the whole point of "give an icon meaning". The
+// vocabulary contract (roles, kinds, guards) lives in core
+// (note-marks.types.ts); the doctrine header rides with it there.
 //
 // HIVE CONTENT, NOT BROWSER STATE. The palette is stored in the
 // sign('notes:marks') pool of meaning as a single content-addressed document
 // (Store.putPoolDoc/getPoolDoc), so it survives a browser wipe and travels
 // with the hive like any other content. The meaning carries a COLON so its
-// address can never collide with a root tile's lineage bag — see the pool
-// rules in CLAUDE.md.
+// address can never collide with a root tile's lineage bag.
 //
-// Consumers resolve this via window.ioc.get('@hypercomb.social/NoteMarks')
-// and listen for 'change'; absence collapses to an empty palette (notes then
-// simply carry no mark).
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1.
+// Announces the palette on EffectBus (NOTE_MARKS_CHANGED, at load + every
+// change — replay covers chrome that mounts before this module loads);
+// consumers hold the instance (NOTE_MARKS_IOC_KEY) only to WRITE. Absence
+// collapses to an empty palette — notes then simply carry no mark.
 
-import type { Store } from './store'
+import {
+  EffectBus,
+  NOTE_MARKS_IOC_KEY,
+  NOTE_MARKS_CHANGED,
+  isMarkIcon,
+  type MarkRole,
+  type NoteMark,
+  type NoteMarksProvider,
+} from '@hypercomb/core'
 
 // Colon-carrying meaning: unproducible by any tile slug, so collision-proof.
 const MARKS_MEANING = 'notes:marks'
 const MARKS_SUBKEY = 'v1'
 
-/** What a mark's meaning DOES to the rows that carry it. */
-export type MarkRole = 'heading' | 'list' | 'prose'
-
 const ROLES: ReadonlySet<string> = new Set<string>(['heading', 'list', 'prose'])
 
-/** The two KINDS a role falls into — see the header. `point` rows are
- *  constrained to a line and carry the structure; `note` rows are the prose
- *  body. Views group and filter on this, never on a list of icon names. */
-export type MarkKind = 'point' | 'note'
-
-export const kindOfRole = (role: MarkRole): MarkKind =>
-  role === 'prose' ? 'note' : 'point'
-
-export type NoteMark = {
-  /** Material symbol name, e.g. 'flag'. Also the mark's identity. */
-  icon: string
-  /** The meaning the user gave the icon. May be empty (unnamed but usable). */
-  name: string
-  role: MarkRole
+/** The slice of Store this palette needs — reached through IoC, never an
+ *  import (the store lives in shared until its own Phase 1 move). */
+type PoolDocStore = {
+  initialize(): Promise<unknown>
+  getPool(meaning: string): Promise<unknown>
+  putPoolDoc(pool: unknown, bytes: ArrayBuffer, subkey: string): Promise<unknown>
+  getPoolDoc(pool: unknown, subkey: string): Promise<ArrayBuffer | null | undefined>
 }
-
-/** Material symbol names are lowercase words joined by underscores. Anything
- *  else is rejected outright — the icon name is interpolated into a ligature
- *  span, so it must never carry markup or whitespace. */
-const ICON_RE = /^[a-z0-9_]{1,48}$/
 
 /** Starter palette, written once on the very first load so the rail isn't an
  *  empty box. Editable and deletable like any other mark — the `seeded` flag
@@ -85,10 +58,10 @@ const MAX_MARKS = 64
 
 type MarksDoc = { v?: number; seeded?: boolean; prosed?: boolean; marks?: unknown }
 
-export class NoteMarksStore extends EventTarget {
+export class NoteMarksStore extends EventTarget implements NoteMarksProvider {
 
   #marks: readonly NoteMark[] = []
-  #store: Store | undefined
+  #store: PoolDocStore | undefined
   #loaded = false
   #seeded = false
   /** Whether the one-time prose top-up has run — see `#load`. Separate from
@@ -113,7 +86,7 @@ export class NoteMarksStore extends EventTarget {
   constructor() {
     super()
     window.ioc?.whenReady?.('@hypercomb.social/Store', (s: unknown) => {
-      this.#store = s as Store
+      this.#store = s as PoolDocStore
       void this.#load()
     })
   }
@@ -122,7 +95,7 @@ export class NoteMarksStore extends EventTarget {
    *  the identity) or the name is malformed. */
   public add = (icon: string, role: MarkRole = 'list'): void => {
     const clean = (icon ?? '').trim()
-    if (!ICON_RE.test(clean)) return
+    if (!isMarkIcon(clean)) return
     if (this.#marks.some(m => m.icon === clean)) return
     if (this.#marks.length >= MAX_MARKS) return
     this.#commit([...this.#marks, { icon: clean, name: '', role }])
@@ -145,8 +118,13 @@ export class NoteMarksStore extends EventTarget {
 
   #commit(next: readonly NoteMark[]): void {
     this.#marks = Object.freeze(next.slice())
-    this.dispatchEvent(new Event('change'))
+    this.#announce()
     void this.#persist()
+  }
+
+  #announce(): void {
+    this.dispatchEvent(new Event('change'))
+    EffectBus.emit(NOTE_MARKS_CHANGED, { marks: this.#marks })
   }
 
   async #persist(): Promise<void> {
@@ -200,7 +178,7 @@ export class NoteMarksStore extends EventTarget {
       dirty = true
     }
     if (dirty) void this.#persist()
-    this.dispatchEvent(new Event('change'))
+    this.#announce()
   }
 }
 
@@ -214,7 +192,7 @@ function normalizeMarks(raw: unknown): NoteMark[] {
   for (const item of raw) {
     const rec = item as Partial<NoteMark> | null
     const icon = typeof rec?.icon === 'string' ? rec.icon.trim() : ''
-    if (!ICON_RE.test(icon) || seen.has(icon)) continue
+    if (!isMarkIcon(icon) || seen.has(icon)) continue
     seen.add(icon)
     out.push({
       icon,
@@ -228,11 +206,12 @@ function normalizeMarks(raw: unknown): NoteMark[] {
   return out
 }
 
-/** Icon-name guard, exported so the strip can reject a bad pick before it
- *  ever reaches a note layer. */
-export const isMarkIcon = (v: unknown): v is string =>
-  typeof v === 'string' && ICON_RE.test(v)
+export const noteMarksStore = new NoteMarksStore()
 
-export const NOTE_MARKS_IOC_KEY = '@hypercomb.social/NoteMarks'
-
-register(NOTE_MARKS_IOC_KEY, new NoteMarksStore())
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureNoteMarksRegistered = (): void => {
+  if (!window.ioc?.has?.(NOTE_MARKS_IOC_KEY)) {
+    window.ioc?.register?.(NOTE_MARKS_IOC_KEY, noteMarksStore)
+  }
+}
+ensureNoteMarksRegistered()

@@ -10,7 +10,7 @@
 // to open for a specific element. Registered at `@hypercomb.social/IconEditMode`.
 
 import { EffectBus } from '@hypercomb/core'
-import { requestIconPick } from './icon-pick'
+import { requestIconPick } from '@hypercomb/core'
 
 export const LONG_PRESS_MS = 5000
 

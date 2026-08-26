@@ -17,17 +17,18 @@ import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-
 import type { SettingRow } from '../docked-panel/panel-settings'
 import { type WindowSession, windowsParked } from '../window-session'
 import { registerShellSurface } from '../../core/shell-surface-registry'
-import { fromRuntime } from '../../core/from-runtime'
 import {
   NOTE_MARKS_IOC_KEY,
+  NOTE_MARKS_CHANGED,
   isMarkIcon,
   kindOfRole,
+  requestIconPick,
   type MarkKind,
   type MarkRole,
   type NoteMark,
-  type NoteMarksStore,
-} from '../../core/note-marks.store'
-import { requestIconPick } from '../../core/icon-pick'
+  type NoteMarksChange,
+  type NoteMarksProvider,
+} from '@hypercomb/core'
 import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
 // The reading cycle's wrap arithmetic — shared with the standalone reader so
 // prev/next behave identically wherever notes are read.
@@ -1097,11 +1098,18 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // rows using it render (heading vs list item). The palette is hive
   // content (sign('notes:marks') pool) — see core/note-marks.store.ts.
 
-  readonly #markStore = window.ioc?.get?.<NoteMarksStore>(NOTE_MARKS_IOC_KEY)
+  get #markStore(): NoteMarksProvider | undefined {
+    // Lazy: the palette rides the notes module now and may register after
+    // this strip mounts. Values arrive on EffectBus; the instance is only
+    // needed to write.
+    return window.ioc?.get?.<NoteMarksProvider>(NOTE_MARKS_IOC_KEY)
+  }
 
   /** Live palette. Empty when the store is absent (marks simply don't
    *  render) or before the pool read settles. */
-  readonly marks = fromRuntime(this.#markStore, () => this.#markStore?.marks ?? [])
+  // Instance-free: the palette announces itself on EffectBus at load and on
+  // every change — replay covers this strip mounting before the notes module.
+  readonly marks = signal<readonly NoteMark[]>([])
 
   /** The rail, split into its two KINDS — points (the constrained roles,
    *  `heading` and `list`) and notes (the `prose` role).
@@ -2794,6 +2802,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // says WHICH tiles survived it (including tiles a flattening filter drew
     // in from pages below). Both are last-value-replayed, so a panel opened
     // after the filter was set still lands on the filtered list.
+    this.#cleanups.push(EffectBus.on<NoteMarksChange>(NOTE_MARKS_CHANGED, (p) => {
+      this.marks.set(p?.marks ?? [])
+    }))
     this.#cleanups.push(EffectBus.on<{ labels?: readonly string[] }>('render:cell-count', (p) => {
       this.#renderedCellLabels.set(Array.isArray(p?.labels) ? [...p!.labels!] : [])
     }))

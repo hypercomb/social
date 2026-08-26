@@ -30,6 +30,9 @@
 // propagates to root via the standard merkle cascade.
 
 import { EffectBus } from '@hypercomb/core'
+// The mark palette rides the notes bundle — exactly ONE entry imports it
+// (two importers would inline two instances; ioc is first-wins).
+import './note-marks.store.js'
 import {
   addChildInTree,
   insertAsChild,

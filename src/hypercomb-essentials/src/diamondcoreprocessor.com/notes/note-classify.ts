@@ -83,9 +83,9 @@ export function splitNoteRoots(
   return { lists, notes: prose }
 }
 
-/** The palette's role resolver, or undefined when the shell has not
- *  registered one. Structural: the store lives in the shell and is reached
- *  through IoC, never through an import. */
+/** The palette's role resolver, or undefined when the palette has not
+ *  registered yet. Reached through IoC — the store rides the notes bundle
+ *  (note-marks.store.ts) but the resolver stays late-bound. */
 export function paletteRoleResolver(): RoleResolver | undefined {
   const marks = window.ioc?.get?.('@hypercomb.social/NoteMarks') as
     { roleOf?: RoleResolver } | undefined

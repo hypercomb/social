@@ -213,8 +213,12 @@ events; the census ratchet line is deleted in the same commit.
   ~~`secret-store`~~ ✓ (took the loopback dev-secret seed with it — boot
   path shrank), ~~`secret-strength`~~ ✓, ~~`saved-locations-store`~~ ✓
   (mesh quartet → `sharing/`, announced on EffectBus: `mesh:room-changed` /
-  `mesh:secret-changed` / `mesh:saved-locations-changed`), `note-marks.store`,
-  `recent-portals.store`, `pinned-entrances.store`, `icon-pick`
+  `mesh:secret-changed` / `mesh:saved-locations-changed`),
+  ~~`note-marks.store`~~ ✓ (→ `notes/`, announces `notes:marks-changed`),
+  ~~`icon-pick`~~ ✓ (pure EffectBus sugar over core's own contract — went to
+  CORE, so modules share the helper), `recent-portals.store`,
+  `pinned-entrances.store` (deferred to Phase 2: never IoC-registered, one
+  component consumer — store + component move together as a custom element)
 - [ ] Registries: `tag-registry`, `bouquet-registry`, `name-registry`,
   `group-registry` + the group sources (`websites-group`, `help-group`,
   `games-group`, `launch-group*`), `tile-icon-provider-registry`,

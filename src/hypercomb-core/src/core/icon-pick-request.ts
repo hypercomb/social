@@ -1,20 +1,21 @@
-// hypercomb-shared/core/icon-pick.ts
-//
-// requestIconPick() — ask the shell's icon chooser for an icon and await the
-// answer. This is the plug-in point for ANY window that needs an icon: one
-// call, one promise, no event wiring, no guessing whether the user cancelled.
+// icon-pick-request.ts — requestIconPick(): ask the shell's icon chooser for
+// an icon and await the answer. This is the plug-in point for ANY window that
+// needs an icon: one call, one promise, no event wiring, no guessing whether
+// the user cancelled.
 //
 //     const icon = await requestIconPick({ id: 'notes:mark', store: false })
 //     if (icon) applyIt(icon)          // null ⇒ the user walked away
 //
-// It is sugar over the ICON_PICK_REQUEST / ICON_PICK_RESULT contract in
-// @hypercomb/core — drone modules (which must not import from shared) still
-// emit those events directly, and get identical behaviour.
+// It is sugar over the ICON_PICK_REQUEST / ICON_PICK_RESULT contract beside
+// it in core — and since it lives in core, drone modules and shell chrome
+// share the exact same helper (moved down from hypercomb-shared in the
+// everything-is-a-beehavior Phase 1).
 //
 // The promise ALWAYS settles: on a pick, on the chooser closing, and when a
 // later request supersedes this one.
 
-import { EffectBus, ICON_PICK_REQUEST, ICON_PICK_RESULT, type IconPickRequest, type IconPickResult } from '@hypercomb/core'
+import { EffectBus } from '../effect-bus.js'
+import { ICON_PICK_REQUEST, ICON_PICK_RESULT, type IconPickRequest, type IconPickResult } from '../icon-pick.types.js'
 
 /**
  * Open the icon chooser and resolve with the chosen Material symbol name, or
