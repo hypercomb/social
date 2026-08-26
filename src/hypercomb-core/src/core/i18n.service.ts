@@ -1,7 +1,15 @@
-// hypercomb-shared/core/i18n.service.ts
+// i18n.service.ts — runtime localization service.
 //
-// Runtime localization service. Extends EventTarget so Angular components can
-// bridge to signals via fromRuntime(). Bees resolve via window.ioc.get(I18N_IOC_KEY).
+// Moved to CORE in the everything-is-a-beehavior Phase 1: the I18nProvider
+// contract always lived here, and every surface — shell chrome and modules
+// alike — needs t() from first paint, which is the kernel's definition. The
+// CATALOGS stay where they are for now (shared/i18n, loaded lazily by the
+// boot path); their split along module lines rides Phase 2 — each panel
+// converted to a custom element carries its own keys via
+// registerTranslations, with a drift check on the way.
+//
+// Extends EventTarget so Angular components can bridge to signals via
+// fromRuntime(). Bees resolve via window.ioc.get(I18N_IOC_KEY).
 //
 // Translation catalogs are namespace-scoped: the host app uses 'app', community
 // modules register under their own namespace (e.g., 'revolucionstyle.com').
@@ -11,8 +19,8 @@
 //
 // Interpolation: replaces {token} placeholders with params[token].
 
-import { EffectBus } from '@hypercomb/core'
-import type { I18nProvider } from '@hypercomb/core'
+import { EffectBus } from '../effect-bus.js'
+import type { I18nProvider } from '../i18n.types.js'
 
 const STORAGE_KEY = 'hc:locale'
 const FALLBACK_LOCALE = 'en'
@@ -23,11 +31,15 @@ export class LocalizationService extends EventTarget implements I18nProvider {
   #catalogs = new Map<string, Map<string, Record<string, string>>>()
   // override layer — checked before #catalogs, lets users/community shadow bee translations
   #overrides = new Map<string, Map<string, Record<string, string>>>()
-  #locale: string
+  #locale: string = FALLBACK_LOCALE
   #fallback = FALLBACK_LOCALE
 
   constructor() {
     super()
+    // Core also evaluates in node contexts (CLI/SDK, node-env specs) where
+    // window may be absent or a PARTIAL stub — require the pieces we read.
+    if (typeof window === 'undefined' || !window.location
+      || typeof localStorage === 'undefined' || typeof document === 'undefined') return
 
     // Detect initial locale: ?lang= URL param (session-only) → user preference → browser → fallback
     const urlLang = new URLSearchParams(window.location.search).get('lang')?.split('-')[0]
@@ -175,4 +187,15 @@ export class LocalizationService extends EventTarget implements I18nProvider {
   }
 }
 
-register('@hypercomb.social/I18n', new LocalizationService())
+export const localizationService = new LocalizationService()
+
+/** Register into the live IoC map when one exists (core also runs in node). */
+export const ensureLocalizationRegistered = (): void => {
+  const ioc = (globalThis as unknown as {
+    ioc?: { has?: (k: string) => boolean; register?: (k: string, v: unknown) => void }
+  }).ioc
+  if (!ioc?.has?.('@hypercomb.social/I18n')) {
+    ioc?.register?.('@hypercomb.social/I18n', localizationService)
+  }
+}
+ensureLocalizationRegistered()

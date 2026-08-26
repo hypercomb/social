@@ -63,6 +63,7 @@ const MOVED_KEYS = [
   '@hypercomb.social/UsageTracker',
   '@hypercomb.social/Navigation',   // now a CORE primitive
   '@hypercomb.social/Lineage',      // now a CORE primitive
+  '@hypercomb.social/I18n',         // now a CORE primitive
 ]
 
 /** Value-announce effects that must sit in last-value replay after boot. */

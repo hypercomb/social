@@ -269,9 +269,13 @@ events; the census ratchet line is deleted in the same commit.
   Navigation lookup keeps its IoC seam (specs mock through it) with the core
   singleton as fallback. ~~`aggregation-layer`~~ ✓ and ~~`mixed-group-bag`~~
   ✓ went with the group cluster above.
-- [ ] i18n: `i18n.service` down + split the 2.2 MB en/ja catalogs along
-  module lines via `registerTranslations` (each module carries its own
-  strings — the community-module pattern, applied to ourselves)
+- [x] i18n: `i18n.service` → CORE (the I18nProvider contract always lived
+  there; every surface needs t() from first paint — sixth kernel-seam
+  re-assert; constructor guarded for partial-window node stubs). The
+  CATALOG SPLIT is re-scoped onto Phase 2 by design: each panel converted
+  to a custom element carries its own keys via `registerTranslations`
+  (strings move with their surfaces), with the drift check attached to that
+  process. PHASE 1 COMPLETE.
 - [x] Delete the Angular DI bridge: `tokens.ts` + `shared-providers.ts` are
   GONE — an inject() census proved no shared service was ever
   Angular-injected (only framework types: ElementRef, ChangeDetectorRef…),

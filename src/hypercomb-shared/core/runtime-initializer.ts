@@ -1,6 +1,6 @@
 import { EffectBus, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
 import type { Lineage } from '@hypercomb/core'
-import type { LocalizationService } from './i18n.service'
+import type { LocalizationService } from '@hypercomb/core'
 import type { Navigation } from '@hypercomb/core'
 import { OpfsTreeLogger } from './tree-logger'
 import { collectProximity } from './proximity-registry'

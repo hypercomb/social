@@ -1908,6 +1908,15 @@
       "note": "The chat toggle moves off the controls bar's left rail onto the command line (command-shell.component.html chat-toggle-btn + its .on filled-glyph rule), and the keymap swaps two bare letters: 'a' now opens the assistant (chat.toggle, GLOBAL layer), and the arrangement cycle moved to 'l'/'L' (sequence.cycle/cyclePrev). Tiles 1:1 with source (+ default-keymap.spec.ts), notes carrying: (1) WHY THE BAR WAS THE WRONG HOME — that rail is how-you-SEE (fit, zoom, pin, fullscreen, orientation) and talking is not one of those; the control belongs on the box you type the question into, and the command-shell already had the wiring (chatPanelOpen/chatLabel/chatToggle) with nothing drawing it. (2) BARE LETTERS ARE THE SCARCEST THING IN THE KEYMAP — the quick-menu binding already notes c/x/a/b/k/p were taken; 'a' went to the assistant because it is what you reach for mid-thought, while the arrangement cycle is a view you set once and leave. (3) ONE WAY IN — the key dispatches through keymap:invoke and the chat window translates chat.toggle into the SAME branch as chat:toggle, so shortcut, icon and palette cannot drift apart. (4) NO SECOND OPENER LEFT BEHIND — the 'chat' registry entry, its left-rail exclusion, its isActive case, the #chatOpen signal, the chat:window-state subscription and the .rail-chat stylesheet all went with it; a customizable entry on a bar that no longer owns the act would be an opener in a place that says nothing about what it does. New i18n key in all 14 catalogs: keymap.chat; help-group lists chat.toggle as 'Assistant' under Beyond. note-add is additive — manual drain only.",
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-i18n-service-to-core",
+      "title": "Mirror Phase 1 FINAL: LocalizationService promoted to CORE (sixth kernel primitive); catalog split re-scoped onto Phase 2 panel conversions — Phase 1 COMPLETE tile on the shrink-campaign collection",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
