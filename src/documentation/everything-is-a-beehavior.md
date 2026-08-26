@@ -626,10 +626,52 @@ owns everything acquisition:
    resource — is public forever. The publish path needs the scrutiny the
    server no longer does.
 
+## Running beside development (the collision course)
+
+This campaign deletes from `hypercomb-shared/ui` while development keeps
+working in it. That is survivable, but only deliberately.
+
+**Measured 2026-08-26.** Development made **64 commits touching
+`hypercomb-shared/ui` in 14 days**, and its hottest files are almost exactly
+the panels this campaign has left: `chat-window` (68 file-touches),
+`notes-strip` (39), `features-viewer` (32), `command-shell` (32),
+`command-line` (31), `docked-panel` (29), `tags-viewer` (14),
+`clipboard-panel` (13), `aggregate-index` (8). Nothing has been lost so far —
+every converted panel was verified to have been ported from current bytes —
+but that is because the campaign converted the QUIET panels first. The
+remaining ones are the live ones, so the risk rises from here rather than
+falling.
+
+**The failure mode is silent, which is why it needs a machine.** When
+development edits a panel already retired here, git reports a modify/delete
+conflict, and the obvious resolution — "we deleted it, take the deletion" —
+discards their fix without a trace. No test goes red. The bug they fixed
+quietly returns inside our port. `scripts/check-conversion-drift.cjs` walks
+it: for every retired panel directory it finds the commit that removed it and
+asks whether the base branch has any commit touching that directory which the
+retirement does not already contain. **Run it after every merge and before
+every batch.** It is self-tested — a synthetic post-retirement commit makes it
+fail and name the panel — so a CLEAN result means something.
+
+**Merge small and merge often.** Every merge so far has been cheap because the
+campaign ADDS to essentials and DELETES from shared, which rarely overlaps
+development's edits in place. The recurring conflict is `mirror-queue.json`,
+and it is always append/append: keep BOTH sides, unioned by id, never choose.
+
+**Sequence against the heat, not just the size.** For a panel development is
+actively working in, converting it is a race whatever the guard says — the
+port can be correct at the moment it is written and stale by the time it
+merges. Convert it while it is quiet, or agree a short freeze on that one
+panel and land the conversion inside it. Size is why the heavy panels are hard
+to convert; heat is why they are hard to convert *safely*, and the two are not
+the same problem.
+
 ## Bookkeeping (every chip, every time)
 
 - The chip's mirror pass runs in the same pass, or its entry lands in the
   mirror queue — run or queued, never neither.
+- After a merge from development, `node scripts/check-conversion-drift.cjs`
+  is CLEAN — no retired panel changed on the base after being retired here.
 - The chip's ratchet line (IoC census, barrel entry, structural allowlist) is
   removed in the same commit, so the ratchet clicks tight behind it.
 - New pool meanings minted along the way carry a colon and register through
