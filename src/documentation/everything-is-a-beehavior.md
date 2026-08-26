@@ -221,10 +221,16 @@ events; the census ratchet line is deleted in the same commit.
   existing `portals:recent-changed`). One deliberate exception:
   `pinned-entrances.store` goes with Phase 2 (never IoC-registered, one
   component consumer — store + component move together as a custom element).
-- [ ] Registries: `tag-registry`, `bouquet-registry`, `name-registry`,
-  `group-registry` + the group sources (`websites-group`, `help-group`,
-  `games-group`, `launch-group*`), `tile-icon-provider-registry`,
-  `proximity-registry`
+- [ ] Registries: ~~`bouquet-registry`~~ ✓, ~~`name-registry`~~ ✓ (both →
+  `commands/`, ride slash-behaviour.drone; zero shared consumers — no core
+  contract even needed), `tag-registry` (registers a command root at module
+  scope — check the timing), `group-registry` + the group sources
+  (`websites-group`, `help-group`, `games-group`, `launch-group*`) — moves
+  WITH `mixed-group-bag`, one cluster; `tile-icon-provider-registry`
+  (boot-anchored in web `core-adapter.ts` and dev `main.ts` — remove both
+  anchors in the same pass). `proximity-registry` RE-SCOPED: import-wired
+  into runtime-initializer's warm handler and never IoC-registered — it
+  moves with the boot machinery (Phase 4), not as census debt.
 - [ ] Services: `theme.service`, `view-mode.service`, `trust-service`,
   `usage-tracker`, `movement.service`, `voice-input.service`,
   `cell-suggestion.provider` + `completion-utility` +

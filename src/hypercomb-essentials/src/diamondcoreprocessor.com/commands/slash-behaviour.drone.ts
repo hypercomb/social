@@ -1,5 +1,9 @@
 // diamondcoreprocessor.com/ui/slash-behaviour/slash-behaviour.drone.ts
 import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+// The name + bouquet registries ride the commands bundle — exactly ONE entry
+// imports them (two importers would inline two instances; ioc is first-wins).
+import './name-registry.js'
+import './bouquet-registry.js'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'

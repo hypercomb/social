@@ -1701,6 +1701,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-name-bouquet-registries-down",
+      "title": "Mirror Phase 1 registries (first pair): name-registry + bouquet-registry moved to essentials commands/ riding slash-behaviour.drone — tiles on the shrink-campaign collection",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

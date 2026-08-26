@@ -1,4 +1,8 @@
-// hypercomb-shared/core/bouquet-registry.ts
+// bouquet-registry.ts
+//
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1 —
+// rides the commands bundle (slash-behaviour.drone is the ONE importer).
+// Consumers keep reaching it via IoC ('@hypercomb.social/BouquetRegistry').
 //
 // BOUQUETS — a group of pheromones. Not an optional one: marks in hand ARE a
 // bouquet from the first one, and a name is a later, separate act.
@@ -221,4 +225,12 @@ export class BouquetRegistry extends EventTarget {
   }
 }
 
-register('@hypercomb.social/BouquetRegistry', new BouquetRegistry())
+export const bouquetRegistry = new BouquetRegistry()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureBouquetRegistryRegistered = (): void => {
+  if (!window.ioc?.has?.('@hypercomb.social/BouquetRegistry')) {
+    window.ioc?.register?.('@hypercomb.social/BouquetRegistry', bouquetRegistry)
+  }
+}
+ensureBouquetRegistryRegistered()

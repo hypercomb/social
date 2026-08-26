@@ -1,4 +1,8 @@
-// hypercomb-shared/core/name-registry.ts
+// name-registry.ts
+//
+// Moved down from hypercomb-shared in the everything-is-a-beehavior Phase 1 —
+// rides the commands bundle (slash-behaviour.drone is the ONE importer).
+// Consumers keep reaching it via IoC ('@hypercomb.social/NameRegistry').
 //
 // Named references — give a friendly handle to a lineage path or a raw
 // signature so slash commands can autocomplete against something other
@@ -160,4 +164,12 @@ export class NameRegistry extends EventTarget {
   }
 }
 
-register('@hypercomb.social/NameRegistry', new NameRegistry())
+export const nameRegistry = new NameRegistry()
+
+/** Re-assert into the LIVE IoC map (the llm-provider-registry lesson). */
+export const ensureNameRegistryRegistered = (): void => {
+  if (!window.ioc?.has?.('@hypercomb.social/NameRegistry')) {
+    window.ioc?.register?.('@hypercomb.social/NameRegistry', nameRegistry)
+  }
+}
+ensureNameRegistryRegistered()

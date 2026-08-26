@@ -217,7 +217,6 @@ describe('doctrine ratchets', () => {
     assertRatchet([...new Set(found)].sort(), [
       '@hypercomb.social/AppRoutes (hypercomb-dev/src/app/app.routes.ts)',
       '@hypercomb.social/BootstrapHistory (hypercomb-shared/core/bootstrap-history.ts)',
-      '@hypercomb.social/BouquetRegistry (hypercomb-shared/core/bouquet-registry.ts)',
       '@hypercomb.social/CellSuggestionProvider (hypercomb-shared/core/cell-suggestion.provider.ts)',
       '@hypercomb.social/CommandLineBehaviors (hypercomb-shared/ui/command-line/command-line.component.ts)',
       '@hypercomb.social/CompletionUtility (hypercomb-shared/core/completion-utility.ts)',
@@ -237,7 +236,6 @@ describe('doctrine ratchets', () => {
       '@hypercomb.social/LayerService (hypercomb-web/src/app/layer-service.ts)',
       '@hypercomb.social/Lineage (hypercomb-shared/core/lineage.ts)',
       '@hypercomb.social/MovementService (hypercomb-shared/core/movement.service.ts)',
-      '@hypercomb.social/NameRegistry (hypercomb-shared/core/name-registry.ts)',
       '@hypercomb.social/Navigation (hypercomb-shared/core/navigation.ts)',
       '@hypercomb.social/OpfsInstallFileSource (hypercomb-shared/core/layer-install-sources/opfs-install-file.source.ts)',
       '@hypercomb.social/OpfsTreeLogger (hypercomb-shared/core/tree-logger.ts)',
