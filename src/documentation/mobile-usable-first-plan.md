@@ -34,7 +34,7 @@ yet" (`collection-empty-prompt.drone.ts:56,108-131,175-176`).
 
 ### "Can't join a swarm" — the front door works; everything after it is broken
 
-- WORKS: mobile bar mesh button → join modal (`controls-bar.component.ts:1865-1875`),
+- WORKS: mobile bar mesh button → join modal (`controls-bar.element.ts`),
   phone bottom sheet with 16px inputs (`mesh-modal.component.scss:325-366`), fully
   headless join chain with compiled-in live relay, and the `/​<sig>` meeting-invite deep
   link end-to-end (`invite-capture.ts`, `meeting-invite.worker.ts`).
@@ -54,7 +54,7 @@ yet" (`collection-empty-prompt.drone.ts:56,108-131,175-176`).
 - The command line lives in the header bar, `display:none` ≤599px wide and ≤449px tall
   (`_header-bar.scss:265-309`). The mobile bar's five buttons (back / mic / fit /
   pheromones / mesh) include NO keyboard button; `toggleInput()` exists on controls-bar
-  and is referenced by **no template** — dead code (`controls-bar.component.ts:272-276`).
+  and was referenced by **no template** at the time — dead code then (`controls-bar.element.ts`).
 - The only reveals: an undiscoverable 500ms long-press on an EMPTY hex; the mic button
   (rendered only when SpeechRecognition exists — absent on Firefox/WebViews); the
   empty-collection prompt.

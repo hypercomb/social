@@ -513,8 +513,9 @@ tag becomes an ordinary element surface.
 - [x] Small chrome: ~~`mesh-header`~~ (201), ~~`sync-indicator`~~ (377),
   ~~`upgrade-indicator`~~ (374)
 - [x] ~~`edit-actions`~~ (460)
-- [ ] `controls-bar` (5,851) — the edge-reservation layout box that panels
-  anchor to must survive the rewrite intact
+- [x] ~~`controls-bar`~~ (5,851) — now a light-DOM element that owns mesh and
+  full-view state from EffectBus while preserving the edge-reservation layout
+  variables, draggable rail, mobile view row, breadcrumbs, tags and flyouts
 - [ ] Pure-TS window plumbing moves down as-is: `tool-windows.ts` (the Escape
   cascade's single owner), `runtime-mediator`, `window-rule`,
   `window-session`, `breakpoints`

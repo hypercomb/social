@@ -8,9 +8,8 @@ $rail-width: 3.4rem;
 // short of this so a long list is clipped rather than run under them.
 $actions-corner: 12rem;
 
-:host {
+hc-controls-bar {
   display: contents;
-}
 
 .hci {
   font-family: 'hypercomb-icons';
@@ -21,7 +20,7 @@ $actions-corner: 12rem;
 }
 
 // suppress mouse-click focus on all buttons
-:host button:focus:not(:focus-visible) {
+button:focus:not(:focus-visible) {
   outline: none;
   box-shadow: none;
 }
@@ -1958,4 +1957,5 @@ $actions-corner: 12rem;
   color: #ffc65c;
   background: rgba(255, 198, 92, 0.14);
   box-shadow: inset 0 0 0 1px rgba(255, 198, 92, 0.4);
+}
 }

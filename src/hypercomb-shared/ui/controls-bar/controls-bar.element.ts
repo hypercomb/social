@@ -1,25 +1,10 @@
-// hypercomb-shared/ui/controls-bar/controls-bar.component.ts
+// Framework-free adaptive controls rail.
 // Floating contextual controls pill — minimal by default, mode-adaptive.
 
-import {
-  Component,
-  computed,
-  effect,
-  ElementRef,
-  EventEmitter,
-  inject,
-  input,
-  Output,
-  signal,
-  type AfterViewInit,
-  type OnInit,
-  type OnDestroy,
-} from '@angular/core'
-import { fromRuntime } from '../../core/from-runtime'
-import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '@hypercomb/core'
 import {
   EffectBus,
+  I18N_IOC_KEY,
   consumePointerGesture,
   iconEditMode,
   LONG_PRESS_MS,
@@ -37,6 +22,7 @@ import {
   type IconOverridesProvider,
   type ZoneValueStore,
   type ZoneValueChange,
+  type I18nProvider,
 } from '@hypercomb/core'
 import {
   RECENT_PORTALS_KEY,
@@ -49,6 +35,86 @@ import { isWindowShowing } from '@hypercomb/core'
 import { showHiveRoot } from '@hypercomb/core'
 import type { InstallMonitor } from '../../core/install-monitor'
 import { secretTag } from '@hypercomb/core'
+
+type ReadSignal<T> = () => T
+type StateSignal<T> = ReadSignal<T> & {
+  set(value: T): void
+  update(update: (value: T) => T): void
+  asReadonly(): ReadSignal<T>
+}
+type ReactiveEffect = { run(): void; destroy(): void }
+
+let activeEffect: ReactiveEffectImpl | null = null
+
+class ReactiveEffectImpl implements ReactiveEffect {
+  readonly deps = new Set<Set<ReactiveEffectImpl>>()
+  #queued = false
+  #destroyed = false
+
+  constructor(readonly callback: () => void) {}
+
+  run(): void {
+    if (this.#destroyed) return
+    this.#queued = false
+    for (const dep of this.deps) dep.delete(this)
+    this.deps.clear()
+    const previous = activeEffect
+    activeEffect = this
+    try { this.callback() } finally { activeEffect = previous }
+  }
+
+  schedule(): void {
+    if (this.#queued || this.#destroyed) return
+    this.#queued = true
+    queueMicrotask(() => this.run())
+  }
+
+  destroy(): void {
+    this.#destroyed = true
+    for (const dep of this.deps) dep.delete(this)
+    this.deps.clear()
+  }
+}
+
+function signal<T>(initial: T): StateSignal<T> {
+  let value = initial
+  const subscribers = new Set<ReactiveEffectImpl>()
+  const read = (() => {
+    if (activeEffect) {
+      subscribers.add(activeEffect)
+      activeEffect.deps.add(subscribers)
+    }
+    return value
+  }) as StateSignal<T>
+  read.set = (next: T): void => {
+    if (Object.is(value, next)) return
+    value = next
+    for (const subscriber of [...subscribers]) subscriber.schedule()
+  }
+  read.update = (update: (current: T) => T): void => read.set(update(value))
+  read.asReadonly = (): ReadSignal<T> => read
+  return read
+}
+
+function computed<T>(read: () => T): ReadSignal<T> {
+  return read
+}
+
+function effect(callback: () => void): ReactiveEffect {
+  const runner = new ReactiveEffectImpl(callback)
+  runner.run()
+  return runner
+}
+
+function fromRuntime<T>(target: EventTarget | undefined | null, getter: () => T, event = 'change'): ReadSignal<T> {
+  let initial: T
+  try { initial = getter() } catch { initial = undefined as T }
+  const state = signal(initial)
+  target?.addEventListener(event, () => queueMicrotask(() => {
+    try { state.set(getter()) } catch { /* provider is between states */ }
+  }))
+  return state.asReadonly()
+}
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
@@ -148,7 +214,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // persisted `hc:show-hidden` state at boot (see the initial emit below).
   // 'world-mode' (the world-view share toggle) moved to the header's
   // mesh-header — it now lives beside the solo/swarm icon and only shows in
-  // swarm mode (see MeshHeaderComponent).
+  // swarm mode (see MeshHeaderElement).
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
   // 'notes' moved to the command-line header (the post-it toggle at the right
   // of the input) — notes ride along with every page, so their switch lives in
@@ -222,26 +288,22 @@ function overridesOf(map: Record<string, boolean>): Record<string, boolean> {
   return out
 }
 
-@Component({
-  selector: 'hc-controls-bar',
-  standalone: true,
-  imports: [TranslatePipe],
-  templateUrl: './controls-bar.component.html',
-  styleUrls: ['./controls-bar.component.scss'],
-})
-export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
-
-  #host = inject(ElementRef<HTMLElement>)
-
-  // ── inputs ────────────────────────────────────────────────
-
-  readonly meshPublic = input<boolean | null>(false)
-  @Output() meshToggled = new EventEmitter<void>()
+export class ControlsBarElement extends HTMLElement {
+  #connected = false
+  #renderSync: ReactiveEffect | null = null
+  #pinSync: ReactiveEffect | null = null
+  #controlsEdgeSync: ReactiveEffect | null = null
+  #meshPublic = signal(false)
+  readonly meshPublic = this.#meshPublic.asReadonly()
+  #meshPublicUnsub: (() => void) | null = null
 
   // ── IoC resolution ──────────────────────────────────────
 
   private get navigation(): Navigation {
-    return get('@hypercomb.social/Navigation') as Navigation
+    return (get('@hypercomb.social/Navigation') ?? {
+      segmentsRaw: () => [],
+      goRaw: () => undefined,
+    }) as Navigation
   }
   private get movement(): MovementProvider | undefined {
     return get(MOVEMENT_SERVICE_KEY) as MovementProvider | undefined
@@ -284,6 +346,30 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     get('@hypercomb.social/I18n') as EventTarget | undefined,
     () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
   )
+  #i18n: (I18nProvider & EventTarget) | null = null
+
+  #connectI18n(): void {
+    const connect = (provider: I18nProvider): void => {
+      if (!this.#connected || this.#i18n === provider) return
+      this.#i18n?.removeEventListener?.('change', this.#onI18nChange)
+      this.#i18n = provider as I18nProvider & EventTarget
+      this.#i18n.addEventListener?.('change', this.#onI18nChange)
+      this.#titleTick.update(value => value + 1)
+    }
+    const current = window.ioc?.get?.<I18nProvider>(I18N_IOC_KEY)
+    if (current) connect(current)
+    else window.ioc?.whenReady?.<I18nProvider>(I18N_IOC_KEY, connect)
+  }
+
+  readonly #onI18nChange = (): void => this.#titleTick.update(value => value + 1)
+
+  #t(key: string, params: Record<string, string | number> = {}): string {
+    const translated = this.#i18n?.t(key, params)
+    if (translated && translated !== key) return translated
+    return key.replace(/\{(\w+)\}/g, (whole, token: string) =>
+      params[token] !== undefined ? String(params[token]) : whole,
+    )
+  }
 
   // ── background sync indicator ──
   private get installMonitor(): InstallMonitor | undefined {
@@ -771,7 +857,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     togglePublish: () => EffectBus.emit('publish:view-toggle', {}),
     cut: () => this.cut(),
     copy: () => this.copy(),
-    remove: () => this.remove(),
+    remove: () => this.removeItem(),
     moveItem: () => this.moveItem(),
     promoteToParent: () => this.promoteToParent(),
     makePublic: () => this.makePublic(),
@@ -824,7 +910,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // zoom_in/zoom_out is the lens-style magnifying glass (circle +
       // handle). Visually off-centre by default because the handle
       // extends bottom-right of the lens — the .zoom-btn class in
-      // controls-bar.component.scss bumps the icon size and translates
+      // controls-bar.element.scss bumps the icon size and translates
       // it so the lens lands roughly on the button's geometric centre.
       case 'zoom-out':     return 'zoom_out'
       case 'zoom-in':      return 'zoom_in'
@@ -1143,12 +1229,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  the ONLY writer of the 'pin' lock: navigating away releases it, arriving on
    *  a pinned layer re-takes it. Locks held by other owners (editor, palette)
    *  are untouched. */
-  #pinSync = effect(() => {
+  #syncPin = (): void => {
     const pinned = this.pinnedHere()
     if (pinned) this.gate?.lock?.(PIN_OWNER)
     else if (this.gate?.lockedBy?.(PIN_OWNER)) this.gate.unlock(PIN_OWNER)
     this.#pinHeld = pinned
-  })
+  }
 
   /** Gate released our pin from outside (the Escape cascade's `clear()`) —
    *  unpin the layer so the stored setting matches what the viewport does. */
@@ -1371,7 +1457,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #iconOverrideUnsub: (() => void) | null = null
   #onIconOverride = (): void => this.iconRev.update(v => v + 1)
 
-  ngOnInit(): void {
+  connectedCallback(): void {
+    if (this.#connected) return
+    this.#connected = true
+    this.#connectI18n()
+    this.#meshPublicUnsub = EffectBus.on<{ public?: boolean }>('mesh:public-changed', ({ public: meshPublic }) => {
+      this.#meshPublic.set(!!meshPublic)
+    })
+
     // Host-level capture guard so a drag-scroll's trailing click never
     // reaches an icon. On the host (not the list) because the list is
     // created and destroyed by the mode/dock branches.
@@ -1437,7 +1530,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The location dialog's "start" confirmed (join mode) — flip to public
     // now that the where/secret are set. Idempotent: already public → no-op.
     this.#meshJoinUnsub = EffectBus.on('mesh:join', () => {
-      if (!this.meshPublic()) this.meshToggled.emit()
+      if (!this.meshPublic()) EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic' })
     })
 
     // The swarm reports that it is public but has nowhere to publish — it
@@ -1647,21 +1740,27 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // the page the session opens on never emits `navigate`, so without this the
     // first page of every session came up unfitted while the switch read green.
     if (this.#fitMode() === 'global') this.#enableFitLocked(true)
-  }
 
-  ngAfterViewInit(): void {
+    this.#pinSync = effect(this.#syncPin)
+    this.#renderSync = effect(() => this.#render())
+
     // Cache the stage element now that it is in the DOM. Re-validate any
     // free position restored from localStorage against the actual pill
     // size: if it no longer fully fits the viewport (it shrank since the
     // last session), fall back to the left-dock default. Docked pills
     // are CSS-positioned on the edge, so they need no re-validation here.
-    this.#pillStageEl = this.#host.nativeElement.querySelector('.pill-stage')
+    this.#pillStageEl = this.querySelector('.pill-stage')
     if (!this.#dockSide()) {
       const pos = this.#pillPos()
       if (pos && !this.#fitsOnScreen(pos.x, pos.y)) this.#resetToDefault()
     }
     this.#observeHeaderHeight()
     this.#observeControlsEdge()
+    this.#controlsEdgeSync = effect(() => {
+      this.#dockSide()
+      this.isMobile()
+      queueMicrotask(this.#measureControlsEdge)
+    })
   }
 
   /** Publish how much of a screen edge the control bar occupies, into
@@ -1678,7 +1777,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // Angular re-creates `.pill-stage` (dock/mobile class swaps, re-render), and
     // a detached node reports a 0×0 box — which would silently drop the
     // reservation and let a panel slide straight under the bar.
-    const stage = this.#host.nativeElement.querySelector('.pill-stage') as HTMLElement | null
+    const stage = this.querySelector('.pill-stage') as HTMLElement | null
     if (stage && stage !== this.#observedStage) {
       this.#controlsObserver?.disconnect()
       this.#observedStage = stage
@@ -1729,16 +1828,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     else root.style.removeProperty('--hc-controls-left-top')
   }
 
-  /** Re-measure whenever the bar changes edge (or mobile flips) — a dock swap
-   *  moves the pill without necessarily resizing it, so the ResizeObserver
-   *  below can't see it. Field initializer: `effect()` needs an injection
-   *  context, which ngAfterViewInit is not. */
-  #controlsEdgeSync = effect(() => {
-    this.#dockSide()
-    this.isMobile()
-    queueMicrotask(this.#measureControlsEdge)
-  })
-
   #observeControlsEdge(): void {
     // The ResizeObserver is attached inside the measure itself, so it always
     // follows the CURRENT stage element rather than the one that existed here.
@@ -1775,7 +1864,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#headerObserver.observe(header)
   }
 
-  ngOnDestroy(): void {
+  disconnectedCallback(): void {
+    if (!this.#connected) return
+    this.#connected = false
     // The pickers' window listeners are capture-phase and live only while
     // open — closing releases them.
     this.closeTourMenu()
@@ -1844,6 +1935,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#secretChangedUnsub?.()
     this.#portalsChangedUnsub?.()
     this.#movedUnsub?.()
+    this.#meshPublicUnsub?.()
+    this.#renderSync?.destroy()
+    this.#renderSync = null
+    this.#pinSync?.destroy()
+    this.#pinSync = null
+    this.#controlsEdgeSync?.destroy()
+    this.#controlsEdgeSync = null
+    this.#i18n?.removeEventListener?.('change', this.#onI18nChange)
+    this.#i18n = null
+    this.removeEventListener('click', this.#onHostClickCapture, { capture: true })
     this.#clearIconPress()
     this.#detachListDrag()   // in case we're torn down mid drag-scroll
     if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)
@@ -2773,7 +2874,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'copy' })
   }
 
-  readonly remove = (): void => {
+  readonly removeItem = (): void => {
     EffectBus.emit('controls:action', { action: 'remove' })
   }
 
@@ -2815,7 +2916,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       EffectBus.emit('mesh:open-modal', { join: true })
       return
     }
-    this.meshToggled.emit()
+    EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic' })
   }
 
   readonly toggleClipboard = async (): Promise<void> => {
@@ -2986,12 +3087,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Capture-phase guard on the host: kills the click that trails a
    *  drag-scroll before it reaches any button underneath. */
   #installClickSwallow(): void {
-    this.#host.nativeElement.addEventListener('click', (event: Event) => {
-      if (!this.#swallowNextClick) return
-      this.#swallowNextClick = false
-      event.stopPropagation()
-      event.preventDefault()
-    }, { capture: true })
+    this.addEventListener('click', this.#onHostClickCapture, { capture: true })
+  }
+
+  #onHostClickCapture = (event: Event): void => {
+    if (!this.#swallowNextClick) return
+    this.#swallowNextClick = false
+    event.stopPropagation()
+    event.preventDefault()
   }
 
   // ── swipe-to-go-back (right-to-left from right edge) ──
@@ -3160,7 +3263,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** True when the pill at (x, y) sits fully within the viewport. */
   #fitsOnScreen(x: number, y: number): boolean {
     if (!this.#pillStageEl) {
-      this.#pillStageEl = this.#host.nativeElement.querySelector('.pill-stage')
+      this.#pillStageEl = this.querySelector('.pill-stage')
     }
     const w = this.#pillStageEl?.offsetWidth ?? 0
     const h = this.#pillStageEl?.offsetHeight ?? 0
@@ -3199,7 +3302,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // Lazily resolve the stage element so clamping is accurate even
     // before the first drag (window resize, localStorage restore).
     if (!this.#pillStageEl) {
-      this.#pillStageEl = this.#host.nativeElement.querySelector('.pill-stage')
+      this.#pillStageEl = this.querySelector('.pill-stage')
     }
     const w = this.#pillStageEl?.offsetWidth ?? 0
     const h = this.#pillStageEl?.offsetHeight ?? 0
@@ -3246,6 +3349,586 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     } catch { /* ignore */ }
   }
 
+  #icon(glyph: string, filled = false): HTMLSpanElement {
+    const icon = document.createElement('span')
+    icon.className = 'mat-sym'
+    icon.classList.toggle('filled', filled)
+    icon.textContent = glyph
+    return icon
+  }
+
+  #button(className: string, label: string, glyph: string, action: (event: MouseEvent) => void): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = className
+    button.setAttribute('aria-label', label)
+    button.addEventListener('click', event => action(event))
+    button.appendChild(this.#icon(glyph))
+    return button
+  }
+
+  #separator(): HTMLSpanElement {
+    const separator = document.createElement('span')
+    separator.className = 'sep-crumb'
+    separator.textContent = '◆'
+    return separator
+  }
+
+  #renderTourMenu(): HTMLElement | null {
+    if (!this.tourMenuOpen()) return null
+    const menu = document.createElement('div')
+    menu.className = 'tour-menu'
+    menu.style.left = `${this.tourMenuPos().x}px`
+    menu.style.top = `${this.tourMenuPos().y}px`
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', this.#t('controls.tutorial.levels'))
+    const title = document.createElement('div')
+    title.className = 'tour-menu-title'
+    title.textContent = this.#t('controls.tutorial.levels')
+    menu.appendChild(title)
+    for (const course of this.tourCourses()) {
+      const group = document.createElement('div')
+      group.className = 'tour-group'
+      const row = this.#button('tour-row', course.label, 'emoji_nature', () => this.pickTour(course.level))
+      row.setAttribute('role', 'menuitem')
+      const rowIcon = row.firstElementChild
+      const label = document.createElement('span')
+      label.className = 'tour-label'
+      label.textContent = course.label
+      const count = document.createElement('span')
+      count.className = 'tour-count'
+      count.textContent = String(course.count)
+      row.replaceChildren(...(rowIcon ? [rowIcon, label, count] : [label, count]))
+      group.appendChild(row)
+      if (course.lessons.length) {
+        const expanded = this.isTourExpanded(course.level)
+        const caret = this.#button('tour-caret', this.#t('controls.tutorial.lessons'), expanded ? 'expand_less' : 'expand_more', event => this.toggleTourCourse(course.level, event))
+        caret.setAttribute('aria-expanded', String(expanded))
+        group.appendChild(caret)
+      }
+      menu.appendChild(group)
+      if (this.isTourExpanded(course.level)) {
+        for (const lesson of course.lessons) {
+          const lessonButton = document.createElement('button')
+          lessonButton.type = 'button'
+          lessonButton.className = 'tour-lesson'
+          lessonButton.setAttribute('role', 'menuitem')
+          lessonButton.addEventListener('click', () => this.pickLesson(lesson.id))
+          const lessonLabel = document.createElement('span')
+          lessonLabel.className = 'tour-label'
+          lessonLabel.textContent = lesson.label
+          lessonButton.appendChild(lessonLabel)
+          menu.appendChild(lessonButton)
+        }
+      }
+    }
+    return menu
+  }
+
+  #renderHomeMenu(): HTMLElement | null {
+    if (!this.homeMenuOpen()) return null
+    const menu = document.createElement('div')
+    menu.className = 'tour-menu home-menu'
+    menu.style.left = `${this.homeMenuPos().x}px`
+    menu.style.top = `${this.homeMenuPos().y}px`
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', this.#t('controls.home.recent'))
+    const title = document.createElement('div')
+    title.className = 'tour-menu-title'
+    title.textContent = this.#t('controls.home.recent')
+    menu.appendChild(title)
+    for (const entry of this.homeEntries()) {
+      const group = document.createElement('div')
+      group.className = 'tour-group'
+      const pinned = this.isPinnedPortal(entry)
+      const row = document.createElement('button')
+      row.type = 'button'
+      row.className = 'tour-row'
+      row.classList.toggle('is-pinned', pinned)
+      row.setAttribute('role', 'menuitem')
+      row.addEventListener('click', () => this.pickHomePortal(entry))
+      const label = document.createElement('span')
+      label.className = 'tour-label'
+      const name = document.createElement('span')
+      name.className = 'home-name'
+      name.textContent = entry.label || this.homePortalPath(entry)
+      const path = document.createElement('span')
+      path.className = 'home-path'
+      path.textContent = this.homePortalPath(entry)
+      label.append(name, path)
+      row.append(this.#icon(pinned ? 'home_pin' : 'door_open'), label)
+      const forgetLabel = this.#t('controls.home.forget')
+      const forget = this.#button('tour-caret home-forget', forgetLabel, 'close', event => this.forgetHomePortal(entry, event))
+      forget.title = forgetLabel
+      group.append(row, forget)
+      menu.appendChild(group)
+    }
+    const root = this.#button('tour-row home-root', this.#t('controls.home.root'), 'home', () => this.goHiveRoot())
+    root.setAttribute('role', 'menuitem')
+    const rootLabel = document.createElement('span')
+    rootLabel.className = 'tour-label'
+    rootLabel.textContent = this.#t('controls.home.root')
+    root.replaceChildren(this.#icon('home'), rootLabel)
+    menu.appendChild(root)
+    return menu
+  }
+
+  #renderFitMenu(): HTMLElement | null {
+    if (!this.fitMenuOpen()) return null
+    const menu = document.createElement('div')
+    menu.className = 'fit-menu'
+    menu.style.left = `${this.fitMenuPos().x}px`
+    menu.style.top = `${this.fitMenuPos().y}px`
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', this.#t('controls.view-menu'))
+    const title = document.createElement('div')
+    title.className = 'tour-menu-title'
+    title.textContent = this.#t('controls.view-menu')
+    menu.appendChild(title)
+    const addRow = (glyph: string, key: string, action: () => void, checked?: boolean): void => {
+      const row = document.createElement('button')
+      row.type = 'button'
+      row.className = 'fit-row'
+      row.setAttribute('role', checked === undefined ? 'menuitem' : 'menuitemcheckbox')
+      if (checked !== undefined) {
+        row.setAttribute('aria-checked', String(checked))
+        row.classList.toggle('on', checked)
+      }
+      row.addEventListener('click', action)
+      const label = document.createElement('span')
+      label.className = 'fit-label'
+      label.textContent = this.#t(key)
+      row.append(this.#icon(glyph), label)
+      if (checked) {
+        const check = this.#icon('check')
+        check.classList.add('fit-check')
+        row.appendChild(check)
+      }
+      menu.appendChild(row)
+    }
+    addRow('center_focus_strong', 'controls.fit-now', this.fitNow)
+    addRow('fit_screen', 'controls.fit-global', this.toggleGlobalFit, this.fitLocked())
+    addRow('aspect_ratio', 'controls.pin-size', this.togglePinSize, this.pinnedSizeHere())
+    addRow('my_location', 'controls.pin-position', this.togglePinPosition, this.pinnedPositionHere())
+    const zoom = document.createElement('div')
+    zoom.className = 'fit-zoom-row'
+    zoom.append(
+      this.#button('fit-zoom-btn', this.#t('controls.zoom-out'), 'zoom_out', () => this.zoomOut()),
+      this.#button('fit-zoom-btn', this.#t('controls.zoom-in'), 'zoom_in', () => this.zoomIn()),
+    )
+    menu.appendChild(zoom)
+    return menu
+  }
+
+  #renderBreadcrumb(): HTMLElement {
+    const crumb = document.createElement('div')
+    crumb.className = 'breadcrumb-top'
+    crumb.classList.toggle('faded', this.isMobile())
+    const privacy = document.createElement('span')
+    privacy.className = this.meshPublic() ? 'public-crumb' : 'private-crumb'
+    privacy.textContent = this.#t(this.meshPublic() ? 'breadcrumb.public' : 'breadcrumb.private')
+    if (this.meshPublic()) privacy.style.color = this.shieldColor()
+    crumb.append(privacy, this.#separator())
+    const domain = document.createElement('span')
+    domain.className = 'domain-crumb crumb-link'
+    domain.textContent = this.activeDomain()
+    domain.addEventListener('click', () => this.navigateTo([]))
+    crumb.appendChild(domain)
+    const segments = this.pathSegments()
+    segments.forEach((segment, index) => {
+      const part = document.createElement('span')
+      if (index === segments.length - 1) {
+        crumb.appendChild(this.#separator())
+        part.className = 'branch-crumb'
+        const before = document.createElement('span')
+        before.className = 'branch-bracket'
+        before.textContent = '['
+        const after = before.cloneNode() as HTMLSpanElement
+        after.textContent = ']'
+        part.append(before, document.createTextNode(segment.name), after)
+      } else {
+        part.className = 'domain-crumb crumb-link'
+        part.append(this.#separator(), document.createTextNode(segment.name))
+        part.addEventListener('click', () => this.navigateTo(segment.target))
+      }
+      crumb.appendChild(part)
+    })
+    if (this.hoveredCell()) {
+      const hover = document.createElement('span')
+      hover.className = 'hover-crumb'
+      hover.textContent = this.hoveredCell() ?? ''
+      crumb.append(this.#separator(), hover)
+    }
+    if (this.secretWords()) {
+      const words = document.createElement('span')
+      words.className = 'secret-crumb'
+      words.textContent = this.secretWords()
+      crumb.append(this.#separator(), words)
+    }
+    const security = document.createElement('span')
+    security.className = this.hasSecret() ? 'secure-crumb' : 'unsecure-crumb'
+    security.textContent = this.#t(this.hasSecret() ? 'breadcrumb.secure' : 'breadcrumb.unsecured')
+    if (this.hasSecret()) security.style.color = this.shieldColor()
+    crumb.append(this.#separator(), security)
+    const installState = this.installState()
+    if (installState !== 'idle') {
+      const install = document.createElement('span')
+      install.className = 'install-crumb'
+      install.dataset['state'] = installState
+      const key = installState === 'checking' ? 'breadcrumb.checking'
+        : installState === 'syncing' ? 'breadcrumb.installing'
+          : installState === 'error' ? 'breadcrumb.sync-error'
+            : this.installChangedFiles() ? 'breadcrumb.installed-count' : 'breadcrumb.installed'
+      install.textContent = this.#t(key, { count: this.installChangedFiles() })
+      crumb.append(this.#separator(), install)
+    }
+    return crumb
+  }
+
+  #renderTags(): HTMLElement | null {
+    if (!this.tags().length) return null
+    const floating = document.createElement('div')
+    floating.className = 'tag-float'
+    floating.classList.toggle('rail-left', this.dockSide() === 'left' && !this.isMobile())
+    floating.classList.toggle('mobile', this.isMobile())
+    floating.classList.toggle('expanded', this.tagsExpanded())
+    const scopeLabel = this.#t('tags.panel.open')
+    const scope = this.#button('tag-scope', scopeLabel, this.scopeIcon(), () => this.openPheromones())
+    scope.dataset['scope'] = this.tagScope()
+    scope.title = `${scopeLabel} — ${this.#t(`tags.scope-${this.tagScope()}`)}`
+    floating.appendChild(scope)
+    const strip = document.createElement('div')
+    strip.className = 'tag-strip'
+    strip.dataset['consumesWheel'] = ''
+    if (this.tagsExpanded()) {
+      const set = document.createElement('span')
+      set.className = 'tag-scope-set'
+      const label = this.#t(`tags.scope-${this.tagScope()}`)
+      const option = this.#button('tag-scope-opt selected', label, this.scopeIcon(), () => this.cycleTagScope())
+      option.title = label
+      set.appendChild(option)
+      strip.appendChild(set)
+    }
+    for (const tag of this.tags()) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'tag-crumb'
+      button.classList.toggle('tag-active', this.isTagFilterActive(tag.name))
+      button.classList.toggle('tag-hovered', this.isTagHovered(tag.name))
+      button.style.setProperty('--tag-color', this.tagColor(tag.name))
+      button.textContent = tag.name
+      button.addEventListener('pointerenter', event => this.previewTag(event, tag.name))
+      button.addEventListener('pointerleave', this.endTagPreview)
+      button.addEventListener('click', () => this.toggleTagFilter(tag.name))
+      strip.appendChild(button)
+    }
+    floating.appendChild(strip)
+    const expanded = this.tagsExpanded()
+    const expandLabel = this.#t(expanded ? 'tags.collapse' : 'tags.expand')
+    const expand = this.#button('tag-expand', expandLabel, expanded ? 'expand_more' : 'expand_less', () => this.toggleTagsExpanded())
+    expand.classList.toggle('open', expanded)
+    expand.setAttribute('aria-expanded', String(expanded))
+    expand.title = expandLabel
+    floating.appendChild(expand)
+    return floating
+  }
+
+  #renderMobileControls(): HTMLElement {
+    const nav = document.createElement('div')
+    nav.className = 'controls-section mobile-nav'
+    if (this.viewRowOpen()) {
+      const row = document.createElement('div')
+      row.className = 'mobile-view-row'
+      row.dataset['consumesWheel'] = ''
+      const fullscreen = this.#button('ctl-btn fullscreen-btn', this.#t('controls.fullscreen'), this.isFullscreen() ? 'fullscreen_exit' : 'fullscreen', () => this.toggleFullscreen())
+      fullscreen.classList.toggle('active', this.isFullscreen())
+      const lanes = this.#button('ctl-btn lanes-btn', this.#t('controls.lanes'), 'view_column', () => this.stepLanes())
+      lanes.classList.toggle('active', this.lanesActive())
+      lanes.addEventListener('contextmenu', event => { event.preventDefault(); this.releaseLanes() })
+      const digit = document.createElement('span')
+      digit.className = 'lane-digit'
+      digit.setAttribute('aria-hidden', 'true')
+      digit.textContent = String(this.laneCount())
+      lanes.appendChild(digit)
+      const rotate = this.#button('ctl-btn rotate-btn', this.#t('controls.rotate'), 'hexagon', () => this.rotateHexes())
+      const arrange = this.#button('ctl-btn arrange-btn', this.#t('controls.arrange'), 'grid_view', () => this.cycleArrangement())
+      const pheromone = this.#button('ctl-btn pheromone-btn', this.#t('tags.panel.open'), 'label', () => this.openPheromones())
+      const pin = this.#button('ctl-btn pin-btn', this.#t('controls.pin'), 'push_pin', () => this.togglePin())
+      pin.classList.toggle('active', this.pinnedHere())
+      pin.firstElementChild?.classList.toggle('filled', this.pinnedHere())
+      row.append(fullscreen, lanes, rotate, arrange, pheromone, pin)
+      nav.appendChild(row)
+    }
+    const left = document.createElement('div')
+    left.className = 'mobile-side left'
+    left.dataset['consumesWheel'] = ''
+    const back = this.#button('ctl-btn back-btn', this.#t('controls.go-back'), 'arrow_back', () => this.onBackClick())
+    back.classList.toggle('disabled', !this.canGoBack())
+    back.disabled = !this.canGoBack()
+    back.addEventListener('pointerdown', this.onBackPointerDown)
+    left.appendChild(back)
+    if (this.pinnedHere()) {
+      const spacer = document.createElement('div')
+      spacer.className = 'ctl-btn pinned-spacer'
+      spacer.setAttribute('aria-hidden', 'true')
+      left.appendChild(spacer)
+    } else {
+      const fit = this.#button('ctl-btn fit-btn', this.#t('controls.fit-content'), 'center_focus_strong', event => this.fitOrCenter(event))
+      fit.classList.toggle('fit-global', this.fitButtonState() === 'global')
+      fit.addEventListener('dblclick', () => this.lockFit())
+      left.appendChild(fit)
+    }
+    if (this.isLandscape()) {
+      const keyboard = this.#button('ctl-btn keyboard-btn', this.#t('controls.keyboard'), 'keyboard', () => this.toggleInput())
+      keyboard.classList.toggle('active', this.inputVisible())
+      keyboard.firstElementChild?.classList.toggle('filled', this.inputVisible())
+      left.appendChild(keyboard)
+    }
+    const camera = this.#button('ctl-btn camera-btn mobile-center', this.#t('controls.camera'), 'photo_camera', () => this.openCamera())
+    const right = document.createElement('div')
+    right.className = 'mobile-side right'
+    right.dataset['consumesWheel'] = ''
+    const view = this.#button('ctl-btn view-row-btn', this.#t('controls.view-row'), this.viewRowOpen() ? 'expand_more' : 'expand_less', event => this.toggleViewRow(event))
+    view.classList.toggle('active', this.viewRowOpen())
+    const mesh = this.#button('ctl-btn mesh-mobile-btn', this.#t(this.meshPublic() ? 'mesh.swarm' : 'mesh.solo'), this.meshPublic() ? 'groups' : 'person', () => this.toggleMeshPublic())
+    mesh.classList.toggle('shield-mode', this.meshPublic())
+    mesh.firstElementChild?.classList.toggle('filled', this.meshPublic())
+    right.append(view, mesh)
+    nav.append(left, camera, right)
+    return nav
+  }
+
+  #renderDesktopControls(): HTMLElement {
+    const rows = document.createElement('div')
+    rows.className = 'controls-rows'
+    rows.classList.toggle('editing', this.editMode())
+    const list = document.createElement('div')
+    list.className = 'controls-row'
+    list.classList.toggle('drag-scrolling', this.dragScrolling())
+    list.addEventListener('pointerdown', this.onListDragStart)
+    if (this.dockSide() === 'left') {
+      const tutorialLabel = this.#t('controls.tutorial')
+      const tutorial = this.#button('ctl-btn rail-tutorial', tutorialLabel, 'emoji_nature', event => this.startTutorial(event))
+      tutorial.classList.toggle('active', this.tourMenuOpen())
+      tutorial.dataset['ctrlId'] = 'tutorial'
+      tutorial.title = `${tutorialLabel} — ${this.#t('controls.tutorial.pick')}`
+      const pin = this.#button('ctl-btn rail-pin', this.#t('controls.pin'), 'push_pin', () => this.togglePin())
+      pin.classList.toggle('active', this.locked())
+      pin.classList.toggle('lock-bump', this.lockBump())
+      pin.dataset['ctrlId'] = 'pin'
+      pin.firstElementChild?.classList.toggle('filled', this.locked())
+      const homePortal = this.homePortal()
+      const homeLabel = homePortal
+        ? this.#t('controls.home.portal', { portal: this.homeLabel() })
+        : this.#t('controls.home')
+      const home = this.#button('ctl-btn rail-home', homeLabel, homePortal ? 'home_pin' : 'home', event => this.goHome(event))
+      home.classList.toggle('active', this.homeMenuOpen())
+      home.classList.toggle('on-portal', !!homePortal)
+      home.dataset['ctrlId'] = 'home'
+      home.title = `${homeLabel} — ${this.#t('controls.home.pick')}`
+      list.append(tutorial, pin, home)
+    }
+    for (const ctrl of this.railControls()) {
+      const button = this.#button('ctl-btn', this.#t(ctrl.label), this.iconSymbol(ctrl), event => this.onCtrlClick(ctrl, event))
+      button.dataset['ctrlId'] = ctrl.id
+      button.classList.toggle('active', ctrl.id !== 'fit' && this.isActive(ctrl))
+      button.classList.toggle('lock-bump', ctrl.id === 'pin' && this.lockBump())
+      button.classList.toggle('muted', !this.isEnabled(ctrl))
+      button.classList.toggle('editing', this.editMode())
+      button.classList.toggle('text-only-btn', ctrl.id === 'text-only')
+      button.classList.toggle('mic-btn', ctrl.id === 'voice')
+      button.classList.toggle('bee-btn', ctrl.id === 'bees')
+      button.classList.toggle('clipboard-btn', ctrl.id === 'clipboard')
+      button.classList.toggle('fit-btn', ctrl.id === 'fit')
+      button.classList.toggle('fit-global', ctrl.id === 'fit' && this.fitButtonState() === 'global')
+      button.classList.toggle('zoom-btn', ctrl.id === 'zoom-in' || ctrl.id === 'zoom-out')
+      button.classList.toggle('icon-jiggle', this.iconEditOn())
+      button.classList.toggle('reordering', this.reorderId() === ctrl.id)
+      button.firstElementChild?.classList.toggle('filled', this.isActive(ctrl) && ctrl.id !== 'fit')
+      button.addEventListener('contextmenu', event => this.onCtrlContext(ctrl, event))
+      button.addEventListener('pointerdown', event => this.onCtrlPointerDown(ctrl, event))
+      button.addEventListener('pointerup', this.onIconPressUp)
+      button.addEventListener('pointerleave', this.onIconPressUp)
+      const badge = this.badgeValue(ctrl)
+      if (ctrl.id === 'clipboard' && badge > 0) {
+        const value = document.createElement('span')
+        value.className = 'badge'
+        value.textContent = String(badge)
+        button.appendChild(value)
+      }
+      if (ctrl.id === 'fit' && !this.editMode()) {
+        const caret = document.createElement('span')
+        caret.className = 'fit-caret'
+        caret.setAttribute('aria-hidden', 'true')
+        caret.textContent = '▾'
+        caret.addEventListener('click', this.onFitCaretClick)
+        caret.addEventListener('contextmenu', event => this.onCtrlContext(ctrl, event))
+        button.appendChild(caret)
+      }
+      list.appendChild(button)
+    }
+    const footer = document.createElement('div')
+    footer.className = 'rail-footer'
+    const edit = this.#button('ctl-btn expand-toggle', this.#t(this.editMode() ? 'controls.collapse' : 'controls.expand'), '', () => this.toggleEditMode())
+    edit.classList.toggle('editing', this.editMode())
+    edit.addEventListener('contextmenu', this.onEditToggleContext)
+    const chevron = document.createElement('span')
+    chevron.className = 'expand-chevron'
+    chevron.classList.toggle('up', this.editMode())
+    chevron.textContent = '▸'
+    edit.replaceChildren(chevron)
+    const back = this.#button('ctl-btn rail-back', this.#t('controls.go-back'), 'arrow_back', () => this.goBack())
+    back.dataset['ctrlId'] = 'back'
+    back.classList.toggle('disabled', !this.canGoBack())
+    back.disabled = !this.canGoBack()
+    footer.append(edit, back)
+    rows.append(list, footer)
+    return rows
+  }
+
+  #renderAtomizeControls(): DocumentFragment {
+    const fragment = document.createDocumentFragment()
+    const mode = document.createElement('div')
+    mode.className = 'controls-section atomize-mode'
+    const label = document.createElement('span')
+    label.className = 'mode-label'
+    label.textContent = this.#t('controls.atomize')
+    const count = document.createElement('span')
+    count.className = 'atomize-count'
+    count.textContent = String(this.atomizeAtomCount())
+    mode.append(label, count)
+    const divider = (): HTMLDivElement => {
+      const element = document.createElement('div')
+      element.className = 'controls-divider'
+      return element
+    }
+    const strategies = document.createElement('div')
+    strategies.className = 'controls-section strategy-picker'
+    for (const name of this.STRATEGY_NAMES) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'ctl-btn strategy-btn'
+      button.classList.toggle('active', this.atomizeStrategy() === name)
+      button.setAttribute('aria-label', this.#t(`controls.atomize-${name}`))
+      button.addEventListener('click', () => this.setAtomizeStrategy(name))
+      const icon = document.createElement('span')
+      icon.className = 'strategy-icon'
+      icon.dataset['strategy'] = name
+      icon.textContent = name.charAt(0).toUpperCase()
+      button.appendChild(icon)
+      strategies.appendChild(button)
+    }
+    const reassemble = this.#button('ctl-btn', this.#t('controls.atomize-reassemble'), 'join_full', () => this.reassemble())
+    ;(reassemble.firstElementChild as HTMLElement | null)?.style.setProperty('color', '#4caf50')
+    const close = this.#button('ctl-btn', this.#t('controls.atomize-close'), 'close', () => this.closeAtomize())
+    fragment.append(mode, divider(), strategies, divider(), reassemble, close)
+    return fragment
+  }
+
+  #renderPill(): HTMLElement {
+    const stage = document.createElement('div')
+    stage.className = 'pill-stage'
+    const mobile = this.isMobile()
+    const dock = this.dockSide()
+    const position = this.pillPos()
+    stage.classList.toggle('faded', !this.visible())
+    stage.classList.toggle('positioned', !!position && !mobile && !dock)
+    stage.classList.toggle('dock-left', dock === 'left' && !mobile)
+    stage.classList.toggle('dock-right', dock === 'right' && !mobile)
+    stage.classList.toggle('dragging', this.pillDragging())
+    stage.classList.toggle('landscape', this.isLandscape())
+    stage.classList.toggle('mobile', mobile)
+    if (position && !mobile && !dock) {
+      stage.style.left = `${position.x}px`
+      stage.style.top = `${position.y}px`
+    }
+    stage.addEventListener('mouseenter', this.onBarEnter)
+    stage.addEventListener('mouseleave', this.onBarLeave)
+    const scaled = document.createElement('div')
+    scaled.className = 'pill-scaled'
+    if (!(dock === 'left' && !mobile)) scaled.style.zoom = String(this.pillZoom())
+    const pill = document.createElement('div')
+    pill.className = 'controls-pill'
+    pill.dataset['consumesWheel'] = ''
+    pill.classList.toggle('public-mode', this.meshPublic())
+    pill.classList.toggle('column', !!dock && !mobile)
+    pill.classList.toggle('power-ctrl', this.powerKey() === 'ctrl')
+    pill.classList.toggle('power-shift', this.powerKey() === 'shift')
+    pill.classList.toggle('power-alt', this.powerKey() === 'alt')
+    pill.addEventListener('wheel', this.onBarWheel, { passive: false })
+    if (!mobile) {
+      const handle = document.createElement('div')
+      handle.className = 'drag-handle vertical'
+      handle.setAttribute('aria-label', this.#t('controls.drag-to-move'))
+      handle.addEventListener('pointerdown', this.onPillDragStart)
+      for (let index = 0; index < 8; index++) {
+        const dot = document.createElement('span')
+        dot.className = 'dot'
+        handle.appendChild(dot)
+      }
+      pill.appendChild(handle)
+    }
+    if (this.mode() === 'atomize') pill.appendChild(this.#renderAtomizeControls())
+    else pill.appendChild(mobile ? this.#renderMobileControls() : this.#renderDesktopControls())
+    scaled.appendChild(pill)
+    stage.appendChild(scaled)
+    return stage
+  }
+
+  #render(): void {
+    if (!this.#connected) return
+    // This replaces the app template's former [style.visibility] binding.
+    // Full-screen views suppress the whole control surface (rail, tags and
+    // breadcrumb), while the pill's own faded class still handles touch drag.
+    this.style.visibility = this.#viewActive() ? 'hidden' : ''
+    const oldList = this.querySelector<HTMLElement>('.controls-row')
+    const scrollTop = oldList?.scrollTop ?? 0
+    const scrollLeft = oldList?.scrollLeft ?? 0
+    const activeElement = document.activeElement instanceof HTMLElement && this.contains(document.activeElement)
+      ? document.activeElement
+      : null
+    const activeControl = activeElement?.dataset['ctrlId']
+    const activeFocusKey = activeElement?.dataset['focusKey']
+    const fragment = document.createDocumentFragment()
+    const indicator = document.createElement('div')
+    indicator.className = 'swipe-back-indicator'
+    indicator.classList.toggle('active', this.swipeIndicatorActive())
+    fragment.appendChild(indicator)
+    const tour = this.#renderTourMenu()
+    const home = this.#renderHomeMenu()
+    const fit = this.#renderFitMenu()
+    if (tour) fragment.appendChild(tour)
+    if (home) fragment.appendChild(home)
+    if (fit) fragment.appendChild(fit)
+    fragment.appendChild(this.#renderBreadcrumb())
+    const tags = this.#renderTags()
+    if (tags) fragment.appendChild(tags)
+    fragment.appendChild(this.#renderPill())
+    const focusCounts = new Map<string, number>()
+    for (const button of fragment.querySelectorAll<HTMLButtonElement>('button')) {
+      const base = button.dataset['ctrlId']
+        ? `ctrl:${button.dataset['ctrlId']}`
+        : `${button.className}|${button.getAttribute('aria-label') ?? ''}`
+      const occurrence = focusCounts.get(base) ?? 0
+      focusCounts.set(base, occurrence + 1)
+      button.dataset['focusKey'] = `${base}:${occurrence}`
+    }
+    this.replaceChildren(fragment)
+    const list = this.querySelector<HTMLElement>('.controls-row')
+    if (list) {
+      list.scrollTop = scrollTop
+      list.scrollLeft = scrollLeft
+      if (this.#dragPointerId !== null) this.#dragList = list
+    }
+    this.#pillStageEl = this.querySelector('.pill-stage')
+    const focusTarget = [...this.querySelectorAll<HTMLElement>('button')].find(element =>
+      (activeFocusKey && element.dataset['focusKey'] === activeFocusKey)
+      || (!activeFocusKey && activeControl && element.dataset['ctrlId'] === activeControl),
+    )
+    focusTarget?.focus({ preventScroll: true })
+    queueMicrotask(this.#measureControlsEdge)
+  }
+
   #onActivity = (): void => {
     this.#idle.set(false)
     this.#resetIdleTimer()
@@ -3274,6 +3957,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   #onPowerKeyReset = (): void => { this.powerKey.set(null) }
+}
+
+if (typeof customElements !== 'undefined' && !customElements.get('hc-controls-bar')) {
+  customElements.define('hc-controls-bar', ControlsBarElement)
 }
 
 /** Deterministic vibrant HSL color from a tag name — avoids grays. */

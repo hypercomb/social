@@ -51,7 +51,7 @@ sweep now emits `mobile:marks-changed` and show-cell restales the reach scan on 
   are dropped before ordering — never fetched. Emits `mobile:gate {active, shown}`.
 
 **Landed (2026-07-24, session 2, type-clean, doctrine 81/81):**
-- **Portrait control bar** (`hypercomb-shared/ui/controls-bar/controls-bar.component.{html,scss}`):
+- **Portrait control bar** (`hypercomb-shared/ui/controls-bar/controls-bar.element.{ts,scss}`):
   `.mobile-nav` is now a `1fr auto 1fr` grid — two side groups (each its own
   `overflow-x:auto` scroll region) flank a fixed, centred, emphasized centre
   button; bigger touch targets (side 3.4rem, centre 4rem). Verified via computed
@@ -188,7 +188,7 @@ re-verify before editing.
   `hypercomb-essentials/src/diamondcoreprocessor.com/navigation/touch/touch-gesture.coordinator.ts`
   — one-finger pan, two-finger pinch (`navigation/zoom/pinch-zoom.input.ts`),
   sensitivity swipe with haptics, momentum coasting.
-- Shell responsiveness is real: `hypercomb-shared/ui/controls-bar/controls-bar.component.ts`
+- Shell responsiveness is real: `hypercomb-shared/ui/controls-bar/controls-bar.element.ts`
   `isMobile` signal (`matchMedia('(max-width: 599px)')` ~L899), `isLandscape`,
   edge-swipe-back (~L1747). `hypercomb-shared/ui/_breakpoints.scss` phone/tablet/
   desktop + `@mixin touch { @media (pointer: coarse) }` used by ~48 stylesheets.

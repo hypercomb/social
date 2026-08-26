@@ -11,7 +11,7 @@
      by the global `body.hc-view-website #pixi-host{,canvas}` rule in
      styles.scss: visibility (NOT display:none → 0×0 corrupts zoom) +
      pointer-events:none on the <canvas>. -->
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+<hc-controls-bar></hc-controls-bar>
 <hc-edit-actions></hc-edit-actions>
 <!-- Every other shell surface is registry-fed: registered in
      shared/ui/shell-surfaces/shell-surfaces.barrel.ts, mounted here in `order`

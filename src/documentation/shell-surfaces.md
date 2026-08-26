@@ -114,6 +114,7 @@ Note: a surface may relocate itself after mount (history-viewer portals to
 
 Only structural chrome: the header bar (command line / app-header plus the
 framework-free upgrade, sync and mesh elements), `router-outlet`, the Pixi
-host div, framework-free `hc-edit-actions`, `hc-controls-bar` (still carrying
-live `meshPublic`/`viewActive()` bindings), and web's install prompt. The
+host div, framework-free `hc-edit-actions` and `hc-controls-bar`, and web's
+install prompt. The controls bar now owns its mesh/full-view subscriptions and
+edge reservations without Angular template bindings. The
 doctrine ratchet's allowlist is the exact inventory; it may only shrink.

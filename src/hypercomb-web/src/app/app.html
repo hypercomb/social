@@ -12,7 +12,7 @@
      styles.scss (body-descendant selectors reach the minted node) using
      visibility (NOT display:none, which collapses it to 0×0 and corrupts
      scale/zoom) plus pointer-events:none on the <canvas>. -->
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+<hc-controls-bar></hc-controls-bar>
 <div class="update-status-dock">
   <hc-upgrade-indicator></hc-upgrade-indicator>
   <hc-sync-indicator></hc-sync-indicator>

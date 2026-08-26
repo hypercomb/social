@@ -324,6 +324,50 @@ async function main() {
     editActions.defined && editActions.mounted && editActions.history && editActions.selection && editActions.view,
     JSON.stringify(editActions))
 
+  const controlsBar = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    const element = document.querySelector('hc-controls-bar')
+    if (!bus || !element) return { defined: false, mounted: false, mesh: false, view: false, tags: false }
+    const previous = {
+      mesh: bus.lastValue?.get?.('mesh:public-changed'),
+      view: bus.lastValue?.get?.('view:active'),
+      tags: bus.lastValue?.get?.('render:tags'),
+      filter: bus.lastValue?.get?.('tags:filter'),
+    }
+    const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+
+    bus.emit('mesh:public-changed', { public: true })
+    await settle()
+    const mesh = element.querySelector('.controls-pill')?.classList.contains('public-mode') === true
+
+    bus.emit('view:active', { active: true })
+    await settle()
+    const hidden = element.style.visibility === 'hidden'
+    bus.emit('view:active', { active: false })
+    await settle()
+    const restored = element.style.visibility !== 'hidden'
+
+    bus.emit('render:tags', { tags: [{ name: 'gate-mark', count: 1 }] })
+    await settle()
+    element.querySelector('.tag-crumb')?.click()
+    await settle()
+    const tags = element.querySelector('.tag-crumb')?.textContent === 'gate-mark'
+      && bus.lastValue?.get?.('tags:filter')?.active?.includes?.('gate-mark')
+
+    bus.emit('mesh:public-changed', previous.mesh ?? { public: false })
+    bus.emit('view:active', previous.view ?? { active: false })
+    bus.emit('render:tags', previous.tags ?? { tags: [] })
+    bus.emit('tags:filter', previous.filter ?? { active: [], scope: 'local' })
+    await settle()
+    return {
+      defined: !!customElements.get('hc-controls-bar'), mounted: true,
+      mesh, view: hidden && restored, tags: !!tags,
+    }
+  })
+  check('converted chrome: controls-bar owns mesh, view and tag contracts in light DOM',
+    controlsBar.defined && controlsBar.mounted && controlsBar.mesh && controlsBar.view && controlsBar.tags,
+    JSON.stringify(controlsBar))
+
   // host-panel is deliberately native-only. Its module must still define the
   // custom element in the web build, but the registry gate must keep it out of
   // the DOM when Tauri is absent.

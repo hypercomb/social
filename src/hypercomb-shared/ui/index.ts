@@ -1,5 +1,5 @@
 export * from './command-line/command-line.component'
-export * from './controls-bar/controls-bar.component'
+export * from './controls-bar/controls-bar.element'
 export * from './edit-actions/edit-actions.element'
 export * from './mesh-header/mesh-header.element'
 export * from './shell-surfaces/shell-surfaces.component'

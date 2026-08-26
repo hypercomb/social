@@ -343,7 +343,7 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/fit.queen.ts',        // /fit
       'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts',       // `0`/`r` keymap + pinch-below-min
       'hypercomb-essentials/src/diamondcoreprocessor.com/sequence/sequence-cycle.drone.ts',    // the `a` recompose keypress
-      'hypercomb-shared/ui/controls-bar/controls-bar.component.ts',                            // the fit button
+      'hypercomb-shared/ui/controls-bar/controls-bar.element.ts',                              // the fit button
     ], "automatic zoomToFit claiming source 'user'")
   })
 
