@@ -2038,6 +2038,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-p2-heavy-band",
+      "title": "shrink Phase 2 heavy band — aggregate-index, tags-viewer, history-viewer, contact-card, atomizer-bar, portal",
+      "run": null,
+      "note": "Six Angular folders producing EIGHT surfaces converted to framework-free custom elements (two folders carry two registered surfaces each and were not merged). aggregate-index brought a whole subsystem: aggregate-source.ts plugin seam, aggregate-drop.ts, sources/collections.source.ts, sources/websites.source.ts. Mirror: one tile per view + sibling i18n catalog + drift spec, gathered into the everything-is-a-beehavior collection, mark each 'part'; note the six defects found (live attribute frozen at show; blur-cancel swallowing the next click; naming draft lost on rebuild; select() destroying an existing name; scroll reset; a spec deleted instead of moved). Manual: note-add is additive and would double-land.",
+      "commit": "bd9c6dde5",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
