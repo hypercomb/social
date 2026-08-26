@@ -1,9 +1,8 @@
 // hypercomb-shared/ui/command-line/command-line.component.ts
 
-import { AfterViewInit, Component, computed, effect, signal, ViewChild, type OnDestroy } from '@angular/core'
+import { AfterViewInit, Component, computed, CUSTOM_ELEMENTS_SCHEMA, effect, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
-import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
 import type { Lineage } from '@hypercomb/core'
 import type { Navigation } from '@hypercomb/core'
 import type { ScriptPreloader } from '../../core/script-preloader'
@@ -262,7 +261,8 @@ function loadCommandHistory(): string[] {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, PinnedEntrancesComponent],
+  imports: [CommandShellComponent, HintBarComponent, TranslatePipe],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss'],
   host: {

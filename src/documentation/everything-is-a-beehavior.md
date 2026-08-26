@@ -490,8 +490,10 @@ is a DOM contract the feature's own acceptance driver may assert on.
   (3,860), `aggregate-index` (3,942), ~~`chat-window`~~ (5,245), ~~`notes-strip`~~
   (7,672). The formerly omitted ~~`host-panel`~~ moved in the same final
   registry-fed batch. The shell-surfaces barrel is now empty: 42 → 0.
-- [ ] Non-barrel stragglers: `file-explorer` (1,137), `pinned-entrances`
-  (513), `file-teaser` (223), `history-component` (54)
+- [ ] Non-barrel stragglers: `file-explorer` (1,137), ~~`pinned-entrances`~~
+  (513; now module-owned and embedded in command-line), `file-teaser` (223).
+  ~~`history-component`~~ (54) was unreachable orphan code — no import, route,
+  template tag or barrel export — and retired rather than preserving a dead UI.
 
 **Roster rule for every panel that moves:** once a surface is
 module-delivered it becomes roster-gated. Seed its cohort ON — a migration

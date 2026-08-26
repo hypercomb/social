@@ -531,8 +531,6 @@
   "command-line.bubble": "Jeu Bubble Bobble — activer/désactiver",
   "command-line.arkanoid": "Jeu Arkanoid — activer/désactiver",
   "command-line.pinned": "Épinglé — désépinglez pour balayer ou zoomer",
-  "pinned.aggregate-hint": "{label} — Ctrl+clic : {group}",
-  "pinned.return": "Retour depuis {group}",
   "swarm.consent.title": "Demande d'abonnement",
   "swarm.consent.message": "{requester} souhaite s'abonner à votre ruche",
   "swarm.consent.accept": "Accepter",

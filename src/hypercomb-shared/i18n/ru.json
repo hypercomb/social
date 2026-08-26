@@ -531,8 +531,6 @@
   "command-line.bubble": "Bubble Bobble — включить/выключить",
   "command-line.arkanoid": "Arkanoid — включить/выключить",
   "command-line.pinned": "Закреплено — открепить для перемещения или масштабирования",
-  "pinned.aggregate-hint": "{label} — Ctrl+клик: {group}",
-  "pinned.return": "Назад из {group}",
   "swarm.consent.title": "Запрос подписки",
   "swarm.consent.message": "{requester} хочет подписаться на ваш улей",
   "swarm.consent.accept": "Принять",

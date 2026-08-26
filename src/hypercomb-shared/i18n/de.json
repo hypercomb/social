@@ -531,8 +531,6 @@
   "command-line.bubble": "Bubble Bobble Spiel — ein-/ausschalten",
   "command-line.arkanoid": "Arkanoid Spiel — ein-/ausschalten",
   "command-line.pinned": "Fixiert — lösen zum Schwenken oder Zoomen",
-  "pinned.aggregate-hint": "{label} — Strg+Klick: {group}",
-  "pinned.return": "Zurück von {group}",
   "swarm.consent.title": "Abonnementanfrage",
   "swarm.consent.message": "{requester} möchte Ihren Bienenstock abonnieren",
   "swarm.consent.accept": "Akzeptieren",

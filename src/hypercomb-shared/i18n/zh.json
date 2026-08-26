@@ -531,8 +531,6 @@
   "command-line.bubble": "Bubble Bobble 游戏 — 开/关",
   "command-line.arkanoid": "Arkanoid 游戏 — 开/关",
   "command-line.pinned": "已固定 — 取消固定以平移或缩放",
-  "pinned.aggregate-hint": "{label} — Ctrl+点击：{group}",
-  "pinned.return": "从{group}返回",
   "swarm.consent.title": "订阅请求",
   "swarm.consent.message": "{requester} 想要订阅您的蜂巢",
   "swarm.consent.accept": "接受",

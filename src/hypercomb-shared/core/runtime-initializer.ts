@@ -3,7 +3,7 @@ import type { Lineage } from '@hypercomb/core'
 import type { LocalizationService } from '@hypercomb/core'
 import type { Navigation } from '@hypercomb/core'
 import { OpfsTreeLogger } from './tree-logger'
-import { collectProximity } from './proximity-registry'
+import { collectProximity } from '@hypercomb/core'
 import './install-monitor'
 import './registry-snapshot'
 // (Escape's single owner, tool-windows, lives in core now — it loads with

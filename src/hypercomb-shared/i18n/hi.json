@@ -531,8 +531,6 @@
   "command-line.bubble": "Bubble Bobble गेम — चालू/बंद टॉगल करें",
   "command-line.arkanoid": "Arkanoid गेम — चालू/बंद टॉगल करें",
   "command-line.pinned": "पिन किया गया — पैन या ज़ूम करने के लिए अनपिन करें",
-  "pinned.aggregate-hint": "{label} — Ctrl+क्लिक: {group}",
-  "pinned.return": "{group} से वापस",
   "swarm.consent.title": "सदस्यता अनुरोध",
   "swarm.consent.message": "{requester} आपके हाइव की सदस्यता लेना चाहता है",
   "swarm.consent.accept": "स्वीकार करें",

@@ -531,8 +531,6 @@
   "command-line.bubble": "لعبة Bubble Bobble — تشغيل/إيقاف",
   "command-line.arkanoid": "لعبة Arkanoid — تشغيل/إيقاف",
   "command-line.pinned": "مثبّت — ألغِ التثبيت للتحريك أو التكبير",
-  "pinned.aggregate-hint": "{label} — ‏Ctrl+نقر: {group}",
-  "pinned.return": "العودة من {group}",
   "swarm.consent.title": "طلب اشتراك",
   "swarm.consent.message": "{requester} يريد الاشتراك في خليتك",
   "swarm.consent.accept": "قبول",

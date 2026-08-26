@@ -531,8 +531,6 @@
   "command-line.bubble": "Bubble Bobble oyunu — aç/kapat",
   "command-line.arkanoid": "Arkanoid oyunu — aç/kapat",
   "command-line.pinned": "Sabitlendi — kaydırmak veya yakınlaştırmak için sabitlemeyi kaldırın",
-  "pinned.aggregate-hint": "{label} — Ctrl+tıklama: {group}",
-  "pinned.return": "{group} sayfasından dön",
   "swarm.consent.title": "Abone olma isteği",
   "swarm.consent.message": "{requester} kovanınıza abone olmak istiyor",
   "swarm.consent.accept": "Kabul et",

@@ -573,8 +573,6 @@
   "command-line.bubble": "バブルボブルゲーム — オン/オフ切り替え",
   "command-line.arkanoid": "アルカノイドゲーム — オン/オフ切り替え",
   "command-line.pinned": "ピン留め中 — ピンを外すとパン・ズームできます",
-  "pinned.aggregate-hint": "{label} — Ctrl+クリック: {group}",
-  "pinned.return": "{group}から戻る",
   "swarm.consent.title": "購読リクエスト",
   "swarm.consent.message": "{requester} さんがあなたのハイブを購読したいと言っています",
   "swarm.consent.accept": "承認",

@@ -531,8 +531,6 @@
   "command-line.bubble": "Gioco Bubble Bobble — attiva/disattiva",
   "command-line.arkanoid": "Gioco Arkanoid — attiva/disattiva",
   "command-line.pinned": "Fissato — sblocca per panoramica o zoom",
-  "pinned.aggregate-hint": "{label} — Ctrl+clic: {group}",
-  "pinned.return": "Torna da {group}",
   "swarm.consent.title": "Richiesta di iscrizione",
   "swarm.consent.message": "{requester} vuole iscriversi al tuo alveare",
   "swarm.consent.accept": "Accetta",

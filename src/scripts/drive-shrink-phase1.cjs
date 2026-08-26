@@ -173,6 +173,45 @@ async function main() {
     `${mounted.length}/${SURFACES.length}` +
     (mounted.length === SURFACES.length ? '' : ` — missing ${SURFACES.filter(s => !mounted.includes(s)).join(', ')}`))
 
+  const pinRail = await page.evaluate(() => ({
+    defined: !!customElements.get('hc-pinned-entrances'),
+    mounted: !!document.querySelector('hc-pinned-entrances'),
+  }))
+  check('converted chrome: pinned-entrances is defined and embedded in command-line',
+    pinRail.defined && pinRail.mounted, JSON.stringify(pinRail))
+
+  const pinRoundTrip = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    const rail = document.querySelector('hc-pinned-entrances')
+    if (!bus || !rail) return { added: false, removed: false }
+    bus.emit('entrance:pin', {
+      groupId: 'gate-probe', memberKey: 'pin', icon: 'flag', label: 'Gate pin',
+      view: '', segments: [],
+    })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const button = rail.querySelector('button[aria-label="Gate pin"]')
+    const added = !!button
+    if (button) {
+      const rect = button.getBoundingClientRect()
+      button.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, button: 0, pointerId: 991,
+        clientX: rect.left + 2, clientY: rect.top + 2,
+      }))
+      document.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true, pointerId: 991,
+        clientX: rect.right + 100, clientY: rect.bottom + 100,
+      }))
+      document.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true, pointerId: 991,
+        clientX: rect.right + 100, clientY: rect.bottom + 100,
+      }))
+    }
+    await new Promise(resolve => setTimeout(resolve, 30))
+    return { added, removed: !rail.querySelector('button[aria-label="Gate pin"]') }
+  })
+  check('converted chrome: pinned entrance adds and drag-off removes at the same level',
+    pinRoundTrip.added && pinRoundTrip.removed, JSON.stringify(pinRoundTrip))
+
   // host-panel is deliberately native-only. Its module must still define the
   // custom element in the web build, but the registry gate must keep it out of
   // the DOM when Tauri is absent.

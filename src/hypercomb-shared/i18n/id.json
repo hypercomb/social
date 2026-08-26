@@ -531,8 +531,6 @@
   "command-line.bubble": "Permainan Bubble Bobble — alihkan hidup/mati",
   "command-line.arkanoid": "Permainan Arkanoid — alihkan hidup/mati",
   "command-line.pinned": "Tersemat — lepas pin untuk menggeser atau memperbesar",
-  "pinned.aggregate-hint": "{label} — Ctrl+klik: {group}",
-  "pinned.return": "Kembali dari {group}",
   "swarm.consent.title": "Permintaan berlangganan",
   "swarm.consent.message": "{requester} ingin berlangganan sarang Anda",
   "swarm.consent.accept": "Terima",

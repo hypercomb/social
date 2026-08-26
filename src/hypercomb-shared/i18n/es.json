@@ -531,8 +531,6 @@
   "command-line.bubble": "Juego Bubble Bobble — alternar encendido/apagado",
   "command-line.arkanoid": "Juego Arkanoid — alternar encendido/apagado",
   "command-line.pinned": "Fijado — desfijar para desplazar o hacer zoom",
-  "pinned.aggregate-hint": "{label} — Ctrl+clic: {group}",
-  "pinned.return": "Volver desde {group}",
   "swarm.consent.title": "Solicitud de suscripción",
   "swarm.consent.message": "{requester} quiere suscribirse a tu colmena",
   "swarm.consent.accept": "Aceptar",

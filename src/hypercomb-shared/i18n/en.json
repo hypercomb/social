@@ -600,8 +600,6 @@
   "command-line.bubble": "Bubble Bobble game — toggle on/off",
   "command-line.arkanoid": "Arkanoid game — toggle on/off",
   "command-line.pinned": "Pinned — unpin to pan or zoom",
-  "pinned.aggregate-hint": "{label} — Ctrl+click: {group}",
-  "pinned.return": "Back from {group}",
   "swarm.consent.title": "Subscribe request",
   "swarm.consent.message": "{requester} wants to subscribe to your hive",
   "swarm.consent.accept": "Accept",

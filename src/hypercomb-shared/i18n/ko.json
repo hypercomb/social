@@ -531,8 +531,6 @@
   "command-line.bubble": "Bubble Bobble 게임 — 켜기/끄기",
   "command-line.arkanoid": "Arkanoid 게임 — 켜기/끄기",
   "command-line.pinned": "고정됨 — 고정 해제하여 이동 또는 확대",
-  "pinned.aggregate-hint": "{label} — Ctrl+클릭: {group}",
-  "pinned.return": "{group}에서 돌아가기",
   "swarm.consent.title": "구독 요청",
   "swarm.consent.message": "{requester}님이 하이브를 구독하려 합니다",
   "swarm.consent.accept": "수락",

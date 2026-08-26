@@ -76,7 +76,7 @@
 // Its strings ship WITH it (history-viewer.i18n.ts, extracted from all 14
 // shell catalogs) and register under the 'app' namespace, so every key
 // resolves exactly as before — the Phase 2 catalog split, another slice.
-// `history.back` is SHARED with the shell's still-Angular `history-component`
+// `history.back` is shared with any shell chrome that offers a history return.
 // (the browser back/forward strip); it is carried in both catalogs on purpose
 // — a surface must carry everything it renders.
 
