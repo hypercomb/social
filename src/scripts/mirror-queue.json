@@ -1809,6 +1809,14 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "chat-durability",
+      "title": "Chat questions are durable until answered — the run outlives the window, the wait is rebuilt from the pool",
+      "run": null,
+      "note": "Three parts to mirror under behaviors/assistant (chat): (1) host-stream.ts — the module-scope run that stores the turn whether or not a window is alive; (2) chat-thread.ts stream checkpoints (sign('chat:streams')) — the partial written down while it arrives and filed on the next boot; (3) chat-window #recoverWaits — the wait/clock/Stop/bee/tile-busy rebuilt from pending kind:'ask' mode:'chat' records after a reload. One collection, one part tile per source file, marked part; note on each explaining what it protects. Needs a live renderer on the bridge.",
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
