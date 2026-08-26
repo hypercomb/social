@@ -1,5 +1,9 @@
 // diamondcoreprocessor.com/input/zoom/zoom.drone.ts
 import { Drone, EffectBus, type KeyMapLayer } from '@hypercomb/core'
+// The touch-sensitivity indicator rides this bundle — the gesture coordinator
+// that FEEDS it (touch:sensitivity-bar) is already inlined here, so the
+// surface and its emitter travel together. ONE importer: dup-inlining rule.
+import '../touch/sensitivity-bar.view.js'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'

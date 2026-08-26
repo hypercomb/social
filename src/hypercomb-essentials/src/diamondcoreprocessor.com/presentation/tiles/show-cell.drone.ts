@@ -1,5 +1,9 @@
 // diamondcoreprocessor.com/pixi/show-cell.drone.ts
 import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
+// The quiet-landing badge rides this bundle — this drone is what HOLDS the
+// paint (#quietLanding), and the badge is the only thing that releases it,
+// so the two halves travel together. ONE importer: dup-inlining rule.
+import './landing-badge.view.js'
 import type { I18nProvider, UsageRanker } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'

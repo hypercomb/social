@@ -7,7 +7,7 @@
 // and en (the fallback locale) is present at all.
 
 import { describe, expect, it } from 'vitest'
-import { SEQUENCE_VIEWER_TRANSLATIONS } from './sequence-viewer.i18n'
+import { SEQUENCE_VIEWER_TRANSLATIONS } from './sequence-viewer.i18n.js'
 
 describe('sequence-viewer catalog', () => {
 

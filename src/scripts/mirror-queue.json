@@ -1944,6 +1944,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase2-four-small-panels",
+      "title": "Mirror Phase 2: four more panels out (website-nav, sensitivity-bar, landing-badge, preview-banner) — tiles on the shrink-campaign collection, note carrying the impure-pipe rule (locale:changed re-render) and the predicate-polarity trap",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 2. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

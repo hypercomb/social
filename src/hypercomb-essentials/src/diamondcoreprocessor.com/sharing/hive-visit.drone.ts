@@ -31,6 +31,11 @@
 // moved — same receipts, same tombstone respect as mesh auto-sync.
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+// The adopt-for-review banner rides this bundle — this drone owns the preview
+// state it renders and consumes its two exits. Their shared strings register
+// with it, which is why `preview.banner.title` still resolves for the toasts
+// below. ONE importer: dup-inlining rule.
+import './preview-banner.view.js'
 import { validateHiveLinkBundle, STATIC_FOLLOWS_KEY, type HiveLinkBundle } from './hive-link.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'

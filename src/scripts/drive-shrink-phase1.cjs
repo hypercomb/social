@@ -90,10 +90,33 @@ async function main() {
     // Pixi's shader-error logger (logProgramError) console.errors an EMPTY
     // string headless — un-filterable by text, same environmental class.
     if (!text.trim()) return
-    // hypercomb-dev's index.html loads an OPTIONAL local env.js; a checkout
-    // without one 404s (and Chrome adds a MIME refusal) — pre-existing noise.
-    if (/env\.js|404 \(Not Found\)/i.test(text)) return
+    // A failed fetch reaches the console as a bare "Failed to load resource"
+    // with no URL, so it cannot be judged from the text. The response
+    // listener below tracks failures BY URL and the check at the end is what
+    // rules on them — ignoring them here would be blind, so this defers
+    // rather than excuses.
+    if (/Failed to load resource|env\.js/i.test(text)) return
+    // NG0100 from an ANGULAR component during the locale-switch check below.
+    // The `t` pipe is impure, so flipping the locale from outside Angular's
+    // zone (which is what page.evaluate does) changes a binding between the
+    // check pass and dev-mode's verification pass. It is an artifact of the
+    // Angular shell — never raised by a converted element, which owns its own
+    // rendering — and it is dev-build-only. It retires with Angular itself.
+    if (/NG0100|ExpressionChangedAfterItHasBeenChecked/i.test(text)) return
     errors.push(text)
+  })
+
+  // Failed requests, BY URL — the console cannot tell you which resource
+  // failed, so judge them here. A SAME-ORIGIN failure means the app asked for
+  // something that is not there (a module that did not build, a stylesheet a
+  // conversion dropped) and is always a real defect. Cross-origin failures are
+  // the content broker reaching for bytes a fresh profile has never fetched,
+  // and `env.js` is the optional per-developer dev file — both environmental.
+  const failedRequests = []
+  page.on('response', (response) => {
+    if (response.status() < 400) return
+    const url = response.url()
+    if (url.startsWith(URL) && !url.includes('/env.js')) failedRequests.push(`${response.status()} ${url}`)
   })
 
   await page.goto(URL, { waitUntil: 'domcontentloaded' })
@@ -185,8 +208,160 @@ async function main() {
   })
   check('converted panel: module-carried i18n resolves', !!i18n && i18n !== 'sequences.title', i18n)
 
-  // 9. No non-environmental console errors.
+  // 9. THE SECOND BATCH — four more panels delivered as modules. Each is
+  //    driven end to end through its OWN effect, because "the element is
+  //    registered" proves nothing: a surface that mounts but never listens
+  //    is exactly the regression a conversion can introduce.
+
+  // 9a. sensitivity-bar (navigation/touch): hidden until the gesture speaks,
+  //     fill height is the log-scale arithmetic, fades on release.
+  const sens = await page.evaluate(async () => {
+    const el = document.querySelector('hc-sensitivity-bar')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    const bootHidden = !el.querySelector('.sensitivity-bar')
+      || getComputedStyle(el).display === 'none'
+      || el.offsetHeight === 0
+    // value 1.0 is the midpoint of the 0.25..4 log range → 50%
+    window.__hypercombEffectBus?.emit?.('touch:sensitivity-bar', { value: 1, locked: false, visible: true })
+    await new Promise(r => setTimeout(r, 150))
+    const fill = el.querySelector('.fill')
+    const pct = fill ? Math.round(parseFloat(fill.style.height)) : -1
+    const shown = !!fill && el.offsetHeight > 0
+    window.__hypercombEffectBus?.emit?.('touch:sensitivity-bar', { value: 1, locked: false, visible: false })
+    await new Promise(r => setTimeout(r, 150))
+    const fading = !!el.querySelector('.fading, .sensitivity-bar.fading')
+      || getComputedStyle(el.querySelector('.sensitivity-bar') ?? el).opacity === '0'
+    return { ok: bootHidden && shown && pct === 50 && fading, bootHidden, shown, pct, fading }
+  })
+  check('converted panel: sensitivity-bar hidden→shows at 50%→fades', sens.ok,
+    sens.reason ?? `boot=${sens.bootHidden} shown=${sens.shown} pct=${sens.pct} fading=${sens.fading}`)
+
+  // 9b. landing-badge (presentation/tiles): the quiet-landing release. The
+  //     TAP is the only thing that frees the held repaint, so the click must
+  //     emit landing:apply — a badge that shows but does not release is worse
+  //     than no badge.
+  const landing = await page.evaluate(async () => {
+    const el = document.querySelector('hc-landing-badge')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    const bootHidden = el.offsetHeight === 0
+    let applied = false
+    const off = window.__hypercombEffectBus?.on?.('landing:apply', () => { applied = true })
+    window.__hypercombEffectBus?.emit?.('landing:pending', { count: 3, where: '/dolphin' })
+    await new Promise(r => setTimeout(r, 150))
+    const text = (el.textContent ?? '').trim()
+    const shown = el.offsetHeight > 0
+    const named = text.includes('3') && text.includes('dolphin')
+    el.querySelector('button')?.click()
+    await new Promise(r => setTimeout(r, 100))
+    window.__hypercombEffectBus?.emit?.('landing:pending', { count: 0 })
+    await new Promise(r => setTimeout(r, 150))
+    const hidden = el.offsetHeight === 0
+    off?.()
+    return { ok: bootHidden && shown && named && applied && hidden, bootHidden, shown, named, applied, hidden, text }
+  })
+  check('converted panel: landing-badge shows the count, releases on tap, hides at 0', landing.ok,
+    landing.reason ?? `boot=${landing.bootHidden} shown=${landing.shown} named=${landing.named} applied=${landing.applied} hidden=${landing.hidden} text="${landing.text}"`)
+
+  // 9c. preview-banner (sharing): names the preview state and carries the
+  //     only two exits. Adopt must emit the real accept effect.
+  const preview = await page.evaluate(async () => {
+    const el = document.querySelector('hc-preview-banner')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    const bootHidden = el.offsetHeight === 0
+    let accepted = false
+    const off = window.__hypercombEffectBus?.on?.('hive:adopt-accept', () => { accepted = true })
+    window.__hypercombEffectBus?.emit?.('preview:mode', {
+      active: true, label: 'northern exposure', pubkey: 'abcdef0123456789', tiles: 12,
+    })
+    await new Promise(r => setTimeout(r, 150))
+    const text = (el.textContent ?? '').trim()
+    const shown = el.offsetHeight > 0
+    // the publisher shorthand is the pubkey's first 8 hex chars
+    const named = text.includes('northern exposure') && text.includes('abcdef01') && text.includes('12')
+    el.querySelector('.adopt')?.click()
+    await new Promise(r => setTimeout(r, 100))
+    window.__hypercombEffectBus?.emit?.('preview:mode', { active: false })
+    await new Promise(r => setTimeout(r, 150))
+    const hidden = el.offsetHeight === 0
+    off?.()
+    return { ok: bootHidden && shown && named && accepted && hidden, bootHidden, shown, named, accepted, hidden, text }
+  })
+  check('converted panel: preview-banner names the preview, adopts, dismisses', preview.ok,
+    preview.reason ?? `boot=${preview.bootHidden} shown=${preview.shown} named=${preview.named} accepted=${preview.accepted} hidden=${preview.hidden} text="${preview.text}"`)
+
+  // 9d. website-nav (commands): HEADLESS — no chrome at all. Its whole job is
+  //     a capture-phase Escape that always leaves website mode, even when a
+  //     page's CSS hid the visible exit. Drive the real key.
+  const nav = await page.evaluate(async () => {
+    const el = document.querySelector('hc-website-nav')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    const invisible = el.offsetHeight === 0 && el.offsetWidth === 0
+    const vm = window.ioc?.get?.('@hypercomb.social/ViewMode')
+    if (!vm) return { ok: false, reason: 'ViewMode not registered' }
+    const before = vm.mode
+    vm.setMode('website')
+    await new Promise(r => setTimeout(r, 100))
+    const inSite = vm.mode === 'website'
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(r => setTimeout(r, 150))
+    const left = vm.mode === 'hexagons'
+    if (vm.mode !== before) vm.setMode(before)
+    return { ok: invisible && inSite && left, invisible, inSite, left }
+  })
+  check('converted panel: website-nav is headless and Escape always leaves website mode', nav.ok,
+    nav.reason ?? `invisible=${nav.invisible} inSite=${nav.inSite} left=${nav.left}`)
+
+  // 9e. Their strings ride their modules too — keys the shell catalogs no
+  //     longer carry, including the PLURAL forms a count param needs.
+  const batchI18n = await page.evaluate(() => {
+    const svc = window.ioc?.get?.('@hypercomb.social/I18n')
+    return {
+      landing: svc?.t?.('landing.pending', { count: 3 }) ?? '',
+      preview: svc?.t?.('preview.banner.title') ?? '',
+      // must STILL resolve from the shell catalog — same prefix family,
+      // different owner (hive-visit.drone's toast). The prefix-bleed guard.
+      dismissed: svc?.t?.('preview.dismissed', { name: 'x' }) ?? '',
+    }
+  })
+  check('converted panels: module-carried i18n resolves, plurals included',
+    !!batchI18n.landing && batchI18n.landing !== 'landing.pending' && batchI18n.landing.includes('3')
+    && !!batchI18n.preview && batchI18n.preview !== 'preview.banner.title',
+    `landing="${batchI18n.landing}" preview="${batchI18n.preview}"`)
+  check('converted panels: the drone’s neighbouring key survived the split',
+    !!batchI18n.dismissed && batchI18n.dismissed !== 'preview.dismissed', batchI18n.dismissed)
+
+  // 9f. THE IMPURE-PIPE REGRESSION. Angular's `t` pipe is declared
+  //     `pure: false`, so every change-detection tick re-resolved every
+  //     string and `/language ja` re-labelled OPEN surfaces on the spot. An
+  //     element renders when it decides to — so a converted panel must treat
+  //     `locale:changed` as a reason to render, or an open panel freezes in
+  //     the previous language. Drive a real switch against an open badge.
+  const locale = await page.evaluate(async () => {
+    const svc = window.ioc?.get?.('@hypercomb.social/I18n')
+    const el = document.querySelector('hc-landing-badge')
+    if (!svc || !el) return { ok: false, reason: 'i18n or badge missing' }
+    const original = svc.locale
+    window.__hypercombEffectBus?.emit?.('landing:pending', { count: 2, where: '/dolphin' })
+    await new Promise(r => setTimeout(r, 200))
+    const before = (el.textContent ?? '').trim()
+    svc.setLocale('ja')
+    await new Promise(r => setTimeout(r, 250))
+    const after = (el.textContent ?? '').trim()
+    svc.setLocale(original)
+    await new Promise(r => setTimeout(r, 200))
+    const restored = (el.textContent ?? '').trim()
+    window.__hypercombEffectBus?.emit?.('landing:pending', { count: 0 })
+    await new Promise(r => setTimeout(r, 150))
+    return { ok: !!before && !!after && before !== after && restored === before, before, after, restored }
+  })
+  check('converted panel: an OPEN panel re-labels on a locale switch', locale.ok,
+    locale.reason ?? `before="${locale.before}" after="${locale.after}" restored="${locale.restored}"`)
+
+  // 10. No non-environmental console errors, and nothing the APP asked for
+  //     came back missing.
   check('console: no errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+  check('network: no same-origin resource failed', failedRequests.length === 0,
+    [...new Set(failedRequests)].slice(0, 3).join(' | '))
 
   await browser.close()
   const failed = results.filter(r => !r.ok)

@@ -204,6 +204,18 @@ registers, every value-announce replays, the loopback secret seed and
 note-marks pool seed work from module land, and the console stays clean.
 Extend its MOVED_KEYS / ANNOUNCED lists with every chip.
 
+> **RESTART THE DEV SERVER AFTER AN ESSENTIALS EDIT, OR THE GATE LIES.**
+> The dev watcher does not pick up essentials changes (the standing
+> `dev-watcher-misses-essentials` trap). A gate run against a stale bundle
+> reports PASS for code that is not running — which is worse than a failure,
+> because it launders an untested change as verified. This bit the second
+> conversion batch: two fixes were live in source, absent from the browser,
+> and the only reason it surfaced was a check that could distinguish old
+> behaviour from new. **Every check you add should be able to fail** — if a
+> check would pass against the pre-change build, it is not proving the
+> change. Kill the server (`netstat -ano | grep :4350`, `taskkill //PID <p>
+> //F`) and restart before trusting a run.
+
 **The proven move pattern** (established by `icon-overrides`, first down):
 contract → `hypercomb-core/src/core/<name>.types.ts` (interface + IoC KEY +
 effect-name constants); implementation → essentials beside its heaviest
@@ -316,14 +328,35 @@ already build imperative DOM — the muscle exists.
   invariant (live panels never recreated) is unique — special case, never
   generalized. A panel that "needs" more than this is rendering too much
   in DOM and should draw from state like the hive does.
-- [ ] Prove the pattern on the small ones: ~~`sequence-viewer`~~ ✓ — THE
-  FIRST PANEL OUT (`sequence/sequence-viewer.view.ts` on
-  DockedPanelElement; same surface name/order/effects/width key; its 7
-  i18n keys extracted from ALL 14 shell catalogs into
-  `sequence-viewer.i18n.ts`, registered under 'app', with the drift-check
-  spec beside it — the catalog split's first slice and its template),
-  `website-nav` (67), `sensitivity-bar` (136), `landing-badge` (186),
-  `preview-banner` (191)
+- [x] Prove the pattern on the small ones — ALL FIVE OUT:
+  ~~`sequence-viewer`~~ (the first, on DockedPanelElement; its 7 keys the
+  catalog split's first slice), ~~`website-nav`~~ (→ `commands/`; headless —
+  the capture-phase Escape that always leaves website mode),
+  ~~`sensitivity-bar`~~ (→ `navigation/touch/`, beside the coordinator that
+  feeds it), ~~`landing-badge`~~ (→ `presentation/tiles/`, beside the
+  show-cell drone whose held repaint it releases), ~~`preview-banner`~~ (→
+  `sharing/`, beside the hive-visit drone that owns the preview). The four
+  non-docked ones extend `HTMLElement` directly — only a DOCKED panel needs
+  `DockedPanelElement`.
+
+**THE IMPURE-PIPE RULE — every converted panel owes this.** Angular's `t`
+pipe is declared `pure: false`, so every change-detection tick re-resolved
+every string: `/language ja` re-labelled OPEN panels on the spot. An element
+renders when it decides to, so **a converted panel must subscribe to
+`locale:changed` and re-render**, or an open panel freezes in the previous
+language — including its buttons, which on the preview banner are the only
+two exits. Strings written once at build time need a `#relabel()` that
+re-resolves them (rows re-resolve theirs on every rebuild). Found by the
+adversarial pass, and it had already slipped into the first conversion.
+
+**The other trap the adversarial pass caught: PRESERVE THE PREDICATE'S
+POLARITY.** `visible = count > 0` is not the same as `if (count <= 0) hide`
+— both are false for `NaN`, so the negated form falls THROUGH and paints
+"NaN changes are waiting" where Angular showed nothing. Copy the original
+condition; do not re-derive it. And where Angular used `@if`, the element
+must genuinely leave the DOM (detach the node, keep the reference) — a
+surface that is merely `display:none` still answers `querySelector`, which
+is a DOM contract the feature's own acceptance driver may assert on.
 - [ ] Utility band: `toast`, `confirm-dialog`, `trust-prompt`, `action-card`,
   `camera-capture`, `format-painter`, `icon-picker`, `shortcut-sheet`,
   `activity-log`, `layer-cycle-strip`, `command-palette`, `context-window`

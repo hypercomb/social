@@ -93,6 +93,12 @@ export class SequenceViewerElement extends DockedPanelElement {
   readonly #changed = (): void => { this.#refresh(); this.#renderRows(); this.#renderCount() }
   #list: HTMLElement | null = null
   #count: HTMLElement | null = null
+  // Held only so a locale switch can re-resolve the strings written once at
+  // build time (#relabel) — the rows re-resolve theirs on every rebuild.
+  #title: HTMLElement | null = null
+  #intro: HTMLElement | null = null
+  #close: HTMLElement | null = null
+  #createLabel: Text | null = null
   #open = false
 
   constructor() {
@@ -126,6 +132,19 @@ export class SequenceViewerElement extends DockedPanelElement {
         this.#active = id
         this.#renderRows()
       }),
+      // THE PIPE WAS IMPURE. Angular's `t` pipe is declared `pure: false`, so
+      // every change-detection tick re-resolved the strings and `/language ja`
+      // re-labelled an OPEN panel on the spot. An element renders when it
+      // decides to, so the locale switch has to be a reason to render — else
+      // an open panel keeps its old-locale header, intro, chips and footer
+      // until it is closed and reopened. Rebuilding is safe: the rows come
+      // from the service, never from the DOM.
+      EffectBus.on('locale:changed', () => {
+        if (!this.#open) return
+        this.#relabel()
+        this.#renderRows()
+        this.#renderCount()
+      }),
     )
   }
 
@@ -154,6 +173,10 @@ export class SequenceViewerElement extends DockedPanelElement {
     this.deactivate()
     this.#list = null
     this.#count = null
+    this.#title = null
+    this.#intro = null
+    this.#close = null
+    this.#createLabel = null
   }
 
   protected override closePanel(): void { this.close() }
@@ -189,7 +212,8 @@ export class SequenceViewerElement extends DockedPanelElement {
     const plus = document.createElement('span')
     plus.className = 'mat-sym'
     plus.textContent = 'add'
-    create.append(plus, document.createTextNode(t('sequences.new', 'New sequence')))
+    const createLabel = document.createTextNode(t('sequences.new', 'New sequence'))
+    create.append(plus, createLabel)
     create.addEventListener('click', () => {
       this.close()
       EffectBus.emit('sequence:edit', { name: 'default' })
@@ -199,6 +223,10 @@ export class SequenceViewerElement extends DockedPanelElement {
     this.append(header, intro, list, footer)
     this.#list = list
     this.#count = count
+    this.#title = name
+    this.#intro = intro
+    this.#close = close
+    this.#createLabel = createLabel
     this.#renderRows()
     this.#renderCount()
   }
@@ -226,6 +254,20 @@ export class SequenceViewerElement extends DockedPanelElement {
       builtIn: false,
     }))
     this.#rows = [...builtIns, ...saved]
+  }
+
+  /** Re-resolve the strings that are written ONCE at build time — the ones a
+   *  row rebuild would never touch. Only the locale switch needs this; the
+   *  row labels come back through #renderRows. */
+  #relabel(): void {
+    this.setAttribute('aria-label', t('sequences.aria', 'Arrangement sequences'))
+    if (this.#title) this.#title.textContent = t('sequences.title', 'Sequences')
+    if (this.#intro) {
+      this.#intro.textContent =
+        t('sequences.intro', 'A sequence is a saved arrangement — pick one and drops follow its order.')
+    }
+    this.#close?.setAttribute('aria-label', t('sequences.close', 'Close'))
+    if (this.#createLabel) this.#createLabel.textContent = t('sequences.new', 'New sequence')
   }
 
   // ── rendering (rebuild on change — the house pattern) ────────────────
