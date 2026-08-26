@@ -1717,6 +1717,31 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "rail-line-talks-arrow-walks",
+      "title": "Mirror the rail reversal: the line talks, the arrow walks, and a line says how many and whether one is live",
+      "run": null,
+      "note": "Reversal in hypercomb-essentials/src/diamondcoreprocessor.com/assistant/agent-tiles-rail.ts (+spec): a click on ANY row now enters its conversation (leaf or parent, one rule instead of one that changed with childCount); going inside moved to its own chevron control (.hc-rail-walk, WALK_GLYPH), hidden where there is nothing to go into; a second press on the current row folds the threads shut without putting the conversation down. Tiles 1:1 with source under the rail collection, marks per declared vocabulary, notes carrying: (1) WHY THE REVERSE IS RIGHT — every line in the list IS a conversation and carries that conversation's state (deep/unread/draft/live), so every one of those marks was describing something you could not reach by pressing the line it was on; (2) THE COUNT AFTER THE LABEL — a tile is a SUBJECT, so several threads about it is the normal case, and archived threads are excluded because the fold excludes them (a row promising four and listing three lies about the same set); (3) LIVE is the only mark in the PRESENT TENSE, so it is the only one that moves — amber (the hive is doing something) breathing on the bees' own cycle, drawn even at zero turns because a question just sent is when you most need to see which line it went to; unread wins at equal specificity because a landed reply is no longer in progress; (4) BACK COMES OUT FROM ANYWHERE ON THE LINE — the contextmenu handler is on the host and the new control does not swallow it. Also fixed: ensureRailStyles refreshes the sheet instead of returning early when the element exists, so a rule added to this file is not invisible until a hard reload. New i18n keys in all 14 catalogs: agent.rail-go, agent.rail-threads. note-add is additive — manual drain only.",
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "folder-sync-always-synchronizing",
+      "title": "Mirror the always-synchronizing folder: lazy content lookup, polled structure, quarantined divergence",
+      "run": null,
+      "note": "Extends folder-sync-one-shape. New behaviour in folder-sync.service.ts (resolveContent, drainNow, #drainFromFolder, #startContinuousDrain, #divergent quarantine) and content-broker.drone.ts (#fetchFromFolder, a folder tier AHEAD of HTTP). Notes to carry: (1) NEITHER SIDE IS THE SOURCE OF TRUTH — syncNow drains in before it mirrors out, so a round trip settles in one pass. (2) CONTENT IS LAZY, STRUCTURE IS POLLED — a signature-named file is never drained; a local-store miss asks the folder FIRST, ahead of every network tier, verifies sha256 and writes through. Nothing is copied until something wants it, and a lookup can only fire for bytes this browser lacks, so it is conflict-free with nothing to overwrite. Bags and pools CANNOT be lazy — you do not miss a marker by name, you enumerate a bag to find its head — so they are walked on a cadence, affordable precisely because content is excluded. (3) A BROWSER TAB CANNOT WATCH A DIRECTORY — page must be open, handle came from a gesture, File System Access API has no change events; the web side is pull-on-open/push-on-commit and the true watcher belongs in the native client. (4) DIVERGENCE IS QUARANTINED, NOT RESOLVED — a disputed address is excluded from the OUTBOUND mirror too, or the copy pass would undo the drain's refusal and destroy the other side's record; proven by a mutation test (disable the quarantine and the folder's bytes become ours). Picking a winner would be picking at random; history never branches.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "behaviors-mirror-repair",
+      "title": "Mirror the repair pass — write-if-absent marks + notes, and the erosion it fixed",
+      "run": null,
+      "note": "scripts/mirror-behaviors-repair.ts shipped 2026-08-25 with no tile of its own. Owed: a cell beside the mirror toolchain (behaviors/appearance/behaviors-theme is the sibling) explaining write-if-absent repair — read state first, add only what is missing, never rewrite a children array (that is what ate the 81-part spread), appliesTo:[] so 74 tiles share ONE mark record. Also record the erosion itself: 15/74 tiles held their mark+note before the pass, 74/74 after. No mirror script written yet.",
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

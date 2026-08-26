@@ -145,7 +145,7 @@ describe('incremental drain', () => {
       failedRoots: 1,
     })
     const before = JSON.parse(new TextDecoder().decode(
-      await read(chosen, `hypercomb-backup/devices/${deviceId}/manifest.json`),
+      await read(chosen, `.hypercomb/devices/${deviceId}/manifest.json`),
     ))
     expect(before.closure.rootsFailed).toBe(1)
 
@@ -156,7 +156,7 @@ describe('incremental drain', () => {
     await vi.advanceTimersByTimeAsync(20_000)
 
     const after = JSON.parse(new TextDecoder().decode(
-      await read(chosen, `hypercomb-backup/devices/${deviceId}/manifest.json`),
+      await read(chosen, `.hypercomb/devices/${deviceId}/manifest.json`),
     ))
     expect(after.files[drainedSig]).toBeDefined()
     // A drain only ADDS bytes. Restating these erased the record of what was
