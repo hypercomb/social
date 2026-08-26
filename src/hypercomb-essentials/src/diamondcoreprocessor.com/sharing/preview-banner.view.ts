@@ -229,11 +229,17 @@ export class PreviewBannerElement extends HTMLElement {
 // ── shell surface registration — the externalization path ────────────────
 // Same name, same order band the Angular component held; the module-side
 // `element:` shape (documentation/shell-surfaces.md).
+// DEFINED AT MODULE SCOPE, registered when a registry appears. A host
+// with no ShellSurfaceRegistry (diamond-core-processor mounts this tag
+// directly in its own template) still needs the tag to be a real element
+// rather than an inert unknown one — so the define cannot wait on the
+// registry. Only the ADD does.
+if (!customElements.get(SURFACE_NAME)) {
+  customElements.define(SURFACE_NAME, PreviewBannerElement)
+}
+
 window.ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', (value) => {
   const registry = value as { add(surface: Record<string, unknown>): void }
-  if (!customElements.get(SURFACE_NAME)) {
-    customElements.define(SURFACE_NAME, PreviewBannerElement)
-  }
   registry.add({
     name: SURFACE_NAME,
     owner: '@diamondcoreprocessor.com/PreviewBannerElement',

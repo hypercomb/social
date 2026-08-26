@@ -15,6 +15,9 @@ import './cell-suggestion.provider.js'
 // The website-mode Escape safety net rides this bundle, beside the ViewMode
 // service it guards. ONE importer: dup-inlining rule.
 import './website-nav.view.js'
+// The confirm modal rides this bundle: callers reach it from every domain
+// (remove, prune, link-drop), so it belongs to the one that is always up.
+import './confirm-dialog.view.js'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'

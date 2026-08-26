@@ -130,6 +130,29 @@ async function main() {
   }
   check('boot: ioc populated', iocKeys.length > 30, `${iocKeys.length} keys`)
 
+  // …and wait for the SURFACES, which is a later moment than a populated
+  // IoC. Modules register progressively, and on a COLD dev server (the first
+  // load after a restart, when everything is still compiling) the gap is
+  // seconds wide — long enough that half these checks reported "element not
+  // mounted" for panels that were merely late. A gate that fails on a cold
+  // start is a gate people learn to re-run, which is how a real failure gets
+  // waved through. Wait for the last surface to arrive instead of racing it.
+  const SURFACES = [
+    'hc-sequence-viewer', 'hc-website-nav', 'hc-sensitivity-bar', 'hc-landing-badge',
+    'hc-preview-banner', 'hc-toast', 'hc-confirm-dialog', 'hc-trust-prompt',
+    'hc-layer-cycle-strip',
+  ]
+  let mounted = []
+  for (let i = 0; i < 60; i++) {
+    mounted = await page.evaluate(
+      names => names.filter(n => !!document.querySelector(n)), SURFACES)
+    if (mounted.length === SURFACES.length) break
+    await sleep(1000)
+  }
+  check('boot: every converted surface mounted', mounted.length === SURFACES.length,
+    `${mounted.length}/${SURFACES.length}` +
+    (mounted.length === SURFACES.length ? '' : ` — missing ${SURFACES.filter(s => !mounted.includes(s)).join(', ')}`))
+
   // 1. Every moved key answers.
   for (const key of MOVED_KEYS) {
     const present = await page.evaluate(k => !!window.ioc?.get?.(k), key)
@@ -356,6 +379,112 @@ async function main() {
   })
   check('converted panel: an OPEN panel re-labels on a locale switch', locale.ok,
     locale.reason ?? `before="${locale.before}" after="${locale.after}" restored="${locale.restored}"`)
+
+  // 9g. THE UTILITY BAND — four more panels as modules. Two of these answer
+  //     a CALLER that is awaiting them, so the check drives the whole round
+  //     trip: a dialog that shows but never answers hangs its caller forever,
+  //     and that failure is invisible to a "does it render" check.
+
+  // 9g-i. toast: the transient stack, driven by its own drone's effect.
+  const toast = await page.evaluate(async () => {
+    const el = document.querySelector('hc-toast')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    const bootEmpty = el.querySelectorAll('.toast-item').length === 0
+    window.__hypercombEffectBus?.emit?.('toast:show',
+      { type: 'tip', title: 'Shrink', message: 'the gate speaks' })
+    await new Promise(r => setTimeout(r, 250))
+    const items = el.querySelectorAll('.toast-item')
+    const text = (el.textContent ?? '').trim()
+    const shown = items.length === 1 && text.includes('the gate speaks')
+    el.querySelector('.toast-dismiss')?.click()
+    await new Promise(r => setTimeout(r, 400))
+    const dismissed = el.querySelectorAll('.toast-item').length === 0
+    return { ok: bootEmpty && shown && dismissed, bootEmpty, shown, dismissed, text }
+  })
+  check('converted panel: toast shows on its effect and dismisses', toast.ok,
+    toast.reason ?? `boot=${toast.bootEmpty} shown=${toast.shown} dismissed=${toast.dismissed}`)
+
+  // 9g-ii. confirm-dialog: the WHOLE round trip. requestConfirm() awaits a
+  //        'confirm:response' carrying the SAME id — an answer that never
+  //        comes, or comes with a different id, hangs every caller (remove,
+  //        prune, link-drop) on a promise that never settles.
+  const confirmed = await page.evaluate(async () => {
+    const el = document.querySelector('hc-confirm-dialog')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    const bootHidden = !el.querySelector('.confirm-panel')
+    const bus = window.__hypercombEffectBus
+    const id = 'gate-' + Date.now()
+    let answer = null
+    const off = bus.on('confirm:response', (res) => { if (res?.id === id) answer = res.confirmed })
+    bus.emit('confirm:request', {
+      id, title: 'confirm.delete-title', message: 'confirm.delete-message',
+      messageParams: { name: 'the gate' }, danger: true,
+    })
+    await new Promise(r => setTimeout(r, 250))
+    const shown = !!el.querySelector('.confirm-panel')
+    const named = (el.textContent ?? '').includes('the gate')
+    // the danger button is the confirm action; cancel carries .cancel
+    const buttons = [...el.querySelectorAll('.confirm-btn')]
+    buttons.find(b => !b.classList.contains('cancel'))?.click()
+    await new Promise(r => setTimeout(r, 250))
+    const closed = !el.querySelector('.confirm-panel')
+    off?.()
+    return { ok: bootHidden && shown && named && answer === true && closed,
+             bootHidden, shown, named, answer, closed }
+  })
+  check('converted panel: confirm-dialog answers its caller (the round trip)', confirmed.ok,
+    confirmed.reason ?? `boot=${confirmed.bootHidden} shown=${confirmed.shown} named=${confirmed.named} answer=${confirmed.answer} closed=${confirmed.closed}`)
+
+  // 9g-iii. trust-prompt: THIS ONE GATES CODE EXECUTION. The request carries
+  //         an onResult callback the trust service awaits before letting a
+  //         foreign bee run. Every exit must answer exactly once.
+  const trust = await page.evaluate(async () => {
+    const el = document.querySelector('hc-trust-prompt')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    // The host is `display: contents` and the backdrop inside it is
+    // position:fixed — so the HOST's offsetHeight is 0 even wide open. Ask
+    // what the participant can actually see instead: the painted child.
+    const painted = () => [...el.children].some(c => c.getBoundingClientRect().height > 0)
+    const bootHidden = !painted()
+    let decision = null
+    let answers = 0
+    window.__hypercombEffectBus.emit('trust:check', {
+      domains: ['gate-probe.example'],
+      onResult: (d) => { answers++; decision = d },
+    })
+    await new Promise(r => setTimeout(r, 250))
+    const shown = painted()
+    const named = (el.textContent ?? '').includes('gate-probe.example')
+    // "allow once" — allow, but never added to the community
+    const once = [...el.querySelectorAll('button')]
+      .find(b => /once|time/i.test(b.textContent ?? ''))
+    once?.click()
+    await new Promise(r => setTimeout(r, 250))
+    const hidden = !painted()
+    return {
+      ok: bootHidden && shown && named && answers === 1
+        && decision?.allow === true && decision?.addToCommunity === false && hidden,
+      bootHidden, shown, named, answers, decision, hidden,
+    }
+  })
+  check('converted panel: trust-prompt answers the gate exactly once', trust.ok,
+    trust.reason ?? `boot=${trust.bootHidden} shown=${trust.shown} named=${trust.named} answers=${trust.answers} decision=${JSON.stringify(trust.decision)} hidden=${trust.hidden}`)
+
+  // 9g-iv. layer-cycle-strip: with no peers in the swarm there is nobody to
+  //        cycle, so the honest assertion is that it mounts and stays EMPTY —
+  //        the same @if-means-detach contract as the rest of the batch. (Its
+  //        widget-zoom wiring lands on the inner strip when peers exist, so
+  //        it cannot be seen from here; the primitive itself is covered by a
+  //        unit spec in core, where it can be driven directly.)
+  const strip = await page.evaluate(() => {
+    const el = document.querySelector('hc-layer-cycle-strip')
+    if (!el) return { ok: false, reason: 'element not mounted by the registry' }
+    const empty = el.children.length === 0
+    const unpainted = el.getBoundingClientRect().height === 0
+    return { ok: empty && unpainted, empty, unpainted }
+  })
+  check('converted panel: layer-cycle-strip mounts and idles empty with no peers', strip.ok,
+    strip.reason ?? `empty=${strip.empty} unpainted=${strip.unpainted}`)
 
   // 10. No non-environmental console errors, and nothing the APP asked for
   //     came back missing.

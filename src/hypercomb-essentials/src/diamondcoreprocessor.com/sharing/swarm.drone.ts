@@ -27,6 +27,9 @@
 // arrives, so we don't need to dispatch a render signal ourselves.
 
 import { Drone, EffectBus, poolAddresses, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+// The peer layer-cycle strip rides this bundle — this drone is what publishes
+// the peer set it renders. ONE importer: dup-inlining rule.
+import './layer-cycle-strip.view.js'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'

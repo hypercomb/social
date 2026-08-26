@@ -12,6 +12,8 @@ import './secret-store.js'
 import './secret-strength.js'
 import './saved-locations-store.js'
 import './trust-service.js'
+// …and the gate's face, beside the service that raises it.
+import './trust-prompt.view.js'
 
 const LOCAL_RELAY = 'ws://localhost:7777'
 // Live bootstrap relay.

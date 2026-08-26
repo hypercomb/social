@@ -10,6 +10,10 @@
 //   EffectBus.emit('toast:clear', undefined)
 
 import { EffectBus } from '@hypercomb/core'
+// The stack's SURFACE rides with the drone that owns the stack — and the
+// view imports the Toast type from here as an ordinary sibling, which is
+// what retires the old shared→essentials type import. ONE importer.
+import './toast.view.js'
 
 export type ToastType = 'info' | 'success' | 'tip' | 'warning'
 

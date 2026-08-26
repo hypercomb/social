@@ -24,26 +24,15 @@
 //   localStorage key : 'hc:widget-scale'      → { [id]: number }
 //   effect           : 'widget:scale-changed' → { id, scale }
 
+// THE MECHANICS MOVED TO CORE (core/panels/widget-zoom.ts) in the
+// everything-is-a-beehavior Phase 2 — they were never Angular-shaped. This
+// directive is now the thin Angular adapter over them, so a converted
+// element and an un-converted component zoom through the SAME code and the
+// same persisted scale for the whole transition.
 import { Directive, ElementRef, Input, inject, type OnDestroy, type OnInit } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { attachWidgetZoom, type WidgetAnchor } from '@hypercomb/core'
 
-export type WidgetAnchor =
-  | 'center' | 'top' | 'bottom' | 'left' | 'right'
-  | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-
-const SCALE_KEY = 'hc:widget-scale'
-
-/** Read a widget's persisted scale straight from localStorage (no dependency
- *  on the drone being registered yet — robust to boot order on web, where
- *  drones load from OPFS after the Angular shell). */
-const readScale = (id: string): number => {
-  try {
-    const raw = localStorage.getItem(SCALE_KEY)
-    const map = raw ? JSON.parse(raw) as Record<string, number> : {}
-    const v = map[id]
-    return typeof v === 'number' && v > 0 ? v : 1
-  } catch { return 1 }
-}
+export type { WidgetAnchor } from '@hypercomb/core'
 
 @Directive({
   selector: '[hcWidget]',
@@ -62,19 +51,7 @@ export class HcWidgetDirective implements OnInit, OnDestroy {
   #unsub: (() => void) | null = null
 
   ngOnInit(): void {
-    if (!this.id) return
-    this.#el.dataset['widget'] = this.id
-    this.#el.dataset['widgetAnchor'] = this.anchor
-    this.#apply(readScale(this.id))
-    this.#unsub = EffectBus.on<{ id: string; scale: number }>(
-      'widget:scale-changed',
-      (p) => { if (p?.id === this.id) this.#apply(p.scale) },
-    )
-  }
-
-  #apply(scale: number): void {
-    // inline `zoom` (setProperty sidesteps TS lib typing for `zoom`)
-    this.#el.style.setProperty('zoom', String(scale))
+    this.#unsub = attachWidgetZoom(this.#el, this.id, this.anchor)
   }
 
   ngOnDestroy(): void {

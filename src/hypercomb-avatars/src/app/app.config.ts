@@ -2,13 +2,11 @@ import { ApplicationConfig, provideAppInitializer, provideBrowserGlobalErrorList
 import { BEE_RESOLVER_KEY } from '@hypercomb/core'
 import { provideRouter } from '@angular/router'
 import { routes } from './app.routes'
-import { sharedProviders } from '@hypercomb/shared/core/shared-providers'
 
 import '@hypercomb/shared/core'
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    ...sharedProviders,
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideAppInitializer(() => {

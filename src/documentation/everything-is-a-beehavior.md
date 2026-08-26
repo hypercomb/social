@@ -310,6 +310,14 @@ already build imperative DOM — the muscle exists.
   components every panel leans on. Build custom-element equivalents that
   preserve the docked-panel contracts (sole writer of `--hc-panel-scale`,
   the width + text-size ladder, the reading face, controls-bar anchoring).
+  Primitive status: ~~`docked-panel`~~ ✓ (DockedPanelElement, step B),
+  ~~`dock-inset`~~ ✓ (folded into that base — a converted panel needs one
+  class), ~~`widget-zoom`~~ ✓ (was never Angular-shaped: ~30 lines that tag
+  an element, read a persisted scale and follow one effect. Now
+  `attachWidgetZoom(el, id, anchor)` in core/panels; the Angular directive
+  is the thin adapter over it, so both kits zoom through the SAME code and
+  the same persisted scale for the whole transition). Still Angular:
+  `pinnable`, `hint-bar`, `icon`.
   Nothing else in this phase moves until this lands. Findings so far: the
   panel SUPPORT MODEL (panel-groups, panel-settings, dock-lanes,
   window-session/rule) is already pure TS — it moves to core so the Angular
@@ -348,6 +356,33 @@ language — including its buttons, which on the preview banner are the only
 two exits. Strings written once at build time need a `#relabel()` that
 re-resolves them (rows re-resolve theirs on every rebuild). Found by the
 adversarial pass, and it had already slipped into the first conversion.
+
+**BUILD EVERY APP IN `build:all`, NOT JUST THE TWO SHELLS.** `diamond-core-
+processor` and `hypercomb-avatars` are Angular apps of their own that import
+from `hypercomb-shared` — DCP mounted `<hc-trust-prompt>` and imported the
+trust service; avatars imported the DI bridge. A gate that builds only core,
+essentials, web and dev cannot see them, so **both were broken for three
+chips before anything noticed** (the DI-bridge deletion took avatars; the
+trust-service move took DCP). Nothing failed, because nothing looked. The
+per-chip build list is now core → essentials → web → dev → **dcp → avatars →
+meadowverse**.
+
+**`customElements.define` GOES AT MODULE SCOPE; only `registry.add` waits.**
+DCP has no ShellSurfaceRegistry at all — it mounts the tag directly in its
+own template. An element whose `define` sits inside
+`whenReady('ShellSurfaceRegistry')` is never defined in such a host, so the
+tag stays an inert unknown element and the surface silently does nothing.
+Define at module scope (guarded by `customElements.get`), add to the registry
+when one appears. Applied to all nine converted views.
+
+**ONE CATALOG PER SURFACE.** Three ports in this batch inlined their own copy
+of the locale table while the extracted `.i18n.ts` sibling — the one the
+drift spec guards — sat unused beside them. Byte-identical today, so nothing
+looked wrong; but a spec guarding a file nobody imports passes forever while
+the real strings drift. The view must import the sibling. And when a split
+lifts a key out of the shell catalogs, the surface MUST register the
+replacement: the confirm dialog's two default labels were extracted and never
+re-registered, which would have un-translated both buttons in all 14 locales.
 
 **The other trap the adversarial pass caught: PRESERVE THE PREDICATE'S
 POLARITY.** `visible = count > 0` is not the same as `if (count <= 0) hide`
