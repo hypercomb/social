@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/command-line/bracket.behavior.ts
 
 import type { CommandLineBehavior } from './command-line-behavior'
-import type { Lineage } from '../../core/lineage'
+import type { Lineage } from '@hypercomb/core'
 
 /**
  * The square bracket `[…]` is THE selection primitive. This behavior owns the

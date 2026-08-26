@@ -1,4 +1,4 @@
-// hypercomb-shared/core/lineage-explorer-replace.spec.ts
+// lineage-explorer-replace.spec.ts (moved to core with lineage)
 //
 // Reading a website must not grow the browser back-stack. Every page a reader
 // clicks inside a site moves the explorer, and `explorerEnter`/`explorerUp`
@@ -15,9 +15,13 @@ interface NavSpy { goRaw: ReturnType<typeof vi.fn>; replaceRaw: ReturnType<typeo
 const load = async (): Promise<{ lineage: any; nav: NavSpy }> => {
   vi.resetModules()
   const nav: NavSpy = { goRaw: vi.fn(), replaceRaw: vi.fn() }
-  ;(globalThis as { register?: unknown }).register = (): void => {}
-  ;(globalThis as { get?: unknown }).get = (key: string): unknown =>
-    key === '@hypercomb.social/Navigation' ? nav : undefined
+  // Lineage reaches Navigation through globalThis.ioc now (core has no bare
+  // get global) — stand the spy in through the same seam.
+  ;(globalThis as { ioc?: unknown }).ioc = {
+    get: (key: string): unknown => key === '@hypercomb.social/Navigation' ? nav : undefined,
+    has: (): boolean => true,
+    register: (): void => {},
+  }
   const mod = await import('./lineage.js')
   return { lineage: new mod.Lineage(), nav }
 }

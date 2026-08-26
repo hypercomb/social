@@ -12,7 +12,7 @@ import {
 } from '@angular/core'
 import { EffectBus, hypercomb, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import type { Lineage } from '../../core/lineage'
+import type { Lineage } from '@hypercomb/core'
 
 interface ActivityEntry {
   id: number

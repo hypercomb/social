@@ -4,7 +4,7 @@ import { AfterViewInit, Component, computed, effect, signal, ViewChild, type OnD
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
-import type { Lineage } from '../../core/lineage'
+import type { Lineage } from '@hypercomb/core'
 import type { Navigation } from '@hypercomb/core'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/core'

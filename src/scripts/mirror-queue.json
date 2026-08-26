@@ -1764,6 +1764,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase1-lineage-to-core-bridge-deleted",
+      "title": "Mirror Phase 1: lineage + home-root promoted to CORE (fifth kernel primitive) and the Angular DI bridge DELETED (tokens + shared-providers — nothing ever injected a shared service) — tiles on the shrink-campaign collection",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 1. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

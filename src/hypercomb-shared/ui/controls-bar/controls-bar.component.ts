@@ -46,7 +46,7 @@ import {
 } from '@hypercomb/core'
 import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
 import { isWindowShowing } from '../window-session'
-import { showHiveRoot } from '../../core/home-root'
+import { showHiveRoot } from '@hypercomb/core'
 import type { InstallMonitor } from '../../core/install-monitor'
 import { secretTag } from '@hypercomb/core'
 

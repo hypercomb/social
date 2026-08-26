@@ -262,17 +262,23 @@ events; the census ratchet line is deleted in the same commit.
   processor class, and boot-side lineage reads it lazily during first paint:
   it must precede everything, which is the kernel's definition). Fourth
   kernel-seam re-assert; the NAVIGATION DI token retired uninjected.
-- [ ] Heavyweights: `lineage.ts` (485 — 184 call sites but key-addressed, so
-  it is a move, not a refactor; its `synchronize` listener moves with it).
-  ~~`aggregation-layer`~~ ✓ and ~~`mixed-group-bag`~~ ✓ went with the group
-  cluster above.
+- [x] Heavyweights: ~~`lineage.ts`~~ ✓ — went to CORE with `home-root` (the
+  current location IS the platform's address state; boot machinery reads it
+  at first paint; navigation, its sibling, was already there). Fifth
+  kernel-seam re-assert; browser wiring guarded for node contexts; the
+  Navigation lookup keeps its IoC seam (specs mock through it) with the core
+  singleton as fallback. ~~`aggregation-layer`~~ ✓ and ~~`mixed-group-bag`~~
+  ✓ went with the group cluster above.
 - [ ] i18n: `i18n.service` down + split the 2.2 MB en/ja catalogs along
   module lines via `registerTranslations` (each module carries its own
   strings — the community-module pattern, applied to ourselves)
-- [ ] Delete the Angular DI bridge as its consumers vanish: `tokens.ts`,
-  `shared-providers.ts`, `from-runtime.ts`, `i18n.pipe`, `i18n.signal` —
-  ~140 LOC of glue that exists only so `inject(Lineage)` returns what
-  `ioc.get` returns. It deletes itself.
+- [x] Delete the Angular DI bridge: `tokens.ts` + `shared-providers.ts` are
+  GONE — an inject() census proved no shared service was ever
+  Angular-injected (only framework types: ElementRef, ChangeDetectorRef…),
+  so the whole bridge was vestigial and both shells dropped
+  `...sharedProviders`. `from-runtime.ts` and `i18n.pipe`/`i18n.signal`
+  survive — they are real Angular adapters (EventTarget→signal, the `| t`
+  pipe), and they retire with their components in Phase 2/the i18n split.
 
 ## Phase 2 — the 42 registry-fed panels become `element:` drones (~50,000 LOC)
 

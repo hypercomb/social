@@ -1,10 +1,26 @@
 // hypercomb-shared/core/lineage.ts
 // synchronize is dispatched only by the processor — lineage fires 'change' on itself
 
-import { EffectBus } from '@hypercomb/core'
-import { homeSubstituted } from './home-root'
-import type { Navigation } from '@hypercomb/core'
-import type { Store } from './store'
+// Moved to CORE in the everything-is-a-beehavior Phase 1: the current
+// location's lineage is the platform's address state — boot machinery reads
+// it during first paint, navigation (its sibling) already lives here, and
+// 184 module call sites reach it by key. Fifth kernel-seam re-assert.
+
+import { EffectBus } from '../effect-bus.js'
+import { homeSubstituted } from './home-root.js'
+import { navigation, type Navigation } from './navigation.js'
+
+const iocGet = <T,>(key: string): T | undefined =>
+  (globalThis as unknown as { ioc?: { get?: (k: string) => unknown } })
+    .ioc?.get?.(key) as T | undefined
+
+/** The slice of Store the walk needs — reached through IoC (the store is
+ *  shim machinery until its own read/write split). */
+type StoreLike = {
+  hypercombRoot: FileSystemDirectoryHandle
+  legacyHive?: FileSystemDirectoryHandle
+  legacyHypercombIo?: FileSystemDirectoryHandle
+}
 
 // global get/register/list available via ioc.web.ts
 
@@ -14,8 +30,10 @@ export class Lineage extends EventTarget {
   // dependencies
   // -------------------------------------------------
 
-  private get store(): Store { return get('@hypercomb.social/Store') as Store }
-  private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
+  private get store(): StoreLike { return iocGet<StoreLike>('@hypercomb.social/Store') as StoreLike }
+  // IoC first so specs (and any host) can stand in a replacement; the core
+  // singleton is the fallback when no map exists yet.
+  private get navigation(): Navigation { return iocGet<Navigation>('@hypercomb.social/Navigation') ?? navigation }
 
   // -------------------------------------------------
   // explorer path (domain-relative)
@@ -129,7 +147,7 @@ export class Lineage extends EventTarget {
     if (this.#pendingSig?.revision === revision) return this.#pendingSig.promise
 
     const promise = (async (): Promise<string> => {
-      const history = get('@diamondcoreprocessor.com/HistoryService') as
+      const history = iocGet('@diamondcoreprocessor.com/HistoryService') as
         { sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string> } | undefined
       if (!history?.sign) return ''
       const sig = await history.sign(this)
@@ -160,7 +178,7 @@ export class Lineage extends EventTarget {
     const promise = (async (): Promise<unknown> => {
       const sig = await this.currentSig()
       if (!sig) return null
-      const history = get('@diamondcoreprocessor.com/HistoryService') as
+      const history = iocGet('@diamondcoreprocessor.com/HistoryService') as
         { currentLayerAt?: (s: string) => Promise<unknown> } | undefined
       if (!history?.currentLayerAt) return null
       const layer = await history.currentLayerAt(sig)
@@ -262,6 +280,9 @@ export class Lineage extends EventTarget {
 
   public constructor() {
     super()
+    // Core also evaluates in node contexts (CLI/SDK, node-env specs) where
+    // window is absent or a partial stub — the browser wiring is browser-only.
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
     // follow url changes (programmatic + back/forward)
     window.addEventListener('navigate', this.followLocation)
     window.addEventListener('popstate', this.followLocation)
@@ -412,7 +433,7 @@ export class Lineage extends EventTarget {
     if (path.length <= 1) { this.#lastHealedPath = path.join(''); return }
 
     const revision = this.#fsRevision
-    const history = get('@diamondcoreprocessor.com/HistoryService') as
+    const history = iocGet('@diamondcoreprocessor.com/HistoryService') as
       { deepestRealPrefix?: (s: readonly string[]) => Promise<{ prefix: string[]; cold: boolean }> } | undefined
     if (!history?.deepestRealPrefix) return // not ready yet — a later change re-triggers
 
@@ -481,5 +502,18 @@ export class Lineage extends EventTarget {
   }
 }
 
-register('@hypercomb.social/Lineage', new Lineage())
+export const LINEAGE_KEY = '@hypercomb.social/Lineage'
+
+export const lineage = new Lineage()
+
+/** Register into the live IoC map when one exists (core also runs in node). */
+export const ensureLineageRegistered = (): void => {
+  const ioc = (globalThis as unknown as {
+    ioc?: { has?: (k: string) => boolean; register?: (k: string, v: unknown) => void }
+  }).ioc
+  if (!ioc?.has?.(LINEAGE_KEY)) {
+    ioc?.register?.(LINEAGE_KEY, lineage)
+  }
+}
+ensureLineageRegistered()
 console.log('[hypercomb] lineage: explorerDir memoized per fsRevision (2026-05-01)')

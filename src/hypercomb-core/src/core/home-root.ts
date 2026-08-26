@@ -1,4 +1,6 @@
-// hypercomb-shared/core/home-root.ts
+// home-root.ts (moved to CORE with lineage in the everything-is-a-beehavior
+// Phase 1 — the home-substitution rule is address arithmetic, a kernel
+// concern beside navigation)
 //
 // THE ROOT *IS* HOME — and it does not say so in the address.
 //
@@ -34,7 +36,7 @@
 // row calls it right before navigating — and it lapses the moment you walk
 // anywhere else, so the next arrival at `/` is home again.
 
-import { RECENT_PORTALS_KEY, type RecentPortalsProvider } from '@hypercomb/core'
+import { RECENT_PORTALS_KEY, type RecentPortalsProvider } from './recent-portals.types.js'
 
 /** True while the participant has deliberately asked for the bare root. Held
  *  rather than one-shot, so acting AT the root — anything that re-reads the
@@ -54,7 +56,8 @@ export const homeSubstituted = (address: readonly string[]): readonly string[] =
   if (address.length > 0) { holdingRoot = false; return address }
   if (holdingRoot) return address
 
-  const home = (get(RECENT_PORTALS_KEY) as RecentPortalsProvider | undefined)?.home
+  const home = ((globalThis as unknown as { ioc?: { get?: (k: string) => unknown } })
+    .ioc?.get?.(RECENT_PORTALS_KEY) as RecentPortalsProvider | undefined)?.home
   // No home marked — the root means the root, exactly as it always did. A home
   // pointing AT the root is already satisfied and must not recurse.
   if (!home || home.segments.length === 0) return address

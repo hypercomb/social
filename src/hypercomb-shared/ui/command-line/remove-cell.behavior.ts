@@ -2,7 +2,7 @@
 
 import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/core'
-import type { Lineage } from '../../core/lineage'
+import type { Lineage } from '@hypercomb/core'
 import type { Navigation } from '@hypercomb/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { parseArrayItems, parseOneItem } from '../../core/array-parser'

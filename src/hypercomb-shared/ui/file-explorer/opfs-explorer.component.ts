@@ -3,7 +3,7 @@
 import { CommonModule } from '@angular/common'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import type { Lineage } from '../../core/lineage'
+import type { Lineage } from '@hypercomb/core'
 import { Store } from '../../core/store'
 import { hypercomb, requestConfirm, poolMeanings } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
