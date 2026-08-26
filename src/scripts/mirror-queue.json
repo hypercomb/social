@@ -2097,6 +2097,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase3-controls-bar",
+      "title": "Mirror the Phase 3 controls-bar unbinding",
+      "run": null,
+      "note": "hc-controls-bar is now a framework-free light-DOM custom element. It owns mesh:public-changed and view:active instead of app-template bindings; confirmed joins and private exits reuse keymap:invoke mesh.togglePublic. The existing controller contracts remain: edge reservations (--hc-controls-left/right/left-top and --hc-header-bottom), draggable/free/side-docked placement, mobile view row and back gesture, breadcrumbs and secret words, tag filtering/preview, fit and home/tour flyouts, rail editing/reordering, pin/fit persistence, and atomize mode. The Angular template retired, its SCSS is globally emitted but scoped under hc-controls-bar, and the live shrink gate now proves mesh/view/tag round trips. Update the existing controls-bar behavior/source parts rather than minting duplicates. Manual: note-add is additive and would double-land.",
+      "commit": "5f168671f",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
