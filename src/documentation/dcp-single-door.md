@@ -38,14 +38,18 @@ The channel is live today as "Mode B":
 
 ### 1. Bypass doors still open (Mode A)
 
-These write install pools on the hive origin without DCP:
+These still write install pools on the hive origin without DCP:
 
-- Genesis bootstrap: `runtime-mediator.ts:40-58` → `LayerInstaller.install()`
 - Bundled fallback + "Upgrade Hypercomb": `ensure-install.ts:247-497`
   (`fetchBundledPackage` / `installFromBundled` / `upgradeFromBundled`)
 - `core-adapter.ts` registering `LayerInstaller` for direct use
 
-**Resolution:** when the sentinel is reachable, all three route through it
+The old genesis bypass (`RuntimeMediator` → `LayerInstaller.install`) is gone:
+the mediator had no live consumer after the OPFS explorer retired. Web boot is
+owned by `ensureInstall`, which reads a usable cached manifest or emits the
+explicit install-needed state, followed by `DependencyLoader.load()`.
+
+**Resolution:** when the sentinel is reachable, the remaining paths route through it
 (genesis = `sentinel.install`, upgrade = `sentinel.sync` after DCP folds
 the new package). The bundled path survives **only** as the
 offline/first-run bootstrap — and even then it goes through the same

@@ -154,9 +154,9 @@ surface and the hosting surface both collapse:
 Progress is measured by three numbers, all of which may only shrink:
 
 1. **The shell IoC census** — IoC keys registered by shared/shell code.
-   Today: 43 in `hypercomb-shared/core`, 4 in `hypercomb-shared/ui`
-   (RuntimeMediator, ToolWindows, CommandLineBehaviors, the command-line
-   atomizer target), 5-ish across the shells (LayerService, SignatureStore,
+   Today: 43 in `hypercomb-shared/core`, 2 in `hypercomb-shared/ui`
+   (CommandLineBehaviors and the command-line atomizer target), 5-ish across
+   the shells (LayerService, SignatureStore,
    bee-resolver, dev's routing trio).
 2. **The shell-surfaces barrel** — 42 entries today → 0. Each entry that
    leaves becomes an `element:` registration from essentials.
@@ -321,7 +321,7 @@ already build imperative DOM — the muscle exists.
   ~~`icon`~~ retired after reachability proved their final consumers had
   already moved or disappeared. Gate complete. Findings so far: the
   panel SUPPORT MODEL (panel-groups, panel-settings, dock-lanes,
-  window-session/rule) is already pure TS — it moves to core so the Angular
+  window-session/rule) was already pure TS and moved to core so the Angular
   directive and the new element share ONE model during the transition (the
   sole-writer rule survives); only the 1,318-line directive is Angular, and
   it already builds its DOM imperatively.
@@ -516,9 +516,11 @@ tag becomes an ordinary element surface.
 - [x] ~~`controls-bar`~~ (5,851) — now a light-DOM element that owns mesh and
   full-view state from EffectBus while preserving the edge-reservation layout
   variables, draggable rail, mobile view row, breadcrumbs, tags and flyouts
-- [ ] Pure-TS window plumbing moves down as-is: `tool-windows.ts` (the Escape
-  cascade's single owner), `runtime-mediator`, `window-rule`,
-  `window-session`, `breakpoints`
+- [x] ~~Pure-TS window plumbing~~ — `tool-windows.ts` (the Escape cascade's
+  single owner), `window-rule`, `window-session` and the TypeScript breakpoint
+  twin moved to core in the Phase 2 gate. The remaining `RuntimeMediator` was
+  retired: its sole caller was the already-retired OPFS explorer, while the
+  live web boot path is `ensureInstall` + `DependencyLoader.load()`.
 - [ ] `command-line` + `command-shell` (9,117 combined) — the largest single
   rewrite in the whole plan; also owns `CommandLineBehaviors` and the
   atomizer target. Goes last in this phase.

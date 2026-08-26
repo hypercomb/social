@@ -49,8 +49,8 @@ describe('ensureInstall install-state validation', () => {
   })
 
   // The browser gates return early, so the claim has to be normalized BEFORE
-  // them: a `true` that survives tells shouldBootstrap and main.ts's first-run
-  // path that this hive is installed while nothing is on disk.
+  // them: a `true` that survives tells main.ts's first-run path that this hive
+  // is installed while nothing is on disk.
   it('clears an installed claim when OPFS is unavailable', async () => {
     store.opfsAvailable = false
     localStorage.setItem('hypercomb.installed', 'true')

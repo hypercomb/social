@@ -6,7 +6,8 @@ export class ServerInitializer {
 
   public enabled = async (_: string): Promise<boolean> => true
 
-  // note: this now only parses and returns the shape used by runtime-mediator
+  // This only parses and returns the location shape; install policy belongs to
+  // the caller (the web boot path is ensureInstall).
   public initialize = async (input: string): Promise<LocationParseResult> => {
     return LocationParser.parse(input)
   }

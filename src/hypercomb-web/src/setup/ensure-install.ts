@@ -81,9 +81,9 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   // manifest has disappeared. Normalize that impossible state here, AFTER
   // Store.initialize() but BEFORE the browser gates below, so first-run UI and
   // reload decisions cannot trust a claim whose required manifest is absent.
-  // The gates return early, and a claim that survives them keeps
-  // `shouldBootstrap` (runtime-mediator) and main.ts's first-run path believing
-  // this hive is installed while nothing is on disk. The claim describes
+  // The gates return early, and a claim that survives them keeps main.ts's
+  // first-run path believing this hive is installed while nothing is on disk.
+  // The claim describes
   // localStorage's own manifest, so it is answerable whether or not OPFS opened.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   const usableCache = cachedManifest && cachedManifest.bees.length > 0

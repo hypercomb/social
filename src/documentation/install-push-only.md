@@ -18,7 +18,7 @@ The verbs, on-disk shapes and IoC services in the rest of this doc (§3–§8) a
 - **Load is inert by skip, not by a `head.json` read.** `ensureInstall` (`hypercomb-web/src/setup/ensure-install.ts`) boots from the cached install in OPFS and emits `install-needed` if there is none. The O(1) update check is a root-sig compare: the sentinel reports the hive's `installedSig`, and DCP's `SentinelHandler` (`diamond-core-processor/src/app/sentinel/sentinel-handler.ts`) skips the whole install when `installedSig === rootSig`. There is no HTTP 304 round-trip.
 - **The push channel is the sentinel bridge, not a `PushTarget`.** DCP and the hive communicate over a `MessageChannel` established in `hypercomb-web/src/setup/sentinel-bridge.ts`; `SentinelBridge.sync(currentSyncSig, have)` sends the set of sigs already present (`have[]`) so DCP streams **only the missing files** — sync is an incremental delta, not a full re-push.
 - **Byte transport to operator hosts is `HostSyncService`** (`hypercomb-essentials/src/diamondcoreprocessor.com/sharing/host-sync.service.ts`): a signed HTTP `PUT` to `https://<host>/<sig>`, confirmed by a read-back `GET` (a bare `PUT 200` is not treated as proof).
-- **The runtime-mediator snippet in §7 is outdated.** `runtime-mediator.ts` still calls `installer.install(parsed)` (gated on an empty layer pool), but there is no `readHeadJson`/`writeHeadJson` and no `__head__/` directory. Treat §5–§7's named artifacts as proposed, not present.
+- **The runtime-mediator snippet in §7 is retired.** Its sole caller was the removed OPFS explorer. `ensureInstall` now owns the live decision: a usable cached manifest boots inertly; otherwise it emits `install-needed`. There is still no `readHeadJson`/`writeHeadJson` or `__head__/` directory. Treat §5–§7's named artifacts as proposed, not present.
 
 ## 2. Core Principles
 
@@ -139,11 +139,11 @@ Community forks pick their transport by registering a different `@hypercomb.soci
 
 ## 7. Load-Side Change
 
-> **Partially shipped, snippet outdated.** The push-only *load posture* already exists: `runtime-mediator.ts` gates `installer.install(parsed)` behind an empty-layer-pool check (`shouldBootstrap()`), and `ensureInstall` boots from cache with no per-load manifest fetch. But `readHeadJson`/`writeHeadJson` do not exist — the "After" block below is a design sketch, not the current code. The genesis-vs-skip decision today is "empty pool → install, else inert", not a `head.json` read.
+> **Partially shipped, snippet retired.** The push-only *load posture* exists in `ensureInstall`: a usable cached manifest boots without a per-load manifest fetch; an absent or incomplete cache emits `install-needed` for an explicit DCP or bundled action. `readHeadJson`/`writeHeadJson` do not exist — the "After" block below remains a design sketch, not the current code.
 
 The proposed load-side shape adds a head pointer to the genesis path. Sketch:
 
-**Before (and roughly what ships today):**
+**Retired pre-push-only path:**
 ```typescript
 if (await shouldBootstrap()) {
   await installer.install(parsed)

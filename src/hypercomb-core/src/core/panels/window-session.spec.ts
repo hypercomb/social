@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/window-session.spec.ts
+// hypercomb-core/src/core/panels/window-session.spec.ts
 //
 // The rules that make "put the windows away for the installer, bring them back
 // on the way home" safe to run in the middle of an install.
@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   holdWindow, parkWindows, unparkWindows, windowsParked, parkedWindowIds,
   resetWindowSession, signalSession, type BooleanSignal,
-} from '@hypercomb/core'
+} from './window-session'
 
 /** A window that is nothing but a boolean, the way most of them are. */
 const fakeSignal = (initial: boolean): BooleanSignal => {

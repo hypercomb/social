@@ -233,7 +233,6 @@ describe('doctrine ratchets', () => {
       '@hypercomb.social/RegistrySnapshot (hypercomb-shared/core/registry-snapshot.ts)',
       '@hypercomb.social/ResourceMessageHandler (hypercomb-shared/core/resource-message-handler.ts)',
       '@hypercomb.social/RouteSinkComponent (hypercomb-dev/src/app/router/route-sink.component.ts)',
-      '@hypercomb.social/RuntimeMediator (hypercomb-shared/ui/runtime-mediator.ts)',
       '@hypercomb.social/ScriptPreloader (hypercomb-shared/core/script-preloader.ts)',
       '@hypercomb.social/ServerInitializer (hypercomb-shared/core/initializers/server-initializer.service.ts)',
       '@hypercomb.social/Store (hypercomb-shared/core/store.ts)',
