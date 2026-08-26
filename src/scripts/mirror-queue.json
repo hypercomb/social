@@ -2107,6 +2107,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase3-window-plumbing",
+      "title": "Mirror the Phase 3 window-plumbing closeout",
+      "run": null,
+      "note": "Close the Phase 3 pure-window-plumbing item without duplicating the Phase 2 core-model mirror. tool-windows, window-rule, window-session and the TypeScript breakpoint twin were already moved to hypercomb-core/src/core/panels in commit c672f0dc6; the remaining window-session contract test now lives beside that implementation. RuntimeMediator was retired rather than moved because its only caller was the already-retired OPFS explorer and nothing imported or resolved its IoC key. The live web boot path is ensureInstall followed by DependencyLoader.load. Remove or annotate any stale RuntimeMediator/source tile and update the existing window-model source pointers. Manual: note-add is additive and would double-land.",
+      "commit": "0ffd3a36f",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
