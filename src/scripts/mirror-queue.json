@@ -2028,6 +2028,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-p2-mid-band",
+      "title": "shrink Phase 2 mid band — command-palette, publish-panel, notes-viewer, clipboard-panel, workflow-designer, tile-editor",
+      "run": null,
+      "note": "Six Angular panels converted to framework-free custom elements and moved into essentials beside their owning bees (commands, sharing, notes, clipboard, workflow, editor). tile-editor is the first SERVICE-DRIVEN conversion (EventTarget getters, not EffectBus). note-cycle.ts went DOWN TO CORE — second instance of the two-consumers-across-the-boundary rule after file-icons.ts. Mirror: one tile per view + sibling i18n catalog + drift spec, gathered into the everything-is-a-beehavior collection, mark each 'part'; note the four DOM-state defects found (re-append drops focus and loses a half-typed answer; focus restore by shared class lands on a destructive control; unkeyed rows and unguarded section rebuilds). Manual: note-add is additive and would double-land.",
+      "commit": "1396072dd",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
