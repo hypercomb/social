@@ -6,10 +6,8 @@ import { OpfsTreeLogger } from './tree-logger'
 import { collectProximity } from './proximity-registry'
 import './install-monitor'
 import './registry-snapshot'
-// Escape's single owner. A side effect, not a surface — it registers the IoC
-// facade the essentials Escape cascade asks for, so no window has to claim the
-// key for itself (ui/tool-windows.ts).
-import '../ui/tool-windows'
+// (Escape's single owner, tool-windows, lives in core now — it loads with
+// the kernel and re-asserts at the ioc.web seam; no side-effect import.)
 import type { BootstrapHistory } from './bootstrap-history'
 import { Store } from './store'
 

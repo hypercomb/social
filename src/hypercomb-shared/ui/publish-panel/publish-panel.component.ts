@@ -37,7 +37,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { signalSession } from '../window-session'
+import { signalSession } from '@hypercomb/core'
 
 // Mirrors of the essentials read-model shapes (shared cannot import
 // essentials). Kept field-for-field identical to PublishRenderPayload in

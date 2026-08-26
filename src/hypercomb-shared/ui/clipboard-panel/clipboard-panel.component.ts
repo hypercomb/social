@@ -46,7 +46,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // Settings-only: the gear + group chrome every tool window carries. The panel
 // keeps its own grip and width signal — `ownsSize` false, `sizeOwner` this.
 import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
-import { type WindowSession } from '../window-session'
+import { type WindowSession } from '@hypercomb/core'
 import { onSelection } from '../../core/selection-context'
 import { resolveEntryImageUrl } from '../clipboard-thumbs'
 

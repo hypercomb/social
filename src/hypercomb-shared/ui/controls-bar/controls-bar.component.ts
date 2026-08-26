@@ -44,8 +44,8 @@ import {
   type RecentPortal,
   type RecentPortalsProvider,
 } from '@hypercomb/core'
-import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
-import { isWindowShowing } from '../window-session'
+import { clearLaneWithUndo } from '@hypercomb/core'
+import { isWindowShowing } from '@hypercomb/core'
 import { showHiveRoot } from '@hypercomb/core'
 import type { InstallMonitor } from '../../core/install-monitor'
 import { secretTag } from '@hypercomb/core'

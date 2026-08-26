@@ -242,7 +242,6 @@ describe('doctrine ratchets', () => {
       'BEE_RESOLVER_KEY (hypercomb-dev/src/app/app.config.ts)',
       'BEE_RESOLVER_KEY (hypercomb-web/src/app.config.ts)',
       'SHELL_SURFACE_REGISTRY_KEY (hypercomb-shared/core/shell-surface-registry.ts)',
-      'TOOL_WINDOWS_IOC_KEY (hypercomb-shared/ui/tool-windows.ts)',
       '`${ATOMIZABLE_TARGET_PREFIX}input:command-line` (hypercomb-shared/ui/command-line/command-line.atomizer.ts)',
     ], 'shell-side IoC registration')
   })

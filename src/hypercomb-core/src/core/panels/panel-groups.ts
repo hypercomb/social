@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/docked-panel/panel-groups.ts
+// hypercomb-core/src/core/panels/panel-groups.ts
 //
 // Tool-window GROUPS — the model behind the settings gear in every docked
 // panel's header (hc-docked-panel.directive.ts builds that chrome).
@@ -199,7 +199,7 @@ export const writeLigatures = (window: string, on: boolean): void => {
  *  this; `adopt` is where a member clamps an incoming attribute to its own
  *  limits, so a window that cannot go that wide sits at its limit rather than
  *  breaking layout. */
-export interface GroupMember {
+export interface PanelGroupMember {
   readonly group: string
   attrs(): GroupAttrs
   adopt(attrs: GroupAttrs): void
@@ -305,11 +305,11 @@ export const writeGroupAttrs = (group: string, attrs: GroupAttrs): void => {
 
 /** Every mounted tool window. Attributes are pushed only across members whose
  *  group text MATCHES. */
-export const members = new Set<GroupMember>()
+export const members = new Set<PanelGroupMember>()
 
 /** Make `source`'s attributes its GROUP's, and push them to every other live
  *  member with the same text. Ungrouped windows publish nothing. */
-export const publishAttrs = (source: GroupMember): void => {
+export const publishAttrs = (source: PanelGroupMember): void => {
   const group = source.group
   if (!group) return
   const attrs: GroupAttrs = { ...readGroupAttrs(group), ...source.attrs() }

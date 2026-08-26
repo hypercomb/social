@@ -14,8 +14,8 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // keeps its own edge handles and width store (`ownsSize` false) — see the
 // directive's header — and hands the directive its width as a `sizeOwner`.
 import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
-import type { SettingRow } from '../docked-panel/panel-settings'
-import { type WindowSession, windowsParked } from '../window-session'
+import type { SettingRow } from '@hypercomb/core'
+import { type WindowSession, windowsParked } from '@hypercomb/core'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   NOTE_MARKS_IOC_KEY,

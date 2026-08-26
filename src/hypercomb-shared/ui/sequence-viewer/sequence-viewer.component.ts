@@ -3,7 +3,7 @@ import { EffectBus } from '@hypercomb/core'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { signalSession } from '../window-session'
+import { signalSession } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
 type SequenceSet = { name: string; indexes: number[] }

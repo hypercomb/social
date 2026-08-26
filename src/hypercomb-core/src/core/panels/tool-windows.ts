@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/tool-windows.ts
+// hypercomb-core/src/core/panels/tool-windows.ts
 //
 // ESCAPE HAS ONE OWNER: the cascade. This is the door it knocks on.
 //
@@ -43,8 +43,16 @@
 // and IoC-free, and it stays that way — it owns the FACTS (who is showing, who
 // has the focus); this owns the POLICY.
 
-import { focusedWindow } from './window-session'
-import { dismissOpenPopover } from './docked-panel/hc-docked-panel.directive'
+import { focusedWindow } from './window-session.js'
+
+// INVERSION (the move to core): the popover dismisser used to be imported
+// from the Angular docked-panel directive — a policy file reaching into
+// chrome. Now whichever docked-panel implementation is live (the Angular
+// directive today, the custom-element kit as panels convert) REGISTERS its
+// dismisser here. Both may register; the last writer wins, and both point at
+// the same "at most one popover is open" fact.
+let popoverDismisser: (() => boolean) | null = null
+export function setPopoverDismisser(fn: (() => boolean) | null): void { popoverDismisser = fn }
 
 /** The IoC contract. Kept structural so essentials can type it without
  *  importing shared. */
@@ -62,7 +70,7 @@ const api: ToolWindowsApi = {
     // Innermost first — a popover belongs to a window, so it backs out before
     // the window does. It is checked without consulting focus because it IS the
     // focused thing whenever it is open (the popover takes focus on open).
-    if (dismissOpenPopover()) return true
+    if (popoverDismisser?.()) return true
     return focusedWindow()?.session.dismiss?.() === true
   },
 
@@ -74,10 +82,15 @@ const api: ToolWindowsApi = {
   },
 }
 
-// Self-registering side effect, imported from the shell bootstrap — the same
-// shape every other shell service uses. Guarded because both shells run the
-// bootstrap and a double import must not mint a second object.
-const ioc = (globalThis as { ioc?: { register(key: string, value: unknown): void; get(key: string): unknown } }).ioc
-if (ioc && !ioc.get(TOOL_WINDOWS_IOC_KEY)) ioc.register(TOOL_WINDOWS_IOC_KEY, api)
+/** Register into the live IoC map when one exists (core also runs in node). */
+export const ensureToolWindowsRegistered = (): void => {
+  const ioc = (globalThis as unknown as {
+    ioc?: { has?: (k: string) => boolean; register?: (k: string, v: unknown) => void }
+  }).ioc
+  if (!ioc?.has?.(TOOL_WINDOWS_IOC_KEY)) {
+    ioc?.register?.(TOOL_WINDOWS_IOC_KEY, api)
+  }
+}
+ensureToolWindowsRegistered()
 
 export { api as toolWindows }

@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/docked-panel/panel-groups.spec.ts
+// hypercomb-core/src/core/panels/panel-groups.spec.ts
 //
 // Tool-window GROUPS: a group is just text — matching text shares attributes.
 // The chrome that drives this (the header gear and its one text field) lives in
@@ -7,14 +7,14 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  type GroupAttrs, type GroupMember, TEXT_SIZES,
+  type GroupAttrs, type PanelGroupMember, TEXT_SIZES,
   members, publishAttrs, readGroupAttrs, readMembership, readTextScale, writeMembership, writeTextScale,
 } from './panel-groups'
 
 /** A tool window as the sharing sees one: a width and a text size, plus its own
  *  limits to clamp an incoming width against — the directive's `adopt`, minus
  *  the DOM. */
-class FakeWindow implements GroupMember {
+class FakeWindow implements PanelGroupMember {
   group = ''
   width: number
   /** `null` = auto, i.e. the scale the panel derives from its own width. */

@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/window-session.ts
+// hypercomb-core/src/core/panels/window-session.ts
 //
 // The tool-window SESSION — what is showing, so it can be put away and brought
 // back exactly as it was.

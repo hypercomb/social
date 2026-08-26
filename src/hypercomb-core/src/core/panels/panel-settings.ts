@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/docked-panel/panel-settings.ts
+// hypercomb-core/src/core/panels/panel-settings.ts
 //
 // The SETTINGS EDITOR — the small surface every docked tool window's gear
 // opens, and the one place its chrome is drawn.
@@ -21,7 +21,7 @@
 // Framework-free — the directive that owns the gear is imperative chrome, and
 // nothing here should need Angular to render a popover.
 
-import { STEEL } from './panel-groups'
+import { STEEL } from './panel-groups.js'
 
 /** One setting. The four shapes cover everything the windows have asked for so
  *  far; a fifth shape is added HERE and every window can use it at once. */

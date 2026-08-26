@@ -34,7 +34,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { signalSession } from '../window-session'
+import { signalSession } from '@hypercomb/core'
 
 /** One attached branch, as `TileContext.resolve` returns it. */
 type ContextBranch = {

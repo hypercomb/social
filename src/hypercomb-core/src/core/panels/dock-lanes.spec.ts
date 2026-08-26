@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/docked-panel/dock-lanes.spec.ts
+// hypercomb-core/src/core/panels/dock-lanes.spec.ts
 //
 // Dock LANES: an edge holds more than one tool window, they stack inward from
 // it in the order they were opened, and a window pushed out of a full lane is

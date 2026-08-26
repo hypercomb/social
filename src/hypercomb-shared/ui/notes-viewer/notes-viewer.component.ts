@@ -28,7 +28,7 @@ import { Component, computed, effect, signal, type OnDestroy } from '@angular/co
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
-import { holdWindow, type WindowSession } from '../window-session'
+import { holdWindow, type WindowSession } from '@hypercomb/core'
 import { flattenHierarchy, stepIndex } from './note-cycle'
 
 type ShapeId = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'hexagon'

@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/breakpoints.ts
+// hypercomb-core/src/core/panels/breakpoints.ts
 //
 // The phone breakpoint, in TypeScript — the twin of `_breakpoints.scss`.
 //

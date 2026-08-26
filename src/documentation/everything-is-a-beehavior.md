@@ -298,7 +298,24 @@ already build imperative DOM — the muscle exists.
   components every panel leans on. Build custom-element equivalents that
   preserve the docked-panel contracts (sole writer of `--hc-panel-scale`,
   the width + text-size ladder, the reading face, controls-bar anchoring).
-  Nothing else in this phase moves until this lands.
+  Nothing else in this phase moves until this lands. Findings so far: the
+  panel SUPPORT MODEL (panel-groups, panel-settings, dock-lanes,
+  window-session/rule) is already pure TS — it moves to core so the Angular
+  directive and the new element share ONE model during the transition (the
+  sole-writer rule survives); only the 1,318-line directive is Angular, and
+  it already builds its DOM imperatively.
+  **NO RECONCILER IN THE KIT** (settled 2026-08-26): a generic
+  keyed-reconcile helper would be the first brick of a framework — outside
+  the architecture. The house answers instead: rebuild-on-change (state
+  lives in services, never DOM, so rebuilding is safe — the shipping
+  `.view.ts` pattern); explicit `focusSnapshot`/`restoreFocus` for what
+  must survive a rebuild (precedent already in panel-settings); and for
+  genuinely live rows, a per-panel `Map<key, element>` re-appended in data
+  order — `appendChild` MOVES an existing node, so the platform is the
+  reconciler. `shell-surfaces` keeps its own keyed host because its
+  invariant (live panels never recreated) is unique — special case, never
+  generalized. A panel that "needs" more than this is rendering too much
+  in DOM and should draw from state like the hive does.
 - [ ] Prove the pattern on the small ones: `website-nav` (67),
   `sequence-viewer` (120), `sensitivity-bar` (136), `landing-badge` (186),
   `preview-banner` (191)

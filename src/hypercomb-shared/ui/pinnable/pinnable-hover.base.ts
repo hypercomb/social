@@ -30,7 +30,7 @@
 
 import { signal, Directive, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
-import { holdWindow, type WindowSession } from '../window-session'
+import { holdWindow, type WindowSession } from '@hypercomb/core'
 
 export interface PinnablePanel<T> {
   id: number

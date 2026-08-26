@@ -5,7 +5,7 @@ import { EffectBus } from '@hypercomb/core'
 import { getClientIdentity } from '../../core/client-identity'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
-import { parkWindows, unparkWindows } from '../window-session'
+import { parkWindows, unparkWindows } from '@hypercomb/core'
 
 const DEFAULT_PORTALS: Record<string, string> = {
   meadowverse: 'https://meadowverse.com',

@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/window-rule.spec.ts
+// hypercomb-core/src/core/panels/window-rule.spec.ts
 //
 // ONE WINDOW AT A TIME, with the pheromone palette the single surface allowed
 // to stay beside one. The chrome that drives this is an Angular directive (it

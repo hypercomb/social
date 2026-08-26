@@ -40,5 +40,5 @@ export * from './presence-banner/presence-banner.component'
 export * from './sync-indicator/sync-indicator.component'
 export * from './upgrade-indicator/upgrade-indicator.component'
 export * from './dock-inset/dock-inset.directive'
-export * from './window-session'
+export * from '@hypercomb/core'
 

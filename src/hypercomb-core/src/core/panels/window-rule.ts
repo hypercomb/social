@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/window-rule.ts
+// hypercomb-core/src/core/panels/window-rule.ts
 //
 // ONE WINDOW AT A TIME.
 //
@@ -32,8 +32,8 @@
 // a view competing for the screen. Widening the rule to everything the session
 // knows about would close cards nobody asked to close.
 
-import { laneCapacity } from './docked-panel/dock-lanes'
-import type { WindowSession } from './window-session'
+import { laneCapacity } from './dock-lanes.js'
+import type { WindowSession } from './window-session.js'
 
 /** Showing tool windows, in the order they opened. A re-registration under the
  *  same id replaces the entry and keeps its rank (`Map.set` on an existing key

@@ -59,14 +59,14 @@ import { EffectBus } from '@hypercomb/core'
 // The GROUP model — membership text and shared attributes — lives in
 // panel-groups.ts. This file is the chrome that drives it.
 import {
-  type GroupAttrs, type GroupMember, STEEL, TEXT_SIZES,
+  type GroupAttrs, type PanelGroupMember, STEEL, TEXT_SIZES,
   CODE_FONTS, DEFAULT_CODE_FONT, codeFont,
   READ_FONTS, DEFAULT_READ_FONT, readFont,
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
   readPairing, writePairing, readTextScale, writeTextScale,
   readCodeFont, writeCodeFont, readLigatures, writeLigatures,
   readReadFont, writeReadFont,
-} from './panel-groups'
+} from '@hypercomb/core'
 
 // The EDITOR — how a settings popover is drawn from declared rows, and the one
 // stylesheet the gear and the popover share. A new setting is a new row here,
@@ -74,7 +74,7 @@ import {
 import {
   type SettingRow, type SettingsView, type SettingsZone,
   focusSnapshot, installSettingsCss, renderSettings, restoreFocus,
-} from './panel-settings'
+} from '@hypercomb/core'
 
 // The LANE model — how many windows an edge holds and where each one sits.
 // A side is no longer a single-window slot: it stacks inward from the edge,
@@ -83,17 +83,17 @@ import {
 import {
   type LaneMember, type LaneSide,
   claimLane, laneHasRoom, layoutLane, releaseLane,
-} from './dock-lanes'
+} from '@hypercomb/core'
 
 // The session — how a window is put away while the hive is covered (the
 // installer) and brought back on the way home. A docked window joins just by
 // handing over its `park`/`unpark` pair; the directive only exists while the
 // window is showing, so its own lifetime IS the "currently open" fact.
-import { holdWindow, type WindowSession } from '../window-session'
+import { holdWindow, type WindowSession } from '@hypercomb/core'
 
 // The one-window rule — opening a tool window puts the others away, with the
 // pheromone palette the single surface allowed to stay beside one.
-import { holdToolWindow } from '../window-rule'
+import { holdToolWindow, setPopoverDismisser } from '@hypercomb/core'
 
 const t = (key: string, fallback: string, params?: Record<string, unknown>): string => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
@@ -151,7 +151,7 @@ const GEAR_SLOT = HEADER_ACTION + HEADER_ACTION_GAP
   selector: '[hcDockedPanel]',
   standalone: true,
 })
-export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, GroupMember, LaneMember {
+export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, PanelGroupMember, LaneMember {
 
   /** Stable participant-local id → localStorage width key. */
   @Input('hcDockedPanel') id = ''
@@ -300,7 +300,7 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
    *  its group mates track it, exactly as the grip does for owned panels. */
   #sizeWatch: ResizeObserver | null = null
 
-  /** GroupMember — what this window contributes to, and takes from, its group. */
+  /** PanelGroupMember — what this window contributes to, and takes from, its group. */
   get group(): string { return this.#group }
   /** The live width. A settings-only window may not have been measured yet when
    *  it joins a group, so ask its owner (or the element) rather than publishing
@@ -1213,7 +1213,7 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     for (const panel of live) { panel.#renderGearState(); panel.#refreshPopover() }
   }
 
-  /** GroupMember — take the group's shared attributes, each clamped to THIS
+  /** PanelGroupMember — take the group's shared attributes, each clamped to THIS
    *  window's own limits, so a panel that cannot go that wide sits at its limit
    *  rather than breaking layout. */
   adopt(attrs: GroupAttrs): void {
@@ -1316,3 +1316,8 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     window.removeEventListener('pointercancel', this.#onUp)
   }
 }
+
+// The Escape cascade's popover rung (tool-windows, now in core) asks whoever
+// is the live docked-panel implementation. While the Angular directive serves
+// the un-converted panels, that is us.
+setPopoverDismisser(dismissOpenPopover)

@@ -25,7 +25,7 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, ElementRef, computed, effect, inject, signal, type AfterViewInit, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { holdWindow, signalSession } from '../window-session'
+import { holdWindow, signalSession } from '@hypercomb/core'
 
 type CursorState = {
   locationSig: string

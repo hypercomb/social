@@ -57,8 +57,8 @@ import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { type WindowSession } from '../window-session'
-import { PHONE_QUERY, isPhoneViewport } from '../breakpoints'
+import { type WindowSession } from '@hypercomb/core'
+import { PHONE_QUERY, isPhoneViewport } from '@hypercomb/core'
 import { bouquetMatchesQuery, filterNamespaceGroups, filterRowsByQuery, looseMarks, namespaceGroupsOf } from './tag-grouping'
 
 interface TagRow {

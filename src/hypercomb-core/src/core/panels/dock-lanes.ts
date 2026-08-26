@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/docked-panel/dock-lanes.ts
+// hypercomb-core/src/core/panels/dock-lanes.ts
 //
 // The dock LANE — how many tool windows a screen edge holds, and where each
 // one sits.
@@ -35,7 +35,7 @@
 // Module scope, no service — the directive is already self-contained chrome,
 // exactly as panel-groups.ts is for the group text.
 
-import { isPhoneViewport } from '../breakpoints'
+import { isPhoneViewport } from './breakpoints.js'
 
 export type LaneSide = 'left' | 'right'
 
@@ -202,7 +202,9 @@ export const reflowLanes = (): void => {
   }
 }
 
-if (typeof window !== 'undefined') {
+// Core also evaluates in node contexts where window is absent or a partial
+// stub — require the piece we wire.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   let queued = 0
   window.addEventListener('resize', () => {
     if (queued) return

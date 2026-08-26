@@ -16,7 +16,7 @@ import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { signalSession } from '../window-session'
+import { signalSession } from '@hypercomb/core'
 import { onSelection } from '../../core/selection-context'
 import { categorize, typeMeta, TYPE_META, TYPE_ORDER, type FileTypeKey, type FileTypeMeta } from './file-icons'
 

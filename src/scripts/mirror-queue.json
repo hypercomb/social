@@ -1917,6 +1917,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase2-panel-model-to-core",
+      "title": "Mirror Phase 2 gate step A: the pure panel model (dock-lanes, panel-groups, panel-settings, window-session, window-rule, breakpoints, tool-windows) moved to core/panels — ONE model under both the Angular directive and the coming element kit",
+      "run": null,
+      "note": "Source: documentation/everything-is-a-beehavior.md Phase 2 gate. note-add is additive, so manual.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
