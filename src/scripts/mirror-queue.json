@@ -1962,6 +1962,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-p2-viewer-batch",
+      "title": "shrink Phase 2 viewer batch — icon-picker, format-painter, youtube-viewer, presence-banner",
+      "run": null,
+      "note": "Four Angular panels converted to framework-free custom elements and moved into essentials beside their owning drones (presentation/tiles, editor, link, sharing). Mirror: one tile per view + its sibling i18n catalog + drift spec, gathered into the everything-is-a-beehavior collection; mark each 'part'. Also mirrors viewport-inset-vars moving shared -> core/panels. Manual: note-add is additive and would double-land.",
+      "commit": "f001bf613",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
