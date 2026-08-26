@@ -889,6 +889,30 @@ function tryLanding(req, res) {
 // trySPA was removed in the full-split refactor. The relay no longer serves
 // installer code under any circumstances. See the landing handler above.
 
+// ── installer hand-off ───────────────────────────────────────────────────────
+//
+// GET /installer → 302 to the latest Windows installer on the blob store.
+// The relay never serves installer bytes itself (see the trySPA note above);
+// it only points at the canonical LATEST, so shipping a new build is one
+// blob overwrite and this link never changes. jwize.com/installer IS the
+// ship-the-app link.
+const INSTALLER_LATEST_URL = process.env.INSTALLER_LATEST_URL
+  || 'https://storagehypercomb.blob.core.windows.net/installer/Hypercomb-Setup-latest.exe'
+
+function tryInstaller(req, res) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false
+  let urlPath
+  try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { return false }
+  if (urlPath !== '/installer' && urlPath !== '/installer/') return false
+  res.writeHead(302, {
+    Location: INSTALLER_LATEST_URL,
+    'Cache-Control': 'no-cache',
+    'Access-Control-Allow-Origin': '*',
+  })
+  res.end()
+  return true
+}
+
 const server = createServer((req, res) => {
   // NIP-11 relay metadata (Accept: application/nostr+json)
   if (req.headers.accept?.includes('application/nostr+json')) {
@@ -896,6 +920,9 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(relayInfo))
     return
   }
+
+  // Installer hand-off: /installer points at the canonical latest build.
+  if (tryInstaller(req, res)) return
 
   // Read side: GET/HEAD/OPTIONS content serving (returns true if handled)
   if (tryServeContent(req, res)) return

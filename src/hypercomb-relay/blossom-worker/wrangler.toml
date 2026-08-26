@@ -17,7 +17,12 @@ routes = [
   # pluginthematrix.io is the legacy-client alias: every deployed client
   # already probes it as a byte fallback, so serving the same sig heap
   # here gives old installs public-content reads with zero updates.
-  { pattern = "pluginthematrix.io", custom_domain = true }
+  { pattern = "pluginthematrix.io", custom_domain = true },
+  # jwize.com/installer rides THIS worker at the edge (302 → the latest
+  # installer blob) so shipping the app never depends on the tunnel or the
+  # relay machine being up. Everything else on jwize.com still flows to
+  # the tunnel — a zone route claims only what it matches.
+  { pattern = "jwize.com/installer*", zone_name = "jwize.com" }
 ]
 
 # R2 bucket holding the flat sig heap: one object per sig, key == sig,
@@ -40,7 +45,7 @@ id = "11e24dcda743413ab24397e936671641"
 #   wrangler kv namespace create HIVES
 [[kv_namespaces]]
 binding = "HIVES"
-id = "REPLACE_WITH_HIVES_NAMESPACE_ID"
+id = "186c91f7458b421abea02d7647f27821"
 
 [vars]
 AUTO_GRANT = "1"                    # '1' mints a grant on first valid upload; '0' closes the door
