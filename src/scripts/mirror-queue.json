@@ -2127,6 +2127,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase3-command-line",
+      "title": "Mirror the Phase 3 command-line unbinding",
+      "run": null,
+      "note": "hc-command-line is now a framework-free light-DOM custom element, completing the command-line + command-shell Phase 3 pair. Preserve and update the existing command-line behavior/source parts rather than minting duplicates: the 5K-line behavior engine, CommandLineBehaviors IoC registration, object/slash/tag/find/select completions, Common Tongue reading, voice, mobile visibility, resource arming, panel/view/indicator rail state and atomizer target all remain. What changed is the host: a small memoized reactive layer owns lifecycle and cleanup, mounts one stable hc-command-shell + hc-pinned-entrances + hc-hint-bar DOM tree, and reconciles shell properties from EffectBus/IoC state while consuming bubbling CustomEvents. The Angular decorator, ViewChild, component template and Angular effects retired; both app shells side-effect import the element, and globally emitted SCSS is scoped under hc-command-line. The live shrink gate proves owned DOM, notes state and mobile visibility in addition to the shell's input/completion contracts; all functional checks pass, with only the already-known direct-dev-port @resource proxy 404s. Manual: note-add is additive and would double-land.",
+      "commit": "56b70b28e",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
