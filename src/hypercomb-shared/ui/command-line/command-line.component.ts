@@ -2096,9 +2096,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     })
 
-    // voice input: live interim preview while speaking
+    // voice input: live interim preview while speaking.
+    //
+    // The dropdown stands down while a sentence is being spoken — nothing is
+    // being typed, so a ghost completion is offering to finish a word the
+    // participant is already saying, and its dot-style rendering was what
+    // turned a heard "open providers" into "open.providers" on screen.
+    // Find stance is the exception: there the rows ARE the answer arriving,
+    // and watching them narrow is the point of speaking.
     this.#voiceInterimUnsub = EffectBus.on<{ text: string }>('voice:interim', ({ text }) => {
-      this.#setShellValue(text, false)
+      this.#setShellValue(text, this.#stance() !== 'find')
     })
 
     // voice input: auto-submit on release (push-to-talk complete).
@@ -2130,9 +2137,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       void this.#preprocessTagsThenExecute(text)
     })
 
-    // voice active state sync (for mic button visual)
+    // voice active state sync (for mic button visual) — and the stance guard.
+    //
+    // SPEAKING IS SAYING, NOT NAMING. Tiles stance reads a plain line as the
+    // name of something to make, so a dictated sentence there mints a tile
+    // called whatever was said. Listening therefore takes the line into a
+    // stance that READS: command, where the Common Tongue hears the sentence.
+    // Find stance is left alone — speech there is a question, which is
+    // already safe — and the guard sits HERE, on the moment dictation
+    // begins, so it covers every way in: the rail mic, the control bar's
+    // toggle, and /voice alike.
+    // Sticky afterwards, as the stance always is: one click on the prompt
+    // glyph walks back to naming.
     this.#voiceActiveUnsub = EffectBus.on<{ active: boolean }>('voice:active', ({ active }) => {
       this.voiceActive.set(active)
+      if (active && this.#stance() === 'tiles') this.#setStance('command')
     })
 
     // push-to-talk toggle (from /push-to-talk slash behaviour)

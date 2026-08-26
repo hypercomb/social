@@ -5,6 +5,23 @@
 
 import { EffectBus } from '@hypercomb/core'
 
+/**
+ * What a spoken line becomes before anything reads it.
+ *
+ * The recognizer writes PROSE — sentence case, proper-noun capitals, and a
+ * closing full stop — and none of that was said out loud. The full stop is
+ * the expensive one: the command line reads a line carrying a '.' as being
+ * in DOT style (the register cell paths use), so "open providers." made the
+ * completion render itself back as "open.providers." and matched nothing.
+ * The capitals broke word matching on their own.
+ *
+ * So: folded to lowercase, whitespace collapsed, and sentence-final
+ * punctuation trimmed. Punctuation INSIDE the utterance is left alone — a
+ * dictated note is allowed to have commas.
+ */
+const spokenLine = (text: string): string =>
+  text.replace(/\s+/g, ' ').trim().replace(/[.,!?;:]+$/, '').trim().toLowerCase()
+
 export class VoiceInputService extends EventTarget {
 
   #recognition: any = null
@@ -76,7 +93,7 @@ export class VoiceInputService extends EventTarget {
       this.#interimText = interim
 
       // emit interim for live preview (final + current interim)
-      const preview = (this.#carriedText + ' ' + this.#finalText + ' ' + interim).trim()
+      const preview = spokenLine(this.#carriedText + ' ' + this.#finalText + ' ' + interim)
       if (preview) {
         EffectBus.emit('voice:interim', { text: preview })
       }
@@ -129,7 +146,7 @@ export class VoiceInputService extends EventTarget {
     // Web Speech API may not have promoted interim → final yet, so fall
     // back to the current interim so the user's last utterance isn't lost.
     // release = cue to submit, so emit voice:submit for auto-execution.
-    const text = (this.#carriedText + ' ' + this.#finalText + ' ' + this.#interimText).trim()
+    const text = spokenLine(this.#carriedText + ' ' + this.#finalText + ' ' + this.#interimText)
     if (text) {
       EffectBus.emit('voice:final', { text })
       EffectBus.emit('voice:submit', { text })

@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "Basculer le focus de la ligne de commande",
   "keymap.mesh-toggle": "Basculer le mode public / privé",
   "keymap.bees": "Basculer les avatars d'abeilles",
+  "keymap.chat": "Ouvrir ou fermer l’assistant",
   "keymap.screensaver": "Afficher l'économiseur d'écran",
   "keymap.fit": "Ajuster le contenu à l'écran",
   "keymap.recenter": "Centrer le contenu à l'écran",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "Rechercher dans ce niveau",
   "agent.rail-no-match": "Aucune tuile ici ne correspond à « {query} ».",
   "agent.rail-talk": "Parler à cette tuile",
+  "agent.rail-go": "Entrer dans {name}",
+  "agent.rail-threads": "{count} conversations",
   "agent.rail-inside": "maintenez pour entrer",
   "agent.rail-draft": "Des réflexions non envoyées attendent ici",
   "agent.rail-turns": "{count} échanges",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "Retirer {tile} de cette demande",
   "chat.reference.empty": "Déposez des tuiles ou une image ici — ou copiez n’importe quelle tuile de la ruche",
   "chat.reference.picture": "image · {size}",
+  "chat.reference.look": "Voir {tile}",
+  "chat.reference.previous": "Image précédente",
+  "chat.reference.next": "Image suivante",
+  "chat.reference.done": "Fermer",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
 }

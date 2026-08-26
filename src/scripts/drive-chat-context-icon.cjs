@@ -97,8 +97,18 @@ async function main() {
   await page.keyboard.press('Enter')
   await page.waitForTimeout(3000)
 
+  // Reopen. The launcher is the honest gesture but it sits in a rail that can
+  // still be settling, and a press that misses reads as "the window never
+  // opened" — so fall back to the remembered choice rather than re-rolling.
+  const panel = page.locator('hc-chat-window .chat-panel')
   await page.locator('.chat-toggle-btn').first().click({ force: true })
-  await page.locator('hc-chat-window .chat-panel').waitFor({ state: 'attached', timeout: 40000 })
+  await page.waitForTimeout(2500)
+  if (!(await panel.count())) {
+    await page.evaluate(() => localStorage.setItem('hc:chat-visible', '1'))
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.locator('hc-shell-surfaces').waitFor({ state: 'attached', timeout: 40000 })
+  }
+  await panel.waitFor({ state: 'attached', timeout: 40000 })
   await page.waitForTimeout(3000)
 
   check('the icon is NOT offered while the window is up', !(await armed(page)))

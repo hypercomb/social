@@ -23,6 +23,20 @@ saying: signed deposits on a sig, with **depositor, intensity, and decay**.
 The community's refinements accumulate into each participant's filters —
 curation without moderators, exactly how a colony does it (stigmergy).
 
+## Exploration produces composable projections
+
+Lineage and pheromone are orthogonal. Lineage answers where an atom came from;
+pheromone answers what a set of atoms has in common. A swarm exploration may
+cross several lineages, discover a coherent cohort, and deposit one common
+pheromone on its members. That scent makes the result reusable by portals and
+document views without moving the atoms or copying them into a new folder.
+
+A projection is the intersection of any applicable lineage constraints,
+pheromone kinds, and participant-local filters over the canonical pool. These
+constraints compose freely: changing the view changes the selection, never the
+identity or storage location of the underlying atoms. See
+[view-library.md](view-library.md#views-are-composable-projections).
+
 ## Why this answers pollution
 
 The public shelf is storage-neutral (quota + expiry + revocation handle

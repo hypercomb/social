@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "Alternar enfoque de línea de comandos",
   "keymap.mesh-toggle": "Alternar modo público / privado",
   "keymap.bees": "Alternar avatares de abejas",
+  "keymap.chat": "Abrir o cerrar el asistente",
   "keymap.screensaver": "Mostrar salvapantallas",
   "keymap.fit": "Ajustar contenido a la pantalla",
   "keymap.recenter": "Centrar contenido en pantalla",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "Buscar en este nivel",
   "agent.rail-no-match": "Aquí no hay ningún mosaico que coincida con «{query}».",
   "agent.rail-talk": "Hablar con este mosaico",
+  "agent.rail-go": "Entrar en {name}",
+  "agent.rail-threads": "{count} conversaciones",
   "agent.rail-inside": "mantén pulsado para entrar",
   "agent.rail-draft": "Aquí hay ideas sin enviar",
   "agent.rail-turns": "{count} turnos",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "Quitar {tile} de esta petición",
   "chat.reference.empty": "Suelta mosaicos o una imagen aquí — o copia cualquier mosaico de la colmena",
   "chat.reference.picture": "imagen · {size}",
+  "chat.reference.look": "Ver {tile}",
+  "chat.reference.previous": "Imagen anterior",
+  "chat.reference.next": "Imagen siguiente",
+  "chat.reference.done": "Cerrar",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
   "mesh-modal.needs-secret": "se necesita un secreto para unirse"
 }

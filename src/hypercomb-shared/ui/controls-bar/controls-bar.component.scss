@@ -552,8 +552,8 @@ $actions-corner: 12rem;
     > .ctl-btn { flex-shrink: 0; }
   }
 
-  // Bee (tour), then pin, then home lead the list (see the order rules at the
-  // bottom of this file) — all three scroll with the rest of the icons.
+  // Chat leads the list, followed by pin and home. The tutorial bee closes the
+  // scrollable run (see the explicit order rules below).
   // The active (view-locked) state must read on EVERY platform: macOS/Safari
   // does not reliably repaint the Material Symbols FILL axis when .filled is
   // toggled, so the locked cue here never relies on the variable-font fill
@@ -579,8 +579,8 @@ $actions-corner: 12rem;
     }
   }
 
-  // The bee sits above pin — the tour opener leads the rail. Same box and gap
-  // as every other icon; only the amber tint marks it as the "start here".
+  // The bee closes the list. Same box and gap as every other icon; only the
+  // amber tint marks it as guided help rather than an everyday tool.
   .rail-tutorial {
     flex-shrink: 0;
     padding: 0.5rem 0 0.55rem;
@@ -717,17 +717,17 @@ $actions-corner: 12rem;
   .controls-row { flex-direction: column; }
 }
 
-// Explicit rail icon order (top → bottom). The bee (guided tour) leads, then
-// pin and home (the two navigation constants), then registry order — except the two
+// Explicit rail icon order (top → bottom). Chat leads, then pin and home
+// (the two navigation constants), then registry order — except the two
 // magnifiers, flipped so the +(zoom-in) stays ABOVE the −(zoom-out). Any
 // enabled extra (default order 50) falls below the named set. The edit-mode
 // chevron and back live in the pinned footer (a separate zone), so they're
 // not ordered here.
 .pill-stage.dock-left .controls-row {
   .ctl-btn                             { order: 50; }
-  .rail-tutorial                       { order: -3; }
   .rail-pin                            { order: -2; }
   .rail-home                           { order: -1; }
+  .rail-tutorial                       { order: 100; }
   .ctl-btn[data-ctrl-id='dcp']         { order: 1; }
   // Portals rides directly under the installer — both are ways OUT of this
   // page. It needs its own rule: anything unlisted falls to the catch-all

@@ -90,6 +90,7 @@ import {
   tilePath, tilePathOf,
   type TileConversation,
 } from './chat-thread.js'
+import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
@@ -192,11 +193,14 @@ const HIVE_KEY = ''
 /** Which chat you were last in, per tile. */
 const STICKY_KEY = 'hc:rail-chat'
 
-/** THE CONTROL THAT TALKS — a Material Symbols ligature, two bubbles,
- *  because what it opens is a tile's conversationS. The shell loads the
- *  face; the button clips, so where it has not the row shows an empty box
- *  rather than the ligature's own letters. */
-const CHATS_GLYPH = 'forum'
+/** GO INSIDE. A chevron, because that is what it now means: the LINE talks,
+ *  so the one control left on the row is the one that walks. */
+const WALK_GLYPH = 'chevron_right'
+
+/** PUT IT AWAY, or bring it back — the same two ligatures the chat window's
+ *  own list wears, so one act looks like itself wherever it is offered. */
+const ARCHIVE_GLYPH = 'archive'
+const UNARCHIVE_GLYPH = 'unarchive'
 
 /** What a dragged row carries. Shared with the chat window's header boxes —
  *  the shell may not import this module, so the CONTRACT is the mime type and
@@ -212,11 +216,7 @@ const AMBER = '226, 196, 140'
 /** The rail's own stylesheet — installed on first mount so the rail reads
  *  identically inside the agent panel and the chat window. Host geometry
  *  (where the rail sits, how wide) stays with whichever surface mounts it. */
-const ensureRailStyles = (): void => {
-  if (document.getElementById(STYLE_ID)) return
-  const style = document.createElement('style')
-  style.id = STYLE_ID
-  style.textContent = `
+const RAIL_CSS = `
 .hc-rail-head{display:flex;align-items:center;gap:0.35rem;flex:0 0 auto;
   padding:0.8rem 0.85rem 0.5rem;}
 .hc-rail-back{width:1.7rem;height:1.9rem;flex:0 0 auto;border:none;background:none;
@@ -238,7 +238,16 @@ const ensureRailStyles = (): void => {
   mask:conic-gradient(from 45deg,#000 0 100%) 50%/0.16rem 100%,
     conic-gradient(from 45deg,#000 0 100%) 50%/100% 0.16rem;
   mask-repeat:no-repeat;transform:rotate(45deg);}
-.hc-rail-list{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;
+/* UP AND DOWN ONLY. A sideways scrollbar under a list of names is never
+   the answer to anything — the names ellipsise and the rows fit, so a bar
+   there means something is overflowing and the participant is being asked
+   to go and find it. An overflow-y of auto alone could not say this: naming
+   ONE axis makes the other compute to auto as well, so the bar arrived
+   the moment anything (a fold row a hair too wide, the 0.6rem slide a
+   level change rides in on) reached past the edge. Both axes are named.
+   The cause is still fixed at the cause — this is the floor under it. */
+.hc-rail-list{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;
+  display:flex;flex-direction:column;
   gap:2px;padding:0.15rem 0.5rem 0.7rem;scrollbar-width:thin;
   scrollbar-color:rgba(${STEEL},0.3) transparent;}
 @keyframes hcRailIn{from{opacity:0;transform:translateX(0.6rem);}to{opacity:1;transform:none;}}
@@ -283,13 +292,23 @@ const ensureRailStyles = (): void => {
 .hc-rail-icon img{width:100%;height:100%;object-fit:cover;display:block;}
 .hc-rail-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-size:0.86rem;color:rgba(238,244,250,0.92);}
+/* HOW MANY THREADS. A bare numeral in the row's own steel, sitting straight
+   after the name — not a pill, because a pill is a BADGE and this is not an
+   alert: it is a fact about the tile that happens to be a number. Metric-
+   neutral by being flex:0 0 auto with the name still holding the elastic, so
+   a count arriving can never re-ellipsize the label. */
+.hc-rail-threads{flex:0 0 auto;font-family:var(--hc-mono,monospace);
+  font-size:0.64rem;line-height:1;color:rgba(${STEEL},0.6);}
+.hc-rail-threads[hidden]{display:none;}
+.hc-rail-row.unread .hc-rail-threads{color:rgba(${AMBER},0.9);}
+
 .hc-rail-bees{flex:0 0 auto;min-width:1.15rem;text-align:center;padding:0.06rem 0.3rem;
   border-radius:999px;border:1px solid rgba(226,196,140,0.5);color:rgba(226,196,140,0.95);
   font-size:0.66rem;line-height:1.2;}
 .hc-rail-bees[hidden]{display:none;}
-.hc-rail-chats-open{flex:0 0 auto;color:rgba(216,230,238,0.35);font-size:1.05rem;line-height:1;
+.hc-rail-walk{flex:0 0 auto;color:rgba(216,230,238,0.35);font-size:1.05rem;line-height:1;
   padding-right:0.1rem;}
-.hc-rail-chats-open[hidden]{display:none;}
+.hc-rail-walk[hidden]{display:none;}
 .hc-rail-draft{flex:0 0 auto;width:0.42rem;height:0.42rem;margin-right:0.55rem;
   border-radius:999px;background:rgba(226,196,140,0.9);}
 .hc-rail-draft[hidden]{display:none;}
@@ -324,6 +343,25 @@ const ensureRailStyles = (): void => {
    turn, 14px from a dozen on. Height is pre-attentive, so a level reads as a
    ragged margin you scan for the deep ones without reading a word. */
 .hc-rail-row.spoken::before{height:calc(6px + var(--hc-rail-depth, 0) * 8px);}
+
+/* ACTIVE — something is happening in this conversation RIGHT NOW: a question
+   of yours is still out, or an agent is working on the tile. It is the one
+   state in this list that is about the present tense, so it is the one mark
+   that MOVES: amber (which in this list already means the hive is doing
+   something), breathing on the same slow cycle as the count at the other end
+   of the row, so the two read as one fact said twice.
+
+   Drawn even when the tile has never been spoken to — .spoken sets the
+   height and a brand-new conversation has none, yet a question just sent is
+   exactly when you most need to see WHICH line it went to. Sits before
+   .unread on purpose: an unread reply has landed and is no longer in
+   progress, so at equal specificity source order lets it win. */
+.hc-rail-row.live::before{min-height:7px;background:rgba(${AMBER},0.85);
+  animation:hcRailBreath 2.6s ease-in-out infinite;}
+
+/* The hive's own tick is amber at rest (it is the hive), so live has to be
+   told apart from it by more than colour: full strength, and the breath. */
+.hc-rail-hive .hc-rail-row.live::before{background:rgba(${AMBER},0.95);}
 
 /* UNREAD — the tick becomes a SEALED COMB CELL: the house pointy-top
    hexagon, the only one in the list, the only amber in the gutter. Shape
@@ -386,20 +424,29 @@ const ensureRailStyles = (): void => {
 @keyframes hcRailBreath{0%,100%{opacity:0.5;}50%{opacity:1;}}
 .hc-rail-bees:not([hidden]){animation:hcRailBreath 2.6s ease-in-out infinite;}
 
-/* THE WAY INTO A TILE'S CONVERSATIONS. A chat glyph, not a chevron: this is
-   the one control in the row that TALKS, and a disclosure arrow the width of
-   a hairline said none of that — it read as furniture on a row whose left
-   half is already a button. Same box as before (the row's rhythm is not
-   negotiable — never resize one icon), a real hit area, a real focus ring,
-   and contrast that passes: 0.35 was 2.76:1 on this ground, 0.5 is 4.1:1.
+/* THE WAY INSIDE A TILE. A chevron, and now that is exactly right: the LINE
+   talks, so the only control left on the row is the one that WALKS, and a
+   chevron at the end of a row means precisely that everywhere. (It was a chat
+   glyph while the icon was the thing that talked — a disclosure arrow said
+   none of that then, and read as furniture on a row whose left
+   half is already a button. A real hit area, a real focus ring, and
+   contrast that passes: 0.35 was 2.76:1 on this ground, 0.5 is 4.1:1.
 
-   NO ROTATION when it opens. A chevron turning is how an ARROW says
-   "unfolded"; a speech bubble lying on its side says nothing. Open is said
-   in COLOUR — the steel this list already uses for "the one in hand".
+   A SOLID BLOCK, TOP TO BOTTOM OF THE ROW, PERFECTLY SQUARE. It stretches
+   to the row's full height and takes its width from that height, so it is a
+   square at any row size and stays one if the picture beside it ever
+   changes — a number written down twice is a number that drifts. The old
+   1.4 x 1.7rem box was a sliver floating in the middle of a 2.85rem row:
+   the easiest thing in the row to miss.
+
+   NO ROTATION. This chevron never becomes a disclosure twisty: it does not
+   open anything under the row, it LEAVES — the level it points at replaces
+   the one you are on.
 
    The ligature needs the face the shell loads; the box clips, so a missing
    one shows nothing rather than the word. */
-.hc-rail-chats-open{flex:0 0 auto;width:1.4rem;height:1.7rem;margin-right:0.15rem;
+.hc-rail-walk{flex:0 0 auto;align-self:stretch;aspect-ratio:1;
+  width:auto;height:auto;box-sizing:border-box;padding:0;margin:0;
   display:grid;place-items:center;overflow:hidden;
   border:0;background:none;cursor:pointer;
   font-family:'Material Symbols Outlined','Material Symbols Rounded';
@@ -409,24 +456,50 @@ const ensureRailStyles = (): void => {
   color:rgba(216,230,238,0.5);font-size:1.05rem;line-height:1;
   border-radius:var(--hc-radius-control, 2px);
   transition:color 0.14s ease,background 0.14s ease;}
-.hc-rail-chats-open:hover{color:rgba(238,244,250,0.95);background:rgba(255,255,255,0.06);}
-.hc-rail-chats-open:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
-.hc-rail-chats-open[aria-expanded="true"]{color:rgba(${STEEL},0.95);
-  background:rgba(${STEEL},0.12);}
+.hc-rail-walk:hover{color:rgba(238,244,250,0.95);background:rgba(255,255,255,0.06);}
+.hc-rail-walk:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
 
 /* THE TILE'S CONVERSATIONS, unfolded under its row. A SHORT step in, no rule
    down the side: the fold already says what they belong to, and a line plus a
-   picture's worth of indent turned a list of two chats into a diagram. */
+   picture's worth of indent turned a list of two chats into a diagram.
+
+   BORDER-BOX, and it matters here more than anywhere else in the sheet:
+   these rows are a width of 100% INSIDE an indented fold, so in a content box
+   each one came out 0.9rem WIDER than the block holding it — the lit
+   background of the conversation you were in ran past the group's right
+   edge and carried the turn count and the archive mark out through the
+   rail's clip with it. */
 .hc-rail-chats{display:flex;flex-direction:column;gap:1px;
   margin:1px 0 4px 0.9rem;padding-left:0;}
 .hc-rail-chat{display:flex;align-items:baseline;gap:0.5rem;width:100%;
+  box-sizing:border-box;
   padding:0.28rem 0.45rem;border:0;background:none;cursor:pointer;
   text-align:left;font:inherit;font-size:0.8rem;
   color:rgba(238,244,250,0.72);border-radius:var(--hc-radius-control, 2px);}
 .hc-rail-chat:hover{background:rgba(255,255,255,0.05);color:rgba(238,244,250,0.95);}
 .hc-rail-chat:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
 .hc-rail-chat.current{background:rgba(${STEEL},0.12);color:rgba(238,244,250,0.98);
-  box-shadow:inset 2px 0 0 rgba(${STEEL},0.9);}
+  box-shadow:inset 2px 0 0 rgba(${STEEL},0.9);
+  /* THE ROW GIVES ITS PADDING TO WHAT IS IN IT. The archive mark rides this
+     row top to bottom and flush right, the way the chat block rides the
+     tile row above — a mark floating in the middle of a padded box is the
+     small, hard-to-hit thing this pass is getting rid of. The words keep
+     their air; it just belongs to them now instead of to the row. */
+  padding:0 0 0 0.45rem;
+  /* The points hang UNDER the row rather than beside it — the only row that
+     ever has a second line, so the wrap is confined to it. */
+  flex-wrap:wrap;row-gap:0;}
+/* FLEX-BASIS ZERO, not auto. Once the row can wrap, a body sized from its
+   content pushes the archive mark onto a line of its own — the mark belongs
+   flush right on the FIRST line, beside the name, exactly where it was before
+   the row could wrap at all. From zero the body takes what is left after the
+   mark instead of claiming the width first. */
+.hc-rail-chat.current .hc-rail-chat-body{padding:0.28rem 0;flex-basis:0;}
+/* AND IT STOPS STRETCHING. align-self:stretch sized the mark to the flex
+   line, which used to BE one line of text — with a blurb under the name the
+   line grew and the mark grew a square with it. It belongs beside the NAME,
+   so it is pinned to the top and sized by its own glyph. */
+.hc-rail-chat.current .hc-rail-chat-put{align-self:flex-start;padding:0.34rem;}
 .hc-rail-chat.unread{color:rgba(246,250,255,0.99);}
 .hc-rail-chat.unread .hc-rail-chat-name::after{content:'';display:inline-block;
   width:0.42rem;height:0.48rem;margin-left:0.35rem;vertical-align:baseline;
@@ -445,25 +518,60 @@ const ensureRailStyles = (): void => {
    row and the archive disclosure are still plain buttons wearing the same
    row styling, which is why the padding lives on the ROW and never on the
    body. */
-.hc-rail-chat-body{flex:1 1 auto;display:flex;align-items:baseline;gap:0.5rem;
+/* THE ROW IS A COLUMN NOW, because a thread is named by TWO things: the first
+   thing you said (the title, which is what you did not know yet) and what it
+   turned out to be about (the blurb). The head keeps the old baseline row —
+   name on the left, turn count on the right — and the blurb hangs under it.
+   A row with no blurb draws exactly what it drew before. */
+.hc-rail-chat-body{flex:1 1 auto;display:flex;flex-direction:column;
+  align-items:stretch;gap:0.1rem;
   min-width:0;padding:0;border:0;background:none;cursor:pointer;
   text-align:left;font:inherit;color:inherit;}
+.hc-rail-chat-head{display:flex;align-items:baseline;gap:0.5rem;min-width:0;}
+/* ONE LINE IN THE LIST, the whole thing in the one you are IN. Forty rows are
+   scanned, and a row that wraps to three lines stops the list being scannable;
+   the conversation you have opened has the room to say more. */
+.hc-rail-chat-blurb{font-size:0.72rem;line-height:1.25;
+  color:rgba(216,230,238,0.6);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;}
+.hc-rail-chat.current .hc-rail-chat-blurb{white-space:normal;overflow:visible;
+  color:rgba(216,230,238,0.72);}
+/* THE POINTS, only on the open conversation — the list of things it decided,
+   asked, built or left open. This is the "click it and it is clear" half:
+   scanning gets one line, choosing gets the notes. */
+.hc-rail-chat-points{flex:1 0 100%;margin:0 0 0.3rem;padding:0 0.45rem 0 1.35rem;
+  font-size:0.7rem;line-height:1.35;color:rgba(216,230,238,0.55);}
+.hc-rail-chat-points li{margin:0 0 0.12rem;}
 .hc-rail-chat-body:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:1px;}
-/* Quiet until the row is under the pointer or something in it has focus —
-   a column of marks down the side of every conversation is a column you have
-   to look past to read the names. Always reachable by keyboard. */
-.hc-rail-chat-put{flex:0 0 auto;width:1.1rem;height:1.1rem;padding:0;border:0;
-  background:none;cursor:pointer;font:inherit;font-size:0.82rem;line-height:1;
-  color:rgba(216,230,238,0.55);border-radius:var(--hc-radius-control, 2px);
-  opacity:0;transition:opacity 0.12s ease,color 0.12s ease;}
-.hc-rail-chat:hover .hc-rail-chat-put,
-.hc-rail-chat-put:focus-visible{opacity:1;}
-.hc-rail-chat-put:hover{color:rgba(${STEEL},0.95);background:rgba(${STEEL},0.16);}
-.hc-rail-chat-put:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:1px;}
+/* IN THE OPEN, because it is on ONE row now. It used to be drawn on every
+   conversation and kept at zero opacity until the pointer found it — a
+   control nobody can see is a control nobody uses, and the reason it had to
+   hide was that there were a dozen of them. There is one.
+
+   THE SAME COLUMN AS THE BLOCK ABOVE IT. A square of the row's own height,
+   flush to the fold's right edge, so its edge lines up with the chat block
+   on the tile's row rather than floating a padding's width inside it. It
+   takes its width from its height for the same reason that one does.
+
+   STEEL, which in this list means THE CONVERSATION — never amber, which
+   says the hive is doing something or waiting on you, and putting a thread
+   away is neither. */
+.hc-rail-chat-put{flex:0 0 auto;align-self:stretch;aspect-ratio:1;
+  width:auto;height:auto;box-sizing:border-box;padding:0;margin:0;border:0;
+  display:grid;place-items:center;overflow:hidden;
+  background:none;cursor:pointer;
+  font-family:'Material Symbols Outlined','Material Symbols Rounded';
+  font-weight:400;font-style:normal;letter-spacing:normal;text-transform:none;
+  white-space:nowrap;direction:ltr;-webkit-font-feature-settings:'liga';
+  font-feature-settings:'liga';-webkit-font-smoothing:antialiased;
+  font-size:1rem;line-height:1;color:rgba(${STEEL},0.8);
+  border-radius:var(--hc-radius-control, 2px);
+  transition:color 0.12s ease,background 0.12s ease;}
+.hc-rail-chat-put:hover{color:rgba(${STEEL},1);background:rgba(${STEEL},0.18);}
+.hc-rail-chat-put:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
 /* PUT AWAY, and it reads that way: dimmer than a live thread, so the section
    under the disclosure is visibly a different shelf. */
 .hc-rail-chat.filed{color:rgba(238,244,250,0.48);}
-.hc-rail-chat.filed .hc-rail-chat-put{opacity:0.55;}
 .hc-rail-archived{color:rgba(216,230,238,0.5);font-size:0.72rem;
   font-family:var(--hc-mono,monospace);letter-spacing:0.04em;}
 .hc-rail-archived.on{color:rgba(${STEEL},0.85);}
@@ -473,10 +581,28 @@ const ensureRailStyles = (): void => {
 
 @media (prefers-reduced-motion:reduce){
   .hc-rail-bees:not([hidden]){animation:none;opacity:1;}
+  /* The mark stays; only the breath goes. Amber in the gutter is still the
+     whole of what "in progress" says. */
+  .hc-rail-row.live::before{animation:none;}
   .hc-rail-list{animation:none !important;}
 }
 `
-  document.head.appendChild(style)
+
+/** Install or REFRESH the sheet.
+ *
+ *  It used to return the moment the element existed, which is correct once
+ *  per page and wrong every time this module is replaced under a running
+ *  page: the new code paints new class names against the old stylesheet, so a
+ *  rule added here silently does nothing until a hard reload — and what you
+ *  see instead is an unstyled control, which reads as a bug in the control.
+ *  Writing the current text is idempotent and costs a string compare. */
+const ensureRailStyles = (): void => {
+  const held = document.getElementById(STYLE_ID)
+  if (held?.textContent === RAIL_CSS) return
+  const style = held ?? document.createElement('style')
+  style.id = STYLE_ID
+  style.textContent = RAIL_CSS
+  if (!style.isConnected) document.head.appendChild(style)
 }
 
 export class AgentTilesRail {
@@ -558,6 +684,11 @@ export class AgentTilesRail {
   readonly #onRegistryChange = (): void => this.#paintStatus()
   #dropDraftWatch: (() => void) | null = null
   #dropChatWatch: (() => void) | null = null
+  #dropBlurbWatch: (() => void) | null = null
+  /** What each conversation turned out to be about, by convoId. DERIVED and
+   *  never load-bearing: a row whose blurb is missing, stale or wiped draws
+   *  exactly as it did before blurbs existed. */
+  #blurbs = new Map<string, ChatBlurb>()
   #dropBusyWatch: (() => void) | null = null
   #dropGroupWatch: (() => void) | null = null
 
@@ -676,10 +807,14 @@ export class AgentTilesRail {
     // composer, from another window, or by a sweep shows up here the same way.
     this.#dropDraftWatch?.()
     this.#dropChatWatch?.()
+    this.#dropBlurbWatch?.()
     if (this.#profile.chats) {
       this.#dropDraftWatch = EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() })
       this.#dropChatWatch = EffectBus.on<{ convoId?: string }>(
         'chat:threads-changed', payload => { void this.#chatChanged(String(payload?.convoId ?? '')) })
+      // The label follows the POOL, not this surface: a blurb minted by the
+      // orchestrator while the rail is open shows up without a reopen.
+      this.#dropBlurbWatch = EffectBus.on('chat:blurbs-changed', () => { void this.#refreshBlurbs() })
     }
     this.#dropGroupWatch?.()
     this.#dropGroupWatch = EffectBus.on<{ paths?: readonly string[] }>('context:active-set', payload => {
@@ -807,6 +942,8 @@ export class AgentTilesRail {
     this.#dropDraftWatch = null
     this.#dropChatWatch?.()
     this.#dropChatWatch = null
+    this.#dropBlurbWatch?.()
+    this.#dropBlurbWatch = null
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = null
     this.#dropGroupWatch?.()
@@ -864,7 +1001,27 @@ export class AgentTilesRail {
     const needle = this.#query.toLowerCase()
     const also = this.#profile.matches
     return listed.filter(row =>
-      row.name.toLowerCase().includes(needle) || (also ? also(row, this.#query) : false))
+      row.name.toLowerCase().includes(needle)
+      || this.#blurbMatches(row, needle)
+      || (also ? also(row, this.#query) : false))
+  }
+
+  /** Does anything said on this tile match? A blurb is written down, so the
+   *  filter can reach INTO the conversations a tile holds rather than only at
+   *  its name — which is the thing a derived-on-open summary could never do,
+   *  because it would not exist until you were already looking at the row.
+   *  Absent blurbs simply never match; the name filter is unchanged. */
+  #blurbMatches(row: RailRow, needle: string): boolean {
+    if (!this.#profile.chats || !this.#blurbs.size) return false
+    const path = tilePath(row.segments)
+    for (const chat of this.#chatList) {
+      if (chat.path !== path) continue
+      const blurb = this.#blurbs.get(chat.convoId)
+      if (!blurb) continue
+      if (blurb.line.toLowerCase().includes(needle)) return true
+      if (blurb.points.some(point => point.toLowerCase().includes(needle))) return true
+    }
+    return false
   }
 
   /** Show a level: the cached shape instantly (else a skeleton), then the
@@ -959,11 +1116,11 @@ export class AgentTilesRail {
     }
 
     const counts = this.#agentCounts()
+    // ONE SENTENCE PER ROW, because there is now one thing a press on it
+    // does. Going inside is the arrow's own label, where the gesture is; the
+    // keyboard's moves answer to the arrow keys a list is already expected to
+    // honour, and are not worth a tooltip on every line.
     const talkHint = this.#profile.clickLabel ?? this.#t('agent.rail-talk', 'Talk to this tile')
-    // Short on purpose: a tooltip on every row is furniture, and the one
-    // gesture worth teaching there is the hold. The keyboard moves answer to
-    // the arrow keys a list is already expected to honour.
-    const insideHint = this.#t('agent.rail-inside', 'hold to go inside')
     for (const row of visible) {
       const key = pathKey(row.segments)
       const current = this.#subject?.key === key
@@ -977,7 +1134,7 @@ export class AgentTilesRail {
       const main = document.createElement('button')
       main.type = 'button'
       main.className = 'hc-rail-main'
-      main.title = row.childCount && this.#profile.walk ? `${talkHint} · ${insideHint}` : talkHint
+      main.title = talkHint
       // The conversation you are in, said to a screen reader as well as to
       // the eye — `current` is only a background colour.
       if (current) main.setAttribute('aria-current', 'true')
@@ -994,6 +1151,20 @@ export class AgentTilesRail {
       name.className = 'hc-rail-name'
       name.textContent = row.name
 
+      // HOW MANY CONVERSATIONS THIS TILE HOLDS, beside the thing they are
+      // about. Now that the line IS the conversation control, "which one am
+      // I about to land in?" is a fair question to have on the row — and a
+      // tile is a SUBJECT, so several threads about it is the normal case,
+      // not an oddity you should have to unfold the tile to discover.
+      //
+      // The gutter tick says the tile has been SPOKEN TO and how deep; this
+      // says in how many separate places. Archived threads are not counted:
+      // they are not in the fold either, so a row promising four and listing
+      // three would be lying about the same set.
+      const threads = document.createElement('span')
+      threads.className = 'hc-rail-threads'
+      threads.hidden = true
+
       // The number at the end of the row: agents at work by default, or
       // whatever the surface counts (the notes panel counts notes).
       const bees = document.createElement('span')
@@ -1002,31 +1173,33 @@ export class AgentTilesRail {
       bees.textContent = String(busy)
       bees.hidden = busy === 0
 
-      main.append(icon, name, bees)
+      main.append(icon, name, threads, bees)
 
-      // CLICK GOES IN, CTRL-CLICK CHOOSES, THE ARROW TALKS.
+      // THE LINE TALKS, THE ARROW WALKS, CTRL-CLICK CHOOSES.
       //
-      // Click used to mean "enter this tile's conversation" and hold-to-enter
-      // meant "go inside". That put the rail's ordinary gesture on the one
-      // thing the rail is not for — it is a way to FIND a tile — and hid
-      // walking behind a press nobody discovers, on a list whose whole point
-      // is to be walked. It also disagreed with every other list in the shell,
-      // where clicking a row with children opens it.
+      // This is the reverse of what it was, and the reverse is what the row
+      // actually is. Every line in this list is a CONVERSATION — that is the
+      // thing it shows state for (turns deep, unread, a draft waiting, live
+      // right now), and every one of those marks was describing something you
+      // could not reach by pressing the line they were on. Talking had been
+      // pushed onto a small icon at the end of the row while the whole width
+      // of the line did something else.
       //
-      // So a click on a row that HAS children goes in. A leaf has nowhere to
-      // go, so there a click still opens the conversation — the same rule the
-      // hive follows, not a second one. Conversations did not lose a home:
-      // the chat icon was always their control and it opens them (including a
-      // fresh one) without moving the list.
+      // So: press the line, you are in its conversation. That is one rule for
+      // every row — leaf or parent, tile or the hive above them — instead of
+      // a rule that changed depending on whether the tile happened to have
+      // children. Walking is not hidden either; it moved to its own control,
+      // which is what a chevron at the end of a row means everywhere.
+      //
+      // A SECOND PRESS FOLDS THE THREADS SHUT without putting the
+      // conversation down — the affordance the chat icon used to carry,
+      // now on the control that took its place.
       main.addEventListener('click', event => {
         if ((event.ctrlKey || event.metaKey) && this.#profile.choose) {
           this.#toggleChosen(wrap, key, row)
           return
         }
-        if (row.childCount > 0 && this.#profile.walk) {
-          this.#drill(row.segments)
-          return
-        }
+        if (current && this.#expanded.has(key)) { this.#toggleChats(key, row); return }
         this.#enter(wrap, key, row)
       })
 
@@ -1084,21 +1257,21 @@ export class AgentTilesRail {
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
       })
 
-      // THE CHAT ICON OPENS THE TILE'S CHATS — AND PUTS YOU IN ONE. It is
-      // its own control, not part of the row: it never walks the list. It
-      // shows what there is to talk in and resumes the thread you left.
-      const chats = document.createElement('button')
-      chats.type = 'button'
-      chats.className = 'hc-rail-chats-open'
-      chats.hidden = !this.#profile.chats
-      chats.textContent = CHATS_GLYPH
-      const chatsLabel = this.#t('agent.rail-chats', 'Conversations on this tile')
-      chats.title = chatsLabel
-      chats.setAttribute('aria-label', chatsLabel)
-      chats.setAttribute('aria-expanded', this.#expanded.has(key) ? 'true' : 'false')
-      chats.addEventListener('click', event => {
+      // THE ARROW GOES INSIDE. Its own control, so walking never competes
+      // with talking for the same press — and absent on a tile with nothing
+      // inside it, because an arrow that leads nowhere is furniture on every
+      // leaf in the list.
+      const walk = document.createElement('button')
+      walk.type = 'button'
+      walk.className = 'hc-rail-walk'
+      walk.hidden = !(row.childCount > 0 && this.#profile.walk)
+      walk.textContent = WALK_GLYPH
+      const walkLabel = this.#t('agent.rail-go', 'Go inside {name}').replace('{name}', row.name)
+      walk.title = walkLabel
+      walk.setAttribute('aria-label', walkLabel)
+      walk.addEventListener('click', event => {
         event.stopPropagation()
-        this.#openChats(key, row)
+        this.#drill(row.segments)
       })
 
       // ONE BLOCK PER TILE. The conversations are not a sibling of the row
@@ -1109,7 +1282,7 @@ export class AgentTilesRail {
       group.className = 'hc-rail-group'
       group.dataset['key'] = key
       group.classList.toggle('current', current)
-      wrap.append(main, chats)
+      wrap.append(main, walk)
       group.appendChild(wrap)
       if (this.#profile.chats && this.#expanded.has(key)) group.appendChild(this.#chatsPanel(key, row))
       list.appendChild(group)
@@ -1136,21 +1309,6 @@ export class AgentTilesRail {
     const index = rows.indexOf(from)
     if (index < 0) return
     rows[Math.min(rows.length - 1, Math.max(0, index + delta))]?.querySelector<HTMLElement>('.hc-rail-main')?.focus()
-  }
-
-  /** THE CHAT ICON. Opening a tile's conversations is also ENTERING one —
-   *  the one you were last in, or its first if you have never spoken to it.
-   *  Showing the list and leaving you outside it made the common case (pick
-   *  up where I was) cost a second aim at a row, and there was nothing else
-   *  the press could have meant: you pressed the control that talks.
-   *
-   *  A second press folds the list shut. It does NOT put the conversation
-   *  down — you are still in it; the rail has simply stopped listing the
-   *  tile's other threads. */
-  #openChats(key: string, row: RailRow): void {
-    if (this.#expanded.has(key)) { this.#toggleChats(key, row); return }
-    const path = tilePath(row.segments)
-    this.#enterChat(row, key, this.#stickyChat(path) || tileConvoId(row.segments))
   }
 
   /** Fold a tile's conversations open or shut. ONE AT A TIME: opening one
@@ -1217,25 +1375,34 @@ export class AgentTilesRail {
     const label = document.createElement('span')
     label.className = 'hc-rail-name'
     label.textContent = name
-    main.append(label)
+
+    // THE SAME DETAILS AS EVERY OTHER LINE. The hive is a conversation like
+    // the tiles under it — deeper than most, usually — and it was the one row
+    // in this list with nowhere to put what it holds: no count of its
+    // threads, no live mark, so a question asked about the whole hive
+    // vanished from the surface the moment it was sent. #paintStatus already
+    // resolves its state (its key is the root's, so its path is HIVE_PATH);
+    // it had no slots to write into.
+    const threads = document.createElement('span')
+    threads.className = 'hc-rail-threads'
+    threads.hidden = true
+
+    const bees = document.createElement('span')
+    bees.className = 'hc-rail-bees'
+    bees.hidden = true
+
+    main.append(label, threads, bees)
+
+    // THE LINE TALKS HERE TOO, second press and all — the hive has nowhere to
+    // walk INTO, so it is the one row that carries no arrow. That is not a
+    // second grammar: it is the same one, on a row with no inside.
     main.addEventListener('click', event => {
       event.stopPropagation()
+      if (current && this.#expanded.has(HIVE_KEY)) { this.#toggleChats(HIVE_KEY, row); return }
       this.#enterChat(row, HIVE_KEY, this.#stickyChat(tilePath([])) || tileConvoId([]))
     })
 
-    const chats = document.createElement('button')
-    chats.type = 'button'
-    chats.className = 'hc-rail-chats-open'
-    chats.textContent = CHATS_GLYPH
-    chats.title = hint
-    chats.setAttribute('aria-label', hint)
-    chats.setAttribute('aria-expanded', this.#expanded.has(HIVE_KEY) ? 'true' : 'false')
-    chats.addEventListener('click', event => {
-      event.stopPropagation()
-      this.#openChats(HIVE_KEY, row)
-    })
-
-    wrap.append(main, chats)
+    wrap.append(main)
     group.appendChild(wrap)
     if (this.#expanded.has(HIVE_KEY)) group.appendChild(this.#chatsPanel(HIVE_KEY, row))
     return group
@@ -1287,30 +1454,75 @@ export class AgentTilesRail {
         ? this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(chat.turns))
         : this.#t('agent.rail-chat-empty', 'empty')
 
-      body.append(title, meta)
+      // THE HEAD IS THE OLD ROW — name left, turn count right. Everything
+      // below it is new, and absent when there is no blurb.
+      const head = document.createElement('span')
+      head.className = 'hc-rail-chat-head'
+      head.append(title, meta)
+      body.append(head)
+
+      // WHAT IT TURNED OUT TO BE ABOUT. The title is the first thing you
+      // said, which is what you did not know yet; this is the other end of
+      // the thread. Purely additive — no blurb, and the row is what it was.
+      const blurb = this.#blurbs.get(chat.convoId)
+      if (blurb?.line) {
+        const line = document.createElement('span')
+        line.className = 'hc-rail-chat-blurb'
+        line.textContent = blurb.line
+        line.title = blurb.line
+        body.append(line)
+      }
+
       body.addEventListener('click', event => {
         event.stopPropagation()
         this.#enterChat(row, key, chat.convoId)
       })
 
-      // THE ONE CONTROL, BOTH WAYS. Archiving and un-archiving are the same
-      // act with the flag flipped, so they are the same button — no separate
-      // "restore" living somewhere else for you to go and find.
-      const put = document.createElement('button')
-      put.type = 'button'
-      put.className = 'hc-rail-chat-put'
-      put.textContent = chat.archived ? '⤺' : '⤓'
-      const label = chat.archived
-        ? this.#t('agent.rail-chat-unarchive', 'Bring this conversation back')
-        : this.#t('agent.rail-chat-archive', 'Archive this conversation')
-      put.title = label
-      put.setAttribute('aria-label', label)
-      put.addEventListener('click', event => {
-        event.stopPropagation()
-        void this.#setArchived(key, chat, !chat.archived)
-      })
+      // THE ONE CONTROL, BOTH WAYS, ON ONE ROW. Archiving and un-archiving
+      // are the same act with the flag flipped, so they are the same button —
+      // no separate "restore" living somewhere else for you to go and find.
+      //
+      // AND IT IS ONLY ON THE CONVERSATION YOU ARE IN. A mark on every row
+      // was a column of controls down the side of a list whose job is to be
+      // scanned for a NAME, and hiding that column until the pointer was over
+      // it only meant the control could not be found at all. One row carries
+      // it, the row you are already reading, where it is worth the ink and
+      // can stand in the open. An archived thread is reached the same way it
+      // always was — click it, you are in it, and the way back out is right
+      // there on it.
+      if (chat.convoId === open) {
+        const put = document.createElement('button')
+        put.type = 'button'
+        put.className = 'hc-rail-chat-put'
+        put.textContent = chat.archived ? UNARCHIVE_GLYPH : ARCHIVE_GLYPH
+        const label = chat.archived
+          ? this.#t('agent.rail-chat-unarchive', 'Bring this conversation back')
+          : this.#t('agent.rail-chat-archive', 'Archive this conversation')
+        put.title = label
+        put.setAttribute('aria-label', label)
+        put.addEventListener('click', event => {
+          event.stopPropagation()
+          void this.#setArchived(key, chat, !chat.archived)
+        })
+        item.append(body, put)
+        // THE LIST, on the conversation you are IN. On the ROW and not inside
+        // the body, because the body is a <button> and a list inside a button
+        // is not something the DOM allows or a screen reader can read out —
+        // the same reason the archive mark is a sibling rather than a child.
+        if (blurb?.points.length) {
+          const points = document.createElement('ul')
+          points.className = 'hc-rail-chat-points'
+          for (const point of blurb.points) {
+            const entry = document.createElement('li')
+            entry.textContent = point
+            points.append(entry)
+          }
+          item.append(points)
+        }
+        return item
+      }
 
-      item.append(body, put)
+      item.append(body)
       return item
     }
 
@@ -1533,6 +1745,28 @@ export class AgentTilesRail {
     this.#chats = foldTileConversations(this.#chatList)
     this.#paintStatus()
     if (this.#expanded.size) this.#repaintExpanded()
+    void this.#refreshBlurbs()
+  }
+
+  /** What the threads in hand turned out to be about. A pool read per
+   *  conversation and no model call — the orchestrator does the deriving, so
+   *  this surface only ever READS. Absent blurbs are simply absent; the map
+   *  is replaced wholesale so a wiped pool clears the lines rather than
+   *  leaving yesterday's labels standing. */
+  async #refreshBlurbs(): Promise<void> {
+    if (!this.#profile.chats) return
+    const ids = this.#chatList.map(chat => chat.convoId)
+    if (!ids.length) {
+      if (!this.#blurbs.size) return
+      this.#blurbs = new Map()
+      if (this.#expanded.size) this.#repaintExpanded()
+      return
+    }
+    let blurbs: Map<string, ChatBlurb>
+    try { blurbs = await readBlurbs(ids) } catch { return }
+    if (this.#disposed) return
+    this.#blurbs = blurbs
+    if (this.#expanded.size) this.#repaintExpanded()
   }
 
   /** Which tiles hold a conversation at all, and whether it has been read.
@@ -1547,6 +1781,7 @@ export class AgentTilesRail {
     this.#paintStatus()
     // An unfolded list showing yesterday's threads is worse than none.
     if (this.#expanded.size) this.#repaintExpanded()
+    void this.#refreshBlurbs()
   }
 
   /** The conversations on one tile, newest first — what the pool holds, and
@@ -1621,9 +1856,27 @@ export class AgentTilesRail {
       row.classList.toggle('draft', draft)
       row.style.setProperty('--hc-rail-depth', String(Math.min(turns, 12) / 12))
 
-      // LIVE is agents on the tile plus a question of your own still out —
-      // one number, because from the row's side they are the same fact.
-      const busy = (counts.get(key) ?? 0) + (this.#busy.has(path) ? 1 : 0)
+      const held = chat?.chats ?? 0
+      const threads = row.querySelector<HTMLElement>('.hc-rail-threads')
+      if (threads) {
+        threads.textContent = String(held)
+        threads.hidden = held === 0
+      }
+
+      // LIVE is agents on the tile — and a question of your own IS one of
+      // them now: sending it raises a bee on the same lane a routine does
+      // (chat-window's #raiseBee), so the registry already counts it.
+      //
+      // NOT A SUM. It used to add the chat's own busy flag to the registry's
+      // count, which was right while a question raised no agent and would now
+      // count the same question twice — one live chat reading "2". The flag
+      // stays as the FALLBACK for a shell whose registry is absent, where it
+      // is the only thing that knows.
+      const working = counts.get(key) ?? 0
+      const busy = working || (this.#busy.has(path) ? 1 : 0)
+      // ACTIVE, as a mark and not only as a digit — see the .live rule. The
+      // count is the fact; the gutter is what you see without reading.
+      row.classList.toggle('live', busy > 0)
       const badge = row.querySelector<HTMLElement>('.hc-rail-bees')
       if (badge) {
         badge.textContent = String(busy)
@@ -1636,6 +1889,7 @@ export class AgentTilesRail {
       const label = row.querySelector<HTMLElement>('.hc-rail-name')?.textContent ?? ''
       if (main && label) {
         const said: string[] = [label]
+        if (held > 0) said.push(this.#t('agent.rail-threads', '{count} conversations').replace('{count}', String(held)))
         if (turns > 0) said.push(this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(turns)))
         if (unread) said.push(this.#t('agent.rail-unread', 'unread reply'))
         if (draft) said.push(this.#t('agent.rail-draft', 'draft waiting'))

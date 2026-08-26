@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "Komut satırı odağını değiştir",
   "keymap.mesh-toggle": "Genel / özel modu değiştir",
   "keymap.bees": "Arı avatarlarını değiştir",
+  "keymap.chat": "Asistanı aç veya kapat",
   "keymap.screensaver": "Ekran koruyucuyu göster",
   "keymap.fit": "İçeriği ekrana sığdır",
   "keymap.recenter": "İçeriği ekranda ortala",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "Bu düzeyde ara",
   "agent.rail-no-match": "Burada “{query}” ile eşleşen döşeme yok.",
   "agent.rail-talk": "Bu döşemeyle konuş",
+  "agent.rail-go": "{name} içine gir",
+  "agent.rail-threads": "{count} sohbet",
   "agent.rail-inside": "içine girmek için basılı tut",
   "agent.rail-draft": "Burada gönderilmemiş düşünceler var",
   "agent.rail-turns": "{count} tur",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "{tile} öğesini bu istekten çıkar",
   "chat.reference.empty": "Döşemeleri ya da bir görseli buraya bırakın — ya da kovandaki herhangi bir döşemeyi kopyalayın",
   "chat.reference.picture": "görsel · {size}",
+  "chat.reference.look": "{tile} görselini görüntüleyin",
+  "chat.reference.previous": "Önceki görsel",
+  "chat.reference.next": "Sonraki görsel",
+  "chat.reference.done": "Kapat",
   "mesh-modal.needs-location": "katılmak için bir konum gerekli",
   "mesh-modal.needs-secret": "katılmak için bir parola gerekli"
 }

@@ -120,6 +120,51 @@ async function main() {
     await page.locator('hc-chat-window .chat-panel').count() === 1
       && !(await panel.evaluate(el => el.classList.contains('peeking'))))
 
+  // ── THE FRAME IS RESERVED, so "centre in window" means the window you can
+  //    actually see. The canvas owner squeezes #pixi-host into the free area
+  //    and its resize path recentres into it; all this has to prove is that
+  //    the reservation appears with the fold and goes with it.
+  const insets = () => page.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement)
+    const px = (n) => parseFloat(cs.getPropertyValue(n)) || 0
+    const host = document.querySelector('#pixi-host')
+    return {
+      top: px('--hc-inset-top'),
+      bottom: px('--hc-inset-bottom'),
+      // Read back through the browser, which normalises `'0'` to `'0px'` and
+      // rounds to 3dp — comparing the raw strings we wrote would fail on
+      // formatting while the box was exactly right.
+      hostTop: host ? parseFloat(getComputedStyle(host).top) || 0 : null,
+      hostBottom: host ? parseFloat(getComputedStyle(host).bottom) || 0 : null,
+    }
+  })
+
+  check('no frame reserved while the window is up',
+    (await insets()).top === 0 && (await insets()).bottom === 0, JSON.stringify(await insets()))
+
+  await toggle.click()
+  await page.waitForTimeout(900)
+  const folded = await insets()
+  check('folding reserves the header as a TOP inset', folded.top > 0, JSON.stringify(folded))
+  check('and the composer as a BOTTOM inset', folded.bottom > 0, JSON.stringify(folded))
+  const near = (a, b) => Math.abs(a - b) < 1
+  check('the canvas host is squeezed into the band between them',
+    near(folded.hostTop, folded.top) && near(folded.hostBottom, folded.bottom),
+    JSON.stringify(folded))
+
+  // THE LAYER'S SAVED FRAMING IS NOT OURS TO CHANGE — automatic writes are
+  // held down for as long as the fold is.
+  const suspended = () => page.evaluate(() =>
+    !!window.ioc?.get('@diamondcoreprocessor.com/ViewportPersistence'))
+  check('the viewport service is reachable', await suspended())
+
+  await toggle.click()
+  await page.waitForTimeout(900)
+  const back = await insets()
+  check('unfolding gives the frame back', back.top === 0 && back.bottom === 0, JSON.stringify(back))
+  check('and the canvas fills the window again',
+    back.hostTop === 0 && back.hostBottom === 0, JSON.stringify(back))
+
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
 
   fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2))

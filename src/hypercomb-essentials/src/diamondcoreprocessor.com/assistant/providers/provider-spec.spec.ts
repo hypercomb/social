@@ -157,6 +157,20 @@ describe('agent-bridge specs', () => {
     expect(spec.endpoint).toBeUndefined()
   })
 
+  it('keeps a validated subscription availability snapshot', () => {
+    const spec = parseProviderSpec(bridgeSpec({
+      subscription: {
+        status: 'limited', source: 'CLI status', checkedAt: 123,
+        windows: [{ label: 'Weekly', remainingPercent: 12, resetsAt: 456 }],
+      },
+    }))
+    expect(spec.subscription).toEqual({
+      status: 'limited', source: 'CLI status', checkedAt: 123,
+      windows: [{ label: 'Weekly', remainingPercent: 12, resetsAt: 456 }],
+    })
+    expect(compileProviderSpec(spec).subscription).toEqual(spec.subscription)
+  })
+
   it('refuses an endpoint, an auth style, and a mismatched transport', () => {
     expect(() => parseProviderSpec(bridgeSpec({ endpoint: 'https://api.example/v1' })))
       .toThrow(/must not declare an endpoint/)

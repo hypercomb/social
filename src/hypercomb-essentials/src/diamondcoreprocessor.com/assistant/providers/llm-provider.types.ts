@@ -49,6 +49,23 @@ export type LlmModelDescriptor = {
   readonly name: string
   readonly id: string
   readonly tier: LlmTier
+  /** Optional participant-facing label; `name` remains the command alias. */
+  readonly label?: string
+}
+
+export type LlmSubscriptionUsage = {
+  readonly status: 'available' | 'limited' | 'exhausted' | 'unknown'
+  readonly source: string
+  readonly message?: string
+  readonly plan?: string
+  readonly checkedAt: number
+  readonly windows: readonly {
+    readonly label: string
+    readonly remainingPercent: number
+    readonly resetsAt?: number
+    readonly durationMinutes?: number
+  }[]
+  readonly credits?: { readonly hasCredits: boolean; readonly unlimited: boolean; readonly balance?: string }
 }
 
 /** Everything an adapter needs to build one request. */
@@ -87,6 +104,15 @@ export type LlmProviderDescriptor = {
 
   /** What a participant calls it. `'Claude'`, `'ChatGPT'`, `'Gemini'`, … */
   readonly label: string
+
+  /** Short participant-facing explanation shown in the provider details. */
+  readonly description?: string
+
+  /** How access is paid/authenticated, e.g. "ChatGPT subscription". */
+  readonly account?: string
+
+  /** Live subscription headroom reported by the local CLI at announcement. */
+  readonly subscription?: LlmSubscriptionUsage
 
   /**
    * Colour family. MUST be a vendor `agent-model.ts` knows (KNOWN_VENDORS) —

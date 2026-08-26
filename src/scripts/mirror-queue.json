@@ -1775,6 +1775,22 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "resting-bees-for-talked-to-tiles",
+      "title": "Mirror the resting bee: a tile that has been talked to keeps its bee",
+      "run": null,
+      "note": "New creation: presentation/avatars/resting-bees.ts (+spec, 9 tests) — the pure derivation — plus the second lane in agent-bee.drone.ts (#resting/#allAgents/#agentFor/#isResting/#refreshResting, the REST_PACE/REST_ALPHA damping in the tick) and conversationModel() in assistant/chat-thread.ts. Tiles 1:1 with source, notes carrying: (1) WHY — a bee meant 'work is happening here NOW', so the hive went blank the moment an answer landed and a tile you had held six conversations on looked exactly like one nobody had ever spoken to; (2) ONE PER TILE, never one per conversation — six threads over one hexagon is a cloud, and the rail's count already says six; the one bee is branded by the model the tile's NEWEST thread was last held in; (3) THE SAME SPRITE — the id is chat:<convoId>, exactly what chat-window raises on agent:start, so sending a question WAKES the resting bee into the full dance instead of fading one out and flying another in; #isResting is simply 'the registry has nothing under this id'; (4) NEVER IN THE WORK REGISTRY — the orchestrator sweeps that for stalls and a resting bee sitting there as working would be reported silent after 4min and rogue after 45, a watchdog barking at furniture; (5) ARCHIVED THREADS DO NOT COUNT, which is the whole way a bee goes away again — a tile whose every thread is put away has none, and the rail's count excludes them for the same reason; (6) THE KEY IS SPELLED TWICE ON PURPOSE — hc:chat-models is written by the chat window (shared) and read by chat-thread.ts (essentials); shared may not import essentials nor the other way, and routing it through core would have put a per-device key in the build chain, so each file names the other. Known cost: #refreshResting walks the threads pool on chat:threads-changed (coalesced 400ms), which is a second walk alongside the rail's. note-add is additive — manual drain only.",
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "assistant-on-the-command-line",
+      "title": "Mirror: the assistant icon moves to the command line, and takes the letter 'a'",
+      "run": null,
+      "note": "The chat toggle moves off the controls bar's left rail onto the command line (command-shell.component.html chat-toggle-btn + its .on filled-glyph rule), and the keymap swaps two bare letters: 'a' now opens the assistant (chat.toggle, GLOBAL layer), and the arrangement cycle moved to 'l'/'L' (sequence.cycle/cyclePrev). Tiles 1:1 with source (+ default-keymap.spec.ts), notes carrying: (1) WHY THE BAR WAS THE WRONG HOME — that rail is how-you-SEE (fit, zoom, pin, fullscreen, orientation) and talking is not one of those; the control belongs on the box you type the question into, and the command-shell already had the wiring (chatPanelOpen/chatLabel/chatToggle) with nothing drawing it. (2) BARE LETTERS ARE THE SCARCEST THING IN THE KEYMAP — the quick-menu binding already notes c/x/a/b/k/p were taken; 'a' went to the assistant because it is what you reach for mid-thought, while the arrangement cycle is a view you set once and leave. (3) ONE WAY IN — the key dispatches through keymap:invoke and the chat window translates chat.toggle into the SAME branch as chat:toggle, so shortcut, icon and palette cannot drift apart. (4) NO SECOND OPENER LEFT BEHIND — the 'chat' registry entry, its left-rail exclusion, its isActive case, the #chatOpen signal, the chat:window-state subscription and the .rail-chat stylesheet all went with it; a customizable entry on a bar that no longer owns the act would be an opener in a place that says nothing about what it does. New i18n key in all 14 catalogs: keymap.chat; help-group lists chat.toggle as 'Assistant' under Beyond. note-add is additive — manual drain only.",
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

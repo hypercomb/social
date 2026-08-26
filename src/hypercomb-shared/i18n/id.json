@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "Ubah fokus baris perintah",
   "keymap.mesh-toggle": "Ubah mode publik / privat",
   "keymap.bees": "Ubah avatar lebah",
+  "keymap.chat": "Buka atau tutup asisten",
   "keymap.screensaver": "Tampilkan screen saver",
   "keymap.fit": "Sesuaikan konten ke layar",
   "keymap.recenter": "Pusatkan konten di layar",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "Cari di tingkat ini",
   "agent.rail-no-match": "Tidak ada ubin di sini yang cocok dengan “{query}”.",
   "agent.rail-talk": "Bicara dengan ubin ini",
+  "agent.rail-go": "Masuk ke {name}",
+  "agent.rail-threads": "{count} percakapan",
   "agent.rail-inside": "tahan untuk masuk",
   "agent.rail-draft": "Ada catatan yang belum dikirim di sini",
   "agent.rail-turns": "{count} giliran",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "Keluarkan {tile} dari permintaan ini",
   "chat.reference.empty": "Jatuhkan ubin atau gambar di sini — atau salin ubin mana pun di sarang",
   "chat.reference.picture": "gambar · {size}",
+  "chat.reference.look": "Lihat {tile}",
+  "chat.reference.previous": "Gambar sebelumnya",
+  "chat.reference.next": "Gambar berikutnya",
+  "chat.reference.done": "Tutup",
   "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
   "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung"
 }

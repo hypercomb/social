@@ -29,6 +29,7 @@
 
 const WebSocket = require('ws')
 const roster = require('./agent-roster.cjs')
+const { subscriptionUsage } = require('./subscription-usage.cjs')
 
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
@@ -56,6 +57,8 @@ function send(req) {
 async function main() {
   const probed = roster.probeAll()
   const live = probed.filter(a => a.installed)
+  const usage = new Map(await Promise.all(live.map(async agent => [agent.id, await subscriptionUsage(agent)])))
+  for (const agent of live) agent.subscription = usage.get(agent.id)
 
   if (AS_JSON) {
     console.log(JSON.stringify(probed.map(a => ({
@@ -72,6 +75,11 @@ async function main() {
         : `not installed — ${a.docsUrl}`
       console.log(`${mark} ${a.label.padEnd(16)} ${String(a.bin || a.id).padEnd(10)} ${detail}`)
       console.log(`     models: ${(a.models ?? []).map(m => m.name).join(', ')}`)
+      if (a.installed) {
+        const sub = usage.get(a.id)
+        const windows = (sub?.windows ?? []).map(w => `${Math.round(w.remainingPercent)}% ${w.label}`).join(', ')
+        console.log(`     limits: ${windows || sub?.message || 'not reported'}`)
+      }
     }
     console.log('')
   }
@@ -89,7 +97,13 @@ async function main() {
     return
   }
 
-  const specs = announcing.map(roster.toProviderSpec)
+  const specs = announcing.map(agent => roster.toProviderSpec({
+    ...agent,
+    subscription: agent.subscription ?? usage.get(agent.id) ?? {
+      status: 'unknown', source: `${agent.label} CLI`, checkedAt: Date.now(), windows: [],
+      message: 'Usage limits are not reported by this CLI',
+    },
+  }))
   let reply
   try {
     reply = await send({ op: 'agents-announce', agents: specs })

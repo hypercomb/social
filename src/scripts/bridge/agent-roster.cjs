@@ -191,14 +191,19 @@ function toProviderSpec(agent) {
     format: 'llm-provider@1',
     id: agent.id,
     label: agent.label,
+    ...(agent.description ? { description: agent.description } : {}),
+    ...(agent.account ? { account: agent.account } : {}),
     vendor: agent.vendor,
     transport: 'agent-bridge',
     shape: 'agent-bridge',
-    models: (agent.models ?? []).map(m => ({ name: m.name, id: m.id, tier: m.tier })),
+    models: (agent.models ?? []).map(m => ({
+      name: m.name, id: m.id, tier: m.tier, ...(m.label ? { label: m.label } : {}),
+    })),
     defaultModel: agent.defaultModel ?? (agent.models ?? [])[0]?.id ?? '',
     docsUrl: agent.docsUrl ?? '',
     requiresKey: false,
     readsHive: true,
+    ...(agent.subscription ? { subscription: agent.subscription } : {}),
   }
 }
 

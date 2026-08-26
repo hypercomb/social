@@ -105,6 +105,7 @@ import {
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../clipboard-thumbs'
@@ -128,6 +129,7 @@ type ConversationSummary = {
   /** PUT AWAY — kept whole, taken out of the list. Optional because an older
    *  essentials build has no archive at all, and there every thread is live. */
   readonly archived?: boolean
+  readonly goal?: { readonly details: string; readonly at: number }
 }
 
 /** The threads module, reached through IoC — shell may never import essentials. */
@@ -284,9 +286,25 @@ const MODEL_ALIASES: Record<string, string> = { o: 'opus', s: 'sonnet', h: 'haik
 
 /** Which model each conversation was last held in, participant-local. Per
  *  CONVERSATION, not global: a thread is about one thing, and the tier you
- *  chose for it is part of what you set up. */
+ *  chose for it is part of what you set up.
+ *
+ *  THE RENDER LAYER READS THIS MAP TOO — a tile's resting bee is branded from
+ *  the model its newest conversation was last held in
+ *  (presentation/avatars/agent-bee.drone.ts, via chat-thread's
+ *  `conversationModel`). Shared may not import essentials nor the other way
+ *  round, so the key is spelled in both; chat-thread.ts names this file as
+ *  the writer, and this comment names it as the reader. Change one, change
+ *  both. */
 const MODEL_KEY = 'hc:chat-models'
 const DEFAULT_MODEL = 'opus'
+
+/** WHAT THE SHALLOW TIER ANSWERS WITH. The host worker relays `/ai/ask` to
+ *  Anthropic, Haiku by default (assistant/host-ai.service.ts). The client
+ *  cannot read the worker's choice, but it does not have to guess either:
+ *  WHICH TIER will answer is decided here, at send time, by `bridgeUp()` —
+ *  so the bee can be branded from the tier that is actually going to take
+ *  the question rather than from the model the composer happens to show. */
+const HOST_TIER_MODEL = 'haiku'
 
 /** Turns carried to a stateless responder. The stored thread can be any
  *  length; this is the window into it the ask record can afford. */
@@ -382,16 +400,20 @@ type ModeRegistryLike = {
 @Component({
   selector: 'hc-chat-window',
   standalone: true,
-  imports: [NgTemplateOutlet, TranslatePipe, HcDockedPanelDirective],
+  imports: [NgTemplateOutlet, TranslatePipe, HcDockedPanelDirective, DockInsetDirective],
   templateUrl: './chat-window.component.html',
   // TWO SHEETS, in source order. Angular's `anyComponentStyle` budget is
   // measured per compiled stylesheet and one output is emitted per `styleUrls`
   // entry — so splitting is the only thing that lowers the number a `@use`'d
   // partial cannot. The markdown sheet is last because it styles the message
   // bodies the first sheet lays out.
-  // Three sheets, not one: Angular's component style budget is per-sheet, and
-  // the peek geometry is a self-contained state that reads better apart.
-  styleUrls: ['./chat-window.component.scss', './chat-markdown.scss', './chat-peek.scss'],
+  // Four sheets, not one: Angular's component style budget is per-sheet, and
+  // the peek geometry and the picture viewer are self-contained states that
+  // read better apart.
+  styleUrls: [
+    './chat-window.component.scss', './chat-markdown.scss',
+    './chat-peek.scss', './chat-look.scss',
+  ],
 })
 export class ChatWindowComponent implements OnDestroy {
 
@@ -425,7 +447,7 @@ export class ChatWindowComponent implements OnDestroy {
   readonly session = signalSession(this.visible, open => {
     EffectBus.emit('chat:window-state', { open })
     this.#claimSurface(open && !this.peeking())
-    this.#announcePeek()
+    this.#applyFold()
   })
 
   readonly conversations = signal<readonly ConversationSummary[]>([])
@@ -608,6 +630,95 @@ export class ChatWindowComponent implements OnDestroy {
     const map: Record<string, string> = {}
     for (const [k, v] of this.#thumbUrls) map[k] = v
     this.contextThumbs.set(map)
+  }
+
+  // ── LOOKING AT WHAT THE REQUEST CARRIES ────────────────────────────
+  //
+  // The shelf shows a picture shrunk to a mark, which answers WHICH but not
+  // WHAT — and a reference you cannot actually look at is one you have to
+  // take on trust. So a shelf picture opens where it already is.
+  //
+  // IN PLACE, NOT IN A TAB. Leaving is the expensive move: the composer holds
+  // an unsent question and a shelf you assembled, and on the native shell a
+  // document navigation takes the window with it (a link out of a view is the
+  // one thing a view may never do). The overlay lives inside the chat panel,
+  // so nothing is put down to look at something.
+  //
+  // NO SECOND FETCH. It paints the URL the shelf is ALREADY holding —
+  // `contextThumbs` resolves a tile's `large` picture and an attached image's
+  // own bytes, both full-size — so opening one is free and closing it cannot
+  // strand an object-URL: the thumbnail cache owns every URL and revokes them
+  // on its own terms.
+
+  /** The shelf picture on screen, by its entry key — or null. */
+  readonly viewing = signal<{ key: string; name: string } | null>(null)
+
+  /** What to paint. Derived from the live cache rather than captured at open,
+   *  so a refresh that re-resolves a picture cannot leave the viewer showing
+   *  a URL that has since been revoked. An entry that leaves the shelf while
+   *  you are looking at it yields '' and the viewer closes itself. */
+  readonly viewingUrl = computed(() => {
+    const held = this.viewing()
+    return held ? this.contextThumbs()[held.key] ?? '' : ''
+  })
+
+  /** The shelf's pictures, in shelf order — what ← and → step through. A
+   *  reference with no picture is not in the set: stepping onto a hexagon
+   *  glyph would be a blank screen with no way to tell it from a failure. */
+  #picturesOnShelf(): RailPickLike[] {
+    const thumbs = this.contextThumbs()
+    return this.references().filter(pick => !!thumbs[pick.key])
+  }
+
+  /** Which of them is showing, or -1. */
+  readonly viewingIndex = computed(() => {
+    const held = this.viewing()
+    if (!held) return -1
+    return this.#picturesOnShelf().findIndex(pick => pick.key === held.key)
+  })
+
+  readonly viewingCount = computed(() => this.#picturesOnShelf().length)
+
+  /** Open a shelf picture. Guarded on there BEING one: the box falls back to
+   *  a name chip when nothing resolved, and that must not open an empty
+   *  screen. */
+  openPicture(pick: RailPickLike, event?: Event): void {
+    event?.stopPropagation()
+    if (!this.contextThumbs()[pick.key]) return
+    this.viewing.set({ key: pick.key, name: pick.name })
+  }
+
+  closePicture(): void { this.viewing.set(null) }
+
+  /** ← and → walk the shelf WITHIN the viewer — the same axis the rest of the
+   *  product uses for "the next one of these", never for leaving. Wraps, so a
+   *  shelf of three is a loop rather than a corridor with two dead ends. */
+  stepPicture(delta: 1 | -1): void {
+    const pictures = this.#picturesOnShelf()
+    if (pictures.length < 2) return
+    const at = this.viewingIndex()
+    if (at < 0) return
+    const next = pictures[(at + delta + pictures.length) % pictures.length]
+    if (next) this.viewing.set({ key: next.key, name: next.name })
+  }
+
+  /** TAKE THE FOCUS WHEN IT OPENS. The overlay's keys are the whole
+   *  interaction — step, step, done — and a surface you have to click before
+   *  the arrows work is one whose arrows nobody finds. The press that opened
+   *  it was on a button inside the shelf, so focus has to be moved
+   *  deliberately. */
+  readonly #focusLook = effect(() => {
+    if (!this.viewing()) return
+    const layer = this.lookLayer()?.nativeElement
+    if (layer) queueMicrotask(() => layer.focus())
+  })
+
+  /** The viewer's own keys. Escape also unwinds through the window's cascade
+   *  (see onKey) for when focus never reached the overlay. */
+  onPictureKey(event: KeyboardEvent): void {
+    if (event.key === 'ArrowRight') { event.preventDefault(); this.stepPicture(1); return }
+    if (event.key === 'ArrowLeft') { event.preventDefault(); this.stepPicture(-1); return }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.closePicture() }
   }
 
   /** The bytes at a signature, as something an <img> can show. Bounded by the
@@ -962,6 +1073,11 @@ export class ChatWindowComponent implements OnDestroy {
    *  putting a conversation away is durable, wanting to look at what you put
    *  away is something you are doing right now. */
   readonly archiveOpen = signal(false)
+  readonly goalOpen = signal(false)
+  readonly activeGoal = computed(() =>
+    this.conversations().find(convo => convo.convoId === this.activeId())?.goal)
+
+  toggleGoal(): void { this.goalOpen.update(open => !open) }
 
   /** PUT AWAY, NOT THROWN AWAY. Delete was the only thing you could do with a
    *  conversation you were finished with, and it is the wrong verb for the
@@ -1012,6 +1128,7 @@ export class ChatWindowComponent implements OnDestroy {
     const convoId = this.activeId()
     if (!convoId) return
     const filing = !this.activeArchived()
+    this.goalOpen.set(false)
     await this.archive(convoId, filing)
     if (!filing) return
 
@@ -1097,6 +1214,7 @@ export class ChatWindowComponent implements OnDestroy {
   readonly input = viewChild<ElementRef<HTMLTextAreaElement>>('input')
   readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller')
   readonly chatRail = viewChild<ElementRef<HTMLDivElement>>('chatRail')
+  readonly lookLayer = viewChild<ElementRef<HTMLElement>>('lookLayer')
 
   /** ONE rail per window lifetime, mounted whenever full screen puts its host
    *  in the DOM — so the trail you drilled and the tiles you chose survive
@@ -1243,20 +1361,50 @@ export class ChatWindowComponent implements OnDestroy {
   togglePeek(): void {
     const next = !this.peeking()
     this.peeking.set(next)
-    // Folding away closes the things that only make sense over a transcript.
-    if (next) { this.clipboardOpen.set(false); this.listOpen.set(false) }
+    // Folding away closes the things that only make sense over a transcript —
+    // and a full-bleed picture would cover the live hive the fold exists to
+    // show. Closed, not merely hidden: an invisible surface still standing is
+    // one Escape would unwind before the fold, which reads as a dead key.
+    if (next) { this.clipboardOpen.set(false); this.listOpen.set(false); this.closePicture() }
     this.#claimSurface(!next)
-    this.#announcePeek()
+    this.#applyFold()
     if (!next) this.#focus()
   }
 
-  /** WHO IS GATHERING. The hexagons grow a per-tile "add to the request"
-   *  icon while the window is folded away and lose it again when it comes
-   *  back (assistant/chat-context-action.drone.ts) — an affordance for a
-   *  shelf nobody can see would be an affordance for nothing. */
-  #announcePeek(): void {
-    EffectBus.emit('chat:peek', { peeking: this.visible() && this.peeking() })
+  /** EVERYTHING THAT FOLLOWS THE FOLD, in one place — so park, close, open
+   *  and the toggle cannot disagree about it. Two things follow:
+   *
+   *  1. WHO IS GATHERING. The hexagons grow a per-tile "add to the request"
+   *     icon while folded away and lose it again when the window comes back
+   *     (assistant/chat-context-action.drone.ts) — an affordance for a shelf
+   *     nobody can see would be an affordance for nothing.
+   *  2. THE LAYER'S SAVED FRAMING IS NOT OURS TO CHANGE. Reserving the bars
+   *     resizes the canvas, and the canvas owner answers a resize by
+   *     recentring and (when the saved zoom was a fit) refitting — which is
+   *     exactly what we want to SEE and exactly what must not be WRITTEN. A
+   *     fit computed for the band between two bars is not the framing this
+   *     layer should open with next time. `suspend()` blocks automatic writes
+   *     only, so a pan or zoom the participant performs while folded is still
+   *     theirs and still persists. Unfolding resumes, the bars stop
+   *     reserving, and the same resize path restores the framing from the
+   *     value that was never overwritten. */
+  #applyFold(): void {
+    const folded = this.visible() && this.peeking()
+    EffectBus.emit('chat:peek', { peeking: folded })
+
+    if (folded === this.#foldSuspendedViewport) return
+    const viewport = ioc()?.get('@diamondcoreprocessor.com/ViewportPersistence') as
+      { suspend?(): void; resume?(): void } | undefined
+    if (!viewport?.suspend || !viewport.resume) return
+    // Only ever resume what THIS window suspended — the flag is global and a
+    // blanket resume would clear somebody else's.
+    if (folded) viewport.suspend()
+    else viewport.resume()
+    this.#foldSuspendedViewport = folded
   }
+
+  /** Whether the fold is currently holding viewport persistence down. */
+  #foldSuspendedViewport = false
 
   /** THE SURFACE IS OWNED, and the owner is counted (ModeRegistry). A full
    *  screen window is a view covering the canvas by any honest reading, and
@@ -1384,12 +1532,27 @@ export class ChatWindowComponent implements OnDestroy {
       else void this.open()
     }))
 
+    // THE KEY IS THE SAME ACT. `a` (keyboard/default-keymap.ts) dispatches
+    // through the keymap's one lane rather than a second toggle event, so
+    // the shortcut, the command-line icon and the palette all end up in the
+    // branch above — there is one way this window opens, however you ask.
+    this.#cleanups.push(EffectBus.on<{ cmd?: string }>('keymap:invoke', payload => {
+      if (payload?.cmd !== 'chat.toggle') return
+      if (this.visible()) this.close()
+      else void this.open()
+    }))
+
     this.#cleanups.push(EffectBus.on('chat:close', () => { if (this.visible()) this.close() }))
 
     // A draft landing anywhere — this composer, another window, a sweep — is
     // a change to the roster, because a conversation that holds only unsent
     // words is still a conversation you must be able to get back to.
     this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
+    this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:goal-reached', payload => {
+      void this.#refreshList().then(() => {
+        if (payload?.convoId === this.activeId()) this.goalOpen.set(true)
+      })
+    }))
 
     // ── WHAT THERE IS TO PASTE ───────────────────────────────────────
     // The clipboard's own contents, for the header's flyout. Last-value
@@ -1526,17 +1689,79 @@ export class ChatWindowComponent implements OnDestroy {
   // active one. It is also what lets the list mark a tile as thinking: the
   // same record is announced on the bus, keyed by the tile's path.
 
-  #startWait(convoId: string): void {
+  #startWait(convoId: string, question = ''): void {
     this.#outstanding.set(convoId, { sig: '', askedAt: Date.now() })
     this.#announceBusy(convoId, true)
+    this.#raiseBee(convoId, question)
     this.#syncWait(convoId)
+  }
+
+  // ── A QUESTION IS A UNIT OF WORK, so it gets a bee ──────────────────
+  //
+  // Every other kind of work in the hive raises one — an ask from the ask
+  // screen, a routine, a sync — and the one thing a person does most often
+  // did not. A chat question was visible only inside this window: send it,
+  // fold the window away, and the hive showed nothing at all happening, on
+  // the tile it was happening to.
+  //
+  // WHOSE MODEL IT IS COMES FOR FREE. The registry derives kind → vendor →
+  // tier from the model at spawn (`#identity` / `identifyModel`), so
+  // declaring `kind: 'model'` and the model in hand is the whole of the
+  // branding — this surface never names a colour, which is what keeps the
+  // vendor accent bounds a contract rather than a convention.
+  //
+  // WHERE THE BEE SITS is the tile's own label, with the rest of its path as
+  // the segments — the shape the bee drone matches against the cells painted
+  // on the current layer. A chat about no tile (the hive's own) leaves both
+  // empty, which is exactly how that drone spells "hive-wide": it flies at
+  // the root instead of over a cell.
+  //
+  // Shared UI must never import essentials, and does not: this is the same
+  // `agent:start` / `agent:end` lane any behaviour uses, and a shell with no
+  // registry simply has nobody listening.
+
+  /** One bee per conversation — `#outstanding` is keyed the same way, so a
+   *  second question cannot exist while the first is out. */
+  #beeId(convoId: string): string { return `chat:${convoId}` }
+
+  /** WHO IS ABOUT TO ANSWER. With a session on the bridge it is the model the
+   *  composer is set to; without one the shallow host takes it, and that tier
+   *  has its own model. Not a guess and not something to be discovered from
+   *  the reply — the same `bridgeUp()` the send path branches on, read one
+   *  moment earlier. */
+  #answeringModel(): string {
+    return this.bridgeUp() ? this.model() : HOST_TIER_MODEL
+  }
+
+  #raiseBee(convoId: string, question: string, model = this.#answeringModel()): void {
+    const path = this.#threads()?.tilePathOf?.(convoId) ?? ''
+    const parts = path.split('/').filter(Boolean)
+    EffectBus.emit('agent:start', {
+      id: this.#beeId(convoId),
+      behavior: model,
+      kind: 'model',
+      model,
+      request: question,
+      // The tile it is about; empty for the hive's own conversation.
+      targets: parts.length ? [parts[parts.length - 1]] : [],
+      segments: parts.slice(0, -1),
+    })
   }
 
   /** Stop waiting, whatever ended it — an answer, a failure, a withdrawal.
    *  Defaults to the conversation on screen; an answer landing on a thread
    *  you have since left ends THAT one. */
   #endWait(convoId: string = this.activeId()): void {
-    if (this.#outstanding.delete(convoId)) this.#announceBusy(convoId, false)
+    if (this.#outstanding.delete(convoId)) {
+      this.#announceBusy(convoId, false)
+      // Guarded on the delete for the same reason the announce is: every path
+      // that ends a wait comes through here, and several of them can fire for
+      // one question (an answer that also fails a bump, a withdrawal that
+      // races an arrival). Ending a bee twice would be harmless; raising the
+      // toast of a second `agent:end` on an id the registry has already
+      // retired is noise in its log.
+      EffectBus.emit('agent:end', { id: this.#beeId(convoId), ok: true })
+    }
     if (convoId === this.activeId()) this.#syncWait(convoId)
   }
 
@@ -1720,7 +1945,7 @@ export class ChatWindowComponent implements OnDestroy {
     // Reopening always lands on the conversation, never folded away.
     this.peeking.set(false)
     this.#claimSurface(true)
-    this.#announcePeek()
+    this.#applyFold()
     // Announce symmetrically with close() — the controls-bar launcher light
     // (and anything else watching) reads this state.
     EffectBus.emit('chat:window-state', { open: true })
@@ -1788,7 +2013,7 @@ export class ChatWindowComponent implements OnDestroy {
     rememberChatVisibility(false)
     this.peeking.set(false)
     this.#claimSurface(false)
-    this.#announcePeek()
+    this.#applyFold()
     this.listOpen.set(false)
     this.armed.set('')
     // Closing the window is a real close: the sidebar's trail and subject go
@@ -1813,7 +2038,10 @@ export class ChatWindowComponent implements OnDestroy {
     // The cascade unwinds the smallest commitment first: the tile you are
     // talking to, then the window — matching the escape-cascade's
     // outermost-first rule.
-    // The flyout is the smallest thing open, so it unwinds first.
+    // LOOKING AT A PICTURE is the smallest of all: nothing was composed, put
+    // down or chosen, so it unwinds before even the flyout.
+    if (this.viewing()) { this.closePicture(); return }
+    // The flyout is the next smallest thing open, so it unwinds after it.
     if (this.clipboardOpen()) { this.clipboardOpen.set(false); return }
     // Folded away is a smaller commitment than the window itself: Escape
     // brings the conversation back before it takes the window down.
@@ -2171,7 +2399,7 @@ export class ChatWindowComponent implements OnDestroy {
 
     const turn: ChatTurn = { kind: 'chat-turn', convoId, role: 'user', text: message, at: Date.now() }
     this.turns.update(list => [...list, turn])
-    this.#startWait(convoId)
+    this.#startWait(convoId, message)
     // Sending is the one arrival the participant caused, so it re-pins the
     // transcript even if they had scrolled up to read something.
     this.#scrollDown(true)
@@ -2219,6 +2447,13 @@ export class ChatWindowComponent implements OnDestroy {
     const transcript = this.turns()
       .slice(-TRANSCRIPT_TURNS)
       .map(t => ({ role: t.role, text: t.text }))
+
+    // THE TIER CHANGED UNDER THE QUESTION. Getting here with the bridge down
+    // means the shallow host declined it and the durable queue will answer
+    // instead — with the composer's model, not the host's. The bee was
+    // branded for the tier that was going to take it, so it is re-branded
+    // for the one that actually did.
+    if (!this.bridgeUp()) this.#raiseBee(convoId, message, this.model())
 
     queen.activeModel = this.model()
     const queued = await queen.submitChat(
@@ -2271,6 +2506,11 @@ export class ChatWindowComponent implements OnDestroy {
     // stored turn stays the participant's own words.
     const about = this.#chosenTargets()
     const question = about.length ? `${message}\n\n(About: ${about.join(', ')})` : message
+
+    EffectBus.emit('agent:progress', {
+      id: this.#beeId(convoId),
+      activity: 'answering on the shallow tier — your AI host',
+    })
 
     const controller = new AbortController()
     this.#abort = controller

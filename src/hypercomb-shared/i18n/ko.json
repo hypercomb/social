@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "명령줄 포커스 전환",
   "keymap.mesh-toggle": "공개 / 비공개 모드 전환",
   "keymap.bees": "벌 아바타 전환",
+  "keymap.chat": "어시스턴트 열기/닫기",
   "keymap.screensaver": "화면보호기 표시",
   "keymap.fit": "화면에 콘텐츠 맞추기",
   "keymap.recenter": "화면 중앙에 콘텐츠 배치",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "이 단계에서 검색",
   "agent.rail-no-match": "여기에는 “{query}”와(과) 일치하는 타일이 없습니다.",
   "agent.rail-talk": "이 타일과 대화하기",
+  "agent.rail-go": "{name} 안으로",
+  "agent.rail-threads": "대화 {count}개",
   "agent.rail-inside": "길게 눌러 안으로 들어가기",
   "agent.rail-draft": "보내지 않은 생각이 남아 있습니다",
   "agent.rail-turns": "{count}회 대화",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "{tile}을(를) 이 요청에서 빼기",
   "chat.reference.empty": "여기에 타일이나 이미지를 놓으세요 — 하이브의 어떤 타일이든 복사하면 됩니다",
   "chat.reference.picture": "이미지 · {size}",
+  "chat.reference.look": "{tile} 보기",
+  "chat.reference.previous": "이전 이미지",
+  "chat.reference.next": "다음 이미지",
+  "chat.reference.done": "닫기",
   "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
   "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다"
 }

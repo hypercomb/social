@@ -39,7 +39,7 @@
 
 import { SignatureService, isSignature } from '@hypercomb/core'
 import { llmActivation } from '../llm-activation.js'
-import { registerLlmProvider } from '../llm-provider-registry.js'
+import { replaceDiscoveredLlmProvider } from '../llm-provider-registry.js'
 import { registerPublishedPool } from '../../sharing/published-pools.js'
 import { compileProviderSpec, parseProviderSpec, type LlmProviderSpec } from './provider-spec.js'
 
@@ -107,7 +107,7 @@ export const sweepProviderPool = async (): Promise<string[]> => {
         const file = await handle.getFile()
         if (!file.size) continue
         const spec = parseProviderSpec(await file.text())
-        registerLlmProvider(compileProviderSpec(spec))
+        replaceDiscoveredLlmProvider(compileProviderSpec(spec))
         registered.push(spec.id)
       } catch (err) {
         console.warn(`[provider-discovery] skipping pool member ${name.slice(0, 12)}…:`, err)
@@ -131,7 +131,7 @@ export const importProviderSpec = async (
   options: { origin?: string } = {},
 ): Promise<LlmProviderSpec> => {
   const spec = parseProviderSpec(json)
-  registerLlmProvider(compileProviderSpec(spec))
+  replaceDiscoveredLlmProvider(compileProviderSpec(spec))
 
   const origin = String(options.origin ?? '').trim().toLowerCase()
   if (origin) {

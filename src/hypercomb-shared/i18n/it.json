@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "Cambia focus riga di comando",
   "keymap.mesh-toggle": "Cambia modalità pubblica / privata",
   "keymap.bees": "Cambia avatar delle api",
+  "keymap.chat": "Apri o chiudi l’assistente",
   "keymap.screensaver": "Mostra salvaschermo",
   "keymap.fit": "Adatta contenuto allo schermo",
   "keymap.recenter": "Centra il contenuto sullo schermo",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "Cerca in questo livello",
   "agent.rail-no-match": "Nessuna tessera qui corrisponde a “{query}”.",
   "agent.rail-talk": "Parla con questa tessera",
+  "agent.rail-go": "Entra in {name}",
+  "agent.rail-threads": "{count} conversazioni",
   "agent.rail-inside": "tieni premuto per entrare",
   "agent.rail-draft": "Qui ci sono pensieri non inviati",
   "agent.rail-turns": "{count} scambi",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "Togli {tile} da questa richiesta",
   "chat.reference.empty": "Trascina qui tessere o un’immagine — o copia una tessera qualsiasi dell’alveare",
   "chat.reference.picture": "immagine · {size}",
+  "chat.reference.look": "Vedi {tile}",
+  "chat.reference.previous": "Immagine precedente",
+  "chat.reference.next": "Immagine successiva",
+  "chat.reference.done": "Chiudi",
   "mesh-modal.needs-location": "serve un luogo per unirsi",
   "mesh-modal.needs-secret": "serve un segreto per unirsi"
 }

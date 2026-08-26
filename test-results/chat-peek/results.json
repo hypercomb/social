@@ -59,6 +59,40 @@
     "ok": true
   },
   {
+    "name": "no frame reserved while the window is up",
+    "ok": true,
+    "detail": "{\"top\":0,\"bottom\":0,\"hostTop\":0,\"hostBottom\":0}"
+  },
+  {
+    "name": "folding reserves the header as a TOP inset",
+    "ok": true,
+    "detail": "{\"top\":46,\"bottom\":110.234375,\"hostTop\":46,\"hostBottom\":110.234}"
+  },
+  {
+    "name": "and the composer as a BOTTOM inset",
+    "ok": true,
+    "detail": "{\"top\":46,\"bottom\":110.234375,\"hostTop\":46,\"hostBottom\":110.234}"
+  },
+  {
+    "name": "the canvas host is squeezed into the band between them",
+    "ok": true,
+    "detail": "{\"top\":46,\"bottom\":110.234375,\"hostTop\":46,\"hostBottom\":110.234}"
+  },
+  {
+    "name": "the viewport service is reachable",
+    "ok": true
+  },
+  {
+    "name": "unfolding gives the frame back",
+    "ok": true,
+    "detail": "{\"top\":0,\"bottom\":0,\"hostTop\":0,\"hostBottom\":0}"
+  },
+  {
+    "name": "and the canvas fills the window again",
+    "ok": true,
+    "detail": "{\"top\":0,\"bottom\":0,\"hostTop\":0,\"hostBottom\":0}"
+  },
+  {
     "name": "no page errors",
     "ok": true,
     "detail": ""

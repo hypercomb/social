@@ -204,20 +204,6 @@
     }
 
     <div class="action-group tools">
-      <!-- chat — the default companion view, so its switch leads the rail.
-           Lights while the window is up. -->
-      <button
-        class="rail-btn chat-toggle-btn"
-        [class.on]="chatPanelOpen()"
-        type="button"
-        (mousedown)="$event.preventDefault(); chatToggle.emit()"
-        [attr.aria-label]="chatLabel()"
-        [attr.aria-pressed]="chatPanelOpen()"
-        [title]="chatLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">chat</span>
-      </button>
-
       @if (showOpenForSubscribersToggle()) {
         <button
           class="rail-btn open-for-subscribers-btn"
@@ -261,6 +247,24 @@
         [title]="featuresPanelOpen() ? featuresLabel() + ' — open' : featuresLabel()"
       >
         <span class="mat-sym" aria-hidden="true">extension</span>
+      </button>
+
+      <!-- THE ASSISTANT, back where the words are. It lived out on the
+           control bar, which is the rail of how-you-SEE controls — fit, zoom,
+           pin, fullscreen — and talking is not one of those: it is what this
+           box is for, so the control belongs on the box. `a` opens it from
+           anywhere (keyboard/default-keymap.ts), landing in the same act as
+           the press. -->
+      <button
+        class="rail-btn chat-toggle-btn"
+        [class.on]="chatPanelOpen()"
+        type="button"
+        (mousedown)="$event.preventDefault(); chatToggle.emit()"
+        [attr.aria-label]="chatLabel()"
+        [attr.aria-pressed]="chatPanelOpen()"
+        [title]="chatLabel()"
+      >
+        <span class="mat-sym" aria-hidden="true">chat</span>
       </button>
 
       <button
