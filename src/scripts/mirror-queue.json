@@ -2067,6 +2067,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase2-closeout",
+      "title": "Mirror the Phase 2 closeout — hint bar converted, dead panel contracts retired",
+      "run": null,
+      "note": "Phase 2 now measures 50/50 registry panels and 100% tracked panel volume. Mirror the framework-free hc-hint-bar embedded by command-line and its DOM pick contract. Record the reachability findings instead of minting replacement tiles: pools-of-meaning/pools-icon were superseded by the controls-bar /sets entrance; file-teaser was never mounted and its request bus had no producer; opfs-explorer and hc-icon had no importer, route, or template mount; their shared PinnableHoverBase therefore had no consumers. file-icons moved back from core beside its sole live files-viewer consumer, and the dead shell catalog keys retired. Manual: note-add is additive and would double-land.",
+      "commit": "89d551228",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
